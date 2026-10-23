@@ -1,0 +1,30 @@
+[package]
+name = "sovra-adk"
+description = "ADK-Rust adapter crate: encapsulates Agent Development Kit runner, sessions, tools, and Gemini models."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+adk-agent = { workspace = true }
+adk-core = { workspace = true }
+adk-model = { workspace = true }
+adk-runner = { workspace = true }
+adk-session = { workspace = true }
+adk-tool = { workspace = true }
+adk-ui = { workspace = true }
+serde_json = { workspace = true }
+async-channel = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+sovra-core = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+
+[lints]
+workspace = true

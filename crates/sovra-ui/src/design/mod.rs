@@ -1,0 +1,55 @@
+//! Sovra's native design system. See `docs/styling.md` for provenance and usage.
+//!
+//! GPUI components read `cx.theme()`; app-owned surfaces use [`tokens`] and
+//! [`SovraStyled`]. All raw visual values belong in this module tree.
+
+mod palette;
+mod styles;
+mod tokens;
+
+use std::rc::Rc;
+
+use gpui_kit::App;
+use gpui_kit::base::{Easing, Spring};
+use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
+
+pub use styles::{SovraStyled, Surface, TextRole, button, primary_button};
+pub use tokens::{
+    AccentTokens, LayoutTokens, MotionTokens, RadiusTokens, SovraTokens, SpaceTokens, tokens,
+};
+
+pub(crate) fn init(cx: &mut App) {
+    let config = |mode| {
+        Rc::new(ThemeConfig {
+            name: match mode {
+                ThemeMode::Dark => "Sovra Dark".into(),
+                ThemeMode::Light => "Sovra Light".into(),
+            },
+            mode,
+            font_size: Some(16.),
+            mono_font_size: Some(13.),
+            // Keep GPUI's platform font resolution: SF on macOS and installed
+            // native fallbacks elsewhere, without network font downloads.
+            radius: Some(12),
+            radius_lg: Some(22),
+            shadow: Some(true),
+            colors: palette::config(mode),
+            ..ThemeConfig::default()
+        })
+    };
+    Theme::update(cx, |theme| {
+        theme.light_theme = config(ThemeMode::Light);
+        theme.dark_theme = config(ThemeMode::Dark);
+    });
+    Theme::change(ThemeMode::Dark, None, cx);
+    let motion = tokens(cx).motion;
+    Theme::update(cx, |theme| {
+        theme.motion.duration_fast = motion.press;
+        theme.motion.duration_normal = motion.control;
+        theme.motion.duration_slow = motion.enter;
+        theme.motion.easing_enter = Easing::cubic_bezier(0.23, 1., 0.32, 1.)
+            .expect("the Sovra enter curve has valid control points");
+        theme.motion.spring_control = Spring::new(theme.motion.duration_normal);
+        theme.motion.spring_move = Spring::new(theme.motion.duration_slow);
+    });
+}

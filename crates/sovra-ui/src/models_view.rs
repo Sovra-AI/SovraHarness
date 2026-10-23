@@ -1,0 +1,886 @@
+//! Native model library: virtualized discovery, composable filters and model details.
+
+use std::collections::BTreeSet;
+
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
+    h_flex,
+    input::{Input, InputEvent, InputState},
+    searchable_list::{SearchableListItem, SearchableVec},
+    select::{Select, SelectEvent, SelectState},
+    v_flex,
+};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, ScrollStrategy, SharedString, Styled as _, Subscription,
+    UniformListScrollHandle, Window, div, uniform_list,
+};
+use sovra_core::{
+    Command,
+    models::{
+        CatalogScope, ModelCommand, ModelEvent, ModelFilter, ModelKey, ModelSort, ModelsState,
+        PriceFilter, ProviderKind,
+    },
+};
+
+use crate::model_connection_editor::{ConnectionForm, ManualModelForm};
+use crate::{
+    RuntimeClient,
+    design::{self, SovraStyled as _, TextRole},
+};
+
+#[derive(Debug, Clone)]
+pub(crate) struct Choice {
+    pub(crate) value: String,
+    pub(crate) title: String,
+}
+impl Choice {
+    pub(crate) fn new(value: &str, title: &str) -> Self {
+        Self {
+            value: value.into(),
+            title: title.into(),
+        }
+    }
+}
+impl SearchableListItem for Choice {
+    type Value = String;
+    fn title(&self) -> SharedString {
+        self.title.clone().into()
+    }
+    fn value(&self) -> &String {
+        &self.value
+    }
+}
+pub(crate) type Selector = SelectState<SearchableVec<Choice>>;
+
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent view flags; a state enum would be artificial"
+)]
+pub struct ModelsView {
+    pub(crate) state: ModelsState,
+    pub(crate) filter: ModelFilter,
+    rows: Vec<ModelKey>,
+    pub(crate) selected: Option<ModelKey>,
+    search: Entity<InputState>,
+    author: Entity<Selector>,
+    input_modality: Entity<Selector>,
+    output_modality: Entity<Selector>,
+    context: Entity<Selector>,
+    price: Entity<Selector>,
+    sort: Entity<Selector>,
+    authors: Vec<String>,
+    controls_dirty: bool,
+    filters_open: bool,
+    pub(crate) connections_open: bool,
+    pub(crate) connection_form: Option<ConnectionForm>,
+    pub(crate) manual_form: Option<ManualModelForm>,
+    pub(crate) form_subscriptions: Vec<Subscription>,
+    pub(crate) pending_save: bool,
+    pub(crate) delete_confirmation: Option<String>,
+    pub(crate) download_name: Entity<InputState>,
+    pub(crate) download_connection: Entity<Selector>,
+    pub(crate) compare: Vec<ModelKey>,
+    pub(crate) compare_open: bool,
+    scroll: UniformListScrollHandle,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl std::fmt::Debug for ModelsView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelsView")
+            .field("models", &self.rows.len())
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) fn selector(
+    choices: Vec<Choice>,
+    window: &mut Window,
+    cx: &mut Context<ModelsView>,
+) -> Entity<Selector> {
+    cx.new(|cx| SelectState::new(SearchableVec::new(choices), None, window, cx).searchable(true))
+}
+
+impl ModelsView {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search names, model IDs, creators or descriptions…")
+        });
+        let author = selector(vec![Choice::new("", "All creators")], window, cx);
+        let input_modality = selector(
+            choices(&[
+                ("", "Any input"),
+                ("text", "Text input"),
+                ("image", "Image / vision"),
+                ("audio", "Audio input"),
+                ("file", "File input"),
+                ("video", "Video input"),
+            ]),
+            window,
+            cx,
+        );
+        let output_modality = selector(
+            choices(&[
+                ("", "Any output"),
+                ("text", "Text / chat"),
+                ("image", "Image"),
+                ("audio", "Audio"),
+                ("speech", "Speech"),
+                ("video", "Video"),
+                ("embeddings", "Embeddings"),
+                ("rerank", "Reranking"),
+                ("transcription", "Transcription"),
+                ("decisions", "Decisions"),
+            ]),
+            window,
+            cx,
+        );
+        let context = selector(
+            choices(&[
+                ("0", "Any context"),
+                ("32000", "32K+ context"),
+                ("128000", "128K+ context"),
+                ("200000", "200K+ context"),
+                ("1000000", "1M+ context"),
+            ]),
+            window,
+            cx,
+        );
+        let price = selector(
+            choices(&[
+                ("any", "Any price"),
+                ("free", "Free API usage"),
+                ("paid", "Paid models"),
+            ]),
+            window,
+            cx,
+        );
+        let sort = selector(
+            choices(&[
+                ("newest", "Newest first"),
+                ("name", "Name A–Z"),
+                ("context", "Largest context"),
+                ("input", "Lowest input price"),
+                ("output", "Lowest output price"),
+            ]),
+            window,
+            cx,
+        );
+        let download_connection = selector(Vec::new(), window, cx);
+        let download_name = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Exact Ollama model tag, e.g. qwen3:8b")
+        });
+        let mut subscriptions =
+            vec![
+                cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        view.read_filters(cx);
+                    }
+                }),
+            ];
+        for control in [
+            &author,
+            &input_modality,
+            &output_modality,
+            &context,
+            &price,
+            &sort,
+        ] {
+            subscriptions.push(cx.subscribe_in(
+                control,
+                window,
+                |view, _, _: &SelectEvent<SearchableVec<Choice>>, _, cx| view.read_filters(cx),
+            ));
+        }
+        Self {
+            state: ModelsState::default(),
+            filter: ModelFilter {
+                sort: ModelSort::Newest,
+                ..ModelFilter::default()
+            },
+            rows: Vec::new(),
+            selected: None,
+            search,
+            author,
+            input_modality,
+            output_modality,
+            context,
+            price,
+            sort,
+            authors: Vec::new(),
+            controls_dirty: true,
+            filters_open: window.viewport_size().width
+                >= design::tokens(cx).layout.detail_breakpoint,
+            connections_open: false,
+            connection_form: None,
+            manual_form: None,
+            form_subscriptions: Vec::new(),
+            pending_save: false,
+            delete_confirmation: None,
+            download_name,
+            download_connection,
+            compare: Vec::new(),
+            compare_open: false,
+            scroll: UniformListScrollHandle::new(),
+            _subscriptions: subscriptions,
+        }
+    }
+
+    pub fn state(&self) -> &ModelsState {
+        &self.state
+    }
+    pub fn visible_models(&self) -> &[ModelKey] {
+        &self.rows
+    }
+
+    pub(crate) fn apply(&mut self, event: &ModelEvent, cx: &mut Context<Self>) {
+        self.state.apply(event);
+        if matches!(event, ModelEvent::Loaded { .. }) && self.pending_save {
+            self.connection_form = None;
+            self.pending_save = false;
+            self.form_subscriptions.clear();
+        }
+        if matches!(event, ModelEvent::Error(_)) {
+            self.pending_save = false;
+        }
+        if matches!(
+            event,
+            ModelEvent::Loaded { .. }
+                | ModelEvent::CatalogLoaded { .. }
+                | ModelEvent::DetailsLoaded { .. }
+                | ModelEvent::ConnectionDeleted { .. }
+        ) {
+            self.controls_dirty = true;
+            self.rebuild_rows();
+        } else if matches!(event, ModelEvent::PreferencesChanged(_)) {
+            self.rebuild_rows();
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn send(&mut self, command: ModelCommand, cx: &mut Context<Self>) {
+        if let Err(error) = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Models(command))
+        {
+            self.state.apply(&ModelEvent::Error(error.to_string()));
+        }
+        cx.notify();
+    }
+
+    fn rebuild_rows(&mut self) {
+        self.rows = self.state.filtered(&self.filter);
+    }
+
+    pub fn set_search(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |input, cx| {
+            input.set_value(query.to_owned(), window, cx);
+        });
+        query.clone_into(&mut self.filter.search);
+        self.rebuild_rows();
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    fn read_filters(&mut self, cx: &mut Context<Self>) {
+        let value = |control: &Entity<Selector>| {
+            control
+                .read(cx)
+                .selected_value()
+                .cloned()
+                .unwrap_or_default()
+        };
+        self.filter.search = self.search.read(cx).value().to_string();
+        self.filter.author = nonempty(value(&self.author));
+        self.filter.input_modality = nonempty(value(&self.input_modality));
+        self.filter.output_modality = nonempty(value(&self.output_modality));
+        self.filter.min_context = value(&self.context).parse().unwrap_or(0);
+        self.filter.price = match value(&self.price).as_str() {
+            "free" => PriceFilter::Free,
+            "paid" => PriceFilter::Paid,
+            _ => PriceFilter::Any,
+        };
+        self.filter.sort = match value(&self.sort).as_str() {
+            "name" => ModelSort::Name,
+            "context" => ModelSort::Context,
+            "input" => ModelSort::InputPrice,
+            "output" => ModelSort::OutputPrice,
+            _ => ModelSort::Newest,
+        };
+        self.rebuild_rows();
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    fn sync_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.controls_dirty {
+            return;
+        }
+        let authors: Vec<String> = self
+            .state
+            .catalogs
+            .values()
+            .flat_map(|c| c.snapshot.models.iter().map(|m| m.author.clone()))
+            .filter(|a| !a.is_empty())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if self.authors != authors {
+            let mut items = vec![Choice::new("", "All creators")];
+            items.extend(authors.iter().map(|a| Choice::new(a, a)));
+            self.author.update(cx, |select, cx| {
+                select.set_items(SearchableVec::new(items), window, cx);
+            });
+            self.authors = authors;
+        }
+        let servers: Vec<_> = self
+            .state
+            .connections
+            .iter()
+            .filter(|c| c.kind == ProviderKind::Ollama)
+            .map(|c| Choice::new(&c.id, &c.name))
+            .collect();
+        self.download_connection.update(cx, |select, cx| {
+            select.set_items(SearchableVec::new(servers.clone()), window, cx);
+            if select.selected_value().is_none()
+                && let Some(first) = servers.first()
+            {
+                select.set_selected_value(&first.value, window, cx);
+            }
+        });
+        self.controls_dirty = false;
+    }
+
+    fn reset_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.filter = ModelFilter {
+            scope: self.filter.scope,
+            sort: ModelSort::Newest,
+            ..ModelFilter::default()
+        };
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        for control in [
+            &self.author,
+            &self.input_modality,
+            &self.output_modality,
+            &self.context,
+            &self.price,
+            &self.sort,
+        ] {
+            control.update(cx, |select, cx| select.set_selected_index(None, window, cx));
+        }
+        self.rebuild_rows();
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    pub(crate) fn select_model(&mut self, key: ModelKey, cx: &mut Context<Self>) {
+        self.selected = Some(key.clone());
+        self.send(ModelCommand::FetchDetails { key }, cx);
+    }
+
+    pub(crate) fn refresh_visible(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<_> = self
+            .state
+            .connections
+            .iter()
+            .filter(|c| match self.filter.scope {
+                CatalogScope::OpenRouter => c.kind == ProviderKind::OpenRouter,
+                CatalogScope::Ollama => c.kind == ProviderKind::Ollama,
+                CatalogScope::Custom => matches!(
+                    c.kind,
+                    ProviderKind::OpenAiCompatible | ProviderKind::Anthropic
+                ),
+                CatalogScope::All | CatalogScope::Favorites => true,
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        for connection_id in ids {
+            self.send(ModelCommand::Refresh { connection_id }, cx);
+        }
+    }
+
+    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let total: usize = self
+            .state
+            .catalogs
+            .values()
+            .map(|c| c.snapshot.models.len())
+            .sum();
+        let loading = self.state.catalogs.values().any(|c| c.loading);
+        v_flex()
+            .gap(t.space.small)
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        v_flex()
+                            .gap(t.space.compact)
+                            .child(
+                                h_flex()
+                                    .gap(t.space.small)
+                                    .items_center()
+                                    .child(
+                                        div().sovra_text(TextRole::PageTitle, cx).child("Models"),
+                                    )
+                                    .child(pill(format!("{total} available"), cx)),
+                            )
+                            .child(caption(
+                                "Find the right model. Connect once, choose anywhere.",
+                                cx,
+                            )),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(t.space.compact)
+                            .child(
+                                design::button(
+                                    "models-refresh",
+                                    if loading { "Refreshing…" } else { "Refresh" },
+                                    cx,
+                                )
+                                .disabled(loading)
+                                .on_click(cx.listener(|view, _, _, cx| view.refresh_visible(cx))),
+                            )
+                            .child(
+                                design::primary_button("models-connections", "Connections", cx)
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.connections_open = !view.connections_open;
+                                        view.selected = None;
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+            )
+            .child(
+                h_flex().flex_wrap().gap(t.space.compact).children(
+                    [
+                        (CatalogScope::All, "All models"),
+                        (CatalogScope::OpenRouter, "OpenRouter"),
+                        (CatalogScope::Ollama, "Ollama"),
+                        (CatalogScope::Custom, "Custom"),
+                        (CatalogScope::Favorites, "Favorites"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (scope, label))| {
+                        Button::new(("model-scope", index))
+                            .label(label)
+                            .ghost()
+                            .selected(self.filter.scope == scope)
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.filter.scope = scope;
+                                view.rebuild_rows();
+                                view.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                                cx.notify();
+                            }))
+                    }),
+                ),
+            )
+    }
+
+    fn filters(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let mut controls = v_flex().gap(t.space.small).child(
+            h_flex()
+                .gap(t.space.small)
+                .child(
+                    Input::new(&self.search)
+                        .id("models-search")
+                        .aria_label("Search all models")
+                        .cleanable(true)
+                        .flex_1(),
+                )
+                .child(
+                    Button::new("models-toggle-filters")
+                        .label("Filters")
+                        .selected(self.filters_open)
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.filters_open = !view.filters_open;
+                            cx.notify();
+                        })),
+                ),
+        );
+        if self.filters_open {
+            controls = controls
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap(t.space.compact)
+                        .child(filter_select(&self.author, "Creator", "All creators", cx))
+                        .child(filter_select(
+                            &self.input_modality,
+                            "Input modality",
+                            "Any input",
+                            cx,
+                        ))
+                        .child(filter_select(
+                            &self.output_modality,
+                            "Output modality",
+                            "Any output",
+                            cx,
+                        ))
+                        .child(filter_select(
+                            &self.context,
+                            "Minimum context length",
+                            "Any context",
+                            cx,
+                        ))
+                        .child(filter_select(&self.price, "Price", "Any price", cx)),
+                )
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(t.space.medium)
+                        .child(
+                            Checkbox::new("models-filter-tools")
+                                .label("Tool calling")
+                                .checked(self.filter.tools)
+                                .on_click(cx.listener(|view, checked, _, cx| {
+                                    view.filter.tools = *checked;
+                                    view.rebuild_rows();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Checkbox::new("models-filter-reasoning")
+                                .label("Reasoning")
+                                .checked(self.filter.reasoning)
+                                .on_click(cx.listener(|view, checked, _, cx| {
+                                    view.filter.reasoning = *checked;
+                                    view.rebuild_rows();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Checkbox::new("models-filter-json")
+                                .label("Structured output")
+                                .checked(self.filter.structured_output)
+                                .on_click(cx.listener(|view, checked, _, cx| {
+                                    view.filter.structured_output = *checked;
+                                    view.rebuild_rows();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("models-clear-filters")
+                                .label("Clear filters")
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(Self::clear_filters_click)),
+                        ),
+                );
+        }
+        controls.child(
+            h_flex()
+                .justify_between()
+                .items_center()
+                .gap(t.space.small)
+                .child(caption(
+                    format!(
+                        "{} results · capabilities as reported by providers",
+                        self.rows.len()
+                    ),
+                    cx,
+                ))
+                .child(filter_select(&self.sort, "Sort models", "Newest first", cx)),
+        )
+    }
+
+    fn clear_filters_click(
+        &mut self,
+        _: &gpui_kit::ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.reset_filters(window, cx);
+    }
+
+    fn row(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let key = self.rows[index].clone();
+        let model = self
+            .state
+            .model(&key)
+            .expect("rows derive from the current catalog");
+        let favorite = self.state.preferences.favorites.contains(&key);
+        let active = self.state.preferences.active.as_ref() == Some(&key);
+        let selected = self.selected.as_ref() == Some(&key);
+        let favorite_key = key.clone();
+        let name = model.name.clone();
+        let connection = self
+            .state
+            .connections
+            .iter()
+            .find(|c| c.id == key.connection_id)
+            .map_or("", |c| c.name.as_str());
+        let metrics = format!(
+            "{} context   ·   {}   ·   {}",
+            compact_count(model.context_length),
+            model.output_modalities.join(" / "),
+            price_summary(model)
+        );
+        v_flex()
+            .id(("catalog-row", index))
+            .h(t.layout.catalog_row_height)
+            .w_full()
+            .min_w_0()
+            .px(t.space.small)
+            .py(t.space.compact)
+            .gap(t.space.compact)
+            .bg(if selected {
+                t.nav_active_background
+            } else {
+                t.canvas
+            })
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(t.space.compact)
+                    .child(
+                        Button::new(("model-row", index))
+                            .label(name)
+                            .accessibility_label(format!("View details for {}", model.id))
+                            .ghost()
+                            .flex_1()
+                            .justify_start()
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.select_model(key.clone(), cx);
+                            })),
+                    )
+                    .child(pill(
+                        if active {
+                            "Active".to_owned()
+                        } else {
+                            connection.to_owned()
+                        },
+                        cx,
+                    ))
+                    .child(
+                        Button::new(("model-favorite", index))
+                            .label(if favorite { "★" } else { "☆" })
+                            .ghost()
+                            .accessibility_label(if favorite {
+                                "Remove from favorites"
+                            } else {
+                                "Add to favorites"
+                            })
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.send(
+                                    ModelCommand::SetFavorite {
+                                        key: favorite_key.clone(),
+                                        favorite: !favorite,
+                                    },
+                                    cx,
+                                );
+                            })),
+                    ),
+            )
+            .child(caption(model.id.clone(), cx).truncate())
+            .child(caption(metrics, cx).truncate())
+    }
+
+    fn catalog(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let mut content = v_flex()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .gap(t.space.small)
+            .child(self.filters(cx));
+        if self.filter.scope == CatalogScope::Ollama {
+            content = content.child(self.render_download(cx));
+        }
+        let errors: Vec<_> = self
+            .state
+            .connections
+            .iter()
+            .filter_map(|c| {
+                self.state
+                    .catalogs
+                    .get(&c.id)
+                    .and_then(|catalog| catalog.error.as_ref())
+                    .map(|error| format!("{}: {error}", c.name))
+            })
+            .collect();
+        if !errors.is_empty() {
+            content = content.child(caption(errors.join("\n"), cx).text_color(cx.theme().warning));
+        }
+        if self.rows.is_empty() {
+            let loading = !self.state.loaded || self.state.catalogs.values().any(|c| c.loading);
+            let title = if loading {
+                "Loading your model library…"
+            } else {
+                "No matching models"
+            };
+            let help = if self.filter.scope == CatalogScope::Ollama {
+                "Start Ollama, check its connection, then refresh. Download a model by its exact tag above."
+            } else if self.filter.scope == CatalogScope::Custom {
+                "Add a connection to LM Studio, vLLM, llama.cpp or a compatible remote API. Discover models or enter an exact model ID."
+            } else {
+                "Clear filters, refresh the catalog or configure a connection. Saved catalog results remain available when a server is offline."
+            };
+            content = content.child(
+                v_flex()
+                    .id("models-empty")
+                    .flex_1()
+                    .justify_center()
+                    .items_center()
+                    .p(t.space.large)
+                    .gap(t.space.small)
+                    .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
+                    .child(caption(help, cx))
+                    .child(
+                        design::button("models-empty-reset", "Clear filters", cx)
+                            .on_click(cx.listener(Self::clear_filters_click)),
+                    ),
+            );
+        } else {
+            let entity = cx.entity();
+            content = content.child(
+                uniform_list("models-list", self.rows.len(), move |range, _, cx| {
+                    entity.update(cx, |view, cx| {
+                        range.map(|index| view.row(index, cx)).collect::<Vec<_>>()
+                    })
+                })
+                .track_scroll(&self.scroll)
+                .flex_1()
+                .min_h_0()
+                .w_full(),
+            );
+        }
+        content
+    }
+}
+
+impl Render for ModelsView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_controls(window, cx);
+        let t = design::tokens(cx);
+        let narrow = window.viewport_size().width < t.layout.detail_breakpoint;
+        let mut page = v_flex()
+            .id("sovra-models-view")
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .p(t.space.medium)
+            .gap(t.space.small)
+            .child(self.header(cx));
+        if let Some(error) = &self.state.error {
+            page = page.child(caption(error.clone(), cx).text_color(cx.theme().danger));
+        } else if let Some(message) = &self.state.notice {
+            page = page.child(caption(message.clone(), cx));
+        }
+        if self.connection_form.is_some() {
+            return page
+                .child(self.render_connection_form(cx))
+                .into_any_element();
+        }
+        if self.manual_form.is_some() {
+            return page.child(self.render_manual_form(cx)).into_any_element();
+        }
+        if self.connections_open {
+            return page.child(self.render_connections(cx)).into_any_element();
+        }
+        if self.compare_open {
+            return page.child(self.render_comparison(cx)).into_any_element();
+        }
+        if narrow && self.selected.is_some() {
+            return page.child(self.render_model_details(cx)).into_any_element();
+        }
+        let mut body = h_flex()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .gap(t.space.medium)
+            .child(self.catalog(cx));
+        if self.selected.is_some() {
+            body = body.child(
+                div()
+                    .w(t.layout.detail_width)
+                    .h_full()
+                    .flex_shrink_0()
+                    .child(self.render_model_details(cx)),
+            );
+        }
+        page.child(body).into_any_element()
+    }
+}
+
+pub(crate) fn choices(items: &[(&str, &str)]) -> Vec<Choice> {
+    items
+        .iter()
+        .map(|(value, title)| Choice::new(value, title))
+        .collect()
+}
+fn nonempty(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
+}
+pub(crate) fn caption(value: impl Into<SharedString>, cx: &App) -> gpui_kit::Div {
+    div()
+        .sovra_text(TextRole::Caption, cx)
+        .text_color(design::tokens(cx).text_secondary)
+        .child(value.into())
+}
+pub(crate) fn pill(value: impl Into<SharedString>, cx: &App) -> gpui_kit::Div {
+    let t = design::tokens(cx);
+    caption(value, cx)
+        .px(t.space.compact)
+        .py(t.space.compact)
+        .rounded(t.radius.pill)
+        .bg(t.subtle)
+}
+pub(crate) fn filter_select(
+    state: &Entity<Selector>,
+    label: &'static str,
+    placeholder: &'static str,
+    cx: &App,
+) -> Select<SearchableVec<Choice>> {
+    Select::new(state)
+        .accessibility_label(label)
+        .placeholder(placeholder)
+        .w(design::tokens(cx).layout.filter_width)
+}
+pub(crate) fn compact_count(value: Option<u64>) -> String {
+    match value {
+        None => "Unknown".into(),
+        Some(v) if v >= 1_000_000 => format!("{}.{}M", v / 1_000_000, (v % 1_000_000) / 100_000),
+        Some(v) if v >= 1_000 => format!("{}K", v / 1_000),
+        Some(v) => v.to_string(),
+    }
+}
+pub(crate) fn token_price(model: &sovra_core::models::ModelInfo, field: &str) -> String {
+    model.token_price(field).map_or_else(
+        || "Unknown".into(),
+        |price| format!("${:.3}", price * 1_000_000.),
+    )
+}
+fn price_summary(model: &sovra_core::models::ModelInfo) -> String {
+    if model.is_free() {
+        "Free API usage".into()
+    } else if model.output_modalities.iter().any(|m| m == "text")
+        && model.token_price("prompt").is_some()
+    {
+        format!(
+            "{} in / {} out per 1M",
+            token_price(model, "prompt"),
+            token_price(model, "completion")
+        )
+    } else if model.pricing.is_empty() {
+        "Pricing not reported".into()
+    } else {
+        "Usage-based pricing · see details".into()
+    }
+}

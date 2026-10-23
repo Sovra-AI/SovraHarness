@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    name: Gates (fmt, clippy, layering, deny, shear, tests)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup show # installs the toolchain pinned in rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2,cargo-nextest@0.9.149,cargo-shear@1.14.0
+      - run: cargo xtask ci
+
+  build:
+    name: Build + test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - if: runner.os == 'Linux'
+        run: ./scripts/install-linux-deps.sh
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.149
+      - run: cargo build --workspace --all-targets
+      - run: cargo nextest run --workspace --no-tests pass

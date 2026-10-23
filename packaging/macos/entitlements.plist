@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened runtime with no exceptions: a pure-Rust binary needs no JIT or unsigned memory.
+     Add an entitlement only with a stated reason in the PR. -->
+<plist version="1.0">
+<dict/>
+</plist>

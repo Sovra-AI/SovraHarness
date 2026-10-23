@@ -1,0 +1,21 @@
+[package]
+name = "sovra-ui"
+description = "GPUI views. The only crate that depends on gpui-kit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui-kit = { workspace = true }
+sovra-core = { workspace = true }
+sovra-runtime = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

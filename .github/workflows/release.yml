@@ -1,0 +1,136 @@
+# Tag `vX.Y.Z` → build per OS → sign/notarize → Velopack installers + update feeds →
+# GitHub Release. Users install once; the app then auto-updates from these feeds.
+#
+# Required secrets (set before the first release; jobs skip signing when absent):
+#   macOS:   BUILD_CERTIFICATE_BASE64, INSTALLER_CERTIFICATE_BASE64, P12_PASSWORD,
+#            KEYCHAIN_PASSWORD, APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM,
+#            MAC_SIGN_NAME (e.g. "Your Org", used in "Developer ID Application: <name>")
+#   Windows: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID (OIDC), plus
+#            packaging/windows/artifact-signing.json (Endpoint, CodeSigningAccountName,
+#            CertificateProfileName)
+# Docs: https://docs.velopack.io/packaging/signing
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write # Azure OIDC for Windows signing
+
+env:
+  CARGO_TERM_COLOR: always
+  PACK_ID: SovraHarness
+
+jobs:
+  package:
+    name: Package (${{ matrix.channel }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, channel: osx, exe: sovra } # Apple Silicon
+          - { os: windows-latest, channel: win, exe: sovra.exe }
+          - { os: ubuntu-24.04, channel: linux, exe: sovra }
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_MAC_SIGNING: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' }}
+      HAS_WIN_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - if: runner.os == 'Linux'
+        run: ./scripts/install-linux-deps.sh
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet tool install -g vpk
+
+      - name: Build
+        shell: bash
+        run: |
+          cargo build --release --package sovra-app
+          mkdir -p target/pack
+          cp "target/release/${{ matrix.exe }}" target/pack/
+
+      - name: Import macOS signing certificates
+        if: runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          INSTALLER_CERTIFICATE_BASE64: ${{ secrets.INSTALLER_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$RUNNER_TEMP/build.p12"
+          echo -n "$INSTALLER_CERTIFICATE_BASE64" | base64 --decode -o "$RUNNER_TEMP/installer.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/build.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security import "$RUNNER_TEMP/installer.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+          xcrun notarytool store-credentials velopack-profile \
+            --apple-id "${{ secrets.APPLE_ID }}" --team-id "${{ secrets.APPLE_TEAM }}" \
+            --password "${{ secrets.APPLE_PASSWORD }}" --keychain "$KEYCHAIN"
+
+      - if: runner.os == 'Windows' && env.HAS_WIN_SIGNING == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Package with Velopack
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARGS=(pack --packId "$PACK_ID" --packVersion "$VERSION" --packDir target/pack
+                --mainExe "${{ matrix.exe }}" --channel "${{ matrix.channel }}" --outputDir target/dist)
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ARGS+=(--bundleId com.sovra.harness --signEntitlements packaging/macos/entitlements.plist)
+            [[ -f packaging/macos/icon.icns ]] && ARGS+=(--icon packaging/macos/icon.icns)
+            if [[ "$HAS_MAC_SIGNING" == "true" ]]; then
+              ARGS+=(--signAppIdentity "Developer ID Application: ${{ secrets.MAC_SIGN_NAME }}"
+                     --signInstallIdentity "Developer ID Installer: ${{ secrets.MAC_SIGN_NAME }}"
+                     --notaryProfile velopack-profile --keychain "$RUNNER_TEMP/app-signing.keychain-db")
+            fi
+          fi
+          if [[ "$RUNNER_OS" == "Windows" && "$HAS_WIN_SIGNING" == "true" ]]; then
+            ARGS+=(--azureTrustedSignFile packaging/windows/artifact-signing.json)
+          fi
+          vpk "${ARGS[@]}"
+
+      - name: Remove temporary keychain
+        if: always() && runner.os == 'macOS'
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.channel }}
+          path: target/dist
+
+  publish:
+    name: Publish GitHub Release + update feeds
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet tool install -g vpk
+      - name: Upload each channel to one release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for channel in osx win linux; do
+            vpk upload github --repoUrl "${{ github.server_url }}/${{ github.repository }}" \
+              --token "$GH_TOKEN" --outputDir "dist/dist-$channel" --channel "$channel" \
+              --tag "$GITHUB_REF_NAME" --releaseName "SovraHarness $GITHUB_REF_NAME" \
+              --merge --publish
+          done

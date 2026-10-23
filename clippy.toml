@@ -1,0 +1,13 @@
+# Architecture rules the compiler enforces. Each `reason` is shown in the lint message.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
+doc-valid-idents = ["SovraHarness", "GPUI", ".."]
+
+disallowed-methods = [
+  { path = "std::thread::sleep", reason = "blocks a thread; use tokio::time::sleep in sovra-runtime or a GPUI timer in sovra-ui" },
+  { path = "std::env::var", reason = "read configuration once in sovra-app (composition root) and pass it down" },
+  { path = "std::env::set_var", reason = "process-global mutation; pass values explicitly" },
+  { path = "std::process::exit", reason = "skips destructors (log flush); return from main instead" },
+  { path = "tokio::spawn", reason = "spawn through sovra-runtime so every task has an owner, cancellation and error logging" },
+]

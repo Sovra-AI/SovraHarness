@@ -1,0 +1,31 @@
+SovraHarness — Proprietary License
+
+Copyright © 2026 Sovra. All rights reserved.
+
+This software, its source code, documentation, assets, and all associated
+materials (the "Software") are the confidential and proprietary property of
+Sovra. The Software is closed source and is NOT licensed for public use.
+
+Access to this repository is granted only to Sovra personnel and to parties
+under a written agreement with Sovra. Unless expressly authorized in writing
+by Sovra, you may not:
+
+  1. Use, copy, modify, merge, publish, or create derivative works of the
+     Software, in whole or in part;
+  2. Distribute, sublicense, sell, lease, or otherwise transfer the Software
+     or access to it;
+  3. Disclose the Software or any non-public information about it to any
+     third party;
+  4. Remove or alter any proprietary notices contained in the Software.
+
+Third-party dependencies bundled with or linked by the Software remain
+subject to their own licenses; the policy for acceptable dependency licenses
+is enforced in `deny.toml`.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+SOVRA BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE
+USE OF THE SOFTWARE.
+
+SPDX identifier used throughout the workspace: LicenseRef-Proprietary.

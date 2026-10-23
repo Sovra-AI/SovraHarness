@@ -1,0 +1,209 @@
+# cargo-deny: supply-chain and architecture gates. Run via `cargo xtask ci`.
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+# Flag unmaintained crates we depend on directly; transitive ones (GPUI's tree) are
+# upstream's to replace and would otherwise block every build.
+unmaintained = "workspace"
+ignore = [
+  # zip 8.x extraction flaws, reachable only through velopack (pins zip ^8.6) when it
+  # unpacks an update package. Our packages come from our own feed and are hash-verified
+  # by Velopack before extraction. Remove once velopack moves to zip >= 9.
+  { id = "RUSTSEC-2026-0367", reason = "velopack pins zip ^8.6; update packages are first-party and hash-verified" },
+  { id = "RUSTSEC-2026-0368", reason = "velopack pins zip ^8.6; update packages are first-party and hash-verified" },
+  { id = "RUSTSEC-2026-0369", reason = "velopack pins zip ^8.6; update packages are first-party and hash-verified" },
+  # Inside surrealdb-core, unreachable from our embedded use. Re-check on surrealdb bumps.
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml via surrealdb's object_store (S3/GCS) backend; we never configure a remote object store or parse untrusted XML" },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml via surrealdb's object_store backend; same as above" },
+  { id = "RUSTSEC-2023-0071", reason = "rsa Marvin timing side-channel via surrealdb's jsonwebtoken auth; embedded engine has no network auth surface and no patched rsa exists" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+  "BUSL-1.1", # only the clarified surrealdb-* crates carry this; see note above exceptions
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense", # public-domain dedication (ext-sort)
+  "Zlib",
+  "0BSD",
+]
+
+# SurrealDB v3 ships under BUSL-1.1 (converts to Apache-2.0 on 2030-01-01). Its grant
+# permits embedding here: we use it for the app's own storage and never offer it to
+# third parties as a database service. The crates use a non-SPDX `license-file`, so each
+# surrealdb-* crate is clarified below as BUSL-1.1; keep the clarify list in sync when
+# the SurrealDB tree grows. See docs/architecture.md for the legal note.
+
+[[licenses.clarify]]
+crate = "surrealdb"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-catalog"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-cnf"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-collections"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-common"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-core"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-datastore"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-engine-api"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-engine-local"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-expr"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-iam"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-idx"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-keyspace-macro"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-kvs"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-kvs-any"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-kvs-mem"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-kvs-surrealkv"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-observe"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-parse-common"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-rpc"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-runtime"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-sql"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-strand"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-syn"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-types"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+crate = "surrealdb-types-derive"
+expression = "BUSL-1.1"
+license-files = []
+
+# MIT upstream but the manifest omits the license field; treat the crate's licence
+# text as authoritative. https://github.com/TannerRogalsky/tokio-tungstenite-wasm
+[[licenses.clarify]]
+crate = "tokio-tungstenite-wasm"
+expression = "MIT"
+license-files = []
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow" # GPUI's tree has unavoidable duplicates; revisit when it stabilises
+wildcards = "deny"
+allow-wildcard-paths = true
+# Workspace architecture (who may depend on tokio, gpui-kit, …) is enforced by
+# `cargo xtask check-deps`; this list is for crates banned outright.
+deny = [
+  { crate = "openssl", reason = "use rustls; native OpenSSL complicates cross-platform distribution" },
+]
+
+[bans.workspace-dependencies]
+duplicates = "deny"
+include-path-dependencies = true
+unused = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
