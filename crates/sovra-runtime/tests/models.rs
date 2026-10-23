@@ -267,6 +267,18 @@ async fn openrouter_fetches_all_modalities_and_retains_cache_after_failure() {
     let snapshot = catalog(&client).await;
     assert_eq!(snapshot.models.len(), 3);
     assert_eq!(snapshot.models[2].output_modalities, ["video"]);
+    send(&client, ModelCommand::Load);
+    let replay = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::CatalogLoaded { .. }))
+    })
+    .await;
+    assert!(
+        matches!(
+            replay,
+            Event::Models(ModelEvent::CatalogLoaded { cached: false, .. })
+        ),
+        "a fresh catalog must stay fresh when reopening Models"
+    );
     fail.store(true, Ordering::SeqCst);
     send(
         &client,
@@ -274,6 +286,15 @@ async fn openrouter_fetches_all_modalities_and_retains_cache_after_failure() {
             connection_id: "router".into(),
         },
     );
+    event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::CatalogFailed { .. }))
+    })
+    .await;
+    send(&client, ModelCommand::Load);
+    event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
     event(&client, |e| {
         matches!(e, Event::Models(ModelEvent::CatalogFailed { .. }))
     })
@@ -293,13 +314,35 @@ async fn openrouter_fetches_all_modalities_and_retains_cache_after_failure() {
 
 #[tokio::test]
 async fn selected_custom_model_routes_real_chat_and_restores_preferences() {
-    let server = Server::new(|request| {
-        assert!(
-            request
-                .headers
-                .to_ascii_lowercase()
-                .contains("authorization: bearer fake-test-key")
-        );
+    custom_chat_with_authentication(Authentication::Bearer).await;
+}
+
+#[tokio::test]
+async fn local_custom_chat_sends_no_authorization_header() {
+    custom_chat_with_authentication(Authentication::None).await;
+}
+
+#[tokio::test]
+async fn custom_chat_supports_api_key_headers_without_bearer() {
+    custom_chat_with_authentication(Authentication::ApiKey).await;
+}
+
+async fn custom_chat_with_authentication(authentication: Authentication) {
+    let server = Server::new(move |request| {
+        let headers = request.headers.to_ascii_lowercase();
+        match authentication {
+            Authentication::Bearer => {
+                assert!(headers.contains("authorization: bearer fake-test-key"));
+            }
+            Authentication::ApiKey => {
+                assert!(headers.contains("api-key: fake-test-key"));
+                assert!(!headers.contains("authorization:"));
+            }
+            Authentication::None => {
+                assert!(!headers.contains("authorization:"));
+                assert!(!headers.contains("api-key:"));
+            }
+        }
         if request.path == "/v1/models" {
             return Reply::json(&json!({"data":[{"id":"local-chat"}]}));
         }
@@ -323,9 +366,13 @@ async fn selected_custom_model_routes_real_chat_and_restores_preferences() {
     });
     let mut connection = ModelConnection::new("custom", ProviderKind::OpenAiCompatible);
     connection.base_url = format!("{}/v1", server.url());
-    connection.authentication = Authentication::Bearer;
-    connection.has_credential = true;
-    let fixture = Fixture::new(connection, Some("fake-test-key"));
+    connection.authentication = authentication;
+    connection.api_key_header = "api-key".into();
+    connection.has_credential = authentication != Authentication::None;
+    let fixture = Fixture::new(
+        connection,
+        (authentication != Authentication::None).then_some("fake-test-key"),
+    );
     let client = fixture.start();
     catalog(&client).await;
     let key = ModelKey {
@@ -405,7 +452,7 @@ async fn ollama_discovery_enriches_metadata_and_pull_streams_progress() {
             assert_eq!(request.body["model"], "new:4b");
             assert_eq!(request.body["stream"], true);
             installed.store(true, Ordering::SeqCst);
-            Reply { status:200,content_type:"application/x-ndjson",body:"{\"status\":\"pulling\",\"completed\":50,\"total\":100}\n{\"status\":\"success\"}\n".into() }
+            Reply { status:200,content_type:"application/x-ndjson",body:"{\"status\":\"pulling\",\"completed\":50,\"total\":100}\n{\"status\":\"success\"}".into() }
         }
         other => panic!("unexpected path {other}"),
     });

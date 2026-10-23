@@ -8,7 +8,7 @@ use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, div, px,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
 };
 use sovra_core::{AgUiWidget, BuildStep, BuildStepState, ClarifyChip};
 
@@ -51,6 +51,7 @@ fn render_build_progress(
 
     v_flex()
         .id("agui-build-progress-card")
+        .test_support()
         .w_full()
         .max_w(px(560.))
         .sovra_surface(Surface::Matte, cx)

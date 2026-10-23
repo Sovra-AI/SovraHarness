@@ -1,10 +1,13 @@
 //!Left navigation sidebar matching the main chat interface design + `SovraSRX` Schedules.
 
 use gpui_kit::assets::IconName; // full Lucide catalog
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, Selectable as _, Sizable as _, button::ButtonVariants as _, h_flex,
+    v_flex,
+};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, div, px,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
 };
 use sovra_core::{NavTab, WorkspaceState};
 
@@ -100,32 +103,17 @@ fn render_nav_item(
         t.text_secondary
     };
 
-    let row = h_flex()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(tab.label())
-        .cursor_pointer()
+    design::button(id, tab.label(), cx)
+        .ghost()
+        .selected(is_active)
+        .icon(Icon::new(icon).small().text_color(icon_color))
         .w_full()
         .px(t.space.small)
-        .py(px(8.))
         .items_center()
+        .justify_start()
         .gap(t.space.small)
-        .rounded(t.radius.input);
-
-    let styled = if is_active {
-        row.sovra_surface(Surface::NavActive, cx)
-    } else {
-        row
-    };
-
-    styled
-        .child(Icon::new(icon).small().text_color(icon_color))
-        .child(
-            div()
-                .sovra_text(TextRole::Body, cx)
-                .text_color(fg)
-                .child(tab.label()),
-        )
+        .rounded(t.radius.input)
+        .text_color(fg)
         .on_click(cx.listener(move |shell, _, _, cx| {
             shell.select_tab(tab, cx);
         }))
@@ -166,6 +154,7 @@ fn render_user_profile(
     let t = design::tokens(cx);
     h_flex()
         .id("sidebar-user-profile")
+        .test_support()
         .role(Role::Button)
         .aria_label("User profile and sign out")
         .cursor_pointer()

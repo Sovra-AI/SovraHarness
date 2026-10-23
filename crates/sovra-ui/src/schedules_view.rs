@@ -4,7 +4,7 @@
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, div, px,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
 };
 use sovra_core::{ScheduleItem, ScheduleStatus, WorkspaceState};
 
@@ -20,6 +20,7 @@ pub(crate) fn render_schedules_view(
 
     v_flex()
         .id("sovra-schedules-view")
+        .test_support()
         .flex_1()
         .min_w_0()
         .h_full()
@@ -196,6 +197,7 @@ fn render_schedule_row(
                 .child(
                     h_flex()
                         .id(("schedule-run", idx))
+                        .test_support()
                         .role(Role::Button)
                         .aria_label("Run schedule now in chat")
                         .cursor_pointer()

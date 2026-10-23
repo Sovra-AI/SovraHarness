@@ -8,8 +8,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_channel::{Receiver, Sender};
 use sovra_adk::AdkHarness;
 use sovra_core::models::{
-    Authentication, CatalogSnapshot, CredentialChange, ModelCommand, ModelConnection, ModelError,
-    ModelEvent, ModelInfo, ModelKey, ModelProvider, ModelSecret, ProviderKind,
+    Authentication, CatalogSnapshot, CatalogState, CredentialChange, ModelCommand, ModelConnection,
+    ModelError, ModelEvent, ModelInfo, ModelKey, ModelProvider, ModelSecret, ProviderKind,
 };
 use sovra_core::{AgentConfig, Event};
 use sovra_providers::{ModelRepository, SavedModels, validate_connection};
@@ -67,6 +67,8 @@ impl ModelsRuntime {
             refreshes: BTreeMap::new(),
             jobs: JoinSet::new(),
             pull: None,
+            pull_generation: 0,
+            pull_progress: async_channel::bounded(16),
             agent,
             execution: execution.clone(),
             events,
@@ -111,20 +113,31 @@ enum Completed {
     Test(Result<String, ModelError>),
     Pull {
         connection_id: String,
+        generation: u64,
         result: Result<(), ModelError>,
     },
 }
+
+struct RunningPull {
+    connection_id: String,
+    generation: u64,
+    task: AbortHandle,
+}
+
+type PullProgressChannel = (Sender<(u64, String)>, Receiver<(u64, String)>);
 
 struct ModelActor {
     repository: ModelRepository,
     providers: BTreeMap<ProviderKind, Arc<dyn ModelProvider>>,
     saved: SavedModels,
-    catalogs: BTreeMap<String, CatalogSnapshot>,
+    catalogs: BTreeMap<String, CatalogState>,
     loaded: bool,
     generations: BTreeMap<String, u64>,
     refreshes: BTreeMap<String, AbortHandle>,
     jobs: JoinSet<Completed>,
-    pull: Option<AbortHandle>,
+    pull: Option<RunningPull>,
+    pull_generation: u64,
+    pull_progress: PullProgressChannel,
     agent: AgentConfig,
     execution: Arc<RwLock<ModelExecution>>,
     events: Sender<Event>,
@@ -153,6 +166,13 @@ impl ModelActor {
                     Ok(command) => if let Err(error) = self.command(command).await { self.emit(ModelEvent::Error(error.0)).await; },
                     Err(_) => break,
                 },
+                progress = self.pull_progress.1.recv() => {
+                    if let Ok((generation, message)) = progress
+                        && self.pull.as_ref().is_some_and(|pull| pull.generation == generation)
+                    {
+                        self.emit(ModelEvent::PullProgress(Some(message))).await;
+                    }
+                }
                 completed = self.jobs.join_next(), if !self.jobs.is_empty() => {
                     if let Some(Ok(completed)) = completed { self.completed(completed).await; }
                 }
@@ -175,8 +195,14 @@ impl ModelActor {
             let id = connection.id.clone();
             if let Ok(Some(mut snapshot)) = blocking(move || repository.load_catalog(&id)).await {
                 merge_manual(&mut snapshot.models, &connection.manual_models);
-                self.catalogs
-                    .insert(connection.id.clone(), snapshot.clone());
+                self.catalogs.insert(
+                    connection.id.clone(),
+                    CatalogState {
+                        snapshot: snapshot.clone(),
+                        cached: true,
+                        ..CatalogState::default()
+                    },
+                );
                 self.emit(ModelEvent::CatalogLoaded {
                     connection_id: connection.id.clone(),
                     snapshot,
@@ -187,9 +213,19 @@ impl ModelActor {
             let fresh = self
                 .catalogs
                 .get(&connection.id)
-                .is_some_and(|c| now().saturating_sub(c.fetched_at) < 900);
-            if !fresh || connection.kind != ProviderKind::OpenRouter {
-                self.refresh(&connection.id).await?;
+                .is_some_and(|c| now().saturating_sub(c.snapshot.fetched_at) < 900);
+            if (!fresh || connection.kind != ProviderKind::OpenRouter)
+                && let Err(error) = self.refresh(&connection.id).await
+            {
+                self.catalogs
+                    .entry(connection.id.clone())
+                    .or_default()
+                    .error = Some(error.0.clone());
+                self.emit(ModelEvent::CatalogFailed {
+                    connection_id: connection.id.clone(),
+                    message: error.0,
+                })
+                .await;
             }
         }
         if let Some(key) = self.saved.preferences.active.clone() {
@@ -253,6 +289,9 @@ impl ModelActor {
         let generation = self.generations.entry(id.to_owned()).or_default();
         *generation += 1;
         let generation = *generation;
+        let catalog = self.catalogs.entry(id.to_owned()).or_default();
+        catalog.loading = true;
+        catalog.error = None;
         self.emit(ModelEvent::CatalogLoading {
             connection_id: id.to_owned(),
         })
@@ -281,13 +320,26 @@ impl ModelActor {
         match command {
             ModelCommand::Load => {
                 self.publish().await;
-                for (id, snapshot) in &self.catalogs {
+                for (id, catalog) in &self.catalogs {
                     self.emit(ModelEvent::CatalogLoaded {
                         connection_id: id.clone(),
-                        snapshot: snapshot.clone(),
-                        cached: true,
+                        snapshot: catalog.snapshot.clone(),
+                        cached: catalog.cached,
                     })
                     .await;
+                    if catalog.loading {
+                        self.emit(ModelEvent::CatalogLoading {
+                            connection_id: id.clone(),
+                        })
+                        .await;
+                    }
+                    if let Some(message) = &catalog.error {
+                        self.emit(ModelEvent::CatalogFailed {
+                            connection_id: id.clone(),
+                            message: message.clone(),
+                        })
+                        .await;
+                    }
                 }
             }
             ModelCommand::Refresh { connection_id } => self.refresh(&connection_id).await?,
@@ -392,35 +444,44 @@ impl ModelActor {
                     return Err(ModelError("Downloads require an Ollama connection.".into()));
                 }
                 let secret = self.secret(&connection).await?;
-                let events = self.events.clone();
-                self.emit(ModelEvent::PullProgress(Some(
-                    "Connecting to Ollama…".into(),
-                )))
+                let progress = self.pull_progress.0.clone();
+                self.pull_generation += 1;
+                let generation = self.pull_generation;
+                let label = format!("{} · {model}", connection.name);
+                self.emit(ModelEvent::PullProgress(Some(format!(
+                    "{label} · Connecting to Ollama…"
+                ))))
                 .await;
-                self.pull = Some(self.jobs.spawn(async move {
+                let id = connection_id.clone();
+                let task = self.jobs.spawn(async move {
                     let result = sovra_providers::pull_ollama(
                         &connection,
                         &secret,
                         &model,
                         move |message| {
-                            let events = events.clone();
+                            let progress = progress.clone();
+                            let message = format!("{label} · {message}");
                             Box::pin(async move {
-                                let _ = events
-                                    .send(Event::Models(ModelEvent::PullProgress(Some(message))))
-                                    .await;
+                                let _ = progress.send((generation, message)).await;
                             })
                         },
                     )
                     .await;
                     Completed::Pull {
                         connection_id,
+                        generation,
                         result,
                     }
-                }));
+                });
+                self.pull = Some(RunningPull {
+                    connection_id: id,
+                    generation,
+                    task,
+                });
             }
             ModelCommand::CancelPull => {
                 if let Some(pull) = self.pull.take() {
-                    pull.abort();
+                    pull.task.abort();
                 }
                 self.emit(ModelEvent::PullProgress(None)).await;
                 self.emit(ModelEvent::Notice(
@@ -434,7 +495,7 @@ impl ModelActor {
     }
 
     fn find_model(&self, key: &ModelKey) -> Result<ModelInfo, ModelError> {
-        self.catalogs.get(&key.connection_id).and_then(|c| c.models.iter().find(|m| m.id == key.model_id)).cloned()
+        self.catalogs.get(&key.connection_id).and_then(|c| c.snapshot.models.iter().find(|m| m.id == key.model_id)).cloned()
             .or_else(|| self.saved.connections.iter().find(|c| c.id == key.connection_id)?.manual_models.iter().find(|m| m.id == key.model_id).cloned())
             .ok_or_else(|| ModelError("This model is no longer in the catalog. Refresh the connection and select a model.".into()))
     }
@@ -495,7 +556,8 @@ impl ModelActor {
             CredentialChange::Remove => Ok(ModelSecret::default()),
             CredentialChange::Keep => {
                 if let Ok(existing) = self.connection(&connection.id) {
-                    if existing.base_url != connection.base_url
+                    if existing.kind != connection.kind
+                        || existing.base_url != connection.base_url
                         || existing.authentication != connection.authentication
                         || existing.api_key_header != connection.api_key_header
                     {
@@ -555,10 +617,12 @@ impl ModelActor {
                 }
             }
             if let Err(error) = repository.save(&saved_copy) {
-                if rollback.is_some_and(|c| c.has_credential) {
-                    let _ = repository.set_credential(&id, &old_secret);
-                } else {
-                    let _ = repository.delete_credential(&id);
+                if !matches!(change, CredentialChange::Keep) {
+                    if rollback.is_some_and(|c| c.has_credential) {
+                        let _ = repository.set_credential(&id, &old_secret);
+                    } else {
+                        let _ = repository.delete_credential(&id);
+                    }
                 }
                 return Err(error);
             }
@@ -566,6 +630,11 @@ impl ModelActor {
         })
         .await?;
         self.saved = saved;
+        if let Some(job) = self.refreshes.remove(&connection.id) {
+            job.abort();
+        }
+        *self.generations.entry(connection.id.clone()).or_default() += 1;
+        self.cancel_connection_pull(&connection.id).await;
         // Invalidate results for a changed destination before publishing new metadata.
         if old
             .as_ref()
@@ -576,15 +645,22 @@ impl ModelActor {
             let id = connection.id.clone();
             blocking(move || repository.delete_catalog(&id)).await?;
         }
-        let snapshot = self.catalogs.entry(connection.id.clone()).or_default();
-        snapshot.models.retain(|m| !m.manual);
-        merge_manual(&mut snapshot.models, &connection.manual_models);
-        let snapshot = snapshot.clone();
+        let catalog = self.catalogs.entry(connection.id.clone()).or_default();
+        catalog.loading = false;
+        catalog.error = None;
+        catalog.snapshot.models.retain(|m| !m.manual);
+        merge_manual(&mut catalog.snapshot.models, &connection.manual_models);
+        let snapshot = catalog.snapshot.clone();
+        let cached = catalog.cached;
         self.publish().await;
         self.emit(ModelEvent::CatalogLoaded {
             connection_id: connection.id.clone(),
             snapshot,
-            cached: true,
+            cached,
+        })
+        .await;
+        self.emit(ModelEvent::ConnectionSaved {
+            id: connection.id.clone(),
         })
         .await;
         self.emit(ModelEvent::Notice(
@@ -608,23 +684,26 @@ impl ModelActor {
             .preferences
             .favorites
             .retain(|k| k.connection_id != id);
-        if saved
+        let removed_active = saved
             .preferences
             .active
             .as_ref()
-            .is_some_and(|k| k.connection_id == id)
-        {
+            .is_some_and(|k| k.connection_id == id);
+        if removed_active {
             saved.preferences.active = None;
+        }
+        self.persist(saved.clone()).await?;
+        self.saved = saved;
+        if removed_active {
             *self.execution.write().await = ModelExecution::Unavailable(
                 "The active connection was removed. Choose another model in Models.".into(),
             );
         }
-        self.persist(saved.clone()).await?;
-        self.saved = saved;
         if let Some(job) = self.refreshes.remove(id) {
             job.abort();
         }
         self.generations.remove(id);
+        self.cancel_connection_pull(id).await;
         self.catalogs.remove(id);
         let repository = self.repository.clone();
         let id_owned = id.to_owned();
@@ -642,6 +721,19 @@ impl ModelActor {
         ))
         .await;
         Ok(())
+    }
+
+    async fn cancel_connection_pull(&mut self, id: &str) {
+        if self
+            .pull
+            .as_ref()
+            .is_some_and(|pull| pull.connection_id == id)
+        {
+            if let Some(pull) = self.pull.take() {
+                pull.task.abort();
+            }
+            self.emit(ModelEvent::PullProgress(None)).await;
+        }
     }
 
     async fn completed(&mut self, completed: Completed) {
@@ -662,8 +754,13 @@ impl ModelActor {
                             models,
                             fetched_at: now(),
                         };
-                        self.catalogs
-                            .insert(connection.id.clone(), snapshot.clone());
+                        self.catalogs.insert(
+                            connection.id.clone(),
+                            CatalogState {
+                                snapshot: snapshot.clone(),
+                                ..CatalogState::default()
+                            },
+                        );
                         self.emit(ModelEvent::CatalogLoaded {
                             connection_id: connection.id.clone(),
                             snapshot: snapshot.clone(),
@@ -679,16 +776,27 @@ impl ModelActor {
                         }
                         if let Some(active) = self.saved.preferences.active.clone()
                             && active.connection_id == connection.id
-                            && matches!(
+                        {
+                            let unavailable = matches!(
                                 *self.execution.read().await,
                                 ModelExecution::Unavailable(_)
-                            )
-                            && let Err(error) = self.activate(&active, false).await
-                        {
-                            self.emit(ModelEvent::Error(error.0)).await;
+                            );
+                            if self.find_model(&active).is_err() {
+                                let message = "The selected model is no longer advertised by this server. Choose another model or add its exact ID manually.".to_owned();
+                                *self.execution.write().await =
+                                    ModelExecution::Unavailable(message.clone());
+                                self.emit(ModelEvent::Error(message)).await;
+                            } else if unavailable
+                                && let Err(error) = self.activate(&active, false).await
+                            {
+                                self.emit(ModelEvent::Error(error.0)).await;
+                            }
                         }
                     }
                     Err(error) => {
+                        let catalog = self.catalogs.entry(connection.id.clone()).or_default();
+                        catalog.loading = false;
+                        catalog.error = Some(error.0.clone());
                         self.emit(ModelEvent::CatalogFailed {
                             connection_id: connection.id,
                             message: error.0,
@@ -715,8 +823,11 @@ impl ModelActor {
                 match result {
                     Ok(model) => {
                         if let Some(snapshot) = self.catalogs.get_mut(&key.connection_id)
-                            && let Some(existing) =
-                                snapshot.models.iter_mut().find(|m| m.id == key.model_id)
+                            && let Some(existing) = snapshot
+                                .snapshot
+                                .models
+                                .iter_mut()
+                                .find(|m| m.id == key.model_id)
                         {
                             *existing = (*model).clone();
                         }
@@ -731,8 +842,23 @@ impl ModelActor {
             },
             Completed::Pull {
                 connection_id,
+                generation,
                 result,
             } => {
+                if self
+                    .pull
+                    .as_ref()
+                    .is_none_or(|pull| pull.generation != generation)
+                {
+                    return;
+                }
+                // The completion and progress channels can become ready together.
+                // Deliver queued progress for this download before clearing it.
+                while let Ok((progress_generation, message)) = self.pull_progress.1.try_recv() {
+                    if progress_generation == generation {
+                        self.emit(ModelEvent::PullProgress(Some(message))).await;
+                    }
+                }
                 self.pull = None;
                 self.emit(ModelEvent::PullProgress(None)).await;
                 match result {

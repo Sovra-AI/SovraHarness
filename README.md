@@ -41,6 +41,17 @@ relaunch automatically; no manual start/stop is needed. This resets in-memory
 state rather than hot-swapping Rust code. Setup and operating rules:
 [`docs/development.md`](docs/development.md).
 
+The **Models** tab includes the complete OpenRouter catalog, Ollama discovery and
+downloads, custom local/remote connections, favorites, comparison and composable
+filters. Setup, authentication and capability details: [Model library](docs/models.md).
+
+The **My AI's & Routing Tree** tab configures how Sovra selects models across its **22 `SovraSRX` specialist agents**:
+- **Single Global Model:** Pin one model from OpenRouter, Ollama, Anthropic, Gemini, or any OpenAI-compatible server across every agent.
+- **Per-Agent Models:** Assign individual models or complexity tiers (`Tier 0 · Fast`, `Tier 1 · Standard`, `Tier 2 · Deep`) per specialist (`CodingAgent`, `WebSearchAgent`, `DeepResearchAgent`, `StockMarketAgent`, etc.).
+- **Dynamic Tree Router (`CogniRouteSLM` + `SovraSRX`):** Evaluates prompts through a complexity decision tree using **Laya** (`/v1/systemone`), **OpenJev / TypeSafe Jev** (`/v1/systemone` or OpenRouter `/api/alpha/decisions`), or the zero-latency **Embedded Rust Heuristic** engine with automatic offline fail-open and auditable `rc1-...` route codes.
+
+The **Chat** and **Schedules** tabs provide the native **AG-UI (`adk-ui`)** conversation workspace (`"Built around you."` hero banner, live `"Building your personal AI..."` progress checklist, `My Personal AI` right inspector, and type-ahead prompt queue) alongside the `SovraSRX` **Schedules Command Center**.
+
 ## Shipping
 
 Push a `vX.Y.Z` tag. `.github/workflows/release.yml` builds each OS, signs + notarizes (when the
@@ -54,8 +65,9 @@ Workflow and best practices: [`CONTRIBUTING.md`](CONTRIBUTING.md). Canonical rul
 [`AGENTS.md`](AGENTS.md) (read natively by Codex and Cursor; imported by `CLAUDE.md`
 for Claude Code), plus a short `AGENTS.md` per crate. Reasoning: [`docs/architecture.md`](docs/architecture.md).
 Edits are checked automatically by `cargo xtask hook` (Claude Code + Cursor hooks) and by CI.
-Notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md); security and secrets policy
-in [`SECURITY.md`](SECURITY.md).
+Every commit uses gitmoji and must update [`CHANGELOG.md`](CHANGELOG.md) under **Unreleased**
+before pushing to `main` (enforced by [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md));
+security and secrets policy lives in [`SECURITY.md`](SECURITY.md).
 
 The native Sovra dark/light design system, embedded SVG branding, usage examples and
 research sources are documented in [`docs/styling.md`](docs/styling.md). The welcome

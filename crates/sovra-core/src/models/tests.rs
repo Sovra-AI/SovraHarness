@@ -108,6 +108,38 @@ fn filters_compose_and_keep_all_modalities_by_default() {
 }
 
 #[test]
+fn facets_preserve_new_modalities_and_connection_filters_are_exact() {
+    let mut state = fixture();
+    state.catalogs.get_mut("local").unwrap().snapshot.models[0]
+        .output_modalities
+        .push("future-kind".into());
+    let local = state.facets(CatalogScope::Ollama);
+    assert!(local.output_modalities.contains("future-kind"));
+    assert!(
+        !state
+            .facets(CatalogScope::OpenRouter)
+            .output_modalities
+            .contains("future-kind")
+    );
+    assert!(state.facets(CatalogScope::Favorites).authors.is_empty());
+    let rows = state.filtered(&ModelFilter {
+        connection_id: Some("local".into()),
+        ..ModelFilter::default()
+    });
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].connection_id, "local");
+    assert_eq!(
+        state
+            .filtered(&ModelFilter {
+                connection_id: Some("missing".into()),
+                ..ModelFilter::default()
+            })
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn unknown_and_non_token_prices_are_not_free() {
     let state = fixture();
     let free = state.filtered(&ModelFilter {

@@ -24,6 +24,11 @@ async, Velopack for install + auto-update. Rust 1.99.1 (pinned), edition 2024.
 **Definition of done:** `cargo xtask ci` passes. Never report a task complete without running it;
 if it fails, say so and show the output.
 
+## Commits, Gitmoji & Changelog rule (mandatory for all agents & contributors)
+
+- **Gitmoji commits:** Every commit message must start with a relevant gitmoji (e.g. `✨ feat(routing): …`, `🐛 fix(ui): …`, `📝 docs: …`).
+- **Mandatory `CHANGELOG.md` update:** Every commit that adds, changes, fixes, or removes functionality **must** update `CHANGELOG.md` under `## [Unreleased]` as part of the commit, and keep `README.md` in sync when user-facing capabilities or workflows change. Never push a commit to `main` without updating `CHANGELOG.md`.
+
 ## Persistent development session (all agents)
 
 - The normal dev runner stays in the `sovra` tmux session, window **`sovraRust`**.
@@ -58,6 +63,7 @@ crates/
   sovra-core      pure domain: types, protocol (Command/Event), state reducers, ports
                   (MemoryStore). No IO/async runtime/GUI; async port *traits* are fine.
   sovra-adk       ADK agent harness adapter.
+  sovra-providers  HTTP catalogs, connection validation, OS credentials and model metadata.
   sovra-runtime   tokio on a background thread; serves the UI over channels (Client).
   sovra-store-surreal  SurrealDB adapter for MemoryStore. The only crate naming surrealdb.
   sovra-ui        GPUI views. The only crate allowed to use gpui-kit.

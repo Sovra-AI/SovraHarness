@@ -1,10 +1,8 @@
 //! Native model library: virtualized discovery, composable filters and model details.
 
-use std::collections::BTreeSet;
-
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::ButtonVariants as _,
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -14,14 +12,15 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, ScrollStrategy, SharedString, Styled as _, Subscription,
-    UniformListScrollHandle, Window, div, uniform_list,
+    ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, TestSupportExt as _, UniformListScrollHandle, Window, div,
+    uniform_list,
 };
 use sovra_core::{
     Command,
     models::{
-        CatalogScope, ModelCommand, ModelEvent, ModelFilter, ModelKey, ModelSort, ModelsState,
-        PriceFilter, ProviderKind,
+        CatalogFacets, CatalogScope, ModelCommand, ModelEvent, ModelFilter, ModelKey, ModelSort,
+        ModelsState, PriceFilter, ProviderKind,
     },
 };
 
@@ -66,19 +65,21 @@ pub struct ModelsView {
     pub(crate) selected: Option<ModelKey>,
     search: Entity<InputState>,
     author: Entity<Selector>,
+    connection: Entity<Selector>,
     input_modality: Entity<Selector>,
     output_modality: Entity<Selector>,
     context: Entity<Selector>,
     price: Entity<Selector>,
     sort: Entity<Selector>,
-    authors: Vec<String>,
+    facets: CatalogFacets,
     controls_dirty: bool,
     filters_open: bool,
+    download_open: bool,
     pub(crate) connections_open: bool,
     pub(crate) connection_form: Option<ConnectionForm>,
     pub(crate) manual_form: Option<ManualModelForm>,
     pub(crate) form_subscriptions: Vec<Subscription>,
-    pub(crate) pending_save: bool,
+    pub(crate) pending_save: Option<String>,
     pub(crate) delete_confirmation: Option<String>,
     pub(crate) download_name: Entity<InputState>,
     pub(crate) download_connection: Entity<Selector>,
@@ -111,34 +112,9 @@ impl ModelsView {
                 .placeholder("Search names, model IDs, creators or descriptions…")
         });
         let author = selector(vec![Choice::new("", "All creators")], window, cx);
-        let input_modality = selector(
-            choices(&[
-                ("", "Any input"),
-                ("text", "Text input"),
-                ("image", "Image / vision"),
-                ("audio", "Audio input"),
-                ("file", "File input"),
-                ("video", "Video input"),
-            ]),
-            window,
-            cx,
-        );
-        let output_modality = selector(
-            choices(&[
-                ("", "Any output"),
-                ("text", "Text / chat"),
-                ("image", "Image"),
-                ("audio", "Audio"),
-                ("speech", "Speech"),
-                ("video", "Video"),
-                ("embeddings", "Embeddings"),
-                ("rerank", "Reranking"),
-                ("transcription", "Transcription"),
-                ("decisions", "Decisions"),
-            ]),
-            window,
-            cx,
-        );
+        let connection = selector(vec![Choice::new("", "All connections")], window, cx);
+        let input_modality = selector(vec![Choice::new("", "Any input")], window, cx);
+        let output_modality = selector(vec![Choice::new("", "Any output")], window, cx);
         let context = selector(
             choices(&[
                 ("0", "Any context"),
@@ -184,6 +160,7 @@ impl ModelsView {
             ];
         for control in [
             &author,
+            &connection,
             &input_modality,
             &output_modality,
             &context,
@@ -206,20 +183,22 @@ impl ModelsView {
             selected: None,
             search,
             author,
+            connection,
             input_modality,
             output_modality,
             context,
             price,
             sort,
-            authors: Vec::new(),
+            facets: CatalogFacets::default(),
             controls_dirty: true,
             filters_open: window.viewport_size().width
                 >= design::tokens(cx).layout.detail_breakpoint,
+            download_open: false,
             connections_open: false,
             connection_form: None,
             manual_form: None,
             form_subscriptions: Vec::new(),
-            pending_save: false,
+            pending_save: None,
             delete_confirmation: None,
             download_name,
             download_connection,
@@ -239,13 +218,16 @@ impl ModelsView {
 
     pub(crate) fn apply(&mut self, event: &ModelEvent, cx: &mut Context<Self>) {
         self.state.apply(event);
-        if matches!(event, ModelEvent::Loaded { .. }) && self.pending_save {
+        if let ModelEvent::ConnectionSaved { id } = event
+            && self.pending_save.as_ref() == Some(id)
+        {
             self.connection_form = None;
-            self.pending_save = false;
+            self.manual_form = None;
+            self.pending_save = None;
             self.form_subscriptions.clear();
         }
         if matches!(event, ModelEvent::Error(_)) {
-            self.pending_save = false;
+            self.pending_save = None;
         }
         if matches!(
             event,
@@ -253,10 +235,9 @@ impl ModelsView {
                 | ModelEvent::CatalogLoaded { .. }
                 | ModelEvent::DetailsLoaded { .. }
                 | ModelEvent::ConnectionDeleted { .. }
+                | ModelEvent::PreferencesChanged(_)
         ) {
             self.controls_dirty = true;
-            self.rebuild_rows();
-        } else if matches!(event, ModelEvent::PreferencesChanged(_)) {
             self.rebuild_rows();
         }
         cx.notify();
@@ -297,6 +278,7 @@ impl ModelsView {
         };
         self.filter.search = self.search.read(cx).value().to_string();
         self.filter.author = nonempty(value(&self.author));
+        self.filter.connection_id = nonempty(value(&self.connection));
         self.filter.input_modality = nonempty(value(&self.input_modality));
         self.filter.output_modality = nonempty(value(&self.output_modality));
         self.filter.min_context = value(&self.context).parse().unwrap_or(0);
@@ -321,23 +303,46 @@ impl ModelsView {
         if !self.controls_dirty {
             return;
         }
-        let authors: Vec<String> = self
-            .state
-            .catalogs
-            .values()
-            .flat_map(|c| c.snapshot.models.iter().map(|m| m.author.clone()))
-            .filter(|a| !a.is_empty())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        if self.authors != authors {
-            let mut items = vec![Choice::new("", "All creators")];
-            items.extend(authors.iter().map(|a| Choice::new(a, a)));
-            self.author.update(cx, |select, cx| {
-                select.set_items(SearchableVec::new(items), window, cx);
-            });
-            self.authors = authors;
+        let facets = self.state.facets(self.filter.scope);
+        for (control, before, after, placeholder) in [
+            (
+                &self.author,
+                &self.facets.authors,
+                &facets.authors,
+                "All creators",
+            ),
+            (
+                &self.input_modality,
+                &self.facets.input_modalities,
+                &facets.input_modalities,
+                "Any input",
+            ),
+            (
+                &self.output_modality,
+                &self.facets.output_modalities,
+                &facets.output_modalities,
+                "Any output",
+            ),
+        ] {
+            if before != after {
+                let mut items = vec![Choice::new("", placeholder)];
+                items.extend(after.iter().map(|value| Choice::new(value, value)));
+                control.update(cx, |select, cx| {
+                    select.set_items(SearchableVec::new(items), window, cx);
+                });
+            }
         }
+        self.facets = facets;
+        let mut connections = vec![Choice::new("", "All connections")];
+        connections.extend(
+            self.state
+                .connections
+                .iter()
+                .map(|c| Choice::new(&c.id, &c.name)),
+        );
+        self.connection.update(cx, |select, cx| {
+            select.set_items(SearchableVec::new(connections), window, cx);
+        });
         let servers: Vec<_> = self
             .state
             .connections
@@ -366,6 +371,7 @@ impl ModelsView {
             .update(cx, |input, cx| input.set_value("", window, cx));
         for control in [
             &self.author,
+            &self.connection,
             &self.input_modality,
             &self.output_modality,
             &self.context,
@@ -405,7 +411,7 @@ impl ModelsView {
         }
     }
 
-    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn header(&self, narrow: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let total: usize = self
             .state
@@ -415,6 +421,7 @@ impl ModelsView {
             .sum();
         let loading = self.state.catalogs.values().any(|c| c.loading);
         v_flex()
+            .flex_shrink_0()
             .gap(t.space.small)
             .child(
                 h_flex()
@@ -434,10 +441,9 @@ impl ModelsView {
                                     )
                                     .child(pill(format!("{total} available"), cx)),
                             )
-                            .child(caption(
-                                "Find the right model. Connect once, choose anywhere.",
-                                cx,
-                            )),
+                            .children((!narrow).then(|| {
+                                caption("Find the right model. Connect once, choose anywhere.", cx)
+                            })),
                     )
                     .child(
                         h_flex()
@@ -462,35 +468,43 @@ impl ModelsView {
                     ),
             )
             .child(
-                h_flex().flex_wrap().gap(t.space.compact).children(
-                    [
-                        (CatalogScope::All, "All models"),
-                        (CatalogScope::OpenRouter, "OpenRouter"),
-                        (CatalogScope::Ollama, "Ollama"),
-                        (CatalogScope::Custom, "Custom"),
-                        (CatalogScope::Favorites, "Favorites"),
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (scope, label))| {
-                        Button::new(("model-scope", index))
-                            .label(label)
-                            .ghost()
-                            .selected(self.filter.scope == scope)
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.filter.scope = scope;
-                                view.rebuild_rows();
-                                view.scroll.scroll_to_item(0, ScrollStrategy::Top);
-                                cx.notify();
-                            }))
-                    }),
-                ),
+                h_flex()
+                    .id("model-scope-tabs")
+                    .w_full()
+                    .min_w_0()
+                    .overflow_x_scroll()
+                    .flex_shrink_0()
+                    .gap(t.space.compact)
+                    .children(
+                        [
+                            (CatalogScope::All, "All models"),
+                            (CatalogScope::OpenRouter, "OpenRouter"),
+                            (CatalogScope::Ollama, "Ollama"),
+                            (CatalogScope::Custom, "Custom"),
+                            (CatalogScope::Favorites, "Favorites"),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (scope, label))| {
+                            design::button(("model-scope", index), label, cx)
+                                .ghost()
+                                .flex_shrink_0()
+                                .selected(self.filter.scope == scope)
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    view.filter.scope = scope;
+                                    view.controls_dirty = true;
+                                    view.rebuild_rows();
+                                    view.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                                    cx.notify();
+                                }))
+                        }),
+                    ),
             )
     }
 
     fn filters(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let mut controls = v_flex().gap(t.space.small).child(
+        let mut controls = v_flex().flex_shrink_0().gap(t.space.small).child(
             h_flex()
                 .gap(t.space.small)
                 .child(
@@ -501,8 +515,7 @@ impl ModelsView {
                         .flex_1(),
                 )
                 .child(
-                    Button::new("models-toggle-filters")
-                        .label("Filters")
+                    design::button("models-toggle-filters", "Filters", cx)
                         .selected(self.filters_open)
                         .on_click(cx.listener(|view, _, _, cx| {
                             view.filters_open = !view.filters_open;
@@ -516,6 +529,12 @@ impl ModelsView {
                     h_flex()
                         .flex_wrap()
                         .gap(t.space.compact)
+                        .child(filter_select(
+                            &self.connection,
+                            "Connection",
+                            "All connections",
+                            cx,
+                        ))
                         .child(filter_select(&self.author, "Creator", "All creators", cx))
                         .child(filter_select(
                             &self.input_modality,
@@ -573,8 +592,7 @@ impl ModelsView {
                                 })),
                         )
                         .child(
-                            Button::new("models-clear-filters")
-                                .label("Clear filters")
+                            design::button("models-clear-filters", "Clear filters", cx)
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(Self::clear_filters_click)),
@@ -632,6 +650,7 @@ impl ModelsView {
         );
         v_flex()
             .id(("catalog-row", index))
+            .test_support()
             .h(t.layout.catalog_row_height)
             .w_full()
             .min_w_0()
@@ -650,8 +669,7 @@ impl ModelsView {
                     .items_center()
                     .gap(t.space.compact)
                     .child(
-                        Button::new(("model-row", index))
-                            .label(name)
+                        design::button(("model-row", index), name, cx)
                             .accessibility_label(format!("View details for {}", model.id))
                             .ghost()
                             .flex_1()
@@ -669,23 +687,26 @@ impl ModelsView {
                         cx,
                     ))
                     .child(
-                        Button::new(("model-favorite", index))
-                            .label(if favorite { "★" } else { "☆" })
-                            .ghost()
-                            .accessibility_label(if favorite {
-                                "Remove from favorites"
-                            } else {
-                                "Add to favorites"
-                            })
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.send(
-                                    ModelCommand::SetFavorite {
-                                        key: favorite_key.clone(),
-                                        favorite: !favorite,
-                                    },
-                                    cx,
-                                );
-                            })),
+                        design::button(
+                            ("model-favorite", index),
+                            if favorite { "★" } else { "☆" },
+                            cx,
+                        )
+                        .ghost()
+                        .accessibility_label(if favorite {
+                            "Remove from favorites"
+                        } else {
+                            "Add to favorites"
+                        })
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.send(
+                                ModelCommand::SetFavorite {
+                                    key: favorite_key.clone(),
+                                    favorite: !favorite,
+                                },
+                                cx,
+                            );
+                        })),
                     ),
             )
             .child(caption(model.id.clone(), cx).truncate())
@@ -696,12 +717,25 @@ impl ModelsView {
         let t = design::tokens(cx);
         let mut content = v_flex()
             .flex_1()
+            .h_full()
             .min_h_0()
             .min_w_0()
             .gap(t.space.small)
             .child(self.filters(cx));
         if self.filter.scope == CatalogScope::Ollama {
-            content = content.child(self.render_download(cx));
+            content = content.child(
+                design::button("ollama-toggle-download", "Download a model", cx).on_click(
+                    cx.listener(|view, _, _, cx| {
+                        view.download_open = !view.download_open;
+                        cx.notify();
+                    }),
+                ),
+            );
+            if self.download_open {
+                content = content.child(self.render_download(cx));
+            } else if let Some(progress) = &self.state.pull_progress {
+                content = content.child(caption(progress.clone(), cx));
+            }
         }
         let errors: Vec<_> = self
             .state
@@ -726,7 +760,7 @@ impl ModelsView {
                 "No matching models"
             };
             let help = if self.filter.scope == CatalogScope::Ollama {
-                "Start Ollama, check its connection, then refresh. Download a model by its exact tag above."
+                "Start Ollama, check its connection, then refresh. Use Download a model to install an exact tag."
             } else if self.filter.scope == CatalogScope::Custom {
                 "Add a connection to LM Studio, vLLM, llama.cpp or a compatible remote API. Discover models or enter an exact model ID."
             } else {
@@ -735,6 +769,7 @@ impl ModelsView {
             content = content.child(
                 v_flex()
                     .id("models-empty")
+                    .test_support()
                     .flex_1()
                     .justify_center()
                     .items_center()
@@ -772,12 +807,13 @@ impl Render for ModelsView {
         let narrow = window.viewport_size().width < t.layout.detail_breakpoint;
         let mut page = v_flex()
             .id("sovra-models-view")
+            .test_support()
             .size_full()
             .min_w_0()
             .min_h_0()
             .p(t.space.medium)
             .gap(t.space.small)
-            .child(self.header(cx));
+            .child(self.header(narrow, cx));
         if let Some(error) = &self.state.error {
             page = page.child(caption(error.clone(), cx).text_color(cx.theme().danger));
         } else if let Some(message) = &self.state.notice {
@@ -796,6 +832,52 @@ impl Render for ModelsView {
         }
         if self.compare_open {
             return page.child(self.render_comparison(cx)).into_any_element();
+        }
+        if narrow && self.download_open && self.filter.scope == CatalogScope::Ollama {
+            return page
+                .child(
+                    v_flex()
+                        .id("ollama-download-panel")
+                        .test_support()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child(self.render_download(cx)),
+                )
+                .child(
+                    design::button("ollama-download-back", "Back to installed models", cx)
+                        .flex_shrink_0()
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.download_open = false;
+                            cx.notify();
+                        })),
+                )
+                .into_any_element();
+        }
+        if narrow && self.filters_open && self.selected.is_none() {
+            return page
+                .child(
+                    v_flex()
+                        .id("models-filter-panel")
+                        .test_support()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child(self.filters(cx)),
+                )
+                .child(
+                    design::primary_button(
+                        "models-apply-filters",
+                        format!("Show {} models", self.rows.len()),
+                        cx,
+                    )
+                    .flex_shrink_0()
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.filters_open = false;
+                        cx.notify();
+                    })),
+                )
+                .into_any_element();
         }
         if narrow && self.selected.is_some() {
             return page.child(self.render_model_details(cx)).into_any_element();
@@ -847,11 +929,29 @@ pub(crate) fn filter_select(
     label: &'static str,
     placeholder: &'static str,
     cx: &App,
-) -> Select<SearchableVec<Choice>> {
-    Select::new(state)
-        .accessibility_label(label)
-        .placeholder(placeholder)
-        .w(design::tokens(cx).layout.filter_width)
+) -> gpui_kit::Div {
+    select_control(state, label, placeholder, cx).w(design::tokens(cx).layout.filter_width)
+}
+
+pub(crate) fn select_control(
+    state: &Entity<Selector>,
+    label: &'static str,
+    placeholder: &'static str,
+    cx: &App,
+) -> gpui_kit::Div {
+    // The pinned Select fills its outer wrapper; styling Select itself only
+    // sizes its inner input. Bound the wrapper so its hitbox cannot cover rows.
+    div()
+        .w_full()
+        .h(design::tokens(cx).layout.control_height)
+        .flex_shrink_0()
+        .child(
+            Select::new(state)
+                .id(label)
+                .accessibility_label(label)
+                .placeholder(placeholder)
+                .size_full(),
+        )
 }
 pub(crate) fn compact_count(value: Option<u64>) -> String {
     match value {

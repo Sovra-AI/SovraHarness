@@ -3,17 +3,18 @@
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::ButtonVariants as _,
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
     searchable_list::SearchableVec,
-    select::{Select, SelectEvent},
+    select::SelectEvent,
     v_flex,
 };
 use gpui_kit::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, div,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window,
+    div,
 };
 use sovra_core::models::{
     Authentication, CredentialChange, ModelCommand, ModelConnection, ModelError, ModelInfo,
@@ -21,7 +22,9 @@ use sovra_core::models::{
 };
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
-use crate::models_view::{Choice, ModelsView, Selector, caption, choices, selector};
+use crate::models_view::{
+    Choice, ModelsView, Selector, caption, choices, select_control, selector,
+};
 
 pub(crate) struct ConnectionForm {
     original: ModelConnection,
@@ -288,7 +291,7 @@ impl ModelsView {
         ));
         self.connection_form = Some(form);
         self.manual_form = None;
-        self.pending_save = false;
+        self.pending_save = None;
         self.state.error = None;
         self.state.notice = None;
         cx.notify();
@@ -334,7 +337,7 @@ impl ModelsView {
                         cx,
                     );
                 } else {
-                    self.pending_save = true;
+                    self.pending_save = Some(connection.id.clone());
                     self.send(
                         ModelCommand::SaveConnection {
                             connection,
@@ -387,7 +390,7 @@ impl ModelsView {
         } else {
             "Optional for unauthenticated local servers. Keys are saved in the operating system credential store, never in config files."
         };
-        let mut content = v_flex().id("model-connection-form").flex_1().min_h_0().overflow_y_scroll().gap(t.space.medium).max_w(t.layout.reading_width)
+        let mut content = v_flex().id("model-connection-form").test_support().flex_1().min_h_0().overflow_y_scroll().gap(t.space.medium).max_w(t.layout.reading_width)
             .child(h_flex().justify_between().items_center()
                 .child(div().sovra_text(TextRole::SectionTitle,cx).child("Connect a model provider"))
                 .child(design::button("connection-cancel","Back",cx).on_click(cx.listener(|view,_,_,cx| { view.connection_form = None; view.form_subscriptions.clear(); cx.notify(); }))))
@@ -399,12 +402,12 @@ impl ModelsView {
                 ("vLLM",ProviderKind::OpenAiCompatible,"http://localhost:8000/v1",Authentication::None),
                 ("llama.cpp",ProviderKind::OpenAiCompatible,"http://localhost:8080/v1",Authentication::None),
                 ("Anthropic",ProviderKind::Anthropic,"https://api.anthropic.com",Authentication::ApiKey),
-            ].into_iter().enumerate().map(|(index,(name,kind,url,auth))| Button::new(("connection-preset",index)).label(name).small()
+            ].into_iter().enumerate().map(|(index,(name,kind,url,auth))| design::button(("connection-preset",index), name, cx).small()
                 .on_click(cx.listener(move |view,_,window,cx| view.preset(name,kind,url,auth,window,cx))))))
             .child(field("connection-name","Connection name",&form.name,"A recognizable name, such as Work GPU or Home Ollama.",cx))
-            .child(v_flex().gap(t.space.compact).child(caption("API protocol",cx)).child(Select::new(&form.protocol).accessibility_label("API protocol").w_full()))
+            .child(v_flex().gap(t.space.compact).child(caption("API protocol",cx)).child(select_control(&form.protocol,"API protocol","Choose a protocol",cx)))
             .child(field("connection-url","Base URL",&form.url,hint,cx))
-            .child(v_flex().gap(t.space.compact).child(caption("Authentication",cx)).child(Select::new(&form.authentication).accessibility_label("Authentication mode").w_full()))
+            .child(v_flex().gap(t.space.compact).child(caption("Authentication",cx)).child(select_control(&form.authentication,"Authentication mode","Choose authentication",cx)))
             .child(field("connection-key","API key",&form.key,credential_hint,cx))
             .child(Checkbox::new("connection-clear-key").label("Clear the saved key").checked(form.clear_key).on_click(cx.listener(|view,checked,_,cx| {
                 if let Some(form) = &mut view.connection_form { form.clear_key = *checked; } cx.notify();
@@ -432,13 +435,13 @@ impl ModelsView {
         }
         content.child(h_flex().flex_wrap().gap(t.space.small)
             .child(design::button("connection-test","Test connection",cx).disabled(self.state.busy).on_click(cx.listener(|view,_,_,cx| view.submit_connection(true,cx))))
-            .child(design::primary_button("connection-save","Save connection",cx).disabled(self.pending_save).on_click(cx.listener(|view,_,_,cx| view.submit_connection(false,cx)))))
+            .child(design::primary_button("connection-save","Save connection",cx).disabled(self.pending_save.is_some()).on_click(cx.listener(|view,_,_,cx| view.submit_connection(false,cx)))))
             .child(caption("Testing verifies the connection and model discovery without sending a paid inference request. Servers without model discovery can still be saved and configured with a manual model ID.",cx))
     }
 
     pub(crate) fn render_connections(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let mut list = v_flex().id("model-connections").flex_1().min_h_0().overflow_y_scroll().gap(t.space.small)
+        let mut list = v_flex().id("model-connections").test_support().flex_1().min_h_0().overflow_y_scroll().gap(t.space.small)
             .child(h_flex().justify_between().items_center()
                 .child(div().sovra_text(TextRole::SectionTitle,cx).child("Your connections"))
                 .child(design::primary_button("connection-add","Add connection",cx).on_click(cx.listener(|view,_,window,cx| view.open_connection(None,window,cx)))))
@@ -492,11 +495,11 @@ impl ModelsView {
                                 )),
                         )
                         .child(
-                            Button::new(("connection-edit", index))
-                                .label("Edit")
-                                .on_click(cx.listener(move |view, _, window, cx| {
+                            design::button(("connection-edit", index), "Edit", cx).on_click(
+                                cx.listener(move |view, _, window, cx| {
                                     view.open_connection(Some(edit.clone()), window, cx);
-                                })),
+                                }),
+                            ),
                         ),
                 )
                 .child(caption(connection.base_url.clone(), cx))
@@ -515,8 +518,7 @@ impl ModelsView {
                         .flex_wrap()
                         .gap(t.space.compact)
                         .child(
-                            Button::new(("connection-refresh", index))
-                                .label("Discover models")
+                            design::button(("connection-refresh", index), "Discover models", cx)
                                 .on_click(cx.listener(move |view, _, _, cx| {
                                     view.send(
                                         ModelCommand::Refresh {
@@ -527,8 +529,7 @@ impl ModelsView {
                                 })),
                         )
                         .child(
-                            Button::new(("connection-remove", index))
-                                .label("Remove")
+                            design::button(("connection-remove", index), "Remove", cx)
                                 .ghost()
                                 .on_click(cx.listener(move |view, _, _, cx| {
                                     view.delete_confirmation = Some(remove_id.clone());
@@ -538,8 +539,7 @@ impl ModelsView {
                 );
             if connection.kind != ProviderKind::OpenRouter {
                 card = card.child(
-                    Button::new(("manual-model-add", index))
-                        .label("Add model by ID")
+                    design::button(("manual-model-add", index), "Add model by ID", cx)
                         .ghost()
                         .on_click(cx.listener(move |view, _, window, cx| {
                             view.open_manual_model(&manual_id, window, cx);
@@ -550,8 +550,8 @@ impl ModelsView {
                 let id = connection.id.clone();
                 card = card.child(caption("Remove this connection and its saved key? Models on the server remain untouched.",cx).text_color(cx.theme().warning))
                     .child(h_flex().gap(t.space.small)
-                        .child(Button::new(("connection-confirm-remove",index)).label("Remove connection").on_click(cx.listener(move |view,_,_,cx| { view.send(ModelCommand::DeleteConnection { id:id.clone() },cx); view.delete_confirmation = None; })))
-                        .child(Button::new(("connection-cancel-remove",index)).label("Keep connection").on_click(cx.listener(|view,_,_,cx| { view.delete_confirmation = None; cx.notify(); }))));
+                        .child(design::button(("connection-confirm-remove",index), "Remove connection", cx).on_click(cx.listener(move |view,_,_,cx| { view.send(ModelCommand::DeleteConnection { id:id.clone() },cx); view.delete_confirmation = None; })))
+                        .child(design::button(("connection-cancel-remove",index), "Keep connection", cx).on_click(cx.listener(|view,_,_,cx| { view.delete_confirmation = None; cx.notify(); }))));
             }
             list = list.child(card);
         }
@@ -583,7 +583,12 @@ impl ModelsView {
         let context_length = if context.trim().is_empty() {
             None
         } else {
-            let Ok(context) = context.parse::<u64>() else {
+            let Some(context) = context
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)
+            else {
                 self.state.error = Some(
                     "Context length must be a positive number of tokens, or left blank.".into(),
                 );
@@ -599,6 +604,7 @@ impl ModelsView {
             supported_parameters: if form.tools { vec!["tools".into()] } else { Vec::new() }, manual:true, details_loaded:true,
             ..ModelInfo::default()
         };
+        self.pending_save = Some(form.connection_id.clone());
         self.send(
             ModelCommand::AddManualModel {
                 connection_id: form.connection_id.clone(),
@@ -606,13 +612,12 @@ impl ModelsView {
             },
             cx,
         );
-        self.manual_form = None;
     }
 
     pub(crate) fn render_manual_form(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let form = self.manual_form.as_ref().expect("manual form is open");
-        v_flex().id("manual-model-form").flex_1().min_h_0().overflow_y_scroll().gap(t.space.medium).max_w(t.layout.reading_width)
+        v_flex().id("manual-model-form").test_support().flex_1().min_h_0().overflow_y_scroll().gap(t.space.medium).max_w(t.layout.reading_width)
             .child(div().sovra_text(TextRole::SectionTitle,cx).child("Add a chat model by ID"))
             .child(caption("Use this when a server does not expose model discovery, or to declare capabilities for a discovered model. The ID must match the server exactly.",cx))
             .child(field("manual-model-id","Model ID",&form.id,"Use the server's deployment/model identifier, not a friendly marketing name.",cx))
@@ -621,7 +626,7 @@ impl ModelsView {
             .child(Checkbox::new("manual-model-tools").label("This model and server support tool calling").checked(form.tools)
                 .on_click(cx.listener(|view,checked,_,cx| { if let Some(form) = &mut view.manual_form { form.tools = *checked; } cx.notify(); })))
             .child(h_flex().gap(t.space.small)
-                .child(design::primary_button("manual-model-save","Add model",cx).on_click(cx.listener(|view,_,_,cx| view.save_manual_model(cx))))
+                .child(design::primary_button("manual-model-save","Add model",cx).disabled(self.pending_save.is_some()).on_click(cx.listener(|view,_,_,cx| view.save_manual_model(cx))))
                 .child(design::button("manual-model-cancel","Cancel",cx).on_click(cx.listener(|view,_,_,cx| { view.manual_form = None; cx.notify(); }))))
     }
 
@@ -630,9 +635,9 @@ impl ModelsView {
         let mut panel = v_flex().p(t.space.small).gap(t.space.compact).sovra_surface(Surface::Subtle,cx)
             .child(caption("OLLAMA · INSTALL A MODEL",cx))
             .child(h_flex().flex_wrap().gap(t.space.compact)
-                .child(Select::new(&self.download_connection).placeholder("Choose Ollama server").accessibility_label("Ollama download destination").w(t.layout.filter_width))
+                .child(select_control(&self.download_connection,"Ollama download destination","Choose Ollama server",cx).w(t.layout.filter_width))
                 .child(Input::new(&self.download_name).id("ollama-model-tag").aria_label("Ollama model tag to download").flex_1())
-                .child(Button::new("ollama-pull").label("Download").disabled(self.state.pull_progress.is_some())
+                .child(design::button("ollama-pull", "Download", cx).disabled(self.state.pull_progress.is_some())
                     .on_click(cx.listener(|view,_,_,cx| {
                         if let Some(connection_id) = view.download_connection.read(cx).selected_value().cloned() {
                             let model = view.download_name.read(cx).value().to_string();
@@ -647,8 +652,7 @@ impl ModelsView {
                     .items_center()
                     .child(caption(progress.clone(), cx))
                     .child(
-                        Button::new("ollama-cancel-pull")
-                            .label("Cancel download")
+                        design::button("ollama-cancel-pull", "Cancel download", cx)
                             .ghost()
                             .small()
                             .on_click(cx.listener(|view, _, _, cx| {

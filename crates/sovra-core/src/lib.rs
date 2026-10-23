@@ -8,7 +8,11 @@ mod agui;
 mod memory;
 pub mod models;
 mod protocol;
+pub mod providers;
+pub mod routing_eval;
+pub mod routing_tree;
 mod schedules;
+pub mod specialists;
 mod status;
 mod workspace;
 
@@ -22,9 +26,19 @@ pub use memory::{
     NewFact, RRF_K, RecallQuery, RecalledFact, Timestamp, fuse_rrf,
 };
 pub use protocol::{Command, Event};
+pub use providers::{
+    ModelTier, TierLadderEntry, default_tier_ladder, parse_params_billions, suggest_model_tier,
+};
+pub use routing_eval::{evaluate_routing, heuristic_answers, resolve_tier_model};
+pub use routing_tree::{
+    BranchOp, DecisionBackend, QuestionKind, RouteEvaluation, RouteTarget, RoutingConfig,
+    SelectionMode, TraceStep, TreeBranch, TreeNode, TreeNodeKind, TreeSpec, TypedAnswer,
+    default_sovra_srx_tree,
+};
 pub use schedules::{
     ScheduleItem, ScheduleStats, ScheduleStatus, compute_stats, default_schedules,
 };
+pub use specialists::{SpecialistAgentSpec, default_sovra_srx_agents, specialist_id_for_route_key};
 pub use status::RuntimeStatus;
 pub use workspace::{
     ConfigCardStatus, NavTab, PersonalAiConfigCard, ScreenRoute, UserProfile, WorkspaceState,

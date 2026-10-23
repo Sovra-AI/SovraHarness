@@ -123,7 +123,7 @@ impl ModelRepository {
         }
         // Environment keys belong to the built-in endpoint, never a user-edited
         // destination bearing the same ID.
-        if connection.base_url == connection.kind.default_url() {
+        if self.has_environment_key(connection) {
             Ok(self
                 .environment_keys
                 .get(&connection.id)
@@ -135,7 +135,10 @@ impl ModelRepository {
     }
 
     pub fn has_environment_key(&self, connection: &ModelConnection) -> bool {
-        connection.base_url == connection.kind.default_url()
+        matches!(
+            (connection.id.as_str(), connection.kind),
+            ("openrouter", ProviderKind::OpenRouter) | ("ollama", ProviderKind::Ollama)
+        ) && connection.base_url == connection.kind.default_url()
             && self
                 .environment_keys
                 .get(&connection.id)
@@ -224,6 +227,33 @@ mod tests {
             Ok(())
         }
     }
+    #[test]
+    fn environment_credentials_are_bound_to_protocol_id_and_endpoint() {
+        let repo = ModelRepository::new(
+            PathBuf::new(),
+            Arc::new(MemoryCredentials::default()),
+            [(
+                "openrouter".into(),
+                ModelSecret("environment-secret".into()),
+            )]
+            .into(),
+        );
+        let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+        assert!(repo.has_environment_key(&connection));
+        assert_eq!(
+            repo.credential(&connection).unwrap().0,
+            "environment-secret"
+        );
+        connection.base_url = "https://different.example/api/v1".into();
+        assert!(!repo.has_environment_key(&connection));
+        assert_eq!(repo.credential(&connection).unwrap().0, "");
+        let connection = ModelConnection::new("openrouter", ProviderKind::OpenAiCompatible);
+        assert!(!repo.has_environment_key(&connection));
+        assert_eq!(repo.credential(&connection).unwrap().0, "");
+        let connection = ModelConnection::new("custom", ProviderKind::OpenRouter);
+        assert!(!repo.has_environment_key(&connection));
+    }
+
     #[test]
     fn settings_and_catalog_roundtrip_without_plaintext_credentials() {
         let path =

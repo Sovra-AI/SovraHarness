@@ -11,7 +11,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, div, px,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
 };
 use sovra_core::{ConfigCardStatus, PersonalAiConfigCard, WorkspaceState};
 
@@ -28,6 +28,7 @@ pub(crate) fn render_inspector(
 
     v_flex()
         .id("sovra-inspector")
+        .test_support()
         .w(t.layout.inspector_width)
         .h_full()
         .flex_shrink_0()

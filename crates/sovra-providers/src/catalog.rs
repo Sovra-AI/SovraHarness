@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use futures::{StreamExt as _, future::BoxFuture};
 use serde_json::{Value, json};
@@ -190,9 +191,34 @@ fn enrich_ollama(model: &ModelInfo, value: &Value) -> ModelInfo {
         }
     }
     model.context_length = value["model_info"].as_object().and_then(|info| {
-        info.iter()
-            .find(|(key, _)| key.ends_with(".context_length"))
-            .and_then(|(_, v)| v.as_u64())
+        let architecture = info
+            .get("general.architecture")
+            .and_then(Value::as_str)
+            .or_else(|| value["details"]["family"].as_str())
+            .or(model.family.as_deref());
+        if let Some(context) = architecture
+            .and_then(|name| info.get(&format!("{name}.context_length")))
+            .and_then(Value::as_u64)
+        {
+            return Some(context);
+        }
+        // Older servers omit architecture. Accept an unambiguous language context,
+        // never the smaller context of an auxiliary vision/audio encoder.
+        let mut contexts = info
+            .iter()
+            .filter(|(key, _)| {
+                key.ends_with(".context_length")
+                    && !["clip.", "vision.", "audio."]
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix))
+            })
+            .filter_map(|(_, value)| value.as_u64());
+        let first = contexts.next();
+        if contexts.next().is_none() {
+            first
+        } else {
+            None
+        }
     });
     model.family = text(&value["details"], "family").or(model.family);
     model.parameter_size = text(&value["details"], "parameter_size").or(model.parameter_size);
@@ -286,6 +312,42 @@ impl ModelProvider for CompatibleProvider {
     }
 }
 
+fn parse_anthropic(value: &Value) -> Result<Vec<ModelInfo>, ModelError> {
+    let mut models = parse_compatible(value)?;
+    for (model, item) in models.iter_mut().zip(data_array(value)?) {
+        model.author = "Anthropic".into();
+        model.input_modalities = vec!["text".into()];
+        model.output_modalities = vec!["text".into()];
+        model.context_length = item["max_input_tokens"].as_u64().or(model.context_length);
+        model.max_output_tokens = item["max_tokens"].as_u64();
+        model.family = text(item, "family");
+        model.expiration_date = text(item, "retires_at");
+        let supported =
+            |name: &str| item["capabilities"][name]["supported"].as_bool() == Some(true);
+        if supported("image_input") {
+            model.input_modalities.push("image".into());
+        }
+        if supported("pdf_input") {
+            model.input_modalities.push("file".into());
+        }
+        for (capability, parameter) in [
+            ("thinking", "reasoning"),
+            ("structured_outputs", "structured_outputs"),
+        ] {
+            if supported(capability) {
+                model.supported_parameters.push(parameter.into());
+            }
+        }
+        if let Some(created) = text(item, "created_at") {
+            let _ = write!(model.description, " Created: {created}.");
+        }
+        if let Some(lifecycle) = text(item, "lifecycle") {
+            let _ = write!(model.description, " Lifecycle: {lifecycle}.");
+        }
+    }
+    Ok(models)
+}
+
 #[derive(Debug, Default)]
 pub struct AnthropicProvider;
 
@@ -311,11 +373,7 @@ impl ModelProvider for AnthropicProvider {
                 request = request.query(&[("after_id", cursor)]);
             }
             let value = read_json(authorize(request, connection, secret)).await?;
-            for mut model in parse_compatible(&value)? {
-                model.author = "Anthropic".into();
-                model.input_modalities = vec!["text".into(), "image".into()];
-                model.output_modalities = vec!["text".into()];
-                model.supported_parameters = vec!["tools".into()];
+            for model in parse_anthropic(&value)? {
                 models.insert(model.id.clone(), model);
             }
             if value["has_more"] != true {
@@ -375,8 +433,13 @@ pub async fn pull_ollama(
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
     let mut success = false;
-    while let Some(chunk) = stream.next().await {
-        buffer.extend_from_slice(&chunk.map_err(|e| transport_error(&e))?);
+    let mut previous_message = String::new();
+    loop {
+        match stream.next().await {
+            Some(chunk) => buffer.extend_from_slice(&chunk.map_err(|e| transport_error(&e))?),
+            None if buffer.is_empty() => break,
+            None => buffer.push(b'\n'),
+        }
         if buffer.len() > 1024 * 1024 {
             return Err(ModelError("Invalid Ollama progress response.".into()));
         }
@@ -398,7 +461,10 @@ pub async fn pull_ollama(
                 }
                 _ => status.to_owned(),
             };
-            progress(message).await;
+            if message != previous_message {
+                previous_message.clone_from(&message);
+                progress(message).await;
+            }
         }
     }
     if success {
@@ -449,5 +515,42 @@ mod tests {
         assert_eq!(models[0].id, "local-model");
         assert_eq!(models[0].token_price("prompt"), None);
         assert_eq!(models[0].supported_parameters, Vec::<String>::new());
+    }
+
+    #[test]
+    fn anthropic_discovery_uses_advertised_capabilities_and_limits() {
+        let models = parse_anthropic(&json!({"data":[
+            {"id":"legacy", "display_name":"Legacy"},
+            {"id":"new", "max_input_tokens":200_000, "max_tokens":64_000, "capabilities":{
+                "image_input":{"supported":true}, "pdf_input":{"supported":false},
+                "thinking":{"supported":true}, "structured_outputs":{"supported":true}
+            }}
+        ]}))
+        .unwrap();
+        assert_eq!(models[0].input_modalities, ["text"]);
+        assert_eq!(models[0].supported_parameters, Vec::<String>::new());
+        assert_eq!(models[1].context_length, Some(200_000));
+        assert_eq!(models[1].max_output_tokens, Some(64_000));
+        assert_eq!(models[1].input_modalities, ["text", "image"]);
+        assert!(models[1].supports("reasoning"));
+        assert!(!models[1].supports("tools"));
+    }
+
+    #[test]
+    fn ollama_context_uses_language_architecture_not_vision_encoder() {
+        let model = enrich_ollama(
+            &ModelInfo::default(),
+            &json!({
+                "model_info": {"general.architecture":"qwen3", "clip.context_length":77, "qwen3.context_length":131_072}
+            }),
+        );
+        assert_eq!(model.context_length, Some(131_072));
+        let model = enrich_ollama(
+            &ModelInfo::default(),
+            &json!({
+                "model_info": {"clip.context_length":77}
+            }),
+        );
+        assert_eq!(model.context_length, None);
     }
 }

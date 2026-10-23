@@ -12,8 +12,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
 use sovra_adk::AdkHarness;
+use sovra_adk::decision_client::fetch_systemone_answers;
 use sovra_core::{
-    AgentConfig, Command, EpisodeKind, Event, MemoryError, MemoryStore, NewEpisode, Timestamp,
+    AgentConfig, Command, EpisodeKind, Event, MemoryError, MemoryStore, NewEpisode, RoutingConfig,
+    SpecialistAgentSpec, Timestamp, default_sovra_srx_agents, evaluate_routing,
 };
 
 /// A deferred memory-store constructor. The composition root picks the backend; the
@@ -117,9 +119,11 @@ async fn serve(
     events: Sender<Event>,
 ) {
     let harness = build_harness(&agent_config);
-    let models =
-        models.map(|config| models::ModelsRuntime::start(config, agent_config, events.clone()));
+    let models = models
+        .map(|config| models::ModelsRuntime::start(config, agent_config.clone(), events.clone()));
     let mut runs = std::collections::BTreeMap::<String, ActiveRun>::new();
+    let mut routing_config = RoutingConfig::default();
+    let mut specialists = default_sovra_srx_agents();
     let memory = open_memory(memory_factory).await;
     tracing::info!(
         %version,
@@ -131,7 +135,6 @@ async fn serve(
         return;
     }
     while let Ok(command) = commands.recv().await {
-        // Commands can contain provider credentials and user prompts.
         tracing::debug!("command received");
         runs.retain(|_, run| !run.task.is_finished());
         match command {
@@ -146,12 +149,49 @@ async fn serve(
                         .await;
                 }
             }
+            Command::UpdateRouting {
+                mode,
+                backend,
+                global_model,
+            } => {
+                routing_config.mode = mode;
+                routing_config.backend = backend;
+                routing_config.global_model = global_model;
+            }
+            Command::SetSpecialistModel {
+                specialist_id,
+                model_override,
+                preferred_tier,
+            } => {
+                if let Some(agent) = specialists.iter_mut().find(|a| a.id == specialist_id) {
+                    agent.model_override = model_override;
+                    agent.preferred_tier = preferred_tier;
+                }
+            }
+            Command::SimulateRoute { prompt } => {
+                spawn_route_simulation(
+                    &handle,
+                    routing_config.clone(),
+                    specialists.clone(),
+                    agent_config.api_key.clone(),
+                    prompt,
+                    events.clone(),
+                );
+            }
             Command::Ping => {
                 if events.send(Event::Pong).await.is_err() {
                     return;
                 }
             }
             Command::RunPrompt { session_id, prompt } => {
+                spawn_route_simulation(
+                    &handle,
+                    routing_config.clone(),
+                    specialists.clone(),
+                    agent_config.api_key.clone(),
+                    prompt.clone(),
+                    events.clone(),
+                );
                 let (selected, timeout) = if let Some(models) = &models {
                     match models.execution.read().await.clone() {
                         models::ModelExecution::Legacy => (harness.clone(), None),
@@ -215,13 +255,38 @@ async fn serve(
         run.harness.interrupt(&session);
         run.task.abort();
     }
-    // The UI may already be gone; nothing to do if this send fails.
     let _ = events.send(Event::Stopped).await;
     tracing::info!("runtime stopped");
 }
 
-/// Opens the configured memory store, degrading to "no memory" on failure: the app
-/// must stay usable when the store is corrupt or unreachable.
+fn spawn_route_simulation(
+    handle: &tokio::runtime::Handle,
+    routing: RoutingConfig,
+    specialists: Vec<SpecialistAgentSpec>,
+    api_key: Option<String>,
+    prompt: String,
+    events: Sender<Event>,
+) {
+    drop(handle.spawn(async move {
+        let external = fetch_systemone_answers(&routing, api_key.as_deref(), &prompt)
+            .await
+            .ok()
+            .flatten();
+        let evaluation = evaluate_routing(
+            &routing,
+            &specialists,
+            &prompt,
+            external.as_ref(),
+            routing.backend,
+        );
+        let _ = events
+            .send(Event::RouteEvaluated {
+                evaluation: Box::new(evaluation),
+            })
+            .await;
+    }));
+}
+
 async fn open_memory(factory: Option<MemoryFactory>) -> Option<Arc<dyn MemoryStore>> {
     let store = match factory {
         Some(build) => match build().await {
@@ -240,7 +305,6 @@ async fn open_memory(factory: Option<MemoryFactory>) -> Option<Arc<dyn MemorySto
     Some(store)
 }
 
-/// Fire-and-forget episode write; memory must never stall the command loop.
 fn record_episode(
     handle: &tokio::runtime::Handle,
     store: Arc<dyn MemoryStore>,
@@ -261,8 +325,6 @@ fn record_episode(
     }));
 }
 
-/// Interposes on the agent's event stream so completed responses become
-/// [`EpisodeKind::AgentMessage`] episodes. Events are forwarded untouched.
 fn tap_agent_events(
     handle: &tokio::runtime::Handle,
     store: Arc<dyn MemoryStore>,
@@ -290,6 +352,7 @@ fn tap_agent_events(
                 Event::Models(_)
                 | Event::Ready { .. }
                 | Event::Pong
+                | Event::RouteEvaluated { .. }
                 | Event::AgUiSurface { .. }
                 | Event::AgentError { .. }
                 | Event::Stopped => {}
@@ -352,9 +415,16 @@ async fn dispatch_prompt(
         if let Some(timeout) = timeout {
             if tokio::time::timeout(timeout, run).await.is_err() {
                 adk.interrupt(&session_id);
-                let _ = events.send(Event::AgentError { session_id, message: "The model response timed out. Increase the connection timeout or try again.".into() }).await;
+                let _ = events
+                    .send(Event::AgentError {
+                        session_id,
+                        message: "The model response timed out. Increase the connection timeout or try again.".into(),
+                    })
+                    .await;
             }
-        } else { run.await; }
+        } else {
+            run.await;
+        }
     });
     Some(ActiveRun { harness, task })
 }
@@ -397,15 +467,19 @@ mod tests {
                 prompt: "Hello".into(),
             })
             .unwrap();
-        match events.recv_blocking().unwrap() {
-            Event::AgentError {
-                session_id,
-                message,
-            } => {
-                assert_eq!(session_id, "s-test");
-                assert!(message.contains("GEMINI_API_KEY"));
+        loop {
+            match events.recv_blocking().unwrap() {
+                Event::RouteEvaluated { .. } => {}
+                Event::AgentError {
+                    session_id,
+                    message,
+                } => {
+                    assert_eq!(session_id, "s-test");
+                    assert!(message.contains("GEMINI_API_KEY"));
+                    break;
+                }
+                other => panic!("expected AgentError, got {other:?}"),
             }
-            other => panic!("expected AgentError, got {other:?}"),
         }
         client.send(Command::Shutdown).unwrap();
         assert_eq!(events.recv_blocking().unwrap(), Event::Stopped);

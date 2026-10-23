@@ -14,6 +14,7 @@ mod login;
 mod model_connection_editor;
 mod model_details;
 mod models_view;
+mod my_ais_view;
 mod schedules_view;
 mod shell;
 mod sidebar;

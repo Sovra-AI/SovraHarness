@@ -54,6 +54,12 @@ resolver 3 (MSRV-aware resolution).
 
 ### UI ↔ runtime: message passing over runtime-agnostic channels
 
+Model discovery and connection storage live in `sovra-providers`, a distinct HTTP/
+OS-credential IO boundary behind the core `ModelProvider` port. Runtime owns its
+tasks and executes blocking persistence off the UI thread. This keeps catalog
+providers replaceable without introducing SDK or GUI dependencies into core.
+The complete flow and protocol sources are documented in [models.md](models.md).
+
 GPUI owns the main thread and has its own executor; tokio runs on a dedicated background
 thread. They communicate only through `Command`/`Event` enums (defined in `sovra-core`) over
 `async-channel`, which works on any executor. Consequences: the UI never blocks, never sees

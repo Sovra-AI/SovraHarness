@@ -225,6 +225,7 @@ pub enum ModelSort {
 pub struct ModelFilter {
     pub search: String,
     pub scope: CatalogScope,
+    pub connection_id: Option<String>,
     pub author: Option<String>,
     pub input_modality: Option<String>,
     pub output_modality: Option<String>,
@@ -234,6 +235,13 @@ pub struct ModelFilter {
     pub reasoning: bool,
     pub structured_output: bool,
     pub sort: ModelSort,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CatalogFacets {
+    pub authors: BTreeSet<String>,
+    pub input_modalities: BTreeSet<String>,
+    pub output_modalities: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -313,6 +321,7 @@ impl ModelsState {
                     self.preferences.active = None;
                 }
             }
+            ModelEvent::ConnectionSaved { .. } => self.busy = false,
             ModelEvent::PreferencesChanged(preferences) => self.preferences.clone_from(preferences),
             ModelEvent::OperationStarted => {
                 self.busy = true;
@@ -349,6 +358,13 @@ impl ModelsState {
             .collect();
         let mut matches = Vec::new();
         for connection in &self.connections {
+            if filter
+                .connection_id
+                .as_ref()
+                .is_some_and(|id| id != &connection.id)
+            {
+                continue;
+            }
             let scope_matches = match filter.scope {
                 CatalogScope::All | CatalogScope::Favorites => true,
                 CatalogScope::OpenRouter => connection.kind == ProviderKind::OpenRouter,
@@ -422,6 +438,35 @@ impl ModelsState {
             order.then_with(|| ka.cmp(kb))
         });
         matches.into_iter().map(|(key, _)| key).collect()
+    }
+
+    pub fn facets(&self, scope: CatalogScope) -> CatalogFacets {
+        let mut facets = CatalogFacets::default();
+        for key in self.filtered(&ModelFilter {
+            scope,
+            ..ModelFilter::default()
+        }) {
+            if let Some(model) = self.model(&key) {
+                if !model.author.is_empty() {
+                    facets.authors.insert(model.author.clone());
+                }
+                facets.input_modalities.extend(
+                    model
+                        .input_modalities
+                        .iter()
+                        .filter(|m| !m.is_empty())
+                        .cloned(),
+                );
+                facets.output_modalities.extend(
+                    model
+                        .output_modalities
+                        .iter()
+                        .filter(|m| !m.is_empty())
+                        .cloned(),
+                );
+            }
+        }
+        facets
     }
 }
 
@@ -498,6 +543,9 @@ pub enum ModelEvent {
         model: Box<ModelInfo>,
     },
     ConnectionDeleted {
+        id: String,
+    },
+    ConnectionSaved {
         id: String,
     },
     PreferencesChanged(ModelPreferences),

@@ -1,14 +1,20 @@
 //! Pure workspace state machine: authentication, sidebar navigation, Personal AI
-//! inspector configuration, AG-UI chat stream, and `SovraSRX` schedules.
+//! inspector configuration, AG-UI chat stream, `SovraSRX` 22-specialist roster,
+//! and `CogniRouteSLM` + `SovraSRX` routing tree.
 
 use crate::agui::{
     AgUiWidget, BuildStepState, ChatMessage, default_personal_ai_build_widget,
     seeded_onboarding_messages,
 };
+use crate::models::ModelKey;
 use crate::protocol::Event;
+use crate::providers::ModelTier;
+use crate::routing_eval::evaluate_routing;
+use crate::routing_tree::{DecisionBackend, RouteEvaluation, RoutingConfig, SelectionMode};
 use crate::schedules::{
     ScheduleItem, ScheduleStats, ScheduleStatus, compute_stats, default_schedules,
 };
+use crate::specialists::{SpecialistAgentSpec, default_sovra_srx_agents};
 use crate::status::RuntimeStatus;
 
 /// Top-level screen route (Login vs authenticated Main Workspace).
@@ -122,12 +128,24 @@ pub struct WorkspaceState {
     pub ai_building: bool,
     pub config_cards: Vec<PersonalAiConfigCard>,
     pub schedules: Vec<ScheduleItem>,
+    pub specialists: Vec<SpecialistAgentSpec>,
+    pub routing: RoutingConfig,
+    pub last_route_evaluation: Option<RouteEvaluation>,
     pub search_query: String,
     next_msg_seq: u64,
 }
 
 impl Default for WorkspaceState {
     fn default() -> Self {
+        let routing = RoutingConfig::default();
+        let specialists = default_sovra_srx_agents();
+        let initial_eval = evaluate_routing(
+            &routing,
+            &specialists,
+            "I want a personal AI that knows my work, preferences and writing style.",
+            None,
+            routing.backend,
+        );
         Self {
             runtime_status: RuntimeStatus::default(),
             route: ScreenRoute::MainWorkspace,
@@ -144,6 +162,9 @@ impl Default for WorkspaceState {
             ai_building: true,
             config_cards: default_config_cards(),
             schedules: default_schedules(),
+            specialists,
+            routing,
+            last_route_evaluation: Some(initial_eval),
             search_query: String::new(),
             next_msg_seq: 2,
         }
@@ -179,7 +200,7 @@ fn default_config_cards() -> Vec<PersonalAiConfigCard> {
         (
             "model",
             "Model",
-            "Default Gemini (environment)",
+            "Tree Router · Laya SystemOne",
             ConfigCardStatus::Selected,
         ),
         (
@@ -214,6 +235,58 @@ impl WorkspaceState {
 
     pub fn select_tab(&mut self, tab: NavTab) {
         self.active_tab = tab;
+    }
+
+    pub fn set_routing_mode(&mut self, mode: SelectionMode) {
+        self.routing.mode = mode;
+        self.sync_model_card_subtitle();
+    }
+
+    pub fn set_decision_backend(&mut self, backend: DecisionBackend) {
+        self.routing.backend = backend;
+        self.sync_model_card_subtitle();
+    }
+
+    pub fn set_specialist_model(
+        &mut self,
+        specialist_id: &str,
+        model_override: Option<ModelKey>,
+        preferred_tier: ModelTier,
+    ) {
+        if let Some(agent) = self.specialists.iter_mut().find(|a| a.id == specialist_id) {
+            agent.model_override = model_override;
+            agent.preferred_tier = preferred_tier;
+        }
+    }
+
+    pub fn simulate_route_offline(&mut self, prompt: &str) -> RouteEvaluation {
+        let eval = evaluate_routing(
+            &self.routing,
+            &self.specialists,
+            prompt,
+            None,
+            self.routing.backend,
+        );
+        self.last_route_evaluation = Some(eval.clone());
+        eval
+    }
+
+    fn sync_model_card_subtitle(&mut self) {
+        let subtitle = match self.routing.mode {
+            SelectionMode::SingleGlobalModel => self.routing.global_model.as_ref().map_or_else(
+                || "Single Model · Default Gemini".to_owned(),
+                |k| format!("Pinned · {}", k.model_id),
+            ),
+            SelectionMode::PerAgentModel => {
+                format!("Per-Agent · {} Specialists", self.specialists.len())
+            }
+            SelectionMode::DynamicTreeRouting => {
+                format!("Tree Router · {}", self.routing.backend.label())
+            }
+        };
+        if let Some(card) = self.config_cards.iter_mut().find(|c| c.key == "model") {
+            card.subtitle = subtitle;
+        }
     }
 
     pub fn submit_prompt(&mut self, raw_prompt: &str) -> Option<String> {
@@ -295,12 +368,18 @@ impl WorkspaceState {
                 crate::models::ModelEvent::Loaded { preferences, .. }
                 | crate::models::ModelEvent::PreferencesChanged(preferences),
             ) => {
-                if let Some(card) = self.config_cards.iter_mut().find(|c| c.key == "model") {
-                    card.subtitle = preferences.active.as_ref().map_or_else(
-                        || "Default Gemini (environment)".to_owned(),
-                        |key| key.model_id.clone(),
-                    );
+                self.routing.global_model.clone_from(&preferences.active);
+                if let Some(active) = &preferences.active {
+                    if let Some(card) = self.config_cards.iter_mut().find(|c| c.key == "model") {
+                        card.subtitle.clone_from(&active.model_id);
+                    }
+                } else {
+                    self.sync_model_card_subtitle();
                 }
+                None
+            }
+            Event::RouteEvaluated { evaluation } => {
+                self.last_route_evaluation = Some((**evaluation).clone());
                 None
             }
             Event::Models(_) | Event::Ready { .. } | Event::Pong | Event::Stopped => None,

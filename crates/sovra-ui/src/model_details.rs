@@ -1,13 +1,11 @@
 //! Model inspection and side-by-side comparison. Unknown metadata is explicit.
 
 use gpui_kit::component::{
-    Disableable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
-    h_flex, v_flex,
+    Disableable as _, Sizable as _, button::ButtonVariants as _, h_flex, v_flex,
 };
 use gpui_kit::{
     ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, div,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::models::{ModelCommand, ModelInfo, ProviderKind};
 
@@ -19,6 +17,7 @@ impl ModelsView {
         let t = design::tokens(cx);
         let mut panel = v_flex()
             .id("model-details")
+            .test_support()
             .flex_1()
             .h_full()
             .min_h_0()
@@ -27,8 +26,7 @@ impl ModelsView {
             .gap(t.space.small)
             .sovra_surface(Surface::Subtle, cx)
             .child(
-                Button::new("model-details-close")
-                    .label("Back to catalog")
+                design::button("model-details-close", "Back to catalog", cx)
                     .ghost()
                     .small()
                     .on_click(cx.listener(|view, _, _, cx| {
@@ -61,29 +59,29 @@ impl ModelsView {
                 && !c.has_credential
                 && !c.environment_credential
         });
-        let action_label = if active {
-            "Current chat model"
+        let action_label = if !model.can_chat() {
+            "Catalog information only"
         } else if missing_key {
             "Connect to use model"
-        } else if model.can_chat() {
-            "Use in chat"
+        } else if active {
+            "Current chat model"
         } else {
-            "Catalog information only"
+            "Use in chat"
         };
         let edit_connection = connection.cloned();
         panel = panel.child(caption(model.author.clone(),cx))
             .child(div().sovra_text(TextRole::SectionTitle,cx).child(model.name.clone()))
             .child(caption(model.id.clone(),cx))
             .child(h_flex().flex_wrap().gap(t.space.compact)
-                .child(Button::new("model-copy-id").label("Copy ID").small().on_click(move |_,_,cx| cx.write_to_clipboard(ClipboardItem::new_string(model_id.clone()))))
-                .child(Button::new("model-detail-favorite").label(if favorite { "★ Favorited" } else { "☆ Favorite" }).small()
+                .child(design::button("model-copy-id", "Copy ID", cx).small().on_click(move |_,_,cx| cx.write_to_clipboard(ClipboardItem::new_string(model_id.clone()))))
+                .child(design::button("model-detail-favorite", if favorite { "★ Favorited" } else { "☆ Favorite" }, cx).small()
                     .on_click(cx.listener(move |view,_,_,cx| view.send(ModelCommand::SetFavorite { key:favorite_key.clone(),favorite:!favorite },cx))))
-                .child(Button::new("model-compare-add").label("Compare").small().disabled(self.compare.len() >= 3 && !self.compare.contains(key))
+                .child(design::button("model-compare-add", "Compare", cx).small().disabled(self.compare.len() >= 3 && !self.compare.contains(key))
                     .on_click(cx.listener(move |view,_,_,cx| {
                         if !view.compare.contains(&compare_key) && view.compare.len() < 3 { view.compare.push(compare_key.clone()); }
                         view.compare_open = true; cx.notify();
                     }))))
-            .child(design::primary_button("model-activate",action_label,cx).disabled(active || (!model.can_chat() && !missing_key))
+            .child(design::primary_button("model-activate",action_label,cx).disabled(!model.can_chat() || (active && !missing_key))
                 .on_click(cx.listener(move |view,_,window,cx| {
                     if missing_key { view.open_connection(edit_connection.clone(),window,cx); }
                     else { view.send(ModelCommand::Activate { key:activate_key.clone() },cx); }
@@ -181,8 +179,7 @@ impl ModelsView {
             if connection.kind == ProviderKind::OpenRouter {
                 let url = format!("https://openrouter.ai/{}", model.id);
                 panel = panel.child(
-                    Button::new("model-open-provider")
-                        .label("Open provider model page")
+                    design::button("model-open-provider", "Open provider model page", cx)
                         .ghost()
                         .on_click(move |_, _, cx| cx.open_url(&url)),
                 );
@@ -191,8 +188,7 @@ impl ModelsView {
         if model.manual {
             let key = key.clone();
             panel = panel.child(
-                Button::new("manual-model-remove")
-                    .label("Remove manual entry")
+                design::button("manual-model-remove", "Remove manual entry", cx)
                     .ghost()
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.send(ModelCommand::RemoveManualModel { key: key.clone() }, cx);
@@ -244,8 +240,7 @@ impl ModelsView {
                             .map(|(label, value)| detail_line(label, value, cx)),
                     )
                     .child(
-                        Button::new(("comparison-remove", index))
-                            .label("Remove from comparison")
+                        design::button(("comparison-remove", index), "Remove from comparison", cx)
                             .ghost()
                             .on_click(cx.listener(move |view, _, _, cx| {
                                 view.compare.retain(|k| k != &key);

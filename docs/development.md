@@ -57,6 +57,10 @@ start one watcher if absent. The repo does not install an OS login daemon.
   time; it does not promise application-level shutdown hooks on termination.
 - `cargo run --package sovra-app` uses the project's incremental dev profile. No
   shell command interpolation, dynamic Rust libraries or alternate GUI stack.
+- The xtask command launcher removes its inherited Cargo package metadata before
+  starting child tools. This prevents build-script fingerprints from changing
+  merely because a build came through xtask; user Cargo configuration, target
+  directories and logging variables remain intact.
 - Child stdout/stderr are inherited directly. There is no `tee`/`tail` process to
   duplicate log lines or become detached. tmux retains scrollback, and the existing
   daily rolling log remains available under the OS data directory.
@@ -102,6 +106,9 @@ Checked online on 2026-10-23 and against the pinned CLI source:
   renders native Rust views, so we retain the existing architecture and rebuild.
 - [tmux guide](https://github.com/tmux/tmux/wiki/Getting-Started): sessions survive
   terminal detachment and can be reattached.
+- [Cargo environment variables](https://doc.rust-lang.org/cargo/reference/environment-variables.html):
+  Cargo exports package metadata when running binaries; child Cargo processes
+  must compute their own metadata rather than inherit xtask's package identity.
 
 This repository's restart-based approach is an implementation decision based on
 the current Rust/GPUI architecture, not a claim that GPUI requires Watchexec.

@@ -4,7 +4,7 @@ use gpui_kit::component::{
     ActiveTheme as _,
     button::{Button, ButtonVariants as _},
 };
-use gpui_kit::{App, FontWeight, Styled, relative, rems};
+use gpui_kit::{App, ElementId, FontWeight, SharedString, Styled, relative, rems};
 
 use super::tokens;
 
@@ -86,7 +86,7 @@ pub trait SovraStyled: Styled + Sized {
 impl<T: Styled> SovraStyled for T {}
 
 /// Apply Sovra's geometry to a real GPUI button; variants still come from the theme.
-pub fn button(id: &'static str, label: &'static str, cx: &App) -> Button {
+pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
     let t = tokens(cx);
     Button::new(id)
         .label(label)
@@ -97,7 +97,11 @@ pub fn button(id: &'static str, label: &'static str, cx: &App) -> Button {
 }
 
 /// Brand gradient and neutral elevation, keeping GPUI's focus and input handling.
-pub fn primary_button(id: &'static str, label: &'static str, cx: &App) -> Button {
+pub fn primary_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Button {
     let t = tokens(cx);
     button(id, label, cx)
         .primary()

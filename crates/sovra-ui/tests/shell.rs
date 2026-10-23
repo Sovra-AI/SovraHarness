@@ -2,7 +2,7 @@
 
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AppContext as _, TestAppContext, px, size};
+use gpui_kit::{AppContext as _, ScrollDelta, TestAppContext, point, px, size};
 use sovra_core::{AgUiWidget, Command, Event, NavTab, RuntimeStatus, ScreenRoute};
 use sovra_runtime::Client;
 use sovra_ui::Shell;
@@ -61,6 +61,11 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
         assert!(window.find("sovra-inspector").visible());
 
         // Click "Preview my AI" in the right inspector -> transitions building state to Ready.
+        window.scroll(
+            "sovra-inspector",
+            ScrollDelta::Pixels(point(px(0.), px(-1200.))),
+            cx,
+        );
         window.click("preview-my-ai-btn", cx);
         assert!(!shell.read(cx).workspace().ai_building);
 
@@ -121,4 +126,67 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
         assert!(last.text.contains("Morning brief completed."));
         assert_eq!(last.widgets.len(), 1);
     });
+}
+
+#[gpui_kit::test]
+fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut TestAppContext) {
+    let (client, commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+
+    let mut shell_entity = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell_entity = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell_entity.unwrap();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-my-ais", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::MyAis);
+        assert!(window.find("sovra-my-ais-view").visible());
+        assert_eq!(shell.read(cx).workspace().specialists.len(), 22);
+
+        // Switch decision backend from Laya to OpenJev.
+        window.click(("decision-backend-btn", 1usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().routing.backend,
+            sovra_core::DecisionBackend::OpenJev
+        );
+
+        // Simulate a prompt through the routing tree.
+        window.click("simulate-route-btn", cx);
+        window.render_frame(cx);
+        let eval = shell
+            .read(cx)
+            .workspace()
+            .last_route_evaluation
+            .as_ref()
+            .unwrap();
+        assert_eq!(eval.specialist_id.as_deref(), Some("CodingAgent"));
+
+        // Switch selection mode to Per-Agent Models.
+        window.click(("routing-mode-btn", 1usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().routing.mode,
+            sovra_core::SelectionMode::PerAgentModel
+        );
+    })
+    .unwrap();
+
+    assert!(matches!(
+        commands.recv_blocking().unwrap(),
+        Command::UpdateRouting {
+            backend: sovra_core::DecisionBackend::OpenJev,
+            ..
+        }
+    ));
+    assert!(matches!(
+        commands.recv_blocking().unwrap(),
+        Command::SimulateRoute { .. }
+    ));
 }

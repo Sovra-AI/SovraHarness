@@ -163,6 +163,32 @@ fn cargo(args: &[&str]) -> anyhow::Result<()> {
 }
 
 fn run(command: &mut Command) -> anyhow::Result<()> {
+    // `cargo run -p xtask` exports xtask's package metadata. Passing that into
+    // another Cargo invocation dirties build-script fingerprints (notably ring)
+    // whenever a developer switches between xtask and ordinary Cargo commands.
+    // Keep user Cargo configuration, target directories and logging intact.
+    let package_environment: Vec<_> = std::env::vars_os()
+        .map(|(name, _)| name)
+        .chain(command.get_envs().map(|(name, _)| name.to_os_string()))
+        .filter(|name| {
+            name.to_str().is_some_and(|name| {
+                name.starts_with("CARGO_PKG_")
+                    || matches!(
+                        name,
+                        "CARGO_MANIFEST_DIR"
+                            | "CARGO_MANIFEST_PATH"
+                            | "CARGO_MANIFEST_LINKS"
+                            | "CARGO_CRATE_NAME"
+                            | "CARGO_BIN_NAME"
+                            | "CARGO_PRIMARY_PACKAGE"
+                            | "OUT_DIR"
+                    )
+            })
+        })
+        .collect();
+    for name in package_environment {
+        command.env_remove(name);
+    }
     let status = command
         .status()
         .with_context(|| format!("failed to spawn {command:?}"))?;
@@ -198,19 +224,30 @@ mod tests {
             .env("SOVRA_XTASK_ENV_PROBE", "1")
             .env("CARGO_MANIFEST_DIR", "parent-xtask-directory")
             .env("CARGO_PKG_NAME", "xtask")
+            .env("OUT_DIR", "parent-build-output")
             .env("CARGO_BUILD_TARGET", "example-target")
+            .env("CARGO_TARGET_DIR", "example-target-directory")
             .env("CARGO_NET_OFFLINE", "true")
             .env("RUST_LOG", "sovra=debug");
         run(&mut command).unwrap();
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "this test exists to probe the child process environment"
+    )]
     fn inspect_child_environment() {
         if std::env::var_os("SOVRA_XTASK_ENV_PROBE").is_none() {
             return;
         }
         assert!(std::env::var_os("CARGO_MANIFEST_DIR").is_none());
         assert!(std::env::var_os("CARGO_PKG_NAME").is_none());
+        assert!(std::env::var_os("OUT_DIR").is_none());
+        assert_eq!(
+            std::env::var("CARGO_TARGET_DIR").unwrap(),
+            "example-target-directory"
+        );
         assert_eq!(
             std::env::var("CARGO_BUILD_TARGET").unwrap(),
             "example-target"

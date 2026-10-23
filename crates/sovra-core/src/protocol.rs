@@ -4,11 +4,30 @@
 //! `match` that has to handle it.
 
 use crate::agui::AgUiWidget;
+use crate::models::ModelKey;
+use crate::providers::ModelTier;
+use crate::routing_tree::{DecisionBackend, RouteEvaluation, SelectionMode};
 
 /// A request from the UI to the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Models(crate::models::ModelCommand),
+    /// Update the active model routing mode or System-1 decision backend (`Laya`, `OpenJev`, or `EmbeddedHeuristic`).
+    UpdateRouting {
+        mode: SelectionMode,
+        backend: DecisionBackend,
+        global_model: Option<ModelKey>,
+    },
+    /// Assign a specific model override or preferred tier to one of the 22 `SovraSRX` specialist agents.
+    SetSpecialistModel {
+        specialist_id: String,
+        model_override: Option<ModelKey>,
+        preferred_tier: ModelTier,
+    },
+    /// Simulate a prompt through the active routing tree (calling Laya/OpenJev or the embedded engine) without running the target LLM.
+    SimulateRoute {
+        prompt: String,
+    },
     /// Liveness probe; the runtime answers with [`Event::Pong`].
     Ping,
     /// Send a user prompt to the active ADK session.
@@ -34,6 +53,10 @@ pub enum Event {
     },
     /// Reply to [`Command::Ping`].
     Pong,
+    /// Emitted when the routing tree or mode evaluates a prompt (either via simulation or before a live turn).
+    RouteEvaluated {
+        evaluation: Box<RouteEvaluation>,
+    },
     /// A streamed text chunk emitted by the ADK agent for a session.
     AgentChunk {
         session_id: String,

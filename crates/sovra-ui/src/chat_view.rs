@@ -7,7 +7,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, div, px,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
 };
 use sovra_core::{ChatMessage, MessageRole, WorkspaceState};
 
@@ -66,6 +66,7 @@ fn render_hero_banner(user_prompt_count: usize, cx: &Context<Shell>) -> impl Int
 
     h_flex()
         .id("chat-hero-banner")
+        .test_support()
         .w_full()
         .justify_between()
         .items_center()

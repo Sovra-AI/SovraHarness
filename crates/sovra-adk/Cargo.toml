@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 async-channel = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
+reqwest = { workspace = true }
 sovra-core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

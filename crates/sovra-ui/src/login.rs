@@ -7,7 +7,8 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _, div, px,
+    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
+    TestSupportExt as _, div, px,
 };
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
@@ -22,6 +23,7 @@ pub(crate) fn render_login_screen(
 
     v_flex()
         .id("sovra-login-screen")
+        .test_support()
         .flex_1()
         .min_h_0()
         .w_full()

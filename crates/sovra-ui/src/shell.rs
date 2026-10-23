@@ -5,15 +5,20 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Pixels, Render, Role, StatefulInteractiveElement as _, Styled as _, Task, Window, div, img,
+    Pixels, Render, Role, StatefulInteractiveElement as _, Styled as _, Task, TestSupportExt as _,
+    Window, div, img,
 };
-use sovra_core::{Command, NavTab, RuntimeStatus, ScreenRoute, WorkspaceState};
+use sovra_core::{
+    Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScreenRoute, SelectionMode,
+    WorkspaceState,
+};
 
 use crate::RuntimeClient;
 use crate::chat_view::render_chat_column;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::inspector::render_inspector;
 use crate::login::render_login_screen;
+use crate::my_ais_view::render_my_ais_view;
 use crate::schedules_view::render_schedules_view;
 use crate::sidebar::render_sidebar;
 
@@ -23,6 +28,7 @@ pub struct Shell {
     search_input: Entity<InputState>,
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
+    sim_route_input: Entity<InputState>,
     models: Entity<crate::ModelsView>,
     _events: Task<()>,
 }
@@ -49,6 +55,10 @@ impl Shell {
             InputState::new(window, cx)
                 .placeholder("Enter your password")
                 .masked(true)
+        });
+        let sim_route_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Type any prompt to test Laya / OpenJev routing tree...")
         });
 
         let events = cx.global::<RuntimeClient>().0.events();
@@ -77,6 +87,7 @@ impl Shell {
             search_input,
             login_email_input,
             login_password_input,
+            sim_route_input,
             models,
             _events: task,
         }
@@ -103,6 +114,61 @@ impl Shell {
 
     pub fn models(&self) -> Entity<crate::ModelsView> {
         self.models.clone()
+    }
+
+    pub fn set_routing_mode(&mut self, mode: SelectionMode, cx: &mut Context<Self>) {
+        self.state.set_routing_mode(mode);
+        self.sync_routing_to_runtime(cx);
+        cx.notify();
+    }
+
+    pub fn set_decision_backend(&mut self, backend: DecisionBackend, cx: &mut Context<Self>) {
+        self.state.set_decision_backend(backend);
+        self.sync_routing_to_runtime(cx);
+        cx.notify();
+    }
+
+    pub fn cycle_specialist_tier(
+        &mut self,
+        specialist_id: &str,
+        next_tier: ModelTier,
+        cx: &mut Context<Self>,
+    ) {
+        let model_override = self.state.routing.global_model.clone();
+        self.state
+            .set_specialist_model(specialist_id, model_override.clone(), next_tier);
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::SetSpecialistModel {
+                specialist_id: specialist_id.to_owned(),
+                model_override,
+                preferred_tier: next_tier,
+            });
+        cx.notify();
+    }
+
+    pub fn simulate_route_from_input(&mut self, cx: &mut Context<Self>) {
+        let raw = self.sim_route_input.read(cx).value().to_string();
+        let prompt = if raw.trim().is_empty() {
+            "Debug and refactor this Rust trait implementation".to_owned()
+        } else {
+            raw
+        };
+        let _ = self.state.simulate_route_offline(&prompt);
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::SimulateRoute { prompt });
+        cx.notify();
+    }
+
+    fn sync_routing_to_runtime(&self, cx: &mut Context<Self>) {
+        let _ = cx.global::<RuntimeClient>().0.send(Command::UpdateRouting {
+            mode: self.state.routing.mode,
+            backend: self.state.routing.backend,
+            global_model: self.state.routing.global_model.clone(),
+        });
     }
 
     pub fn submit_login(&mut self, cx: &mut Context<Self>) {
@@ -161,7 +227,7 @@ impl Shell {
 
     pub fn handle_config_card_click(&mut self, key: &str, cx: &mut Context<Self>) {
         match key {
-            "model" => self.select_tab(NavTab::Models, cx),
+            "model" => self.select_tab(NavTab::MyAis, cx),
             "deployment" => self.state.activate_preview_ai(),
             "knowledge" => self.state.select_tab(NavTab::Knowledge),
             _ => {}
@@ -198,7 +264,6 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        // Copied out before render helpers take `&mut cx` (holding the borrow is E0502).
         let border = theme.border;
         let muted_foreground = theme.muted_foreground;
         let t = design::tokens(cx);
@@ -234,8 +299,9 @@ impl Render for Shell {
                     .text_color(muted_foreground)
                     .child(format!("Runtime: {}", self.state.runtime_status.label()))
                     .child(format!(
-                        "Workspace: {} · AG-UI (adk-ui v2.2)",
-                        self.state.user.workspace_label
+                        "Routing: {} · {} · AG-UI (adk-ui v2.2)",
+                        self.state.routing.mode.label(),
+                        self.state.routing.backend.default_model_id()
                     )),
             )
     }
@@ -256,21 +322,24 @@ impl Shell {
                         .h_full()
                         .child(self.models.clone())
                         .into_any_element(),
+                    NavTab::MyAis => render_my_ais_view(&self.state, &self.sim_route_input, cx)
+                        .into_any_element(),
                     NavTab::Schedules => render_schedules_view(&self.state, cx).into_any_element(),
-                    NavTab::Chat | NavTab::MyAis | NavTab::Knowledge | NavTab::Settings => {
+                    NavTab::Chat | NavTab::Knowledge | NavTab::Settings => {
                         render_chat_column(&self.state, &self.composer_input, cx).into_any_element()
                     }
                 };
 
                 let mut body = h_flex()
                     .id("sovra-main-workspace")
+                    .test_support()
                     .flex_1()
                     .min_h_0()
                     .w_full()
                     .overflow_hidden()
                     .child(render_sidebar(&self.state, cx))
                     .child(center);
-                if self.state.active_tab != NavTab::Models {
+                if !matches!(self.state.active_tab, NavTab::Models | NavTab::MyAis) {
                     body = body.child(render_inspector(&self.state, &self.search_input, cx));
                 }
                 body.into_any_element()
@@ -310,7 +379,6 @@ fn render_title_bar(
 }
 
 pub(crate) fn logo(id: &'static str, size: Pixels) -> impl IntoElement {
-    // `svg()` is a monochrome mask. `img()` preserves the original radial gradient.
     div()
         .id(id)
         .role(Role::Image)

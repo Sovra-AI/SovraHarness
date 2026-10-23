@@ -207,8 +207,10 @@ dependencies = [
  "chrono",
  "futures",
  "http",
+ "ollama-rs",
  "reqwest 0.12.28",
  "reqwest 0.13.5",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "tokio",
@@ -6794,6 +6796,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ollama-rs"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fed8739c37da731774bd5b39209bbd9b770f0c1d9a000c4b859c824badac3e8e"
+dependencies = [
+ "async-stream",
+ "log",
+ "reqwest 0.12.28",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-stream",
+ "url",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9304,6 +9325,7 @@ dependencies = [
  "async-trait",
  "futures",
  "http",
+ "reqwest 0.12.28",
  "serde_json",
  "sovra-core",
  "thiserror 2.0.21",
@@ -10676,6 +10698,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

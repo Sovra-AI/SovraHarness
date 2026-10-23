@@ -4,6 +4,8 @@
 //! `adk-tool`, and `adk-ui` (native AG-UI / A2UI surfaces) behind a pure `sovra-core`
 //! boundary so upstream crates never depend on ADK types directly.
 
+pub mod decision_client;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -36,6 +38,8 @@ pub enum Error {
     Session(#[source] adk_core::AdkError),
     #[error("ADK execution failure: {0}")]
     Execution(#[source] adk_core::AdkError),
+    #[error("Laya/OpenJev decision router unavailable: {0}")]
+    DecisionRouter(String),
 }
 
 /// High-level ADK-Rust harness managing sessions, AG-UI tools, and agent execution.

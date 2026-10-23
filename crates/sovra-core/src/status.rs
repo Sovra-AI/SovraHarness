@@ -22,6 +22,7 @@ impl RuntimeStatus {
             }
             Event::Models(_)
             | Event::Pong
+            | Event::RouteEvaluated { .. }
             | Event::AgentChunk { .. }
             | Event::AgUiSurface { .. }
             | Event::AgentCompleted { .. }

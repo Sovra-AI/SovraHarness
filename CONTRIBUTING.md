@@ -47,12 +47,8 @@ Read before writing code:
 ## Branches, commits, and review
 
 - Branch from `main`; keep branches short-lived and focused.
-- Prefer small, reviewable commits. Use conventional-style messages with a
-  scope and clear intent (`feat(ui): …`, `fix(runtime): …`,
-  `docs: …`). No attribution or co-author trailers.
-- Update [CHANGELOG.md](CHANGELOG.md) under **Unreleased** in the same
-  change when the behavior of the app, the build, or the release process
-  changes.
+- Prefer small, reviewable commits. Prefix every commit message with a gitmoji and conventional scope (`✨ feat(ui): …`, `🐛 fix(runtime): …`, `📝 docs: …`). No attribution or co-author trailers.
+- **Mandatory Changelog & README rule:** Every commit must update [CHANGELOG.md](CHANGELOG.md) under **Unreleased** before pushing to `main`, and update [README.md](README.md) whenever user-visible features, tabs, or commands change.
 - Open a PR against `main`; CI must be green before merge.
 
 ## Releasing

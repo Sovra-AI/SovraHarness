@@ -25,7 +25,7 @@ sovra-ui = { path = "crates/sovra-ui" }
 # External crates (versions verified on crates.io 2026-10-23)
 adk-agent = { version = "2.3.0", default-features = false }
 adk-core = "2.3.0"
-adk-model = { version = "2.3.0", default-features = false, features = ["gemini", "openai", "anthropic", "openrouter"] }
+adk-model = { version = "2.3.0", default-features = false, features = ["gemini", "openai", "anthropic", "openrouter", "ollama"] }
 adk-runner = { version = "2.3.0", default-features = false }
 adk-session = { version = "2.3.0", default-features = false }
 adk-tool = { version = "2.3.0", default-features = false }
