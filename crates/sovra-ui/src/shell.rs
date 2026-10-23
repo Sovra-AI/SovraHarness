@@ -4,9 +4,9 @@ use gpui_kit::component::{
     ActiveTheme as _, Theme, ThemeMode, TitleBar, h_flex, input::InputState, v_flex,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Pixels, Render, Role, StatefulInteractiveElement as _, Styled as _, Task, TestSupportExt as _,
-    Window, div, img,
+    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, Render, Role, StatefulInteractiveElement as _, Styled as _, Task,
+    TestSupportExt as _, Window, div, img,
 };
 use sovra_core::{
     Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScreenRoute, SelectionMode,
@@ -24,6 +24,7 @@ use crate::sidebar::render_sidebar;
 
 pub struct Shell {
     state: WorkspaceState,
+    focus_handle: FocusHandle,
     composer_input: Entity<InputState>,
     search_input: Entity<InputState>,
     login_email_input: Entity<InputState>,
@@ -45,6 +46,10 @@ impl std::fmt::Debug for Shell {
 
 impl Shell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Root's native Tab bindings need an initial focus path before any input
+        // has been clicked. The shell itself stays outside the tab order.
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window, cx);
         let composer_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Message your SOVRA..."));
         let search_input =
@@ -83,6 +88,7 @@ impl Shell {
         });
         Self {
             state: WorkspaceState::default(),
+            focus_handle,
             composer_input,
             search_input,
             login_email_input,
@@ -280,6 +286,8 @@ impl Render for Shell {
 
         v_flex()
             .id("sovra-shell")
+            .track_focus(&self.focus_handle)
+            .tab_stop(false)
             .size_full()
             .sovra_surface(Surface::Canvas, cx)
             .sovra_text(TextRole::Body, cx)
@@ -354,28 +362,31 @@ fn render_title_bar(
     cx: &Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    TitleBar::new().child(
-        h_flex()
-            .w_full()
-            .items_center()
-            .justify_between()
-            .pr(t.space.small)
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap(t.space.compact)
-                    .child(logo("title-logo", t.layout.logo_small))
-                    .child(
-                        div()
-                            .sovra_text(TextRole::Caption, cx)
-                            .child(crate::PRODUCT_NAME),
-                    ),
-            )
-            .child(
-                design::primary_button("toggle-appearance", appearance_label, cx)
-                    .on_click(move |_, _, cx| Theme::change(next_mode, None, cx)),
-            ),
-    )
+    // The shared 40px controls must fit inside the native title bar's content area.
+    TitleBar::new()
+        .h(t.layout.control_height + t.space.compact)
+        .child(
+            h_flex()
+                .w_full()
+                .items_center()
+                .justify_between()
+                .pr(t.space.small)
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap(t.space.compact)
+                        .child(logo("title-logo", t.layout.logo_small))
+                        .child(
+                            div()
+                                .sovra_text(TextRole::Caption, cx)
+                                .child(crate::PRODUCT_NAME),
+                        ),
+                )
+                .child(
+                    design::primary_button("toggle-appearance", appearance_label, cx)
+                        .on_click(move |_, _, cx| Theme::change(next_mode, None, cx)),
+                ),
+        )
 }
 
 pub(crate) fn logo(id: &'static str, size: Pixels) -> impl IntoElement {

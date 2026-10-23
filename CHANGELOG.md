@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- Enable keyboard navigation immediately when a window opens, before an input has been clicked.
+- Size the title bar to fit the appearance control without clipping and verify keyboard theme switching.
+- Align model names with their metadata and preserve usable Models controls at the minimum window size.
+
 ### Added
 
 - **Main Chat, Login & Personal AI Builder (`sovra-ui`, `sovra-core`)**:

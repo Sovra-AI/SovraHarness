@@ -670,6 +670,8 @@ impl ModelsView {
                     .gap(t.space.compact)
                     .child(
                         design::button(("model-row", index), name, cx)
+                            .child(div().flex_1())
+                            .px(t.space.compact)
                             .accessibility_label(format!("View details for {}", model.id))
                             .ghost()
                             .flex_1()
@@ -811,7 +813,11 @@ impl Render for ModelsView {
             .size_full()
             .min_w_0()
             .min_h_0()
-            .p(t.space.medium)
+            .p(if narrow {
+                t.space.small
+            } else {
+                t.space.medium
+            })
             .gap(t.space.small)
             .child(self.header(narrow, cx));
         if let Some(error) = &self.state.error {

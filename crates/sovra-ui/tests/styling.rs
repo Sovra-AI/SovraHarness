@@ -132,8 +132,14 @@ fn appearance_control_works_at_minimum_and_default_window_sizes(cx: &mut TestApp
                 window.find("toggle-appearance").label(),
                 Some("Use dark appearance")
             );
-            // GPUI deliberately avoids pointer focus; keyboard traversal must work.
-            window.press("tab", cx);
+            // Sidebar buttons participate in native traversal too; verify reachability
+            // without coupling the appearance control to a particular tab index.
+            for _ in 0..20 {
+                window.press("tab", cx);
+                if window.find("toggle-appearance").focused() == Some(true) {
+                    break;
+                }
+            }
             assert_eq!(window.find("toggle-appearance").focused(), Some(true));
             window.press("space", cx);
             assert!(cx.theme().is_dark());
