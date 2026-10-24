@@ -56,6 +56,101 @@ impl NavTab {
     }
 }
 
+/// Interactive 5-step guided system tutorial walking new users through Sovra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TourStep {
+    /// Step 1 of 5 (`NavTab::Chat`): Sending your first message and using starter chips.
+    WelcomeChat,
+    /// Step 2 of 5 (`NavTab::MyAis`): How Sovra automatically routes between quick and deep models.
+    AutomaticRouting,
+    /// Step 3 of 5 (`NavTab::Knowledge`): How bi-temporal memory remembers facts without losing history.
+    KnowledgeMemory,
+    /// Step 4 of 5 (`NavTab::Schedules`): Putting recurring prompts and daily briefings on autopilot.
+    AutomatedSchedules,
+    /// Step 5 of 5 (`NavTab::Settings`): Personalizing Always-On Context and response style.
+    PersonalizeSettings,
+}
+
+impl TourStep {
+    pub const ALL: [Self; 5] = [
+        Self::WelcomeChat,
+        Self::AutomaticRouting,
+        Self::KnowledgeMemory,
+        Self::AutomatedSchedules,
+        Self::PersonalizeSettings,
+    ];
+
+    pub fn step_number(self) -> usize {
+        match self {
+            Self::WelcomeChat => 1,
+            Self::AutomaticRouting => 2,
+            Self::KnowledgeMemory => 3,
+            Self::AutomatedSchedules => 4,
+            Self::PersonalizeSettings => 5,
+        }
+    }
+
+    pub fn target_tab(self) -> NavTab {
+        match self {
+            Self::WelcomeChat => NavTab::Chat,
+            Self::AutomaticRouting => NavTab::MyAis,
+            Self::KnowledgeMemory => NavTab::Knowledge,
+            Self::AutomatedSchedules => NavTab::Schedules,
+            Self::PersonalizeSettings => NavTab::Settings,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::WelcomeChat => "1. Chat Naturally in Your Own Words",
+            Self::AutomaticRouting => "2. Explore AI choices",
+            Self::KnowledgeMemory => "3. How memory works",
+            Self::AutomatedSchedules => "4. Save a task to run again",
+            Self::PersonalizeSettings => "5. Your Personal Sticky Note & Tone (Settings)",
+        }
+    }
+
+    pub fn explanation(self) -> &'static str {
+        match self {
+            Self::WelcomeChat => {
+                "Type a question at the bottom and press Enter. A starter suggestion fills the box for you to review. Answers appear as they arrive; some models also share reasoning."
+            }
+            Self::AutomaticRouting => {
+                "Try a simulation of how Sovra could choose an AI for different tasks. Chat currently uses the AI you selected in Models."
+            }
+            Self::KnowledgeMemory => {
+                "Follow a sample story showing a saved event, a current belief, and an older belief kept as history. This page explains memory; it does not show facts extracted from your chats."
+            }
+            Self::AutomatedSchedules => {
+                "Save a summary or checklist here, then click “Run now” to send it into Chat. Automatic background runs are not available yet."
+            }
+            Self::PersonalizeSettings => {
+                "Write your “Always-On Context” (like a sticky note on Sovra's desk so you never repeat yourself) and pick how Sovra explains things (such as Simple & Friendly or Step-by-Step)."
+            }
+        }
+    }
+
+    pub fn next(self) -> Option<Self> {
+        match self {
+            Self::WelcomeChat => Some(Self::AutomaticRouting),
+            Self::AutomaticRouting => Some(Self::KnowledgeMemory),
+            Self::KnowledgeMemory => Some(Self::AutomatedSchedules),
+            Self::AutomatedSchedules => Some(Self::PersonalizeSettings),
+            Self::PersonalizeSettings => None,
+        }
+    }
+
+    pub fn previous(self) -> Option<Self> {
+        match self {
+            Self::WelcomeChat => None,
+            Self::AutomaticRouting => Some(Self::WelcomeChat),
+            Self::KnowledgeMemory => Some(Self::AutomaticRouting),
+            Self::AutomatedSchedules => Some(Self::KnowledgeMemory),
+            Self::PersonalizeSettings => Some(Self::AutomatedSchedules),
+        }
+    }
+}
+
 /// Status badge state for each of the 6 cards in the right "My Personal AI" inspector.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigCardStatus {
@@ -112,6 +207,10 @@ impl Default for UserProfile {
 }
 
 /// Pure, deterministic state of the entire Sovra desktop UI.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent workspace flags; one enum would mix unrelated states"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceState {
     pub runtime_status: RuntimeStatus,
@@ -136,6 +235,23 @@ pub struct WorkspaceState {
     pub routing: RoutingConfig,
     pub last_route_evaluation: Option<RouteEvaluation>,
     pub search_query: String,
+    /// Whether model connections/preferences have been loaded from the runtime.
+    pub models_loaded: bool,
+    /// Whether an active chat LLM is selected and has required credentials.
+    pub has_active_llm: bool,
+    /// Current deterministic setup progression stage.
+    pub setup_stage: crate::models::SetupStage,
+    /// Plain-language hint explaining what is needed to finish LLM setup when `!has_active_llm`.
+    pub llm_setup_hint: Option<String>,
+    /// Active step of the interactive 5-step system tutorial, when running.
+    pub tour_step: Option<TourStep>,
+    /// Whether the user has completed or dismissed the guided onboarding tutorial.
+    pub onboarding_completed: bool,
+    /// Session IDs for which the user explicitly renamed the title (prevents auto-title overwrite).
+    user_renamed_threads: std::collections::BTreeSet<String>,
+    /// Session IDs that have already requested or received an LLM-generated title.
+    titled_threads: std::collections::BTreeSet<String>,
+    model_connections: Vec<crate::models::ModelConnection>,
     next_msg_seq: u64,
     next_thread_seq: u64,
 }
@@ -171,6 +287,15 @@ impl Default for WorkspaceState {
             routing,
             last_route_evaluation: None,
             search_query: String::new(),
+            models_loaded: false,
+            has_active_llm: false,
+            setup_stage: crate::models::SetupStage::Loading,
+            llm_setup_hint: None,
+            tour_step: None,
+            onboarding_completed: false,
+            user_renamed_threads: std::collections::BTreeSet::new(),
+            titled_threads: std::collections::BTreeSet::new(),
+            model_connections: Vec::new(),
             next_msg_seq: 0,
             next_thread_seq: 1,
         }
@@ -241,6 +366,45 @@ impl WorkspaceState {
 
     pub fn select_tab(&mut self, tab: NavTab) {
         self.active_tab = tab;
+    }
+
+    /// Starts the interactive 5-step system tour at Step 1 (`TourStep::WelcomeChat`)
+    /// and switches the workspace to its target tab.
+    pub fn start_tour(&mut self) -> TourStep {
+        let step = TourStep::WelcomeChat;
+        self.tour_step = Some(step);
+        self.active_tab = step.target_tab();
+        step
+    }
+
+    /// Advances to the next step in the interactive system tour, or completes the tour
+    /// if currently on the final step (`TourStep::PersonalizeSettings`).
+    pub fn next_tour_step(&mut self) -> Option<TourStep> {
+        let current = self.tour_step?;
+        if let Some(next) = current.next() {
+            self.tour_step = Some(next);
+            self.active_tab = next.target_tab();
+            Some(next)
+        } else {
+            self.tour_step = None;
+            self.onboarding_completed = true;
+            self.active_tab = NavTab::Chat;
+            None
+        }
+    }
+
+    /// Moves back one step in the interactive system tour.
+    pub fn prev_tour_step(&mut self) -> Option<TourStep> {
+        let prev = self.tour_step?.previous()?;
+        self.tour_step = Some(prev);
+        self.active_tab = prev.target_tab();
+        Some(prev)
+    }
+
+    /// Ends or skips the interactive system tour and marks onboarding completed.
+    pub fn end_tour(&mut self) {
+        self.tour_step = None;
+        self.onboarding_completed = true;
     }
 
     pub fn set_history_filter(&mut self, filter: ChatHistoryFilter) {
@@ -377,8 +541,66 @@ impl WorkspaceState {
             NEW_CHAT_TITLE.clone_into(&mut thread.title);
         } else {
             trimmed.clone_into(&mut thread.title);
+            self.user_renamed_threads.insert(session_id.to_owned());
         }
         Some(thread.clone())
+    }
+
+    /// Applies an AI-generated title to `session_id` unless the user manually renamed it.
+    pub fn apply_generated_title(
+        &mut self,
+        session_id: &str,
+        raw_title: &str,
+    ) -> Option<ChatThread> {
+        if self.user_renamed_threads.contains(session_id) {
+            return None;
+        }
+        let cleaned = crate::chat_history::sanitize_generated_title(raw_title);
+        if cleaned.is_empty() {
+            return None;
+        }
+        self.titled_threads.insert(session_id.to_owned());
+        let thread = self
+            .threads
+            .iter_mut()
+            .find(|t| t.id == session_id && t.is_active())?;
+        thread.title = cleaned;
+        Some(thread.clone())
+    }
+
+    /// If `session_id` has completed its first exchange and has not yet been auto-titled
+    /// by the model (or manually renamed), returns `(session_id, first_user_prompt, first_assistant_reply)`
+    /// and marks it as requested so it only triggers once per conversation.
+    pub fn take_pending_title_request(
+        &mut self,
+        session_id: &str,
+    ) -> Option<(String, String, String)> {
+        if self.user_renamed_threads.contains(session_id)
+            || self.titled_threads.contains(session_id)
+        {
+            return None;
+        }
+        let thread = self
+            .threads
+            .iter()
+            .find(|t| t.id == session_id && t.is_active())?;
+        if thread.kind != crate::chat_history::ConversationKind::Chat {
+            return None;
+        }
+        let first_user = thread
+            .messages
+            .iter()
+            .find(|m| m.role == crate::agui::MessageRole::User && !m.text.trim().is_empty())?;
+        let first_assistant = thread
+            .messages
+            .iter()
+            .find(|m| m.role == crate::agui::MessageRole::Assistant && !m.text.trim().is_empty())?;
+        self.titled_threads.insert(session_id.to_owned());
+        Some((
+            session_id.to_owned(),
+            first_user.text.clone(),
+            first_assistant.text.clone(),
+        ))
     }
 
     /// Soft-deletes `session_id`. If it was the active session, switches to the most recent remaining thread or creates a fresh draft.
@@ -508,6 +730,25 @@ impl WorkspaceState {
         eval
     }
 
+    fn refresh_llm_readiness(&mut self) {
+        if !self.models_loaded {
+            return;
+        }
+        let temp = crate::models::ModelsState {
+            connections: self.model_connections.clone(),
+            preferences: crate::models::ModelPreferences {
+                active: self.routing.global_model.clone(),
+                onboarding_completed: self.onboarding_completed,
+                ..crate::models::ModelPreferences::default()
+            },
+            loaded: true,
+            ..crate::models::ModelsState::default()
+        };
+        self.has_active_llm = temp.has_active_llm();
+        self.setup_stage = temp.setup_stage();
+        self.llm_setup_hint = temp.setup_status_hint();
+    }
+
     fn sync_model_card_subtitle(&mut self) {
         let subtitle = match self.routing.mode {
             SelectionMode::SingleGlobalModel => self.routing.global_model.as_ref().map_or_else(
@@ -529,6 +770,17 @@ impl WorkspaceState {
     pub fn submit_prompt(&mut self, raw_prompt: &str) -> Option<String> {
         let prompt = raw_prompt.trim();
         if prompt.is_empty() {
+            return None;
+        }
+        if self.models_loaded && !self.has_active_llm {
+            self.append_user_turn(prompt);
+            self.is_generating = false;
+            let widget = crate::agui::llm_setup_widget_for_stage(
+                &self.setup_stage,
+                self.llm_setup_hint.as_deref(),
+            );
+            self.attach_agui_widget(widget);
+            self.sync_active_thread();
             return None;
         }
         if self.is_generating {
@@ -637,17 +889,55 @@ impl WorkspaceState {
                 }
                 None
             }
-            Event::Models(
-                crate::models::ModelEvent::Loaded { preferences, .. }
-                | crate::models::ModelEvent::PreferencesChanged(preferences),
-            ) => {
-                self.routing.global_model.clone_from(&preferences.active);
-                if let Some(active) = &preferences.active {
-                    if let Some(card) = self.config_cards.iter_mut().find(|c| c.key == "model") {
-                        card.subtitle.clone_from(&active.model_id);
+            Event::Models(model_event) => {
+                match model_event {
+                    crate::models::ModelEvent::Loaded {
+                        connections,
+                        preferences,
+                    } => {
+                        self.models_loaded = true;
+                        self.onboarding_completed = preferences.onboarding_completed;
+                        self.model_connections.clone_from(connections);
+                        self.routing.global_model.clone_from(&preferences.active);
+                        self.refresh_llm_readiness();
+                        if let Some(active) = &preferences.active {
+                            if let Some(card) =
+                                self.config_cards.iter_mut().find(|c| c.key == "model")
+                            {
+                                card.subtitle.clone_from(&active.model_id);
+                            }
+                        } else {
+                            self.sync_model_card_subtitle();
+                        }
                     }
-                } else {
-                    self.sync_model_card_subtitle();
+                    crate::models::ModelEvent::PreferencesChanged(preferences) => {
+                        self.onboarding_completed = preferences.onboarding_completed;
+                        self.routing.global_model.clone_from(&preferences.active);
+                        self.refresh_llm_readiness();
+                        if let Some(active) = &preferences.active {
+                            if let Some(card) =
+                                self.config_cards.iter_mut().find(|c| c.key == "model")
+                            {
+                                card.subtitle.clone_from(&active.model_id);
+                            }
+                        } else {
+                            self.sync_model_card_subtitle();
+                        }
+                    }
+                    crate::models::ModelEvent::ConnectionDeleted { id } => {
+                        self.model_connections.retain(|c| c.id != *id);
+                        if self
+                            .routing
+                            .global_model
+                            .as_ref()
+                            .is_some_and(|k| k.connection_id == *id)
+                        {
+                            self.routing.global_model = None;
+                        }
+                        self.refresh_llm_readiness();
+                        self.sync_model_card_subtitle();
+                    }
+                    _ => {}
                 }
                 None
             }
@@ -655,7 +945,11 @@ impl WorkspaceState {
                 self.last_route_evaluation = Some((**evaluation).clone());
                 None
             }
-            Event::Models(_) | Event::Ready { .. } | Event::Pong | Event::Stopped => None,
+            Event::ChatTitleGenerated { session_id, title } => {
+                let _ = self.apply_generated_title(session_id, title);
+                None
+            }
+            Event::Ready { .. } | Event::Pong | Event::Stopped => None,
             Event::AgentResponseStarted { session_id, .. }
             | Event::AgentChunk { session_id, .. }
             | Event::AgentThinkingChunk { session_id, .. }
@@ -1088,5 +1382,79 @@ mod tests {
 
         assert!(state.delete_thread(&first_id));
         assert_eq!(state.session_id, second.id);
+    }
+
+    #[test]
+    fn tour_lifecycle_navigates_across_all_five_tabs_and_completes() {
+        let mut state = WorkspaceState::default();
+        assert_eq!(state.tour_step, None);
+        assert!(!state.onboarding_completed);
+
+        assert_eq!(state.start_tour(), TourStep::WelcomeChat);
+        assert_eq!(state.active_tab, NavTab::Chat);
+
+        assert_eq!(state.next_tour_step(), Some(TourStep::AutomaticRouting));
+        assert_eq!(state.active_tab, NavTab::MyAis);
+
+        assert_eq!(state.prev_tour_step(), Some(TourStep::WelcomeChat));
+        assert_eq!(state.active_tab, NavTab::Chat);
+
+        assert_eq!(state.next_tour_step(), Some(TourStep::AutomaticRouting));
+        assert_eq!(state.next_tour_step(), Some(TourStep::KnowledgeMemory));
+        assert_eq!(state.active_tab, NavTab::Knowledge);
+
+        assert_eq!(state.next_tour_step(), Some(TourStep::AutomatedSchedules));
+        assert_eq!(state.active_tab, NavTab::Schedules);
+
+        assert_eq!(state.next_tour_step(), Some(TourStep::PersonalizeSettings));
+        assert_eq!(state.active_tab, NavTab::Settings);
+
+        assert_eq!(state.next_tour_step(), None);
+        assert_eq!(state.tour_step, None);
+        assert!(state.onboarding_completed);
+        assert_eq!(state.active_tab, NavTab::Chat);
+    }
+
+    #[test]
+    fn prompt_with_connected_key_only_shows_model_selection_setup_card() {
+        let mut state = WorkspaceState::default();
+        let mut router =
+            crate::models::ModelConnection::new("router", crate::models::ProviderKind::OpenRouter);
+        router.has_credential = true;
+        router.key_preview = "sk-or-••••1234".into();
+        state.apply_event(&Event::Models(crate::models::ModelEvent::Loaded {
+            connections: vec![router],
+            preferences: crate::models::ModelPreferences::default(),
+        }));
+        assert!(state.models_loaded);
+        assert!(!state.has_active_llm);
+        assert_eq!(
+            state.setup_stage,
+            crate::models::SetupStage::NeedsModelSelection {
+                connected_service: "OpenRouter".into(),
+                key_preview: Some("sk-or-••••1234".into()),
+            }
+        );
+
+        let dispatched = state.submit_prompt("Hello Sovra!");
+        assert!(dispatched.is_none());
+        let assistant = state.messages.last().unwrap();
+        let debug_repr = format!("{:?}", assistant.widgets);
+        assert!(
+            debug_repr.contains("Step 2 of 2"),
+            "must show Step 2 model selection: {debug_repr}"
+        );
+        assert!(
+            debug_repr.contains("setup:recommended-models"),
+            "must offer recommended models action: {debug_repr}"
+        );
+        assert!(
+            !debug_repr.contains("setup:openrouter-key"),
+            "must NOT ask for OpenRouter key when key is already set: {debug_repr}"
+        );
+        assert!(
+            !debug_repr.contains("setup:ollama"),
+            "must NOT show Ollama setup when key is already set: {debug_repr}"
+        );
     }
 }

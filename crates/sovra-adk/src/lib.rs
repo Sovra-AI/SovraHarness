@@ -328,6 +328,59 @@ impl AdkHarness {
             })
             .await;
     }
+
+    /// Generates a short (3–6 word) conversation title using an isolated one-shot session
+    /// on the active model, falling back to `derive_chat_title` if the model returns empty.
+    pub async fn generate_title(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        reply: &str,
+        events: &Sender<Event>,
+    ) {
+        let title_session = format!("title-gen-{session_id}");
+        if self.ensure_session(&title_session).await.is_err() {
+            return;
+        }
+        let user_snippet: String = prompt.chars().take(240).collect();
+        let reply_snippet: String = reply.chars().take(240).collect();
+        let title_prompt = format!(
+            "Write a concise, clear 3 to 6 word title summarizing this conversation. \
+             Output ONLY the title words with no quotes, no markdown, and no trailing period.\n\n\
+             User: {user_snippet}\nAssistant: {reply_snippet}"
+        );
+        let content = Content::new("user").with_text(&title_prompt);
+        let Ok(mut stream) = self
+            .runner
+            .run_str(DEFAULT_USER_ID, &title_session, content)
+            .await
+        else {
+            return;
+        };
+        let mut deltas = EventTextDeltas::default();
+        let mut collected = String::new();
+        while let Some(Ok(adk_event)) = stream.next().await {
+            let delta_event = deltas.push(&adk_event);
+            let (_, text) = extract_output(&delta_event);
+            if let Some(chunk) = text {
+                collected.push_str(&chunk);
+            }
+        }
+        let cleaned = sovra_core::sanitize_generated_title(&collected);
+        let final_title = if cleaned.is_empty() {
+            sovra_core::derive_chat_title(prompt)
+        } else {
+            cleaned
+        };
+        if !final_title.is_empty() && final_title != sovra_core::NEW_CHAT_TITLE {
+            let _ = events
+                .send(Event::ChatTitleGenerated {
+                    session_id: session_id.to_owned(),
+                    title: final_title,
+                })
+                .await;
+        }
+    }
 }
 
 async fn forward_adk_event(

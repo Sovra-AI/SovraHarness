@@ -11,14 +11,18 @@ mod chat_view;
 mod composer;
 pub mod design;
 mod inspector;
+mod knowledge_view;
 mod login;
 mod markdown_segments;
 mod model_connection_editor;
 mod model_details;
+mod model_home;
 mod models_view;
 mod my_ais_view;
 mod native_surface;
+mod onboarding_bar;
 mod schedules_view;
+mod settings_view;
 mod shell;
 mod sidebar;
 

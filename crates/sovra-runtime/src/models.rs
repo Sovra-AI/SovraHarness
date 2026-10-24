@@ -44,6 +44,7 @@ pub(crate) enum ModelExecution {
 pub(crate) struct ModelsRuntime {
     commands: Sender<ModelCommand>,
     pub(crate) execution: Arc<RwLock<ModelExecution>>,
+    pub(crate) memory_enabled: Arc<std::sync::atomic::AtomicBool>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -53,6 +54,7 @@ impl ModelsRuntime {
         let execution = Arc::new(RwLock::new(ModelExecution::Unavailable(
             "Model settings are still loading.".into(),
         )));
+        let memory_enabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let actor = ModelActor {
             repository: config.repository,
             providers: config
@@ -71,11 +73,13 @@ impl ModelsRuntime {
             pull_progress: async_channel::bounded(16),
             agent,
             execution: execution.clone(),
+            memory_enabled: memory_enabled.clone(),
             events,
         };
         Self {
             commands,
             execution,
+            memory_enabled,
             // sovra-runtime owns the executor; this actor is the sanctioned spawn point
             // (owned JoinHandle, aborted on drop). The workspace-wide disallow steers
             // other crates here.
@@ -140,6 +144,7 @@ struct ModelActor {
     pull_progress: PullProgressChannel,
     agent: AgentConfig,
     execution: Arc<RwLock<ModelExecution>>,
+    memory_enabled: Arc<std::sync::atomic::AtomicBool>,
     events: Sender<Event>,
 }
 
@@ -184,9 +189,16 @@ impl ModelActor {
     async fn load(&mut self) -> Result<(), ModelError> {
         let repository = self.repository.clone();
         self.saved = blocking(move || repository.load()).await?;
-        for connection in &mut self.saved.connections {
-            *connection = validate_connection(connection)?;
-            connection.environment_credential = self.repository.has_environment_key(connection);
+        self.memory_enabled.store(
+            self.saved.preferences.agent_settings.memory_enabled,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        for index in 0..self.saved.connections.len() {
+            let mut connection = validate_connection(&self.saved.connections[index])?;
+            connection.environment_credential = self.repository.has_environment_key(&connection);
+            let secret = self.secret(&connection).await?;
+            connection.key_preview = secret.masked_preview();
+            self.saved.connections[index] = connection;
         }
         self.loaded = true;
         self.publish().await;
@@ -238,8 +250,12 @@ impl ModelActor {
                 )))
                 .await;
             }
-        } else {
+        } else if self.agent.has_api_key() {
             *self.execution.write().await = ModelExecution::Legacy;
+        } else {
+            *self.execution.write().await = ModelExecution::Unavailable(
+                "No AI model is active yet. Add an OpenRouter key in Settings, set up free local Ollama, or connect an OpenAI-compatible URL, then pick a model in Models.".into(),
+            );
         }
         Ok(())
     }
@@ -422,6 +438,37 @@ impl ModelActor {
                 ))
                 .await;
             }
+            ModelCommand::SetAgentSettings { settings } => {
+                let mut saved = self.saved.clone();
+                saved.preferences.agent_settings = settings;
+                self.persist(saved.clone()).await?;
+                self.saved = saved;
+                self.memory_enabled.store(
+                    self.saved.preferences.agent_settings.memory_enabled,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                if let Some(active) = self.saved.preferences.active.clone() {
+                    let _ = self.activate(&active, false).await;
+                }
+                self.emit(ModelEvent::PreferencesChanged(
+                    self.saved.preferences.clone(),
+                ))
+                .await;
+                self.emit(ModelEvent::Notice(
+                    "Saved your Personal AI instructions and behavior settings.".into(),
+                ))
+                .await;
+            }
+            ModelCommand::SetOnboardingCompleted { completed } => {
+                let mut saved = self.saved.clone();
+                saved.preferences.onboarding_completed = completed;
+                self.persist(saved.clone()).await?;
+                self.saved = saved;
+                self.emit(ModelEvent::PreferencesChanged(
+                    self.saved.preferences.clone(),
+                ))
+                .await;
+            }
             ModelCommand::Activate { key } => self.activate(&key, true).await?,
             ModelCommand::FetchDetails { key } => {
                 let connection = self.connection(&key.connection_id)?;
@@ -523,8 +570,26 @@ impl ModelActor {
                 connection.name
             )));
         }
-        let harness = AdkHarness::from_selected_model(&self.agent, &connection, &model, &secret)
-            .map_err(|_| ModelError("Could not configure this model. Check its connection URL and authentication settings.".into()))?;
+        let mut effective_agent = self.agent.clone();
+        effective_agent.instruction = self
+            .saved
+            .preferences
+            .agent_settings
+            .compose_system_instruction(&self.agent.instruction);
+        let mut effective_model = model.clone();
+        if !self.saved.preferences.agent_settings.tools_enabled {
+            effective_model
+                .supported_parameters
+                .retain(|p| p != "tools");
+        }
+        let harness =
+            AdkHarness::from_selected_model(&effective_agent, &connection, &effective_model, &secret)
+                .map_err(|_| {
+                    ModelError(
+                        "Could not configure this model. Check its connection URL and authentication settings."
+                            .into(),
+                    )
+                })?;
         if persist {
             let mut saved = self.saved.clone();
             saved.preferences.active = Some(key.clone());
@@ -608,6 +673,14 @@ impl ModelActor {
             CredentialChange::Remove => false,
         };
         connection.environment_credential = self.repository.has_environment_key(&connection);
+        let preview_secret = if !secret.0.is_empty() {
+            secret.clone()
+        } else if connection.environment_credential {
+            self.secret(&connection).await.unwrap_or_default()
+        } else {
+            ModelSecret::default()
+        };
+        connection.key_preview = preview_secret.masked_preview();
         let mut saved = self.saved.clone();
         if let Some(existing) = saved.connections.iter_mut().find(|c| c.id == connection.id) {
             *existing = connection.clone();

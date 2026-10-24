@@ -67,6 +67,8 @@ pub(crate) fn run(root: &Path) -> anyhow::Result<()> {
     ]);
     // Keep user-selected filters/backtraces. The application's debug logger
     // already writes to stderr and a rolling file; no tee/tail duplication.
+    // Dev rebuilds change the binary signature; skip the keychain so reloads never prompt.
+    command.env("SOVRA_DEV", "1");
     if std::env::var_os("RUST_BACKTRACE").is_none() {
         command.env("RUST_BACKTRACE", "1");
     }

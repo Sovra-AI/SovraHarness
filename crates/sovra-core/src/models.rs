@@ -56,6 +56,10 @@ pub struct ModelConnection {
     pub has_credential: bool,
     #[serde(skip)]
     pub environment_credential: bool,
+    /// Masked preview of the active credential (e.g. `sk-or-••••1234`), populated in
+    /// memory by the runtime/provider and never written to disk (`#[serde(skip)]`).
+    #[serde(skip)]
+    pub key_preview: String,
     #[serde(default)]
     pub manual_models: Vec<ModelInfo>,
 }
@@ -78,7 +82,28 @@ impl ModelConnection {
             project: String::new(),
             has_credential: false,
             environment_credential: false,
+            key_preview: String::new(),
             manual_models: Vec::new(),
+        }
+    }
+
+    /// Returns a human-readable masked representation of the active API key when one is present.
+    pub fn active_key_display(&self) -> Option<String> {
+        if !self.key_preview.is_empty() {
+            Some(self.key_preview.clone())
+        } else if self.has_credential {
+            Some(match self.kind {
+                ProviderKind::OpenRouter => "sk-or-••••••••".to_owned(),
+                _ => "••••••••".to_owned(),
+            })
+        } else if self.environment_credential {
+            Some(match self.kind {
+                ProviderKind::OpenRouter => "OPENROUTER_API_KEY (system)".to_owned(),
+                ProviderKind::Ollama => "OLLAMA_API_KEY (system)".to_owned(),
+                _ => "System environment key".to_owned(),
+            })
+        } else {
+            None
         }
     }
 }
@@ -90,6 +115,30 @@ fn default_api_key_header() -> String {
 /// A secret can cross the command channel, but never appears in Debug or JSON.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct ModelSecret(pub String);
+
+impl ModelSecret {
+    /// Produces a safe, non-reversible masked preview of the key (e.g. `sk-or-••••1234`
+    /// or `te••••ey`) so the user can verify which key is active without exposing the secret.
+    pub fn masked_preview(&self) -> String {
+        let trimmed = self.0.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        let chars: Vec<char> = trimmed.chars().collect();
+        if chars.len() <= 4 {
+            return "••••••••".to_owned();
+        }
+        if chars.len() <= 10 {
+            let prefix: String = chars[..2].iter().collect();
+            let suffix: String = chars[chars.len() - 2..].iter().collect();
+            return format!("{prefix}••••{suffix}");
+        }
+        let prefix_len = if trimmed.starts_with("sk-or-") { 6 } else { 4 };
+        let prefix: String = chars[..prefix_len].iter().collect();
+        let suffix: String = chars[chars.len() - 4..].iter().collect();
+        format!("{prefix}••••{suffix}")
+    }
+}
 
 impl std::fmt::Debug for ModelSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -182,6 +231,129 @@ pub enum Appearance {
     Light,
 }
 
+/// Default conversational tone and explanation style for the Personal AI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseStyle {
+    /// Warm, everyday language with zero technical jargon — ideal for non-technical users.
+    #[default]
+    FriendlySimple,
+    /// Balanced, clear explanations with practical examples.
+    BalancedClear,
+    /// Brief, direct bullet points without extra filler.
+    ConciseDirect,
+    /// Patient, numbered step-by-step walkthroughs.
+    StepByStep,
+}
+
+impl ResponseStyle {
+    pub const ALL: [Self; 4] = [
+        Self::FriendlySimple,
+        Self::BalancedClear,
+        Self::ConciseDirect,
+        Self::StepByStep,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FriendlySimple => "Simple & Friendly",
+            Self::BalancedClear => "Balanced & Clear",
+            Self::ConciseDirect => "Short & Direct",
+            Self::StepByStep => "Step-by-Step Guide",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::FriendlySimple => {
+                "Everyday language with no technical jargon — explains things like a patient friend."
+            }
+            Self::BalancedClear => "Clear, helpful replies with just the right amount of detail.",
+            Self::ConciseDirect => {
+                "Quick bullet points and brief answers that get straight to the point."
+            }
+            Self::StepByStep => "Walks you through tasks one small, numbered step at a time.",
+        }
+    }
+
+    pub fn instruction_clause(self) -> &'static str {
+        match self {
+            Self::FriendlySimple => {
+                "Use warm, friendly, everyday language. Avoid technical jargon unless asked, and explain concepts simply so anyone can follow."
+            }
+            Self::BalancedClear => {
+                "Provide balanced, well-structured answers with clear explanations."
+            }
+            Self::ConciseDirect => {
+                "Keep answers brief, direct, and easy to scan using short bullet points."
+            }
+            Self::StepByStep => {
+                "Break explanations and instructions into clear, numbered steps, checking one step at a time."
+            }
+        }
+    }
+}
+
+/// User-facing agentic AI settings: standing context ("always context"), response style,
+/// cross-chat memory, helper tools, web search, and action confirmation guardrails.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent user-facing toggles for agentic AI capabilities"
+)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentSettings {
+    /// Standing instructions and personal context included in every conversation automatically.
+    pub always_context: String,
+    /// Default explanation style and tone.
+    pub response_style: ResponseStyle,
+    /// Whether Sovra remembers facts and episodes across conversations.
+    pub memory_enabled: bool,
+    /// Whether Sovra can render interactive AG-UI cards, tables, and checklists in chat.
+    pub tools_enabled: bool,
+    /// Whether Sovra can search the web for current information when supported.
+    pub web_search_enabled: bool,
+    /// Guardrail: whether Sovra asks before running important actions.
+    pub confirm_actions: bool,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        Self {
+            always_context: String::new(),
+            response_style: ResponseStyle::FriendlySimple,
+            memory_enabled: true,
+            tools_enabled: true,
+            web_search_enabled: true,
+            confirm_actions: true,
+        }
+    }
+}
+
+impl AgentSettings {
+    /// Combines the base system instruction with the user's response style, safety
+    /// confirmation policy, and standing `always_context`.
+    pub fn compose_system_instruction(&self, base_instruction: &str) -> String {
+        let mut out = format!(
+            "{base_instruction}\n\nResponse style preference: {}",
+            self.response_style.instruction_clause()
+        );
+        if self.confirm_actions {
+            out.push_str(
+                "\nSafety guardrail: Always ask for the user's confirmation before performing any external, destructive, or state-changing action.",
+            );
+        }
+        let custom = self.always_context.trim();
+        if !custom.is_empty() {
+            out.push_str(
+                "\n\nAlways-on context from the user (keep this in mind in every reply):\n",
+            );
+            out.push_str(custom);
+        }
+        out
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModelPreferences {
     pub favorites: BTreeSet<ModelKey>,
@@ -189,6 +361,77 @@ pub struct ModelPreferences {
     /// `default` keeps files written before this field existed loadable.
     #[serde(default)]
     pub appearance: Appearance,
+    /// Standing context, tone, memory, tool, and safety preferences for the agent.
+    #[serde(default)]
+    pub agent_settings: AgentSettings,
+    /// Whether the user has completed or dismissed the guided onboarding tutorial.
+    #[serde(default)]
+    pub onboarding_completed: bool,
+}
+
+/// Deterministic setup progression stage so the UI only asks for what is still missing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetupStage {
+    /// Model connections and preferences are still loading from the runtime.
+    Loading,
+    /// Step 1: No connection has an active credential or available local models yet.
+    NeedsConnection,
+    /// Step 1b: A specific model was chosen, but its connection requires an API key.
+    NeedsModelKey {
+        model_id: String,
+        connection_id: String,
+        connection_name: String,
+    },
+    /// Step 2: A connection/key is ready, and the user only needs to pick a model.
+    NeedsModelSelection {
+        connected_service: String,
+        key_preview: Option<String>,
+    },
+    /// Setup complete: a model is selected and its connection has required credentials.
+    Ready { active: ModelKey },
+}
+
+/// Curated recommendation category for non-technical users choosing a model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecommendationKind {
+    /// Zero-cost starter model to try Sovra immediately.
+    FreeStarter,
+    /// Fast, balanced everyday chat model for writing, email, and general questions.
+    EverydaySmart,
+    /// Step-by-step reasoning model for hard coding, math, and deep analysis.
+    DeepReasoning,
+}
+
+impl RecommendationKind {
+    pub fn badge(self) -> &'static str {
+        match self {
+            Self::FreeStarter => "FREE TO TRY",
+            Self::EverydaySmart => "EVERYDAY CHAT",
+            Self::DeepReasoning => "STEP-BY-STEP REASONING",
+        }
+    }
+
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::FreeStarter => "Listed as free. Usage limits apply; availability can change.",
+            Self::EverydaySmart => {
+                "A chat model for writing and questions. Check its price before choosing."
+            }
+            Self::DeepReasoning => {
+                "The service lists support for reasoning. Replies may take longer."
+            }
+        }
+    }
+}
+
+/// A highlighted model recommendation card shown on the setup home screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecommendedModelCard {
+    pub kind: RecommendationKind,
+    pub key: ModelKey,
+    pub name: String,
+    pub author: String,
+    pub connection_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -362,6 +605,252 @@ impl ModelsState {
             .find(|m| m.id == key.model_id)
     }
 
+    /// Returns `true` when a chat model is selected and its connection has any required key.
+    pub fn has_active_llm(&self) -> bool {
+        let Some(active) = &self.preferences.active else {
+            return false;
+        };
+        let Some(connection) = self
+            .connections
+            .iter()
+            .find(|c| c.id == active.connection_id)
+        else {
+            return false;
+        };
+        connection.authentication == Authentication::None
+            || connection.has_credential
+            || connection.environment_credential
+    }
+
+    /// Returns the `OpenRouter` connection if one is configured.
+    pub fn openrouter_connection(&self) -> Option<&ModelConnection> {
+        self.connections
+            .iter()
+            .find(|c| c.kind == ProviderKind::OpenRouter)
+    }
+
+    /// Returns the deterministic setup progression stage so the UI only displays what is missing.
+    pub fn setup_stage(&self) -> SetupStage {
+        if !self.loaded {
+            return SetupStage::Loading;
+        }
+        if let Some(active) = &self.preferences.active
+            && let Some(conn) = self
+                .connections
+                .iter()
+                .find(|c| c.id == active.connection_id)
+        {
+            if conn.authentication == Authentication::None
+                || conn.has_credential
+                || conn.environment_credential
+            {
+                return SetupStage::Ready {
+                    active: active.clone(),
+                };
+            }
+            return SetupStage::NeedsModelKey {
+                model_id: active.model_id.clone(),
+                connection_id: conn.id.clone(),
+                connection_name: conn.name.clone(),
+            };
+        }
+        if let Some(router) = self
+            .openrouter_connection()
+            .filter(|c| c.has_credential || c.environment_credential)
+        {
+            return SetupStage::NeedsModelSelection {
+                connected_service: router.name.clone(),
+                key_preview: router.active_key_display(),
+            };
+        }
+        if let Some(other) = self.connections.iter().find(|c| {
+            c.has_credential
+                || c.environment_credential
+                || (c.authentication == Authentication::None
+                    && self
+                        .catalogs
+                        .get(&c.id)
+                        .is_some_and(|cat| !cat.snapshot.models.is_empty()))
+        }) {
+            return SetupStage::NeedsModelSelection {
+                connected_service: other.name.clone(),
+                key_preview: other.active_key_display(),
+            };
+        }
+        SetupStage::NeedsConnection
+    }
+
+    /// Returns a plain-English explanation of what is still needed when no LLM is active.
+    pub fn setup_status_hint(&self) -> Option<String> {
+        match self.setup_stage() {
+            SetupStage::Loading | SetupStage::Ready { .. } => None,
+            SetupStage::NeedsModelKey {
+                model_id,
+                connection_name,
+                ..
+            } => Some(format!(
+                "You chose model “{model_id}”, but {connection_name} still needs an API key before it can reply."
+            )),
+            SetupStage::NeedsModelSelection {
+                connected_service,
+                key_preview,
+            } => {
+                let key_note = key_preview
+                    .map_or_else(String::new, |preview| format!(" ({preview})"));
+                Some(format!(
+                    "Step 1 complete: {connected_service}{key_note} is connected! Now complete Step 2: click a recommended AI model below (or open Models) to start chatting."
+                ))
+            }
+            SetupStage::NeedsConnection => Some(
+                "Step 1 of 2: Connect your AI service. The easiest way is a free OpenRouter key (unlocks 300+ models), or use free local Ollama.".to_owned(),
+            ),
+        }
+    }
+
+    /// Suggests up to 3 curated model recommendation cards (`FreeStarter`, `EverydaySmart`, `DeepReasoning`)
+    /// from ready connections so non-technical users never have to hunt through 300+ models.
+    pub fn recommended_model_cards(&self) -> Vec<RecommendedModelCard> {
+        let mut cards = Vec::new();
+        let mut used_keys = BTreeSet::new();
+
+        // 1. Best Free Starter (zero-cost online model)
+        if let Some(free_key) = self.recommended_chat_model()
+            && let Some(model) = self.model(&free_key)
+        {
+            let connection_name = self
+                .connections
+                .iter()
+                .find(|c| c.id == free_key.connection_id)
+                .map_or_else(|| "OpenRouter".to_owned(), |c| c.name.clone());
+            used_keys.insert(free_key.clone());
+            cards.push(RecommendedModelCard {
+                kind: RecommendationKind::FreeStarter,
+                key: free_key,
+                name: model.name.clone(),
+                author: model.author.clone(),
+                connection_name,
+            });
+        }
+
+        // Gather all chat-capable models from ready connections
+        let ready_models: Vec<(&ModelConnection, &ModelInfo)> = self
+            .connections
+            .iter()
+            .filter(|c| {
+                c.has_credential
+                    || c.environment_credential
+                    || c.authentication == Authentication::None
+            })
+            .filter_map(|c| self.catalogs.get(&c.id).map(|cat| (c, cat)))
+            .flat_map(|(c, cat)| {
+                cat.snapshot
+                    .models
+                    .iter()
+                    .filter(|m| m.output_modalities.iter().any(|output| output == "text"))
+                    .map(move |m| (c, m))
+            })
+            .collect();
+
+        // Use live catalog costs, not provider names or an unverified quality ranking.
+        let cost = |model: &ModelInfo| {
+            model
+                .token_price("prompt")
+                .zip(model.token_price("completion"))
+                .map(|(input, output)| input + output)
+                .filter(|total| total.is_finite())
+                .unwrap_or(f64::INFINITY)
+        };
+        let everyday = ready_models
+            .iter()
+            .copied()
+            .filter(|(c, m)| !used_keys.contains(&m.key(&c.id)))
+            .filter(|(_, m)| !m.supports("reasoning") && !m.supports("include_reasoning"))
+            .min_by(|(left_connection, left), (right_connection, right)| {
+                cost(left)
+                    .total_cmp(&cost(right))
+                    .then_with(|| left.id.cmp(&right.id))
+                    .then_with(|| left_connection.id.cmp(&right_connection.id))
+            });
+        if let Some((conn, model)) = everyday {
+            let key = model.key(&conn.id);
+            used_keys.insert(key.clone());
+            cards.push(RecommendedModelCard {
+                kind: RecommendationKind::EverydaySmart,
+                key,
+                name: model.name.clone(),
+                author: model.author.clone(),
+                connection_name: conn.name.clone(),
+            });
+        }
+
+        // Reasoning is an advertised capability, not a claim about answer quality.
+        let reasoning = ready_models
+            .iter()
+            .copied()
+            .filter(|(c, m)| {
+                !used_keys.contains(&m.key(&c.id))
+                    && (m.supports("reasoning") || m.supports("include_reasoning"))
+            })
+            .min_by(|(left_connection, left), (right_connection, right)| {
+                cost(left)
+                    .total_cmp(&cost(right))
+                    .then_with(|| left.id.cmp(&right.id))
+                    .then_with(|| left_connection.id.cmp(&right_connection.id))
+            });
+        if let Some((conn, model)) = reasoning {
+            let key = model.key(&conn.id);
+            used_keys.insert(key.clone());
+            cards.push(RecommendedModelCard {
+                kind: RecommendationKind::DeepReasoning,
+                key,
+                name: model.name.clone(),
+                author: model.author.clone(),
+                connection_name: conn.name.clone(),
+            });
+        }
+
+        cards
+    }
+
+    /// Suggests a connected online chat model with explicitly zero catalog prices.
+    /// Never recommends a paid or unknown-price model as the free starting choice.
+    pub fn recommended_chat_model(&self) -> Option<ModelKey> {
+        self.connections
+            .iter()
+            .filter(|connection| {
+                connection.kind == ProviderKind::OpenRouter
+                    && (connection.has_credential || connection.environment_credential)
+            })
+            .filter_map(|connection| {
+                self.catalogs
+                    .get(&connection.id)
+                    .map(|catalog| (connection, catalog))
+            })
+            .flat_map(|(connection, catalog)| {
+                catalog
+                    .snapshot
+                    .models
+                    .iter()
+                    .filter(|model| {
+                        model
+                            .output_modalities
+                            .iter()
+                            .any(|output| output == "text")
+                            && model.is_free()
+                            && model.pricing.contains_key("prompt")
+                            && model.pricing.contains_key("completion")
+                    })
+                    .map(move |model| model.key(&connection.id))
+            })
+            .min_by_key(|key| {
+                (
+                    key.model_id != "openrouter/free",
+                    key.model_id.clone(),
+                    key.connection_id.clone(),
+                )
+            })
+    }
+
     pub fn filtered(&self, filter: &ModelFilter) -> Vec<ModelKey> {
         let words: Vec<_> = filter
             .search
@@ -532,6 +1021,12 @@ pub enum ModelCommand {
     CancelPull,
     SetAppearance {
         appearance: Appearance,
+    },
+    SetAgentSettings {
+        settings: AgentSettings,
+    },
+    SetOnboardingCompleted {
+        completed: bool,
     },
 }
 

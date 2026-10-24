@@ -108,10 +108,15 @@ impl ModelsView {
                         if !view.compare.contains(&compare_key) && view.compare.len() < 3 { view.compare.push(compare_key.clone()); }
                         view.compare_open = true; cx.notify();
                     }))))
-            .child(design::primary_button("model-activate",action_label,cx).disabled(!model.can_chat() || (active && !missing_key))
-                .on_click(cx.listener(move |view,_,window,cx| {
-                    if missing_key { view.open_connection(edit_connection.clone(),window,cx); }
-                    else { view.send(ModelCommand::Activate { key:activate_key.clone() },cx); }
+            .child(h_flex().flex_wrap().gap(t.space.compact)
+                .child(design::primary_button("model-activate",action_label,cx).disabled(!model.can_chat() || (active && !missing_key))
+                    .on_click(cx.listener(move |view,_,window,cx| {
+                        if missing_key { view.open_connection(edit_connection.clone(),window,cx); }
+                        else { view.choose_model(activate_key.clone(),cx); }
+                    })))
+                .children((active && !missing_key && model.can_chat()).then(|| {
+                    design::primary_button("model-details-go-chat", "Go to Chat →", cx)
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(crate::models_view::GoToChat)))
                 })))
             .child(caption(if model.can_chat() { "Your next message will use this model. Replies already in progress finish with the old one." } else { "This model makes something other than text (for example images or video), so it can't be used in chat yet." },cx))
             .child(section("What it does", cx))

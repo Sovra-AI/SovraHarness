@@ -114,17 +114,82 @@ pub fn format_relative_time(updated_at: Timestamp, now: Timestamp) -> String {
 pub const NEW_CHAT_TITLE: &str = "New chat";
 
 /// Generates a concise conversation title from the first user prompt.
+///
+/// Strips common conversational filler prefixes ("Can you help me", "Please explain", etc.)
+/// and capitalizes the first character so instant fallback titles look like clean topic headings.
 pub fn derive_chat_title(prompt: &str) -> String {
-    let cleaned = prompt.trim().lines().next().unwrap_or_default().trim();
+    let first_line = prompt.trim().lines().next().unwrap_or_default().trim();
+    if first_line.is_empty() {
+        return NEW_CHAT_TITLE.to_owned();
+    }
+    let lower = first_line.to_lowercase();
+    let mut stripped = first_line;
+    for prefix in [
+        "can you please ",
+        "could you please ",
+        "can you help me ",
+        "could you help me ",
+        "help me write a ",
+        "help me write ",
+        "help me ",
+        "please explain ",
+        "explain this to me simply, like i'm new to it: ",
+        "explain to me ",
+        "i want to know ",
+        "tell me about ",
+        "what is the best way to ",
+    ] {
+        if lower.starts_with(prefix) && first_line.len() > prefix.len() + 3 {
+            stripped = first_line[prefix.len()..].trim();
+            break;
+        }
+    }
+    let cleaned = sanitize_generated_title(stripped);
     if cleaned.is_empty() {
         return NEW_CHAT_TITLE.to_owned();
     }
     let max_chars = 48;
     let char_count = cleaned.chars().count();
     if char_count <= max_chars {
-        cleaned.to_owned()
+        cleaned
     } else {
         let prefix: String = cleaned.chars().take(max_chars - 1).collect();
+        format!("{}…", prefix.trim_end())
+    }
+}
+
+/// Cleans and normalizes a raw model-generated title (strips surrounding quotes, markdown
+/// bold/headers, `Title:` prefixes, and trailing punctuation, and caps length at 52 chars).
+pub fn sanitize_generated_title(raw: &str) -> String {
+    let line = raw
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
+    let without_label = line
+        .strip_prefix("Title:")
+        .or_else(|| line.strip_prefix("title:"))
+        .unwrap_or(line)
+        .trim();
+    let trimmed = without_label
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '“' | '”' | '`' | '*' | '#' | '-'))
+        .trim()
+        .trim_end_matches(['.', '!', ';', ':'])
+        .trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let mut chars = trimmed.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut capitalized: String = first.to_uppercase().collect();
+    capitalized.extend(chars);
+    let max_chars = 52;
+    if capitalized.chars().count() <= max_chars {
+        capitalized
+    } else {
+        let prefix: String = capitalized.chars().take(max_chars - 1).collect();
         format!("{}…", prefix.trim_end())
     }
 }
@@ -394,6 +459,14 @@ mod tests {
         assert_eq!(
             derive_chat_title("Summarize Q3 revenue and margin trends\nExtra line"),
             "Summarize Q3 revenue and margin trends"
+        );
+        assert_eq!(
+            derive_chat_title("Can you help me write a Rust trait for async storage"),
+            "Write a Rust trait for async storage"
+        );
+        assert_eq!(
+            sanitize_generated_title("Title: \"Rust Async Trait Guide.\""),
+            "Rust Async Trait Guide"
         );
         let long = "A".repeat(80);
         let title = derive_chat_title(&long);

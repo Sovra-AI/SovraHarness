@@ -2,7 +2,7 @@
 //! only through the model command protocol.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, Theme, ThemeMode,
+    ActiveTheme as _, Disableable as _, Sizable as _,
     button::ButtonVariants as _,
     checkbox::Checkbox,
     h_flex,
@@ -17,8 +17,8 @@ use gpui_kit::{
     div,
 };
 use sovra_core::models::{
-    Appearance, Authentication, CredentialChange, ModelCommand, ModelConnection, ModelError,
-    ModelInfo, ModelSecret, ProviderKind,
+    Authentication, CredentialChange, ModelCommand, ModelConnection, ModelError, ModelInfo,
+    ModelSecret, ProviderKind,
 };
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
@@ -27,10 +27,10 @@ use crate::models_view::{
 };
 
 pub(crate) struct ConnectionForm {
-    original: ModelConnection,
+    pub(crate) original: ModelConnection,
     name: Entity<InputState>,
     url: Entity<InputState>,
-    key: Entity<InputState>,
+    pub(crate) key: Entity<InputState>,
     key_header: Entity<InputState>,
     timeout: Entity<InputState>,
     organization: Entity<InputState>,
@@ -65,7 +65,7 @@ fn input(
     })
 }
 
-fn field(
+pub(crate) fn field(
     id: &'static str,
     label: &'static str,
     state: &Entity<InputState>,
@@ -159,7 +159,7 @@ impl ConnectionForm {
     }
 }
 
-fn credential_status(connection: &ModelConnection) -> &'static str {
+pub(crate) fn credential_status(connection: &ModelConnection) -> &'static str {
     if connection.has_credential {
         "Connected · your key is saved in this computer's keychain"
     } else if connection.environment_credential {
@@ -169,7 +169,7 @@ fn credential_status(connection: &ModelConnection) -> &'static str {
     }
 }
 
-fn back_button(cx: &mut Context<ModelsView>) -> gpui_kit::component::button::Button {
+pub(crate) fn back_button(cx: &mut Context<ModelsView>) -> gpui_kit::component::button::Button {
     design::button("connection-cancel", "Back", cx).on_click(cx.listener(|view, _, _, cx| {
         view.connection_form = None;
         view.form_subscriptions.clear();
@@ -177,306 +177,7 @@ fn back_button(cx: &mut Context<ModelsView>) -> gpui_kit::component::button::But
     }))
 }
 
-fn settings_section(
-    id: &'static str,
-    title: &'static str,
-    description: &'static str,
-    cx: &App,
-) -> impl gpui_kit::ParentElement + IntoElement + use<> {
-    let t = design::tokens(cx);
-    v_flex()
-        .id(id)
-        .test_support()
-        .w_full()
-        .p(t.space.medium)
-        .gap(t.space.small)
-        .sovra_surface(Surface::Subtle, cx)
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
-        .child(caption(description, cx))
-}
-
 impl ModelsView {
-    pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let t = design::tokens(cx);
-        let mut page = v_flex()
-            .id("sovra-settings-view")
-            .test_support()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .p(t.space.medium)
-            .gap(t.space.medium)
-            .child(
-                v_flex()
-                    .gap(t.space.compact)
-                    .child(div().sovra_text(TextRole::PageTitle, cx).child("Settings"))
-                    .child(caption("Set up Sovra and make it yours.", cx)),
-            );
-        if let Some(error) = &self.state.error {
-            page = page.child(caption(error.clone(), cx).text_color(cx.theme().danger));
-        } else if let Some(notice) = &self.state.notice {
-            page = page.child(caption(notice.clone(), cx));
-        }
-        if self.manual_form.is_some() {
-            return page.child(self.render_manual_form(cx)).into_any_element();
-        }
-        if let Some(form) = &self.connection_form {
-            if form.original.kind == ProviderKind::OpenRouter {
-                return page
-                    .child(self.render_key_form(form, cx))
-                    .into_any_element();
-            }
-            return page
-                .child(self.render_connection_form(cx))
-                .into_any_element();
-        }
-        let dark = cx.theme().is_dark();
-        let appearance = settings_section(
-            "settings-appearance",
-            "Appearance",
-            "Choose how Sovra looks.",
-            cx,
-        )
-        .child(h_flex().gap(t.space.compact).children(
-            [(ThemeMode::Light, "Light"), (ThemeMode::Dark, "Dark")].map(|(mode, label)| {
-                design::button(
-                    match mode {
-                        ThemeMode::Light => "settings-theme-light",
-                        ThemeMode::Dark => "settings-theme-dark",
-                    },
-                    label,
-                    cx,
-                )
-                .accessibility_label(format!("{label} appearance"))
-                .selected(mode.is_dark() == dark)
-                .on_click(cx.listener(move |view, _, _, cx| {
-                    Theme::change(mode, None, cx);
-                    view.send(
-                        ModelCommand::SetAppearance {
-                            appearance: if mode.is_dark() {
-                                Appearance::Dark
-                            } else {
-                                Appearance::Light
-                            },
-                        },
-                        cx,
-                    );
-                }))
-            }),
-        ));
-
-        let router = self
-            .state
-            .connections
-            .iter()
-            .find(|c| c.kind == ProviderKind::OpenRouter);
-        let connected = router.is_some_and(|c| c.has_credential || c.environment_credential);
-        let status = router.map_or("Not connected yet", credential_status);
-        let ai = settings_section(
-            "settings-ai",
-            "AI connection",
-            "Sovra uses an online AI service called OpenRouter to understand you and reply. Add your OpenRouter key once and you're ready to chat.",
-            cx,
-        )
-        .child(
-            div()
-                .id("settings-openrouter-status")
-                .test_support()
-                .aria_label(status)
-                .text_color(if connected {
-                    cx.theme().success
-                } else {
-                    t.text_secondary
-                })
-                .child(status),
-        )
-        .child(
-            h_flex().child(
-                design::primary_button(
-                    "settings-openrouter",
-                    if connected { "Manage key" } else { "Add your key" },
-                    cx,
-                )
-                .on_click(cx.listener(|view, _, window, cx| {
-                    let connection = view
-                        .state
-                        .connections
-                        .iter()
-                        .find(|connection| connection.kind == ProviderKind::OpenRouter)
-                        .cloned();
-                    let is_new = connection.is_none();
-                    view.open_connection(connection, window, cx);
-                    if is_new {
-                        if let Some(form) = &mut view.connection_form {
-                            form.original.kind = ProviderKind::OpenRouter;
-                        }
-                        view.preset(
-                            "OpenRouter",
-                            ProviderKind::OpenRouter,
-                            ProviderKind::OpenRouter.default_url(),
-                            Authentication::Bearer,
-                            window,
-                            cx,
-                        );
-                    }
-                })),
-            ),
-        );
-
-        let mut advanced = settings_section(
-            "settings-advanced",
-            "Advanced",
-            "Run AI on your own computer (for example with Ollama or LM Studio) or connect a different service. Most people can skip this.",
-            cx,
-        )
-        .child(
-            h_flex().child(
-                design::button(
-                    "settings-advanced-toggle",
-                    if self.settings_advanced_open {
-                        "Hide advanced options"
-                    } else {
-                        "Show advanced options"
-                    },
-                    cx,
-                )
-                .on_click(cx.listener(|view, _, _, cx| {
-                    view.settings_advanced_open = !view.settings_advanced_open;
-                    cx.notify();
-                })),
-            ),
-        );
-        if self.settings_advanced_open {
-            advanced = advanced
-                .child(Self::connections_header(cx))
-                .children(self.connection_cards(cx));
-        }
-
-        page.child(
-            v_flex()
-                .id("settings-sections")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .child(
-                    v_flex()
-                        .w_full()
-                        .max_w(t.layout.reading_width)
-                        .gap(t.space.medium)
-                        .child(appearance)
-                        .child(ai)
-                        .child(advanced),
-                ),
-        )
-        .into_any_element()
-    }
-
-    fn render_key_form(
-        &self,
-        form: &ConnectionForm,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        let t = design::tokens(cx);
-        let saved = form.original.has_credential;
-        let has_draft = !form.key.read(cx).value().trim().is_empty();
-        let saving = self.pending_save.is_some();
-        let status = credential_status(&form.original);
-        let remove = form.original.clone();
-        let mut steps = v_flex().gap(t.space.compact);
-        if !saved {
-            steps = steps
-                .child(caption(
-                    "1. Go to openrouter.ai and sign in. Signing up is free.",
-                    cx,
-                ))
-                .child(caption("2. Open “Keys” and create a new key.", cx))
-                .child(caption("3. Copy the key and paste it below.", cx));
-        }
-        v_flex()
-            .id("settings-key-form")
-            .test_support()
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .max_w(t.layout.reading_width)
-            .gap(t.space.medium)
-            .child(div().sovra_text(TextRole::SectionTitle, cx).child("Your OpenRouter key"))
-            .child(
-                div()
-                    .id("settings-key-status")
-                    .test_support()
-                    .aria_label(status)
-                    .sovra_surface(Surface::Subtle, cx)
-                    .p(t.space.small)
-                    .text_color(if saved || form.original.environment_credential {
-                        cx.theme().success
-                    } else {
-                        t.text_secondary
-                    })
-                    .child(status),
-            )
-            .child(steps)
-            .child(field(
-                "connection-key",
-                if saved { "New key" } else { "Paste your key" },
-                &form.key,
-                if saved {
-                    "Only fill this in if you want to swap your key for a different one."
-                } else {
-                    "It starts with “sk-or-”. Sovra keeps it locked in this computer's keychain and never shows it again."
-                },
-                cx,
-            ))
-            .child(
-                h_flex()
-                    .gap(t.space.small)
-                    .flex_wrap()
-                    .child(
-                        design::primary_button(
-                            "connection-save",
-                            if saving {
-                                "Saving…"
-                            } else if saved {
-                                "Replace key"
-                            } else {
-                                "Save key"
-                            },
-                            cx,
-                        )
-                        .disabled(saving || !has_draft)
-                        .on_click(cx.listener(|view, _, _, cx| view.submit_connection(false, cx))),
-                    )
-                    .child(
-                        design::button("connection-test", "Check key", cx)
-                            .disabled(
-                                self.state.busy
-                                    || saving
-                                    || (!saved && !form.original.environment_credential && !has_draft),
-                            )
-                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(true, cx))),
-                    )
-                    .children(saved.then(|| {
-                        design::button("settings-remove-key", "Remove key", cx)
-                            .disabled(saving)
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.pending_save = Some(remove.id.clone());
-                                view.send(
-                                    ModelCommand::SaveConnection {
-                                        connection: remove.clone(),
-                                        credential: CredentialChange::Remove,
-                                    },
-                                    cx,
-                                );
-                            }))
-                    }))
-                    .child(back_button(cx)),
-            )
-            .child(caption(
-                "“Check key” only makes sure the key works. It doesn't send a message or cost anything.",
-                cx,
-            ))
-    }
-
     pub(crate) fn open_connection(
         &mut self,
         connection: Option<ModelConnection>,
@@ -616,7 +317,7 @@ impl ModelsView {
         cx.notify();
     }
 
-    fn preset(
+    pub(crate) fn preset(
         &mut self,
         name: &str,
         kind: ProviderKind,
@@ -640,7 +341,7 @@ impl ModelsView {
         cx.notify();
     }
 
-    fn submit_connection(&mut self, test: bool, cx: &mut Context<Self>) {
+    pub(crate) fn submit_connection(&mut self, test: bool, cx: &mut Context<Self>) {
         let Some(form) = &self.connection_form else {
             return;
         };
@@ -656,6 +357,16 @@ impl ModelsView {
                         cx,
                     );
                 } else {
+                    match &credential {
+                        CredentialChange::Replace(secret) => {
+                            self.last_saved_previews
+                                .insert(connection.id.clone(), secret.masked_preview());
+                        }
+                        CredentialChange::Remove => {
+                            self.last_saved_previews.remove(&connection.id);
+                        }
+                        CredentialChange::Keep => {}
+                    }
                     self.pending_save = Some(connection.id.clone());
                     self.send(
                         ModelCommand::SaveConnection {
@@ -928,7 +639,7 @@ impl ModelsView {
             .children(self.connection_cards(cx))
     }
 
-    fn connections_header(cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    pub(crate) fn connections_header(cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         v_flex()
             .gap(t.space.compact)
@@ -949,7 +660,7 @@ impl ModelsView {
             ))
     }
 
-    fn connection_cards(&self, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
+    pub(crate) fn connection_cards(&self, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
         let t = design::tokens(cx);
         let mut cards = Vec::new();
         for (index, connection) in self.state.connections.iter().enumerate() {
@@ -979,11 +690,17 @@ impl ModelsView {
                 },
             );
             let key_status = if connection.has_credential {
-                "Key saved on this computer"
+                self.active_key_preview(connection).map_or_else(
+                    || "Key saved on this computer".to_owned(),
+                    |preview| format!("Key saved on this computer · Active key: {preview}"),
+                )
             } else if connection.environment_credential {
-                "Key from this computer's system settings"
+                self.active_key_preview(connection).map_or_else(
+                    || "Key from this computer's system settings".to_owned(),
+                    |preview| format!("Key from system settings · Active key: {preview}"),
+                )
             } else {
-                "No key"
+                "No key".to_owned()
             };
             let mut card = v_flex()
                 .p(t.space.medium)

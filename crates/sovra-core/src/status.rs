@@ -22,6 +22,7 @@ impl RuntimeStatus {
             }
             Event::Models(_)
             | Event::ChatHistoryLoaded { .. }
+            | Event::ChatTitleGenerated { .. }
             | Event::Pong
             | Event::RouteEvaluated { .. }
             | Event::AgentChunk { .. }

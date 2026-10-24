@@ -494,6 +494,7 @@ pub(crate) fn render_chat_column(
     area.flex_basis = Some(px(0.).into());
     v_flex()
         .id("sovra-chat-main")
+        .test_support()
         .flex_1()
         .min_w_0()
         .min_h_0()

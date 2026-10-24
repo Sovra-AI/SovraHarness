@@ -88,6 +88,7 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("nav-models", cx);
+        window.click("models-browse-all", cx);
         assert!(window.find("sovra-models-view").visible());
         assert_eq!(shell.read(cx).models().read(cx).visible_models().len(), 4);
         window.click("models-search", cx);
@@ -108,6 +109,7 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
             "example/beta"
         );
         assert_eq!(shell.read(cx).models().read(cx).visible_models().len(), 1);
+        window.click("models-toggle-filters", cx);
         window.click("models-clear-filters", cx);
         window.click("models-filter-tools", cx);
         assert_eq!(
@@ -160,6 +162,245 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
     .expect("test operation succeeds");
 }
 
+#[gpui_kit::test]
+fn setup_starts_with_one_connection_action_and_no_catalog_controls(cx: &mut TestAppContext) {
+    let (client, _commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 1280., 820.);
+    for event in fixture_events(Vec::new()) {
+        events
+            .send_blocking(Event::Models(event))
+            .expect("event delivered");
+    }
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-models", cx);
+        assert!(window.find("models-setup-home").visible());
+        assert!(window.find("models-home-connect").visible());
+        assert!(window.try_find("models-search").is_none());
+        assert!(window.try_find("models-home-chat").is_none());
+        window.click("models-home-connect", cx);
+        assert!(window.find("settings-key-form").visible());
+        assert!(window.find("connection-key").visible());
+    })
+    .expect("window exists");
+}
+
+#[gpui_kit::test]
+fn free_model_choice_waits_for_runtime_confirmation_before_chat(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    let (window, shell) = open_shell(cx, client, 1280., 820.);
+    let mut free = model("example/free", "Free conversation", "text", true);
+    free.pricing = [
+        ("prompt".into(), "0".into()),
+        ("completion".into(), "0".into()),
+    ]
+    .into();
+    let key = free.key("router");
+    let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+    connection.has_credential = true;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection],
+            preferences: ModelPreferences::default(),
+        }))
+        .expect("connection delivered");
+    events
+        .send_blocking(Event::Models(ModelEvent::CatalogLoaded {
+            connection_id: "router".into(),
+            snapshot: CatalogSnapshot {
+                models: vec![free],
+                fetched_at: 1,
+            },
+            cached: false,
+        }))
+        .expect("catalog delivered");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-models", cx);
+        assert!(window.find("models-home-use-free").visible());
+        window.click("models-home-use-free", cx);
+        assert_eq!(window.find("models-home-use-free").disabled(), Some(true));
+        assert!(window.try_find("models-home-chat").is_none());
+    })
+    .expect("window exists");
+    let mut sent = Vec::new();
+    while let Ok(command) = commands.try_recv() {
+        sent.push(command);
+    }
+    assert!(sent.iter().any(|command| matches!(command, Command::Models(ModelCommand::Activate { key: selected }) if selected == &key)));
+    events
+        .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
+            ModelPreferences {
+                active: Some(key),
+                ..ModelPreferences::default()
+            },
+        )))
+        .expect("activation confirmed");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("models-home-chat").visible());
+        window.click("models-home-chat", cx);
+    })
+    .expect("window exists");
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).workspace().active_tab,
+            sovra_core::NavTab::Chat
+        );
+    });
+}
+
+fn assert_setup_fits_minimum_window(cx: &mut TestAppContext, mode: ThemeMode) {
+    let (client, _commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 640., 420.);
+    cx.update(|cx| Theme::change(mode, None, cx));
+    for event in fixture_events(Vec::new()) {
+        events
+            .send_blocking(Event::Models(event))
+            .expect("setup loaded");
+    }
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-models", cx);
+        let home = window.find("models-setup-home").bounds();
+        let connect = window.find("models-home-connect");
+        assert!(
+            connect.visible(),
+            "the first setup action must be visible without scrolling: {connect:?}"
+        );
+        assert!(
+            connect.bounds().bottom() <= home.bottom(),
+            "primary action is clipped: {connect:?}; home={home:?}"
+        );
+        assert!(connect.bounds().right() <= home.right());
+        assert!(window.find("models-browse-all").visible());
+    })
+    .expect("window exists");
+}
+
+#[gpui_kit::test]
+fn setup_first_action_fits_minimum_dark_window(cx: &mut TestAppContext) {
+    assert_setup_fits_minimum_window(cx, ThemeMode::Dark);
+}
+
+#[gpui_kit::test]
+fn selected_custom_connection_setup_asks_for_its_own_key(cx: &mut TestAppContext) {
+    let (client, _commands, events) = Client::loopback();
+    let (window, shell) = open_shell(cx, client, 1280., 820.);
+    let mut connection = ModelConnection::new("my-service", ProviderKind::OpenAiCompatible);
+    connection.name = "My service".into();
+    connection.base_url = "https://models.example.test/v1".into();
+    connection.authentication = sovra_core::models::Authentication::Bearer;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection],
+            preferences: ModelPreferences {
+                active: Some(sovra_core::models::ModelKey {
+                    connection_id: "my-service".into(),
+                    model_id: "chat".into(),
+                }),
+                ..ModelPreferences::default()
+            },
+        }))
+        .expect("saved setup delivered");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-models", cx);
+        assert!(window.find("models-home-add-key").visible());
+        assert!(window.try_find("models-home-connect").is_none());
+        window.click("models-home-add-key", cx);
+    })
+    .expect("window exists");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("connection-url").value(),
+            Some("https://models.example.test/v1")
+        );
+        assert!(
+            window.try_find("settings-key-form").is_none(),
+            "must not open OpenRouter key setup"
+        );
+        shell.update(cx, |shell, cx| {
+            shell.handle_llm_setup_action("selected-key", window, cx);
+        });
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("connection-url").value(),
+            Some("https://models.example.test/v1")
+        );
+    })
+    .expect("window exists");
+}
+
+#[gpui_kit::test]
+fn setup_first_action_fits_minimum_light_window(cx: &mut TestAppContext) {
+    assert_setup_fits_minimum_window(cx, ThemeMode::Light);
+}
+
+#[gpui_kit::test]
+fn next_setup_actions_fit_minimum_window_in_both_themes(cx: &mut TestAppContext) {
+    let (client, _commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 640., 420.);
+    let mut free = model("openrouter/free", "Free conversation", "text", false);
+    free.pricing = [
+        ("prompt".into(), "0".into()),
+        ("completion".into(), "0".into()),
+    ]
+    .into();
+    let key = free.key("router");
+    for theme in [ThemeMode::Dark, ThemeMode::Light] {
+        cx.update(|cx| Theme::change(theme, None, cx));
+        for (active, action) in [
+            (None, "models-home-use-free"),
+            (Some(key.clone()), "models-home-chat"),
+        ] {
+            let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+            connection.has_credential = true;
+            events
+                .send_blocking(Event::Models(ModelEvent::Loaded {
+                    connections: vec![connection],
+                    preferences: ModelPreferences {
+                        active,
+                        ..ModelPreferences::default()
+                    },
+                }))
+                .expect("saved setup delivered");
+            events
+                .send_blocking(Event::Models(ModelEvent::CatalogLoaded {
+                    connection_id: "router".into(),
+                    snapshot: CatalogSnapshot {
+                        models: vec![free.clone()],
+                        fetched_at: 1,
+                    },
+                    cached: false,
+                }))
+                .expect("catalog delivered");
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.click("nav-models", cx);
+                let home = window.find("models-setup-home").bounds();
+                let button = window.find(action);
+                assert!(button.visible(), "next action must be visible: {button:?}");
+                assert!(
+                    button.bounds().bottom() <= home.bottom(),
+                    "next action is clipped: {button:?}; home={home:?}"
+                );
+                assert!(button.bounds().right() <= home.right());
+            })
+            .expect("window exists");
+        }
+    }
+}
+
 fn assert_large_catalog_layout(cx: &mut TestAppContext, width: f32, height: f32, mode: ThemeMode) {
     let (client, _commands, events) = Client::loopback();
     let (window, shell) = open_shell(cx, client, width, height);
@@ -185,6 +426,7 @@ fn assert_large_catalog_layout(cx: &mut TestAppContext, width: f32, height: f32,
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("nav-models", cx);
+        window.click("models-browse-all", cx);
         assert_eq!(
             shell.read(cx).models().read(cx).visible_models().len(),
             1000
@@ -250,6 +492,7 @@ fn minimum_window_filters_keep_apply_action_visible(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("nav-models", cx);
+        window.click("models-browse-all", cx);
         window.click("models-toggle-filters", cx);
         assert!(window.find("models-apply-filters").visible());
         assert!(window.find("models-apply-filters").bounds().bottom() <= px(420.));
@@ -292,6 +535,7 @@ fn ollama_installed_models_and_download_panel_fit_minimum_window(cx: &mut TestAp
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("nav-models", cx);
+        window.click("models-browse-all", cx);
         window.click(("model-scope", 2usize), cx);
         assert!(window.find(("model-row", 0usize)).visible());
         window.click("ollama-toggle-download", cx);
@@ -310,6 +554,7 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("nav-models", cx);
+        window.click("models-browse-all", cx);
         window.click("models-connections", cx);
         window.click("connection-add", cx);
         window.click(("connection-preset", 3usize), cx);
@@ -662,4 +907,85 @@ fn appearance_choice_is_saved_and_restored(cx: &mut TestAppContext) {
     };
     assert_eq!(saved, Appearance::Dark);
     cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+}
+
+#[gpui_kit::test]
+fn setup_with_saved_key_only_shows_step_two_and_curated_recommendations(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 1280., 820.);
+
+    let mut free = model("openrouter/free", "Free Starter", "text", false);
+    free.pricing = [
+        ("prompt".into(), "0".into()),
+        ("completion".into(), "0".into()),
+    ]
+    .into();
+    let mut smart = model("anthropic/claude-3.5-sonnet", "Claude Sonnet", "text", true);
+    smart.pricing = [
+        ("prompt".into(), "0.000003".into()),
+        ("completion".into(), "0.000015".into()),
+    ]
+    .into();
+    let mut thinker = model("deepseek/deepseek-r1", "DeepSeek R1", "text", true);
+    thinker.supported_parameters.push("reasoning".into());
+    thinker.pricing = [
+        ("prompt".into(), "0.000001".into()),
+        ("completion".into(), "0.000002".into()),
+    ]
+    .into();
+
+    let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+    connection.has_credential = true;
+    connection.key_preview = "sk-or-••••1234".into();
+
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection],
+            preferences: ModelPreferences::default(),
+        }))
+        .unwrap();
+    events
+        .send_blocking(Event::Models(ModelEvent::CatalogLoaded {
+            connection_id: "router".into(),
+            snapshot: CatalogSnapshot {
+                models: vec![free, smart, thinker],
+                fetched_at: 10,
+            },
+            cached: false,
+        }))
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-models", cx);
+        window.render_frame(cx);
+
+        // Step 1 connection action must be hidden when key is already connected!
+        assert!(window.try_find("models-home-connect").is_none());
+        assert!(window.try_find("models-home-local").is_none());
+        // Step 1 completion badge and Step 2 curated recommendation cards must be visible.
+        assert!(window.find("models-home-step1-done").visible());
+        assert!(window.find(("models-home-rec", 0usize)).visible());
+        assert!(window.find(("models-home-rec", 1usize)).visible());
+        assert!(window.find(("models-home-rec", 2usize)).visible());
+
+        // Also verify direct 1-click model activation in the full catalog row.
+        window.click("models-browse-all", cx);
+        window.render_frame(cx);
+        assert!(window.find(("model-use-row", 0usize)).visible());
+        window.click(("model-use-row", 0usize), cx);
+    })
+    .unwrap();
+
+    let mut activated = false;
+    while let Ok(cmd) = commands.try_recv() {
+        if matches!(cmd, Command::Models(ModelCommand::Activate { .. })) {
+            activated = true;
+        }
+    }
+    assert!(
+        activated,
+        "clicking Use Model on a catalog row must dispatch Activate"
+    );
 }

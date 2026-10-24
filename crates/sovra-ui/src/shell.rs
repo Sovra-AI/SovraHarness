@@ -6,9 +6,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Render, Role, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Task, TestSupportExt as _, Window, div, img,
+    AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, Role, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, TestSupportExt as _, Window, div, img,
 };
 use sovra_core::{
     ChatHistoryFilter, Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScreenRoute,
@@ -16,10 +16,10 @@ use sovra_core::{
 };
 
 use crate::RuntimeClient;
-use crate::chat_history_view::render_chat_history_rail;
 use crate::chat_view::{ChatPresentation, render_chat_column};
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::inspector::render_inspector;
+use crate::knowledge_view::render_knowledge_view;
 use crate::login::render_login_screen;
 use crate::my_ais_view::render_my_ais_view;
 use crate::schedules_view::render_schedules_view;
@@ -49,7 +49,8 @@ pub struct Shell {
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
     sim_route_input: Entity<InputState>,
-    my_ais_advanced_open: bool,
+    pub(crate) my_ais_advanced_open: bool,
+    knowledge_times_open: bool,
     models: Entity<crate::ModelsView>,
     /// The conversation, rendered as a cached view: composer cursor blinks, sidebar
     /// and timer updates reuse its last frame instead of laying out every message.
@@ -59,6 +60,9 @@ pub struct Shell {
     _events: Task<()>,
     _composer_events: Subscription,
     _history_search_events: Subscription,
+    _models_events: Subscription,
+    _models_navigation: Subscription,
+    _models_tour: Subscription,
 }
 
 impl std::fmt::Debug for Shell {
@@ -138,6 +142,34 @@ impl Shell {
 
         let events = cx.global::<RuntimeClient>().0.events();
         let models = cx.new(|cx| crate::ModelsView::new(window, cx));
+        let models_navigation = cx.subscribe_in(
+            &models,
+            window,
+            |shell, _, _: &crate::models_view::GoToChat, window, cx| {
+                shell.select_tab(NavTab::Chat, cx);
+                shell
+                    .composer_input
+                    .read(cx)
+                    .focus_handle(cx)
+                    .focus(window, cx);
+            },
+        );
+        let models_tour = cx.subscribe(
+            &models,
+            |shell, _, _: &crate::models_view::StartSystemTour, cx| {
+                shell.start_system_tour(cx);
+            },
+        );
+        let models_events = cx.observe(&models, |shell, models, cx| {
+            let settings_open = models.read(cx).settings_open;
+            if settings_open && shell.state.active_tab == NavTab::Models {
+                shell.state.select_tab(NavTab::Settings);
+                cx.notify();
+            } else if !settings_open && shell.state.active_tab == NavTab::Settings {
+                shell.state.select_tab(NavTab::Models);
+                cx.notify();
+            }
+        });
         let task = cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv().await {
                 // Streamed tokens arrive far faster than frames. Wait out one frame
@@ -195,12 +227,32 @@ impl Shell {
                             sovra_core::Event::AgentCompleted { .. }
                                 | sovra_core::Event::AgentError { .. }
                                 | sovra_core::Event::AgUiSurface { .. }
+                                | sovra_core::Event::ChatTitleGenerated { .. }
                         ) {
                             should_persist_thread = true;
                         }
+                        let completed_session = match &event {
+                            sovra_core::Event::AgentCompleted { session_id } => {
+                                Some(session_id.clone())
+                            }
+                            _ => None,
+                        };
                         if let Some(next_prompt) = shell.state.apply_event(&event) {
                             shell.dispatch_runtime_prompt(next_prompt, cx);
                             should_persist_thread = true;
+                        }
+                        if let Some(session_id) = completed_session
+                            && let Some((sid, prompt, reply)) =
+                                shell.state.take_pending_title_request(&session_id)
+                        {
+                            let _ =
+                                cx.global::<RuntimeClient>()
+                                    .0
+                                    .send(Command::GenerateChatTitle {
+                                        session_id: sid,
+                                        prompt,
+                                        reply,
+                                    });
                         }
                     }
                     if should_persist_thread {
@@ -219,6 +271,9 @@ impl Shell {
             chat: ChatPresentation::new(cx),
             _composer_events: composer_events,
             _history_search_events: history_search_events,
+            _models_events: models_events,
+            _models_navigation: models_navigation,
+            _models_tour: models_tour,
             focus_handle,
             history_compact: window.viewport_size().width
                 < design::tokens(cx).layout.history_breakpoint,
@@ -235,6 +290,7 @@ impl Shell {
             login_password_input,
             sim_route_input,
             my_ais_advanced_open: false,
+            knowledge_times_open: false,
             models,
             turn_ticker: None,
             transcript: cx.new(|_| crate::chat_view::Transcript::new(shell_handle)),
@@ -265,6 +321,9 @@ impl Shell {
         self.state.select_tab(tab);
         self.models.update(cx, |models, cx| {
             models.settings_open = tab == NavTab::Settings;
+            if tab == NavTab::Models {
+                models.open_model_home(cx);
+            }
             cx.notify();
         });
         if matches!(tab, NavTab::Models | NavTab::Settings) {
@@ -314,6 +373,11 @@ impl Shell {
 
     pub fn toggle_my_ais_advanced(&mut self, cx: &mut Context<Self>) {
         self.my_ais_advanced_open = !self.my_ais_advanced_open;
+        self.refresh(cx);
+    }
+
+    pub fn toggle_knowledge_times(&mut self, cx: &mut Context<Self>) {
+        self.knowledge_times_open = !self.knowledge_times_open;
         self.refresh(cx);
     }
 
@@ -469,6 +533,36 @@ impl Shell {
         self.refresh(cx);
     }
 
+    pub fn regenerate_thread_title(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        let Some(thread) = self
+            .state
+            .threads
+            .iter()
+            .find(|t| t.id == session_id && t.is_active())
+        else {
+            return;
+        };
+        let prompt = thread
+            .messages
+            .iter()
+            .find(|m| m.role == sovra_core::MessageRole::User && !m.text.trim().is_empty())
+            .map_or_else(|| thread.title.clone(), |m| m.text.clone());
+        let reply = thread
+            .messages
+            .iter()
+            .find(|m| m.role == sovra_core::MessageRole::Assistant && !m.text.trim().is_empty())
+            .map_or_else(String::new, |m| m.text.clone());
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::GenerateChatTitle {
+                session_id: session_id.to_owned(),
+                prompt,
+                reply,
+            });
+        self.refresh(cx);
+    }
+
     pub fn toggle_schedule_form(&mut self, cx: &mut Context<Self>) {
         self.schedule_form_open = !self.schedule_form_open;
         self.refresh(cx);
@@ -540,8 +634,100 @@ impl Shell {
             "model" => self.select_tab(NavTab::MyAis, cx),
             "deployment" => self.state.activate_preview_ai(),
             "knowledge" => self.state.select_tab(NavTab::Knowledge),
+            "memory" | "behaviour" | "guardrails" => self.select_tab(NavTab::Settings, cx),
             _ => {}
         }
+        self.refresh(cx);
+    }
+
+    pub fn handle_llm_setup_action(
+        &mut self,
+        target: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            "open-openrouter-web" => {
+                cx.open_url("https://openrouter.ai/keys");
+            }
+            "openrouter-key" => {
+                self.select_tab(NavTab::Settings, cx);
+                self.models.update(cx, |models, cx| {
+                    models.open_openrouter_key_editor(window, cx);
+                });
+            }
+            "selected-key" => {
+                self.select_tab(NavTab::Settings, cx);
+                self.models.update(cx, |models, cx| {
+                    models.open_selected_connection(window, cx);
+                });
+            }
+            "recommended-models" => {
+                self.select_tab(NavTab::Models, cx);
+                self.models.update(cx, |models, cx| {
+                    models.open_model_home(cx);
+                });
+            }
+            "start-tour" => {
+                self.start_system_tour(cx);
+                return;
+            }
+            "ollama" => {
+                self.select_tab(NavTab::Models, cx);
+                self.models.update(cx, |models, cx| {
+                    models.open_ollama_setup(window, cx);
+                });
+            }
+            "openai-url" => {
+                self.select_tab(NavTab::Settings, cx);
+                self.models.update(cx, |models, cx| {
+                    models.open_openai_compatible_editor(window, cx);
+                });
+            }
+            "choose-model" => {
+                self.select_tab(NavTab::Models, cx);
+                self.models.update(cx, |models, cx| {
+                    models.open_model_catalog(cx);
+                });
+            }
+            _ => {
+                self.select_tab(NavTab::Settings, cx);
+            }
+        }
+        self.refresh(cx);
+    }
+
+    pub fn start_system_tour(&mut self, cx: &mut Context<Self>) {
+        let step = self.state.start_tour();
+        self.select_tab(step.target_tab(), cx);
+    }
+
+    pub fn next_system_tour_step(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(next) = self.state.next_tour_step() {
+            self.select_tab(next.target_tab(), cx);
+        } else {
+            let _ = cx.global::<RuntimeClient>().0.send(Command::Models(
+                sovra_core::models::ModelCommand::SetOnboardingCompleted { completed: true },
+            ));
+            self.select_tab(NavTab::Chat, cx);
+            self.composer_input
+                .read(cx)
+                .focus_handle(cx)
+                .focus(window, cx);
+        }
+    }
+
+    pub fn prev_system_tour_step(&mut self, cx: &mut Context<Self>) {
+        if let Some(prev) = self.state.prev_tour_step() {
+            self.select_tab(prev.target_tab(), cx);
+        }
+    }
+
+    pub fn end_system_tour(&mut self, cx: &mut Context<Self>) {
+        self.state.end_tour();
+        let _ = cx.global::<RuntimeClient>().0.send(Command::Models(
+            sovra_core::models::ModelCommand::SetOnboardingCompleted { completed: true },
+        ));
         self.refresh(cx);
     }
 
@@ -581,9 +767,10 @@ impl Render for Shell {
             self.history_overlay_open = false;
         }
         let theme = cx.theme();
-        let border = theme.border;
+        let border = cx.theme().border;
         let muted_foreground = theme.muted_foreground;
         let t = design::tokens(cx);
+        let body_view = self.render_body(cx);
         v_flex()
             .id("sovra-shell")
             .track_focus(&self.focus_handle)
@@ -592,7 +779,7 @@ impl Render for Shell {
             .sovra_surface(Surface::Canvas, cx)
             .sovra_text(TextRole::Body, cx)
             .child(TitleBar::new())
-            .child(self.render_body(cx))
+            .child(body_view)
             .child(
                 h_flex()
                     .h(t.layout.status_height)
@@ -686,13 +873,6 @@ impl Shell {
                         .min_h_0()
                         .h_full()
                         .overflow_hidden()
-                        .child(render_chat_history_rail(
-                            &self.state,
-                            &self.history_search_input,
-                            &self.rename_thread_input,
-                            self.history_compact || self.state.history_collapsed,
-                            cx,
-                        ))
                         .child(render_chat_column(
                             &self.state,
                             &self.composer_input,
@@ -700,43 +880,57 @@ impl Shell {
                             &self.transcript,
                             cx,
                         ))
-                        .children(
-                            (self.history_compact && self.history_overlay_open).then(|| {
-                                div().absolute().top_0().left_0().h_full().occlude().child(
-                                    render_chat_history_rail(
-                                        &self.state,
-                                        &self.history_search_input,
-                                        &self.rename_thread_input,
-                                        false,
-                                        cx,
-                                    ),
-                                )
-                            }),
-                        )
                         .into_any_element(),
-                    NavTab::Knowledge => render_chat_column(
-                        &self.state,
-                        &self.composer_input,
-                        &self.chat,
-                        &self.transcript,
-                        cx,
-                    )
-                    .into_any_element(),
+                    NavTab::Knowledge => {
+                        render_knowledge_view(self.knowledge_times_open, cx).into_any_element()
+                    }
                 };
 
+                let sidebar_collapsed = self.history_compact || self.state.history_collapsed;
                 let mut body = h_flex()
                     .id("sovra-main-workspace")
                     .test_support()
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .w_full()
                     .overflow_hidden()
-                    .child(render_sidebar(&self.state, cx))
-                    .child(center);
+                    .child(render_sidebar(
+                        &self.state,
+                        &self.history_search_input,
+                        &self.rename_thread_input,
+                        sidebar_collapsed,
+                        cx,
+                    ))
+                    .child(center)
+                    .children(
+                        (self.history_compact && self.history_overlay_open).then(|| {
+                            div().absolute().top_0().left_0().h_full().occlude().child(
+                                render_sidebar(
+                                    &self.state,
+                                    &self.history_search_input,
+                                    &self.rename_thread_input,
+                                    false,
+                                    cx,
+                                ),
+                            )
+                        }),
+                    );
                 if self.state.active_tab == NavTab::Knowledge {
                     body = body.child(render_inspector(&self.state, &self.search_input, cx));
                 }
-                body.into_any_element()
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .overflow_hidden()
+                    .children(crate::onboarding_bar::render_onboarding_bar(
+                        &self.state,
+                        self.history_compact,
+                        cx,
+                    ))
+                    .child(body)
+                    .into_any_element()
             }
         }
     }

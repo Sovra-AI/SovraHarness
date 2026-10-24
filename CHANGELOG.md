@@ -4,15 +4,41 @@ All notable changes to SovraHarness are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/). Releases are cut by pushing a
 `vX.Y.Z` tag (see [README → Shipping](README.md#shipping)); installed apps
-auto-update from the resulting GitHub Release via Velopack.
+can use the generated Velopack release feed once update checking is integrated.
 
 Add entries under **Unreleased** as part of the change that introduces them;
 move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Unified Single Left Sidebar & AI-Generated Conversation Titles (`sovra-core`, `sovra-adk`, `sovra-runtime`, `sovra-ui`)**:
+  - Consolidated the navigation sidebar and conversation history rail into a single unified left sidebar (`sidebar.rs` + `chat_history_view.rs`), eliminating the double-sidebar layout.
+  - Placed a prominent **`+ New Chat`** button at the top of the sidebar above primary navigation, followed by search, `Chats | Scheduled` filter pills, and date-grouped conversation history (`Pinned`, `Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`) that remains accessible across all workspace tabs and collapses cleanly into a compact icon rail on narrow viewports.
+  - Added automatic LLM-powered conversation title generation (`Command::GenerateChatTitle` / `Event::ChatTitleGenerated` and `AdkHarness::generate_title`): after the first exchange in a chat, the active model generates a concise 3–6 word title (sanitized via `sanitize_generated_title` with smart filler-stripping fallback in `derive_chat_title`), plus a 1-click **`AI Title`** button on each history row while preserving manual user renames.
+- **State-Aware Guided AI Setup, Curated Model Recommendations & 5-Step Interactive System Tutorial (`sovra-core`, `sovra-runtime`, `sovra-ui`)**:
+  - Deterministic `SetupStage` progression (`NeedsConnection` → `NeedsModelSelection` → `NeedsModelKey` → `Ready`) so Chat setup cards, the top Guided Setup Strip, and `Models` setup home **only** display what is still needed (when an API key is already saved, Step 1 connection options are hidden and the user is guided straight to Step 2: picking a model).
+  - Model suggestions for free trials, everyday chat and step-by-step reasoning use live catalog prices and advertised capabilities, without claiming a quality ranking. Direct **Use Model** / **✓ Active** actions are available in the catalog.
+  - One-click **Open openrouter.ai/keys in Browser ↗** helpers on both the Setup Home screen and the Settings OpenRouter key editor.
+  - Interactive 5-step System Tutorial (`TourStep::WelcomeChat` → `AutomaticRouting` → `KnowledgeMemory` → `AutomatedSchedules` → `PersonalizeSettings`) with a top spotlight coach bar (`onboarding_bar.rs`), sidebar step badges, interactive try-it actions, and persistent `onboarding_completed` state.
+- The Knowledge tab explains how Sovra remembers, in everyday words: a record of
+  what happened, a separate current belief, who or what that belief is about, and
+  the older belief kept as history when a newer one replaces it. A worked example
+  shows that whole life in order, including that finding a memory uses both meaning
+  and the words themselves. The page is a fixed picture, so it still appears when
+  no memory store is open. The times Sovra keeps stay behind a labeled control.
+
 ### Changed
 
+- Start Models with a guided connection → model choice → Chat flow. Offer an
+  explicitly free, text-capable online model when available; wait for runtime
+  confirmation before showing the Chat action. Keep the full virtualized catalog
+  one click away with filters closed initially, and stop showing an unavailable
+  local server error while browsing unrelated online models.
+- `cargo xtask dev` stores model API keys in 0600 files under the app data dir
+  (`SOVRA_DEV`) instead of the keychain, so hot reloads never prompt for the macOS
+  password. Release builds still use the keychain.
 - Restyle the standard chat after SovraSRX: bare assistant replies beside a Sovra
   avatar (ringed while writing), gradient user bubbles with a tail corner and initials
   avatar, responsive 720/768/880px reading column, 16px/1.7 reply text, a glass
@@ -75,6 +101,20 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- Send missing-key setup to the selected model's own service, including custom
+  connections; avoid repeating setup prompts inside Models and Settings.
+- Keep development credentials separate from release keys, enforce owner-only
+  Unix permissions when saving, and ignore the development flag in release builds.
+- Describe the tour's routing simulation, memory example and manual task runs
+  accurately instead of promising background automation.
+- Make `cargo xtask dist` fail early without the pinned packaging tool and verify
+  that exactly one nonempty native installer was produced. Each build stages only
+  the app in fresh directories, with an explicit OS/architecture and bundle identity.
+- Use the `.entitlements` filename required by Velopack in both local and release
+  packaging, and pin the release CLI to the SDK version. Clarify that update
+  lifecycle hooks exist but automatic update checking is not yet implemented.
+- Correct documentation lint and Settings view visibility errors that prevented
+  the live development build and CI from compiling.
 - Streaming a code-heavy reply could crash the app: a segment split was decided only
   after a line completed, behind text already rendered. Splits are now decided at a
   line's first byte, with a defensive one-block fallback, covered by an invariant test

@@ -1,15 +1,11 @@
-//! Left conversation history rail (`RecentConversationsRail` from `SovraSRXProduction`).
-//!
-//! Renders inside the Chat workspace alongside the main navigation sidebar:
-//! - Header with "Chats" title, "+ New Chat" action, and collapse/expand toggle.
+//! Conversation history section rendered inside the unified left sidebar:
 //! - Search bar (`Search chats...`) filtering by title, subtitle, and message body.
 //! - Segmented `Chats | Scheduled` filter pills (`ChatFilterPills` radio group).
 //! - Scrollable conversation list partitioned into `Pinned` and recency buckets
 //!   (`Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`).
-//! - Per-row topic icon, title / inline rename input, subtitle preview, relative
-//!   timestamp, and quick actions (Pin, Rename, Delete).
-//! - Dedicated empty states for `Chats` ("No chats yet" + "Start your first chat")
-//!   and `Scheduled` ("No scheduled runs yet" + "Open Schedules" placeholder CTA).
+//! - Per-row topic icon, AI-generated or user title / inline rename input, subtitle preview,
+//!   relative timestamp, and quick actions (`Pin`, `AI Title`, `Rename`, `Delete`).
+//! - Dedicated empty states for `Chats` and `Scheduled`.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -31,19 +27,14 @@ use sovra_core::{
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
-pub(crate) fn render_chat_history_rail(
+/// Renders the unified conversation history section inside the single left sidebar.
+pub(crate) fn render_chat_history_section(
     state: &WorkspaceState,
     history_search_input: &Entity<InputState>,
     rename_thread_input: &Entity<InputState>,
-    collapsed: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
-    if collapsed {
-        return render_collapsed_rail(cx).into_any_element();
-    }
-
     let t = design::tokens(cx);
-    let border = cx.theme().border;
     let reference_now = state
         .threads
         .iter()
@@ -61,16 +52,10 @@ pub(crate) fn render_chat_history_rail(
     v_flex()
         .id("chat-history-rail")
         .test_support()
-        .w(t.layout.history_rail_width)
-        .h_full()
-        .min_h_0()
-        .flex_shrink_0()
-        .p(t.space.small)
-        .gap(t.space.small)
-        .sovra_surface(Surface::Chrome, cx)
-        .border_r_1()
-        .border_color(border)
-        .child(render_rail_header(cx))
+        .w_full()
+        .flex_1()
+        .min_h(px(72.))
+        .gap(t.space.compact)
         .child(render_rail_search(history_search_input, cx))
         .child(render_filter_pills(state.history_filter, cx))
         .child(render_thread_list(
@@ -80,106 +65,6 @@ pub(crate) fn render_chat_history_rail(
             rename_thread_input,
             cx,
         ))
-        .into_any_element()
-}
-
-fn render_collapsed_rail(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
-    let t = design::tokens(cx);
-    let border = cx.theme().border;
-
-    v_flex()
-        .id("chat-history-rail-collapsed")
-        .test_support()
-        .w(t.layout.history_compact_width)
-        .h_full()
-        .flex_shrink_0()
-        .py(t.space.small)
-        .px(t.space.compact)
-        .items_center()
-        .gap(t.space.small)
-        .sovra_surface(Surface::Chrome, cx)
-        .border_r_1()
-        .border_color(border)
-        .child(
-            design::button("chat-history-expand-btn", "", cx)
-                .accessibility_label("Expand chat history")
-                .ghost()
-                .small()
-                .px(t.space.compact)
-                .child(
-                    Icon::new(IconName::PanelLeftOpen)
-                        .small()
-                        .text_color(t.text_secondary),
-                )
-                .on_click(cx.listener(|shell, _, _, cx| {
-                    shell.toggle_history_rail(cx);
-                })),
-        )
-        .child(
-            design::button("chat-new-btn-collapsed", "", cx)
-                .accessibility_label("Start a new chat")
-                .ghost()
-                .small()
-                .px(t.space.compact)
-                .child(
-                    Icon::new(IconName::Plus)
-                        .small()
-                        .text_color(t.accent.violet),
-                )
-                .on_click(cx.listener(|shell, _, window, cx| {
-                    shell.start_new_chat(window, cx);
-                })),
-        )
-}
-
-fn render_rail_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
-    let t = design::tokens(cx);
-    h_flex()
-        .w_full()
-        .items_center()
-        .justify_between()
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child("Chats"))
-        .child(
-            h_flex()
-                .items_center()
-                .gap(px(4.))
-                .child(
-                    design::button("chat-new-btn", "", cx)
-                        .accessibility_label("Start a new chat")
-                        .ghost()
-                        .small()
-                        .px(t.space.compact)
-                        .child(
-                            h_flex()
-                                .items_center()
-                                .gap(px(4.))
-                                .child(
-                                    Icon::new(IconName::Plus)
-                                        .small()
-                                        .text_color(t.accent.violet),
-                                )
-                                .child(div().sovra_text(TextRole::Caption, cx).child("New")),
-                        )
-                        .on_click(cx.listener(|shell, _, window, cx| {
-                            shell.start_new_chat(window, cx);
-                        })),
-                )
-                .child(
-                    design::button("chat-history-collapse-btn", "", cx)
-                        .accessibility_label("Collapse chat history")
-                        .ghost()
-                        .small()
-                        .px(t.space.compact)
-                        .child(
-                            Icon::new(IconName::PanelLeftClose)
-                                .small()
-                                .text_color(t.text_secondary),
-                        )
-                        .on_click(cx.listener(|shell, _, _, cx| {
-                            shell.toggle_history_rail(cx);
-                        })),
-                ),
-        )
 }
 
 fn render_rail_search(
@@ -190,6 +75,7 @@ fn render_rail_search(
     h_flex()
         .id("chat-history-search-box")
         .w_full()
+        .flex_shrink_0()
         .items_center()
         .gap(t.space.compact)
         .px(t.space.small)
@@ -227,6 +113,7 @@ fn render_filter_pills(
         .role(Role::RadioGroup)
         .aria_label("Filter conversations")
         .w_full()
+        .flex_shrink_0()
         .p(px(3.))
         .gap(px(4.))
         .rounded(t.radius.pill)
@@ -241,7 +128,7 @@ fn render_filter_pills(
                 .ghost()
                 .selected(is_active)
                 .small()
-                .min_h(px(30.))
+                .min_h(px(28.))
                 .flex_1()
                 .px(t.space.small)
                 .rounded(t.radius.pill)
@@ -259,7 +146,6 @@ fn render_thread_list(
     rename_thread_input: &Entity<InputState>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
-    let t = design::tokens(cx);
     let searching = !state.history_search.trim().is_empty();
 
     let mut list = v_flex()
@@ -268,7 +154,7 @@ fn render_thread_list(
         .flex_1()
         .min_h_0()
         .w_full()
-        .gap(t.space.compact)
+        .gap(px(4.))
         .overflow_y_scroll();
 
     let visible_non_draft: usize = grouped
@@ -335,7 +221,7 @@ fn render_section_label(label: &str, cx: &Context<Shell>) -> impl IntoElement + 
     let t = design::tokens(cx);
     div()
         .px(t.space.compact)
-        .pt(t.space.compact)
+        .pt(px(2.))
         .sovra_text(TextRole::Caption, cx)
         .text_color(t.text_secondary)
         .child(label.to_owned())
@@ -369,13 +255,15 @@ fn render_thread_row(
     let time_label = format_relative_time(thread.updated_at, reference_now);
     let thread_id_select = thread.id.clone();
     let thread_id_pin = thread.id.clone();
+    let thread_id_ai_title = thread.id.clone();
     let thread_id_rename = thread.id.clone();
     let thread_id_delete = thread.id.clone();
     let thread_id_commit = thread.id.clone();
     let is_pinned = thread.pinned;
+    let has_messages = !thread.messages.is_empty();
 
     let surface = if is_active {
-        Surface::Matte
+        Surface::NavActive
     } else {
         Surface::Subtle
     };
@@ -421,7 +309,7 @@ fn render_thread_row(
                             .test_support()
                             .flex_1()
                             .min_w_0()
-                            .overflow_hidden()
+                            .truncate()
                             .sovra_text(TextRole::Body, cx)
                             .child(thread.title.clone()),
                     )
@@ -436,7 +324,7 @@ fn render_thread_row(
             .children((!thread.last_message_preview.is_empty()).then(|| {
                 div()
                     .w_full()
-                    .overflow_hidden()
+                    .truncate()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
                     .child(thread.last_message_preview.clone())
@@ -497,6 +385,17 @@ fn render_thread_row(
                         shell.toggle_thread_pin(&thread_id_pin, cx);
                     })),
                 )
+                .children(has_messages.then(|| {
+                    design::button(("chat-thread-ai-title", idx), "AI Title", cx)
+                        .accessibility_label("Generate conversation title with AI")
+                        .ghost()
+                        .xsmall()
+                        .min_h(px(22.))
+                        .px(px(6.))
+                        .on_click(cx.listener(move |shell, _, _, cx| {
+                            shell.regenerate_thread_title(&thread_id_ai_title, cx);
+                        }))
+                }))
                 .child(
                     design::button(("chat-thread-rename", idx), "Rename", cx)
                         .accessibility_label("Rename conversation")

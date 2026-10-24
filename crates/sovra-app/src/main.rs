@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     });
     let model_repository = sovra_providers::ModelRepository::new(
         dirs.data_local_dir().join("models"),
-        Arc::new(sovra_providers::OsCredentialStore),
+        credential_store(&dirs),
         read_model_keys(),
     );
     let models = sovra_runtime::ModelsConfig {
@@ -87,4 +87,17 @@ fn read_gemini_api_key() -> Option<String> {
     std::env::var("GEMINI_API_KEY")
         .ok()
         .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+}
+
+/// `cargo xtask dev` sets `SOVRA_DEV`: every rebuild changes the binary's code
+/// signature, which makes macOS re-prompt for the keychain password each reload.
+fn credential_store(dirs: &directories::ProjectDirs) -> Arc<dyn sovra_providers::CredentialStore> {
+    if cfg!(debug_assertions) && std::env::var_os("SOVRA_DEV").is_some_and(|value| value == "1") {
+        tracing::warn!("SOVRA_DEV set: model keys use plaintext dev files, not the keychain");
+        Arc::new(sovra_providers::FileCredentialStore::new(
+            dirs.data_local_dir().join("dev-credentials"),
+        ))
+    } else {
+        Arc::new(sovra_providers::OsCredentialStore)
+    }
 }

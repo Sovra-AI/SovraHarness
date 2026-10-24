@@ -54,12 +54,20 @@ impl SearchableListItem for Choice {
 }
 pub(crate) type Selector = SelectState<SearchableVec<Choice>>;
 
+pub(crate) struct GoToChat;
+impl gpui_kit::EventEmitter<GoToChat> for ModelsView {}
+
+pub(crate) struct StartSystemTour;
+impl gpui_kit::EventEmitter<StartSystemTour> for ModelsView {}
+
 #[allow(
     clippy::struct_excessive_bools,
     reason = "independent view flags; a state enum would be artificial"
 )]
 pub struct ModelsView {
     pub(crate) state: ModelsState,
+    pub(crate) home_open: bool,
+    pub(crate) pending_activation: Option<ModelKey>,
     pub(crate) filter: ModelFilter,
     rows: Vec<ModelKey>,
     pub(crate) selected: Option<ModelKey>,
@@ -72,9 +80,9 @@ pub struct ModelsView {
     price: Entity<Selector>,
     sort: Entity<Selector>,
     facets: CatalogFacets,
-    controls_dirty: bool,
+    pub(crate) controls_dirty: bool,
     filters_open: bool,
-    download_open: bool,
+    pub(crate) download_open: bool,
     pub(crate) connections_open: bool,
     pub(crate) settings_open: bool,
     pub(crate) settings_advanced_open: bool,
@@ -83,6 +91,9 @@ pub struct ModelsView {
     pub(crate) form_subscriptions: Vec<Subscription>,
     pub(crate) pending_save: Option<String>,
     pub(crate) saved_form_refresh: Option<String>,
+    pub(crate) pending_context_sync: Option<String>,
+    pub(crate) last_saved_previews: std::collections::BTreeMap<String, String>,
+    pub(crate) always_context_input: Entity<InputState>,
     pub(crate) delete_confirmation: Option<String>,
     pub(crate) download_name: Entity<InputState>,
     pub(crate) download_connection: Entity<Selector>,
@@ -147,6 +158,11 @@ impl ModelsView {
         let download_name = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Model name from ollama.com, e.g. qwen3:8b")
         });
+        let always_context_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(
+                "e.g. Explain things simply without technical jargon. Use short bullet points.",
+            )
+        });
         let mut subscriptions =
             vec![
                 cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
@@ -172,6 +188,8 @@ impl ModelsView {
         }
         Self {
             state: ModelsState::default(),
+            home_open: true,
+            pending_activation: None,
             filter: ModelFilter {
                 sort: ModelSort::Newest,
                 ..ModelFilter::default()
@@ -188,8 +206,7 @@ impl ModelsView {
             sort,
             facets: CatalogFacets::default(),
             controls_dirty: true,
-            filters_open: window.viewport_size().width
-                >= design::tokens(cx).layout.detail_breakpoint,
+            filters_open: false,
             download_open: false,
             connections_open: false,
             settings_open: false,
@@ -199,6 +216,9 @@ impl ModelsView {
             form_subscriptions: Vec::new(),
             pending_save: None,
             saved_form_refresh: None,
+            pending_context_sync: None,
+            last_saved_previews: std::collections::BTreeMap::new(),
+            always_context_input,
             delete_confirmation: None,
             download_name,
             download_connection,
@@ -216,8 +236,32 @@ impl ModelsView {
         &self.rows
     }
 
+    pub(crate) fn active_key_preview(
+        &self,
+        connection: &sovra_core::models::ModelConnection,
+    ) -> Option<String> {
+        if !connection.key_preview.is_empty() {
+            Some(connection.key_preview.clone())
+        } else if connection.has_credential {
+            self.last_saved_previews
+                .get(&connection.id)
+                .cloned()
+                .or_else(|| connection.active_key_display())
+        } else if connection.environment_credential {
+            connection.active_key_display()
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn apply(&mut self, event: &ModelEvent, cx: &mut Context<Self>) {
         self.state.apply(event);
+        if matches!(event, ModelEvent::Error(_))
+            || matches!(event, ModelEvent::PreferencesChanged(preferences)
+                if preferences.active.as_ref() == self.pending_activation.as_ref())
+        {
+            self.pending_activation = None;
+        }
         if let ModelEvent::ConnectionSaved { id } = event
             && self.pending_save.as_ref() == Some(id)
         {
@@ -233,9 +277,13 @@ impl ModelsView {
         if matches!(event, ModelEvent::Error(_)) {
             self.pending_save = None;
         }
+        if let ModelEvent::ConnectionDeleted { id } = event {
+            self.last_saved_previews.remove(id);
+        }
         if let ModelEvent::Loaded { preferences, .. }
         | ModelEvent::PreferencesChanged(preferences) = event
         {
+            self.pending_context_sync = Some(preferences.agent_settings.always_context.clone());
             let mode = match preferences.appearance {
                 Appearance::Dark => ThemeMode::Dark,
                 Appearance::Light => ThemeMode::Light,
@@ -269,7 +317,7 @@ impl ModelsView {
         cx.notify();
     }
 
-    fn rebuild_rows(&mut self) {
+    pub(crate) fn rebuild_rows(&mut self) {
         self.rows = self.state.filtered(&self.filter);
     }
 
@@ -479,41 +527,54 @@ impl ModelsView {
                 .find(|c| c.id == k.connection_id)
         });
 
-        let (headline, summary, status_text, needs_key) = match (active_key.as_ref(), active_model, active_conn) {
-            (Some(_), Some(model), Some(conn)) => {
-                let missing_key = conn.authentication != sovra_core::models::Authentication::None
-                    && !conn.has_credential
-                    && !conn.environment_credential;
-                let status = if missing_key {
-                    format!("{} · Needs API key to chat", conn.name)
-                } else {
-                    format!("{} · Ready to answer in Chat", conn.name)
-                };
-                let summary = format!(
-                    "Memory {} · {} · {}",
-                    compact_count(model.context_length),
-                    if model.supports("tools") {
-                        "Can use tools"
+        let (headline, summary, status_text, needs_key) =
+            match (active_key.as_ref(), active_model, active_conn) {
+                (Some(_), Some(model), Some(conn)) => {
+                    let missing_key = conn.authentication
+                        != sovra_core::models::Authentication::None
+                        && !conn.has_credential
+                        && !conn.environment_credential;
+                    let status = if missing_key {
+                        format!("{} · Needs API key to chat", conn.name)
                     } else {
-                        "Standard chat"
-                    },
-                    price_summary(model)
-                );
-                (model.name.clone(), summary, status, missing_key)
-            }
-            (Some(key), _, _) => (
-                key.model_id.clone(),
-                "Selected for your Personal AI. Refresh the catalog to load full details.".to_owned(),
-                format!("Connection: {}", key.connection_id),
-                false,
-            ),
-            (None, _, _) => (
-                "Default Sovra AI (Automatic)".to_owned(),
-                "Click any model below and press \"Use this model\" to pin a specific AI for your chats.".to_owned(),
-                "No custom model pinned yet".to_owned(),
-                false,
-            ),
-        };
+                        format!("{} · Ready to answer in Chat", conn.name)
+                    };
+                    let summary = format!(
+                        "Memory {} · {} · {}",
+                        compact_count(model.context_length),
+                        if model.supports("tools") {
+                            "Can use tools"
+                        } else {
+                            "Standard chat"
+                        },
+                        price_summary(model)
+                    );
+                    (model.name.clone(), summary, status, missing_key)
+                }
+                (Some(key), _, _) => (
+                    key.model_id.clone(),
+                    "Selected for your Personal AI. Refresh the catalog to load full details."
+                        .to_owned(),
+                    format!("Connection: {}", key.connection_id),
+                    false,
+                ),
+                (None, _, _) => (
+                    "Choose an AI before chatting".to_owned(),
+                    "Open a model to see its price and choose it. Setup can help you get started."
+                        .to_owned(),
+                    "No model selected".to_owned(),
+                    false,
+                ),
+            };
+
+        let openrouter_key_pill = self
+            .state
+            .openrouter_connection()
+            .and_then(|c| self.active_key_preview(c))
+            .map_or_else(
+                || "OpenRouter key: Not added".to_owned(),
+                |preview| format!("OpenRouter key: {preview}"),
+            );
 
         let mut banner = h_flex()
             .id("models-active-banner")
@@ -542,7 +603,13 @@ impl ModelsView {
                                     .text_color(cx.theme().link)
                                     .child("CURRENTLY SET FOR YOUR AI"),
                             )
-                            .child(pill(status_text, cx)),
+                            .child(pill(status_text, cx))
+                            .child(
+                                div()
+                                    .id("models-active-key-status")
+                                    .test_support()
+                                    .child(pill(openrouter_key_pill, cx)),
+                            ),
                     )
                     .child(
                         div()
@@ -564,7 +631,23 @@ impl ModelsView {
                         view.select_model(inspect_key.clone(), cx);
                     })),
             );
+            if !needs_key {
+                actions = actions.child(
+                    design::primary_button("models-active-go-chat", "Go to Chat →", cx)
+                        .small()
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(GoToChat))),
+                );
+            }
         }
+        actions = actions.child(
+            design::button("models-open-settings", "AI Keys & Settings", cx)
+                .small()
+                .ghost()
+                .on_click(cx.listener(|view, _, _, cx| {
+                    view.settings_open = true;
+                    cx.notify();
+                })),
+        );
         if needs_key {
             let conn = active_conn.cloned();
             actions = actions.child(
@@ -635,6 +718,8 @@ impl ModelsView {
                     .child(
                         h_flex()
                             .gap(t.space.compact)
+                            .child(design::button("models-back-home", "Setup", cx)
+                                .on_click(cx.listener(|view, _, _, cx| view.open_model_home(cx))))
                             .child(
                                 design::button(
                                     "models-refresh",
@@ -908,6 +993,18 @@ impl ModelsView {
         } else {
             format!("By {}   ·   {}", model.author, model.id)
         };
+        let can_chat = model.can_chat();
+        let use_key = key.clone();
+        let edit_conn = connection_obj.cloned();
+        let use_label = if active && !needs_key {
+            "✓ Active"
+        } else if !can_chat {
+            "Non-chat"
+        } else if needs_key {
+            "Add Key"
+        } else {
+            "Use Model"
+        };
         v_flex()
             .id(("catalog-row", index))
             .test_support()
@@ -941,6 +1038,19 @@ impl ModelsView {
                             })),
                     )
                     .child(pill(badge_text, cx))
+                    .child(
+                        design::button(("model-use-row", index), use_label, cx)
+                            .small()
+                            .disabled(!can_chat || (active && !needs_key))
+                            .accessibility_label(format!("Use {} in chat", model.id))
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                if needs_key {
+                                    view.open_connection(edit_conn.clone(), window, cx);
+                                } else {
+                                    view.choose_model(use_key.clone(), cx);
+                                }
+                            })),
+                    )
                     .child(
                         design::button(
                             ("model-favorite", index),
@@ -996,6 +1106,21 @@ impl ModelsView {
             .state
             .connections
             .iter()
+            .filter(|connection| match self.filter.scope {
+                CatalogScope::Ollama => connection.kind == ProviderKind::Ollama,
+                CatalogScope::OpenRouter => connection.kind == ProviderKind::OpenRouter,
+                CatalogScope::Custom => matches!(
+                    connection.kind,
+                    ProviderKind::OpenAiCompatible | ProviderKind::Anthropic
+                ),
+                CatalogScope::All | CatalogScope::Favorites => {
+                    connection.kind != ProviderKind::Ollama
+                        || self
+                            .rows
+                            .iter()
+                            .any(|key| key.connection_id == connection.id)
+                }
+            })
             .filter_map(|c| {
                 self.state
                     .catalogs
@@ -1057,6 +1182,11 @@ impl ModelsView {
 
 impl Render for ModelsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(context_text) = self.pending_context_sync.take() {
+            self.always_context_input.update(cx, |input, cx| {
+                input.set_value(context_text, window, cx);
+            });
+        }
         if let Some(id) = self.saved_form_refresh.take()
             && let Some(connection) = self.state.connections.iter().find(|c| c.id == id).cloned()
         {
@@ -1070,6 +1200,14 @@ impl Render for ModelsView {
         }
         if self.settings_open {
             return self.render_settings(cx).into_any_element();
+        }
+        if self.home_open {
+            return self
+                .render_model_home(
+                    window.viewport_size().width < design::tokens(cx).layout.detail_breakpoint,
+                    cx,
+                )
+                .into_any_element();
         }
         self.sync_controls(window, cx);
         let t = design::tokens(cx);
@@ -1242,7 +1380,7 @@ pub(crate) fn token_price(model: &sovra_core::models::ModelInfo, field: &str) ->
         |price| format!("${:.3}", price * 1_000_000.),
     )
 }
-fn price_summary(model: &sovra_core::models::ModelInfo) -> String {
+pub(crate) fn price_summary(model: &sovra_core::models::ModelInfo) -> String {
     if model.is_free() {
         "Free".into()
     } else if model.output_modalities.iter().any(|m| m == "text")

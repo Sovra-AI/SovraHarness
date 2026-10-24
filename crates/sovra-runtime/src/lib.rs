@@ -235,18 +235,22 @@ async fn serve(
                         }
                         models::ModelExecution::Unavailable(message) => {
                             let _ = events
-                                .send(Event::AgentError {
-                                    session_id,
-                                    message,
+                                .send(Event::AgUiSurface {
+                                    session_id: session_id.clone(),
+                                    widget: sovra_core::default_llm_setup_widget(Some(&message)),
                                 })
                                 .await;
+                            let _ = events.send(Event::AgentCompleted { session_id }).await;
                             continue;
                         }
                     }
                 } else {
                     (harness.clone(), None)
                 };
-                if let Some(store) = &memory {
+                let memory_enabled = models
+                    .as_ref()
+                    .is_none_or(|m| m.memory_enabled.load(std::sync::atomic::Ordering::Relaxed));
+                if memory_enabled && let Some(store) = &memory {
                     record_episode(
                         &handle,
                         store.clone(),
@@ -255,10 +259,14 @@ async fn serve(
                         prompt.clone(),
                     );
                 }
-                let events = memory.as_ref().map_or_else(
-                    || events.clone(),
-                    |store| tap_agent_events(&handle, store.clone(), events.clone()),
-                );
+                let events = if memory_enabled {
+                    memory.as_ref().map_or_else(
+                        || events.clone(),
+                        |store| tap_agent_events(&handle, store.clone(), events.clone()),
+                    )
+                } else {
+                    events.clone()
+                };
                 if let Some(previous) = runs.remove(&session_id) {
                     previous.harness.interrupt(&session_id);
                     previous.task.abort();
@@ -281,6 +289,41 @@ async fn serve(
                     run.harness.interrupt(&session_id);
                     run.task.abort();
                     tracing::info!(%session_id, "session interrupted");
+                }
+            }
+            Command::GenerateChatTitle {
+                session_id,
+                prompt,
+                reply,
+            } => {
+                let selected = if let Some(models) = &models {
+                    match models.execution.read().await.clone() {
+                        models::ModelExecution::Legacy => harness.clone(),
+                        models::ModelExecution::Selected { harness, .. } => Some(harness),
+                        models::ModelExecution::Unavailable(_) => None,
+                    }
+                } else {
+                    harness.clone()
+                };
+                if let Some(adk) = selected {
+                    let events = events.clone();
+                    drop(handle.spawn(async move {
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_secs(15),
+                            adk.generate_title(&session_id, &prompt, &reply, &events),
+                        )
+                        .await;
+                    }));
+                } else {
+                    let fallback = sovra_core::derive_chat_title(&prompt);
+                    if !fallback.is_empty() && fallback != sovra_core::NEW_CHAT_TITLE {
+                        let _ = events
+                            .send(Event::ChatTitleGenerated {
+                                session_id,
+                                title: fallback,
+                            })
+                            .await;
+                    }
                 }
             }
             Command::Shutdown => break,
@@ -411,6 +454,7 @@ fn tap_agent_events(
                 | Event::AgentResponseStarted { .. }
                 | Event::AgUiSurface { .. }
                 | Event::AgentError { .. }
+                | Event::ChatTitleGenerated { .. }
                 | Event::Stopped => {}
             }
             if events.send(event).await.is_err() {

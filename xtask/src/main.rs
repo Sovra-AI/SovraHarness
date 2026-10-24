@@ -11,6 +11,7 @@
 
 mod deps;
 mod dev;
+mod dist;
 mod hook;
 mod styles;
 
@@ -30,7 +31,7 @@ cargo xtask <command>
   check-deps   Enforce the crate layering rules (see xtask/src/deps.rs)
   check-styles Enforce the UI colour boundary and single SVG brand asset
   hook         Agent post-edit hook: reads hook JSON on stdin, checks the edited file
-  dist         Release build, then package with Velopack `vpk` if installed
+  dist         Build and verify a single native installer (requires pinned Velopack)
 ";
 
 /// Development tools; the CI subset matches `.github/workflows/ci.yml`.
@@ -52,7 +53,7 @@ fn main() -> ExitCode {
         Some("check-deps") => deps::check(&root()),
         Some("check-styles") => styles::check(&root()),
         Some("hook") => return hook::run(&root()),
-        Some("dist") => dist(),
+        Some("dist") => dist::run(&root()),
         Some("help" | "-h" | "--help") | None => {
             print!("{HELP}");
             Ok(())
@@ -116,36 +117,6 @@ fn fix() -> anyhow::Result<()> {
     cargo(&["fmt", "--all"])
 }
 
-/// Mirrors the `Package` job in `.github/workflows/release.yml` (unsigned, local channel).
-fn dist() -> anyhow::Result<()> {
-    cargo(&["build", "--release", "--package", "sovra-app"])?;
-    let exe = if cfg!(windows) { "sovra.exe" } else { "sovra" };
-    let pack_dir = root().join("target/pack");
-    std::fs::create_dir_all(&pack_dir)?;
-    std::fs::copy(root().join("target/release").join(exe), pack_dir.join(exe))?;
-    if !has_program("vpk") {
-        println!(
-            "Built {}. Install Velopack's `vpk` (`dotnet tool install -g vpk`) to produce \
-             installers; CI does this in .github/workflows/release.yml.",
-            pack_dir.join(exe).display()
-        );
-        return Ok(());
-    }
-    run(Command::new("vpk").args([
-        "pack",
-        "--packId",
-        "SovraHarness",
-        "--packVersion",
-        env!("CARGO_PKG_VERSION"),
-        "--packDir",
-        &pack_dir.to_string_lossy(),
-        "--mainExe",
-        exe,
-        "--outputDir",
-        &root().join("target/dist").to_string_lossy(),
-    ]))
-}
-
 fn step(name: &str, f: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
     println!("\n==> {name}");
     f().with_context(|| format!("`{name}` failed"))
@@ -201,13 +172,6 @@ fn run(command: &mut Command) -> anyhow::Result<()> {
 fn has_cargo_subcommand(name: &str) -> bool {
     Command::new(env!("CARGO"))
         .args([name, "--help"])
-        .output()
-        .is_ok_and(|out| out.status.success())
-}
-
-fn has_program(name: &str) -> bool {
-    Command::new(name)
-        .arg("--help")
         .output()
         .is_ok_and(|out| out.status.success())
 }

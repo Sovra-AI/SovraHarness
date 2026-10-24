@@ -1,5 +1,5 @@
 # Tag `vX.Y.Z` → build per OS → sign/notarize → Velopack installers + update feeds →
-# GitHub Release. Users install once; the app then auto-updates from these feeds.
+# GitHub Release. Update feeds are produced; in-app update checks are not implemented yet.
 #
 # Required secrets (set before the first release; jobs skip signing when absent):
 #   macOS:   BUILD_CERTIFICATE_BASE64, INSTALLER_CERTIFICATE_BASE64, P12_PASSWORD,
@@ -46,12 +46,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - run: dotnet tool install -g vpk
+      - run: dotnet tool install -g vpk --version 1.2.161
 
       - name: Build
         shell: bash
         run: |
-          cargo build --release --package sovra-app
+          cargo build --release --locked --package sovra-app
           mkdir -p target/pack
           cp "target/release/${{ matrix.exe }}" target/pack/
 
@@ -90,7 +90,7 @@ jobs:
           ARGS=(pack --packId "$PACK_ID" --packVersion "$VERSION" --packDir target/pack
                 --mainExe "${{ matrix.exe }}" --channel "${{ matrix.channel }}" --outputDir target/dist)
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            ARGS+=(--bundleId com.sovra.harness --signEntitlements packaging/macos/entitlements.plist)
+            ARGS+=(--bundleId com.sovra.harness --signEntitlements packaging/macos/sovra.entitlements)
             [[ -f packaging/macos/icon.icns ]] && ARGS+=(--icon packaging/macos/icon.icns)
             if [[ "$HAS_MAC_SIGNING" == "true" ]]; then
               ARGS+=(--signAppIdentity "Developer ID Application: ${{ secrets.MAC_SIGN_NAME }}"
@@ -123,7 +123,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - run: dotnet tool install -g vpk
+      - run: dotnet tool install -g vpk --version 1.2.161
       - name: Upload each channel to one release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

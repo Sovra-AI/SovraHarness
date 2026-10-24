@@ -130,7 +130,12 @@ architecture. Changing it requires a stated reason in the same change.
 - Add `#[allow(..)]` without `reason = "…"`; prefer `#[expect(..)]`.
 - Add `tokio`, `gpui-kit`, or `velopack` to a crate other than its owner.
 - Add OpenSSL (banned; use rustls), git dependencies, or wildcard versions.
-- Commit secrets. API keys go in the OS keychain (keyring), never in files or logs.
+- Commit or log secrets. Installed/release builds keep API keys in the OS keychain
+  (keyring). The user-approved development exception is a debug build with
+  `SOVRA_DEV=1`: keys may live in the app data directory's `dev-credentials/`,
+  outside the checkout, with owner-only directory/file permissions on Unix.
+  Release builds must ignore this flag and always use the keychain. Never copy
+  development keys into the installer or migrate keychain entries automatically.
 
 ## GPUI notes
 

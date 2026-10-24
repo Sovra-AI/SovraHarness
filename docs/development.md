@@ -15,6 +15,13 @@ watcher waiting for the next save. The watcher also stays alive if the app close
 This is **restart-based live reload**, not in-process code replacement or preservation
 of active agent work. Use test credentials/data for development.
 
+The user-approved development mode sets `SOVRA_DEV=1`. Debug builds then keep
+model keys in the OS app data directory under `dev-credentials/` (plaintext,
+owner-only directory and files on Unix), avoiding repeated macOS keychain prompts
+after rebuilds. This store is separate from release credentials and is never
+included in packages or source control. Release builds always use the OS keychain,
+even when that variable is set. No keys are copied between the two stores.
+
 ## One-time setup
 
 ```sh

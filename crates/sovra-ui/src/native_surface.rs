@@ -167,6 +167,24 @@ fn render_component(
             action_id,
             disabled,
         } => {
+            if let Some(setup_target) = action_id.strip_prefix("setup:") {
+                let target = setup_target.to_owned();
+                let button_id = gpui_kit::SharedString::from(format!("surface-setup-{target}"));
+                let button = if matches!(
+                    target.as_str(),
+                    "openrouter-key" | "selected-key" | "recommended-models"
+                ) {
+                    design::primary_button(button_id, label.clone(), cx)
+                } else {
+                    design::button(button_id, label.clone(), cx)
+                };
+                return button
+                    .disabled(*disabled)
+                    .on_click(cx.listener(move |shell, _, window, cx| {
+                        shell.handle_llm_setup_action(&target, window, cx);
+                    }))
+                    .into_any_element();
+            }
             let prompt = serde_json::json!({"surface_ref":{"id":surface_id,"version":version},"event":{"type":"button_click","action_id":action_id}}).to_string();
             design::button(
                 gpui_kit::SharedString::from(format!("surface-action-{path}")),

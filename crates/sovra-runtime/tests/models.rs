@@ -828,3 +828,32 @@ async fn appearance_choice_survives_restart() {
     );
     stop(client).await;
 }
+
+#[tokio::test]
+async fn onboarding_completion_and_replay_survive_restart() {
+    let server = Server::new(|_| Reply::json(&json!({"data":[]})));
+    let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/api/v1", server.url());
+    let fixture = Fixture::new(connection, None);
+    for completed in [true, false] {
+        let client = fixture.start();
+        event(&client, |e| {
+            matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+        })
+        .await;
+        send(&client, ModelCommand::SetOnboardingCompleted { completed });
+        event(&client, |e| {
+            matches!(e, Event::Models(ModelEvent::PreferencesChanged(p)) if p.onboarding_completed == completed)
+        }).await;
+        stop(client).await;
+        let client = fixture.start();
+        let loaded = event(&client, |e| {
+            matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+        })
+        .await;
+        assert!(
+            matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.onboarding_completed == completed)
+        );
+        stop(client).await;
+    }
+}

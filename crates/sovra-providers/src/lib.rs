@@ -10,4 +10,6 @@ pub use catalog::{
     test_connection,
 };
 pub use connection::{endpoint, validate_connection};
-pub use storage::{CredentialStore, ModelRepository, OsCredentialStore, SavedModels};
+pub use storage::{
+    CredentialStore, FileCredentialStore, ModelRepository, OsCredentialStore, SavedModels,
+};

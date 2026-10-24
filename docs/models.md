@@ -1,15 +1,36 @@
 # Model library
 
-Add your OpenRouter key under **Settings → AI connection → Add your key** (shown as
-**Manage key** once one is saved). The masked field supports saving/replacing,
-removing and checking the key through the OS credential store. Select the model you want to use in **Models** after saving.
+Start in **Models**. The setup screen explains what an AI model does and shows the
+next action for your saved setup:
 
-Open **Models** in the sidebar to browse OpenRouter, installed Ollama models and
+1. **Connect OpenRouter** opens the guided account-key form. Paste and save your
+   connection key; the installed app stores it in the OS credential store.
+2. **Next: choose an AI** returns to setup. When available, **Use this free model**
+   suggests a text-capable model with explicitly zero input, output and other listed
+   prices. Unknown prices and capabilities never qualify. Free services have usage
+   limits; no chat is sent or billed merely by selecting a model.
+3. After the runtime confirms your choice, **Go to Chat** opens the conversation.
+
+**Browse all models** opens the full library. Filters start closed; open them when
+you need specific capabilities. **Setup** returns to the guided screen. A saved
+selection is shown by name, and an empty selection is never described as a working
+default AI. Local/other connections are optional, separate paths; the online path
+requires no extra installed app.
+
+Use **Models → Browse all models** to browse OpenRouter, installed Ollama models and
 your own local or remote connections. The library refreshes in the background;
 saved results remain visible when a server is offline. **Refresh** requests current
 metadata. Connection cards identify live, cached, loading and failed discovery.
 
 ## Find and choose a model
+
+The setup flow follows [recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/):
+actions and explanations appear together, while technical filters stay in the full
+library. Free model availability and limits come from the live catalog and
+[OpenRouter's pricing documentation](https://openrouter.ai/pricing), checked on
+2026-10-24. Suggestions use listed prices and advertised text/reasoning support;
+they do not rank answer quality or infer speed from a model name. Unknown prices
+remain visible as unknown and never qualify for the free starting choice.
 
 OpenRouter discovery requests `/api/v1/models?output_modalities=all`. This includes
 the complete public catalog, including non-chat outputs; the default API response

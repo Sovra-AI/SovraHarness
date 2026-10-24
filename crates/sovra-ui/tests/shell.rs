@@ -436,3 +436,212 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
             .any(|cmd| matches!(cmd, Command::SaveChatThread { .. }))
     );
 }
+
+#[gpui_kit::test]
+fn interactive_system_tour_walks_through_all_five_tabs_and_state_aware_chat_setup(
+    cx: &mut TestAppContext,
+) {
+    use sovra_core::models::{ModelConnection, ModelEvent, ModelPreferences, ProviderKind};
+
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+
+    // Simulate user having already set an OpenRouter key, but no model selected yet.
+    let mut router = ModelConnection::new("router", ProviderKind::OpenRouter);
+    router.has_credential = true;
+    router.key_preview = "sk-or-••••1234".into();
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![router],
+            preferences: ModelPreferences::default(),
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // Top setup coach strip must show Step 2 (Pick Model), NOT Step 1 (Connect Key).
+        assert!(window.find("sovra-setup-coach-strip").visible());
+        assert!(window.find("setup-strip-pick-model").visible());
+        assert!(window.try_find("setup-strip-connect").is_none());
+
+        // Sending a message in Chat when key is set must ONLY show Step 2 model selection in chat.
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("Hi there!", window, cx);
+        });
+        window.render_frame(cx);
+        assert!(window.find("surface-setup-recommended-models").visible());
+        assert!(window.try_find("surface-setup-openrouter-key").is_none());
+
+        // Launch the 5-step Interactive System Tour from the chat card button.
+        window.click("surface-setup-start-tour", cx);
+        window.render_frame(cx);
+        assert!(window.find("sovra-tour-coach-bar").visible());
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
+        assert!(
+            window
+                .find(("nav-spotlight-badge", NavTab::Chat as usize))
+                .visible()
+        );
+
+        // Step 1 -> Step 2 (My AI's)
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::MyAis);
+        assert!(
+            window
+                .find(("nav-spotlight-badge", NavTab::MyAis as usize))
+                .visible()
+        );
+
+        // Step 2 -> Step 3 (Knowledge)
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Knowledge);
+
+        // Step 3 -> Step 4 (Schedules)
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Schedules);
+
+        // Step 4 -> Step 5 (Settings)
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Settings);
+
+        // Finish Tour -> returns to Chat and closes tour bar
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
+        assert!(window.try_find("sovra-tour-coach-bar").is_none());
+        assert!(shell.read(cx).workspace().onboarding_completed);
+    })
+    .unwrap();
+
+    let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(sent.iter().any(|cmd| matches!(
+        cmd,
+        Command::Models(sovra_core::models::ModelCommand::SetOnboardingCompleted {
+            completed: true
+        })
+    )));
+}
+
+#[gpui_kit::test]
+fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // Verify there is ONE unified sidebar containing both navigation and chat history,
+        // with "+ New Chat" at the top and the chat column directly adjacent to it.
+        let sidebar_bounds = window.find("sovra-sidebar").bounds();
+        let history_bounds = window.find("chat-history-rail").bounds();
+        let new_chat_bounds = window.find("chat-new-btn").bounds();
+        let nav_chat_bounds = window.find("nav-chat").bounds();
+        let chat_main_bounds = window.find("sovra-chat-main").bounds();
+
+        assert!(
+            history_bounds.left() >= sidebar_bounds.left()
+                && history_bounds.right() <= sidebar_bounds.right(),
+            "chat history must live inside the single unified sidebar"
+        );
+        assert!(
+            new_chat_bounds.top() < nav_chat_bounds.top(),
+            "+ New Chat must be at the top of the sidebar above navigation"
+        );
+        assert!(
+            (chat_main_bounds.left() - sidebar_bounds.right()).abs() < px(4.),
+            "chat column must sit directly beside the single sidebar with no second sidebar in between"
+        );
+
+        // Send first user prompt
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text(
+                "Can you help me design a zero-copy parser in Rust for HTTP/3 frames?",
+                window,
+                cx,
+            );
+        });
+        window.render_frame(cx);
+    })
+    .unwrap();
+
+    // Simulate assistant response completing
+    events
+        .send_blocking(Event::AgentChunk {
+            session_id: "personal-ai-setup".into(),
+            text: "Here is how to build a zero-copy HTTP/3 frame parser in Rust.".into(),
+        })
+        .unwrap();
+    events
+        .send_blocking(Event::AgentCompleted {
+            session_id: "personal-ai-setup".into(),
+        })
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+
+    // Verify the shell automatically requested an AI-generated title from the model
+    let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(
+        sent.iter().any(|cmd| matches!(
+            cmd,
+            Command::GenerateChatTitle { session_id, prompt, reply }
+                if session_id == "personal-ai-setup"
+                && prompt.contains("zero-copy parser")
+                && reply.contains("HTTP/3 frame parser")
+        )),
+        "completing the first exchange must dispatch Command::GenerateChatTitle"
+    );
+
+    // Deliver the model-generated title and verify it updates the sidebar history row
+    events
+        .send_blocking(Event::ChatTitleGenerated {
+            session_id: "personal-ai-setup".into(),
+            title: "\"Rust Zero-Copy HTTP/3 Parser\"".into(),
+        })
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().active_thread().unwrap().title,
+            "Rust Zero-Copy HTTP/3 Parser"
+        );
+        assert_eq!(
+            window.find(("chat-thread-row", 0usize)).label(),
+            Some("Open conversation Rust Zero-Copy HTTP/3 Parser")
+        );
+        // Also verify history stays visible in the unified sidebar when switching to another tab (e.g. Models)
+        window.click("nav-models", cx);
+        window.render_frame(cx);
+        assert!(window.find("chat-history-rail").visible());
+        assert_eq!(
+            window.find(("chat-thread-row", 0usize)).label(),
+            Some("Open conversation Rust Zero-Copy HTTP/3 Parser")
+        );
+    })
+    .unwrap();
+}

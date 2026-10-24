@@ -44,6 +44,73 @@ impl CredentialStore for OsCredentialStore {
     }
 }
 
+/// Dev-only store: keys live in 0600 files so `cargo xtask dev` rebuilds never
+/// re-trigger the macOS keychain password prompt (its ACL is bound to the binary's
+/// code signature, which changes on every build). Never selected in release builds.
+#[derive(Debug)]
+pub struct FileCredentialStore {
+    directory: PathBuf,
+}
+
+impl FileCredentialStore {
+    pub fn new(directory: PathBuf) -> Self {
+        Self { directory }
+    }
+
+    fn path(&self, id: &str) -> Result<PathBuf, ModelError> {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(ModelError("Invalid connection identifier.".into()));
+        }
+        Ok(self.directory.join(id))
+    }
+}
+
+impl CredentialStore for FileCredentialStore {
+    fn get(&self, id: &str) -> Result<ModelSecret, ModelError> {
+        match std::fs::read_to_string(self.path(id)?) {
+            Ok(secret) => Ok(ModelSecret(secret)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ModelSecret::default()),
+            Err(_) => Err(ModelError("Could not read the dev credential file.".into())),
+        }
+    }
+    fn set(&self, id: &str, secret: &ModelSecret) -> Result<(), ModelError> {
+        let path = self.path(id)?;
+        let write = || -> std::io::Result<()> {
+            std::fs::create_dir_all(&self.directory)?;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(false);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&self.directory, std::fs::Permissions::from_mode(0o700))?;
+                options.mode(0o600);
+            }
+            let mut file = options.open(path)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                // OpenOptions::mode only applies to new files. Tighten an existing
+                // file before replacing its contents too.
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            }
+            file.set_len(0)?;
+            file.write_all(secret.0.as_bytes())?;
+            file.sync_all()
+        };
+        write().map_err(|_| ModelError("Could not save the dev credential file.".into()))
+    }
+    fn delete(&self, id: &str) -> Result<(), ModelError> {
+        match std::fs::remove_file(self.path(id)?) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(ModelError(
+                "Could not remove the dev credential file.".into(),
+            )),
+        }
+    }
+}
+
 fn credential_error() -> ModelError {
     ModelError("Sovra couldn't open this computer's keychain. Unlock it and try again. Your key was not saved anywhere else.".into())
 }
@@ -212,6 +279,51 @@ fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), ModelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_credentials_roundtrip_without_exposing_values_or_accepting_paths() {
+        let path = std::env::temp_dir().join(format!("sovra-dev-key-test-{}", std::process::id()));
+        let store = FileCredentialStore::new(path.clone());
+        assert_eq!(store.get("openrouter").unwrap().0, "");
+        store
+            .set("openrouter", &ModelSecret("test-value".into()))
+            .unwrap();
+        assert_eq!(store.get("openrouter").unwrap().0, "test-value");
+        assert!(!format!("{store:?}").contains("test-value"));
+        for id in ["", "../escape", "/absolute", "other/key"] {
+            assert!(store.get(id).is_err());
+            assert!(store.set(id, &ModelSecret("test-value".into())).is_err());
+            assert!(store.delete(id).is_err());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(
+                path.join("openrouter"),
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+            store
+                .set("openrouter", &ModelSecret("replacement".into()))
+                .unwrap();
+            assert_eq!(
+                std::fs::metadata(path.join("openrouter"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        store.delete("openrouter").unwrap();
+        store.delete("openrouter").unwrap();
+        assert_eq!(store.get("openrouter").unwrap().0, "");
+        std::fs::remove_dir(path).unwrap();
+    }
 
     #[test]
     fn preferences_saved_before_appearance_existed_load_as_dark() {

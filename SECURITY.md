@@ -14,8 +14,12 @@ outside Sovra at any point.
 
 ## Handling secrets
 
-- API keys and credentials live in the **OS keychain** (via `keyring`),
-  never in files, environment files, logs, or commit history.
+- Installed/release builds keep API keys in the **OS keychain** (via `keyring`).
+  The user-approved exception is debug development with `SOVRA_DEV=1`, which uses
+  separate plaintext files under the app data directory's `dev-credentials/`.
+  Unix saves enforce directory mode 0700 and file mode 0600. Release builds ignore
+  the flag. No key is copied automatically between stores or included in packages.
+  Secrets must never enter repository files, logs, or commit history.
 - Signing and notarization credentials exist only as GitHub Actions
   secrets consumed by `.github/workflows/release.yml`.
 - If a secret is ever committed, treat it as compromised: rotate it
@@ -28,5 +32,7 @@ outside Sovra at any point.
   through the root `[workspace.dependencies]` and vetted by `cargo-deny`
   (licenses, advisories) in CI.
 - `unsafe` is forbidden across the workspace.
-- The Rust toolchain is pinned (`rust-toolchain.toml`); releases are built
-  from CI, signed, and distributed through Velopack auto-update.
+- The Rust toolchain is pinned (`rust-toolchain.toml`); the release workflow
+  packages with Velopack and signs when signing credentials are configured.
+  Unsigned local installers are for testing; automatic update checks are not yet
+  implemented in the app.
