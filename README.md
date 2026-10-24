@@ -50,11 +50,10 @@ Development builds use a separate plaintext key store in the app data directory
 when `SOVRA_DEV=1` is set by the runner. Release builds always use the OS keychain.
 See the development guide for storage and permission details.
 
-The **Models** tab starts with guided setup: connect your account, choose an AI,
-then go to Chat. When available, it offers an explicitly free online model to try.
-**Browse all models** opens the complete catalog, optional Ollama connections,
-favorites and comparison; filters stay closed until needed. Setup, authentication
-and capability details: [Model library](docs/models.md).
+The **Models** tab starts with a 3-step guided setup (`1. Connect AI Service` → `2. Pick Your Model` → `3. Chat & System Tour`). When an API key is already saved, Step 1 collapses into a green confirmation banner and only Step 2 is shown, with curated recommendation cards (`★ Best Free Starter`, `⚡ Best Everyday All-Rounder`, `🧠 Best Step-by-Step Thinker`) alongside a 1-click **Get Free Key at openrouter.ai ↗** browser launcher.
+**Browse all models** opens the complete catalog with a direct 1-click **Use Model** / **✓ Active** action button on every row, optional Ollama connections, favorites and comparison; filters stay closed until needed. Setup, authentication and capability details: [Model library](docs/models.md).
+
+A single **Unified Left Sidebar** (`sidebar.rs` + `chat_history_view.rs`) houses **`+ New Chat`** at the top, primary navigation (`Chat`, `My AI's`, `Knowledge`, `Models`, `Schedules`, `Settings`), a 1-click **Guided System Tour** launcher, instant chat search, `Chats | Scheduled` filter pills, and date-grouped conversation history (`Pinned`, `Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`). After the first exchange in any conversation, the active LLM automatically generates a concise 3–6 word title (`Command::GenerateChatTitle` / `Event::ChatTitleGenerated`), and each row includes a 1-click **AI Title** action alongside `Pin`, `Rename`, and `Delete`.
 
 The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
 - **Automatic (recommended):** a fast decision engine (**Laya**, **OpenJev / TypeSafe Jev**,

@@ -1,17 +1,12 @@
 # Model library
 
-Start in **Models**. The setup screen explains what an AI model does and shows the
-next action for your saved setup:
+Start in **Models**. The setup screen uses a state-aware 3-step stepper (`Step 1 · Connect AI Service` → `Step 2 · Pick Your Model` → `Step 3 · Chat & System Tour`) that only shows what is still needed for your saved setup:
 
-1. **Connect OpenRouter** opens the guided account-key form. Paste and save your
-   connection key; the installed app stores it in the OS credential store.
-2. **Next: choose an AI** returns to setup. When available, **Use this free model**
-   suggests a text-capable model with explicitly zero input, output and other listed
-   prices. Unknown prices and capabilities never qualify. Free services have usage
-   limits; no chat is sent or billed merely by selecting a model.
-3. After the runtime confirms your choice, **Go to Chat** opens the conversation.
+1. **Connect OpenRouter** opens the guided account-key form (with a 1-click **Get Free Key at openrouter.ai ↗** browser button). Paste and save your connection key; release builds store it in the OS credential store (`keyring`), and a masked preview (`sk-or-••••1234`) stays visible so you can verify, test, replace, or remove it anytime.
+2. **Step 2 · Pick Your AI Model**: Once a key is connected, Step 1 collapses into a confirmation badge (`✓ Step 1 Complete`) and the setup screen highlights up to three recommendation cards derived from live catalog prices and capabilities (**Best Free Starter**, **Best Everyday All-Rounder**, and **Best Step-by-Step Thinker**). Unknown prices and capabilities never qualify for the free starter choice.
+3. **Go to Chat & Interactive System Tour**: After the runtime confirms your choice, **Go to Chat →** opens the conversation, and **Take 1-Minute System Tour** launches the 5-step interactive walkthrough across `Chat`, `My AI's`, `Knowledge`, `Schedules`, and `Settings`.
 
-**Browse all models** opens the full library. Filters start closed; open them when
+**Browse all models** opens the full library. Every row in the catalog includes a direct **Use Model** / **✓ Active** / **Add Key** button on the right for 1-click activation, while clicking the row title opens the inspection panel. Filters start closed; open them when
 you need specific capabilities. **Setup** returns to the guided screen. A saved
 selection is shown by name, and an empty selection is never described as a working
 default AI. Local/other connections are optional, separate paths; the online path
