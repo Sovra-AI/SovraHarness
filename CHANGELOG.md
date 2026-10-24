@@ -33,6 +33,9 @@ move them under a version heading when the tag is cut.
   typing, the sidebar and the elapsed timer reuse its last frame instead of laying out
   every visible message. Measured with a long conversation on screen: idle CPU after
   a reply fell from ~20% to ~7% of a core (the cost of the cursor blink alone).
+  GPUI frame-time overlay, release builds, 40 earlier replies plus a 3,400-token
+  streamed reply: frames after the reply drop from 72.8 ms to 3.6 ms, and the slowest
+  10% / 1% of frames late in the stream from 71.1 / 74.7 ms to 40.9 / 48.7 ms.
 - Highlight code blocks with `gpui-kit`'s `syntect` feature (pure-Rust regexes,
   cached per unchanged block).
 - New chats open on a `SovraSRX`-style welcome: a greeting, a plain-language subtitle and
