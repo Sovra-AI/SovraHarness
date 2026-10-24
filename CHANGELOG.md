@@ -29,6 +29,10 @@ move them under a version heading when the tag is cut.
 - Streamed tokens are coalesced per frame (8ms) before they reach the UI, so each
   frame costs at most one state update and one Markdown parse. Measured on a
   20,000-chunk reply after 40 long messages: the core reducer went from 327ms to 0.7ms.
+- Render the conversation as its own cached GPUI view: composer cursor blinks,
+  typing, the sidebar and the elapsed timer reuse its last frame instead of laying out
+  every visible message. Measured with a long conversation on screen: idle CPU after
+  a reply fell from ~20% to ~7% of a core (the cost of the cursor blink alone).
 - Highlight code blocks with `gpui-kit`'s `syntect` feature (pure-Rust regexes,
   cached per unchanged block).
 - New chats open on a `SovraSRX`-style welcome: a greeting, a plain-language subtitle and
@@ -51,6 +55,12 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- Sending in a conversation restored at startup no longer blanks earlier replies or
+  shows one reply's text in place of another: new message ids skip ids already in
+  the conversation, and chat rendering state is keyed by position, so duplicate ids
+  saved by older builds still render correctly.
+- Code blocks use the dark highlight theme in dark mode (they used the light one),
+  and reasoning text is muted.
 - Memory recall's "newest first" order no longer flips when two facts are saved in
   the same millisecond: each store hands out strictly increasing fact timestamps.
 - Ensure every clickable button (`design::button`, `design::primary_button`), checkbox (`Checkbox`), dropdown (`Select`), and custom interactive element across `sovra-ui` displays a pointer cursor (`CursorStyle::PointingHand`), enforced by `xtask check-styles`.

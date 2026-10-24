@@ -38,7 +38,7 @@ pub struct Shell {
     focus_handle: FocusHandle,
     history_compact: bool,
     history_overlay_open: bool,
-    composer_input: Entity<TextareaState>,
+    pub(crate) composer_input: Entity<TextareaState>,
     search_input: Entity<InputState>,
     history_search_input: Entity<InputState>,
     rename_thread_input: Entity<InputState>,
@@ -51,6 +51,9 @@ pub struct Shell {
     sim_route_input: Entity<InputState>,
     my_ais_advanced_open: bool,
     models: Entity<crate::ModelsView>,
+    /// The conversation, rendered as a cached view: composer cursor blinks, sidebar
+    /// and timer updates reuse its last frame instead of laying out every message.
+    pub(crate) transcript: Entity<crate::chat_view::Transcript>,
     /// Redraws once a second while a turn runs, for the elapsed timer.
     turn_ticker: Option<Task<()>>,
     _events: Task<()>,
@@ -203,13 +206,14 @@ impl Shell {
                     if should_persist_thread {
                         shell.persist_active_thread(cx);
                     }
-                    cx.notify();
+                    shell.refresh(cx);
                 });
                 if applied.is_err() {
                     break; // view dropped
                 }
             }
         });
+        let shell_handle = cx.entity().downgrade();
         Self {
             state: WorkspaceState::default(),
             chat: ChatPresentation::new(cx),
@@ -233,8 +237,20 @@ impl Shell {
             my_ais_advanced_open: false,
             models,
             turn_ticker: None,
+            transcript: cx.new(|_| crate::chat_view::Transcript::new(shell_handle)),
             _events: task,
         }
+    }
+
+    /// State changed: redraw the shell and the cached conversation view.
+    pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.refresh_transcript(cx);
+        cx.notify();
+    }
+
+    /// Only the conversation changed (a parse landed, a timer ticked, it scrolled).
+    pub(crate) fn refresh_transcript(&self, cx: &mut Context<Self>) {
+        self.transcript.update(cx, |_, cx| cx.notify());
     }
 
     pub fn status(&self) -> &RuntimeStatus {
@@ -257,7 +273,7 @@ impl Shell {
                 .0
                 .send(Command::Models(sovra_core::models::ModelCommand::Load));
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn models(&self) -> Entity<crate::ModelsView> {
@@ -267,13 +283,13 @@ impl Shell {
     pub fn set_routing_mode(&mut self, mode: SelectionMode, cx: &mut Context<Self>) {
         self.state.set_routing_mode(mode);
         self.sync_routing_to_runtime(cx);
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn set_decision_backend(&mut self, backend: DecisionBackend, cx: &mut Context<Self>) {
         self.state.set_decision_backend(backend);
         self.sync_routing_to_runtime(cx);
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn cycle_specialist_tier(
@@ -293,12 +309,12 @@ impl Shell {
                 model_override,
                 preferred_tier: next_tier,
             });
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn toggle_my_ais_advanced(&mut self, cx: &mut Context<Self>) {
         self.my_ais_advanced_open = !self.my_ais_advanced_open;
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn simulate_route_from_input(&mut self, cx: &mut Context<Self>) {
@@ -313,7 +329,7 @@ impl Shell {
             .global::<RuntimeClient>()
             .0
             .send(Command::SimulateRoute { prompt });
-        cx.notify();
+        self.refresh(cx);
     }
 
     fn sync_routing_to_runtime(&self, cx: &mut Context<Self>) {
@@ -327,12 +343,12 @@ impl Shell {
     pub fn submit_login(&mut self, cx: &mut Context<Self>) {
         let email = self.login_email_input.read(cx).value().to_string();
         self.state.login(&email);
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn logout(&mut self, cx: &mut Context<Self>) {
         self.state.logout();
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn submit_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -356,7 +372,7 @@ impl Shell {
         self.composer_input.update(cx, |input, cx| {
             input.set_value(owned, window, cx);
         });
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn send_prompt_text(&mut self, prompt: &str, _window: &mut Window, cx: &mut Context<Self>) {
@@ -367,7 +383,7 @@ impl Shell {
             self.dispatch_runtime_prompt(dispatched, cx);
         }
         self.persist_active_thread(cx);
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn start_new_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -377,7 +393,7 @@ impl Shell {
         self.composer_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn select_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
@@ -386,12 +402,12 @@ impl Shell {
             self.history_overlay_open = false;
             self.chat.follow_latest();
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn set_history_filter(&mut self, filter: ChatHistoryFilter, cx: &mut Context<Self>) {
         self.state.set_history_filter(filter);
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn toggle_history_rail(&mut self, cx: &mut Context<Self>) {
@@ -400,7 +416,7 @@ impl Shell {
         } else {
             self.state.toggle_history_collapsed();
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn toggle_thread_pin(&mut self, session_id: &str, cx: &mut Context<Self>) {
@@ -412,7 +428,7 @@ impl Shell {
                     thread: Box::new(updated),
                 });
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn begin_rename_thread(
@@ -426,7 +442,7 @@ impl Shell {
                 input.set_value(current_title, window, cx);
             });
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn commit_rename_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
@@ -439,7 +455,7 @@ impl Shell {
                     thread: Box::new(updated),
                 });
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn delete_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
@@ -450,17 +466,17 @@ impl Shell {
                 .0
                 .send(Command::DeleteChatThread { session_id: owned });
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn toggle_schedule_form(&mut self, cx: &mut Context<Self>) {
         self.schedule_form_open = !self.schedule_form_open;
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn open_schedule_form(&mut self, cx: &mut Context<Self>) {
         self.schedule_form_open = true;
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn submit_new_schedule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -483,12 +499,12 @@ impl Shell {
             });
             self.schedule_form_open = false;
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn delete_schedule(&mut self, schedule_id: &str, cx: &mut Context<Self>) {
         self.state.delete_schedule(schedule_id);
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub(crate) fn persist_active_thread(&self, cx: &mut Context<Self>) {
@@ -511,12 +527,12 @@ impl Shell {
             .global::<RuntimeClient>()
             .0
             .send(Command::InterruptSession { session_id });
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn preview_personal_ai(&mut self, cx: &mut Context<Self>) {
         self.state.activate_preview_ai();
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn handle_config_card_click(&mut self, key: &str, cx: &mut Context<Self>) {
@@ -526,12 +542,12 @@ impl Shell {
             "knowledge" => self.state.select_tab(NavTab::Knowledge),
             _ => {}
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn toggle_schedule(&mut self, schedule_id: &str, cx: &mut Context<Self>) {
         self.state.toggle_schedule(schedule_id);
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn run_schedule_in_chat(
@@ -544,7 +560,7 @@ impl Shell {
             self.dispatch_runtime_prompt(dispatched, cx);
             self.persist_active_thread(cx);
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     fn dispatch_runtime_prompt(&self, prompt: String, cx: &mut Context<Self>) {
@@ -621,7 +637,7 @@ impl Shell {
                     .await;
                 let running = this.update(cx, |shell, cx| {
                     if shell.state.is_generating {
-                        cx.notify();
+                        shell.refresh_transcript(cx);
                     }
                     shell.state.is_generating
                 });
@@ -663,48 +679,49 @@ impl Shell {
                         cx,
                     )
                     .into_any_element(),
-                    NavTab::Chat => {
-                        self.chat.sync(&self.state, cx);
-                        h_flex()
-                            .relative()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .h_full()
-                            .overflow_hidden()
-                            .child(render_chat_history_rail(
-                                &self.state,
-                                &self.history_search_input,
-                                &self.rename_thread_input,
-                                self.history_compact || self.state.history_collapsed,
-                                cx,
-                            ))
-                            .child(render_chat_column(
-                                &self.state,
-                                &self.composer_input,
-                                &self.chat,
-                                cx,
-                            ))
-                            .children((self.history_compact && self.history_overlay_open).then(
-                                || {
-                                    div().absolute().top_0().left_0().h_full().occlude().child(
-                                        render_chat_history_rail(
-                                            &self.state,
-                                            &self.history_search_input,
-                                            &self.rename_thread_input,
-                                            false,
-                                            cx,
-                                        ),
-                                    )
-                                },
-                            ))
-                            .into_any_element()
-                    }
-                    NavTab::Knowledge => {
-                        self.chat.sync(&self.state, cx);
-                        render_chat_column(&self.state, &self.composer_input, &self.chat, cx)
-                            .into_any_element()
-                    }
+                    NavTab::Chat => h_flex()
+                        .relative()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .h_full()
+                        .overflow_hidden()
+                        .child(render_chat_history_rail(
+                            &self.state,
+                            &self.history_search_input,
+                            &self.rename_thread_input,
+                            self.history_compact || self.state.history_collapsed,
+                            cx,
+                        ))
+                        .child(render_chat_column(
+                            &self.state,
+                            &self.composer_input,
+                            &self.chat,
+                            &self.transcript,
+                            cx,
+                        ))
+                        .children(
+                            (self.history_compact && self.history_overlay_open).then(|| {
+                                div().absolute().top_0().left_0().h_full().occlude().child(
+                                    render_chat_history_rail(
+                                        &self.state,
+                                        &self.history_search_input,
+                                        &self.rename_thread_input,
+                                        false,
+                                        cx,
+                                    ),
+                                )
+                            }),
+                        )
+                        .into_any_element(),
+                    NavTab::Knowledge => render_chat_column(
+                        &self.state,
+                        &self.composer_input,
+                        &self.chat,
+                        &self.transcript,
+                        cx,
+                    )
+                    .into_any_element(),
                 };
 
                 let mut body = h_flex()

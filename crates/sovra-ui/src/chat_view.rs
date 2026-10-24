@@ -21,9 +21,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AppContext as _, ClipboardItem, Context, Entity, FollowMode, InteractiveElement as _,
-    IntoElement, ListAlignment, ListState, ParentElement as _, Pixels, Role, ScrollHandle,
-    StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, div, list, px,
-    relative,
+    IntoElement, ListAlignment, ListState, ParentElement as _, Pixels, Render, Role, ScrollHandle,
+    StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription,
+    TestSupportExt as _, WeakEntity, Window, div, list, px, relative,
 };
 use sovra_core::{AgUiWidget, ChatMessage, MessageRole, ResponseModel, WorkspaceState};
 
@@ -33,6 +33,9 @@ use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::{Shell, logo};
 
 struct MarkdownMessage {
+    /// The message this state was built for; a different message at the same
+    /// position rebuilds it.
+    id: String,
     /// Bytes of `ChatMessage::text` already handed to `state`. Messages only grow
     /// while streaming, so the new suffix is appended without copying or comparing
     /// the text received so far.
@@ -54,9 +57,11 @@ struct ThinkingView {
 
 pub(crate) struct ChatPresentation {
     pub(crate) list: ListState,
-    markdown: HashMap<String, MarkdownMessage>,
+    /// Keyed by position: a conversation only grows, and saved history can hold
+    /// duplicate message ids from older builds.
+    markdown: HashMap<usize, MarkdownMessage>,
     /// Reasoning disclosures the reader opened (or closed while streaming).
-    pub(crate) thinking_toggled: HashSet<String>,
+    pub(crate) thinking_toggled: HashSet<usize>,
     session_id: String,
     /// When the current turn started, for the "Thinking… 12s" timer.
     pub(crate) turn_started: Option<Instant>,
@@ -97,7 +102,7 @@ fn markdown_view(
     // Let ListState preserve the reading position or follow the newly measured tail.
     let changed = cx.observe(&view, move |shell, _, cx| {
         shell.chat.list.remeasure_items(index..index + 1);
-        cx.notify();
+        shell.refresh_transcript(cx);
     });
     (view, changed)
 }
@@ -107,7 +112,7 @@ impl ChatPresentation {
         // Rows carry SovraSRX's 8px vertical padding; the list adds only a small gap.
         let list = ListState::new(0, ListAlignment::Top, design::tokens(cx).space.compact);
         list.set_follow_mode(FollowMode::Tail);
-        list.set_scroll_handler(cx.listener(|_, _, _, cx| cx.notify()));
+        list.set_scroll_handler(cx.listener(|shell, _, _, cx| shell.refresh(cx)));
         Self {
             list,
             markdown: HashMap::new(),
@@ -146,7 +151,11 @@ impl ChatPresentation {
             if message.role != MessageRole::Assistant {
                 continue;
             }
-            if let Some(markdown) = self.markdown.get_mut(&message.id) {
+            if let Some(markdown) = self
+                .markdown
+                .get_mut(&index)
+                .filter(|markdown| markdown.id == message.id)
+            {
                 let mut changed =
                     feed(&markdown.state, &mut markdown.answer_len, &message.text, cx);
                 match &mut markdown.thinking {
@@ -183,8 +192,9 @@ impl ChatPresentation {
                     }
                 });
                 self.markdown.insert(
-                    message.id.clone(),
+                    index,
                     MarkdownMessage {
+                        id: message.id.clone(),
                         answer_len: message.text.len(),
                         widgets: message.widgets.clone(),
                         model: message.model.clone(),
@@ -240,14 +250,95 @@ fn column(chat: &ChatPresentation, cx: &Context<Shell>) -> gpui_kit::Div {
     }
 }
 
+/// The conversation list, rendered by its own entity so `Shell` can embed it with
+/// [`Entity::cached`]: GPUI then reuses its last layout and paint unless
+/// `Shell::refresh_transcript` notifies it, instead of re-laying-out every visible
+/// message whenever the composer cursor blinks or the sidebar changes.
+pub(crate) struct Transcript {
+    shell: WeakEntity<Shell>,
+    #[cfg(test)]
+    renders: usize,
+}
+
+impl Transcript {
+    pub(crate) fn new(shell: WeakEntity<Shell>) -> Self {
+        Self {
+            shell,
+            #[cfg(test)]
+            renders: 0,
+        }
+    }
+}
+
+impl Render for Transcript {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        {
+            self.renders += 1;
+        }
+        let Some(shell) = self.shell.upgrade() else {
+            return div().into_any_element();
+        };
+        shell.update(cx, |shell, cx| {
+            let Shell { chat, state, .. } = shell;
+            chat.sync(state, cx);
+            render_transcript(&shell.chat, cx).into_any_element()
+        })
+    }
+}
+
+fn render_transcript(chat: &ChatPresentation, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    div()
+        .id("chat-scroll-area")
+        .role(Role::Log)
+        .aria_label("Conversation")
+        .test_support()
+        .relative()
+        .size_full()
+        .overflow_hidden()
+        .child(
+            list(
+                chat.list.clone(),
+                cx.processor(|shell, index, _, cx| {
+                    render_row(&shell.state, &shell.chat, index, cx).into_any_element()
+                }),
+            )
+            .size_full(),
+        )
+        .children((!chat.list.is_following_tail()).then(|| {
+            h_flex()
+                .absolute()
+                .bottom(t.space.small)
+                .w_full()
+                .justify_center()
+                .child(
+                    design::button("chat-jump-latest", "Jump to latest", cx)
+                        .icon(IconName::ChevronDown)
+                        .small()
+                        .sovra_surface(Surface::Glass, cx)
+                        .rounded(t.radius.pill)
+                        .on_click(cx.listener(|shell, _, _, cx| {
+                            shell.chat.follow_latest();
+                            shell.refresh(cx);
+                        })),
+                )
+        }))
+}
+
 pub(crate) fn render_chat_column(
     state: &WorkspaceState,
     composer_input: &Entity<TextareaState>,
     chat: &ChatPresentation,
+    transcript: &Entity<Transcript>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let welcome = state.messages.is_empty() && !state.is_generating;
+    let mut area = StyleRefinement::default().w_full().min_h_0();
+    // The empty list yields its height to the welcome block.
+    area.flex_grow = Some(if welcome { 0. } else { 1. });
+    area.flex_basis = Some(px(0.).into());
     v_flex()
         .id("sovra-chat-main")
         .flex_1()
@@ -258,47 +349,7 @@ pub(crate) fn render_chat_column(
         .pb(t.space.small)
         .overflow_hidden()
         .children(welcome.then(|| render_welcome(state, cx)))
-        .child(
-            div()
-                .id("chat-scroll-area")
-                .role(Role::Log)
-                .aria_label("Conversation")
-                .test_support()
-                .relative()
-                // The empty list yields its height to the welcome block.
-                .flex_grow(if welcome { 0. } else { 1. })
-                .flex_basis(px(0.))
-                .min_h_0()
-                .w_full()
-                .overflow_hidden()
-                .child(
-                    list(
-                        chat.list.clone(),
-                        cx.processor(|shell, index, _, cx| {
-                            render_row(&shell.state, &shell.chat, index, cx).into_any_element()
-                        }),
-                    )
-                    .size_full(),
-                )
-                .children((!chat.list.is_following_tail()).then(|| {
-                    h_flex()
-                        .absolute()
-                        .bottom(t.space.small)
-                        .w_full()
-                        .justify_center()
-                        .child(
-                            design::button("chat-jump-latest", "Jump to latest", cx)
-                                .icon(IconName::ChevronDown)
-                                .small()
-                                .sovra_surface(Surface::Glass, cx)
-                                .rounded(t.radius.pill)
-                                .on_click(cx.listener(|shell, _, _, cx| {
-                                    shell.chat.follow_latest();
-                                    cx.notify();
-                                })),
-                        )
-                })),
-        )
+        .child(transcript.clone().cached(area))
         .child(
             h_flex()
                 .w_full()
@@ -558,7 +609,7 @@ fn render_thinking(
     let t = design::tokens(cx);
     // Open while the model is reasoning, folded once the answer starts — unless the
     // reader chose otherwise.
-    let open = live != chat.thinking_toggled.contains(&msg.id);
+    let open = live != chat.thinking_toggled.contains(&index);
     let label = if live {
         format!("Thinking… {}", turn_elapsed(chat))
     } else {
@@ -567,7 +618,6 @@ fn render_thinking(
             |ms| format!("Thought for {}", elapsed_label(ms.max(1000))),
         )
     };
-    let id = msg.id.clone();
     let mut block = v_flex()
         .id(("thinking", index))
         .w_full()
@@ -604,8 +654,8 @@ fn render_thinking(
                             }),
                     )
                     .on_click(cx.listener(move |shell, _, _, cx| {
-                        if !shell.chat.thinking_toggled.remove(&id) {
-                            shell.chat.thinking_toggled.insert(id.clone());
+                        if !shell.chat.thinking_toggled.remove(&index) {
+                            shell.chat.thinking_toggled.insert(index);
                         }
                         shell.chat.list.remeasure_items(index..index + 1);
                         cx.notify();
@@ -628,11 +678,11 @@ fn render_thinking(
                 .border_color(t.chat.thinking_rule)
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
+                // No explicit style: the view then inherits this muted text colour.
                 .child(
                     TextView::new(&thinking.state)
                         .selectable(true)
-                        .scrollable(false)
-                        .style(design::markdown_style(cx)),
+                        .scrollable(false),
                 ),
         );
     }
@@ -649,7 +699,7 @@ fn render_assistant_message(
     let t = design::tokens(cx);
     let markdown = chat
         .markdown
-        .get(&msg.id)
+        .get(&index)
         .expect("assistant Markdown is synchronized before rendering");
     let copy_text = msg.text.clone();
     let answering = !msg.text.is_empty();
@@ -669,6 +719,8 @@ fn render_assistant_message(
     if answering {
         content = content.child(
             div()
+                .id(("assistant-answer", index))
+                .test_support()
                 .w_full()
                 .min_w_0()
                 .sovra_text(TextRole::Reading, cx)
@@ -826,6 +878,172 @@ mod tests {
         .unwrap();
         assert!(std::iter::from_fn(|| commands.try_recv().ok())
             .any(|command| matches!(command, sovra_core::Command::RunPrompt { prompt, .. } if prompt.starts_with("Help me write"))));
+    }
+
+    #[gpui_kit::test]
+    fn sending_in_a_restored_conversation_keeps_earlier_answers_visible(cx: &mut TestAppContext) {
+        let (client, _commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let mut thread = sovra_core::ChatThread::new("restored", sovra_core::Timestamp(1));
+        thread
+            .messages
+            .push(ChatMessage::user("msg-user-1", "Hi", "Earlier"));
+        let mut reply = ChatMessage::assistant(
+            "msg-assistant-2",
+            "An earlier **answer** that must stay visible.",
+            "Earlier",
+            Vec::new(),
+        );
+        reply.thinking = "Earlier reasoning.".into();
+        reply.thinking_ms = Some(5_000);
+        thread.messages.push(reply);
+        // Older builds could save two replies under one id.
+        thread
+            .messages
+            .push(ChatMessage::user("msg-user-3", "And?", "Earlier"));
+        thread.messages.push(ChatMessage::assistant(
+            "msg-assistant-2",
+            "A different second answer.",
+            "Earlier",
+            Vec::new(),
+        ));
+        events
+            .send_blocking(Event::ChatHistoryLoaded {
+                threads: vec![thread],
+            })
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.select_thread("restored", cx));
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let before = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window
+                    .find(("assistant-answer", 1usize))
+                    .bounds()
+                    .size
+                    .height
+            })
+            .unwrap();
+        assert!(before > px(10.), "restored answer renders: {before:?}");
+        shell.read_with(cx, |shell, cx| {
+            let text = |index: usize| {
+                shell.chat.markdown[&index]
+                    .state
+                    .read(cx)
+                    .rendered_text()
+                    .as_str()
+                    .to_owned()
+            };
+            assert!(text(1).contains("earlier answer"));
+            assert!(text(3).contains("different second answer"));
+        });
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.send_prompt_text("Again", window, cx));
+            window.render_frame(cx);
+        })
+        .unwrap();
+        events
+            .send_blocking(Event::AgentThinkingChunk {
+                session_id: "restored".into(),
+                text: "New reasoning".into(),
+                elapsed_ms: 300,
+            })
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let after = window
+                .find(("assistant-answer", 1usize))
+                .bounds()
+                .size
+                .height;
+            assert_eq!(after, before, "earlier answer collapsed after sending");
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn typing_does_not_rerender_the_conversation_but_new_output_does(cx: &mut TestAppContext) {
+        let (client, _commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let session = shell.read_with(cx, |shell, _| shell.state.session_id.clone());
+        let renders = |cx: &mut TestAppContext| {
+            shell.read_with(cx, |shell, cx| shell.transcript.read(cx).renders)
+        };
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.send_prompt_text("Hi", window, cx));
+            window.render_frame(cx);
+        })
+        .unwrap();
+        events
+            .send_blocking(Event::AgentChunk {
+                session_id: session.clone(),
+                text: "Hello there.".into(),
+            })
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        // `render_frame` forces a full refresh, which bypasses view caches; real
+        // frames (`draw`) only redraw what was notified.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.draw(cx).clear(cx);
+        })
+        .unwrap();
+        let settled = renders(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            for draft in ["t", "ty", "typing a draft"] {
+                let input = shell.read(cx).composer_input.clone();
+                input.update(cx, |input, cx| input.set_value(draft, window, cx));
+                window.draw(cx).clear(cx);
+            }
+        })
+        .unwrap();
+        assert_eq!(
+            renders(cx),
+            settled,
+            "composer typing reused the cached conversation"
+        );
+        events
+            .send_blocking(Event::AgentChunk {
+                session_id: session,
+                text: " More.".into(),
+            })
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        assert!(
+            renders(cx) > settled,
+            "new output re-renders the conversation"
+        );
     }
 
     #[test]
@@ -1021,8 +1239,10 @@ mod tests {
             window.render_frame(cx);
             let view = shell.read(cx);
             assert!(view.chat.list.is_following_tail());
-            let last = view.state.messages.last().unwrap();
-            let rendered = view.chat.markdown[&last.id].state.read(cx).rendered_text();
+            let rendered = view.chat.markdown[&(view.state.messages.len() - 1)]
+                .state
+                .read(cx)
+                .rendered_text();
             assert!(rendered.as_str().contains("Heading"));
             assert!(rendered.as_str().contains("Bold"));
             assert!(rendered.as_str().contains("let answer = 42;"));

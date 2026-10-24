@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use gpui_kit::App;
 use gpui_kit::base::{Easing, Spring};
-use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
+use gpui_kit::component::{Theme, ThemeConfig, ThemeMode, highlighter::HighlightTheme};
 
 pub use styles::{
     SovraStyled, Surface, TextRole, button, markdown_style, primary_button, round_icon_button,
@@ -37,6 +37,16 @@ pub(crate) fn init(cx: &mut App) {
             radius_lg: Some(22),
             shadow: Some(true),
             colors: palette::config(mode),
+            // Without a mode-specific style the component keeps its light code theme,
+            // which is unreadable on the dark canvas.
+            highlight: Some(
+                match mode {
+                    ThemeMode::Dark => HighlightTheme::default_dark(),
+                    ThemeMode::Light => HighlightTheme::default_light(),
+                }
+                .style
+                .clone(),
+            ),
             ..ThemeConfig::default()
         })
     };

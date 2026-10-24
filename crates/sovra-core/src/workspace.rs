@@ -547,8 +547,7 @@ impl WorkspaceState {
     }
 
     fn append_user_turn(&mut self, prompt: &str) {
-        self.next_msg_seq += 1;
-        let user_id = format!("msg-user-{}", self.next_msg_seq);
+        let user_id = self.fresh_message_id("user");
         self.messages
             .push(ChatMessage::user(user_id, prompt, "Just now"));
         self.is_generating = true;
@@ -711,6 +710,19 @@ impl WorkspaceState {
         }
     }
 
+    /// Message ids key per-message UI state, so they must be unique within the
+    /// conversation. The counter restarts every launch while restored messages keep
+    /// their old ids, so skip any id that is already taken.
+    fn fresh_message_id(&mut self, role: &str) -> String {
+        loop {
+            self.next_msg_seq += 1;
+            let id = format!("msg-{role}-{}", self.next_msg_seq);
+            if !self.messages.iter().any(|message| message.id == id) {
+                return id;
+            }
+        }
+    }
+
     fn append_or_extend_assistant(&mut self, chunk: &str) {
         if let Some(last) = self.messages.last_mut()
             && last.role == crate::agui::MessageRole::Assistant
@@ -719,8 +731,7 @@ impl WorkspaceState {
             last.text.push_str(chunk);
             return;
         }
-        self.next_msg_seq += 1;
-        let id = format!("msg-assistant-{}", self.next_msg_seq);
+        let id = self.fresh_message_id("assistant");
         self.messages
             .push(ChatMessage::assistant(id, chunk, "Just now", Vec::new()));
     }
@@ -743,8 +754,7 @@ impl WorkspaceState {
             }
             last.widgets.push(widget);
         } else {
-            self.next_msg_seq += 1;
-            let id = format!("msg-assistant-{}", self.next_msg_seq);
+            let id = self.fresh_message_id("assistant");
             self.messages.push(ChatMessage::assistant(
                 id,
                 String::new(),
@@ -851,6 +861,54 @@ mod tests {
         assert_eq!(state.active_thread().unwrap().messages.len(), 1);
         state.apply_event(&Event::AgentCompleted { session_id });
         assert_eq!(state.active_thread().unwrap().messages, state.messages);
+    }
+
+    #[test]
+    fn replies_in_a_restored_conversation_never_reuse_message_ids() {
+        // A fresh app session restarts the id counter; restored messages already
+        // used low ids, and a reused id made the UI overwrite an old reply's text.
+        // Every launch starts in the same session id, so history restores straight
+        // into the current conversation (not via `select_thread`).
+        let mut state = WorkspaceState::default();
+        let session = state.session_id.clone();
+        let mut thread = ChatThread::new(session.clone(), Timestamp(1));
+        thread
+            .messages
+            .push(ChatMessage::user("msg-user-1", "Hi", "Earlier"));
+        thread.messages.push(ChatMessage::assistant(
+            "msg-assistant-2",
+            "Old answer",
+            "Earlier",
+            Vec::new(),
+        ));
+        state.threads.clear();
+        state.apply_event(&Event::ChatHistoryLoaded {
+            threads: vec![thread],
+        });
+        assert_eq!(
+            state.messages.len(),
+            2,
+            "history restores into the startup chat"
+        );
+        for _ in 0..3 {
+            state.submit_prompt("Again");
+            state.apply_event(&Event::AgentChunk {
+                session_id: session.clone(),
+                text: "New answer".into(),
+            });
+            state.apply_event(&Event::AgentCompleted {
+                session_id: session.clone(),
+            });
+        }
+        let mut ids: Vec<_> = state.messages.iter().map(|m| m.id.as_str()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            state.messages.len(),
+            "message ids must be unique"
+        );
+        assert_eq!(state.messages[1].text, "Old answer");
     }
 
     #[test]
