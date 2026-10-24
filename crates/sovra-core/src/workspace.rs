@@ -543,6 +543,7 @@ impl WorkspaceState {
     pub fn interrupt_generation(&mut self) {
         self.is_generating = false;
         self.queued_prompts.clear();
+        self.sync_active_thread();
     }
 
     fn append_user_turn(&mut self, prompt: &str) {
@@ -658,6 +659,7 @@ impl WorkspaceState {
             Event::Models(_) | Event::Ready { .. } | Event::Pong | Event::Stopped => None,
             Event::AgentResponseStarted { session_id, .. }
             | Event::AgentChunk { session_id, .. }
+            | Event::AgentThinkingChunk { session_id, .. }
             | Event::AgUiSurface { session_id, .. }
             | Event::AgentCompleted { session_id }
             | Event::AgentError { session_id, .. }
@@ -673,9 +675,21 @@ impl WorkspaceState {
                 self.sync_active_thread();
                 None
             }
+            // Chunks only touch the live transcript. Copying it into the history
+            // thread on every token made a long answer quadratic; the thread is
+            // synced when the response starts, finishes, fails or is stopped.
             Event::AgentChunk { text, .. } => {
                 self.append_or_extend_assistant(text);
-                self.sync_active_thread();
+                None
+            }
+            Event::AgentThinkingChunk {
+                text, elapsed_ms, ..
+            } => {
+                self.append_or_extend_assistant("");
+                if let Some(message) = self.messages.last_mut() {
+                    message.thinking.push_str(text);
+                    message.thinking_ms = Some(*elapsed_ms);
+                }
                 None
             }
             Event::AgUiSurface { widget, .. } => {
@@ -804,6 +818,52 @@ mod tests {
         assert!(state.select_thread(&session_id));
         assert_eq!(state.messages[1].model.as_ref(), Some(&first));
         assert_eq!(state.messages[3].model.as_ref(), Some(&second));
+    }
+
+    #[test]
+    fn reasoning_folds_into_the_reply_and_history_syncs_once_per_turn() {
+        let mut state = WorkspaceState::default();
+        let session_id = state.session_id.clone();
+        state.submit_prompt("Why?");
+        for (text, elapsed_ms) in [("Let me ", 400), ("check.", 1_900)] {
+            state.apply_event(&Event::AgentThinkingChunk {
+                session_id: session_id.clone(),
+                text: text.into(),
+                elapsed_ms,
+            });
+        }
+        state.apply_event(&Event::AgentThinkingChunk {
+            session_id: "another-chat".into(),
+            text: "ignored".into(),
+            elapsed_ms: 9_000,
+        });
+        for chunk in ["Because ", "it is."] {
+            state.apply_event(&Event::AgentChunk {
+                session_id: session_id.clone(),
+                text: chunk.into(),
+            });
+        }
+        let reply = state.messages.last().unwrap();
+        assert_eq!(reply.thinking, "Let me check.");
+        assert_eq!(reply.thinking_ms, Some(1_900));
+        assert_eq!(reply.text, "Because it is.");
+        // Streaming must not copy the transcript into history on every token.
+        assert_eq!(state.active_thread().unwrap().messages.len(), 1);
+        state.apply_event(&Event::AgentCompleted { session_id });
+        assert_eq!(state.active_thread().unwrap().messages, state.messages);
+    }
+
+    #[test]
+    fn stopping_mid_answer_keeps_the_partial_reply_in_history() {
+        let mut state = WorkspaceState::default();
+        let session_id = state.session_id.clone();
+        state.submit_prompt("Long answer please");
+        state.apply_event(&Event::AgentChunk {
+            session_id,
+            text: "Partial".into(),
+        });
+        state.interrupt_generation();
+        assert_eq!(state.active_thread().unwrap().messages, state.messages);
     }
 
     #[test]

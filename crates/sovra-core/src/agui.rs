@@ -83,6 +83,12 @@ pub struct ChatMessage {
     pub widgets: Vec<AgUiWidget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ResponseModel>,
+    /// The model's visible reasoning, streamed before (or between) answer text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thinking: String,
+    /// How long the model had been working when its latest reasoning arrived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_ms: Option<u64>,
 }
 
 impl ChatMessage {
@@ -100,6 +106,8 @@ impl ChatMessage {
             text: text.into(),
             widgets: Vec::new(),
             model: None,
+            thinking: String::new(),
+            thinking_ms: None,
         }
     }
 
@@ -118,6 +126,8 @@ impl ChatMessage {
             text: text.into(),
             widgets,
             model: None,
+            thinking: String::new(),
+            thinking_ms: None,
         }
     }
 }

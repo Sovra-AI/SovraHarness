@@ -173,10 +173,22 @@ impl ModelInfo {
     }
 }
 
+/// Light or dark app theme. Saved alongside model preferences so the choice survives restarts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Appearance {
+    #[default]
+    Dark,
+    Light,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModelPreferences {
     pub favorites: BTreeSet<ModelKey>,
     pub active: Option<ModelKey>,
+    /// `default` keeps files written before this field existed loadable.
+    #[serde(default)]
+    pub appearance: Appearance,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -518,6 +530,9 @@ pub enum ModelCommand {
         model: String,
     },
     CancelPull,
+    SetAppearance {
+        appearance: Appearance,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

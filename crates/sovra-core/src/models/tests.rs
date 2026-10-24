@@ -171,6 +171,7 @@ fn favorites_and_selection_are_scoped_to_connection() {
     state.apply(&ModelEvent::PreferencesChanged(ModelPreferences {
         favorites: [key.clone()].into(),
         active: Some(key.clone()),
+        ..ModelPreferences::default()
     }));
     assert_eq!(
         state.filtered(&ModelFilter {

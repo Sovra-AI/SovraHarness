@@ -15,6 +15,8 @@
 mod schema;
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -91,6 +93,9 @@ impl StoreConfig {
 pub struct SurrealStore {
     db: Surreal<Any>,
     config: StoreConfig,
+    /// Last fact `created_at` handed out. Recency is ordered by this millisecond stamp,
+    /// so two saves in the same millisecond must not tie; shared by clones of one store.
+    last_fact_ms: Arc<AtomicI64>,
 }
 
 impl SurrealStore {
@@ -103,9 +108,24 @@ impl SurrealStore {
             .use_db(&config.database)
             .await
             .map_err(|e| unavailable(&e))?;
-        let store = Self { db, config };
+        let store = Self {
+            db,
+            config,
+            last_fact_ms: Arc::new(AtomicI64::new(0)),
+        };
         store.apply_schema().await?;
         Ok(store)
+    }
+
+    /// Wall-clock milliseconds, bumped past the previous stamp so newer facts always sort first.
+    fn next_fact_ms(&self) -> i64 {
+        let now = now_ms();
+        let previous = self
+            .last_fact_ms
+            .update(Ordering::SeqCst, Ordering::SeqCst, |last| {
+                now.max(last.saturating_add(1))
+            });
+        now.max(previous.saturating_add(1))
     }
 
     async fn apply_schema(&self) -> Result<(), MemoryError> {
@@ -227,7 +247,7 @@ impl MemoryStore for SurrealStore {
         if let Some(embedding) = &fact.embedding {
             self.check_embedding(embedding)?;
         }
-        let now = now_ms();
+        let now = self.next_fact_ms();
         let row = NewFactRow {
             content: fact.content,
             entities: fact.entities.clone(),

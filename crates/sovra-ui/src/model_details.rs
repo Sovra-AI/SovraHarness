@@ -26,7 +26,7 @@ impl ModelsView {
             .gap(t.space.small)
             .sovra_surface(Surface::Subtle, cx)
             .child(
-                design::button("model-details-close", "Back to catalog", cx)
+                design::button("model-details-close", "Back to all models", cx)
                     .ghost()
                     .small()
                     .on_click(cx.listener(|view, _, _, cx| {
@@ -39,7 +39,7 @@ impl ModelsView {
         };
         let Some(model) = self.state.model(key) else {
             return panel.child(caption(
-                "This model is no longer in the catalog. Refresh and choose another model.",
+                "This model isn't available any more. Press Refresh and pick another one.",
                 cx,
             ));
         };
@@ -60,20 +60,47 @@ impl ModelsView {
                 && !c.environment_credential
         });
         let action_label = if !model.can_chat() {
-            "Catalog information only"
+            "Can't be used in chat"
         } else if missing_key {
-            "Connect to use model"
+            "Add your key to use this"
         } else if active {
-            "Current chat model"
+            "Currently in use"
         } else {
-            "Use in chat"
+            "Use this model"
+        };
+        let status_summary = if !model.can_chat() {
+            "This model generates non-text output (such as images, video, or embeddings) and cannot be used for chat."
+        } else if missing_key {
+            "Ready to connect — add your API key once in Settings or Connections to start chatting."
+        } else if active {
+            "✓ Active now — your Personal AI is currently using this model for new conversations."
+        } else {
+            "Ready to use — click \"Use this model\" below to make this your active Personal AI."
         };
         let edit_connection = connection.cloned();
-        panel = panel.child(caption(model.author.clone(),cx))
-            .child(div().sovra_text(TextRole::SectionTitle,cx).child(model.name.clone()))
-            .child(caption(model.id.clone(),cx))
+        panel = panel
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(t.space.compact)
+                    .child(caption(model.author.clone(), cx))
+                    .child(pill(
+                        if active {
+                            "✓ Active Model".to_owned()
+                        } else if missing_key {
+                            "Needs API Key".to_owned()
+                        } else {
+                            "Available".to_owned()
+                        },
+                        cx,
+                    )),
+            )
+            .child(div().sovra_text(TextRole::SectionTitle, cx).child(model.name.clone()))
+            .child(caption(model.id.clone(), cx))
+            .child(caption(status_summary, cx))
             .child(h_flex().flex_wrap().gap(t.space.compact)
-                .child(design::button("model-copy-id", "Copy ID", cx).small().on_click(move |_,_,cx| cx.write_to_clipboard(ClipboardItem::new_string(model_id.clone()))))
+                .child(design::button("model-copy-id", "Copy name", cx).small().on_click(move |_,_,cx| cx.write_to_clipboard(ClipboardItem::new_string(model_id.clone()))))
                 .child(design::button("model-detail-favorite", if favorite { "★ Favorited" } else { "☆ Favorite" }, cx).small()
                     .on_click(cx.listener(move |view,_,_,cx| view.send(ModelCommand::SetFavorite { key:favorite_key.clone(),favorite:!favorite },cx))))
                 .child(design::button("model-compare-add", "Compare", cx).small().disabled(self.compare.len() >= 3 && !self.compare.contains(key))
@@ -86,29 +113,39 @@ impl ModelsView {
                     if missing_key { view.open_connection(edit_connection.clone(),window,cx); }
                     else { view.send(ModelCommand::Activate { key:activate_key.clone() },cx); }
                 })))
-            .child(caption(if model.can_chat() { "Selection applies to new chat requests. Existing requests keep their model; switching starts fresh provider history." } else { "This model is included in the complete catalog. The current chat composer cannot produce its output type." },cx))
-            .child(div().sovra_text(TextRole::Body,cx).child(if model.description.is_empty() { "No description supplied by this provider.".into() } else { model.description.clone() }))
-            .child(detail_line("Context window",compact_count(model.context_length),cx))
-            .child(detail_line("Maximum output",compact_count(model.max_output_tokens),cx))
-            .child(detail_line("Input",list_or_unknown(&model.input_modalities),cx))
-            .child(detail_line("Output",list_or_unknown(&model.output_modalities),cx));
+            .child(caption(if model.can_chat() { "Your next message will use this model. Replies already in progress finish with the old one." } else { "This model makes something other than text (for example images or video), so it can't be used in chat yet." },cx))
+            .child(section("What it does", cx))
+            .child(div().sovra_text(TextRole::Body,cx).child(if model.description.is_empty() { "No description available.".into() } else { model.description.clone() }))
+            .child(section("At a glance", cx))
+            .child(detail_line("Memory (how much text it keeps in mind, in tokens)",compact_count(model.context_length),cx))
+            .child(detail_line("Longest reply (tokens)",compact_count(model.max_output_tokens),cx))
+            .child(detail_line("Understands",list_or_unknown(&model.input_modalities),cx))
+            .child(detail_line("Creates",list_or_unknown(&model.output_modalities),cx));
         if model.output_modalities.is_empty() {
-            panel = panel.child(caption("This server does not advertise modalities. Chat compatibility will be checked by the server when you send a request.",cx));
+            panel = panel.child(caption("This service doesn't say what the model can do. It will be checked when you send a message.",cx));
         }
-        panel = panel.child(section("Pricing", cx));
+        panel = panel.child(section("Price", cx));
         if model.pricing.is_empty() {
-            panel = panel.child(caption("Not reported by this server. Local execution may use your hardware; cloud or remote usage may incur charges.",cx));
+            panel = panel.child(caption("No price given. Models on your own computer are free to run; online services may charge.",cx));
         } else {
             for (field, value) in &model.pricing {
                 let (label, formatted) = match field.as_str() {
-                    "prompt" => ("Input / 1M tokens".into(), token_price(model, field)),
-                    "completion" => ("Output / 1M tokens".into(), token_price(model, field)),
-                    "input_cache_read" => {
-                        ("Cache read / 1M tokens".into(), token_price(model, field))
-                    }
-                    "input_cache_write" => {
-                        ("Cache write / 1M tokens".into(), token_price(model, field))
-                    }
+                    "prompt" => (
+                        "Reading your messages, per million tokens".into(),
+                        token_price(model, field),
+                    ),
+                    "completion" => (
+                        "Writing replies, per million tokens".into(),
+                        token_price(model, field),
+                    ),
+                    "input_cache_read" => (
+                        "Re-reading earlier messages, per million tokens".into(),
+                        token_price(model, field),
+                    ),
+                    "input_cache_write" => (
+                        "Remembering earlier messages, per million tokens".into(),
+                        token_price(model, field),
+                    ),
                     "request" => ("Per request".into(), format!("${value}")),
                     "image" => ("Per image".into(), format!("${value}")),
                     _ => (
@@ -118,9 +155,9 @@ impl ModelsView {
                 };
                 panel = panel.child(detail_line(label, formatted, cx));
             }
-            panel = panel.child(caption("USD estimates from the provider catalog. Routing, cache, media and request charges can affect the final bill.",cx));
+            panel = panel.child(caption("Prices in US dollars, as listed by the service. A million tokens is roughly 750,000 words.",cx));
         }
-        panel = panel.child(section("Capabilities & parameters", cx)).child(
+        panel = panel.child(section("Technical details", cx)).child(
             h_flex().flex_wrap().gap(t.space.compact).children(
                 model
                     .supported_parameters
@@ -129,11 +166,11 @@ impl ModelsView {
             ),
         );
         if model.supported_parameters.is_empty() {
-            panel = panel.child(caption("No supported parameters reported. Manual connections can declare tool support when their server supports it.",cx));
+            panel = panel.child(caption("No technical details listed.", cx));
         }
         for (label, value) in [
-            ("Knowledge cutoff", model.knowledge_cutoff.clone()),
-            ("Retires on", model.expiration_date.clone()),
+            ("Knows about events up to", model.knowledge_cutoff.clone()),
+            ("Available until", model.expiration_date.clone()),
             ("Tokenizer", model.tokenizer.clone()),
             ("Family", model.family.clone()),
             ("Parameters", model.parameter_size.clone()),
@@ -156,7 +193,7 @@ impl ModelsView {
         }
         if let Some(connection) = connection {
             panel = panel
-                .child(section("Connection", cx))
+                .child(section("Service", cx))
                 .child(caption(
                     format!("{} · {}", connection.name, connection.kind.label()),
                     cx,
@@ -168,9 +205,9 @@ impl ModelsView {
                         "{} · {}",
                         catalog_age(catalog.snapshot.fetched_at),
                         if catalog.cached {
-                            "cached; refresh for current availability"
+                            "press Refresh to check it's still available"
                         } else {
-                            "last successful refresh"
+                            "up to date"
                         }
                     ),
                     cx,
@@ -179,7 +216,7 @@ impl ModelsView {
             if connection.kind == ProviderKind::OpenRouter {
                 let url = format!("https://openrouter.ai/{}", model.id);
                 panel = panel.child(
-                    design::button("model-open-provider", "Open provider model page", cx)
+                    design::button("model-open-provider", "Learn more on openrouter.ai", cx)
                         .ghost()
                         .on_click(move |_, _, cx| cx.open_url(&url)),
                 );
@@ -188,7 +225,7 @@ impl ModelsView {
         if model.manual {
             let key = key.clone();
             panel = panel.child(
-                design::button("manual-model-remove", "Remove manual entry", cx)
+                design::button("manual-model-remove", "Remove this model", cx)
                     .ghost()
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.send(ModelCommand::RemoveManualModel { key: key.clone() }, cx);
@@ -201,11 +238,33 @@ impl ModelsView {
 
     pub(crate) fn render_comparison(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let mut content = v_flex().id("models-comparison").flex_1().min_h_0().gap(t.space.small)
-            .child(h_flex().justify_between().items_center()
-                .child(div().sovra_text(TextRole::SectionTitle,cx).child(format!("Compare models · {}/3",self.compare.len())))
-                .child(design::button("models-comparison-close","Back to catalog",cx).on_click(cx.listener(|view,_,_,cx| { view.compare_open = false; view.selected = None; cx.notify(); }))))
-            .child(caption("Add up to three models from their details. Prices reflect advertised rates; unknown values are not treated as zero.",cx));
+        let mut content = v_flex()
+            .id("models-comparison")
+            .flex_1()
+            .min_h_0()
+            .gap(t.space.small)
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        div()
+                            .sovra_text(TextRole::SectionTitle, cx)
+                            .child(format!("Compare models · {}/3", self.compare.len())),
+                    )
+                    .child(
+                        design::button("models-comparison-close", "Back to all models", cx)
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.compare_open = false;
+                                view.selected = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(caption(
+                "Add up to three models with the Compare button on each model.",
+                cx,
+            ));
         let mut cards = h_flex()
             .id("models-comparison-scroll")
             .flex_1()
@@ -256,16 +315,22 @@ impl ModelsView {
 
 fn comparison_fields(model: &ModelInfo) -> Vec<(&'static str, String)> {
     vec![
-        ("Context", compact_count(model.context_length)),
-        ("Max output", compact_count(model.max_output_tokens)),
-        ("Input / 1M tokens", token_price(model, "prompt")),
-        ("Output / 1M tokens", token_price(model, "completion")),
-        ("Input modalities", list_or_unknown(&model.input_modalities)),
+        ("Memory (tokens)", compact_count(model.context_length)),
         (
-            "Output modalities",
-            list_or_unknown(&model.output_modalities),
+            "Longest reply (tokens)",
+            compact_count(model.max_output_tokens),
         ),
-        ("Parameters", list_or_unknown(&model.supported_parameters)),
+        ("Reading, per million tokens", token_price(model, "prompt")),
+        (
+            "Writing, per million tokens",
+            token_price(model, "completion"),
+        ),
+        ("Understands", list_or_unknown(&model.input_modalities)),
+        ("Creates", list_or_unknown(&model.output_modalities)),
+        (
+            "Technical details",
+            list_or_unknown(&model.supported_parameters),
+        ),
         (
             "Quantization",
             model

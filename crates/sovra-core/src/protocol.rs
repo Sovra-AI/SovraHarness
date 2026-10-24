@@ -82,6 +82,13 @@ pub enum Event {
         session_id: String,
         text: String,
     },
+    /// A streamed reasoning chunk. `elapsed_ms` is measured from the start of the turn,
+    /// so the UI can say how long the model thought without reading a clock itself.
+    AgentThinkingChunk {
+        session_id: String,
+        text: String,
+        elapsed_ms: u64,
+    },
     /// A structured AG-UI surface emitted by `adk-ui` or the agent runner.
     AgUiSurface {
         session_id: String,

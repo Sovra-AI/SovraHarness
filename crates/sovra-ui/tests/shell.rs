@@ -143,6 +143,11 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::MyAis);
         assert!(window.find("sovra-my-ais-view").visible());
         assert_eq!(shell.read(cx).workspace().specialists.len(), 22);
+        // Engine internals stay folded away until asked for.
+        assert!(window.try_find(("decision-backend-btn", 1usize)).is_none());
+        assert!(window.try_find(("specialist-tier-btn", 0usize)).is_none());
+        window.click("my-ais-advanced-toggle", cx);
+        window.render_frame(cx);
 
         // Switch decision backend from Laya to OpenJev.
         window.click(("decision-backend-btn", 1usize), cx);
@@ -170,6 +175,7 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
             shell.read(cx).workspace().routing.mode,
             sovra_core::SelectionMode::PerAgentModel
         );
+        assert!(window.find(("specialist-tier-btn", 0usize)).visible());
     })
     .unwrap();
 

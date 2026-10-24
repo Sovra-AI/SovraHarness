@@ -50,10 +50,17 @@ The **Models** tab includes the complete OpenRouter catalog, Ollama discovery an
 downloads, custom local/remote connections, favorites, comparison and composable
 filters. Setup, authentication and capability details: [Model library](docs/models.md).
 
-The **My AI's & Routing Tree** tab configures how Sovra selects models across its **22 `SovraSRX` specialist agents**:
-- **Single Global Model:** Pin one model from OpenRouter, Ollama, Anthropic, Gemini, or any OpenAI-compatible server across every agent.
-- **Per-Agent Models:** Assign individual models or complexity tiers (`Tier 0 · Fast`, `Tier 1 · Standard`, `Tier 2 · Deep`) per specialist (`CodingAgent`, `WebSearchAgent`, `DeepResearchAgent`, `StockMarketAgent`, etc.).
-- **Dynamic Tree Router (`CogniRouteSLM` + `SovraSRX`):** Evaluates prompts through a complexity decision tree using **Laya** (`/v1/systemone`), **OpenJev / TypeSafe Jev** (`/v1/systemone` or OpenRouter `/api/alpha/decisions`), or the zero-latency **Embedded Rust Heuristic** engine with automatic offline fail-open and auditable `rc1-...` route codes.
+The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
+- **Automatic (recommended):** a fast decision engine (**Laya**, **OpenJev / TypeSafe Jev**,
+  or the zero-latency **Embedded Rust Heuristic**, with offline fail-open and auditable
+  `rc1-...` route codes) sends simple questions to a quick model and hard ones to a
+  powerful one.
+- **One AI for everything:** use the model picked in **Models** for every task.
+- **Choose per task:** set effort (Quick / Balanced / Thorough) for each of the 22
+  `SovraSRX` specialists.
+
+The engine choice, routing tree and prompt tester are folded under
+*How automatic choice works → Show details*.
 
 **Settings** is the one place to set Sovra up, written for people new to AI:
 **Appearance** (Light or Dark), **AI connection** (follow the three steps to paste an
@@ -62,11 +69,15 @@ and a folded-away **Advanced** section for local or other services, whose techni
 fields stay hidden until you choose *Show technical options*. Then select a chat
 model in **Models**.
 
-**Chat** starts with a normal conversation using the selected model. Replies render
+**Chat** starts with a normal conversation using the selected model. Its look follows SovraSRX's chat:
+gradient user bubbles, bare replies beside the Sovra avatar and a glass composer. While
+Sovra works, a "Sovra is thinking…" pill shows the elapsed time; models that reason
+stream their thinking into a collapsible panel that folds when the answer starts. Replies render
 as selectable Markdown with code copying. Each new reply includes a model pill
 with its connection and exact model ID on hover; this identity is saved with the
 conversation and stays accurate after switching models. Streaming follows the latest output;
 scrolling up pauses following until you return to the bottom or use **Jump to latest**.
+Visible model reasoning appears in a collapsible panel with an elapsed-time indicator.
 Enter sends and Shift+Enter adds a line. **Stop** also discards queued prompts.
 Native AG-UI cards and buttons are optional tools for interactive requests, and
 their actions return to the same session with the surface ID and revision.
@@ -92,4 +103,4 @@ security and secrets policy lives in [`SECURITY.md`](SECURITY.md).
 
 The native Sovra dark/light design system, embedded SVG branding, usage examples and
 research sources are documented in [`docs/styling.md`](docs/styling.md). Switch
-between both modes in **Settings → Appearance** (session only).
+between both modes in **Settings → Appearance**; the choice is remembered.

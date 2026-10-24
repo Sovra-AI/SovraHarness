@@ -1,7 +1,7 @@
-//! `My AI's` & Dynamic Tree Router view: configure the 3 selection modes
-//! (`SingleGlobalModel`, `PerAgentModel`, `DynamicTreeRouting`), switch the System-1
-//! decision engine (`Laya`, `OpenJev`, `EmbeddedHeuristic`), inspect/test the
-//! `SovraSRX` + `CogniRouteSLM` routing tree, and customize the 22 specialist agents.
+//! `My AI's` view: choose one of the 3 selection modes (`SingleGlobalModel`,
+//! `PerAgentModel`, `DynamicTreeRouting`) in plain language, set effort per specialist,
+//! and — folded away for the curious — switch the System-1 decision engine (`Laya`,
+//! `OpenJev`, `EmbeddedHeuristic`) and inspect/test the `SovraSRX` routing tree.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -24,11 +24,12 @@ use crate::shell::Shell;
 pub(crate) fn render_my_ais_view(
     state: &WorkspaceState,
     sim_input: &Entity<InputState>,
+    advanced_open: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
 
-    v_flex()
+    let mut page = v_flex()
         .id("sovra-my-ais-view")
         .test_support()
         .flex_1()
@@ -38,50 +39,107 @@ pub(crate) fn render_my_ais_view(
         .gap(t.space.medium)
         .overflow_y_scroll()
         .child(render_header(cx))
-        .child(render_mode_selector(state.routing.mode, cx))
-        .child(render_router_engine_and_simulator(state, sim_input, cx))
-        .child(render_routing_tree_section(state, cx))
-        .child(render_specialists_section(state, cx))
-}
-
-fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
-    let t = design::tokens(cx);
-    let link = cx.theme().link;
-
-    h_flex()
+        .child(render_mode_selector(state.routing.mode, cx));
+    if state.routing.mode == SelectionMode::PerAgentModel {
+        page = page.child(render_specialists_section(state, cx));
+    }
+    let mut advanced = v_flex()
+        .id("my-ais-advanced")
+        .test_support()
         .w_full()
-        .items_center()
-        .justify_between()
+        .gap(t.space.small)
         .child(
             v_flex()
                 .gap(px(2.))
                 .child(
                     div()
-                        .sovra_text(TextRole::Caption, cx)
-                        .text_color(link)
-                        .child("MULTI-AGENT ORCHESTRATION · COGNIROUTE + SOVRASRX"),
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("How automatic choice works"),
                 )
                 .child(
                     div()
-                        .sovra_text(TextRole::PageTitle, cx)
-                        .child("My AI's & Routing Tree"),
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child("For the curious. You never need to change anything here."),
+                ),
+        )
+        .child(
+            h_flex().child(
+                design::button(
+                    "my-ais-advanced-toggle",
+                    if advanced_open {
+                        "Hide details"
+                    } else {
+                        "Show details"
+                    },
+                    cx,
                 )
+                .on_click(cx.listener(|shell, _, _, cx| shell.toggle_my_ais_advanced(cx))),
+            ),
+        );
+    if advanced_open {
+        advanced = advanced
+            .child(render_router_engine_and_simulator(state, sim_input, cx))
+            .child(render_routing_tree_section(state, cx));
+    }
+    page.child(advanced)
+}
+
+fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+
+    h_flex()
+        .w_full()
+        .flex_wrap()
+        .gap(t.space.small)
+        .items_center()
+        .justify_between()
+        .child(
+            v_flex()
+                .gap(px(2.))
+                .child(div().sovra_text(TextRole::PageTitle, cx).child("My AI's"))
                 .child(
                     div()
                         .sovra_text(TextRole::Body, cx)
                         .text_color(t.text_secondary)
                         .child(
-                            "Select a single global model, configure each of the 22 SovraSRX specialists, or route dynamically via Laya / OpenJev.",
+                            "Choose how Sovra decides which AI answers you. Not sure? Leave it on Automatic.",
                         ),
                 ),
         )
         .child(
-            design::primary_button("open-models-catalog-btn", "Browse All Models", cx).on_click(
-                cx.listener(|shell, _, _, cx| {
+            design::button("open-models-catalog-btn", "Pick a model", cx).on_click(cx.listener(
+                |shell, _, _, cx| {
                     shell.select_tab(sovra_core::NavTab::Models, cx);
-                }),
-            ),
+                },
+            )),
         )
+}
+
+/// Plain-language title and description; the core labels stay technical for logs.
+fn mode_copy(mode: SelectionMode) -> (&'static str, &'static str) {
+    match mode {
+        SelectionMode::SingleGlobalModel => (
+            "One AI for everything",
+            "Always use the model you picked in Models.",
+        ),
+        SelectionMode::PerAgentModel => (
+            "Choose per task",
+            "Decide how much effort Sovra puts into each kind of task.",
+        ),
+        SelectionMode::DynamicTreeRouting => (
+            "Automatic (recommended)",
+            "Sovra uses a quick AI for simple questions and a more powerful one for hard ones.",
+        ),
+    }
+}
+
+fn tier_copy(tier: ModelTier) -> &'static str {
+    match tier {
+        ModelTier::Fast => "Quick",
+        ModelTier::Standard => "Balanced",
+        ModelTier::Deep => "Thorough",
+    }
 }
 
 fn render_mode_selector(
@@ -94,6 +152,7 @@ fn render_mode_selector(
         .id("routing-mode-selector")
         .test_support()
         .w_full()
+        .flex_wrap()
         .gap(t.space.small)
         .children(
             SelectionMode::ALL
@@ -101,6 +160,7 @@ fn render_mode_selector(
                 .enumerate()
                 .map(|(idx, mode)| {
                     let selected = mode == active_mode;
+                    let (title, description) = mode_copy(mode);
                     let surface = if selected {
                         Surface::NavActive
                     } else {
@@ -110,11 +170,12 @@ fn render_mode_selector(
                         .id(("routing-mode-btn", idx))
                         .test_support()
                         .role(Role::Button)
-                        .aria_label(mode.label())
+                        .aria_label(title)
                         .cursor_pointer()
                         .flex_1()
+                        .min_w(px(220.))
                         .p(t.space.medium)
-                        .items_center()
+                        .items_start()
                         .gap(t.space.small)
                         .sovra_surface(surface, cx)
                         .child(
@@ -130,7 +191,19 @@ fn render_mode_selector(
                                 t.text_secondary
                             }),
                         )
-                        .child(div().sovra_text(TextRole::Body, cx).child(mode.label()))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(2.))
+                                .child(div().sovra_text(TextRole::Body, cx).child(title))
+                                .child(
+                                    div()
+                                        .sovra_text(TextRole::Caption, cx)
+                                        .text_color(t.text_secondary)
+                                        .child(description),
+                                ),
+                        )
                         .on_click(cx.listener(move |shell, _, _, cx| {
                             shell.set_routing_mode(mode, cx);
                         }))
@@ -155,12 +228,26 @@ fn render_router_engine_and_simulator(
         .child(
             h_flex()
                 .w_full()
+                .flex_wrap()
+                .gap(t.space.small)
                 .items_center()
                 .justify_between()
                 .child(
-                    div()
-                        .sovra_text(TextRole::SectionTitle, cx)
-                        .child("System-1 Decision Model (Laya / OpenJev / Heuristic)"),
+                    v_flex()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .child("Decision engine"),
+                        )
+                        .child(
+                            div()
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(t.text_secondary)
+                                .child(
+                                    "The small, fast helper that judges how hard each question is.",
+                                ),
+                        ),
                 )
                 .child(
                     h_flex().gap(t.space.compact).children(
@@ -201,14 +288,15 @@ fn render_router_engine_and_simulator(
                     div().flex_1().min_w_0().child(
                         Input::new(sim_input)
                             .id("route-simulator-input")
-                            .aria_label("Test a prompt through the routing tree"),
+                            .aria_label("Try a question to see which AI Sovra would pick"),
                     ),
                 )
                 .child(
-                    design::primary_button("simulate-route-btn", "Test Prompt Through Tree", cx)
-                        .on_click(cx.listener(|shell, _, _, cx| {
+                    design::primary_button("simulate-route-btn", "Try it", cx).on_click(
+                        cx.listener(|shell, _, _, cx| {
                             shell.simulate_route_from_input(cx);
-                        })),
+                        }),
+                    ),
                 ),
         )
         .children(
@@ -236,14 +324,14 @@ fn render_evaluation_trace(
         .child(
             h_flex()
                 .w_full()
+                .flex_wrap()
+                .gap(t.space.small)
                 .items_center()
                 .justify_between()
                 .child(div().sovra_text(TextRole::Body, cx).child(format!(
-                    "Decision: {} · Specialist: {} · Model: {} ({})",
-                    eval.route_kind,
-                    eval.specialist_id.as_deref().unwrap_or("None"),
+                    "Sovra would use {} · effort: {}",
                     eval.selected_model.model_id,
-                    eval.tier.label()
+                    tier_copy(eval.tier)
                 )))
                 .child(
                     div()
@@ -281,12 +369,21 @@ fn render_routing_tree_section(
         .test_support()
         .w_full()
         .gap(t.space.small)
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child(format!(
-            "Active Decision Tree: {} ({} nodes · root={})",
-            state.routing.tree.name,
-            state.routing.tree.nodes.len(),
-            state.routing.tree.root
-        )))
+        .child(
+            div()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child("The questions Sovra asks itself"),
+        )
+        .child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(format!(
+                    "{} · {} steps",
+                    state.routing.tree.name,
+                    state.routing.tree.nodes.len()
+                )),
+        )
         .child(
             h_flex().w_full().flex_wrap().gap(t.space.small).children(
                 state
@@ -304,15 +401,11 @@ fn render_tree_node_card(node: &TreeNode, cx: &Context<Shell>) -> impl IntoEleme
     let kind_badge = match &node.kind {
         TreeNodeKind::Decision {
             min_confidence_pct, ..
-        } => format!("Laya/Jev Question (min {min_confidence_pct}%)"),
+        } => format!("Question · needs {min_confidence_pct}% confidence"),
         TreeNodeKind::Rule { field } => format!("Rule · {field}"),
-        TreeNodeKind::Difficulty => "Difficulty + Heuristic Floor".to_owned(),
+        TreeNodeKind::Difficulty => "How hard is it?".to_owned(),
         TreeNodeKind::Route { target } => {
-            format!(
-                "Route Leaf · {} ({})",
-                target.route_kind,
-                target.tier.short_label()
-            )
+            format!("Answer with · {}", tier_copy(target.tier))
         }
     };
 
@@ -332,17 +425,6 @@ fn render_tree_node_card(node: &TreeNode, cx: &Context<Shell>) -> impl IntoEleme
                 .sovra_text(TextRole::Body, cx)
                 .child(node.label.clone()),
         )
-        .child(
-            div()
-                .sovra_text(TextRole::Caption, cx)
-                .text_color(t.text_secondary)
-                .child(format!(
-                    "id={} · {} branches · default={}",
-                    node.id,
-                    node.branches.len(),
-                    node.default_next.as_deref().unwrap_or("leaf")
-                )),
-        )
 }
 
 fn render_specialists_section(
@@ -350,7 +432,6 @@ fn render_specialists_section(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let global_ref = state.routing.global_model.as_ref();
 
     v_flex()
         .id("sovra-specialists-list")
@@ -360,24 +441,28 @@ fn render_specialists_section(
         .child(
             div()
                 .sovra_text(TextRole::SectionTitle, cx)
-                .child(format!(
-                    "SovraSRX Specialist Agents ({} total — click any agent's tier/model button to customize)",
-                    state.specialists.len()
-                )),
+                .child("Effort per task"),
+        )
+        .child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(
+                    "Quick is fastest and cheapest. Thorough takes longer but thinks harder. Click a button to change it.",
+                ),
         )
         .children(
             state
                 .specialists
                 .iter()
                 .enumerate()
-                .map(|(idx, spec)| render_specialist_row(spec, idx, global_ref, cx)),
+                .map(|(idx, spec)| render_specialist_row(spec, idx, cx)),
         )
 }
 
 fn render_specialist_row(
     spec: &SpecialistAgentSpec,
     idx: usize,
-    global_model: Option<&sovra_core::models::ModelKey>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
@@ -395,6 +480,7 @@ fn render_specialist_row(
         .w_full()
         .items_center()
         .justify_between()
+        .gap(t.space.small)
         .p(t.space.small)
         .sovra_surface(Surface::Matte, cx)
         .child(
@@ -403,24 +489,9 @@ fn render_specialist_row(
                 .min_w_0()
                 .gap(px(2.))
                 .child(
-                    h_flex()
-                        .items_center()
-                        .gap(t.space.small)
-                        .child(
-                            div()
-                                .sovra_text(TextRole::Body, cx)
-                                .child(spec.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .px(t.space.compact)
-                                .py(px(2.))
-                                .rounded(t.radius.pill)
-                                .bg(t.subtle)
-                                .sovra_text(TextRole::Caption, cx)
-                                .text_color(t.text_secondary)
-                                .child(spec.id.clone()),
-                        ),
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .child(spec.name.clone()),
                 )
                 .child(
                     div()
@@ -431,30 +502,24 @@ fn render_specialist_row(
         )
         .child(
             h_flex()
-                .items_center()
-                .gap(t.space.small)
-                .child(
-                    div()
-                        .sovra_text(TextRole::Caption, cx)
-                        .text_color(t.text_secondary)
-                        .child(spec.assigned_model_label(global_model)),
-                )
-                .child(
-                    h_flex()
-                        .id(("specialist-tier-btn", idx))
-                        .test_support()
-                        .role(Role::Button)
-                        .aria_label("Cycle agent tier and model")
-                        .cursor_pointer()
-                        .px(t.space.small)
-                        .py(px(6.))
-                        .rounded(t.radius.button)
-                        .bg(t.nav_active_background)
-                        .sovra_text(TextRole::Caption, cx)
-                        .child(current_tier.label())
-                        .on_click(cx.listener(move |shell, _, _, cx| {
-                            shell.cycle_specialist_tier(&spec_id, next_tier, cx);
-                        })),
-                ),
+                .id(("specialist-tier-btn", idx))
+                .test_support()
+                .role(Role::Button)
+                .aria_label(format!(
+                    "Effort for {}: {}. Click to change",
+                    spec.name,
+                    tier_copy(current_tier)
+                ))
+                .cursor_pointer()
+                .flex_shrink_0()
+                .px(t.space.small)
+                .py(px(6.))
+                .rounded(t.radius.button)
+                .bg(t.nav_active_background)
+                .sovra_text(TextRole::Caption, cx)
+                .child(tier_copy(current_tier))
+                .on_click(cx.listener(move |shell, _, _, cx| {
+                    shell.cycle_specialist_tier(&spec_id, next_tier, cx);
+                })),
         )
 }

@@ -406,6 +406,8 @@ fn tap_agent_events(
                 | Event::Ready { .. }
                 | Event::Pong
                 | Event::RouteEvaluated { .. }
+                // Reasoning is the model's scratch work, not something to remember.
+                | Event::AgentThinkingChunk { .. }
                 | Event::AgentResponseStarted { .. }
                 | Event::AgUiSurface { .. }
                 | Event::AgentError { .. }

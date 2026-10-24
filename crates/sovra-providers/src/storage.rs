@@ -212,6 +212,21 @@ fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), ModelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferences_saved_before_appearance_existed_load_as_dark() {
+        use sovra_core::models::Appearance;
+        let old: ModelPreferences =
+            serde_json::from_str(r#"{"favorites":[],"active":null}"#).unwrap();
+        assert_eq!(old.appearance, Appearance::Dark);
+        let light = ModelPreferences {
+            appearance: Appearance::Light,
+            ..ModelPreferences::default()
+        };
+        let round: ModelPreferences =
+            serde_json::from_str(&serde_json::to_string(&light).unwrap()).unwrap();
+        assert_eq!(round.appearance, Appearance::Light);
+    }
     #[derive(Default)]
     struct MemoryCredentials(std::sync::Mutex<BTreeMap<String, ModelSecret>>);
     impl CredentialStore for MemoryCredentials {

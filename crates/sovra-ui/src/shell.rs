@@ -25,6 +25,10 @@ use crate::my_ais_view::render_my_ais_view;
 use crate::schedules_view::render_schedules_view;
 use crate::sidebar::render_sidebar;
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent view flags; a state enum would be artificial"
+)]
 pub struct Shell {
     pub(crate) state: WorkspaceState,
     pub(crate) chat: ChatPresentation,
@@ -42,7 +46,10 @@ pub struct Shell {
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
     sim_route_input: Entity<InputState>,
+    my_ais_advanced_open: bool,
     models: Entity<crate::ModelsView>,
+    /// Redraws once a second while a turn runs, for the elapsed timer.
+    turn_ticker: Option<Task<()>>,
     _events: Task<()>,
     _composer_events: Subscription,
     _history_search_events: Subscription,
@@ -79,7 +86,11 @@ impl Shell {
                     shift: false,
                 } => shell.submit_composer(window, cx),
                 InputEvent::Change => cx.notify(),
-                InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
+                InputEvent::Focus | InputEvent::Blur => {
+                    shell.chat.composer_focused = matches!(event, InputEvent::Focus);
+                    cx.notify();
+                }
+                InputEvent::PressEnter { .. } => {}
             },
         );
         let search_input =
@@ -130,16 +141,30 @@ impl Shell {
                     let Ok(event) = events.try_recv() else {
                         break;
                     };
-                    if let sovra_core::Event::AgentChunk { session_id, text } = &event
-                        && let Some(sovra_core::Event::AgentChunk {
-                            session_id: previous_session,
-                            text: previous_text,
-                        }) = batch.last_mut()
-                        && previous_session == session_id
-                    {
-                        previous_text.push_str(text);
-                    } else {
-                        batch.push(event);
+                    match (&event, batch.last_mut()) {
+                        (
+                            sovra_core::Event::AgentChunk { session_id, text },
+                            Some(sovra_core::Event::AgentChunk {
+                                session_id: previous_session,
+                                text: previous_text,
+                            }),
+                        ) if previous_session == session_id => previous_text.push_str(text),
+                        (
+                            sovra_core::Event::AgentThinkingChunk {
+                                session_id,
+                                text,
+                                elapsed_ms,
+                            },
+                            Some(sovra_core::Event::AgentThinkingChunk {
+                                session_id: previous_session,
+                                text: previous_text,
+                                elapsed_ms: previous_elapsed,
+                            }),
+                        ) if previous_session == session_id => {
+                            previous_text.push_str(text);
+                            *previous_elapsed = *elapsed_ms;
+                        }
+                        _ => batch.push(event),
                     }
                 }
                 let applied = this.update(cx, |shell, cx| {
@@ -193,7 +218,9 @@ impl Shell {
             login_email_input,
             login_password_input,
             sim_route_input,
+            my_ais_advanced_open: false,
             models,
+            turn_ticker: None,
             _events: task,
         }
     }
@@ -254,6 +281,11 @@ impl Shell {
                 model_override,
                 preferred_tier: next_tier,
             });
+        cx.notify();
+    }
+
+    pub fn toggle_my_ais_advanced(&mut self, cx: &mut Context<Self>) {
+        self.my_ais_advanced_open = !self.my_ais_advanced_open;
         cx.notify();
     }
 
@@ -515,6 +547,7 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let compact = window.viewport_size().width < design::tokens(cx).layout.history_breakpoint;
+        self.chat.viewport_width = window.viewport_size().width;
         if self.history_compact != compact {
             self.history_compact = compact;
             self.history_overlay_open = false;
@@ -561,7 +594,34 @@ impl Render for Shell {
 }
 
 impl Shell {
+    fn ensure_turn_ticker(&mut self, cx: &mut Context<Self>) {
+        if !self.state.is_generating {
+            self.turn_ticker = None;
+            return;
+        }
+        if self.turn_ticker.is_some() {
+            return;
+        }
+        self.turn_ticker = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(1))
+                    .await;
+                let running = this.update(cx, |shell, cx| {
+                    if shell.state.is_generating {
+                        cx.notify();
+                    }
+                    shell.state.is_generating
+                });
+                if !matches!(running, Ok(true)) {
+                    break;
+                }
+            }
+        }));
+    }
+
     fn render_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        self.ensure_turn_ticker(cx);
         match self.state.route {
             ScreenRoute::Login => {
                 render_login_screen(&self.login_email_input, &self.login_password_input, cx)
@@ -575,8 +635,13 @@ impl Shell {
                         .h_full()
                         .child(self.models.clone())
                         .into_any_element(),
-                    NavTab::MyAis => render_my_ais_view(&self.state, &self.sim_route_input, cx)
-                        .into_any_element(),
+                    NavTab::MyAis => render_my_ais_view(
+                        &self.state,
+                        &self.sim_route_input,
+                        self.my_ais_advanced_open,
+                        cx,
+                    )
+                    .into_any_element(),
                     NavTab::Schedules => render_schedules_view(
                         &self.state,
                         &self.schedule_name_input,

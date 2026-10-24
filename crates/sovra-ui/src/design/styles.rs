@@ -27,6 +27,8 @@ pub enum TextRole {
     PageTitle,
     SectionTitle,
     Body,
+    /// Assistant replies: `SovraSRX`'s 16px / 1.75 chat paragraphs.
+    Reading,
     Caption,
 }
 
@@ -74,6 +76,7 @@ pub trait SovraStyled: Styled + Sized {
             TextRole::PageTitle => (2.0, 1.12, FontWeight::BOLD),
             TextRole::SectionTitle => (1.15, 1.25, FontWeight::SEMIBOLD),
             TextRole::Body => (0.9375, 1.5, FontWeight::NORMAL),
+            TextRole::Reading => (1.0, 1.7, FontWeight::NORMAL),
             TextRole::Caption => (0.78, 1.4, FontWeight::NORMAL),
         };
         self.font_family(cx.theme().font_family.clone())
@@ -113,11 +116,35 @@ pub fn primary_button(
         .shadow(vec![t.button_shadow])
 }
 
-/// Keep wide code and tables inside the conversation's reading column.
-pub fn markdown_style() -> gpui_kit::component::text::TextViewStyle {
-    let mut scroll = gpui_kit::StyleRefinement::default();
-    scroll.overflow.x = Some(gpui_kit::Overflow::Scroll);
+/// Round icon-only button (composer send/stop). GPUI keeps focus, hover and
+/// disabled handling; callers pick the fill from `tokens(cx).chat`.
+pub fn round_icon_button(id: impl Into<ElementId>, size: gpui_kit::Pixels) -> Button {
+    Button::new(id)
+        .cursor_pointer()
+        .rounded_full()
+        .size(size)
+        .min_h(size)
+        .p_0()
+}
+
+/// `SovraSRX` chat Markdown: 16px reading text with roomy paragraphs, compact
+/// headings (1.15 / 1.05 / 0.95rem) and rounded code blocks that scroll sideways
+/// instead of widening the reading column.
+pub fn markdown_style(cx: &App) -> gpui_kit::component::text::TextViewStyle {
+    let t = tokens(cx);
+    let mut code = gpui_kit::StyleRefinement::default();
+    code.overflow.x = Some(gpui_kit::Overflow::Scroll);
+    let code = code.rounded(t.chat.code_radius);
+    let mut table = gpui_kit::StyleRefinement::default();
+    table.overflow.x = Some(gpui_kit::Overflow::Scroll);
     gpui_kit::component::text::TextViewStyle::default()
-        .code_block(scroll.clone())
-        .table(scroll)
+        .paragraph_gap(rems(1.0))
+        // Relative to the 16px reading size, not the component's 14px heading base.
+        .heading_font_size(|level, _| match level {
+            1 => gpui_kit::px(18.4),
+            2 => gpui_kit::px(16.8),
+            _ => gpui_kit::px(15.2),
+        })
+        .code_block(code)
+        .table(table)
 }

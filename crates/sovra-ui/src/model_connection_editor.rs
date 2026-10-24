@@ -17,8 +17,8 @@ use gpui_kit::{
     div,
 };
 use sovra_core::models::{
-    Authentication, CredentialChange, ModelCommand, ModelConnection, ModelError, ModelInfo,
-    ModelSecret, ProviderKind,
+    Appearance, Authentication, CredentialChange, ModelCommand, ModelConnection, ModelError,
+    ModelInfo, ModelSecret, ProviderKind,
 };
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
@@ -249,7 +249,19 @@ impl ModelsView {
                 )
                 .accessibility_label(format!("{label} appearance"))
                 .selected(mode.is_dark() == dark)
-                .on_click(move |_, _, cx| Theme::change(mode, None, cx))
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    Theme::change(mode, None, cx);
+                    view.send(
+                        ModelCommand::SetAppearance {
+                            appearance: if mode.is_dark() {
+                                Appearance::Dark
+                            } else {
+                                Appearance::Light
+                            },
+                        },
+                        cx,
+                    );
+                }))
             }),
         ));
 
@@ -1141,18 +1153,18 @@ impl ModelsView {
     pub(crate) fn render_download(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let mut panel = v_flex().p(t.space.small).gap(t.space.compact).sovra_surface(Surface::Subtle,cx)
-            .child(caption("OLLAMA · INSTALL A MODEL",cx))
+            .child(caption("Download a model to run on your own computer",cx))
             .child(h_flex().flex_wrap().gap(t.space.compact)
-                .child(select_control(&self.download_connection,"Ollama download destination","Choose Ollama server",cx).w(t.layout.filter_width))
-                .child(Input::new(&self.download_name).id("ollama-model-tag").aria_label("Ollama model tag to download").flex_1())
+                .child(select_control(&self.download_connection,"Download to","Choose where to download",cx).w(t.layout.filter_width))
+                .child(Input::new(&self.download_name).id("ollama-model-tag").aria_label("Name of the model to download").flex_1())
                 .child(design::button("ollama-pull", "Download", cx).disabled(self.state.pull_progress.is_some())
                     .on_click(cx.listener(|view,_,_,cx| {
                         if let Some(connection_id) = view.download_connection.read(cx).selected_value().cloned() {
                             let model = view.download_name.read(cx).value().to_string();
                             view.send(ModelCommand::PullOllama { connection_id,model },cx);
-                        } else { view.state.error = Some("Add an Ollama connection first.".into()); cx.notify(); }
+                        } else { view.state.error = Some("Set up Ollama first: open Settings → Advanced and add an Ollama connection.".into()); cx.notify(); }
                     }))))
-            .child(caption("Downloads run on the selected Ollama server and can be several GB. Already installed models appear below after discovery.",cx));
+            .child(caption("Find model names at ollama.com/library. Downloads can be several gigabytes, so this may take a while. Finished models appear below.",cx));
         if let Some(progress) = &self.state.pull_progress {
             panel = panel.child(
                 h_flex()

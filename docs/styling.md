@@ -3,7 +3,8 @@
 The product design lives in `crates/sovra-ui/src/design/`. GPUI Component receives
 registered **Sovra Dark** and **Sovra Light** themes during `sovra_ui::init`, before
 the first window. Dark is the initial mode, matching the source app. The
-**Settings → Appearance** control changes the current session; persistence belongs to future preferences.
+**Settings → Appearance** control switches modes and is saved with model
+preferences (`ModelCommand::SetAppearance`), so it is restored on the next launch.
 
 ## Source and migration
 

@@ -798,3 +798,33 @@ async fn conversational_reply_arrives_before_the_server_finishes_without_cards_o
     assert_eq!(text, "Hello **world**!");
     stop(client).await;
 }
+
+#[tokio::test]
+async fn appearance_choice_survives_restart() {
+    let server = Server::new(|_| Reply::json(&json!({"data":[]})));
+    let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/api/v1", server.url());
+    let fixture = Fixture::new(connection, None);
+    let client = fixture.start();
+    catalog(&client).await;
+    send(
+        &client,
+        ModelCommand::SetAppearance {
+            appearance: Appearance::Light,
+        },
+    );
+    event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::PreferencesChanged(p)) if p.appearance == Appearance::Light)
+    })
+    .await;
+    stop(client).await;
+    let client = fixture.start();
+    let loaded = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
+    assert!(
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.appearance == Appearance::Light)
+    );
+    stop(client).await;
+}

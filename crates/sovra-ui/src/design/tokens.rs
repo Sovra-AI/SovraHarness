@@ -3,11 +3,45 @@
 use std::time::Duration;
 
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::{App, BoxShadow, Hsla, Pixels, point, px};
+use gpui_kit::{
+    App, Background, BoxShadow, Hsla, Pixels, linear_color_stop, linear_gradient, point, px,
+};
 
 use super::palette::{
-    self, BLACK, INDIGO, LILAC, VIOLET, VIOLET_DEEP, VIOLET_LIGHT, WHITE, colour,
+    self, BLACK, INDIGO, INDIGO_FILL, LILAC, VIOLET, VIOLET_DEEP, VIOLET_LIGHT, WHITE, colour,
 };
+
+/// The standard chat surface, ported from `SovraSRX`'s chat (`CopilotKit` overrides):
+/// bare assistant text beside a 28px avatar, a gradient user bubble with a sharp
+/// tail corner, a glass composer and a responsive reading column.
+#[derive(Debug, Clone)]
+pub struct ChatTokens {
+    /// Column widths at the 900 / 1200 / 1536px window breakpoints (100% below 900).
+    pub column_widths: [(Pixels, Pixels); 3],
+    pub avatar: Pixels,
+    pub row_gap: Pixels,
+    pub user_bubble: Background,
+    pub user_bubble_foreground: Hsla,
+    pub user_bubble_radius: Pixels,
+    pub user_bubble_tail_radius: Pixels,
+    pub user_bubble_shadow: BoxShadow,
+    pub avatar_ring: Hsla,
+    pub thinking_pill: Hsla,
+    pub thinking_rule: Hsla,
+    pub thinking_max_height: Pixels,
+    pub composer_background: Hsla,
+    pub composer_border: Hsla,
+    pub composer_focus_border: Hsla,
+    pub composer_focus_glow: BoxShadow,
+    pub composer_radius: Pixels,
+    pub send_size: Pixels,
+    pub send_ready_background: Hsla,
+    pub send_ready_foreground: Hsla,
+    pub send_idle_foreground: Hsla,
+    pub stop_background: Hsla,
+    pub code_radius: Pixels,
+    pub action_idle_opacity: f32,
+}
 
 /// Source accent ramp for charts/decorations. Text uses contrast-tested theme roles.
 #[derive(Debug, Clone, Copy)]
@@ -89,6 +123,7 @@ pub struct SovraTokens {
     pub radius: RadiusTokens,
     pub layout: LayoutTokens,
     pub motion: MotionTokens,
+    pub chat: ChatTokens,
     pub text_secondary: Hsla,
     pub canvas: Hsla,
     pub chrome: Hsla,
@@ -190,6 +225,55 @@ pub fn tokens(cx: &App) -> SovraTokens {
             control: duration(180),
             material: duration(220),
             enter_distance: px(if cx.reduce_motion() { 0. } else { 8. }),
+        },
+        chat: ChatTokens {
+            column_widths: [
+                (px(900.), px(720.)),
+                (px(1200.), px(768.)),
+                (px(1536.), px(880.)),
+            ],
+            avatar: px(28.),
+            row_gap: px(12.),
+            // SovraSRX uses #8b5cf6 -> #6366f1; the brand fills keep white text >= 4.5:1.
+            user_bubble: linear_gradient(
+                135.,
+                linear_color_stop(colour(VIOLET), 0.),
+                linear_color_stop(colour(INDIGO_FILL), 1.),
+            ),
+            user_bubble_foreground: colour(WHITE),
+            user_bubble_radius: px(14.),
+            user_bubble_tail_radius: px(4.),
+            user_bubble_shadow: shadow(4., 18., 0., if dark { 0.4 } else { 0.14 }),
+            avatar_ring: colour(VIOLET_LIGHT).alpha(0.55),
+            thinking_pill: if dark {
+                canvas.blend(colour(VIOLET_LIGHT).alpha(0.12))
+            } else {
+                colour(0xf1_ea_ff)
+            },
+            thinking_rule: colour(VIOLET_LIGHT).alpha(0.3),
+            thinking_max_height: px(240.),
+            composer_background: layer(if dark { 0.05 } else { 0.9 }),
+            composer_border: colour(if dark { WHITE } else { 0x4c_1d_95 }).alpha(if dark {
+                0.1
+            } else {
+                0.14
+            }),
+            composer_focus_border: colour(VIOLET).alpha(0.6),
+            composer_focus_glow: BoxShadow {
+                color: colour(VIOLET).alpha(0.2),
+                offset: point(px(0.), px(0.)),
+                blur_radius: px(15.),
+                spread_radius: px(0.),
+                inset: false,
+            },
+            composer_radius: px(12.),
+            send_size: px(34.),
+            send_ready_background: colour(if dark { WHITE } else { 0x0a_0a_0f }),
+            send_ready_foreground: colour(if dark { 0x0a_0a_0f } else { WHITE }),
+            send_idle_foreground: colour(p.secondary_text),
+            stop_background: colour(0xdc_26_26),
+            code_radius: px(6.),
+            action_idle_opacity: 0.55,
         },
         text_secondary: colour(p.secondary_text),
         canvas,

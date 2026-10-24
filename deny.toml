@@ -20,6 +20,7 @@ ignore = [
   { id = "RUSTSEC-2026-0194", reason = "quick-xml via surrealdb's object_store (S3/GCS) backend; we never configure a remote object store or parse untrusted XML" },
   { id = "RUSTSEC-2026-0195", reason = "quick-xml via surrealdb's object_store backend; same as above" },
   { id = "RUSTSEC-2023-0071", reason = "rsa Marvin timing side-channel via surrealdb's jsonwebtoken auth; embedded engine has no network auth surface and no patched rsa exists" },
+  { id = "RUSTSEC-2026-0387", reason = "Approved exception: crypto-bigint 0.5 is pulled in by SurrealDB's WebAssembly-only jsonwebtoken rust_crypto backend; absent from Linux x86_64, Windows x86_64 and macOS arm64 release graphs. Remove when that upstream chain uses crypto-bigint >=0.7.6." },
 ]
 
 [licenses]

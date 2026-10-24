@@ -13,6 +13,20 @@ move them under a version heading when the tag is cut.
 
 ### Changed
 
+- Restyle the standard chat after SovraSRX: bare assistant replies beside a Sovra
+  avatar (ringed while writing), gradient user bubbles with a tail corner and initials
+  avatar, responsive 720/768/880px reading column, 16px/1.7 reply text, a glass
+  composer with violet focus glow, round send and red stop buttons, a glass "Jump to
+  latest" pill and quiet copy actions.
+- Show model reasoning: a shimmering "Sovra is thinking…" pill with an elapsed timer
+  before output, then a collapsible reasoning panel that streams open, folds when the
+  answer starts and reads "Thought for Ns" afterwards (saved with the conversation).
+- Make streaming cheaper: history is synced once per turn instead of copying the whole
+  transcript on every token; Markdown views receive only appended bytes (parsed off
+  the UI thread); thinking chunks are coalesced like answer chunks; collapsed reasoning
+  is never built; the per-token fade animation is off and the only continuous
+  animation is the pre-answer shimmer.
+
 - Clean up the title bar: it no longer shows the product name or a light/dark
   button. Appearance now lives in **Settings → Appearance**.
 - Rework Settings for people new to AI: three plain-language sections (Appearance,
@@ -20,9 +34,18 @@ move them under a version heading when the tag is cut.
   Advanced section for other services, and technical connection fields (service
   type, key header, wait time, organization/project IDs) hidden behind
   *Show technical options*. Connection, key and error messages use everyday wording.
+- Simplify **My AI's** for people new to AI: three plain choices (Automatic,
+  One AI for everything, Choose per task) with one-line explanations; effort per task
+  (Quick / Balanced / Thorough) shows only when choosing per task, and the decision
+  engine, routing tree and prompt tester sit behind *How automatic choice works*.
+- Rewrite the **Models** library in everyday words: Online / On my computer / Other
+  services tabs, "Made by", "Reads / Creates", "Not for chat" markers, "Memory size", "Can use
+  tools", "Thinks step by step", plain prices and clearer Ollama download help.
 
 ### Fixed
 
+- Memory recall's "newest first" order no longer flips when two facts are saved in
+  the same millisecond: each store hands out strictly increasing fact timestamps.
 - Ensure every clickable button (`design::button`, `design::primary_button`), checkbox (`Checkbox`), dropdown (`Select`), and custom interactive element across `sovra-ui` displays a pointer cursor (`CursorStyle::PointingHand`), enforced by `xtask check-styles`.
 - Normal chat answers conversationally in Markdown; native UI tools are optional,
   and ordinary turns no longer invoke the specialist routing simulation.
@@ -44,8 +67,19 @@ move them under a version heading when the tag is cut.
 - ADK-UI tool responses now deliver actual AG-UI component payloads to native GPUI
   cards, tables, alerts, progress and action buttons. Surface revisions update in
   place; button actions carry their surface identity back to the agent.
+### Security
+
+- Record the approved `RUSTSEC-2026-0387` exception for SurrealDB's WebAssembly-only
+  cryptography dependency, which is absent from all three desktop release targets.
+
 ### Added
 
+- **Settings → Appearance** remembers Light or Dark across restarts (saved with model
+  preferences; older preference files load as Dark).
+- Show streamed reasoning in a collapsible panel with an elapsed-time indicator,
+  and refresh chat typography, avatars, user bubbles and composer styling.
+- Feed Markdown incrementally and save transcript snapshots at turn boundaries
+  to reduce work during long streamed replies.
 - Assistant replies show a compact model and connection pill with the exact model ID
   on hover. Execution identity stays with each reply across model changes and saved history.
 

@@ -293,6 +293,7 @@ impl AdkHarness {
 
         let mut deltas = EventTextDeltas::default();
         let mut response_model = Some(self.response_model.clone());
+        let started = std::time::Instant::now();
         while let Some(item) = stream.next().await {
             match item {
                 Ok(adk_event) => {
@@ -300,6 +301,7 @@ impl AdkHarness {
                         session_id,
                         &deltas.push(&adk_event),
                         &mut response_model,
+                        started,
                         events,
                     )
                     .await
@@ -332,16 +334,29 @@ async fn forward_adk_event(
     session_id: &str,
     adk_event: &adk_core::Event,
     response_model: &mut Option<ResponseModel>,
+    started: std::time::Instant,
     events: &Sender<Event>,
 ) -> bool {
     let widgets = native_ui::extract_surfaces(adk_event);
-    let text = extract_text(adk_event);
-    if (!widgets.is_empty() || text.is_some())
+    let (thinking, text) = extract_output(adk_event);
+    if (!widgets.is_empty() || text.is_some() || thinking.is_some())
         && let Some(model) = response_model.take()
         && events
             .send(Event::AgentResponseStarted {
                 session_id: session_id.to_owned(),
                 model,
+            })
+            .await
+            .is_err()
+    {
+        return false;
+    }
+    if let Some(text) = thinking
+        && events
+            .send(Event::AgentThinkingChunk {
+                session_id: session_id.to_owned(),
+                text,
+                elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             })
             .await
             .is_err()
@@ -374,18 +389,29 @@ async fn forward_adk_event(
     true
 }
 
-fn extract_text(event: &adk_core::Event) -> Option<String> {
-    let content = event.llm_response.content.as_ref()?;
+/// Splits model output into (reasoning, answer) text; either may be absent.
+fn extract_output(event: &adk_core::Event) -> (Option<String>, Option<String>) {
+    let Some(content) = event.llm_response.content.as_ref() else {
+        return (None, None);
+    };
     if !matches!(content.role.as_str(), "model" | "assistant") {
-        return None;
+        return (None, None);
     }
+    let mut thinking = String::new();
     let mut text = String::new();
     for part in &content.parts {
-        if let Part::Text { text: chunk } = part {
-            text.push_str(chunk);
+        match part {
+            Part::Text { text: chunk } => text.push_str(chunk),
+            Part::Thinking {
+                thinking: chunk, ..
+            } => thinking.push_str(chunk),
+            _ => {}
         }
     }
-    (!text.is_empty()).then_some(text)
+    (
+        (!thinking.is_empty()).then_some(thinking),
+        (!text.is_empty()).then_some(text),
+    )
 }
 
 #[cfg(test)]
@@ -519,12 +545,85 @@ mod tests {
         });
     }
 
+    struct ThinkingLlm;
+
+    #[async_trait::async_trait]
+    impl Llm for ThinkingLlm {
+        fn name(&self) -> &'static str {
+            "thinking-test"
+        }
+
+        async fn generate_content(
+            &self,
+            _request: LlmRequest,
+            _stream: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            let response = |thinking: &str, text: &str, partial| {
+                let mut content = Content::new("model");
+                if !thinking.is_empty() {
+                    content.parts.push(Part::Thinking {
+                        thinking: thinking.into(),
+                        signature: None,
+                    });
+                }
+                if !text.is_empty() {
+                    content.parts.push(Part::Text { text: text.into() });
+                }
+                LlmResponse {
+                    content: Some(content),
+                    partial,
+                    provider_metadata: (!partial)
+                        .then(|| serde_json::json!({"content_complete": true})),
+                    ..LlmResponse::default()
+                }
+            };
+            Ok(Box::pin(futures::stream::iter([
+                Ok(response("Let me ", "", true)),
+                Ok(response("check.", "", true)),
+                Ok(response("", "Answer", true)),
+                Ok(response("Let me check.", "Answer", false)),
+            ])))
+        }
+    }
+
+    #[test]
+    fn reasoning_streams_separately_from_the_answer_without_repeats() {
+        futures::executor::block_on(async {
+            let harness = AdkHarness::with_llm_and_tools(
+                &AgentConfig::default(),
+                Arc::new(ThinkingLlm),
+                vec![],
+            )
+            .unwrap();
+            let (tx, rx) = async_channel::unbounded();
+            harness.run_prompt("think", "Hello", &tx).await;
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                Event::AgentResponseStarted { .. }
+            ));
+            let (mut thinking, mut answer) = (String::new(), String::new());
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    Event::AgentThinkingChunk { text, .. } => {
+                        assert!(answer.is_empty(), "reasoning arrives before the answer");
+                        thinking.push_str(&text);
+                    }
+                    Event::AgentChunk { text, .. } => answer.push_str(&text),
+                    Event::AgentCompleted { .. } => {}
+                    event => panic!("unexpected event: {event:?}"),
+                }
+            }
+            assert_eq!(thinking, "Let me check.");
+            assert_eq!(answer, "Answer");
+        });
+    }
+
     #[test]
     fn user_and_tool_text_are_not_assistant_output() {
         for role in ["user", "tool"] {
             let mut event = adk_core::Event::new("test");
             event.set_content(Content::new(role).with_text("not an assistant reply"));
-            assert_eq!(extract_text(&event), None);
+            assert_eq!(extract_output(&event), (None, None));
             let mut model = Some(ResponseModel {
                 model_id: "test".into(),
                 name: "Test model".into(),
@@ -532,7 +631,11 @@ mod tests {
             });
             let (tx, rx) = async_channel::unbounded();
             assert!(futures::executor::block_on(forward_adk_event(
-                "test", &event, &mut model, &tx
+                "test",
+                &event,
+                &mut model,
+                std::time::Instant::now(),
+                &tx
             )));
             assert!(rx.is_empty());
             assert!(

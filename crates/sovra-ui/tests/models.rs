@@ -126,13 +126,16 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
         .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
             ModelPreferences {
                 favorites: [alpha.clone()].into(),
-                active: None,
+                active: Some(alpha.clone()),
+                ..ModelPreferences::default()
             },
         )))
         .expect("test operation succeeds");
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
+        assert!(window.find("models-active-banner").visible());
+        assert!(window.find("models-active-inspect").visible());
         window.click("models-clear-filters", cx);
         window.click(("model-scope", 4usize), cx);
         assert_eq!(shell.read(cx).models().read(cx).visible_models(), &[alpha]);
@@ -145,7 +148,7 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
         window.click(("model-row", 0usize), cx);
         assert!(window.find("model-details").visible());
         let action = window.find("model-activate");
-        assert_eq!(action.label(), Some("Catalog information only"));
+        assert_eq!(action.label(), Some("Can't be used in chat"));
         assert_eq!(action.disabled(), Some(true));
     })
     .expect("test operation succeeds");
@@ -588,4 +591,41 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
         assert!(window.find("connection-timeout").visible());
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn appearance_choice_is_saved_and_restored(cx: &mut TestAppContext) {
+    use gpui_kit::component::ActiveTheme as _;
+    use sovra_core::models::Appearance;
+
+    let (client, commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 1000., 760.);
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![],
+            preferences: ModelPreferences {
+                appearance: Appearance::Light,
+                ..ModelPreferences::default()
+            },
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        assert!(!cx.theme().is_dark(), "saved Light choice applies on load");
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        window.click("settings-theme-dark", cx);
+        assert!(cx.theme().is_dark());
+    })
+    .unwrap();
+    let saved = loop {
+        if let Command::Models(ModelCommand::SetAppearance { appearance }) =
+            commands.try_recv().expect("appearance saved")
+        {
+            break appearance;
+        }
+    };
+    assert_eq!(saved, Appearance::Dark);
+    cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
 }

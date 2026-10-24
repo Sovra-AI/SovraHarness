@@ -9,7 +9,7 @@ pub(super) const VIOLET_LIGHT: u32 = 0x9f_67_ff;
 pub(super) const LILAC: u32 = 0xb9_8c_f0;
 pub(super) const INDIGO: u32 = 0x5b_6c_f0;
 // Slightly deeper than brand indigo so white control labels pass 4.5:1.
-const INDIGO_FILL: u32 = 0x55_66_e6;
+pub(super) const INDIGO_FILL: u32 = 0x55_66_e6;
 pub(super) const WHITE: u32 = 0xff_ff_ff;
 pub(super) const BLACK: u32 = 0x00_00_00;
 

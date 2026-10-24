@@ -412,6 +412,16 @@ impl ModelActor {
                 ))
                 .await;
             }
+            ModelCommand::SetAppearance { appearance } => {
+                let mut saved = self.saved.clone();
+                saved.preferences.appearance = appearance;
+                self.persist(saved.clone()).await?;
+                self.saved = saved;
+                self.emit(ModelEvent::PreferencesChanged(
+                    self.saved.preferences.clone(),
+                ))
+                .await;
+            }
             ModelCommand::Activate { key } => self.activate(&key, true).await?,
             ModelCommand::FetchDetails { key } => {
                 let connection = self.connection(&key.connection_id)?;

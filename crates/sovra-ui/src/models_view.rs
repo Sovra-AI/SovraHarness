@@ -1,7 +1,7 @@
 //! Native model library: virtualized discovery, composable filters and model details.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, Theme, ThemeMode,
     button::ButtonVariants as _,
     checkbox::Checkbox,
     h_flex,
@@ -19,8 +19,8 @@ use gpui_kit::{
 use sovra_core::{
     Command,
     models::{
-        CatalogFacets, CatalogScope, ModelCommand, ModelEvent, ModelFilter, ModelKey, ModelSort,
-        ModelsState, PriceFilter, ProviderKind,
+        Appearance, CatalogFacets, CatalogScope, ModelCommand, ModelEvent, ModelFilter, ModelKey,
+        ModelSort, ModelsState, PriceFilter, ProviderKind,
     },
 };
 
@@ -110,31 +110,25 @@ pub(crate) fn selector(
 
 impl ModelsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Search names, model IDs, creators or descriptions…")
-        });
-        let author = selector(vec![Choice::new("", "All creators")], window, cx);
-        let connection = selector(vec![Choice::new("", "All connections")], window, cx);
-        let input_modality = selector(vec![Choice::new("", "Any input")], window, cx);
-        let output_modality = selector(vec![Choice::new("", "Any output")], window, cx);
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search by name or maker…"));
+        let author = selector(vec![Choice::new("", "Any maker")], window, cx);
+        let connection = selector(vec![Choice::new("", "Any service")], window, cx);
+        let input_modality = selector(vec![Choice::new("", "Reads anything")], window, cx);
+        let output_modality = selector(vec![Choice::new("", "Creates anything")], window, cx);
         let context = selector(
             choices(&[
-                ("0", "Any context"),
-                ("32000", "32K+ context"),
-                ("128000", "128K+ context"),
-                ("200000", "200K+ context"),
-                ("1000000", "1M+ context"),
+                ("0", "Any memory size"),
+                ("32000", "Long chats (32K+)"),
+                ("128000", "Long documents (128K+)"),
+                ("200000", "Very long documents (200K+)"),
+                ("1000000", "Whole books (1M+)"),
             ]),
             window,
             cx,
         );
         let price = selector(
-            choices(&[
-                ("any", "Any price"),
-                ("free", "Free API usage"),
-                ("paid", "Paid models"),
-            ]),
+            choices(&[("any", "Any price"), ("free", "Free"), ("paid", "Paid")]),
             window,
             cx,
         );
@@ -142,16 +136,16 @@ impl ModelsView {
             choices(&[
                 ("newest", "Newest first"),
                 ("name", "Name A–Z"),
-                ("context", "Largest context"),
-                ("input", "Lowest input price"),
-                ("output", "Lowest output price"),
+                ("context", "Biggest memory"),
+                ("input", "Cheapest to read your messages"),
+                ("output", "Cheapest to write replies"),
             ]),
             window,
             cx,
         );
         let download_connection = selector(Vec::new(), window, cx);
         let download_name = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Exact Ollama model tag, e.g. qwen3:8b")
+            InputState::new(window, cx).placeholder("Model name from ollama.com, e.g. qwen3:8b")
         });
         let mut subscriptions =
             vec![
@@ -239,6 +233,17 @@ impl ModelsView {
         if matches!(event, ModelEvent::Error(_)) {
             self.pending_save = None;
         }
+        if let ModelEvent::Loaded { preferences, .. }
+        | ModelEvent::PreferencesChanged(preferences) = event
+        {
+            let mode = match preferences.appearance {
+                Appearance::Dark => ThemeMode::Dark,
+                Appearance::Light => ThemeMode::Light,
+            };
+            if cx.theme().is_dark() != mode.is_dark() {
+                Theme::change(mode, None, cx);
+            }
+        }
         if matches!(
             event,
             ModelEvent::Loaded { .. }
@@ -319,19 +324,19 @@ impl ModelsView {
                 &self.author,
                 &self.facets.authors,
                 &facets.authors,
-                "All creators",
+                "Any maker",
             ),
             (
                 &self.input_modality,
                 &self.facets.input_modalities,
                 &facets.input_modalities,
-                "Any input",
+                "Reads anything",
             ),
             (
                 &self.output_modality,
                 &self.facets.output_modalities,
                 &facets.output_modalities,
-                "Any output",
+                "Creates anything",
             ),
         ] {
             if before != after {
@@ -343,7 +348,7 @@ impl ModelsView {
             }
         }
         self.facets = facets;
-        let mut connections = vec![Choice::new("", "All connections")];
+        let mut connections = vec![Choice::new("", "Any service")];
         connections.extend(
             self.state
                 .connections
@@ -421,6 +426,173 @@ impl ModelsView {
         }
     }
 
+    fn active_filter_count(&self) -> usize {
+        usize::from(!self.filter.search.trim().is_empty())
+            + usize::from(self.filter.author.is_some())
+            + usize::from(self.filter.connection_id.is_some())
+            + usize::from(self.filter.input_modality.is_some())
+            + usize::from(self.filter.output_modality.is_some())
+            + usize::from(self.filter.min_context > 0)
+            + usize::from(self.filter.price != PriceFilter::Any)
+            + usize::from(self.filter.tools)
+            + usize::from(self.filter.reasoning)
+            + usize::from(self.filter.structured_output)
+    }
+
+    fn scope_guide(&self) -> (&'static str, &'static str) {
+        match self.filter.scope {
+            CatalogScope::All => (
+                "All connected sources",
+                "Browse every AI model available from your cloud and local connections.",
+            ),
+            CatalogScope::OpenRouter => (
+                "Online · OpenRouter Cloud",
+                "Access 300+ frontier models (Claude, GPT, Gemini, DeepSeek, Llama) with one API key.",
+            ),
+            CatalogScope::Ollama => (
+                "On my computer · Ollama",
+                "Private, offline models running directly on your hardware for free.",
+            ),
+            CatalogScope::Custom => (
+                "Other services · Custom Servers",
+                "Connect LM Studio, vLLM, llama.cpp, Anthropic, or any OpenAI-compatible server.",
+            ),
+            CatalogScope::Favorites => (
+                "★ Your Favorites",
+                "Quick access to the models you've starred for everyday work.",
+            ),
+        }
+    }
+
+    fn render_active_model_banner(
+        &self,
+        narrow: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let active_key = self.state.preferences.active.clone();
+        let active_model = active_key.as_ref().and_then(|k| self.state.model(k));
+        let active_conn = active_key.as_ref().and_then(|k| {
+            self.state
+                .connections
+                .iter()
+                .find(|c| c.id == k.connection_id)
+        });
+
+        let (headline, summary, status_text, needs_key) = match (active_key.as_ref(), active_model, active_conn) {
+            (Some(_), Some(model), Some(conn)) => {
+                let missing_key = conn.authentication != sovra_core::models::Authentication::None
+                    && !conn.has_credential
+                    && !conn.environment_credential;
+                let status = if missing_key {
+                    format!("{} · Needs API key to chat", conn.name)
+                } else {
+                    format!("{} · Ready to answer in Chat", conn.name)
+                };
+                let summary = format!(
+                    "Memory {} · {} · {}",
+                    compact_count(model.context_length),
+                    if model.supports("tools") {
+                        "Can use tools"
+                    } else {
+                        "Standard chat"
+                    },
+                    price_summary(model)
+                );
+                (model.name.clone(), summary, status, missing_key)
+            }
+            (Some(key), _, _) => (
+                key.model_id.clone(),
+                "Selected for your Personal AI. Refresh the catalog to load full details.".to_owned(),
+                format!("Connection: {}", key.connection_id),
+                false,
+            ),
+            (None, _, _) => (
+                "Default Sovra AI (Automatic)".to_owned(),
+                "Click any model below and press \"Use this model\" to pin a specific AI for your chats.".to_owned(),
+                "No custom model pinned yet".to_owned(),
+                false,
+            ),
+        };
+
+        let mut banner = h_flex()
+            .id("models-active-banner")
+            .test_support()
+            .w_full()
+            .flex_wrap()
+            .justify_between()
+            .items_center()
+            .gap(t.space.small)
+            .px(t.space.medium)
+            .py(t.space.small)
+            .sovra_surface(design::Surface::Subtle, cx)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(gpui_kit::px(2.))
+                    .child(
+                        h_flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(t.space.compact)
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::Caption, cx)
+                                    .text_color(cx.theme().link)
+                                    .child("CURRENTLY SET FOR YOUR AI"),
+                            )
+                            .child(pill(status_text, cx)),
+                    )
+                    .child(
+                        div()
+                            .id("models-active-name")
+                            .test_support()
+                            .sovra_text(TextRole::SectionTitle, cx)
+                            .child(headline),
+                    )
+                    .children((!narrow).then(|| caption(summary, cx))),
+            );
+
+        let mut actions = h_flex().items_center().gap(t.space.compact);
+        if let Some(inspect_key) = active_key {
+            actions = actions.child(
+                design::button("models-active-inspect", "View active setup", cx)
+                    .small()
+                    .ghost()
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.select_model(inspect_key.clone(), cx);
+                    })),
+            );
+        }
+        if needs_key {
+            let conn = active_conn.cloned();
+            actions = actions.child(
+                design::primary_button("models-active-connect", "Add API key", cx)
+                    .small()
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.open_connection(conn.clone(), window, cx);
+                    })),
+            );
+        }
+        if !self.compare.is_empty() {
+            actions = actions.child(
+                design::button(
+                    "models-open-compare",
+                    format!("Compare ({}/3)", self.compare.len()),
+                    cx,
+                )
+                .small()
+                .on_click(cx.listener(|view, _, _, cx| {
+                    view.compare_open = true;
+                    cx.notify();
+                })),
+            );
+        }
+        banner = banner.child(actions);
+        banner
+    }
+
     fn header(&self, narrow: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let total: usize = self
@@ -430,7 +602,9 @@ impl ModelsView {
             .map(|c| c.snapshot.models.len())
             .sum();
         let loading = self.state.catalogs.values().any(|c| c.loading);
-        v_flex()
+        let (scope_title, scope_desc) = self.scope_guide();
+
+        let mut hdr = v_flex()
             .flex_shrink_0()
             .gap(t.space.small)
             .child(
@@ -441,7 +615,7 @@ impl ModelsView {
                     .items_center()
                     .child(
                         v_flex()
-                            .gap(t.space.compact)
+                            .gap(gpui_kit::px(2.))
                             .child(
                                 h_flex()
                                     .gap(t.space.small)
@@ -452,7 +626,10 @@ impl ModelsView {
                                     .child(pill(format!("{total} available"), cx)),
                             )
                             .children((!narrow).then(|| {
-                                caption("Find the right model. Connect once, choose anywhere.", cx)
+                                caption(
+                                    "Choose the brain behind your Personal AI. Switch anytime between cloud and private local models.",
+                                    cx,
+                                )
                             })),
                     )
                     .child(
@@ -476,57 +653,88 @@ impl ModelsView {
                                     })),
                             ),
                     ),
-            )
-            .child(
+            );
+
+        if !narrow
+            && !self.connections_open
+            && self.connection_form.is_none()
+            && self.manual_form.is_none()
+        {
+            hdr = hdr.child(self.render_active_model_banner(narrow, cx));
+        }
+
+        hdr = hdr.child(
+            h_flex()
+                .id("model-scope-tabs")
+                .w_full()
+                .min_w_0()
+                .overflow_x_scroll()
+                .flex_shrink_0()
+                .gap(t.space.compact)
+                .children(
+                    [
+                        (CatalogScope::All, "All models"),
+                        (CatalogScope::OpenRouter, "Online"),
+                        (CatalogScope::Ollama, "On my computer"),
+                        (CatalogScope::Custom, "Other services"),
+                        (CatalogScope::Favorites, "Favorites"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (scope, label))| {
+                        design::button(("model-scope", index), label, cx)
+                            .ghost()
+                            .flex_shrink_0()
+                            .selected(self.filter.scope == scope)
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.filter.scope = scope;
+                                view.controls_dirty = true;
+                                view.rebuild_rows();
+                                view.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                                cx.notify();
+                            }))
+                    }),
+                ),
+        );
+
+        if !narrow
+            && !self.connections_open
+            && self.connection_form.is_none()
+            && self.manual_form.is_none()
+        {
+            hdr = hdr.child(
                 h_flex()
-                    .id("model-scope-tabs")
-                    .w_full()
-                    .min_w_0()
-                    .overflow_x_scroll()
-                    .flex_shrink_0()
+                    .items_center()
                     .gap(t.space.compact)
-                    .children(
-                        [
-                            (CatalogScope::All, "All models"),
-                            (CatalogScope::OpenRouter, "OpenRouter"),
-                            (CatalogScope::Ollama, "Ollama"),
-                            (CatalogScope::Custom, "Custom"),
-                            (CatalogScope::Favorites, "Favorites"),
-                        ]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, (scope, label))| {
-                            design::button(("model-scope", index), label, cx)
-                                .ghost()
-                                .flex_shrink_0()
-                                .selected(self.filter.scope == scope)
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    view.filter.scope = scope;
-                                    view.controls_dirty = true;
-                                    view.rebuild_rows();
-                                    view.scroll.scroll_to_item(0, ScrollStrategy::Top);
-                                    cx.notify();
-                                }))
-                        }),
-                    ),
-            )
+                    .child(pill(scope_title, cx))
+                    .child(caption(scope_desc, cx)),
+            );
+        }
+
+        hdr
     }
 
     fn filters(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
+        let active_filters = self.active_filter_count();
+        let filters_label = if active_filters > 0 {
+            format!("Filters ({active_filters})")
+        } else {
+            "Filters".to_owned()
+        };
         let mut controls = v_flex().flex_shrink_0().gap(t.space.small).child(
             h_flex()
                 .gap(t.space.small)
                 .child(
                     Input::new(&self.search)
                         .id("models-search")
-                        .aria_label("Search all models")
+                        .aria_label("Search models")
                         .cleanable(true)
                         .flex_1(),
                 )
                 .child(
-                    design::button("models-toggle-filters", "Filters", cx)
-                        .selected(self.filters_open)
+                    design::button("models-toggle-filters", filters_label, cx)
+                        .selected(self.filters_open || active_filters > 0)
                         .on_click(cx.listener(|view, _, _, cx| {
                             view.filters_open = !view.filters_open;
                             cx.notify();
@@ -541,27 +749,27 @@ impl ModelsView {
                         .gap(t.space.compact)
                         .child(filter_select(
                             &self.connection,
-                            "Connection",
-                            "All connections",
+                            "Service",
+                            "Any service",
                             cx,
                         ))
-                        .child(filter_select(&self.author, "Creator", "All creators", cx))
+                        .child(filter_select(&self.author, "Made by", "Any maker", cx))
                         .child(filter_select(
                             &self.input_modality,
-                            "Input modality",
-                            "Any input",
+                            "What it understands",
+                            "Reads anything",
                             cx,
                         ))
                         .child(filter_select(
                             &self.output_modality,
-                            "Output modality",
-                            "Any output",
+                            "What it creates",
+                            "Creates anything",
                             cx,
                         ))
                         .child(filter_select(
                             &self.context,
-                            "Minimum context length",
-                            "Any context",
+                            "Memory size",
+                            "Any memory size",
                             cx,
                         ))
                         .child(filter_select(&self.price, "Price", "Any price", cx)),
@@ -574,7 +782,7 @@ impl ModelsView {
                         .child(
                             Checkbox::new("models-filter-tools")
                                 .cursor_pointer()
-                                .label("Tool calling")
+                                .label("Can use tools")
                                 .checked(self.filter.tools)
                                 .on_click(cx.listener(|view, checked, _, cx| {
                                     view.filter.tools = *checked;
@@ -585,7 +793,7 @@ impl ModelsView {
                         .child(
                             Checkbox::new("models-filter-reasoning")
                                 .cursor_pointer()
-                                .label("Reasoning")
+                                .label("Thinks step by step")
                                 .checked(self.filter.reasoning)
                                 .on_click(cx.listener(|view, checked, _, cx| {
                                     view.filter.reasoning = *checked;
@@ -596,7 +804,7 @@ impl ModelsView {
                         .child(
                             Checkbox::new("models-filter-json")
                                 .cursor_pointer()
-                                .label("Structured output")
+                                .label("Can fill in forms")
                                 .checked(self.filter.structured_output)
                                 .on_click(cx.listener(|view, checked, _, cx| {
                                     view.filter.structured_output = *checked;
@@ -619,8 +827,9 @@ impl ModelsView {
                 .gap(t.space.small)
                 .child(caption(
                     format!(
-                        "{} results · capabilities as reported by providers",
-                        self.rows.len()
+                        "Showing {} model{} · Click any row to inspect or activate",
+                        self.rows.len(),
+                        if self.rows.len() == 1 { "" } else { "s" }
                     ),
                     cx,
                 ))
@@ -649,18 +858,56 @@ impl ModelsView {
         let selected = self.selected.as_ref() == Some(&key);
         let favorite_key = key.clone();
         let name = model.name.clone();
-        let connection = self
+        let connection_obj = self
             .state
             .connections
             .iter()
-            .find(|c| c.id == key.connection_id)
-            .map_or("", |c| c.name.as_str());
+            .find(|c| c.id == key.connection_id);
+        let connection = connection_obj.map_or("", |c| c.name.as_str());
+        let needs_key = connection_obj.is_some_and(|c| {
+            c.authentication != sovra_core::models::Authentication::None
+                && !c.has_credential
+                && !c.environment_credential
+        });
+        let mut capability_tags = Vec::new();
+        if model.supports("tools") {
+            capability_tags.push("Tools");
+        }
+        if model.supports("reasoning") || model.supports("include_reasoning") {
+            capability_tags.push("Step-by-step reasoning");
+        }
+        if model.input_modalities.iter().any(|m| m == "image") {
+            capability_tags.push("Vision");
+        }
+        let capabilities_str = if capability_tags.is_empty() {
+            String::new()
+        } else {
+            format!("   ·   {}", capability_tags.join(" · "))
+        };
         let metrics = format!(
-            "{} context   ·   {}   ·   {}",
+            "Memory {}   ·   Creates {}   ·   {}{}",
             compact_count(model.context_length),
             model.output_modalities.join(" / "),
-            price_summary(model)
+            price_summary(model),
+            capabilities_str,
         );
+        let metrics = if model.can_chat() {
+            metrics
+        } else {
+            format!("{metrics}   ·   Not for chat")
+        };
+        let badge_text = if active {
+            "✓ Using Now".to_owned()
+        } else if needs_key {
+            format!("{connection} · Needs Key")
+        } else {
+            connection.to_owned()
+        };
+        let subtitle = if model.author.is_empty() {
+            model.id.clone()
+        } else {
+            format!("By {}   ·   {}", model.author, model.id)
+        };
         v_flex()
             .id(("catalog-row", index))
             .test_support()
@@ -670,7 +917,7 @@ impl ModelsView {
             .px(t.space.small)
             .py(t.space.compact)
             .gap(t.space.compact)
-            .bg(if selected {
+            .bg(if selected || active {
                 t.nav_active_background
             } else {
                 t.canvas
@@ -693,14 +940,7 @@ impl ModelsView {
                                 view.select_model(key.clone(), cx);
                             })),
                     )
-                    .child(pill(
-                        if active {
-                            "Active".to_owned()
-                        } else {
-                            connection.to_owned()
-                        },
-                        cx,
-                    ))
+                    .child(pill(badge_text, cx))
                     .child(
                         design::button(
                             ("model-favorite", index),
@@ -724,7 +964,7 @@ impl ModelsView {
                         })),
                     ),
             )
-            .child(caption(model.id.clone(), cx).truncate())
+            .child(caption(subtitle, cx).truncate())
             .child(caption(metrics, cx).truncate())
     }
 
@@ -775,11 +1015,11 @@ impl ModelsView {
                 "No matching models"
             };
             let help = if self.filter.scope == CatalogScope::Ollama {
-                "Start Ollama, check its connection, then refresh. Use Download a model to install an exact tag."
+                "Nothing here yet. Open the Ollama app on this computer, then press Refresh, or use Download a model."
             } else if self.filter.scope == CatalogScope::Custom {
-                "Add a connection to LM Studio, vLLM, llama.cpp or a compatible remote API. Discover models or enter an exact model ID."
+                "Nothing here yet. Use Connections to add another service, such as LM Studio."
             } else {
-                "Clear filters, refresh the catalog or configure a connection. Saved catalog results remain available when a server is offline."
+                "Try clearing the filters or pressing Refresh. To use online models, add your key in Settings."
             };
             content = content.child(
                 v_flex()
@@ -1004,18 +1244,18 @@ pub(crate) fn token_price(model: &sovra_core::models::ModelInfo, field: &str) ->
 }
 fn price_summary(model: &sovra_core::models::ModelInfo) -> String {
     if model.is_free() {
-        "Free API usage".into()
+        "Free".into()
     } else if model.output_modalities.iter().any(|m| m == "text")
         && model.token_price("prompt").is_some()
     {
         format!(
-            "{} in / {} out per 1M",
+            "{} read / {} write per million tokens",
             token_price(model, "prompt"),
             token_price(model, "completion")
         )
     } else if model.pricing.is_empty() {
-        "Pricing not reported".into()
+        "Price unknown".into()
     } else {
-        "Usage-based pricing · see details".into()
+        "Paid · see details".into()
     }
 }
