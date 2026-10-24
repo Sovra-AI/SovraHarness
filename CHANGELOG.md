@@ -41,6 +41,13 @@ move them under a version heading when the tag is cut.
   screen instead of the whole reply. GPUI frame-time overlay, same workload: the
   slowest 10% of frames late in a 3,400-token reply fell from 70.5 ms to 10.6 ms
   (inside the 16 ms budget for 60 fps), the slowest 1% from 75.0 ms to 24.2 ms.
+- Very long paragraphs (walls of prose) are split softly between sentences after
+  ~3 KB, never inside inline code or emphasis, and drawn without a gap. Final load
+  matrix (frame-time overlay plus app CPU over the same window, old → new): slowest
+  10% of frames short 12.1 → 5.4 ms, code 7.2 → 4.5 ms, reasoning + answer ~104 →
+  14.4 ms, long 66.7 → 10.2 ms (all within the 16 ms budget); frames drawn in heavy
+  streams up to 1.9× more for 7–23% less total CPU, i.e. CPU per frame 72 → 33 ms and
+  55 → 34 ms on the virtual display (whose software copy is the ~30 ms floor).
 - Reasoning is segmented like answers; while it streams, the pinned panel builds only
   its last segments. Replies containing link reference definitions stay one block.
   Load matrix (frame-time overlay, slowest 10% at end of stream, old → new): short

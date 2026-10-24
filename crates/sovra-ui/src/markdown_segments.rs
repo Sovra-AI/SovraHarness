@@ -5,16 +5,31 @@
 //!
 //! Splits happen only where Markdown is self-contained: at a non-indented line that
 //! follows a blank line, outside fenced code. Scanning is incremental — each call
-//! looks only at new bytes. A split is decided as soon as the first byte of a line
-//! arrives, so it never lands inside text that is already on screen.
+//! looks only at new bytes. A split is decided as soon as the byte that starts the
+//! new segment arrives, so it never lands inside text that is already on screen.
+//!
+//! A single paragraph can be very long (a wall of prose with no blank lines). Such a
+//! plain paragraph is also split softly between sentences once it passes
+//! [`SOFT_SPLIT_BYTES`], never inside inline code or emphasis; the continuation is
+//! drawn without a paragraph gap.
 
 /// Segments grow to at least this many bytes before the next safe split.
 pub(crate) const SEGMENT_BYTES: usize = 1536;
+
+/// A plain paragraph longer than this is split between sentences.
+pub(crate) const SOFT_SPLIT_BYTES: usize = 3072;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Segmenter {
     /// Byte offsets where segments after the first begin.
     boundaries: Vec<usize>,
+    /// For each boundary: whether it splits a paragraph between sentences.
+    soft: Vec<bool>,
+    /// Inline markers on the current line when it is plain prose (eligible for
+    /// sentence splits); `None` for headings, lists, quotes, tables and code.
+    plain: Option<Markers>,
+    /// How far into the current line sentence splits have been considered.
+    line_scanned: usize,
     /// Start of the line being scanned (all earlier lines are complete).
     scanned: usize,
     /// Whether the split decision for the line at `scanned` has been made.
@@ -51,17 +66,25 @@ impl Segmenter {
                     && line_start - self.segment_start >= SEGMENT_BYTES
                 {
                     self.boundaries.push(line_start);
+                    self.soft.push(false);
                     self.segment_start = line_start;
                 }
+                self.plain = first.is_alphabetic().then(Markers::default);
+                self.line_scanned = line_start;
                 self.decided = true;
             }
-            let Some(offset) = rest.find('\n') else {
+            let line_end = rest.find('\n').map(|offset| line_start + offset);
+            if self.plain.is_some() && self.fence.is_none() && !self.keep_whole {
+                self.split_sentences(text, line_end.unwrap_or(text.len()));
+            }
+            let Some(offset) = line_end.map(|end| end - line_start) else {
                 return;
             };
             let line = &rest[..offset];
             if self.fence.is_none() && is_reference_definition(line) {
                 self.keep_whole = true;
                 self.boundaries.clear();
+                self.soft.clear();
             }
             self.track_fence(line.trim_start());
             self.previous_blank = line.trim().is_empty();
@@ -80,6 +103,37 @@ impl Segmenter {
 
     pub(crate) fn boundaries(&self) -> &[usize] {
         &self.boundaries
+    }
+
+    /// Whether boundary `index` splits a paragraph between sentences.
+    pub(crate) fn is_soft(&self, index: usize) -> bool {
+        self.soft.get(index).copied().unwrap_or(false)
+    }
+
+    /// Considers new bytes of the current plain line, up to `end`, for a split at
+    /// the start of a sentence (`. `, `! ` or `? ` followed by a capital letter).
+    fn split_sentences(&mut self, text: &str, end: usize) {
+        let from = self.line_scanned;
+        let Some(mut markers) = self.plain else {
+            return;
+        };
+        for (offset, c) in text[from..end].char_indices() {
+            let at = from + offset;
+            markers.count(c);
+            if c.is_uppercase()
+                && at - self.segment_start >= SOFT_SPLIT_BYTES
+                && markers.balanced()
+                && [". ", "! ", "? "]
+                    .iter()
+                    .any(|end| text[..at].ends_with(end))
+            {
+                self.boundaries.push(at);
+                self.soft.push(true);
+                self.segment_start = at;
+            }
+        }
+        self.plain = Some(markers);
+        self.line_scanned = end;
     }
 
     /// Whether the reply must render as a single segment.
@@ -106,6 +160,32 @@ impl Segmenter {
             }
             Some(_) => {}
         }
+    }
+}
+
+/// Inline code and emphasis markers seen on a line; a sentence split needs each
+/// of them balanced so it never lands inside `code`, *emphasis* or **strong** text.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Markers {
+    backticks: usize,
+    stars: usize,
+    underscores: usize,
+}
+
+impl Markers {
+    fn count(&mut self, c: char) {
+        match c {
+            '`' => self.backticks += 1,
+            '*' => self.stars += 1,
+            '_' => self.underscores += 1,
+            _ => {}
+        }
+    }
+
+    fn balanced(self) -> bool {
+        self.backticks.is_multiple_of(2)
+            && self.stars.is_multiple_of(2)
+            && self.underscores.is_multiple_of(2)
     }
 }
 
@@ -199,6 +279,46 @@ mod tests {
             seen = end;
         }
         assert!(segmenter.boundaries().len() > 2);
+    }
+
+    #[test]
+    fn walls_of_prose_split_softly_between_sentences() {
+        let text = "This sentence has `inline code` and **bold** words. ".repeat(200);
+        let mut segmenter = Segmenter::default();
+        let mut seen = 0;
+        for end in (1..=text.len()).step_by(11).chain([text.len()]) {
+            let before = segmenter.boundaries().len();
+            segmenter.advance(&text[..end]);
+            for boundary in &segmenter.boundaries()[before..] {
+                assert!(*boundary >= seen, "split behind rendered text");
+            }
+            seen = end;
+        }
+        assert!(segmenter.boundaries().len() >= 2);
+        for (index, boundary) in segmenter.boundaries().iter().enumerate() {
+            assert!(segmenter.is_soft(index));
+            assert!(text[*boundary..].starts_with("This sentence"));
+            let piece = &text[..*boundary];
+            assert_eq!(
+                piece.matches('`').count() % 2,
+                0,
+                "split inside inline code"
+            );
+            assert_eq!(piece.matches("**").count() % 2, 0, "split inside bold");
+        }
+    }
+
+    #[test]
+    fn block_lines_are_never_split_mid_line() {
+        for prefix in ["- ", "> ", "| ", "# ", "1. "] {
+            let text = format!(
+                "{prefix}{}\n",
+                "Words end here. Next one starts. ".repeat(200)
+            );
+            let mut segmenter = Segmenter::default();
+            segmenter.advance(&text);
+            assert_eq!(segmenter.boundaries(), &[] as &[usize], "{prefix:?}");
+        }
     }
 
     #[test]

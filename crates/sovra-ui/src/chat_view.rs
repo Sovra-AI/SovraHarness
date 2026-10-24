@@ -41,6 +41,8 @@ struct Segment {
     /// streaming, so new bytes are appended without copying or comparing old ones.
     fed: usize,
     state: Entity<TextViewState>,
+    /// Continues a paragraph split between sentences: drawn without a gap.
+    soft: bool,
     _changed: Subscription,
 }
 
@@ -116,6 +118,7 @@ fn new_segment(start: usize, message: usize, segment: usize, cx: &mut Context<Sh
         start,
         fed: start,
         state,
+        soft: false,
         _changed: changed,
     }
 }
@@ -172,7 +175,8 @@ impl SegmentedText {
             let last = self.segments.last_mut().expect("segments are never empty");
             push(&last.state, &text[last.fed..boundary], cx);
             last.fed = boundary;
-            let next = new_segment(boundary, message, row_segment(self.segments.len()), cx);
+            let mut next = new_segment(boundary, message, row_segment(self.segments.len()), cx);
+            next.soft = self.segmenter.is_soft(self.segments.len() - 1);
             self.segments.push(next);
         }
         let last = self.segments.last_mut().expect("segments are never empty");
@@ -597,14 +601,20 @@ fn render_row(
             ),
             Some(msg) => {
                 let streaming = state.is_generating && message + 1 == state.messages.len();
-                let segments = chat
-                    .markdown
-                    .get(&message)
-                    .map_or(1, |markdown| markdown.answer.segments.len());
+                let answer = chat.markdown.get(&message).map(|markdown| &markdown.answer);
+                let segments = answer.map_or(1, |answer| answer.segments.len());
+                let soft = answer
+                    .and_then(|answer| answer.segments.get(segment))
+                    .is_some_and(|part| part.soft);
                 (
                     render_assistant_segment(msg, message, segment, streaming, chat, cx)
                         .into_any_element(),
-                    if segment == 0 { px(11.) } else { px(16.) },
+                    // A paragraph continued between sentences gets no gap.
+                    match (segment, soft) {
+                        (0, _) => px(11.),
+                        (_, true) => px(0.),
+                        (_, false) => px(16.),
+                    },
                     if segment + 1 == segments {
                         px(11.)
                     } else {
@@ -863,9 +873,17 @@ fn render_thinking(
                         })
                         // No explicit style: the view inherits this muted text colour.
                         .map(|part| {
-                            TextView::new(&part.state)
-                                .selectable(true)
-                                .scrollable(false)
+                            div()
+                                .pt(if part.start > 0 && !part.soft {
+                                    px(12.)
+                                } else {
+                                    px(0.)
+                                })
+                                .child(
+                                    TextView::new(&part.state)
+                                        .selectable(true)
+                                        .scrollable(false),
+                                )
                         }),
                 ),
         );
