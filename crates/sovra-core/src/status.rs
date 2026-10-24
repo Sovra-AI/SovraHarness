@@ -25,6 +25,7 @@ impl RuntimeStatus {
             | Event::Pong
             | Event::RouteEvaluated { .. }
             | Event::AgentChunk { .. }
+            | Event::AgentResponseStarted { .. }
             | Event::AgUiSurface { .. }
             | Event::AgentCompleted { .. }
             | Event::AgentError { .. } => {}

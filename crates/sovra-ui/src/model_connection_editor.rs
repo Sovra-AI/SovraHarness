@@ -2,7 +2,7 @@
 //! only through the model command protocol.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, Theme, ThemeMode,
     button::ButtonVariants as _,
     checkbox::Checkbox,
     h_flex,
@@ -38,6 +38,7 @@ pub(crate) struct ConnectionForm {
     protocol: Entity<Selector>,
     authentication: Entity<Selector>,
     clear_key: bool,
+    more_options: bool,
 }
 
 pub(crate) struct ManualModelForm {
@@ -160,12 +161,38 @@ impl ConnectionForm {
 
 fn credential_status(connection: &ModelConnection) -> &'static str {
     if connection.has_credential {
-        "•••••••• · Key saved in OS keychain"
+        "Connected · your key is saved in this computer's keychain"
     } else if connection.environment_credential {
-        "Using an environment key · No key saved in OS keychain"
+        "Connected · using a key from this computer's system settings"
     } else {
-        "No saved API key"
+        "Not connected yet"
     }
+}
+
+fn back_button(cx: &mut Context<ModelsView>) -> gpui_kit::component::button::Button {
+    design::button("connection-cancel", "Back", cx).on_click(cx.listener(|view, _, _, cx| {
+        view.connection_form = None;
+        view.form_subscriptions.clear();
+        cx.notify();
+    }))
+}
+
+fn settings_section(
+    id: &'static str,
+    title: &'static str,
+    description: &'static str,
+    cx: &App,
+) -> impl gpui_kit::ParentElement + IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex()
+        .id(id)
+        .test_support()
+        .w_full()
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .sovra_surface(Surface::Subtle, cx)
+        .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
+        .child(caption(description, cx))
 }
 
 impl ModelsView {
@@ -179,11 +206,12 @@ impl ModelsView {
             .min_h_0()
             .p(t.space.medium)
             .gap(t.space.medium)
-            .child(div().sovra_text(TextRole::PageTitle, cx).child("Settings"))
-            .child(caption(
-                "Connect your providers. API keys are stored in your OS keychain.",
-                cx,
-            ));
+            .child(
+                v_flex()
+                    .gap(t.space.compact)
+                    .child(div().sovra_text(TextRole::PageTitle, cx).child("Settings"))
+                    .child(caption("Set up Sovra and make it yours.", cx)),
+            );
         if let Some(error) = &self.state.error {
             page = page.child(caption(error.clone(), cx).text_color(cx.theme().danger));
         } else if let Some(notice) = &self.state.notice {
@@ -194,63 +222,70 @@ impl ModelsView {
         }
         if let Some(form) = &self.connection_form {
             if form.original.kind == ProviderKind::OpenRouter {
-                let saved = form.original.has_credential;
-                let has_draft = !form.key.read(cx).value().trim().is_empty();
-                let saving = self.pending_save.is_some();
-                let status = credential_status(&form.original);
-                let remove = form.original.clone();
-                return page.child(v_flex().max_w(t.layout.reading_width).gap(t.space.medium)
-                    .child(div().sovra_text(TextRole::SectionTitle, cx).child("OpenRouter"))
-                    .child(div().id("settings-key-status").test_support().aria_label(status)
-                        .sovra_surface(Surface::Subtle, cx).p(t.space.small)
-                        .text_color(if saved { cx.theme().success } else { cx.theme().muted_foreground })
-                        .child(status))
-                    .child(field("connection-key", if saved { "Replacement API key" } else { "OpenRouter API key" }, &form.key,
-                        "The saved key stays in your OS keychain. Enter a new key only when replacing it.", cx))
-                    .child(h_flex().gap(t.space.small).flex_wrap()
-                        .child(design::primary_button("connection-save", if saving { "Saving…" } else if saved { "Replace key" } else { "Save key" }, cx)
-                            .disabled(saving || !has_draft)
-                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(false, cx))))
-                        .child(design::button("connection-test", if has_draft { "Test entered key" } else { "Test saved key" }, cx)
-                            .disabled(self.state.busy || saving || (!saved && !form.original.environment_credential && !has_draft))
-                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(true, cx))))
-                        .children(saved.then(|| design::button("settings-remove-key", "Remove saved key", cx)
-                            .disabled(saving)
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.pending_save = Some(remove.id.clone());
-                                view.send(ModelCommand::SaveConnection {
-                                    connection: remove.clone(), credential: CredentialChange::Remove,
-                                }, cx);
-                            }))))
-                        .child(design::button("connection-cancel", "Back", cx)
-                            .on_click(cx.listener(|view, _, _, cx| {
-                                view.connection_form = None;
-                                view.form_subscriptions.clear();
-                                cx.notify();
-                            }))))).into_any_element();
+                return page
+                    .child(self.render_key_form(form, cx))
+                    .into_any_element();
             }
             return page
                 .child(self.render_connection_form(cx))
                 .into_any_element();
         }
+        let dark = cx.theme().is_dark();
+        let appearance = settings_section(
+            "settings-appearance",
+            "Appearance",
+            "Choose how Sovra looks.",
+            cx,
+        )
+        .child(h_flex().gap(t.space.compact).children(
+            [(ThemeMode::Light, "Light"), (ThemeMode::Dark, "Dark")].map(|(mode, label)| {
+                design::button(
+                    match mode {
+                        ThemeMode::Light => "settings-theme-light",
+                        ThemeMode::Dark => "settings-theme-dark",
+                    },
+                    label,
+                    cx,
+                )
+                .accessibility_label(format!("{label} appearance"))
+                .selected(mode.is_dark() == dark)
+                .on_click(move |_, _, cx| Theme::change(mode, None, cx))
+            }),
+        ));
+
         let router = self
             .state
             .connections
             .iter()
             .find(|c| c.kind == ProviderKind::OpenRouter);
-        let status = router.map_or("No saved API key", credential_status);
-        page.child(
+        let connected = router.is_some_and(|c| c.has_credential || c.environment_credential);
+        let status = router.map_or("Not connected yet", credential_status);
+        let ai = settings_section(
+            "settings-ai",
+            "AI connection",
+            "Sovra uses an online AI service called OpenRouter to understand you and reply. Add your OpenRouter key once and you're ready to chat.",
+            cx,
+        )
+        .child(
             div()
                 .id("settings-openrouter-status")
                 .test_support()
                 .aria_label(status)
-                .sovra_surface(Surface::Subtle, cx)
-                .p(t.space.small)
-                .child(format!("OpenRouter · {status}")),
+                .text_color(if connected {
+                    cx.theme().success
+                } else {
+                    t.text_secondary
+                })
+                .child(status),
         )
         .child(
-            design::primary_button("settings-openrouter", "Manage OpenRouter key", cx).on_click(
-                cx.listener(|view, _, window, cx| {
+            h_flex().child(
+                design::primary_button(
+                    "settings-openrouter",
+                    if connected { "Manage key" } else { "Add your key" },
+                    cx,
+                )
+                .on_click(cx.listener(|view, _, window, cx| {
                     let connection = view
                         .state
                         .connections
@@ -272,11 +307,162 @@ impl ModelsView {
                             cx,
                         );
                     }
-                }),
+                })),
             ),
+        );
+
+        let mut advanced = settings_section(
+            "settings-advanced",
+            "Advanced",
+            "Run AI on your own computer (for example with Ollama or LM Studio) or connect a different service. Most people can skip this.",
+            cx,
         )
-        .child(self.render_connections(cx))
+        .child(
+            h_flex().child(
+                design::button(
+                    "settings-advanced-toggle",
+                    if self.settings_advanced_open {
+                        "Hide advanced options"
+                    } else {
+                        "Show advanced options"
+                    },
+                    cx,
+                )
+                .on_click(cx.listener(|view, _, _, cx| {
+                    view.settings_advanced_open = !view.settings_advanced_open;
+                    cx.notify();
+                })),
+            ),
+        );
+        if self.settings_advanced_open {
+            advanced = advanced
+                .child(Self::connections_header(cx))
+                .children(self.connection_cards(cx));
+        }
+
+        page.child(
+            v_flex()
+                .id("settings-sections")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(
+                    v_flex()
+                        .w_full()
+                        .max_w(t.layout.reading_width)
+                        .gap(t.space.medium)
+                        .child(appearance)
+                        .child(ai)
+                        .child(advanced),
+                ),
+        )
         .into_any_element()
+    }
+
+    fn render_key_form(
+        &self,
+        form: &ConnectionForm,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let saved = form.original.has_credential;
+        let has_draft = !form.key.read(cx).value().trim().is_empty();
+        let saving = self.pending_save.is_some();
+        let status = credential_status(&form.original);
+        let remove = form.original.clone();
+        let mut steps = v_flex().gap(t.space.compact);
+        if !saved {
+            steps = steps
+                .child(caption(
+                    "1. Go to openrouter.ai and sign in. Signing up is free.",
+                    cx,
+                ))
+                .child(caption("2. Open “Keys” and create a new key.", cx))
+                .child(caption("3. Copy the key and paste it below.", cx));
+        }
+        v_flex()
+            .id("settings-key-form")
+            .test_support()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .max_w(t.layout.reading_width)
+            .gap(t.space.medium)
+            .child(div().sovra_text(TextRole::SectionTitle, cx).child("Your OpenRouter key"))
+            .child(
+                div()
+                    .id("settings-key-status")
+                    .test_support()
+                    .aria_label(status)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .p(t.space.small)
+                    .text_color(if saved || form.original.environment_credential {
+                        cx.theme().success
+                    } else {
+                        t.text_secondary
+                    })
+                    .child(status),
+            )
+            .child(steps)
+            .child(field(
+                "connection-key",
+                if saved { "New key" } else { "Paste your key" },
+                &form.key,
+                if saved {
+                    "Only fill this in if you want to swap your key for a different one."
+                } else {
+                    "It starts with “sk-or-”. Sovra keeps it locked in this computer's keychain and never shows it again."
+                },
+                cx,
+            ))
+            .child(
+                h_flex()
+                    .gap(t.space.small)
+                    .flex_wrap()
+                    .child(
+                        design::primary_button(
+                            "connection-save",
+                            if saving {
+                                "Saving…"
+                            } else if saved {
+                                "Replace key"
+                            } else {
+                                "Save key"
+                            },
+                            cx,
+                        )
+                        .disabled(saving || !has_draft)
+                        .on_click(cx.listener(|view, _, _, cx| view.submit_connection(false, cx))),
+                    )
+                    .child(
+                        design::button("connection-test", "Check key", cx)
+                            .disabled(
+                                self.state.busy
+                                    || saving
+                                    || (!saved && !form.original.environment_credential && !has_draft),
+                            )
+                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(true, cx))),
+                    )
+                    .children(saved.then(|| {
+                        design::button("settings-remove-key", "Remove key", cx)
+                            .disabled(saving)
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.pending_save = Some(remove.id.clone());
+                                view.send(
+                                    ModelCommand::SaveConnection {
+                                        connection: remove.clone(),
+                                        credential: CredentialChange::Remove,
+                                    },
+                                    cx,
+                                );
+                            }))
+                    }))
+                    .child(back_button(cx)),
+            )
+            .child(caption(
+                "“Check key” only makes sure the key works. It doesn't send a message or cost anything.",
+                cx,
+            ))
     }
 
     pub(crate) fn open_connection(
@@ -373,6 +559,7 @@ impl ModelsView {
             authentication,
             original: connection,
             clear_key: false,
+            more_options: false,
         };
         self.form_subscriptions.clear();
         for state in [
@@ -490,112 +677,306 @@ impl ModelsView {
                 .map_or("compatible", String::as_str),
         );
         let hint = match kind {
-            ProviderKind::OpenRouter => {
-                "https://openrouter.ai/api/v1 · API key required for inference; catalog browsing is public."
-            }
+            ProviderKind::OpenRouter => "Usually https://openrouter.ai/api/v1.",
             ProviderKind::Ollama => {
-                "Server root, usually http://localhost:11434. Local Ollama needs no key. Remote proxies may require Bearer authentication."
+                "If Ollama runs on this computer, this is usually http://localhost:11434."
             }
             ProviderKind::OpenAiCompatible => {
-                "Include the API prefix, usually /v1. LM Studio: localhost:1234/v1 · vLLM: localhost:8000/v1 · llama.cpp: localhost:8080/v1."
+                "Copy this from the program you're connecting to. It usually ends in /v1, for example http://localhost:1234/v1 for LM Studio."
             }
-            ProviderKind::Anthropic => {
-                "Server root, usually https://api.anthropic.com. Sovra adds /v1/models and /v1/messages plus the required version header."
-            }
+            ProviderKind::Anthropic => "Usually https://api.anthropic.com.",
         };
-        let credential_hint = if form.original.environment_credential {
-            "An environment key is available for the original endpoint. Enter a key here to save an override in the OS credential store."
-        } else if form.original.has_credential {
-            "A key is saved in the OS credential store. Leave blank to keep it, or enter a replacement."
+        let credential_hint = if form.original.has_credential {
+            "A key is already saved. Leave this empty to keep it, or paste a new one to replace it."
+        } else if form.original.environment_credential {
+            "A key from this computer's system settings is being used. Paste one here only to override it."
         } else {
-            "Optional for unauthenticated local servers. Keys are saved in the operating system credential store, never in config files."
+            "Leave empty for programs on your own computer. Keys are kept in this computer's keychain."
         };
-        let mut content = v_flex().id("model-connection-form").test_support().flex_1().min_h_0().overflow_y_scroll().gap(t.space.medium).max_w(t.layout.reading_width)
-            .child(h_flex().justify_between().items_center()
-                .child(div().sovra_text(TextRole::SectionTitle,cx).child("Connect a model provider"))
-                .child(design::button("connection-cancel","Back",cx).on_click(cx.listener(|view,_,_,cx| { view.connection_form = None; view.form_subscriptions.clear(); cx.notify(); }))))
-            .child(caption("Start with a preset, then adjust it for your server.",cx))
-            .child(h_flex().flex_wrap().gap(t.space.compact).children([
-                ("OpenRouter",ProviderKind::OpenRouter,"https://openrouter.ai/api/v1",Authentication::Bearer),
-                ("Ollama",ProviderKind::Ollama,"http://localhost:11434",Authentication::None),
-                ("LM Studio",ProviderKind::OpenAiCompatible,"http://localhost:1234/v1",Authentication::None),
-                ("vLLM",ProviderKind::OpenAiCompatible,"http://localhost:8000/v1",Authentication::None),
-                ("llama.cpp",ProviderKind::OpenAiCompatible,"http://localhost:8080/v1",Authentication::None),
-                ("Anthropic",ProviderKind::Anthropic,"https://api.anthropic.com",Authentication::ApiKey),
-            ].into_iter().enumerate().map(|(index,(name,kind,url,auth))| design::button(("connection-preset",index), name, cx).small()
-                .on_click(cx.listener(move |view,_,window,cx| view.preset(name,kind,url,auth,window,cx))))))
-            .child(field("connection-name","Connection name",&form.name,"A recognizable name, such as Work GPU or Home Ollama.",cx))
-            .child(v_flex().gap(t.space.compact).child(caption("API protocol",cx)).child(select_control(&form.protocol,"API protocol","Choose a protocol",cx)))
-            .child(field("connection-url","Base URL",&form.url,hint,cx))
-            .child(v_flex().gap(t.space.compact).child(caption("Authentication",cx)).child(select_control(&form.authentication,"Authentication mode","Choose authentication",cx)))
-            .child(field("connection-key","API key",&form.key,credential_hint,cx))
-            .child(Checkbox::new("connection-clear-key").label("Clear the saved key").checked(form.clear_key).on_click(cx.listener(|view,checked,_,cx| {
-                if let Some(form) = &mut view.connection_form { form.clear_key = *checked; } cx.notify();
-            })))
-            .child(field("connection-timeout","Timeout in seconds",&form.timeout,"5–600 seconds. Applies to discovery requests and the complete chat response; downloads use their own progress timeout.",cx));
-        if matches!(kind, ProviderKind::OpenAiCompatible | ProviderKind::Ollama) {
-            content = content.child(field("connection-key-header", "API key header name", &form.key_header, "Used only for API key header authentication. Defaults to x-api-key; some proxies use api-key.", cx));
+        let title = if self
+            .state
+            .connections
+            .iter()
+            .any(|c| c.id == form.original.id)
+        {
+            "Edit connection"
+        } else {
+            "Connect a service"
+        };
+        let mut content = v_flex()
+            .id("model-connection-form")
+            .test_support()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .gap(t.space.medium)
+            .max_w(t.layout.reading_width)
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
+                    .child(back_button(cx)),
+            )
+            .child(caption(
+                "What are you connecting to? Pick one to fill in the details for you.",
+                cx,
+            ))
+            .child(
+                h_flex().flex_wrap().gap(t.space.compact).children(
+                    [
+                        (
+                            "OpenRouter",
+                            ProviderKind::OpenRouter,
+                            "https://openrouter.ai/api/v1",
+                            Authentication::Bearer,
+                        ),
+                        (
+                            "Ollama",
+                            ProviderKind::Ollama,
+                            "http://localhost:11434",
+                            Authentication::None,
+                        ),
+                        (
+                            "LM Studio",
+                            ProviderKind::OpenAiCompatible,
+                            "http://localhost:1234/v1",
+                            Authentication::None,
+                        ),
+                        (
+                            "vLLM",
+                            ProviderKind::OpenAiCompatible,
+                            "http://localhost:8000/v1",
+                            Authentication::None,
+                        ),
+                        (
+                            "llama.cpp",
+                            ProviderKind::OpenAiCompatible,
+                            "http://localhost:8080/v1",
+                            Authentication::None,
+                        ),
+                        (
+                            "Anthropic",
+                            ProviderKind::Anthropic,
+                            "https://api.anthropic.com",
+                            Authentication::ApiKey,
+                        ),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (name, kind, url, auth))| {
+                        design::button(("connection-preset", index), name, cx)
+                            .small()
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                view.preset(name, kind, url, auth, window, cx);
+                            }))
+                    }),
+                ),
+            )
+            .child(field(
+                "connection-name",
+                "Name",
+                &form.name,
+                "Anything that helps you recognise it, like “Home computer”.",
+                cx,
+            ))
+            .child(field("connection-url", "Address", &form.url, hint, cx))
+            .child(field(
+                "connection-key",
+                "Key (only if the service gave you one)",
+                &form.key,
+                credential_hint,
+                cx,
+            ));
+        if form.original.has_credential {
+            content = content.child(
+                Checkbox::new("connection-clear-key")
+                    .cursor_pointer()
+                    .label("Remove the saved key")
+                    .checked(form.clear_key)
+                    .on_click(cx.listener(|view, checked, _, cx| {
+                        if let Some(form) = &mut view.connection_form {
+                            form.clear_key = *checked;
+                        }
+                        cx.notify();
+                    })),
+            );
         }
-        if matches!(kind, ProviderKind::OpenAiCompatible) {
-            content = content
-                .child(field(
-                    "connection-organization",
-                    "Organization ID",
-                    &form.organization,
-                    "Optional OpenAI-Organization header, only when your provider requires it.",
+        content = content.child(
+            h_flex().child(
+                design::button(
+                    "connection-more-options",
+                    if form.more_options {
+                        "Hide technical options"
+                    } else {
+                        "Show technical options"
+                    },
                     cx,
-                ))
+                )
+                .ghost()
+                .small()
+                .on_click(cx.listener(|view, _, _, cx| {
+                    if let Some(form) = &mut view.connection_form {
+                        form.more_options = !form.more_options;
+                    }
+                    cx.notify();
+                })),
+            ),
+        );
+        if form.more_options {
+            content = content
+                .child(
+                    v_flex()
+                        .gap(t.space.compact)
+                        .child(caption("Service type", cx))
+                        .child(select_control(
+                            &form.protocol,
+                            "Service type",
+                            "Choose a type",
+                            cx,
+                        )),
+                )
+                .child(
+                    v_flex()
+                        .gap(t.space.compact)
+                        .child(caption("How the key is sent", cx))
+                        .child(select_control(
+                            &form.authentication,
+                            "How the key is sent",
+                            "Choose how the key is sent",
+                            cx,
+                        )),
+                )
                 .child(field(
-                    "connection-project",
-                    "Project ID",
-                    &form.project,
-                    "Optional OpenAI-Project header, only when your provider requires it.",
+                    "connection-timeout",
+                    "Wait time (seconds)",
+                    &form.timeout,
+                    "How long to wait for a reply before giving up. Between 5 and 600.",
                     cx,
                 ));
+            if matches!(kind, ProviderKind::OpenAiCompatible | ProviderKind::Ollama) {
+                content = content.child(field(
+                    "connection-key-header",
+                    "Key header name",
+                    &form.key_header,
+                    "Only change this if the service's instructions tell you to. Usually x-api-key.",
+                    cx,
+                ));
+            }
+            if matches!(kind, ProviderKind::OpenAiCompatible) {
+                content = content
+                    .child(field(
+                        "connection-organization",
+                        "Organization ID",
+                        &form.organization,
+                        "Only if your service asks for one.",
+                        cx,
+                    ))
+                    .child(field(
+                        "connection-project",
+                        "Project ID",
+                        &form.project,
+                        "Only if your service asks for one.",
+                        cx,
+                    ));
+            }
         }
-        content.child(h_flex().flex_wrap().gap(t.space.small)
-            .child(design::button("connection-test","Test connection",cx).disabled(self.state.busy).on_click(cx.listener(|view,_,_,cx| view.submit_connection(true,cx))))
-            .child(design::primary_button("connection-save","Save connection",cx).disabled(self.pending_save.is_some()).on_click(cx.listener(|view,_,_,cx| view.submit_connection(false,cx)))))
-            .child(caption("Testing verifies the connection and model discovery without sending a paid inference request. Servers without model discovery can still be saved and configured with a manual model ID.",cx))
+        content
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::primary_button("connection-save", "Save", cx)
+                            .disabled(self.pending_save.is_some())
+                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(false, cx))),
+                    )
+                    .child(
+                        design::button("connection-test", "Check connection", cx)
+                            .disabled(self.state.busy)
+                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(true, cx))),
+                    ),
+            )
+            .child(caption(
+                "“Check connection” only makes sure Sovra can reach the service. It doesn't send a message or cost anything.",
+                cx,
+            ))
     }
 
     pub(crate) fn render_connections(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let mut list = v_flex().id("model-connections").test_support().flex_1().min_h_0().overflow_y_scroll().gap(t.space.small)
-            .child(h_flex().justify_between().items_center()
-                .child(div().sovra_text(TextRole::SectionTitle,cx).child("Your connections"))
-                .child(design::primary_button("connection-add","Add connection",cx).on_click(cx.listener(|view,_,window,cx| view.open_connection(None,window,cx)))))
-            .child(caption("Local and remote servers share one library. Credentials stay in your OS credential store; removing a connection never removes models from its server.",cx));
+        v_flex()
+            .id("model-connections")
+            .test_support()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .gap(t.space.small)
+            .child(Self::connections_header(cx))
+            .children(self.connection_cards(cx))
+    }
+
+    fn connections_header(cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        v_flex()
+            .gap(t.space.compact)
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(div().sovra_text(TextRole::SectionTitle, cx).child("Connected services"))
+                    .child(
+                        design::primary_button("connection-add", "Add connection", cx).on_click(
+                            cx.listener(|view, _, window, cx| view.open_connection(None, window, cx)),
+                        ),
+                    ),
+            )
+            .child(caption(
+                "Each connection is a place Sovra can get AI from. Removing one never deletes anything from that service.",
+                cx,
+            ))
+    }
+
+    fn connection_cards(&self, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
+        let t = design::tokens(cx);
+        let mut cards = Vec::new();
         for (index, connection) in self.state.connections.iter().enumerate() {
             let edit = connection.clone();
             let refresh_id = connection.id.clone();
             let remove_id = connection.id.clone();
             let manual_id = connection.id.clone();
-            let status =
-                self.state
-                    .catalogs
-                    .get(&connection.id)
-                    .map_or("Not loaded".into(), |catalog| {
-                        if catalog.loading {
-                            "Refreshing…".into()
-                        } else if catalog.error.is_some() {
-                            "Connection needs attention".into()
-                        } else {
-                            format!(
-                                "{} models · {}",
-                                catalog.snapshot.models.len(),
-                                if catalog.cached {
-                                    "cached catalog"
-                                } else {
-                                    "live catalog"
-                                }
-                            )
-                        }
-                    });
+            let status = self.state.catalogs.get(&connection.id).map_or_else(
+                || "Not checked yet".to_owned(),
+                |catalog| {
+                    if catalog.loading {
+                        "Checking…".to_owned()
+                    } else if catalog.error.is_some() {
+                        "Can't connect right now · choose Edit to fix it".to_owned()
+                    } else {
+                        let count = catalog.snapshot.models.len();
+                        format!(
+                            "{count} AI model{} available{}",
+                            if count == 1 { "" } else { "s" },
+                            if catalog.cached {
+                                " · last known list"
+                            } else {
+                                ""
+                            }
+                        )
+                    }
+                },
+            );
+            let key_status = if connection.has_credential {
+                "Key saved on this computer"
+            } else if connection.environment_credential {
+                "Key from this computer's system settings"
+            } else {
+                "No key"
+            };
             let mut card = v_flex()
                 .p(t.space.medium)
                 .gap(t.space.small)
-                .sovra_surface(Surface::Subtle, cx)
+                .sovra_surface(Surface::Matte, cx)
                 .child(
                     h_flex()
                         .flex_wrap()
@@ -609,10 +990,8 @@ impl ModelsView {
                                         .sovra_text(TextRole::SectionTitle, cx)
                                         .child(connection.name.clone()),
                                 )
-                                .child(caption(
-                                    format!("{} · {status}", connection.kind.label()),
-                                    cx,
-                                )),
+                                .child(caption(status, cx))
+                                .child(caption(key_status, cx)),
                         )
                         .child(
                             design::button(("connection-edit", index), "Edit", cx).on_click(
@@ -622,60 +1001,69 @@ impl ModelsView {
                             ),
                         ),
                 )
-                .child(caption(connection.base_url.clone(), cx))
-                .child(caption(
-                    if connection.has_credential {
-                        "API key saved in OS credential store"
-                    } else if connection.environment_credential {
-                        "API key supplied by environment"
-                    } else {
-                        "No saved API key"
-                    },
-                    cx,
-                ))
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap(t.space.compact)
-                        .child(
-                            design::button(("connection-refresh", index), "Discover models", cx)
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    view.send(
-                                        ModelCommand::Refresh {
-                                            connection_id: refresh_id.clone(),
-                                        },
-                                        cx,
-                                    );
-                                })),
-                        )
-                        .child(
-                            design::button(("connection-remove", index), "Remove", cx)
-                                .ghost()
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    view.delete_confirmation = Some(remove_id.clone());
-                                    cx.notify();
-                                })),
-                        ),
-                );
+                .child(caption(connection.base_url.clone(), cx));
+            let mut actions = h_flex().flex_wrap().gap(t.space.compact).child(
+                design::button(("connection-refresh", index), "Refresh list", cx).on_click(
+                    cx.listener(move |view, _, _, cx| {
+                        view.send(
+                            ModelCommand::Refresh {
+                                connection_id: refresh_id.clone(),
+                            },
+                            cx,
+                        );
+                    }),
+                ),
+            );
             if connection.kind != ProviderKind::OpenRouter {
-                card = card.child(
-                    design::button(("manual-model-add", index), "Add model by ID", cx)
+                actions = actions.child(
+                    design::button(("manual-model-add", index), "Add a model by name", cx)
                         .ghost()
                         .on_click(cx.listener(move |view, _, window, cx| {
                             view.open_manual_model(&manual_id, window, cx);
                         })),
                 );
             }
+            actions = actions.child(
+                design::button(("connection-remove", index), "Remove", cx)
+                    .ghost()
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.delete_confirmation = Some(remove_id.clone());
+                        cx.notify();
+                    })),
+            );
+            card = card.child(actions);
             if self.delete_confirmation.as_deref() == Some(&connection.id) {
                 let id = connection.id.clone();
-                card = card.child(caption("Remove this connection and its saved key? Models on the server remain untouched.",cx).text_color(cx.theme().warning))
-                    .child(h_flex().gap(t.space.small)
-                        .child(design::button(("connection-confirm-remove",index), "Remove connection", cx).on_click(cx.listener(move |view,_,_,cx| { view.send(ModelCommand::DeleteConnection { id:id.clone() },cx); view.delete_confirmation = None; })))
-                        .child(design::button(("connection-cancel-remove",index), "Keep connection", cx).on_click(cx.listener(|view,_,_,cx| { view.delete_confirmation = None; cx.notify(); }))));
+                card = card
+                    .child(
+                        caption(
+                            "Remove this connection and its saved key? Nothing is deleted from the service itself.",
+                            cx,
+                        )
+                        .text_color(cx.theme().warning),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(t.space.small)
+                            .child(
+                                design::button(("connection-confirm-remove", index), "Remove", cx)
+                                    .on_click(cx.listener(move |view, _, _, cx| {
+                                        view.send(ModelCommand::DeleteConnection { id: id.clone() }, cx);
+                                        view.delete_confirmation = None;
+                                    })),
+                            )
+                            .child(
+                                design::button(("connection-cancel-remove", index), "Keep it", cx)
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.delete_confirmation = None;
+                                        cx.notify();
+                                    })),
+                            ),
+                    );
             }
-            list = list.child(card);
+            cards.push(card.into_any_element());
         }
-        list
+        cards
     }
 
     pub(crate) fn open_manual_model(
@@ -738,12 +1126,12 @@ impl ModelsView {
         let t = design::tokens(cx);
         let form = self.manual_form.as_ref().expect("manual form is open");
         v_flex().id("manual-model-form").test_support().flex_1().min_h_0().overflow_y_scroll().gap(t.space.medium).max_w(t.layout.reading_width)
-            .child(div().sovra_text(TextRole::SectionTitle,cx).child("Add a chat model by ID"))
-            .child(caption("Use this when a server does not expose model discovery, or to declare capabilities for a discovered model. The ID must match the server exactly.",cx))
-            .child(field("manual-model-id","Model ID",&form.id,"Use the server's deployment/model identifier, not a friendly marketing name.",cx))
-            .child(field("manual-model-name","Display name",&form.name,"Optional; defaults to the model ID.",cx))
-            .child(field("manual-model-context","Context length",&form.context,"Optional maximum context in tokens. Leave blank when unknown.",cx))
-            .child(Checkbox::new("manual-model-tools").label("This model and server support tool calling").checked(form.tools)
+            .child(div().sovra_text(TextRole::SectionTitle,cx).child("Add a model by name"))
+            .child(caption("Use this if a model you know is there doesn't show up in the list. Type its name exactly as the service shows it.",cx))
+            .child(field("manual-model-id","Model name on the service",&form.id,"Copy it exactly, for example qwen3:8b.",cx))
+            .child(field("manual-model-name","Friendly name",&form.name,"Optional. What Sovra should call it.",cx))
+            .child(field("manual-model-context","Memory size (tokens)",&form.context,"Optional. How much text the model can keep in mind at once. Leave empty if you don't know.",cx))
+            .child(Checkbox::new("manual-model-tools").cursor_pointer().label("This model can use tools").checked(form.tools)
                 .on_click(cx.listener(|view,checked,_,cx| { if let Some(form) = &mut view.manual_form { form.tools = *checked; } cx.notify(); })))
             .child(h_flex().gap(t.space.small)
                 .child(design::primary_button("manual-model-save","Add model",cx).disabled(self.pending_save.is_some()).on_click(cx.listener(|view,_,_,cx| view.save_manual_model(cx))))

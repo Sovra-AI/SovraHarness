@@ -457,7 +457,7 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
                 .find("settings-key-status")
                 .label()
                 .unwrap()
-                .contains("Key saved in OS keychain")
+                .contains("saved in this computer's keychain")
         );
         assert!(window.find("connection-key").visible());
         assert_eq!(
@@ -472,7 +472,7 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
                 .find("settings-openrouter-status")
                 .label()
                 .unwrap()
-                .contains("Key saved in OS keychain")
+                .contains("saved in this computer's keychain")
         );
         window.click("settings-openrouter", cx);
         window.render_frame(cx);
@@ -481,7 +481,7 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
                 .find("settings-key-status")
                 .label()
                 .unwrap()
-                .contains("Key saved in OS keychain")
+                .contains("saved in this computer's keychain")
         );
         window.click("connection-test", cx);
     })
@@ -537,9 +537,55 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
         window.render_frame(cx);
         assert_eq!(
             window.find("settings-key-status").label(),
-            Some("No saved API key")
+            Some("Not connected yet")
         );
         assert!(window.find("connection-key").visible());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestAppContext) {
+    let (client, _commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 1000., 760.);
+    events
+        .send_blocking(Event::Models(fixture_events(vec![])[0].clone()))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert!(window.find("settings-appearance").visible());
+        assert!(window.find("settings-ai").visible());
+        assert_eq!(
+            window.find("settings-openrouter-status").label(),
+            Some("Not connected yet")
+        );
+        assert!(
+            window.try_find("connection-add").is_none(),
+            "advanced connections stay folded away until asked for"
+        );
+        window.click("settings-advanced-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.find("connection-add").visible());
+        window.click("connection-add", cx);
+        window.render_frame(cx);
+        assert!(window.find("connection-url").visible());
+        assert!(
+            window.try_find("connection-timeout").is_none(),
+            "technical fields are hidden by default"
+        );
+        assert!(window.try_find("connection-clear-key").is_none());
+        window.click("connection-more-options", cx);
+        window.render_frame(cx);
+        window.scroll(
+            "model-connection-form",
+            ScrollDelta::Pixels(point(px(0.), px(-2000.))),
+            cx,
+        );
+        window.render_frame(cx);
+        assert!(window.find("connection-timeout").visible());
     })
     .unwrap();
 }

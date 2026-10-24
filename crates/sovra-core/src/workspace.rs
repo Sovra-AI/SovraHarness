@@ -656,12 +656,21 @@ impl WorkspaceState {
                 None
             }
             Event::Models(_) | Event::Ready { .. } | Event::Pong | Event::Stopped => None,
-            Event::AgentChunk { session_id, .. }
+            Event::AgentResponseStarted { session_id, .. }
+            | Event::AgentChunk { session_id, .. }
             | Event::AgUiSurface { session_id, .. }
             | Event::AgentCompleted { session_id }
             | Event::AgentError { session_id, .. }
                 if session_id != &self.session_id =>
             {
+                None
+            }
+            Event::AgentResponseStarted { model, .. } => {
+                self.append_or_extend_assistant("");
+                if let Some(message) = self.messages.last_mut() {
+                    message.model.get_or_insert_with(|| model.clone());
+                }
+                self.sync_active_thread();
                 None
             }
             Event::AgentChunk { text, .. } => {
@@ -751,6 +760,51 @@ impl WorkspaceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn response_model_is_pinned_to_each_reply_and_saved_with_history() {
+        let mut state = WorkspaceState::default();
+        let session_id = state.session_id.clone();
+        let first = crate::ResponseModel {
+            model_id: "provider/first".into(),
+            name: "First model".into(),
+            provider: "OpenRouter".into(),
+        };
+        let second = crate::ResponseModel {
+            model_id: "local/second".into(),
+            name: "Second model".into(),
+            provider: "Local server".into(),
+        };
+        for model in [&first, &second] {
+            state.submit_prompt("Hello");
+            state.apply_event(&Event::AgentResponseStarted {
+                session_id: "another-chat".into(),
+                model: model.clone(),
+            });
+            assert_eq!(
+                state.messages.last().unwrap().role,
+                crate::MessageRole::User
+            );
+            state.apply_event(&Event::AgentResponseStarted {
+                session_id: session_id.clone(),
+                model: model.clone(),
+            });
+            state.apply_event(&Event::AgentChunk {
+                session_id: session_id.clone(),
+                text: "Hello back".into(),
+            });
+            state.apply_event(&Event::AgentCompleted {
+                session_id: session_id.clone(),
+            });
+        }
+        assert_eq!(state.messages[1].model.as_ref(), Some(&first));
+        assert_eq!(state.messages[3].model.as_ref(), Some(&second));
+        assert_eq!(state.active_thread().unwrap().messages, state.messages);
+        state.start_new_chat();
+        assert!(state.select_thread(&session_id));
+        assert_eq!(state.messages[1].model.as_ref(), Some(&first));
+        assert_eq!(state.messages[3].model.as_ref(), Some(&second));
+    }
 
     #[test]
     fn surface_revisions_update_in_place_and_ignore_other_sessions() {

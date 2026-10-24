@@ -48,6 +48,45 @@ fn check_views(directory: &Path, design: &Path) -> anyhow::Result<()> {
                         line + 1
                     );
                 }
+                if compact.contains("Button::new(") {
+                    bail!(
+                        "{}:{}: use design::button or design::primary_button in views so buttons get Sovra geometry and pointer cursor",
+                        path.display(),
+                        line + 1
+                    );
+                }
+                if compact.contains("Checkbox::new(") && !compact.contains(".cursor_pointer()") {
+                    let window_end = (line + 6).min(source.lines().count());
+                    let snippet: String = source
+                        .lines()
+                        .skip(line)
+                        .take(window_end - line)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !snippet.contains(".cursor_pointer()") {
+                        bail!(
+                            "{}:{}: Checkbox::new must include .cursor_pointer()",
+                            path.display(),
+                            line + 1
+                        );
+                    }
+                }
+                if compact.contains("Select::new(") && !compact.contains(".cursor_pointer()") {
+                    let window_end = (line + 8).min(source.lines().count());
+                    let snippet: String = source
+                        .lines()
+                        .skip(line)
+                        .take(window_end - line)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !snippet.contains(".cursor_pointer()") {
+                        bail!(
+                            "{}:{}: Select::new must include .cursor_pointer()",
+                            path.display(),
+                            line + 1
+                        );
+                    }
+                }
             }
         }
     }

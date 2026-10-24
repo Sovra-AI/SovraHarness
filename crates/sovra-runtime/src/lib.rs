@@ -406,6 +406,7 @@ fn tap_agent_events(
                 | Event::Ready { .. }
                 | Event::Pong
                 | Event::RouteEvaluated { .. }
+                | Event::AgentResponseStarted { .. }
                 | Event::AgUiSurface { .. }
                 | Event::AgentError { .. }
                 | Event::Stopped => {}

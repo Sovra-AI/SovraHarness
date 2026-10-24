@@ -18,7 +18,7 @@ pub async fn test_connection(
 ) -> Result<usize, ModelError> {
     if connection.authentication != sovra_core::models::Authentication::None && secret.0.is_empty()
     {
-        return Err(ModelError("Enter an API key to test authentication. The public OpenRouter catalog can be browsed without one.".into()));
+        return Err(ModelError("Paste your key first, then check it.".into()));
     }
     if connection.kind == ProviderKind::OpenRouter {
         let request = client(connection)?.get(endpoint(connection, "auth/key"));

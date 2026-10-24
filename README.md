@@ -55,11 +55,17 @@ The **My AI's & Routing Tree** tab configures how Sovra selects models across it
 - **Per-Agent Models:** Assign individual models or complexity tiers (`Tier 0 · Fast`, `Tier 1 · Standard`, `Tier 2 · Deep`) per specialist (`CodingAgent`, `WebSearchAgent`, `DeepResearchAgent`, `StockMarketAgent`, etc.).
 - **Dynamic Tree Router (`CogniRouteSLM` + `SovraSRX`):** Evaluates prompts through a complexity decision tree using **Laya** (`/v1/systemone`), **OpenJev / TypeSafe Jev** (`/v1/systemone` or OpenRouter `/api/alpha/decisions`), or the zero-latency **Embedded Rust Heuristic** engine with automatic offline fail-open and auditable `rc1-...` route codes.
 
-Open **Settings → Manage OpenRouter key** to add, replace, test or remove your
-key in the OS keychain. Then select a chat model in **Models**.
+**Settings** is the one place to set Sovra up, written for people new to AI:
+**Appearance** (Light or Dark), **AI connection** (follow the three steps to paste an
+OpenRouter key; it is kept in the OS keychain and can be checked, replaced or removed)
+and a folded-away **Advanced** section for local or other services, whose technical
+fields stay hidden until you choose *Show technical options*. Then select a chat
+model in **Models**.
 
 **Chat** starts with a normal conversation using the selected model. Replies render
-as selectable Markdown with code copying. Streaming follows the latest output;
+as selectable Markdown with code copying. Each new reply includes a model pill
+with its connection and exact model ID on hover; this identity is saved with the
+conversation and stays accurate after switching models. Streaming follows the latest output;
 scrolling up pauses following until you return to the bottom or use **Jump to latest**.
 Enter sends and Shift+Enter adds a line. **Stop** also discards queued prompts.
 Native AG-UI cards and buttons are optional tools for interactive requests, and
@@ -85,5 +91,5 @@ before pushing to `main` (enforced by [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTIN
 security and secrets policy lives in [`SECURITY.md`](SECURITY.md).
 
 The native Sovra dark/light design system, embedded SVG branding, usage examples and
-research sources are documented in [`docs/styling.md`](docs/styling.md). The welcome
-screen's appearance control previews both modes (session only).
+research sources are documented in [`docs/styling.md`](docs/styling.md). Switch
+between both modes in **Settings → Appearance** (session only).

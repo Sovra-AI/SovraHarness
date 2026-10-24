@@ -757,9 +757,14 @@ async fn conversational_reply_arrives_before_the_server_finishes_without_cards_o
         .unwrap();
     let events = client.events();
     let mut text = String::new();
+    let mut responder = None;
     let first = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await.unwrap() {
+                Event::AgentResponseStarted { session_id, model } => {
+                    assert_eq!(session_id, "live-stream");
+                    assert!(responder.replace(model).is_none());
+                }
                 Event::AgentChunk { text, .. } => break text,
                 Event::Models(_) | Event::Ready { .. } => {}
                 event => panic!("unexpected event before first text: {event:?}"),
@@ -768,6 +773,14 @@ async fn conversational_reply_arrives_before_the_server_finishes_without_cards_o
     })
     .await
     .unwrap();
+    assert_eq!(
+        responder.unwrap(),
+        sovra_core::ResponseModel {
+            model_id: "chat-model".into(),
+            name: "chat-model".into(),
+            provider: "OpenAI compatible".into(),
+        }
+    );
     assert_eq!(first, "Hello **");
     text.push_str(&first);
     release.send(()).unwrap();

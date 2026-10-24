@@ -1,7 +1,7 @@
 //! The main window's root view: title bar, Login / 3-column Main Chat workspace, and status bar.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Theme, ThemeMode, TitleBar, h_flex,
+    ActiveTheme as _, TitleBar, h_flex,
     input::{InputEvent, InputState, TextareaState},
     v_flex,
 };
@@ -523,17 +523,6 @@ impl Render for Shell {
         let border = theme.border;
         let muted_foreground = theme.muted_foreground;
         let t = design::tokens(cx);
-        let next_mode = if theme.is_dark() {
-            ThemeMode::Light
-        } else {
-            ThemeMode::Dark
-        };
-        let appearance_label = if theme.is_dark() {
-            "Use light appearance"
-        } else {
-            "Use dark appearance"
-        };
-
         v_flex()
             .id("sovra-shell")
             .track_focus(&self.focus_handle)
@@ -541,7 +530,7 @@ impl Render for Shell {
             .size_full()
             .sovra_surface(Surface::Canvas, cx)
             .sovra_text(TextRole::Body, cx)
-            .child(render_title_bar(appearance_label, next_mode, cx))
+            .child(TitleBar::new())
             .child(self.render_body(cx))
             .child(
                 h_flex()
@@ -657,39 +646,6 @@ impl Shell {
             }
         }
     }
-}
-
-fn render_title_bar(
-    appearance_label: &'static str,
-    next_mode: ThemeMode,
-    cx: &Context<Shell>,
-) -> impl IntoElement + use<> {
-    let t = design::tokens(cx);
-    // The shared 40px controls must fit inside the native title bar's content area.
-    TitleBar::new()
-        .h(t.layout.control_height + t.space.compact)
-        .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .justify_between()
-                .pr(t.space.small)
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap(t.space.compact)
-                        .child(logo("title-logo", t.layout.logo_small))
-                        .child(
-                            div()
-                                .sovra_text(TextRole::Caption, cx)
-                                .child(crate::PRODUCT_NAME),
-                        ),
-                )
-                .child(
-                    design::primary_button("toggle-appearance", appearance_label, cx)
-                        .on_click(move |_, _, cx| Theme::change(next_mode, None, cx)),
-                ),
-        )
 }
 
 pub(crate) fn logo(id: &'static str, size: Pixels) -> impl IntoElement {

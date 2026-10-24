@@ -227,6 +227,11 @@ async fn chat_threads_save_list_and_soft_delete() {
         "Just now",
         vec![],
     ));
+    thread2.messages[0].model = Some(sovra_core::ResponseModel {
+        model_id: "provider/model".into(),
+        name: "Friendly model".into(),
+        provider: "OpenRouter".into(),
+    });
     thread2.refresh_summary(Timestamp(4_000));
 
     store
@@ -241,6 +246,7 @@ async fn chat_threads_save_list_and_soft_delete() {
     let listed = store.list_chat_threads(10).await.expect("list threads");
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].id, "sched-run-1");
+    assert_eq!(listed[0].messages, thread2.messages);
     assert_eq!(listed[0].kind, sovra_core::ConversationKind::Scheduled);
     assert_eq!(listed[1].id, "chat-1");
     assert_eq!(listed[1].messages.len(), 1);
@@ -255,4 +261,14 @@ async fn chat_threads_save_list_and_soft_delete() {
         .expect("list after delete");
     assert_eq!(after_delete.len(), 1);
     assert_eq!(after_delete[0].id, "sched-run-1");
+}
+
+#[test]
+fn older_chat_messages_load_without_inventing_a_model() {
+    let message: sovra_core::ChatMessage = serde_json::from_value(serde_json::json!({
+        "id":"old", "role":"assistant", "author":"SOVRA", "timestamp":"Yesterday",
+        "text":"Earlier reply", "widgets":[],
+    }))
+    .unwrap();
+    assert!(message.model.is_none());
 }

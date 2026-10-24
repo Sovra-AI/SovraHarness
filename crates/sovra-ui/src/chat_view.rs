@@ -2,12 +2,14 @@
 
 use std::collections::HashMap;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _,
+    ActiveTheme as _, Icon, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::TextareaState,
     text::{TextView, TextViewState},
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -15,7 +17,7 @@ use gpui_kit::{
     IntoElement, ListAlignment, ListState, ParentElement as _, Role,
     StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, div, list,
 };
-use sovra_core::{AgUiWidget, ChatMessage, MessageRole, WorkspaceState};
+use sovra_core::{AgUiWidget, ChatMessage, MessageRole, ResponseModel, WorkspaceState};
 
 use crate::agui_widgets::render_agui_widget;
 use crate::composer::render_composer;
@@ -25,6 +27,7 @@ use crate::shell::Shell;
 struct MarkdownMessage {
     source: String,
     widgets: Vec<AgUiWidget>,
+    model: Option<ResponseModel>,
     state: Entity<TextViewState>,
     _changed: Subscription,
 }
@@ -73,7 +76,11 @@ impl ChatPresentation {
                         .state
                         .update(cx, |view, cx| view.set_text(&message.text, cx));
                 }
-                if text_changed || markdown.widgets != message.widgets {
+                if text_changed
+                    || markdown.widgets != message.widgets
+                    || markdown.model != message.model
+                {
+                    markdown.model.clone_from(&message.model);
                     markdown.widgets.clone_from(&message.widgets);
                     self.list.remeasure_items(index..index + 1);
                 }
@@ -90,6 +97,7 @@ impl ChatPresentation {
                     MarkdownMessage {
                         source: message.text.clone(),
                         widgets: message.widgets.clone(),
+                        model: message.model.clone(),
                         state: view,
                         _changed: changed,
                     },
@@ -265,16 +273,72 @@ fn render_assistant_message(
                     render_agui_widget(widget, index * 10 + widget_index, cx)
                 }),
         )
-        .children((!msg.text.is_empty()).then(|| {
-            h_flex().child(
-                design::button(("copy-message", index), "Copy", cx)
-                    .ghost()
-                    .accessibility_label("Copy response")
-                    .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                    }),
-            )
-        }))
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .gap(t.space.small)
+                .children(
+                    msg.model
+                        .as_ref()
+                        .map(|model| render_model_pill(model, index, cx)),
+                )
+                .children((!msg.text.is_empty()).then(|| {
+                    design::button(("copy-message", index), "Copy", cx)
+                        .ghost()
+                        .accessibility_label("Copy response")
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                        })
+                })),
+        )
+}
+
+fn render_model_pill(
+    model: &ResponseModel,
+    index: usize,
+    cx: &Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let name = if model.name.is_empty() {
+        &model.model_id
+    } else {
+        &model.name
+    };
+    let label = if model.provider.is_empty() {
+        name.clone()
+    } else {
+        format!("{name} · {}", model.provider)
+    };
+    let details = format!(
+        "Response model: {name}\nModel ID: {}{}",
+        model.model_id,
+        if model.provider.is_empty() {
+            String::new()
+        } else {
+            format!("\nConnection: {}", model.provider)
+        }
+    );
+    h_flex()
+        .id(("response-model", index))
+        .aria_label(details.clone())
+        .test_support()
+        .max_w_full()
+        .min_w_0()
+        .gap(t.space.compact)
+        .px(t.space.small)
+        .py(t.space.compact)
+        .sovra_surface(Surface::Subtle, cx)
+        .rounded(t.radius.pill)
+        .sovra_text(TextRole::Caption, cx)
+        .tooltip(move |window, cx| Tooltip::new(details.clone()).build(window, cx))
+        .child(
+            Icon::new(IconName::Cpu)
+                .xsmall()
+                .flex_shrink_0()
+                .text_color(cx.theme().link),
+        )
+        .child(div().min_w_0().truncate().child(label))
 }
 
 #[cfg(test)]
@@ -285,6 +349,69 @@ mod tests {
     use gpui_kit::{ScrollDelta, TestAppContext, point, px, size};
     use sovra_core::Event;
     use sovra_runtime::Client;
+
+    #[gpui_kit::test]
+    fn response_model_pill_fits_both_themes_and_preserves_copy(cx: &mut TestAppContext) {
+        let (client, _commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(640.), px(420.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let session = shell.read_with(cx, |shell, _| shell.state.session_id.clone());
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.send_prompt_text("Hi", window, cx));
+        })
+        .unwrap();
+        let model = ResponseModel {
+            model_id: "organization/model-version-2026".into(),
+            name: "A model with a deliberately long catalog display name".into(),
+            provider: "My OpenRouter connection".into(),
+        };
+        for event in [
+            Event::AgentResponseStarted {
+                session_id: session.clone(),
+                model: model.clone(),
+            },
+            Event::AgentChunk {
+                session_id: session.clone(),
+                text: "**Hello** from this model.".into(),
+            },
+            Event::AgentCompleted {
+                session_id: session,
+            },
+        ] {
+            events.send_blocking(event).unwrap();
+        }
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            for mode in [ThemeMode::Dark, ThemeMode::Light] {
+                Theme::change(mode, Some(window), cx);
+                window.render_frame(cx);
+                let pill = window.find(("response-model", 1usize));
+                assert!(pill.visible());
+                assert!(pill.label().unwrap().contains(&model.model_id));
+                assert!(pill.label().unwrap().contains(&model.provider));
+                let bounds = pill.bounds();
+                let chat = window.find("chat-scroll-area").bounds();
+                assert!(bounds.left() >= chat.left());
+                assert!(bounds.right() <= chat.right());
+                window.click(("copy-message", 1usize), cx);
+                assert_eq!(
+                    cx.read_from_clipboard().unwrap().text().unwrap(),
+                    "**Hello** from this model."
+                );
+            }
+            assert_eq!(
+                shell.read(cx).state.messages[1].model.as_ref(),
+                Some(&model)
+            );
+        })
+        .unwrap();
+    }
 
     #[gpui_kit::test]
     fn streamed_markdown_follows_tail_without_stealing_the_reading_position(

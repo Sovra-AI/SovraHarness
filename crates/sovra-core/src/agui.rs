@@ -64,6 +64,14 @@ pub enum AgUiWidget {
     },
 }
 
+/// Immutable execution identity retained with a reply, independently of current selection.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResponseModel {
+    pub model_id: String,
+    pub name: String,
+    pub provider: String,
+}
+
 /// A single message in the main chat conversation stream.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
@@ -73,6 +81,8 @@ pub struct ChatMessage {
     pub timestamp: String,
     pub text: String,
     pub widgets: Vec<AgUiWidget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ResponseModel>,
 }
 
 impl ChatMessage {
@@ -89,6 +99,7 @@ impl ChatMessage {
             timestamp: timestamp.into(),
             text: text.into(),
             widgets: Vec::new(),
+            model: None,
         }
     }
 
@@ -106,6 +117,7 @@ impl ChatMessage {
             timestamp: timestamp.into(),
             text: text.into(),
             widgets,
+            model: None,
         }
     }
 }

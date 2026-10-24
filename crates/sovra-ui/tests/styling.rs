@@ -107,7 +107,7 @@ fn both_modes_keep_native_components_and_product_surfaces_readable(cx: &mut Test
 }
 
 #[gpui_kit::test]
-fn appearance_control_works_at_minimum_and_default_window_sizes(cx: &mut TestAppContext) {
+fn appearance_lives_in_settings_at_minimum_and_default_window_sizes(cx: &mut TestAppContext) {
     let (client, _commands, _events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     for dimensions in [size(px(640.), px(420.)), size(px(1100.), px(720.))] {
@@ -117,33 +117,62 @@ fn appearance_control_works_at_minimum_and_default_window_sizes(cx: &mut TestApp
         });
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            let button = window.find("toggle-appearance");
-            assert!(button.visible());
-            assert!(
-                button.bounds().left() >= px(0.) && button.bounds().right() <= dimensions.width
-            );
-            assert!(
-                button.bounds().top() >= px(0.) && button.bounds().bottom() <= dimensions.height
-            );
-            assert_eq!(button.label(), Some("Use light appearance"));
-            window.click("toggle-appearance", cx);
-            assert!(!cx.theme().is_dark());
+            // The title bar stays empty: no product name, no appearance switch.
+            assert!(window.try_find("toggle-appearance").is_none());
+            assert!(window.try_find("title-logo").is_none());
+            window.click("nav-settings", cx);
+            window.render_frame(cx);
+            for id in ["settings-theme-light", "settings-theme-dark"] {
+                let button = window.find(id);
+                assert!(button.visible());
+                assert!(
+                    button.bounds().left() >= px(0.) && button.bounds().right() <= dimensions.width
+                );
+                assert!(
+                    button.bounds().top() >= px(0.)
+                        && button.bounds().bottom() <= dimensions.height
+                );
+            }
             assert_eq!(
-                window.find("toggle-appearance").label(),
-                Some("Use dark appearance")
+                window.find("settings-theme-light").label(),
+                Some("Light appearance")
             );
-            // Sidebar buttons participate in native traversal too; verify reachability
-            // without coupling the appearance control to a particular tab index.
-            for _ in 0..20 {
+            window.click("settings-theme-light", cx);
+            assert!(!cx.theme().is_dark());
+            window.render_frame(cx);
+            // Keyboard users reach the switch through native traversal too.
+            for _ in 0..30 {
                 window.press("tab", cx);
-                if window.find("toggle-appearance").focused() == Some(true) {
+                if window.find("settings-theme-dark").focused() == Some(true) {
                     break;
                 }
             }
-            assert_eq!(window.find("toggle-appearance").focused(), Some(true));
+            assert_eq!(window.find("settings-theme-dark").focused(), Some(true));
             window.press("space", cx);
             assert!(cx.theme().is_dark());
         })
         .unwrap();
     }
+}
+
+#[gpui_kit::test]
+fn buttons_and_clickable_controls_use_pointer_cursor(cx: &mut TestAppContext) {
+    use gpui_kit::{CursorStyle, Styled as _};
+
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| {
+        sovra_ui::init(client, cx);
+        let mut standard = design::button("test-btn", "Action", cx);
+        assert_eq!(
+            standard.style().mouse_cursor,
+            Some(CursorStyle::PointingHand),
+            "design::button must set a pointer cursor"
+        );
+        let mut primary = design::primary_button("test-primary-btn", "Primary", cx);
+        assert_eq!(
+            primary.style().mouse_cursor,
+            Some(CursorStyle::PointingHand),
+            "design::primary_button must set a pointer cursor"
+        );
+    });
 }

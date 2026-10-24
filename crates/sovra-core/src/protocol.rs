@@ -72,6 +72,11 @@ pub enum Event {
     RouteEvaluated {
         evaluation: Box<RouteEvaluation>,
     },
+    /// Execution identity, sent once immediately before the first assistant output.
+    AgentResponseStarted {
+        session_id: String,
+        model: crate::ResponseModel,
+    },
     /// A streamed text chunk emitted by the ADK agent for a session.
     AgentChunk {
         session_id: String,

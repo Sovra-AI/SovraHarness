@@ -178,7 +178,9 @@ pub(crate) fn transport_error(error: &reqwest::Error) -> ModelError {
 
 pub(crate) fn status_error(status: reqwest::StatusCode) -> ModelError {
     let hint = match status.as_u16() {
-        401 | 403 => "Authentication was rejected. Check your API key and account access.",
+        401 | 403 => {
+            "That key wasn't accepted. Check that you copied the whole key and that your account is active."
+        }
         404 => {
             "Endpoint not found. Check the base URL and protocol. You can add a model ID manually if this server does not support discovery."
         }

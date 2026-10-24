@@ -356,7 +356,7 @@ impl ModelActor {
                 let provider = self.provider(connection.kind)?;
                 self.emit(ModelEvent::OperationStarted).await;
                 self.jobs.spawn(async move {
-                    Completed::Test(sovra_providers::test_connection(provider.as_ref(), &connection, &secret).await.map(|count| format!("Connection verified · {count} models discovered. No inference request was sent.")))
+                    Completed::Test(sovra_providers::test_connection(provider.as_ref(), &connection, &secret).await.map(|count| format!("It works! Sovra can reach this service · {count} AI models available.")))
                 });
             }
             ModelCommand::DeleteConnection { id } => self.delete_connection(&id).await?,
@@ -664,8 +664,7 @@ impl ModelActor {
         })
         .await;
         self.emit(ModelEvent::Notice(
-            "Connection saved. API keys are stored in the operating system credential store."
-                .into(),
+            "Saved. Any key is kept safely in this computer's keychain.".into(),
         ))
         .await;
         if let Some(active) = self.saved.preferences.active.clone()
@@ -717,7 +716,7 @@ impl ModelActor {
         self.publish().await;
         cleanup?;
         self.emit(ModelEvent::Notice(
-            "Connection removed. Models on the server were not deleted.".into(),
+            "Connection removed. Nothing was deleted from the service itself.".into(),
         ))
         .await;
         Ok(())

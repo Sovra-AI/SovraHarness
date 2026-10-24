@@ -19,7 +19,7 @@ use adk_tool::GoogleSearchTool;
 use async_channel::Sender;
 use futures::StreamExt as _;
 use sovra_core::models::{Authentication, ModelConnection, ModelInfo, ModelSecret, ProviderKind};
-use sovra_core::{AgentConfig, Event};
+use sovra_core::{AgentConfig, Event, ResponseModel};
 
 const DEFAULT_USER_ID: &str = "local-user";
 
@@ -49,6 +49,7 @@ pub struct AdkHarness {
     runner: Arc<Runner>,
     sessions: Arc<InMemorySessionService>,
     secrets: Vec<ModelSecret>,
+    response_model: ResponseModel,
 }
 
 impl std::fmt::Debug for AdkHarness {
@@ -156,6 +157,11 @@ impl AdkHarness {
             Vec::new()
         };
         let mut harness = Self::with_llm_and_tools(config, llm, tools)?;
+        harness.response_model = ResponseModel {
+            model_id: model.id.clone(),
+            name: model.name.clone(),
+            provider: connection.name.clone(),
+        };
         if !secret.0.is_empty() {
             harness.secrets.push(secret.clone());
         }
@@ -169,7 +175,13 @@ impl AdkHarness {
         let model = GeminiModel::new(api_key, &config.model).map_err(Error::ModelInit)?;
         let mut tools: Vec<Arc<dyn Tool>> = vec![Arc::new(GoogleSearchTool::new())];
         tools.extend(native_ui::tools());
-        Self::with_llm_and_tools(config, Arc::new(model), tools)
+        let mut harness = Self::with_llm_and_tools(config, Arc::new(model), tools)?;
+        harness.response_model = ResponseModel {
+            model_id: config.model.clone(),
+            name: config.model.clone(),
+            provider: "Google Gemini".into(),
+        };
+        Ok(harness)
     }
 
     /// Builds an `AdkHarness` with a custom [`Llm`] and tool list (used for tests and custom models).
@@ -178,6 +190,11 @@ impl AdkHarness {
         llm: Arc<dyn Llm>,
         tools: Vec<Arc<dyn Tool>>,
     ) -> Result<Self, Error> {
+        let response_model = ResponseModel {
+            model_id: llm.name().into(),
+            name: llm.name().into(),
+            provider: String::new(),
+        };
         let instruction = if tools.is_empty() {
             config.instruction.clone()
         } else {
@@ -205,6 +222,7 @@ impl AdkHarness {
             app_name: config.app_name.clone(),
             runner: Arc::new(runner),
             sessions,
+            response_model,
             secrets: config.api_key.iter().cloned().map(ModelSecret).collect(),
         })
     }
@@ -274,10 +292,18 @@ impl AdkHarness {
         };
 
         let mut deltas = EventTextDeltas::default();
+        let mut response_model = Some(self.response_model.clone());
         while let Some(item) = stream.next().await {
             match item {
                 Ok(adk_event) => {
-                    if !forward_adk_event(session_id, &deltas.push(&adk_event), events).await {
+                    if !forward_adk_event(
+                        session_id,
+                        &deltas.push(&adk_event),
+                        &mut response_model,
+                        events,
+                    )
+                    .await
+                    {
                         return;
                     }
                 }
@@ -305,9 +331,24 @@ impl AdkHarness {
 async fn forward_adk_event(
     session_id: &str,
     adk_event: &adk_core::Event,
+    response_model: &mut Option<ResponseModel>,
     events: &Sender<Event>,
 ) -> bool {
-    for widget in native_ui::extract_surfaces(adk_event) {
+    let widgets = native_ui::extract_surfaces(adk_event);
+    let text = extract_text(adk_event);
+    if (!widgets.is_empty() || text.is_some())
+        && let Some(model) = response_model.take()
+        && events
+            .send(Event::AgentResponseStarted {
+                session_id: session_id.to_owned(),
+                model,
+            })
+            .await
+            .is_err()
+    {
+        return false;
+    }
+    for widget in widgets {
         if events
             .send(Event::AgUiSurface {
                 session_id: session_id.to_owned(),
@@ -319,7 +360,7 @@ async fn forward_adk_event(
             return false;
         }
     }
-    if let Some(text) = extract_text(adk_event)
+    if let Some(text) = text
         && events
             .send(Event::AgentChunk {
                 session_id: session_id.to_owned(),
@@ -395,6 +436,17 @@ mod tests {
             let (tx, rx) = async_channel::unbounded();
 
             harness.run_prompt("session-1", "Hi there", &tx).await;
+            assert_eq!(
+                rx.recv().await.unwrap(),
+                Event::AgentResponseStarted {
+                    session_id: "session-1".into(),
+                    model: ResponseModel {
+                        model_id: "fake-gemini".into(),
+                        name: "fake-gemini".into(),
+                        provider: String::new(),
+                    },
+                }
+            );
 
             assert_eq!(
                 rx.recv().await.unwrap(),
@@ -451,6 +503,10 @@ mod tests {
             .unwrap();
             let (tx, rx) = async_channel::unbounded();
             harness.run_prompt("stream", "Hello", &tx).await;
+            assert!(
+                matches!(rx.recv().await.unwrap(), Event::AgentResponseStarted { model, .. }
+                if model.model_id == "streaming-test")
+            );
             let mut chunks = Vec::new();
             while let Ok(event) = rx.try_recv() {
                 match event {
@@ -469,6 +525,20 @@ mod tests {
             let mut event = adk_core::Event::new("test");
             event.set_content(Content::new(role).with_text("not an assistant reply"));
             assert_eq!(extract_text(&event), None);
+            let mut model = Some(ResponseModel {
+                model_id: "test".into(),
+                name: "Test model".into(),
+                provider: String::new(),
+            });
+            let (tx, rx) = async_channel::unbounded();
+            assert!(futures::executor::block_on(forward_adk_event(
+                "test", &event, &mut model, &tx
+            )));
+            assert!(rx.is_empty());
+            assert!(
+                model.is_some(),
+                "attribution waits for real assistant output"
+            );
         }
     }
 }

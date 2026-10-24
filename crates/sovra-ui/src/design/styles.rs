@@ -94,6 +94,7 @@ pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App
         button = button.label(label);
     }
     button
+        .cursor_pointer()
         .rounded(t.radius.button)
         .min_h(t.layout.control_height)
         .px(t.space.large)

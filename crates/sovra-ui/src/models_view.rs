@@ -77,6 +77,7 @@ pub struct ModelsView {
     download_open: bool,
     pub(crate) connections_open: bool,
     pub(crate) settings_open: bool,
+    pub(crate) settings_advanced_open: bool,
     pub(crate) connection_form: Option<ConnectionForm>,
     pub(crate) manual_form: Option<ManualModelForm>,
     pub(crate) form_subscriptions: Vec<Subscription>,
@@ -198,6 +199,7 @@ impl ModelsView {
             download_open: false,
             connections_open: false,
             settings_open: false,
+            settings_advanced_open: false,
             connection_form: None,
             manual_form: None,
             form_subscriptions: Vec::new(),
@@ -571,6 +573,7 @@ impl ModelsView {
                         .gap(t.space.medium)
                         .child(
                             Checkbox::new("models-filter-tools")
+                                .cursor_pointer()
                                 .label("Tool calling")
                                 .checked(self.filter.tools)
                                 .on_click(cx.listener(|view, checked, _, cx| {
@@ -581,6 +584,7 @@ impl ModelsView {
                         )
                         .child(
                             Checkbox::new("models-filter-reasoning")
+                                .cursor_pointer()
                                 .label("Reasoning")
                                 .checked(self.filter.reasoning)
                                 .on_click(cx.listener(|view, checked, _, cx| {
@@ -591,6 +595,7 @@ impl ModelsView {
                         )
                         .child(
                             Checkbox::new("models-filter-json")
+                                .cursor_pointer()
                                 .label("Structured output")
                                 .checked(self.filter.structured_output)
                                 .on_click(cx.listener(|view, checked, _, cx| {
@@ -973,11 +978,13 @@ pub(crate) fn select_control(
         .w_full()
         .h(design::tokens(cx).layout.control_height)
         .flex_shrink_0()
+        .cursor_pointer()
         .child(
             Select::new(state)
                 .id(label)
                 .accessibility_label(label)
                 .placeholder(placeholder)
+                .cursor_pointer()
                 .size_full(),
         )
 }

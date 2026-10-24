@@ -1,8 +1,8 @@
 # Model library
 
-Add your OpenRouter key under **Settings → Manage OpenRouter key**. The masked
-field supports saving/replacing, removing and testing the key through the OS
-credential store. Select the model you want to use in **Models** after saving.
+Add your OpenRouter key under **Settings → AI connection → Add your key** (shown as
+**Manage key** once one is saved). The masked field supports saving/replacing,
+removing and checking the key through the OS credential store. Select the model you want to use in **Models** after saving.
 
 Open **Models** in the sidebar to browse OpenRouter, installed Ollama models and
 your own local or remote connections. The library refreshes in the background;
@@ -40,8 +40,10 @@ what the model supports. Switching models starts fresh provider history.
 
 ## Connections
 
-Open **Connections → Add connection**, choose a preset and adjust its URL, protocol
-and authentication. Use the API base, not a web dashboard URL. Reverse-proxy path
+Open **Connections → Add connection** (or **Settings → Advanced → Show advanced
+options**), choose a preset and adjust its address. Service type (protocol),
+how the key is sent (authentication), wait time and other headers sit behind
+**Show technical options**. Use the API base, not a web dashboard URL. Reverse-proxy path
 prefixes are preserved. Common full endpoint suffixes are normalized.
 
 | Server | Base URL example | Protocol | Authentication |
@@ -62,9 +64,9 @@ needs its matching adapter. Optional OpenAI organization/project headers and a
 custom API-key header name are supported. Request/chat timeout is configurable
 between 5 and 600 seconds.
 
-**Test connection** verifies discovery and, for OpenRouter, the key endpoint; it
+**Check connection** verifies discovery and, for OpenRouter, the key endpoint; it
 does not send a paid inference request. Saving is also possible when discovery
-is unsupported. Use **Add model by ID** on that connection to supply an exact
+is unsupported. Use **Add a model by name** on that connection to supply an exact
 deployment/model ID, optional context and explicit tool capability. A manual
 entry overrides discovered metadata for the same ID. Removing it restores normal
 discovery. Removing a connection never deletes models from its server.

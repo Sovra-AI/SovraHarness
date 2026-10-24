@@ -19,8 +19,8 @@ mod workspace;
 
 pub use agent::{AgentConfig, DEFAULT_GEMINI_MODEL, DEFAULT_SYSTEM_INSTRUCTION};
 pub use agui::{
-    AgUiWidget, BuildStep, BuildStepState, ChatMessage, ClarifyChip, MessageRole, UiComponent,
-    default_personal_ai_build_widget,
+    AgUiWidget, BuildStep, BuildStepState, ChatMessage, ClarifyChip, MessageRole, ResponseModel,
+    UiComponent, default_personal_ai_build_widget,
 };
 pub use chat_history::{
     ChatHistoryFilter, ChatThread, ConversationKind, ConversationTopicIcon, GroupedHistory,

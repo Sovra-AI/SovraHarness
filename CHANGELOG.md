@@ -11,8 +11,19 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- Clean up the title bar: it no longer shows the product name or a light/dark
+  button. Appearance now lives in **Settings → Appearance**.
+- Rework Settings for people new to AI: three plain-language sections (Appearance,
+  AI connection, Advanced), step-by-step OpenRouter key instructions, a folded-away
+  Advanced section for other services, and technical connection fields (service
+  type, key header, wait time, organization/project IDs) hidden behind
+  *Show technical options*. Connection, key and error messages use everyday wording.
+
 ### Fixed
 
+- Ensure every clickable button (`design::button`, `design::primary_button`), checkbox (`Checkbox`), dropdown (`Select`), and custom interactive element across `sovra-ui` displays a pointer cursor (`CursorStyle::PointingHand`), enforced by `xtask check-styles`.
 - Normal chat answers conversationally in Markdown; native UI tools are optional,
   and ordinary turns no longer invoke the specialist routing simulation.
 - Preserve streamed text exactly and deduplicate ADK's final response snapshots.
@@ -34,6 +45,9 @@ move them under a version heading when the tag is cut.
   cards, tables, alerts, progress and action buttons. Surface revisions update in
   place; button actions carry their surface identity back to the agent.
 ### Added
+
+- Assistant replies show a compact model and connection pill with the exact model ID
+  on hover. Execution identity stays with each reply across model changes and saved history.
 
 - **Chat History Rail & Schedules Integration (`sovra-core`, `sovra-store-surreal`, `sovra-runtime`, `sovra-ui`)**:
   - Multi-session conversation history rail (`RecentConversationsRail` from `SovraSRXProduction`) with collapsible strip, instant search, segmented `Chats | Scheduled` radio-group filter pills, `Pinned` partitioning, recency buckets (`Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`), semantic topic icons, auto-titling from first prompt, inline rename, pin/unpin, and soft-deletion.

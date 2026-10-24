@@ -45,7 +45,7 @@ impl CredentialStore for OsCredentialStore {
 }
 
 fn credential_error() -> ModelError {
-    ModelError("The operating system credential store is unavailable or access was denied. Unlock your keychain and retry; no API key was written to disk.".into())
+    ModelError("Sovra couldn't open this computer's keychain. Unlock it and try again. Your key was not saved anywhere else.".into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
