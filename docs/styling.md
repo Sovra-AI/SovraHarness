@@ -130,3 +130,26 @@ Checked online on 2026-10-23, then verified APIs in the pinned local
 
 The native adaptations are application decisions based on these constraints, not
 claims that the upstream library prescribes Sovra's visual design.
+
+## Conversational chat
+
+The normal chat follows `SovraSRXProduction`'s `assistant-message.tsx`, shared
+`sovra-chat-column` width and `use-stick-to-bottom.ts` reading behaviour: plain
+assistant prose, a compact user bubble, and aligned transcript/composer widths.
+The native layout uses `layout.reading_width`, with no task banner or fabricated
+attachment/voice actions. Enter submits and Shift+Enter inserts a newline.
+
+[GPUI TextView guidance](https://gpui-kit.com/component/text-view/) was checked
+on 2026-10-24 and verified against the pinned 0.8.0 sources. Each assistant
+message retains a `TextViewState`: incremental Markdown parsing preserves text
+selection and supports incomplete formatting while streaming. Code and tables
+scroll horizontally within the reading column; copy controls use native buttons.
+`stream_fade(true)` follows the component theme's motion policy and reduced-motion
+setting. Chunks are never artificially delayed; already available events are
+applied in bounded batches to avoid redundant UI updates.
+
+The pinned GPUI `ListState` owns variable-height virtualization and `FollowMode::Tail`.
+It follows additions and Markdown remeasurement until the user scrolls up, keeps
+the reading position during further updates, and resumes at the bottom or via
+Jump to latest. Sending a new message also resumes following. This uses the
+native list's layout/scroll state rather than estimated text heights or timers.

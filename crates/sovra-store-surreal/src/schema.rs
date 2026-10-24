@@ -14,6 +14,10 @@ pub(crate) const STATIC_SCHEMA: &str = "
 DEFINE TABLE OVERWRITE episode SCHEMALESS;
 DEFINE INDEX OVERWRITE episode_session ON episode FIELDS session_id, occurred_at;
 
+DEFINE TABLE OVERWRITE chat_thread SCHEMALESS;
+DEFINE INDEX OVERWRITE chat_thread_session ON chat_thread FIELDS session_id UNIQUE;
+DEFINE INDEX OVERWRITE chat_thread_updated ON chat_thread FIELDS updated_at;
+
 DEFINE TABLE OVERWRITE fact SCHEMALESS;
 DEFINE INDEX OVERWRITE fact_created ON fact FIELDS created_at;
 

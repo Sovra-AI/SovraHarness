@@ -19,8 +19,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use sovra_core::{
-    Embedding, Episode, EpisodeId, EpisodeKind, Fact, FactId, MemoryError, MemoryStore, NewEpisode,
-    NewFact, RecallQuery, RecalledFact, Timestamp, fuse_rrf,
+    ChatThread, ConversationKind, Embedding, Episode, EpisodeId, EpisodeKind, Fact, FactId,
+    MemoryError, MemoryStore, NewEpisode, NewFact, RecallQuery, RecalledFact, Timestamp, fuse_rrf,
 };
 use surrealdb::IndexedResults;
 use surrealdb::Surreal;
@@ -362,9 +362,97 @@ impl MemoryStore for SurrealStore {
         }
         Ok(fuse_rrf(legs, query.limit))
     }
+
+    async fn save_chat_thread(&self, thread: &ChatThread) -> Result<(), MemoryError> {
+        let messages_json = serde_json::to_string(&thread.messages)
+            .map_err(|e| MemoryError::Backend(format!("serialize chat messages: {e}")))?;
+        let record_id = RecordId::new("chat_thread", entity_key(&thread.id));
+        let row = ChatThreadRow {
+            session_id: thread.id.clone(),
+            title: thread.title.clone(),
+            kind: match thread.kind {
+                ConversationKind::Chat => "chat".to_owned(),
+                ConversationKind::Scheduled => "scheduled".to_owned(),
+            },
+            schedule_id: thread.schedule_id.clone(),
+            pinned: thread.pinned,
+            created_at: thread.created_at.millis(),
+            updated_at: thread.updated_at.millis(),
+            last_message_preview: thread.last_message_preview.clone(),
+            messages_json,
+            deleted_at: thread.deleted_at.map(Timestamp::millis),
+        };
+        self.query(
+            "UPSERT $record CONTENT $data;",
+            ("record", record_id, "data", row),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn list_chat_threads(&self, limit: usize) -> Result<Vec<ChatThread>, MemoryError> {
+        let rows: Vec<ChatThreadRow> = self
+            .query(
+                "SELECT session_id, title, kind, schedule_id, pinned, created_at, updated_at, \
+                 last_message_preview, messages_json, deleted_at FROM chat_thread \
+                 WHERE deleted_at IS NONE ORDER BY updated_at DESC LIMIT $limit;",
+                ("limit", i64::try_from(limit).unwrap_or(i64::MAX)),
+            )
+            .await?
+            .take(0)
+            .map_err(|e| backend(&e))?;
+        rows.into_iter().map(ChatThreadRow::into_thread).collect()
+    }
+
+    async fn delete_chat_thread(&self, session_id: &str, at: Timestamp) -> Result<(), MemoryError> {
+        let record_id = RecordId::new("chat_thread", entity_key(session_id));
+        self.query(
+            "UPDATE $record SET deleted_at = $at;",
+            ("record", record_id, "at", at.millis()),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 // --- rows ---------------------------------------------------------------------------
+
+#[derive(Debug, SurrealValue)]
+struct ChatThreadRow {
+    session_id: String,
+    title: String,
+    kind: String,
+    schedule_id: Option<String>,
+    pinned: bool,
+    created_at: i64,
+    updated_at: i64,
+    last_message_preview: String,
+    messages_json: String,
+    deleted_at: Option<i64>,
+}
+
+impl ChatThreadRow {
+    fn into_thread(self) -> Result<ChatThread, MemoryError> {
+        let messages = serde_json::from_str(&self.messages_json)
+            .map_err(|e| MemoryError::Backend(format!("deserialize chat messages: {e}")))?;
+        let kind = match self.kind.as_str() {
+            "scheduled" => ConversationKind::Scheduled,
+            _ => ConversationKind::Chat,
+        };
+        Ok(ChatThread {
+            id: self.session_id,
+            title: self.title,
+            kind,
+            schedule_id: self.schedule_id,
+            pinned: self.pinned,
+            created_at: Timestamp(self.created_at),
+            updated_at: Timestamp(self.updated_at),
+            last_message_preview: self.last_message_preview,
+            messages,
+            deleted_at: self.deleted_at.map(Timestamp),
+        })
+    }
+}
 
 #[derive(Debug, SurrealValue)]
 struct NewEpisodeRow {

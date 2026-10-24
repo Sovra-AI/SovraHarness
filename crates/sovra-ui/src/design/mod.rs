@@ -13,7 +13,7 @@ use gpui_kit::App;
 use gpui_kit::base::{Easing, Spring};
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
 
-pub use styles::{SovraStyled, Surface, TextRole, button, primary_button};
+pub use styles::{SovraStyled, Surface, TextRole, button, markdown_style, primary_button};
 pub use tokens::{
     AccentTokens, LayoutTokens, MotionTokens, RadiusTokens, SovraTokens, SpaceTokens, tokens,
 };

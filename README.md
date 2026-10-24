@@ -11,12 +11,17 @@ codebase.
 ## Quick start
 
 ```sh
-# 1. Rust via https://rustup.rs — the pinned toolchain (1.99.1) installs itself on first build
-# 2. Linux only: ./scripts/install-linux-deps.sh
-cargo xtask setup    # once: install pinned development tools
-cargo xtask dev      # start only if the existing sovraRust watcher is absent
+just dev
 ```
 
+Or without `just`:
+
+```sh
+cargo xtask setup
+cargo xtask dev
+```
+
+On Linux, install system packages once first with `./scripts/install-linux-deps.sh`.
 That's it — no Node, no Python, no system packages on macOS/Windows.
 
 ## Everyday commands
@@ -50,7 +55,17 @@ The **My AI's & Routing Tree** tab configures how Sovra selects models across it
 - **Per-Agent Models:** Assign individual models or complexity tiers (`Tier 0 · Fast`, `Tier 1 · Standard`, `Tier 2 · Deep`) per specialist (`CodingAgent`, `WebSearchAgent`, `DeepResearchAgent`, `StockMarketAgent`, etc.).
 - **Dynamic Tree Router (`CogniRouteSLM` + `SovraSRX`):** Evaluates prompts through a complexity decision tree using **Laya** (`/v1/systemone`), **OpenJev / TypeSafe Jev** (`/v1/systemone` or OpenRouter `/api/alpha/decisions`), or the zero-latency **Embedded Rust Heuristic** engine with automatic offline fail-open and auditable `rc1-...` route codes.
 
-The **Chat** and **Schedules** tabs provide the native **AG-UI (`adk-ui`)** conversation workspace (`"Built around you."` hero banner, live `"Building your personal AI..."` progress checklist, `My Personal AI` right inspector, and type-ahead prompt queue) alongside the `SovraSRX` **Schedules Command Center**.
+Open **Settings → Manage OpenRouter key** to add, replace, test or remove your
+key in the OS keychain. Then select a chat model in **Models**.
+
+**Chat** starts with a normal conversation using the selected model. Replies render
+as selectable Markdown with code copying. Streaming follows the latest output;
+scrolling up pauses following until you return to the bottom or use **Jump to latest**.
+Enter sends and Shift+Enter adds a line. **Stop** also discards queued prompts.
+Native AG-UI cards and buttons are optional tools for interactive requests, and
+their actions return to the same session with the surface ID and revision.
+Routing simulation remains in **My AI's**. The **Schedules** tab retains the
+`SovraSRX` Schedules Command Center.
 
 ## Shipping
 

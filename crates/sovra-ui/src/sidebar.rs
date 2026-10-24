@@ -25,12 +25,14 @@ pub(crate) fn render_sidebar(
         .id("sovra-sidebar")
         .w(t.layout.sidebar_width)
         .h_full()
+        .min_h_0()
         .flex_shrink_0()
         .justify_between()
         .p(t.space.medium)
         .sovra_surface(Surface::Chrome, cx)
         .border_r_1()
         .border_color(theme.border)
+        .overflow_y_scroll()
         .child(
             v_flex()
                 .gap(t.space.medium)
@@ -103,10 +105,29 @@ fn render_nav_item(
         t.text_secondary
     };
 
-    design::button(id, tab.label(), cx)
+    design::button(id, "", cx)
+        .accessibility_label(tab.label())
         .ghost()
         .selected(is_active)
-        .icon(Icon::new(icon).small().text_color(icon_color))
+        .child(
+            h_flex()
+                .w_full()
+                .justify_start()
+                .items_center()
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .id(("nav-icon", tab as usize))
+                        .test_support()
+                        .child(Icon::new(icon).small().text_color(icon_color)),
+                )
+                .child(
+                    div()
+                        .id(("nav-label", tab as usize))
+                        .test_support()
+                        .child(tab.label()),
+                ),
+        )
         .w_full()
         .px(t.space.small)
         .items_center()
@@ -123,7 +144,7 @@ fn render_skyline_tagline(cx: &Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let heights = [16., 28., 22., 48., 34., 64., 38., 26., 18.];
     v_flex()
-        .items_center()
+        .items_start()
         .gap(t.space.compact)
         .py(t.space.small)
         .child(

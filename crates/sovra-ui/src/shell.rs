@@ -1,20 +1,23 @@
 //! The main window's root view: title bar, Login / 3-column Main Chat workspace, and status bar.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Theme, ThemeMode, TitleBar, h_flex, input::InputState, v_flex,
+    ActiveTheme as _, Theme, ThemeMode, TitleBar, h_flex,
+    input::{InputEvent, InputState, TextareaState},
+    v_flex,
 };
 use gpui_kit::{
     AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Render, Role, StatefulInteractiveElement as _, Styled as _, Task,
-    TestSupportExt as _, Window, div, img,
+    ParentElement as _, Pixels, Render, Role, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Task, TestSupportExt as _, Window, div, img,
 };
 use sovra_core::{
-    Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScreenRoute, SelectionMode,
-    WorkspaceState,
+    ChatHistoryFilter, Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScreenRoute,
+    SelectionMode, WorkspaceState,
 };
 
 use crate::RuntimeClient;
-use crate::chat_view::render_chat_column;
+use crate::chat_history_view::render_chat_history_rail;
+use crate::chat_view::{ChatPresentation, render_chat_column};
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::inspector::render_inspector;
 use crate::login::render_login_screen;
@@ -23,15 +26,26 @@ use crate::schedules_view::render_schedules_view;
 use crate::sidebar::render_sidebar;
 
 pub struct Shell {
-    state: WorkspaceState,
+    pub(crate) state: WorkspaceState,
+    pub(crate) chat: ChatPresentation,
     focus_handle: FocusHandle,
-    composer_input: Entity<InputState>,
+    history_compact: bool,
+    history_overlay_open: bool,
+    composer_input: Entity<TextareaState>,
     search_input: Entity<InputState>,
+    history_search_input: Entity<InputState>,
+    rename_thread_input: Entity<InputState>,
+    schedule_name_input: Entity<InputState>,
+    schedule_cadence_input: Entity<InputState>,
+    schedule_prompt_input: Entity<InputState>,
+    schedule_form_open: bool,
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
     sim_route_input: Entity<InputState>,
     models: Entity<crate::ModelsView>,
     _events: Task<()>,
+    _composer_events: Subscription,
+    _history_search_events: Subscription,
 }
 
 impl std::fmt::Debug for Shell {
@@ -50,10 +64,49 @@ impl Shell {
         // has been clicked. The shell itself stays outside the tab order.
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
-        let composer_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Message your SOVRA..."));
+        let composer_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Message Sovra…")
+                .auto_grow(1, 6)
+                .submit_on_enter(true)
+        });
+        let composer_events = cx.subscribe_in(
+            &composer_input,
+            window,
+            |shell, _, event, window, cx| match event {
+                InputEvent::PressEnter {
+                    secondary: false,
+                    shift: false,
+                } => shell.submit_composer(window, cx),
+                InputEvent::Change => cx.notify(),
+                InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
+            },
+        );
         let search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search anything..."));
+        let history_search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search chats…"));
+        let history_search_events = cx.subscribe_in(
+            &history_search_input,
+            window,
+            |shell, input, event, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let query = input.read(cx).value().to_string();
+                    shell.state.set_history_search(&query);
+                    cx.notify();
+                }
+            },
+        );
+        let rename_thread_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Conversation title"));
+        let schedule_name_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Morning Market Check"));
+        let schedule_cadence_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Daily · 08:00 GST"));
+        let schedule_prompt_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Summarize overnight market moves and portfolio alerts.")
+        });
         let login_email_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("ahmed@sovra.ai"));
         let login_password_input = cx.new(|cx| {
@@ -70,14 +123,48 @@ impl Shell {
         let models = cx.new(|cx| crate::ModelsView::new(window, cx));
         let task = cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv().await {
-                let applied = this.update(cx, |shell, cx| {
-                    if let sovra_core::Event::Models(event) = &event {
-                        shell
-                            .models
-                            .update(cx, |models, cx| models.apply(event, cx));
+                // Drain a bounded burst so one network packet does not schedule a
+                // separate UI update for every token; never delay incoming output.
+                let mut batch = vec![event];
+                for _ in 1..128 {
+                    let Ok(event) = events.try_recv() else {
+                        break;
+                    };
+                    if let sovra_core::Event::AgentChunk { session_id, text } = &event
+                        && let Some(sovra_core::Event::AgentChunk {
+                            session_id: previous_session,
+                            text: previous_text,
+                        }) = batch.last_mut()
+                        && previous_session == session_id
+                    {
+                        previous_text.push_str(text);
+                    } else {
+                        batch.push(event);
                     }
-                    if let Some(next_prompt) = shell.state.apply_event(&event) {
-                        shell.dispatch_runtime_prompt(next_prompt, cx);
+                }
+                let applied = this.update(cx, |shell, cx| {
+                    let mut should_persist_thread = false;
+                    for event in batch {
+                        if let sovra_core::Event::Models(event) = &event {
+                            shell
+                                .models
+                                .update(cx, |models, cx| models.apply(event, cx));
+                        }
+                        if matches!(
+                            event,
+                            sovra_core::Event::AgentCompleted { .. }
+                                | sovra_core::Event::AgentError { .. }
+                                | sovra_core::Event::AgUiSurface { .. }
+                        ) {
+                            should_persist_thread = true;
+                        }
+                        if let Some(next_prompt) = shell.state.apply_event(&event) {
+                            shell.dispatch_runtime_prompt(next_prompt, cx);
+                            should_persist_thread = true;
+                        }
+                    }
+                    if should_persist_thread {
+                        shell.persist_active_thread(cx);
                     }
                     cx.notify();
                 });
@@ -88,9 +175,21 @@ impl Shell {
         });
         Self {
             state: WorkspaceState::default(),
+            chat: ChatPresentation::new(cx),
+            _composer_events: composer_events,
+            _history_search_events: history_search_events,
             focus_handle,
+            history_compact: window.viewport_size().width
+                < design::tokens(cx).layout.history_breakpoint,
+            history_overlay_open: false,
             composer_input,
             search_input,
+            history_search_input,
+            rename_thread_input,
+            schedule_name_input,
+            schedule_cadence_input,
+            schedule_prompt_input,
+            schedule_form_open: false,
             login_email_input,
             login_password_input,
             sim_route_input,
@@ -109,7 +208,11 @@ impl Shell {
 
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
         self.state.select_tab(tab);
-        if tab == NavTab::Models {
+        self.models.update(cx, |models, cx| {
+            models.settings_open = tab == NavTab::Settings;
+            cx.notify();
+        });
+        if matches!(tab, NavTab::Models | NavTab::Settings) {
             let _ = cx
                 .global::<RuntimeClient>()
                 .0
@@ -190,6 +293,9 @@ impl Shell {
 
     pub fn submit_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.composer_input.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
         self.composer_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
@@ -210,15 +316,153 @@ impl Shell {
     }
 
     pub fn send_prompt_text(&mut self, prompt: &str, _window: &mut Window, cx: &mut Context<Self>) {
+        if !prompt.trim().is_empty() {
+            self.chat.follow_latest();
+        }
         if let Some(dispatched) = self.state.submit_prompt(prompt) {
             self.dispatch_runtime_prompt(dispatched, cx);
+        }
+        self.persist_active_thread(cx);
+        cx.notify();
+    }
+
+    pub fn start_new_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.history_overlay_open = false;
+        self.persist_active_thread(cx);
+        let _ = self.state.start_new_chat();
+        self.composer_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        cx.notify();
+    }
+
+    pub fn select_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        self.persist_active_thread(cx);
+        if self.state.select_thread(session_id) {
+            self.history_overlay_open = false;
+            self.chat.follow_latest();
         }
         cx.notify();
     }
 
+    pub fn set_history_filter(&mut self, filter: ChatHistoryFilter, cx: &mut Context<Self>) {
+        self.state.set_history_filter(filter);
+        cx.notify();
+    }
+
+    pub fn toggle_history_rail(&mut self, cx: &mut Context<Self>) {
+        if self.history_compact {
+            self.history_overlay_open = !self.history_overlay_open;
+        } else {
+            self.state.toggle_history_collapsed();
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_thread_pin(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        if let Some(updated) = self.state.toggle_thread_pin(session_id) {
+            let _ = cx
+                .global::<RuntimeClient>()
+                .0
+                .send(Command::SaveChatThread {
+                    thread: Box::new(updated),
+                });
+        }
+        cx.notify();
+    }
+
+    pub fn begin_rename_thread(
+        &mut self,
+        session_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(current_title) = self.state.begin_rename_thread(session_id) {
+            self.rename_thread_input.update(cx, |input, cx| {
+                input.set_value(current_title, window, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    pub fn commit_rename_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        let draft = self.rename_thread_input.read(cx).value().to_string();
+        if let Some(updated) = self.state.rename_thread(session_id, &draft) {
+            let _ = cx
+                .global::<RuntimeClient>()
+                .0
+                .send(Command::SaveChatThread {
+                    thread: Box::new(updated),
+                });
+        }
+        cx.notify();
+    }
+
+    pub fn delete_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        let owned = session_id.to_owned();
+        if self.state.delete_thread(&owned) {
+            let _ = cx
+                .global::<RuntimeClient>()
+                .0
+                .send(Command::DeleteChatThread { session_id: owned });
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_schedule_form(&mut self, cx: &mut Context<Self>) {
+        self.schedule_form_open = !self.schedule_form_open;
+        cx.notify();
+    }
+
+    pub fn open_schedule_form(&mut self, cx: &mut Context<Self>) {
+        self.schedule_form_open = true;
+        cx.notify();
+    }
+
+    pub fn submit_new_schedule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.schedule_name_input.read(cx).value().to_string();
+        let cadence = self.schedule_cadence_input.read(cx).value().to_string();
+        let prompt = self.schedule_prompt_input.read(cx).value().to_string();
+        if self
+            .state
+            .create_schedule(&name, &cadence, &prompt)
+            .is_some()
+        {
+            self.schedule_name_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+            self.schedule_cadence_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+            self.schedule_prompt_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+            self.schedule_form_open = false;
+        }
+        cx.notify();
+    }
+
+    pub fn delete_schedule(&mut self, schedule_id: &str, cx: &mut Context<Self>) {
+        self.state.delete_schedule(schedule_id);
+        cx.notify();
+    }
+
+    pub(crate) fn persist_active_thread(&self, cx: &mut Context<Self>) {
+        if let Some(thread) = self.state.active_thread()
+            && !thread.messages.is_empty()
+        {
+            let _ = cx
+                .global::<RuntimeClient>()
+                .0
+                .send(Command::SaveChatThread {
+                    thread: Box::new(thread.clone()),
+                });
+        }
+    }
+
     pub fn interrupt_active_session(&mut self, cx: &mut Context<Self>) {
         let session_id = self.state.session_id.clone();
-        self.state.is_generating = false;
+        self.state.interrupt_generation();
         let _ = cx
             .global::<RuntimeClient>()
             .0
@@ -254,6 +498,7 @@ impl Shell {
     ) {
         if let Some(dispatched) = self.state.trigger_schedule(schedule_id) {
             self.dispatch_runtime_prompt(dispatched, cx);
+            self.persist_active_thread(cx);
         }
         cx.notify();
     }
@@ -268,7 +513,12 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let compact = window.viewport_size().width < design::tokens(cx).layout.history_breakpoint;
+        if self.history_compact != compact {
+            self.history_compact = compact;
+            self.history_overlay_open = false;
+        }
         let theme = cx.theme();
         let border = theme.border;
         let muted_foreground = theme.muted_foreground;
@@ -305,18 +555,24 @@ impl Render for Shell {
                     .border_color(border)
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(muted_foreground)
-                    .child(format!("Runtime: {}", self.state.runtime_status.label()))
-                    .child(format!(
-                        "Routing: {} · {} · AG-UI (adk-ui v2.2)",
-                        self.state.routing.mode.label(),
-                        self.state.routing.backend.default_model_id()
-                    )),
+                    .child(match &self.state.runtime_status {
+                        RuntimeStatus::Starting => "Connecting…",
+                        RuntimeStatus::Ready { .. } => "Ready",
+                        RuntimeStatus::Stopped => "Disconnected",
+                    })
+                    .child(
+                        self.state
+                            .routing
+                            .global_model
+                            .as_ref()
+                            .map_or("Sovra".to_owned(), |model| model.model_id.clone()),
+                    ),
             )
     }
 }
 
 impl Shell {
-    fn render_body(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         match self.state.route {
             ScreenRoute::Login => {
                 render_login_screen(&self.login_email_input, &self.login_password_input, cx)
@@ -324,7 +580,7 @@ impl Shell {
             }
             ScreenRoute::MainWorkspace => {
                 let center = match self.state.active_tab {
-                    NavTab::Models => div()
+                    NavTab::Models | NavTab::Settings => div()
                         .flex_1()
                         .min_w_0()
                         .h_full()
@@ -332,9 +588,56 @@ impl Shell {
                         .into_any_element(),
                     NavTab::MyAis => render_my_ais_view(&self.state, &self.sim_route_input, cx)
                         .into_any_element(),
-                    NavTab::Schedules => render_schedules_view(&self.state, cx).into_any_element(),
-                    NavTab::Chat | NavTab::Knowledge | NavTab::Settings => {
-                        render_chat_column(&self.state, &self.composer_input, cx).into_any_element()
+                    NavTab::Schedules => render_schedules_view(
+                        &self.state,
+                        &self.schedule_name_input,
+                        &self.schedule_cadence_input,
+                        &self.schedule_prompt_input,
+                        self.schedule_form_open,
+                        cx,
+                    )
+                    .into_any_element(),
+                    NavTab::Chat => {
+                        self.chat.sync(&self.state, cx);
+                        h_flex()
+                            .relative()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .h_full()
+                            .overflow_hidden()
+                            .child(render_chat_history_rail(
+                                &self.state,
+                                &self.history_search_input,
+                                &self.rename_thread_input,
+                                self.history_compact || self.state.history_collapsed,
+                                cx,
+                            ))
+                            .child(render_chat_column(
+                                &self.state,
+                                &self.composer_input,
+                                &self.chat,
+                                cx,
+                            ))
+                            .children((self.history_compact && self.history_overlay_open).then(
+                                || {
+                                    div().absolute().top_0().left_0().h_full().occlude().child(
+                                        render_chat_history_rail(
+                                            &self.state,
+                                            &self.history_search_input,
+                                            &self.rename_thread_input,
+                                            false,
+                                            cx,
+                                        ),
+                                    )
+                                },
+                            ))
+                            .into_any_element()
+                    }
+                    NavTab::Knowledge => {
+                        self.chat.sync(&self.state, cx);
+                        render_chat_column(&self.state, &self.composer_input, &self.chat, cx)
+                            .into_any_element()
                     }
                 };
 
@@ -347,7 +650,7 @@ impl Shell {
                     .overflow_hidden()
                     .child(render_sidebar(&self.state, cx))
                     .child(center);
-                if !matches!(self.state.active_tab, NavTab::Models | NavTab::MyAis) {
+                if self.state.active_tab == NavTab::Knowledge {
                     body = body.child(render_inspector(&self.state, &self.search_input, cx));
                 }
                 body.into_any_element()

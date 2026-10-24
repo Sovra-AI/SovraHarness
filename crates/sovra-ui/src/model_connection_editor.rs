@@ -158,7 +158,127 @@ impl ConnectionForm {
     }
 }
 
+fn credential_status(connection: &ModelConnection) -> &'static str {
+    if connection.has_credential {
+        "•••••••• · Key saved in OS keychain"
+    } else if connection.environment_credential {
+        "Using an environment key · No key saved in OS keychain"
+    } else {
+        "No saved API key"
+    }
+}
+
 impl ModelsView {
+    pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let mut page = v_flex()
+            .id("sovra-settings-view")
+            .test_support()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .p(t.space.medium)
+            .gap(t.space.medium)
+            .child(div().sovra_text(TextRole::PageTitle, cx).child("Settings"))
+            .child(caption(
+                "Connect your providers. API keys are stored in your OS keychain.",
+                cx,
+            ));
+        if let Some(error) = &self.state.error {
+            page = page.child(caption(error.clone(), cx).text_color(cx.theme().danger));
+        } else if let Some(notice) = &self.state.notice {
+            page = page.child(caption(notice.clone(), cx));
+        }
+        if self.manual_form.is_some() {
+            return page.child(self.render_manual_form(cx)).into_any_element();
+        }
+        if let Some(form) = &self.connection_form {
+            if form.original.kind == ProviderKind::OpenRouter {
+                let saved = form.original.has_credential;
+                let has_draft = !form.key.read(cx).value().trim().is_empty();
+                let saving = self.pending_save.is_some();
+                let status = credential_status(&form.original);
+                let remove = form.original.clone();
+                return page.child(v_flex().max_w(t.layout.reading_width).gap(t.space.medium)
+                    .child(div().sovra_text(TextRole::SectionTitle, cx).child("OpenRouter"))
+                    .child(div().id("settings-key-status").test_support().aria_label(status)
+                        .sovra_surface(Surface::Subtle, cx).p(t.space.small)
+                        .text_color(if saved { cx.theme().success } else { cx.theme().muted_foreground })
+                        .child(status))
+                    .child(field("connection-key", if saved { "Replacement API key" } else { "OpenRouter API key" }, &form.key,
+                        "The saved key stays in your OS keychain. Enter a new key only when replacing it.", cx))
+                    .child(h_flex().gap(t.space.small).flex_wrap()
+                        .child(design::primary_button("connection-save", if saving { "Saving…" } else if saved { "Replace key" } else { "Save key" }, cx)
+                            .disabled(saving || !has_draft)
+                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(false, cx))))
+                        .child(design::button("connection-test", if has_draft { "Test entered key" } else { "Test saved key" }, cx)
+                            .disabled(self.state.busy || saving || (!saved && !form.original.environment_credential && !has_draft))
+                            .on_click(cx.listener(|view, _, _, cx| view.submit_connection(true, cx))))
+                        .children(saved.then(|| design::button("settings-remove-key", "Remove saved key", cx)
+                            .disabled(saving)
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.pending_save = Some(remove.id.clone());
+                                view.send(ModelCommand::SaveConnection {
+                                    connection: remove.clone(), credential: CredentialChange::Remove,
+                                }, cx);
+                            }))))
+                        .child(design::button("connection-cancel", "Back", cx)
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.connection_form = None;
+                                view.form_subscriptions.clear();
+                                cx.notify();
+                            }))))).into_any_element();
+            }
+            return page
+                .child(self.render_connection_form(cx))
+                .into_any_element();
+        }
+        let router = self
+            .state
+            .connections
+            .iter()
+            .find(|c| c.kind == ProviderKind::OpenRouter);
+        let status = router.map_or("No saved API key", credential_status);
+        page.child(
+            div()
+                .id("settings-openrouter-status")
+                .test_support()
+                .aria_label(status)
+                .sovra_surface(Surface::Subtle, cx)
+                .p(t.space.small)
+                .child(format!("OpenRouter · {status}")),
+        )
+        .child(
+            design::primary_button("settings-openrouter", "Manage OpenRouter key", cx).on_click(
+                cx.listener(|view, _, window, cx| {
+                    let connection = view
+                        .state
+                        .connections
+                        .iter()
+                        .find(|connection| connection.kind == ProviderKind::OpenRouter)
+                        .cloned();
+                    let is_new = connection.is_none();
+                    view.open_connection(connection, window, cx);
+                    if is_new {
+                        if let Some(form) = &mut view.connection_form {
+                            form.original.kind = ProviderKind::OpenRouter;
+                        }
+                        view.preset(
+                            "OpenRouter",
+                            ProviderKind::OpenRouter,
+                            ProviderKind::OpenRouter.default_url(),
+                            Authentication::Bearer,
+                            window,
+                            cx,
+                        );
+                    }
+                }),
+            ),
+        )
+        .child(self.render_connections(cx))
+        .into_any_element()
+    }
+
     pub(crate) fn open_connection(
         &mut self,
         connection: Option<ModelConnection>,

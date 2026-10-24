@@ -13,12 +13,32 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- Normal chat answers conversationally in Markdown; native UI tools are optional,
+  and ordinary turns no longer invoke the specialist routing simulation.
+- Preserve streamed text exactly and deduplicate ADK's final response snapshots.
+- Render selectable Markdown with code copying in a centered reading column;
+  virtualized messages follow streamed output, pause when scrolled up, and offer
+  Jump to latest. Enter sends, Shift+Enter inserts a line, and Stop clears queued work.
+
+- Keep OpenRouter key management visible after saving, with a persistent masked
+  saved status and explicit replace, test and remove controls.
+
 - Enable keyboard navigation immediately when a window opens, before an input has been clicked.
 - Size the title bar to fit the appearance control without clipping and verify keyboard theme switching.
 - Align model names with their metadata and preserve usable Models controls at the minimum window size.
-
+- Settings now opens provider configuration, with a masked OpenRouter key editor,
+  connection testing and OS keychain save/replace/removal.
+- Left sidebar icons and labels share a left-aligned content edge.
+- Chat starts empty; removed seeded messages, hero banner and mock build inspector.
+- ADK-UI tool responses now deliver actual AG-UI component payloads to native GPUI
+  cards, tables, alerts, progress and action buttons. Surface revisions update in
+  place; button actions carry their surface identity back to the agent.
 ### Added
 
+- **Chat History Rail & Schedules Integration (`sovra-core`, `sovra-store-surreal`, `sovra-runtime`, `sovra-ui`)**:
+  - Multi-session conversation history rail (`RecentConversationsRail` from `SovraSRXProduction`) with collapsible strip, instant search, segmented `Chats | Scheduled` radio-group filter pills, `Pinned` partitioning, recency buckets (`Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`), semantic topic icons, auto-titling from first prompt, inline rename, pin/unpin, and soft-deletion.
+  - Persistent `chat_thread` storage in `sovra-store-surreal` and automatic startup history hydration via `sovra-runtime`.
+  - Schedules placeholder empty state (`"No scheduled runs yet"` in the history rail and `"No schedules yet"` with schedule creation form in the Schedules Command Center).
 - **Main Chat, Login & Personal AI Builder (`sovra-ui`, `sovra-core`)**:
   - 3-column post-login workspace (`Sidebar`, `ChatView` with `"Built around you."` hero banner and prompt timeline counter, and `My Personal AI` right inspector with 6 configuration cards and `"Preview my AI"` workflow) plus a native glass Login screen.
   - Native AG-UI (`adk-ui = "2.2.0"`) surface rendering (`BuildProgress` live checklist card, `ClarifyChips`, and `SurfaceCard`) and `SovraSRX` type-ahead prompt queue strip.

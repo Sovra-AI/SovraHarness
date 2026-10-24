@@ -259,6 +259,31 @@ pub trait MemoryStore: Send + Sync {
 
     /// Retrieves facts by semantic similarity, entity, and/or recency per [`RecallQuery`].
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError>;
+
+    /// Upserts a conversation thread (including its messages and metadata) into the store.
+    async fn save_chat_thread(
+        &self,
+        _thread: &crate::chat_history::ChatThread,
+    ) -> Result<(), MemoryError> {
+        Ok(())
+    }
+
+    /// Lists non-deleted conversation threads ordered by `updated_at` descending.
+    async fn list_chat_threads(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<crate::chat_history::ChatThread>, MemoryError> {
+        Ok(Vec::new())
+    }
+
+    /// Soft-deletes a conversation thread as of `at` (sets `deleted_at`; never hard-deletes).
+    async fn delete_chat_thread(
+        &self,
+        _session_id: &str,
+        _at: Timestamp,
+    ) -> Result<(), MemoryError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

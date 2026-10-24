@@ -31,6 +31,7 @@ pub(crate) fn render_inspector(
         .test_support()
         .w(t.layout.inspector_width)
         .h_full()
+        .min_h_0()
         .flex_shrink_0()
         .justify_between()
         .p(t.space.medium)

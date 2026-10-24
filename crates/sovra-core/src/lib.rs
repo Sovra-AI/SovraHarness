@@ -5,6 +5,7 @@
 
 mod agent;
 mod agui;
+pub mod chat_history;
 mod memory;
 pub mod models;
 mod protocol;
@@ -18,8 +19,13 @@ mod workspace;
 
 pub use agent::{AgentConfig, DEFAULT_GEMINI_MODEL, DEFAULT_SYSTEM_INSTRUCTION};
 pub use agui::{
-    AgUiWidget, BuildStep, BuildStepState, ChatMessage, ClarifyChip, MessageRole,
-    default_personal_ai_build_widget, seeded_onboarding_messages,
+    AgUiWidget, BuildStep, BuildStepState, ChatMessage, ClarifyChip, MessageRole, UiComponent,
+    default_personal_ai_build_widget,
+};
+pub use chat_history::{
+    ChatHistoryFilter, ChatThread, ConversationKind, ConversationTopicIcon, GroupedHistory,
+    NEW_CHAT_TITLE, RecencyBucket, derive_chat_title, derive_message_preview, format_relative_time,
+    group_threads, infer_topic_icon, recency_bucket,
 };
 pub use memory::{
     Embedding, Episode, EpisodeId, EpisodeKind, Fact, FactId, MemoryError, MemoryStore, NewEpisode,

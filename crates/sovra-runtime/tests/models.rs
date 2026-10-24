@@ -48,6 +48,7 @@ struct Reply {
     status: u16,
     content_type: &'static str,
     body: String,
+    tail: Option<(Arc<Mutex<std::sync::mpsc::Receiver<()>>>, String)>,
 }
 impl Reply {
     fn json(value: &Value) -> Self {
@@ -55,6 +56,7 @@ impl Reply {
             status: 200,
             content_type: "application/json",
             body: value.to_string(),
+            tail: None,
         }
     }
 }
@@ -131,10 +133,19 @@ impl Server {
                     "HTTP/1.1 {} {status}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     reply.status,
                     reply.content_type,
-                    reply.body.len(),
+                    reply.body.len() + reply.tail.as_ref().map_or(0, |(_, tail)| tail.len()),
                     reply.body
                 );
                 let _ = socket.write_all(response.as_bytes());
+                if let Some((gate, tail)) = reply.tail
+                    && gate
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(10))
+                        .is_ok()
+                {
+                    let _ = socket.write_all(tail.as_bytes());
+                }
             }
         });
         Self {
@@ -250,6 +261,7 @@ async fn openrouter_fetches_all_modalities_and_retains_cache_after_failure() {
         if server_fail.load(Ordering::SeqCst) {
             return Reply {
                 status: 503,
+                tail: None,
                 content_type: "application/json",
                 body: "{}".into(),
             };
@@ -352,6 +364,7 @@ async fn custom_chat_with_authentication(authentication: Authentication) {
             Reply {
                 status: 200,
                 content_type: "text/event-stream",
+                tail: None,
                 body: format!(
                     "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
                     json!({"id":"c","object":"chat.completion.chunk","created":1,"model":"local-chat","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello from custom model"},"finish_reason":null}]}),
@@ -452,7 +465,7 @@ async fn ollama_discovery_enriches_metadata_and_pull_streams_progress() {
             assert_eq!(request.body["model"], "new:4b");
             assert_eq!(request.body["stream"], true);
             installed.store(true, Ordering::SeqCst);
-            Reply { status:200,content_type:"application/x-ndjson",body:"{\"status\":\"pulling\",\"completed\":50,\"total\":100}\n{\"status\":\"success\"}".into() }
+            Reply { status:200,tail:None,content_type:"application/x-ndjson",body:"{\"status\":\"pulling\",\"completed\":50,\"total\":100}\n{\"status\":\"success\"}".into() }
         }
         other => panic!("unexpected path {other}"),
     });
@@ -505,5 +518,270 @@ async fn changing_a_credentialed_endpoint_requires_a_new_key() {
         matches!(failure,Event::Models(ModelEvent::Error(message)) if message.contains("Re-enter"))
     );
     assert_eq!(server.requests.lock().unwrap().len(), 1);
+    stop(client).await;
+}
+
+#[tokio::test]
+async fn real_tool_execution_delivers_agui_components_to_client() {
+    let called = AtomicBool::new(false);
+    let server = Server::new(move |request| {
+        if request.path == "/v1/models" {
+            return Reply::json(
+                &json!({"data":[{"id":"ui-model", "supported_parameters":["tools"], "output_modalities":["text"]}]}),
+            );
+        }
+        assert_eq!(request.path, "/v1/chat/completions");
+        let first = !called.swap(true, Ordering::SeqCst);
+        let args = json!({"title":"Report", "content":"Actual tool content", "actions":[{"label":"Continue", "action_id":"next"}]}).to_string();
+        let tool_call = json!({"index":0, "id":"call-1", "type":"function", "function":{"name":"render_card", "arguments":args}});
+        let (message, finish) = if first {
+            assert!(
+                request.body["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["function"]["name"] == "render_card")
+            );
+            (
+                json!({"role":"assistant", "tool_calls":[tool_call]}),
+                "tool_calls",
+            )
+        } else {
+            assert!(
+                request.body["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|message| message["role"] == "tool")
+            );
+            (
+                json!({"role":"assistant", "content":"Here is your report."}),
+                "stop",
+            )
+        };
+        if request.body["stream"] == true {
+            Reply {
+                status: 200,
+                content_type: "text/event-stream",
+                tail: None,
+                body: format!(
+                    "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                    json!({"id":"c", "object":"chat.completion.chunk", "created":1, "model":"ui-model", "choices":[{"index":0, "delta":message, "finish_reason":null}]}),
+                    json!({"id":"c", "object":"chat.completion.chunk", "created":1, "model":"ui-model", "choices":[{"index":0, "delta":{}, "finish_reason":finish}]})
+                ),
+            }
+        } else {
+            Reply::json(
+                &json!({"id":"c", "object":"chat.completion", "created":1, "model":"ui-model", "choices":[{"index":0, "message":message, "finish_reason":finish}]}),
+            )
+        }
+    });
+    let mut connection = ModelConnection::new("native-ui", ProviderKind::OpenAiCompatible);
+    connection.base_url = format!("{}/v1", server.url());
+    let fixture = Fixture::new(connection, None);
+    let client = fixture.start();
+    catalog(&client).await;
+    let key = ModelKey {
+        connection_id: "native-ui".into(),
+        model_id: "ui-model".into(),
+    };
+    send(&client, ModelCommand::Activate { key: key.clone() });
+    event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.as_ref() == Some(&key))).await;
+    client
+        .send(Command::RunPrompt {
+            session_id: "native-ui-session".into(),
+            prompt: "Show a report".into(),
+        })
+        .unwrap();
+    let rendered = event(&client, |event| {
+        matches!(
+            event,
+            Event::AgUiSurface { .. } | Event::AgentError { .. } | Event::AgentCompleted { .. }
+        )
+    })
+    .await;
+    let Event::AgUiSurface {
+        session_id,
+        widget: sovra_core::AgUiWidget::Components { components, .. },
+    } = rendered
+    else {
+        panic!("expected actual native components, got {rendered:?}")
+    };
+    assert_eq!(session_id, "native-ui-session");
+    let sovra_core::UiComponent::Card {
+        title, children, ..
+    } = &components[0]
+    else {
+        panic!("expected card")
+    };
+    assert_eq!(title, "Report");
+    assert!(
+        matches!(&children[0], sovra_core::UiComponent::Text { text, .. } if text == "Actual tool content")
+    );
+    assert!(
+        matches!(&children[1], sovra_core::UiComponent::Button { action_id, .. } if action_id == "next")
+    );
+    event(&client, |e| matches!(e, Event::AgentCompleted { .. })).await;
+    stop(client).await;
+}
+
+#[tokio::test]
+async fn saved_key_metadata_and_secret_survive_restart_replace_and_remove() {
+    let server = Server::new(|_| Reply::json(&json!({"data":[]})));
+    let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/api/v1", server.url());
+    let fixture = Fixture::new(connection.clone(), None);
+    let client = fixture.start();
+    catalog(&client).await;
+    for value in ["initial-test-key", "replacement-test-key"] {
+        send(
+            &client,
+            ModelCommand::SaveConnection {
+                connection: connection.clone(),
+                credential: CredentialChange::Replace(ModelSecret(value.into())),
+            },
+        );
+        event(&client, |e| {
+            matches!(e, Event::Models(ModelEvent::ConnectionSaved { .. }))
+        })
+        .await;
+        let saved = fixture.repo.load().unwrap();
+        connection = saved.connections[0].clone();
+        assert!(connection.has_credential);
+        assert_eq!(fixture.repo.credential(&connection).unwrap().0, value);
+        assert!(
+            !std::fs::read_to_string(fixture.path.join("connections.json"))
+                .unwrap()
+                .contains(value)
+        );
+    }
+    stop(client).await;
+    let client = fixture.start();
+    let loaded = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
+    assert!(
+        matches!(loaded, Event::Models(ModelEvent::Loaded { connections, .. }) if connections[0].has_credential)
+    );
+    assert_eq!(
+        fixture.repo.credential(&connection).unwrap().0,
+        "replacement-test-key"
+    );
+    send(
+        &client,
+        ModelCommand::SaveConnection {
+            connection,
+            credential: CredentialChange::Remove,
+        },
+    );
+    event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::ConnectionSaved { .. }))
+    })
+    .await;
+    let saved = fixture.repo.load().unwrap();
+    assert!(!saved.connections[0].has_credential);
+    assert_eq!(
+        fixture.repo.credential(&saved.connections[0]).unwrap().0,
+        ""
+    );
+    stop(client).await;
+}
+
+#[tokio::test]
+async fn conversational_reply_arrives_before_the_server_finishes_without_cards_or_routing() {
+    let (release, gate) = std::sync::mpsc::channel();
+    let gate = Arc::new(Mutex::new(gate));
+    let server = Server::new(move |request| {
+        if request.path == "/v1/models" {
+            return Reply::json(
+                &json!({"data":[{"id":"chat-model", "supported_parameters":["tools"]}]}),
+            );
+        }
+        assert_eq!(request.body["stream"], true);
+        assert_ne!(request.body["tool_choice"], "required");
+        // ADK 2.3 represents its instruction preamble as user Content; inspect
+        // the actual outbound context rather than assuming a provider role.
+        let instructions = request.body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|message| message["content"].to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            instructions.contains("conversational assistant"),
+            "{instructions}"
+        );
+        assert!(instructions.contains("Native UI tools are optional"));
+        let chunk = |text: &str, finish: Value| {
+            format!(
+                "data: {}\n\n",
+                json!({
+                    "id":"streaming", "object":"chat.completion.chunk", "created":1,
+                    "model":"chat-model", "choices":[{"index":0,
+                        "delta":{"role":"assistant","content":text}, "finish_reason":finish}]
+                })
+            )
+        };
+        Reply {
+            status: 200,
+            content_type: "text/event-stream",
+            body: chunk("Hello **", Value::Null),
+            tail: Some((
+                gate.clone(),
+                format!(
+                    "{}{}data: [DONE]\n\n",
+                    chunk("world**!", Value::Null),
+                    chunk("", json!("stop"))
+                ),
+            )),
+        }
+    });
+    let mut connection = ModelConnection::new("streaming", ProviderKind::OpenAiCompatible);
+    connection.base_url = format!("{}/v1", server.url());
+    let fixture = Fixture::new(connection, None);
+    let client = fixture.start();
+    catalog(&client).await;
+    let key = ModelKey {
+        connection_id: "streaming".into(),
+        model_id: "chat-model".into(),
+    };
+    send(&client, ModelCommand::Activate { key: key.clone() });
+    event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.as_ref() == Some(&key))).await;
+    client
+        .send(Command::RunPrompt {
+            session_id: "live-stream".into(),
+            prompt: "Hi!".into(),
+        })
+        .unwrap();
+    let events = client.events();
+    let mut text = String::new();
+    let first = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events.recv().await.unwrap() {
+                Event::AgentChunk { text, .. } => break text,
+                Event::Models(_) | Event::Ready { .. } => {}
+                event => panic!("unexpected event before first text: {event:?}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(first, "Hello **");
+    text.push_str(&first);
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events.recv().await.unwrap() {
+                Event::AgentChunk { text: chunk, .. } => text.push_str(&chunk),
+                Event::AgentCompleted { .. } => break,
+                event => panic!("basic chat must not emit cards or routing: {event:?}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(text, "Hello **world**!");
     stop(client).await;
 }

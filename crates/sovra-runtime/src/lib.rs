@@ -134,6 +134,9 @@ async fn serve(
     if events.send(Event::Ready { version }).await.is_err() {
         return;
     }
+    if let Some(store) = &memory {
+        spawn_load_chat_history(&handle, store.clone(), events.clone());
+    }
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");
         runs.retain(|_, run| !run.task.is_finished());
@@ -147,6 +150,46 @@ async fn serve(
                             "Model connections are unavailable in this runtime.".into(),
                         )))
                         .await;
+                }
+            }
+            Command::LoadChatHistory => {
+                if let Some(store) = &memory {
+                    spawn_load_chat_history(&handle, store.clone(), events.clone());
+                } else {
+                    let _ = events
+                        .send(Event::ChatHistoryLoaded {
+                            threads: Vec::new(),
+                        })
+                        .await;
+                }
+            }
+            Command::SaveChatThread { thread } => {
+                if let Some(store) = &memory {
+                    let store = store.clone();
+                    let mut thread = *thread;
+                    if thread.updated_at.millis() <= 1_000_000 {
+                        let current = now();
+                        if thread.created_at.millis() <= 1_000_000 {
+                            thread.created_at = current;
+                        }
+                        thread.updated_at = current;
+                    }
+                    drop(handle.spawn(async move {
+                        if let Err(error) = store.save_chat_thread(&thread).await {
+                            tracing::warn!(%error, "failed to save chat thread");
+                        }
+                    }));
+                }
+            }
+            Command::DeleteChatThread { session_id } => {
+                if let Some(store) = &memory {
+                    let store = store.clone();
+                    let at = now();
+                    drop(handle.spawn(async move {
+                        if let Err(error) = store.delete_chat_thread(&session_id, at).await {
+                            tracing::warn!(%error, "failed to delete chat thread");
+                        }
+                    }));
                 }
             }
             Command::UpdateRouting {
@@ -184,14 +227,6 @@ async fn serve(
                 }
             }
             Command::RunPrompt { session_id, prompt } => {
-                spawn_route_simulation(
-                    &handle,
-                    routing_config.clone(),
-                    specialists.clone(),
-                    agent_config.api_key.clone(),
-                    prompt.clone(),
-                    events.clone(),
-                );
                 let (selected, timeout) = if let Some(models) = &models {
                     match models.execution.read().await.clone() {
                         models::ModelExecution::Legacy => (harness.clone(), None),
@@ -257,6 +292,23 @@ async fn serve(
     }
     let _ = events.send(Event::Stopped).await;
     tracing::info!("runtime stopped");
+}
+
+fn spawn_load_chat_history(
+    handle: &tokio::runtime::Handle,
+    store: Arc<dyn MemoryStore>,
+    events: Sender<Event>,
+) {
+    drop(handle.spawn(async move {
+        match store.list_chat_threads(50).await {
+            Ok(threads) => {
+                let _ = events.send(Event::ChatHistoryLoaded { threads }).await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to load chat history");
+            }
+        }
+    }));
 }
 
 fn spawn_route_simulation(
@@ -350,6 +402,7 @@ fn tap_agent_events(
                     }
                 }
                 Event::Models(_)
+                | Event::ChatHistoryLoaded { .. }
                 | Event::Ready { .. }
                 | Event::Pong
                 | Event::RouteEvaluated { .. }

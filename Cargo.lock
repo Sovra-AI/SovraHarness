@@ -9391,6 +9391,7 @@ name = "sovra-store-surreal"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "serde_json",
  "sovra-core",
  "surrealdb",
  "tokio",

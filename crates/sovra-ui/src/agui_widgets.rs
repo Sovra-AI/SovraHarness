@@ -21,6 +21,11 @@ pub(crate) fn render_agui_widget(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     match widget {
+        AgUiWidget::Components {
+            surface_id,
+            version,
+            components,
+        } => crate::native_surface::render_surface(surface_id, *version, components, index, cx),
         AgUiWidget::BuildProgress {
             title,
             subtitle,

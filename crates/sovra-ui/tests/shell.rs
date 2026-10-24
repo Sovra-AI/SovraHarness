@@ -2,7 +2,7 @@
 
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AppContext as _, ScrollDelta, TestAppContext, point, px, size};
+use gpui_kit::{AppContext as _, TestAppContext, px, size};
 use sovra_core::{AgUiWidget, Command, Event, NavTab, RuntimeStatus, ScreenRoute};
 use sovra_runtime::Client;
 use sovra_ui::Shell;
@@ -56,18 +56,13 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find("sovra-main-workspace").visible());
-        assert!(window.find("chat-hero-banner").visible());
-        assert!(window.find("agui-build-progress-card").visible());
-        assert!(window.find("sovra-inspector").visible());
-
-        // Click "Preview my AI" in the right inspector -> transitions building state to Ready.
-        window.scroll(
-            "sovra-inspector",
-            ScrollDelta::Pixels(point(px(0.), px(-1200.))),
-            cx,
+        assert_eq!(
+            shell.read(cx).workspace().messages,
+            Vec::<sovra_core::ChatMessage>::new()
         );
-        window.click("preview-my-ai-btn", cx);
-        assert!(!shell.read(cx).workspace().ai_building);
+        assert!(window.try_find("chat-hero-banner").is_none());
+        assert!(window.try_find("agui-build-progress-card").is_none());
+        assert!(window.try_find("sovra-inspector").is_none());
 
         // Switch to Schedules tab -> renders Schedules Command Center.
         window.click("nav-schedules", cx);
@@ -189,4 +184,239 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         commands.recv_blocking().unwrap(),
         Command::SimulateRoute { .. }
     ));
+}
+
+#[gpui_kit::test]
+fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let window = cx.open_window(size(px(1000.), px(760.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        Root::new(shell, window, cx)
+    });
+    events
+        .send_blocking(Event::AgUiSurface {
+            session_id: "personal-ai-setup".into(),
+            widget: AgUiWidget::Components {
+                surface_id: "report".into(),
+                version: 3,
+                components: vec![sovra_core::UiComponent::Card {
+                    title: "Report".into(),
+                    description: "From the agent".into(),
+                    children: vec![
+                        sovra_core::UiComponent::Table {
+                            headers: vec!["Name".into(), "Status".into()],
+                            rows: vec![vec!["Sovra".into(), "Ready".into()]],
+                        },
+                        sovra_core::UiComponent::Progress {
+                            label: "Progress".into(),
+                            value: 75,
+                        },
+                        sovra_core::UiComponent::Button {
+                            label: "Continue".into(),
+                            action_id: "next".into(),
+                            disabled: false,
+                        },
+                    ],
+                }],
+            },
+        })
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        for mode in [
+            gpui_kit::component::ThemeMode::Dark,
+            gpui_kit::component::ThemeMode::Light,
+        ] {
+            gpui_kit::component::Theme::change(mode, Some(window), cx);
+            window.render_frame(cx);
+            let left = window.find(("nav-icon", 0usize)).bounds().left();
+            let text_left = window.find(("nav-label", 0usize)).bounds().left();
+            let button_left = window.find("nav-chat").bounds().left();
+            assert!(
+                left - button_left < px(20.),
+                "nav content must start at left padding"
+            );
+            for index in 1..NavTab::ALL.len() {
+                assert_eq!(window.find(("nav-icon", index)).bounds().left(), left);
+                assert_eq!(window.find(("nav-label", index)).bounds().left(), text_left);
+            }
+            assert!(window.find(("native-surface", 0usize)).visible());
+            assert!(window.find("surface-action-0-0-2").visible());
+        }
+        window.click("surface-action-0-0-2", cx);
+    })
+    .unwrap();
+    let dispatched = std::iter::from_fn(|| commands.try_recv().ok())
+        .find(|command| matches!(command, Command::RunPrompt { .. }));
+    let Some(Command::RunPrompt { session_id, prompt }) = dispatched else {
+        panic!("action must return to agent")
+    };
+    assert_eq!(session_id, "personal-ai-setup");
+    let action: serde_json::Value = serde_json::from_str(&prompt).unwrap();
+    assert_eq!(action["surface_ref"]["id"], "report");
+    assert_eq!(action["surface_ref"]["version"], 3);
+    assert_eq!(action["event"]["action_id"], "next");
+}
+
+#[gpui_kit::test]
+fn composer_enter_sends_shift_enter_adds_line_and_stop_clears_queue(cx: &mut TestAppContext) {
+    let (client, commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("composer-attach-btn").is_none());
+        assert!(window.try_find("composer-voice-btn").is_none());
+        shell.update(cx, |shell, cx| {
+            shell.fill_composer_draft("Hello", window, cx);
+        });
+        window.render_frame(cx);
+        window.click("chat-composer-input", cx);
+        window.press("shift-enter", cx);
+        window.input("world", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().messages[0].text, "Hello\nworld");
+        assert!(shell.read(cx).workspace().is_generating);
+        shell.update(cx, |shell, cx| {
+            shell.fill_composer_draft("Follow up", window, cx);
+        });
+        window.render_frame(cx);
+        window.click("composer-send-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().queued_prompts, ["Follow up"]);
+        window.click("composer-stop-btn", cx);
+        window.render_frame(cx);
+        assert!(!shell.read(cx).workspace().is_generating);
+        assert_eq!(
+            shell.read(cx).workspace().queued_prompts,
+            Vec::<String>::new()
+        );
+    })
+    .unwrap();
+    // Startup may request model/history data as well.
+    let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(sent.iter().any(
+        |command| matches!(command, Command::RunPrompt { prompt, .. } if prompt == "Hello\nworld")
+    ));
+    assert!(
+        sent.iter()
+            .any(|command| matches!(command, Command::InterruptSession { .. }))
+    );
+}
+
+#[gpui_kit::test]
+fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppContext) {
+    let (client, commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("chat-history-rail").visible());
+        assert!(window.find("chat-filter-pills").visible());
+
+        // Send a prompt in the first thread and verify auto-titling in the history rail.
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("Analyze Q4 Semiconductor Supply Chain", window, cx);
+        });
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("chat-thread-row", 0usize)).label(),
+            Some("Open conversation Analyze Q4 Semiconductor Supply Chain")
+        );
+
+        // Start a new chat and send a second prompt.
+        window.click("chat-new-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().messages,
+            Vec::<sovra_core::ChatMessage>::new()
+        );
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("Draft Rust async trait guidelines", window, cx);
+        });
+        window.render_frame(cx);
+
+        // Pin the top thread and verify it stays accessible.
+        window.click(("chat-thread-pin", 0usize), cx);
+        window.render_frame(cx);
+        assert!(shell.read(cx).workspace().active_thread().unwrap().pinned);
+
+        // Switch back to the first thread by clicking row 1 in the rail.
+        window.click(("chat-thread-row", 1usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().messages[0].text,
+            "Analyze Q4 Semiconductor Supply Chain"
+        );
+
+        // Collapse and re-expand the chat history rail.
+        window.click("chat-history-collapse-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("chat-history-rail-collapsed").visible());
+        window.click("chat-history-expand-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("chat-history-rail").visible());
+
+        // Switch to the Scheduled filter in the history rail -> shows the Schedules placeholder CTA.
+        window.click("chat-filter-scheduled", cx);
+        window.render_frame(cx);
+        assert!(window.find("chat-history-scheduled-placeholder").visible());
+
+        // Click "Open Schedules" CTA from the Scheduled history placeholder -> navigates to Schedules tab.
+        window.click("chat-scheduled-open-schedules-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Schedules);
+        assert!(window.find("sovra-schedules-view").visible());
+
+        // Delete all 3 seeded schedules -> verifies the Schedules Empty Placeholder ("No schedules yet") appears.
+        window.click(("schedule-delete", 0usize), cx);
+        window.render_frame(cx);
+        window.click(("schedule-delete", 0usize), cx);
+        window.render_frame(cx);
+        window.click(("schedule-delete", 0usize), cx);
+        window.render_frame(cx);
+        assert!(window.find("schedules-empty-placeholder").visible());
+
+        // Click "Create schedule" from the empty placeholder -> opens the schedule creation form and creates a schedule.
+        window.click("schedule-empty-create-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("schedule-create-form").visible());
+        window.click("schedule-name-input", cx);
+        window.input("Daily Tech Digest", cx);
+        window.click("schedule-prompt-input", cx);
+        window.input("Summarize top semiconductor and AI news.", cx);
+        window.click("schedule-save-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().schedules.len(), 1);
+        assert_eq!(
+            shell.read(cx).workspace().schedules[0].name,
+            "Daily Tech Digest"
+        );
+    })
+    .unwrap();
+
+    let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(
+        sent.iter()
+            .any(|cmd| matches!(cmd, Command::SaveChatThread { .. }))
+    );
 }

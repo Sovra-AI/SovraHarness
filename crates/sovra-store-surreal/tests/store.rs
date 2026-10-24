@@ -204,3 +204,55 @@ async fn wrong_dimension_embeddings_are_rejected() {
         other => panic!("expected EmbeddingMismatch, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn chat_threads_save_list_and_soft_delete() {
+    let store = open_store().await;
+    let mut thread1 = sovra_core::ChatThread::new("chat-1", Timestamp(1_000));
+    thread1.title = "First conversation".into();
+    thread1
+        .messages
+        .push(sovra_core::ChatMessage::user("m1", "Hello", "Just now"));
+    thread1.refresh_summary(Timestamp(2_000));
+
+    let mut thread2 = sovra_core::ChatThread::new_scheduled(
+        "sched-run-1",
+        "sched-morning-brief",
+        "Executive Morning Brief",
+        Timestamp(3_000),
+    );
+    thread2.messages.push(sovra_core::ChatMessage::assistant(
+        "m2",
+        "Morning brief ready.",
+        "Just now",
+        vec![],
+    ));
+    thread2.refresh_summary(Timestamp(4_000));
+
+    store
+        .save_chat_thread(&thread1)
+        .await
+        .expect("save thread1");
+    store
+        .save_chat_thread(&thread2)
+        .await
+        .expect("save thread2");
+
+    let listed = store.list_chat_threads(10).await.expect("list threads");
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].id, "sched-run-1");
+    assert_eq!(listed[0].kind, sovra_core::ConversationKind::Scheduled);
+    assert_eq!(listed[1].id, "chat-1");
+    assert_eq!(listed[1].messages.len(), 1);
+
+    store
+        .delete_chat_thread("chat-1", Timestamp(5_000))
+        .await
+        .expect("soft delete");
+    let after_delete = store
+        .list_chat_threads(10)
+        .await
+        .expect("list after delete");
+    assert_eq!(after_delete.len(), 1);
+    assert_eq!(after_delete[0].id, "sched-run-1");
+}

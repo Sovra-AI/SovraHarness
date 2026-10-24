@@ -6,6 +6,7 @@
 mod agui_widgets;
 mod app_menu;
 mod assets;
+mod chat_history_view;
 mod chat_view;
 mod composer;
 pub mod design;
@@ -15,6 +16,7 @@ mod model_connection_editor;
 mod model_details;
 mod models_view;
 mod my_ais_view;
+mod native_surface;
 mod schedules_view;
 mod shell;
 mod sidebar;

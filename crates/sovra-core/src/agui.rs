@@ -4,14 +4,16 @@
 //! into these pure, deterministic types so `sovra-ui` can render them natively in GPUI.
 
 /// Role of a participant in a conversation thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     User,
     Assistant,
 }
 
 /// Execution state of a step inside an AG-UI build or workflow checklist.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BuildStepState {
     Pending,
     InProgress,
@@ -19,22 +21,29 @@ pub enum BuildStepState {
 }
 
 /// A single step inside an AG-UI live progress checklist.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BuildStep {
     pub label: String,
     pub state: BuildStepState,
 }
 
 /// Interactive clarification prompt chip rendered inline in AG-UI streams.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ClarifyChip {
     pub label: String,
     pub prompt: String,
 }
 
 /// Native AG-UI surface widget attached to an assistant message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgUiWidget {
+    /// A complete ADK-UI surface delivered over the AG-UI custom event profile.
+    Components {
+        surface_id: String,
+        version: u64,
+        components: Vec<UiComponent>,
+    },
     /// Live "Building your personal AI..." progress card from the main chat design.
     BuildProgress {
         title: String,
@@ -56,7 +65,7 @@ pub enum AgUiWidget {
 }
 
 /// A single message in the main chat conversation stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub id: String,
     pub role: MessageRole,
@@ -132,34 +141,39 @@ pub fn default_personal_ai_build_widget() -> AgUiWidget {
     }
 }
 
-/// Default seeded conversation matching the Personal AI setup flow in the design.
-pub fn seeded_onboarding_messages() -> Vec<ChatMessage> {
-    vec![
-        ChatMessage::user(
-            "msg-user-1",
-            "I want a personal AI that knows my work, preferences and writing style. Can you help me set that up?",
-            "9:41 AM",
-        ),
-        ChatMessage::assistant(
-            "msg-assistant-1",
-            "Absolutely. I'll help you build your personal SOVRA — an AI that learns from your work, remembers what matters, and communicates in your style. Let's make it yours.",
-            "9:41 AM",
-            vec![default_personal_ai_build_widget()],
-        ),
-    ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn seeded_messages_match_personal_ai_onboarding_flow() {
-        let messages = seeded_onboarding_messages();
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].role, MessageRole::User);
-        assert_eq!(messages[0].author, "AA");
-        assert_eq!(messages[1].role, MessageRole::Assistant);
-        assert_eq!(messages[1].widgets.len(), 1);
-    }
+/// Native component vocabulary; no GUI or ADK dependency crosses the domain boundary.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UiComponent {
+    Text {
+        text: String,
+        heading: bool,
+    },
+    Card {
+        title: String,
+        description: String,
+        children: Vec<Self>,
+    },
+    Row(Vec<Self>),
+    Column(Vec<Self>),
+    Table {
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    Code(String),
+    Badge(String),
+    Alert {
+        title: String,
+        description: String,
+    },
+    Progress {
+        label: String,
+        value: u8,
+    },
+    Button {
+        label: String,
+        action_id: String,
+        disabled: bool,
+    },
+    Divider,
 }

@@ -88,8 +88,12 @@ impl<T: Styled> SovraStyled for T {}
 /// Apply Sovra's geometry to a real GPUI button; variants still come from the theme.
 pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
     let t = tokens(cx);
-    Button::new(id)
-        .label(label)
+    let label = label.into();
+    let mut button = Button::new(id);
+    if !label.is_empty() {
+        button = button.label(label);
+    }
+    button
         .rounded(t.radius.button)
         .min_h(t.layout.control_height)
         .px(t.space.large)
@@ -106,4 +110,13 @@ pub fn primary_button(
     button(id, label, cx)
         .primary()
         .shadow(vec![t.button_shadow])
+}
+
+/// Keep wide code and tables inside the conversation's reading column.
+pub fn markdown_style() -> gpui_kit::component::text::TextViewStyle {
+    let mut scroll = gpui_kit::StyleRefinement::default();
+    scroll.overflow.x = Some(gpui_kit::Overflow::Scroll);
+    gpui_kit::component::text::TextViewStyle::default()
+        .code_block(scroll.clone())
+        .table(scroll)
 }

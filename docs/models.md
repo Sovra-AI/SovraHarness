@@ -1,5 +1,9 @@
 # Model library
 
+Add your OpenRouter key under **Settings → Manage OpenRouter key**. The masked
+field supports saving/replacing, removing and testing the key through the OS
+credential store. Select the model you want to use in **Models** after saving.
+
 Open **Models** in the sidebar to browse OpenRouter, installed Ollama models and
 your own local or remote connections. The library refreshes in the background;
 saved results remain visible when a server is offline. **Refresh** requests current
@@ -124,3 +128,21 @@ Verified 2026-10-24 and against pinned dependencies:
 Discovery success establishes connectivity and catalog access, not inference
 permission, billing balance or support for every advertised feature. Tool use is
 enabled only when reported by the catalog or explicitly declared for a manual model.
+
+## Native agent UI
+
+Research checked on 2026-10-24: [AG-UI](https://github.com/ag-ui-protocol/ag-ui)
+is an interaction protocol, not a desktop widget toolkit. The standalone
+[Rust ag-ui SDK](https://docs.rs/ag-ui/latest/ag_ui/) offers protocol/client/server
+types; it does not supply GPUI components. For this ADK-based harness,
+[ADK-UI](https://adk-rust.com/en/docs/tools/ui-tools) is the best fit because its
+Rust toolset already generates structured UI and an AG-UI surface event profile.
+The implementation is verified against the pinned `adk-ui 2.2.0` source.
+
+Sovra requests `ag_ui` output from the card, confirmation, table, alert and progress
+tools, decodes their `adk.ui.surface` CUSTOM events, and translates the embedded
+component tree to pure domain types. GPUI renders these natively without a WebView.
+Repeated revisions replace the current surface. Buttons send a JSON action with
+surface ID, revision and action ID as the next prompt in the same session.
+Only tools with native renderers are advertised; browser forms, charts, 3D scenes,
+and arbitrary remote AG-UI HTTP endpoints are not currently exposed.

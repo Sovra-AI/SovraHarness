@@ -370,3 +370,176 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
     })
     .expect("window exists");
 }
+
+#[gpui_kit::test]
+fn settings_saves_openrouter_key_through_secure_connection_protocol(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 1000., 760.);
+    events
+        .send_blocking(Event::Models(fixture_events(vec![])[0].clone()))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert!(window.find("sovra-settings-view").visible());
+        window.click("settings-openrouter", cx);
+        window.render_frame(cx);
+        window.click("connection-key", cx);
+        window.input("test-openrouter-key", cx);
+        window.click("connection-save", cx);
+    })
+    .unwrap();
+    assert!(matches!(
+        commands.try_recv().unwrap(),
+        Command::Models(ModelCommand::Load)
+    ));
+    let Command::Models(ModelCommand::SaveConnection {
+        connection,
+        credential,
+    }) = commands.try_recv().unwrap()
+    else {
+        panic!("Settings must dispatch a connection save");
+    };
+    assert_eq!(connection.id, "router");
+    assert_eq!(connection.kind, ProviderKind::OpenRouter);
+    assert!(
+        matches!(credential, sovra_core::models::CredentialChange::Replace(secret) if secret.0 == "test-openrouter-key")
+    );
+}
+
+#[gpui_kit::test]
+fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
+    cx: &mut TestAppContext,
+) {
+    let (client, commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 1000., 760.);
+    let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection.clone()],
+            preferences: ModelPreferences::default(),
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.click("settings-openrouter", cx);
+        window.click("connection-key", cx);
+        window.input("test-key", cx);
+        window.click("connection-save", cx);
+    })
+    .unwrap();
+    commands.try_recv().unwrap();
+    assert!(matches!(
+        commands.try_recv().unwrap(),
+        Command::Models(ModelCommand::SaveConnection { .. })
+    ));
+    connection.has_credential = true;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection.clone()],
+            preferences: ModelPreferences::default(),
+        }))
+        .unwrap();
+    events
+        .send_blocking(Event::Models(ModelEvent::ConnectionSaved {
+            id: connection.id.clone(),
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("settings-key-status")
+                .label()
+                .unwrap()
+                .contains("Key saved in OS keychain")
+        );
+        assert!(window.find("connection-key").visible());
+        assert_eq!(
+            window.find("connection-save").disabled(),
+            Some(true),
+            "saved secret must be cleared from draft"
+        );
+        window.click("connection-cancel", cx);
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("settings-openrouter-status")
+                .label()
+                .unwrap()
+                .contains("Key saved in OS keychain")
+        );
+        window.click("settings-openrouter", cx);
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("settings-key-status")
+                .label()
+                .unwrap()
+                .contains("Key saved in OS keychain")
+        );
+        window.click("connection-test", cx);
+    })
+    .unwrap();
+    assert!(matches!(
+        commands.try_recv().unwrap(),
+        Command::Models(ModelCommand::TestConnection {
+            credential: sovra_core::models::CredentialChange::Keep,
+            ..
+        })
+    ));
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("connection-key", cx);
+        window.input("replacement-key", cx);
+        window.click("connection-save", cx);
+    })
+    .unwrap();
+    assert!(
+        matches!(commands.try_recv().unwrap(), Command::Models(ModelCommand::SaveConnection { credential: sovra_core::models::CredentialChange::Replace(secret), .. }) if secret.0 == "replacement-key")
+    );
+    events
+        .send_blocking(Event::Models(ModelEvent::ConnectionSaved {
+            id: connection.id.clone(),
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("settings-remove-key", cx);
+    })
+    .unwrap();
+    assert!(matches!(
+        commands.try_recv().unwrap(),
+        Command::Models(ModelCommand::SaveConnection {
+            credential: sovra_core::models::CredentialChange::Remove,
+            ..
+        })
+    ));
+    connection.has_credential = false;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection.clone()],
+            preferences: ModelPreferences::default(),
+        }))
+        .unwrap();
+    events
+        .send_blocking(Event::Models(ModelEvent::ConnectionSaved {
+            id: connection.id,
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("settings-key-status").label(),
+            Some("No saved API key")
+        );
+        assert!(window.find("connection-key").visible());
+    })
+    .unwrap();
+}

@@ -76,10 +76,12 @@ pub struct ModelsView {
     filters_open: bool,
     download_open: bool,
     pub(crate) connections_open: bool,
+    pub(crate) settings_open: bool,
     pub(crate) connection_form: Option<ConnectionForm>,
     pub(crate) manual_form: Option<ManualModelForm>,
     pub(crate) form_subscriptions: Vec<Subscription>,
     pub(crate) pending_save: Option<String>,
+    pub(crate) saved_form_refresh: Option<String>,
     pub(crate) delete_confirmation: Option<String>,
     pub(crate) download_name: Entity<InputState>,
     pub(crate) download_connection: Entity<Selector>,
@@ -195,10 +197,12 @@ impl ModelsView {
                 >= design::tokens(cx).layout.detail_breakpoint,
             download_open: false,
             connections_open: false,
+            settings_open: false,
             connection_form: None,
             manual_form: None,
             form_subscriptions: Vec::new(),
             pending_save: None,
+            saved_form_refresh: None,
             delete_confirmation: None,
             download_name,
             download_connection,
@@ -221,10 +225,14 @@ impl ModelsView {
         if let ModelEvent::ConnectionSaved { id } = event
             && self.pending_save.as_ref() == Some(id)
         {
-            self.connection_form = None;
+            if self.settings_open && self.connection_form.is_some() {
+                self.saved_form_refresh = Some(id.clone());
+            } else {
+                self.connection_form = None;
+                self.form_subscriptions.clear();
+            }
             self.manual_form = None;
             self.pending_save = None;
-            self.form_subscriptions.clear();
         }
         if matches!(event, ModelEvent::Error(_)) {
             self.pending_save = None;
@@ -804,6 +812,20 @@ impl ModelsView {
 
 impl Render for ModelsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(id) = self.saved_form_refresh.take()
+            && let Some(connection) = self.state.connections.iter().find(|c| c.id == id).cloned()
+        {
+            // Recreate the masked input only after the runtime acknowledges persistence.
+            // This discards the secret draft while keeping management controls visible.
+            let notice = self.state.notice.clone();
+            let error = self.state.error.clone();
+            self.open_connection(Some(connection), window, cx);
+            self.state.notice = notice;
+            self.state.error = error;
+        }
+        if self.settings_open {
+            return self.render_settings(cx).into_any_element();
+        }
         self.sync_controls(window, cx);
         let t = design::tokens(cx);
         let narrow = window.viewport_size().width < t.layout.detail_breakpoint;

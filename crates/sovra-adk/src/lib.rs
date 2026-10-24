@@ -5,21 +5,21 @@
 //! boundary so upstream crates never depend on ADK types directly.
 
 pub mod decision_client;
+mod native_ui;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use adk_agent::LlmAgentBuilder;
-use adk_core::{Content, Llm, Part, Tool};
+use adk_core::{Content, EventTextDeltas, Llm, Part, Tool};
 use adk_model::GeminiModel;
 use adk_runner::Runner;
 use adk_session::{CreateRequest, GetRequest, InMemorySessionService, SessionService};
 use adk_tool::GoogleSearchTool;
-use adk_ui::{ACTIVE_SURFACE_STATE_KEY, UI_AGENT_PROMPT_SHORT, UiToolset};
 use async_channel::Sender;
 use futures::StreamExt as _;
 use sovra_core::models::{Authentication, ModelConnection, ModelInfo, ModelSecret, ProviderKind};
-use sovra_core::{AgUiWidget, AgentConfig, Event};
+use sovra_core::{AgentConfig, Event};
 
 const DEFAULT_USER_ID: &str = "local-user";
 
@@ -151,7 +151,7 @@ impl AdkHarness {
             }
         };
         let tools = if model.supports("tools") {
-            UiToolset::all_tools()
+            native_ui::tools()
         } else {
             Vec::new()
         };
@@ -168,7 +168,7 @@ impl AdkHarness {
         let api_key = config.api_key.as_deref().ok_or(Error::MissingApiKey)?;
         let model = GeminiModel::new(api_key, &config.model).map_err(Error::ModelInit)?;
         let mut tools: Vec<Arc<dyn Tool>> = vec![Arc::new(GoogleSearchTool::new())];
-        tools.extend(UiToolset::all_tools());
+        tools.extend(native_ui::tools());
         Self::with_llm_and_tools(config, Arc::new(model), tools)
     }
 
@@ -181,10 +181,13 @@ impl AdkHarness {
         let instruction = if tools.is_empty() {
             config.instruction.clone()
         } else {
-            format!("{}\n\n{}", config.instruction, UI_AGENT_PROMPT_SHORT)
+            format!(
+                "{}\n\nNative UI tools are optional. Answer normal conversational questions directly in Markdown, including ordinary lists and tables. Use a native UI tool only when the user asks for an interactive interface or when a concrete choice or confirmation benefits from buttons. Do not turn greetings, explanations or simple answers into cards, menus or task workflows. Never invent progress, actions or tool results. Button replies contain surface_ref and a button_click event. Use only tools actually available in this session.",
+                config.instruction
+            )
         };
         let mut builder = LlmAgentBuilder::new(&config.agent_name)
-            .description("Sovra AI assistant with native AG-UI surfaces")
+            .description("Sovra conversational assistant")
             .instruction(instruction)
             .model(llm);
         for tool in tools {
@@ -270,10 +273,11 @@ impl AdkHarness {
             }
         };
 
+        let mut deltas = EventTextDeltas::default();
         while let Some(item) = stream.next().await {
             match item {
                 Ok(adk_event) => {
-                    if !forward_adk_event(session_id, &adk_event, events).await {
+                    if !forward_adk_event(session_id, &deltas.push(&adk_event), events).await {
                         return;
                     }
                 }
@@ -303,16 +307,17 @@ async fn forward_adk_event(
     adk_event: &adk_core::Event,
     events: &Sender<Event>,
 ) -> bool {
-    if let Some(widget) = extract_agui_surface(adk_event)
-        && events
+    for widget in native_ui::extract_surfaces(adk_event) {
+        if events
             .send(Event::AgUiSurface {
                 session_id: session_id.to_owned(),
                 widget,
             })
             .await
             .is_err()
-    {
-        return false;
+        {
+            return false;
+        }
     }
     if let Some(text) = extract_text(adk_event)
         && events
@@ -328,22 +333,11 @@ async fn forward_adk_event(
     true
 }
 
-fn extract_agui_surface(event: &adk_core::Event) -> Option<AgUiWidget> {
-    let val = event.actions.state_delta.get(ACTIVE_SURFACE_STATE_KEY)?;
-    let surface_id = val.get("id")?.as_str()?.to_owned();
-    let version = val
-        .get("version")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(1);
-    Some(AgUiWidget::SurfaceCard {
-        title: format!("AG-UI Surface · {surface_id}"),
-        summary: format!("Updated structured AG-UI surface (revision v{version})."),
-        surface_id,
-    })
-}
-
 fn extract_text(event: &adk_core::Event) -> Option<String> {
     let content = event.llm_response.content.as_ref()?;
+    if !matches!(content.role.as_str(), "model" | "assistant") {
+        return None;
+    }
     let mut text = String::new();
     for part in &content.parts {
         if let Part::Text { text: chunk } = part {
@@ -395,7 +389,7 @@ mod tests {
             let fake_llm = Arc::new(FakeLlm {
                 reply: "Hello from ADK-Rust + AG-UI!".to_owned(),
             });
-            let tools = UiToolset::all_tools();
+            let tools = native_ui::tools();
             assert!(!tools.is_empty(), "adk-ui toolset must provide AG-UI tools");
             let harness = AdkHarness::with_llm_and_tools(&cfg, fake_llm, tools).unwrap();
             let (tx, rx) = async_channel::unbounded();
@@ -416,5 +410,65 @@ mod tests {
                 }
             );
         });
+    }
+    struct StreamingLlm;
+
+    #[async_trait::async_trait]
+    impl Llm for StreamingLlm {
+        fn name(&self) -> &'static str {
+            "streaming-test"
+        }
+
+        async fn generate_content(
+            &self,
+            _request: LlmRequest,
+            stream: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            assert!(stream, "normal chat must request incremental output");
+            let response = |text: &str, partial| LlmResponse {
+                content: Some(Content::new("model").with_text(text)),
+                partial,
+                provider_metadata: (!partial)
+                    .then(|| serde_json::json!({"content_complete": true})),
+                ..LlmResponse::default()
+            };
+            Ok(Box::pin(futures::stream::iter([
+                Ok(response("Hello **", true)),
+                Ok(response("世界", true)),
+                Ok(response("Hello **世界**!", false)),
+            ])))
+        }
+    }
+
+    #[test]
+    fn streaming_complete_snapshot_does_not_repeat_partial_markdown() {
+        futures::executor::block_on(async {
+            let harness = AdkHarness::with_llm_and_tools(
+                &AgentConfig::default(),
+                Arc::new(StreamingLlm),
+                vec![],
+            )
+            .unwrap();
+            let (tx, rx) = async_channel::unbounded();
+            harness.run_prompt("stream", "Hello", &tx).await;
+            let mut chunks = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    Event::AgentChunk { text, .. } => chunks.push(text),
+                    Event::AgentCompleted { .. } => {}
+                    event => panic!("unexpected event: {event:?}"),
+                }
+            }
+            assert_eq!(chunks, ["Hello **", "世界", "**!"]);
+        });
+    }
+
+    #[test]
+    fn user_and_tool_text_are_not_assistant_output() {
+        for role in ["user", "tool"] {
+            let mut event = adk_core::Event::new("test");
+            event.set_content(Content::new(role).with_text("not an assistant reply"));
+            assert_eq!(extract_text(&event), None);
+        }
     }
 }

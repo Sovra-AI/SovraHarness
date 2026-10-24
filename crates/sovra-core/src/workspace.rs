@@ -2,10 +2,9 @@
 //! inspector configuration, AG-UI chat stream, `SovraSRX` 22-specialist roster,
 //! and `CogniRouteSLM` + `SovraSRX` routing tree.
 
-use crate::agui::{
-    AgUiWidget, BuildStepState, ChatMessage, default_personal_ai_build_widget,
-    seeded_onboarding_messages,
-};
+use crate::agui::{AgUiWidget, BuildStepState, ChatMessage, default_personal_ai_build_widget};
+use crate::chat_history::{ChatHistoryFilter, ChatThread, NEW_CHAT_TITLE};
+use crate::memory::Timestamp;
 use crate::models::ModelKey;
 use crate::protocol::Event;
 use crate::providers::ModelTier;
@@ -121,6 +120,11 @@ pub struct WorkspaceState {
     pub user: UserProfile,
     pub session_id: String,
     pub messages: Vec<ChatMessage>,
+    pub threads: Vec<ChatThread>,
+    pub history_filter: ChatHistoryFilter,
+    pub history_search: String,
+    pub history_collapsed: bool,
+    pub renaming_thread_id: Option<String>,
     pub queued_prompts: Vec<String>,
     pub is_generating: bool,
     pub ai_name: String,
@@ -133,40 +137,42 @@ pub struct WorkspaceState {
     pub last_route_evaluation: Option<RouteEvaluation>,
     pub search_query: String,
     next_msg_seq: u64,
+    next_thread_seq: u64,
 }
 
 impl Default for WorkspaceState {
     fn default() -> Self {
         let routing = RoutingConfig::default();
         let specialists = default_sovra_srx_agents();
-        let initial_eval = evaluate_routing(
-            &routing,
-            &specialists,
-            "I want a personal AI that knows my work, preferences and writing style.",
-            None,
-            routing.backend,
-        );
+        let initial_id = "personal-ai-setup".to_owned();
+        let initial_thread = ChatThread::new(initial_id.clone(), Timestamp(0));
         Self {
             runtime_status: RuntimeStatus::default(),
             route: ScreenRoute::MainWorkspace,
             active_tab: NavTab::Chat,
             user: UserProfile::default(),
-            session_id: "personal-ai-setup".to_owned(),
-            messages: seeded_onboarding_messages(),
+            session_id: initial_id,
+            messages: Vec::new(),
+            threads: vec![initial_thread],
+            history_filter: ChatHistoryFilter::Chats,
+            history_search: String::new(),
+            history_collapsed: false,
+            renaming_thread_id: None,
             queued_prompts: Vec::new(),
             is_generating: false,
             ai_name: "My Personal AI".to_owned(),
             ai_description:
                 "A trusted partner that understands my work, thinks like me, and helps me go further."
                     .to_owned(),
-            ai_building: true,
+            ai_building: false,
             config_cards: default_config_cards(),
             schedules: default_schedules(),
             specialists,
             routing,
-            last_route_evaluation: Some(initial_eval),
+            last_route_evaluation: None,
             search_query: String::new(),
-            next_msg_seq: 2,
+            next_msg_seq: 0,
+            next_thread_seq: 1,
         }
     }
 }
@@ -237,6 +243,237 @@ impl WorkspaceState {
         self.active_tab = tab;
     }
 
+    pub fn set_history_filter(&mut self, filter: ChatHistoryFilter) {
+        self.history_filter = filter;
+    }
+
+    pub fn set_history_search(&mut self, query: &str) {
+        query.clone_into(&mut self.history_search);
+    }
+
+    pub fn toggle_history_collapsed(&mut self) {
+        self.history_collapsed = !self.history_collapsed;
+    }
+
+    /// Returns the currently active [`ChatThread`], if found.
+    pub fn active_thread(&self) -> Option<&ChatThread> {
+        self.threads
+            .iter()
+            .find(|t| t.id == self.session_id && t.is_active())
+    }
+
+    fn sync_active_thread(&mut self) {
+        self.next_msg_seq += 1;
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "sequence counters are small positive integers"
+        )]
+        let ts = Timestamp(self.next_msg_seq as i64);
+        if let Some(thread) = self.threads.iter_mut().find(|t| t.id == self.session_id) {
+            thread.messages.clone_from(&self.messages);
+            let effective_ts = thread.updated_at.max(ts);
+            thread.refresh_summary(effective_ts);
+        } else {
+            let mut thread = ChatThread::new(self.session_id.clone(), ts);
+            thread.messages.clone_from(&self.messages);
+            thread.refresh_summary(ts);
+            self.threads.push(thread);
+        }
+    }
+
+    /// Starts a fresh chat conversation thread (or focuses an existing empty draft).
+    pub fn start_new_chat(&mut self) -> ChatThread {
+        self.sync_active_thread();
+        self.history_filter = ChatHistoryFilter::Chats;
+        self.active_tab = NavTab::Chat;
+        self.renaming_thread_id = None;
+        if let Some(existing_draft) = self
+            .threads
+            .iter()
+            .find(|t| t.is_active() && t.is_untouched_draft())
+        {
+            let draft = existing_draft.clone();
+            self.session_id.clone_from(&draft.id);
+            self.messages.clear();
+            self.queued_prompts.clear();
+            self.is_generating = false;
+            return draft;
+        }
+        self.next_thread_seq += 1;
+        self.next_msg_seq += 1;
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "sequence counters are small positive integers"
+        )]
+        let ts = Timestamp(self.next_msg_seq as i64);
+        let new_id = format!("chat-session-{}", self.next_thread_seq);
+        let thread = ChatThread::new(new_id.clone(), ts);
+        self.threads.push(thread.clone());
+        self.session_id = new_id;
+        self.messages.clear();
+        self.queued_prompts.clear();
+        self.is_generating = false;
+        thread
+    }
+
+    /// Switches the active conversation to `session_id`.
+    pub fn select_thread(&mut self, session_id: &str) -> bool {
+        if self.session_id == session_id {
+            self.active_tab = NavTab::Chat;
+            return true;
+        }
+        self.sync_active_thread();
+        let Some(target) = self
+            .threads
+            .iter()
+            .find(|t| t.id == session_id && t.is_active())
+            .cloned()
+        else {
+            return false;
+        };
+        self.session_id.clone_from(&target.id);
+        self.messages.clone_from(&target.messages);
+        self.queued_prompts.clear();
+        self.is_generating = false;
+        self.renaming_thread_id = None;
+        self.active_tab = NavTab::Chat;
+        true
+    }
+
+    /// Toggles the pinned status of a conversation thread and returns the updated thread.
+    pub fn toggle_thread_pin(&mut self, session_id: &str) -> Option<ChatThread> {
+        let thread = self
+            .threads
+            .iter_mut()
+            .find(|t| t.id == session_id && t.is_active())?;
+        thread.pinned = !thread.pinned;
+        Some(thread.clone())
+    }
+
+    /// Begins inline renaming for `session_id`, returning its current title.
+    pub fn begin_rename_thread(&mut self, session_id: &str) -> Option<String> {
+        let thread = self
+            .threads
+            .iter()
+            .find(|t| t.id == session_id && t.is_active())?;
+        self.renaming_thread_id = Some(session_id.to_owned());
+        Some(thread.title.clone())
+    }
+
+    /// Cancels inline renaming without modifying any thread title.
+    pub fn cancel_rename_thread(&mut self) {
+        self.renaming_thread_id = None;
+    }
+
+    /// Renames `session_id` to `new_title` (ignoring blank titles) and returns the updated thread.
+    pub fn rename_thread(&mut self, session_id: &str, new_title: &str) -> Option<ChatThread> {
+        self.renaming_thread_id = None;
+        let trimmed = new_title.trim();
+        let thread = self
+            .threads
+            .iter_mut()
+            .find(|t| t.id == session_id && t.is_active())?;
+        if trimmed.is_empty() {
+            NEW_CHAT_TITLE.clone_into(&mut thread.title);
+        } else {
+            trimmed.clone_into(&mut thread.title);
+        }
+        Some(thread.clone())
+    }
+
+    /// Soft-deletes `session_id`. If it was the active session, switches to the most recent remaining thread or creates a fresh draft.
+    pub fn delete_thread(&mut self, session_id: &str) -> bool {
+        self.next_msg_seq += 1;
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "sequence counters are small positive integers"
+        )]
+        let deleted_at = Timestamp(self.next_msg_seq as i64);
+        let Some(thread) = self
+            .threads
+            .iter_mut()
+            .find(|t| t.id == session_id && t.is_active())
+        else {
+            return false;
+        };
+        thread.deleted_at = Some(deleted_at);
+        if self.renaming_thread_id.as_deref() == Some(session_id) {
+            self.renaming_thread_id = None;
+        }
+        if self.session_id == session_id {
+            let next_active = self
+                .threads
+                .iter()
+                .filter(|t| t.is_active())
+                .max_by_key(|t| t.updated_at)
+                .cloned();
+            if let Some(next) = next_active {
+                self.session_id = next.id;
+                self.messages = next.messages;
+                self.queued_prompts.clear();
+                self.is_generating = false;
+            } else {
+                self.next_thread_seq += 1;
+                let new_id = format!("chat-session-{}", self.next_thread_seq);
+                let fresh = ChatThread::new(new_id.clone(), deleted_at);
+                self.threads.push(fresh);
+                self.session_id = new_id;
+                self.messages.clear();
+                self.queued_prompts.clear();
+                self.is_generating = false;
+            }
+        }
+        true
+    }
+
+    /// Creates a new automation schedule and appends it to `self.schedules`.
+    pub fn create_schedule(
+        &mut self,
+        name: &str,
+        cadence: &str,
+        prompt: &str,
+    ) -> Option<ScheduleItem> {
+        let name = name.trim();
+        let prompt = prompt.trim();
+        if name.is_empty() || prompt.is_empty() {
+            return None;
+        }
+        let cadence = if cadence.trim().is_empty() {
+            "Daily · 09:00 GST"
+        } else {
+            cadence.trim()
+        };
+        let slug: String = name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let id = format!(
+            "sched-{}-{}",
+            slug.trim_matches('-'),
+            self.schedules.len() + 1
+        );
+        let item = ScheduleItem {
+            id,
+            name: name.to_owned(),
+            cadence: cadence.to_owned(),
+            next_run: "Scheduled".to_owned(),
+            last_result: "Ready · Never run".to_owned(),
+            prompt: prompt.to_owned(),
+            status: ScheduleStatus::Active,
+            runs_today: 0,
+        };
+        self.schedules.push(item.clone());
+        Some(item)
+    }
+
+    /// Deletes a schedule by `schedule_id`.
+    pub fn delete_schedule(&mut self, schedule_id: &str) -> bool {
+        let before = self.schedules.len();
+        self.schedules.retain(|s| s.id != schedule_id);
+        self.schedules.len() < before
+    }
+
     pub fn set_routing_mode(&mut self, mode: SelectionMode) {
         self.routing.mode = mode;
         self.sync_model_card_subtitle();
@@ -302,12 +539,19 @@ impl WorkspaceState {
         Some(prompt.to_owned())
     }
 
+    /// Stops the visible turn and discards queued work so Stop cannot trigger another request.
+    pub fn interrupt_generation(&mut self) {
+        self.is_generating = false;
+        self.queued_prompts.clear();
+    }
+
     fn append_user_turn(&mut self, prompt: &str) {
         self.next_msg_seq += 1;
         let user_id = format!("msg-user-{}", self.next_msg_seq);
         self.messages
             .push(ChatMessage::user(user_id, prompt, "Just now"));
         self.is_generating = true;
+        self.sync_active_thread();
     }
 
     pub fn activate_preview_ai(&mut self) {
@@ -344,15 +588,26 @@ impl WorkspaceState {
     }
 
     pub fn trigger_schedule(&mut self, schedule_id: &str) -> Option<String> {
-        let prompt = self
+        let (schedule_name, prompt) = self
             .schedules
             .iter_mut()
             .find(|s| s.id == schedule_id)
             .map(|s| {
                 s.runs_today += 1;
                 "Running now in Chat...".clone_into(&mut s.last_result);
-                format!("[Schedule: {}] {}", s.name, s.prompt)
+                (
+                    s.name.clone(),
+                    format!("[Schedule: {}] {}", s.name, s.prompt),
+                )
             })?;
+        if let Some(thread) = self.threads.iter_mut().find(|t| t.id == self.session_id)
+            && thread.messages.is_empty()
+        {
+            thread.kind = crate::chat_history::ConversationKind::Scheduled;
+            thread.schedule_id = Some(schedule_id.to_owned());
+            thread.title = schedule_name;
+        }
+        self.history_filter = ChatHistoryFilter::Scheduled;
         self.active_tab = NavTab::Chat;
         self.submit_prompt(&prompt)
     }
@@ -364,6 +619,24 @@ impl WorkspaceState {
     pub fn apply_event(&mut self, event: &Event) -> Option<String> {
         self.runtime_status.apply(event);
         match event {
+            Event::ChatHistoryLoaded { threads } => {
+                for incoming in threads {
+                    if let Some(existing) = self.threads.iter_mut().find(|t| t.id == incoming.id) {
+                        if existing.messages.is_empty() && !incoming.messages.is_empty() {
+                            *existing = incoming.clone();
+                        }
+                    } else {
+                        self.threads.push(incoming.clone());
+                    }
+                }
+                if let Some(active) = self.threads.iter().find(|t| t.id == self.session_id)
+                    && self.messages.is_empty()
+                    && !active.messages.is_empty()
+                {
+                    self.messages.clone_from(&active.messages);
+                }
+                None
+            }
             Event::Models(
                 crate::models::ModelEvent::Loaded { preferences, .. }
                 | crate::models::ModelEvent::PreferencesChanged(preferences),
@@ -383,21 +656,33 @@ impl WorkspaceState {
                 None
             }
             Event::Models(_) | Event::Ready { .. } | Event::Pong | Event::Stopped => None,
+            Event::AgentChunk { session_id, .. }
+            | Event::AgUiSurface { session_id, .. }
+            | Event::AgentCompleted { session_id }
+            | Event::AgentError { session_id, .. }
+                if session_id != &self.session_id =>
+            {
+                None
+            }
             Event::AgentChunk { text, .. } => {
                 self.append_or_extend_assistant(text);
+                self.sync_active_thread();
                 None
             }
             Event::AgUiSurface { widget, .. } => {
                 self.attach_agui_widget(widget.clone());
+                self.sync_active_thread();
                 None
             }
             Event::AgentCompleted { .. } => {
                 self.is_generating = false;
+                self.sync_active_thread();
                 self.dequeue_next_prompt()
             }
             Event::AgentError { message, .. } => {
                 self.is_generating = false;
                 self.append_or_extend_assistant(&format!("Note: {message}"));
+                self.sync_active_thread();
                 self.dequeue_next_prompt()
             }
         }
@@ -408,9 +693,6 @@ impl WorkspaceState {
             && last.role == crate::agui::MessageRole::Assistant
             && last.timestamp == "Just now"
         {
-            if !last.text.is_empty() {
-                last.text.push(' ');
-            }
             last.text.push_str(chunk);
             return;
         }
@@ -424,6 +706,18 @@ impl WorkspaceState {
         if let Some(last) = self.messages.last_mut()
             && last.role == crate::agui::MessageRole::Assistant
         {
+            if let AgUiWidget::Components { surface_id, version, .. } = &widget
+                && let Some(existing) = last.widgets.iter_mut().find(|existing| {
+                    matches!(existing, AgUiWidget::Components { surface_id: id, .. } if id == surface_id)
+                })
+            {
+                if let AgUiWidget::Components { version: previous, .. } = existing
+                    && version >= previous
+                {
+                    *existing = widget;
+                }
+                return;
+            }
             last.widgets.push(widget);
         } else {
             self.next_msg_seq += 1;
@@ -459,6 +753,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn surface_revisions_update_in_place_and_ignore_other_sessions() {
+        let mut state = WorkspaceState::default();
+        state.submit_prompt("Report");
+        let event = |session_id: String, version| Event::AgUiSurface {
+            session_id,
+            widget: AgUiWidget::Components {
+                surface_id: "report".into(),
+                version,
+                components: vec![crate::UiComponent::Progress {
+                    label: "Report".into(),
+                    value: 50,
+                }],
+            },
+        };
+        state.apply_event(&event("other-session".into(), 1));
+        assert_eq!(state.messages.len(), 1);
+        state.apply_event(&event(state.session_id.clone(), 1));
+        state.apply_event(&event(state.session_id.clone(), 2));
+        state.apply_event(&event(state.session_id.clone(), 1));
+        assert_eq!(state.messages.len(), 2);
+        let widgets = &state.messages[1].widgets;
+        assert_eq!(widgets.len(), 1);
+        assert!(matches!(
+            widgets[0],
+            AgUiWidget::Components { version: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn new_workspace_has_no_demo_conversation_or_activity() {
+        let state = WorkspaceState::default();
+        assert_eq!(state.messages, Vec::<ChatMessage>::new());
+        assert_eq!(state.queued_prompts, Vec::<String>::new());
+        assert!(!state.is_generating);
+        assert!(!state.ai_building);
+        assert!(state.last_route_evaluation.is_none());
+    }
+
+    #[test]
     fn login_and_logout_switch_routes() {
         let mut state = WorkspaceState::default();
         state.logout();
@@ -490,9 +823,98 @@ mod tests {
     #[test]
     fn preview_ai_completes_deployment_and_checklist() {
         let mut state = WorkspaceState::default();
+        state.reset_build_progress();
         assert!(state.ai_building);
         state.activate_preview_ai();
         assert!(!state.ai_building);
         assert!(state.config_cards.iter().all(|c| c.status.is_complete()));
+    }
+    #[test]
+    fn stream_chunks_preserve_exact_markdown_and_unicode() {
+        let mut state = WorkspaceState::default();
+        state.submit_prompt("Explain this");
+        for text in [
+            "## He",
+            "ading\n\n**",
+            "世界",
+            "**\n\n```rust\n",
+            "let x = 1;\n",
+            "```",
+        ] {
+            state.apply_event(&Event::AgentChunk {
+                session_id: state.session_id.clone(),
+                text: text.into(),
+            });
+        }
+        assert_eq!(
+            state.messages.last().unwrap().text,
+            "## Heading\n\n**世界**\n\n```rust\nlet x = 1;\n```"
+        );
+    }
+    #[test]
+    fn stopping_clears_queued_turns_and_keeps_partial_reply() {
+        let mut state = WorkspaceState::default();
+        state.submit_prompt("First");
+        state.submit_prompt("Queued");
+        state.apply_event(&Event::AgentChunk {
+            session_id: state.session_id.clone(),
+            text: "Partial reply".into(),
+        });
+        state.interrupt_generation();
+        assert!(!state.is_generating);
+        assert_eq!(state.queued_prompts, Vec::<String>::new());
+        assert_eq!(state.messages.last().unwrap().text, "Partial reply");
+        assert_eq!(
+            state.apply_event(&Event::AgentCompleted {
+                session_id: state.session_id.clone()
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn manages_multiple_chat_threads_and_scheduled_runs() {
+        let mut state = WorkspaceState::default();
+        let first_id = state.session_id.clone();
+        state.submit_prompt("Analyze Nvidia Q3 earnings");
+        state.apply_event(&Event::AgentChunk {
+            session_id: first_id.clone(),
+            text: "Nvidia revenue grew strongly.".into(),
+        });
+        state.apply_event(&Event::AgentCompleted {
+            session_id: first_id.clone(),
+        });
+        assert_eq!(
+            state.active_thread().unwrap().title,
+            "Analyze Nvidia Q3 earnings"
+        );
+        assert_eq!(
+            state.active_thread().unwrap().last_message_preview,
+            "Nvidia revenue grew strongly."
+        );
+
+        let second = state.start_new_chat();
+        assert_ne!(second.id, first_id);
+        assert_eq!(state.messages, Vec::<ChatMessage>::new());
+        state.submit_prompt("Refactor the SurrealDB adapter");
+        assert_eq!(
+            state.active_thread().unwrap().title,
+            "Refactor the SurrealDB adapter"
+        );
+
+        assert!(state.select_thread(&first_id));
+        assert_eq!(state.messages.len(), 2);
+        assert_eq!(state.messages[0].text, "Analyze Nvidia Q3 earnings");
+
+        let pinned = state.toggle_thread_pin(&first_id).unwrap();
+        assert!(pinned.pinned);
+
+        let renamed = state
+            .rename_thread(&first_id, "NVDA Earnings Deep Dive")
+            .unwrap();
+        assert_eq!(renamed.title, "NVDA Earnings Deep Dive");
+
+        assert!(state.delete_thread(&first_id));
+        assert_eq!(state.session_id, second.id);
     }
 }

@@ -4,6 +4,7 @@
 //! `match` that has to handle it.
 
 use crate::agui::AgUiWidget;
+use crate::chat_history::ChatThread;
 use crate::models::ModelKey;
 use crate::providers::ModelTier;
 use crate::routing_tree::{DecisionBackend, RouteEvaluation, SelectionMode};
@@ -12,6 +13,16 @@ use crate::routing_tree::{DecisionBackend, RouteEvaluation, SelectionMode};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Models(crate::models::ModelCommand),
+    /// Load persisted conversation threads from the memory store.
+    LoadChatHistory,
+    /// Upsert a conversation thread (metadata + messages) to persistent storage.
+    SaveChatThread {
+        thread: Box<ChatThread>,
+    },
+    /// Soft-delete a conversation thread in persistent storage.
+    DeleteChatThread {
+        session_id: String,
+    },
     /// Update the active model routing mode or System-1 decision backend (`Laya`, `OpenJev`, or `EmbeddedHeuristic`).
     UpdateRouting {
         mode: SelectionMode,
@@ -47,6 +58,10 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Models(crate::models::ModelEvent),
+    /// Persisted conversation threads loaded from the memory store.
+    ChatHistoryLoaded {
+        threads: Vec<ChatThread>,
+    },
     /// The runtime is up and accepting commands.
     Ready {
         version: String,
