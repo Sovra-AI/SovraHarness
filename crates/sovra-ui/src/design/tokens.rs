@@ -41,6 +41,9 @@ pub struct ChatTokens {
     pub stop_background: Hsla,
     pub code_radius: Pixels,
     pub action_idle_opacity: f32,
+    pub welcome_width: Pixels,
+    pub chip_border: Hsla,
+    pub chip_height: Pixels,
 }
 
 /// Source accent ramp for charts/decorations. Text uses contrast-tested theme roles.
@@ -274,6 +277,9 @@ pub fn tokens(cx: &App) -> SovraTokens {
             stop_background: colour(0xdc_26_26),
             code_radius: px(6.),
             action_idle_opacity: 0.55,
+            welcome_width: px(680.),
+            chip_border: colour(VIOLET).alpha(0.2),
+            chip_height: px(36.),
         },
         text_secondary: colour(p.secondary_text),
         canvas,

@@ -81,6 +81,8 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
             .send_blocking(Event::Models(event))
             .expect("test operation succeeds");
     }
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
 
     cx.update_window(window.into(), |_, window, cx| {
@@ -96,6 +98,8 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
         commands.try_recv().expect("test operation succeeds"),
         Command::Models(ModelCommand::Load)
     ));
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -131,6 +135,8 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
             },
         )))
         .expect("test operation succeeds");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -173,6 +179,8 @@ fn assert_large_catalog_layout(cx: &mut TestAppContext, width: f32, height: f32,
             .send_blocking(Event::Models(event))
             .expect("test operation succeeds");
     }
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -236,6 +244,8 @@ fn minimum_window_filters_keep_apply_action_visible(cx: &mut TestAppContext) {
             .send_blocking(Event::Models(event))
             .expect("fixture delivered");
     }
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -276,6 +286,8 @@ fn ollama_installed_models_and_download_panel_fit_minimum_window(cx: &mut TestAp
             cached: false,
         }))
         .expect("catalog delivered");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -303,6 +315,8 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
         window.click(("connection-preset", 3usize), cx);
     })
     .expect("window exists");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -339,6 +353,8 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
             preferences: ModelPreferences::default(),
         }))
         .expect("replay delivered");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -353,6 +369,8 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
             "Credential store unavailable".into(),
         )))
         .expect("error delivered");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -366,6 +384,8 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
             id: saved.0.id,
         }))
         .expect("ack delivered");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -381,6 +401,8 @@ fn settings_saves_openrouter_key_through_secure_connection_protocol(cx: &mut Tes
     events
         .send_blocking(Event::Models(fixture_events(vec![])[0].clone()))
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -425,6 +447,8 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
             preferences: ModelPreferences::default(),
         }))
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -452,6 +476,8 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
             id: connection.id.clone(),
         }))
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -510,6 +536,8 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
             id: connection.id.clone(),
         }))
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -535,6 +563,8 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
             id: connection.id,
         }))
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -554,6 +584,8 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
     events
         .send_blocking(Event::Models(fixture_events(vec![])[0].clone()))
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -609,6 +641,8 @@ fn appearance_choice_is_saved_and_restored(cx: &mut TestAppContext) {
             },
         }))
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         assert!(!cx.theme().is_dark(), "saved Light choice applies on load");

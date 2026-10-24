@@ -26,6 +26,13 @@ move them under a version heading when the tag is cut.
   the UI thread); thinking chunks are coalesced like answer chunks; collapsed reasoning
   is never built; the per-token fade animation is off and the only continuous
   animation is the pre-answer shimmer.
+- Streamed tokens are coalesced per frame (8ms) before they reach the UI, so each
+  frame costs at most one state update and one Markdown parse. Measured on a
+  20,000-chunk reply after 40 long messages: the core reducer went from 327ms to 0.7ms.
+- Highlight code blocks with `gpui-kit`'s `syntect` feature (pure-Rust regexes,
+  cached per unchanged block).
+- New chats open on a `SovraSRX`-style welcome: a greeting, a plain-language subtitle and
+  starter chips that fill the message box without sending.
 
 - Clean up the title bar: it no longer shows the product name or a light/dark
   button. Appearance now lives in **Settings → Appearance**.

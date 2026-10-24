@@ -28,12 +28,16 @@ fn status_follows_runtime_events(cx: &mut TestAppContext) {
             version: "1.2.3".into(),
         })
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     shell.read_with(cx, |shell, _| {
         assert_eq!(shell.status().label(), "Ready · v1.2.3");
     });
 
     events.send_blocking(Event::Stopped).unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     shell.read_with(cx, |shell, _| {
         assert_eq!(shell.status(), &RuntimeStatus::Stopped);
@@ -113,6 +117,8 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
             session_id: "personal-ai-setup".into(),
         })
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
 
     shell.read_with(cx, |shell, _| {
@@ -228,6 +234,8 @@ fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut Tes
             },
         })
         .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         for mode in [
@@ -290,6 +298,8 @@ fn composer_enter_sends_shift_enter_adds_line_and_stop_clears_queue(cx: &mut Tes
         window.press("enter", cx);
     })
     .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);

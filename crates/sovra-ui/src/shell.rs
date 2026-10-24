@@ -25,6 +25,9 @@ use crate::my_ais_view::render_my_ais_view;
 use crate::schedules_view::render_schedules_view;
 use crate::sidebar::render_sidebar;
 
+/// How long the UI waits to coalesce streamed tokens into one update.
+const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(8);
+
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent view flags; a state enum would be artificial"
@@ -134,10 +137,19 @@ impl Shell {
         let models = cx.new(|cx| crate::ModelsView::new(window, cx));
         let task = cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv().await {
-                // Drain a bounded burst so one network packet does not schedule a
-                // separate UI update for every token; never delay incoming output.
+                // Streamed tokens arrive far faster than frames. Wait out one frame
+                // (~8ms, imperceptible) and fold everything that queued meanwhile into
+                // a single update, so each frame costs at most one state change, one
+                // Markdown append and one background parse. Other events apply at once.
+                if matches!(
+                    event,
+                    sovra_core::Event::AgentChunk { .. }
+                        | sovra_core::Event::AgentThinkingChunk { .. }
+                ) {
+                    cx.background_executor().timer(FRAME_BUDGET).await;
+                }
                 let mut batch = vec![event];
-                for _ in 1..128 {
+                for _ in 1..1024 {
                     let Ok(event) = events.try_recv() else {
                         break;
                     };

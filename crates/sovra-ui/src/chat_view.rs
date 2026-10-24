@@ -247,6 +247,7 @@ pub(crate) fn render_chat_column(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    let welcome = state.messages.is_empty() && !state.is_generating;
     v_flex()
         .id("sovra-chat-main")
         .flex_1()
@@ -256,6 +257,7 @@ pub(crate) fn render_chat_column(
         .px(t.space.medium)
         .pb(t.space.small)
         .overflow_hidden()
+        .children(welcome.then(|| render_welcome(state, cx)))
         .child(
             div()
                 .id("chat-scroll-area")
@@ -263,7 +265,9 @@ pub(crate) fn render_chat_column(
                 .aria_label("Conversation")
                 .test_support()
                 .relative()
-                .flex_1()
+                // The empty list yields its height to the welcome block.
+                .flex_grow(if welcome { 0. } else { 1. })
+                .flex_basis(px(0.))
                 .min_h_0()
                 .w_full()
                 .overflow_hidden()
@@ -300,6 +304,80 @@ pub(crate) fn render_chat_column(
                 .w_full()
                 .justify_center()
                 .child(column(chat, cx).child(render_composer(state, composer_input, chat, cx))),
+        )
+}
+
+/// Starters for people who don't know what to ask an AI yet.
+const STARTERS: [(&str, &str); 4] = [
+    (
+        "Explain something simply",
+        "Explain this to me simply, like I'm new to it: ",
+    ),
+    (
+        "Draft an email",
+        "Help me write a short, friendly email about ",
+    ),
+    (
+        "Plan my week",
+        "Help me plan my week. Here's what I need to get done: ",
+    ),
+    (
+        "Summarize a text",
+        "Summarize this in a few bullet points:\n\n",
+    ),
+];
+
+/// `SovraSRX`'s welcome: greeting, one-line subtitle and starter chips that fill the
+/// composer (they never send on their own).
+fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let first_name = state
+        .user
+        .full_name
+        .split_whitespace()
+        .next()
+        .unwrap_or("there")
+        .to_owned();
+    h_flex()
+        .id("chat-welcome")
+        .test_support()
+        .w_full()
+        .flex_1()
+        .justify_center()
+        .items_center()
+        .child(
+            v_flex()
+                .w_full()
+                .max_w(t.chat.welcome_width)
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .sovra_text(TextRole::PageTitle, cx)
+                        .child(format!("Hi {first_name}, what can I help with?")),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .text_color(t.text_secondary)
+                        .child("Ask anything in your own words. Pick a starter if you're not sure where to begin."),
+                )
+                .child(
+                    h_flex().flex_wrap().gap(t.space.compact).pt(t.space.small).children(
+                        STARTERS.iter().enumerate().map(|(index, (label, draft))| {
+                            design::button(("chat-starter", index), *label, cx)
+                                .ghost()
+                                .small()
+                                .min_h(t.chat.chip_height)
+                                .px(t.space.small)
+                                .rounded(t.radius.pill)
+                                .border_1()
+                                .border_color(t.chat.chip_border)
+                                .on_click(cx.listener(move |shell, _, window, cx| {
+                                    shell.fill_composer_draft(draft, window, cx);
+                                }))
+                        }),
+                    ),
+                ),
         )
 }
 
@@ -720,6 +798,36 @@ mod tests {
     use sovra_core::Event;
     use sovra_runtime::Client;
 
+    #[gpui_kit::test]
+    fn empty_chat_welcomes_and_starters_only_fill_the_composer(cx: &mut TestAppContext) {
+        let (client, commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.find("chat-welcome").visible());
+            window.click(("chat-starter", 1usize), cx);
+            window.render_frame(cx);
+            assert!(
+                shell.read(cx).state.messages.is_empty(),
+                "starters never send"
+            );
+            assert_ne!(window.find("composer-send-btn").disabled(), Some(true));
+            window.click("composer-send-btn", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("chat-welcome").is_none());
+        })
+        .unwrap();
+        assert!(std::iter::from_fn(|| commands.try_recv().ok())
+            .any(|command| matches!(command, sovra_core::Command::RunPrompt { prompt, .. } if prompt.starts_with("Help me write"))));
+    }
+
     #[test]
     fn elapsed_label_matches_sovrasrx_format() {
         assert_eq!(elapsed_label(0), "0s");
@@ -756,6 +864,8 @@ mod tests {
                 elapsed_ms: 2_400,
             })
             .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
@@ -773,6 +883,8 @@ mod tests {
         ] {
             events.send_blocking(event).unwrap();
         }
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
@@ -831,6 +943,8 @@ mod tests {
         ] {
             events.send_blocking(event).unwrap();
         }
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             for mode in [ThemeMode::Dark, ThemeMode::Light] {
@@ -893,11 +1007,15 @@ mod tests {
                 text: markdown.repeat(12),
             })
             .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
         })
         .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
@@ -931,11 +1049,15 @@ mod tests {
                 text: "\n\nLatest text".repeat(20),
             })
             .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
         })
         .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
@@ -956,6 +1078,8 @@ mod tests {
                 session_id: session,
             })
             .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
