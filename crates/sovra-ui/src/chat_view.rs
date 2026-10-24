@@ -44,24 +44,27 @@ struct Segment {
     _changed: Subscription,
 }
 
+/// Streamed Markdown split into segments (see `markdown_segments`). Never empty
+/// once fed; earlier segments are frozen and only the last one grows.
+struct SegmentedText {
+    segmenter: Segmenter,
+    segments: Vec<Segment>,
+}
+
 struct MarkdownMessage {
     /// The message this state was built for; a different message at the same
     /// position rebuilds it.
     id: String,
-    segmenter: Segmenter,
-    /// Never empty. Earlier segments are frozen; only the last one grows.
-    segments: Vec<Segment>,
+    answer: SegmentedText,
     widgets: Vec<AgUiWidget>,
     model: Option<ResponseModel>,
     thinking: Option<ThinkingView>,
 }
 
 struct ThinkingView {
-    len: usize,
-    state: Entity<TextViewState>,
+    text: SegmentedText,
     /// Keeps the capped reasoning panel pinned to its newest line while it streams.
     scroll: ScrollHandle,
-    _changed: Subscription,
 }
 
 /// One virtualized list row: a user message, one segment of a reply, or the
@@ -87,27 +90,6 @@ pub(crate) struct ChatPresentation {
     pub(crate) composer_focused: bool,
     /// Window width, for `SovraSRX`'s responsive reading column.
     pub(crate) viewport_width: Pixels,
-}
-
-/// Feeds a markdown view only the bytes it has not seen. A shorter text means the
-/// text was replaced (not streamed), so it is re-parsed in full.
-fn feed(
-    view: &Entity<TextViewState>,
-    seen: &mut usize,
-    text: &str,
-    cx: &mut Context<Shell>,
-) -> bool {
-    if text.len() == *seen {
-        return false;
-    }
-    if text.len() > *seen && text.is_char_boundary(*seen) {
-        let delta = &text[*seen..];
-        view.update(cx, |view, cx| view.push_str(delta, cx));
-    } else {
-        view.update(cx, |view, cx| view.set_text(text, cx));
-    }
-    *seen = text.len();
-    true
 }
 
 fn markdown_view(
@@ -138,32 +120,24 @@ fn new_segment(start: usize, message: usize, segment: usize, cx: &mut Context<Sh
     }
 }
 
-impl MarkdownMessage {
-    fn new(message: &ChatMessage, index: usize, cx: &mut Context<Shell>) -> Self {
-        let thinking = (!message.thinking.is_empty()).then(|| {
-            let (state, changed) = markdown_view(&message.thinking, index, 0, cx);
-            ThinkingView {
-                len: message.thinking.len(),
-                state,
-                scroll: ScrollHandle::new(),
-                _changed: changed,
-            }
-        });
-        let mut markdown = Self {
-            id: message.id.clone(),
+impl SegmentedText {
+    fn new() -> Self {
+        Self {
             segmenter: Segmenter::default(),
             segments: Vec::new(),
-            widgets: message.widgets.clone(),
-            model: message.model.clone(),
-            thinking,
-        };
-        markdown.feed_answer(&message.text, index, cx);
-        markdown
+        }
     }
 
-    /// Appends new answer bytes, opening a new segment at each safe split.
+    /// Appends new bytes, opening a new segment at each safe split. `row_segment`
+    /// maps a segment to the list row its parse results must re-measure.
     /// Returns whether anything changed.
-    fn feed_answer(&mut self, text: &str, index: usize, cx: &mut Context<Shell>) -> bool {
+    fn feed(
+        &mut self,
+        text: &str,
+        message: usize,
+        row_segment: fn(usize) -> usize,
+        cx: &mut Context<Shell>,
+    ) -> bool {
         let fed = self.segments.last().map_or(0, |segment| segment.fed);
         if !self.segments.is_empty() && text.len() == fed {
             return false;
@@ -173,22 +147,84 @@ impl MarkdownMessage {
             self.segmenter = Segmenter::default();
             self.segments.clear();
         }
-        if self.segments.is_empty() {
-            self.segments.push(new_segment(0, index, 0, cx));
-        }
+        let was_whole = self.segmenter.keep_whole();
         self.segmenter.advance(text);
+        if self.segmenter.keep_whole() && !was_whole && self.segments.len() > 1 {
+            // A link definition appeared: links may point across segments, so
+            // render this text as one block from here on.
+            self.segments.clear();
+        }
+        if self.segments.is_empty() {
+            self.segments
+                .push(new_segment(0, message, row_segment(0), cx));
+        }
         while self.segments.len() <= self.segmenter.boundaries().len() {
             let boundary = self.segmenter.boundaries()[self.segments.len() - 1];
+            if boundary < self.segments.last().map_or(0, |segment| segment.fed) {
+                // Defensive: never slice backwards. Render the text as one block.
+                tracing::warn!(boundary, "segment split behind rendered text");
+                self.segmenter = Segmenter::whole();
+                self.segments.clear();
+                self.segments
+                    .push(new_segment(0, message, row_segment(0), cx));
+                break;
+            }
             let last = self.segments.last_mut().expect("segments are never empty");
             push(&last.state, &text[last.fed..boundary], cx);
             last.fed = boundary;
-            let next = new_segment(boundary, index, self.segments.len(), cx);
+            let next = new_segment(boundary, message, row_segment(self.segments.len()), cx);
             self.segments.push(next);
         }
         let last = self.segments.last_mut().expect("segments are never empty");
         push(&last.state, &text[last.fed..], cx);
         last.fed = text.len();
         true
+    }
+}
+
+/// Answer segments each have their own row.
+fn own_row(segment: usize) -> usize {
+    segment
+}
+
+/// Reasoning lives in the reply's first row.
+fn first_row(_: usize) -> usize {
+    0
+}
+
+impl ThinkingView {
+    fn new() -> Self {
+        Self {
+            text: SegmentedText::new(),
+            scroll: ScrollHandle::new(),
+        }
+    }
+}
+
+impl MarkdownMessage {
+    fn new(message: &ChatMessage, index: usize, cx: &mut Context<Shell>) -> Self {
+        let mut markdown = Self {
+            id: message.id.clone(),
+            answer: SegmentedText::new(),
+            widgets: message.widgets.clone(),
+            model: message.model.clone(),
+            thinking: None,
+        };
+        markdown.feed(message, index, cx);
+        markdown
+    }
+
+    /// Feeds new answer and reasoning bytes; returns whether either changed.
+    fn feed(&mut self, message: &ChatMessage, index: usize, cx: &mut Context<Shell>) -> bool {
+        let mut changed = self.answer.feed(&message.text, index, own_row, cx);
+        if !message.thinking.is_empty() {
+            changed |= self
+                .thinking
+                .get_or_insert_with(ThinkingView::new)
+                .text
+                .feed(&message.thinking, index, first_row, cx);
+        }
+        changed
     }
 }
 
@@ -255,31 +291,15 @@ impl ChatPresentation {
                 .get_mut(&index)
                 .filter(|markdown| markdown.id == message.id)
             {
-                let mut dirty = markdown.feed_answer(&message.text, index, cx);
-                match &mut markdown.thinking {
-                    Some(thinking) => {
-                        dirty |= feed(&thinking.state, &mut thinking.len, &message.thinking, cx);
-                    }
-                    None if !message.thinking.is_empty() => {
-                        let (state, changed_sub) = markdown_view(&message.thinking, index, 0, cx);
-                        markdown.thinking = Some(ThinkingView {
-                            len: message.thinking.len(),
-                            state,
-                            scroll: ScrollHandle::new(),
-                            _changed: changed_sub,
-                        });
-                        dirty = true;
-                    }
-                    None => {}
-                }
+                let dirty = markdown.feed(message, index, cx);
                 if dirty || markdown.widgets != message.widgets || markdown.model != message.model {
                     markdown.model.clone_from(&message.model);
                     markdown.widgets.clone_from(&message.widgets);
-                    changed.push((index, markdown.segments.len()));
+                    changed.push((index, markdown.answer.segments.len()));
                 }
             } else {
                 let markdown = MarkdownMessage::new(message, index, cx);
-                changed.push((index, markdown.segments.len()));
+                changed.push((index, markdown.answer.segments.len()));
                 self.markdown.insert(index, markdown);
             }
         }
@@ -290,7 +310,7 @@ impl ChatPresentation {
                 MessageRole::Assistant => self
                     .markdown
                     .get(&index)
-                    .map_or(1, |markdown| markdown.segments.len()),
+                    .map_or(1, |markdown| markdown.answer.segments.len()),
             };
             rows.extend((0..segments).map(|segment| Row::Message {
                 message: index,
@@ -329,6 +349,7 @@ impl ChatPresentation {
     #[cfg(test)]
     fn rendered_answer(&self, message: usize, cx: &gpui_kit::App) -> String {
         self.markdown[&message]
+            .answer
             .segments
             .iter()
             .map(|segment| segment.state.read(cx).rendered_text().as_str().to_owned())
@@ -337,7 +358,7 @@ impl ChatPresentation {
 
     #[cfg(test)]
     fn segment_count(&self, message: usize) -> usize {
-        self.markdown[&message].segments.len()
+        self.markdown[&message].answer.segments.len()
     }
 }
 
@@ -579,7 +600,7 @@ fn render_row(
                 let segments = chat
                     .markdown
                     .get(&message)
-                    .map_or(1, |markdown| markdown.segments.len());
+                    .map_or(1, |markdown| markdown.answer.segments.len());
                 (
                     render_assistant_segment(msg, message, segment, streaming, chat, cx)
                         .into_any_element(),
@@ -828,11 +849,24 @@ fn render_thinking(
                 .border_color(t.chat.thinking_rule)
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
-                // No explicit style: the view then inherits this muted text colour.
-                .child(
-                    TextView::new(&thinking.state)
-                        .selectable(true)
-                        .scrollable(false),
+                // While reasoning streams, the pinned panel shows only its end, so
+                // only the last segments are built; opened later, all of them are.
+                .children(
+                    thinking
+                        .text
+                        .segments
+                        .iter()
+                        .skip(if live {
+                            thinking.text.segments.len().saturating_sub(2)
+                        } else {
+                            0
+                        })
+                        // No explicit style: the view inherits this muted text colour.
+                        .map(|part| {
+                            TextView::new(&part.state)
+                                .selectable(true)
+                                .scrollable(false)
+                        }),
                 ),
         );
     }
@@ -853,7 +887,7 @@ fn render_assistant_segment(
         .get(&index)
         .expect("assistant Markdown is synchronized before rendering");
     let first = segment == 0;
-    let last = segment + 1 == markdown.segments.len();
+    let last = segment + 1 == markdown.answer.segments.len();
     let answering = !msg.text.is_empty();
     let mut content = v_flex().flex_1().min_w_0().gap(t.space.small);
     if first {
@@ -871,6 +905,7 @@ fn render_assistant_segment(
         }
     }
     if let Some(part) = markdown
+        .answer
         .segments
         .get(segment)
         .filter(|part| part.fed > part.start)
@@ -899,7 +934,9 @@ fn render_assistant_segment(
                 .test_support()
                 .into_any_element()
         } else {
-            body.into_any_element()
+            body.id(("assistant-segment", index * 100_000 + segment))
+                .test_support()
+                .into_any_element()
         });
     }
     if last {
@@ -1206,6 +1243,157 @@ mod tests {
             renders(cx) > settled,
             "new output re-renders the conversation"
         );
+    }
+
+    #[gpui_kit::test]
+    fn selection_spans_the_segments_of_a_long_reply(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton, base::TextSelection};
+
+        let (client, _commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let session = shell.read_with(cx, |shell, _| shell.state.session_id.clone());
+        cx.update(|window, cx| {
+            shell.update(cx, |shell, cx| shell.send_prompt_text("Hi", window, cx));
+        });
+        let filler = "words ".repeat(270);
+        for event in [
+            Event::AgentChunk {
+                session_id: session.clone(),
+                text: format!("Alphamarker {filler}\n\nOmegamarker closes the reply.\n"),
+            },
+            Event::AgentCompleted {
+                session_id: session,
+            },
+        ] {
+            events.send_blocking(event).unwrap();
+        }
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        let draw = |cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+        let (from, to) = cx.update(|window, cx| {
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).chat.segment_count(1), 2);
+            let first = window.find(("assistant-answer", 1usize)).bounds();
+            let second = window.find(("assistant-segment", 100_001usize)).bounds();
+            (
+                first.origin + point(px(1.), px(8.)),
+                second.bottom_right() - point(px(4.), px(8.)),
+            )
+        });
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+        draw(cx);
+        let selected = cx.update(TextSelection::selected_text);
+        assert!(selected.contains("Alphamarker"), "got: {selected:?}");
+        assert!(selected.contains("Omegamarker"), "got: {selected:?}");
+    }
+
+    #[gpui_kit::test]
+    fn code_heavy_replies_stream_in_mid_line_chunks_without_slicing_backwards(
+        cx: &mut TestAppContext,
+    ) {
+        let (client, _commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let session = shell.read_with(cx, |shell, _| shell.state.session_id.clone());
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.send_prompt_text("Code", window, cx));
+        })
+        .unwrap();
+        let block = "```rust\nfn step(input: &str) -> usize {\n    input.len()\n}\n```\n\nExplanation words. ";
+        let reply = block.repeat(40);
+        let bytes = reply.as_bytes();
+        for chunk in bytes.chunks(7) {
+            events
+                .send_blocking(Event::AgentChunk {
+                    session_id: session.clone(),
+                    text: String::from_utf8(chunk.to_vec()).unwrap(),
+                })
+                .unwrap();
+            // A frame between chunks, as in the app, so partial lines get rendered.
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                let _ = window.draw(cx);
+            })
+            .unwrap();
+        }
+        shell.read_with(cx, |shell, cx| {
+            assert!(shell.chat.segment_count(1) > 1);
+            let rendered = shell.chat.rendered_answer(1, cx);
+            assert_eq!(rendered.matches("input.len()").count(), 40);
+        });
+    }
+
+    #[gpui_kit::test]
+    fn long_reasoning_is_segmented_like_answers(cx: &mut TestAppContext) {
+        let (client, _commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let session = shell.read_with(cx, |shell, _| shell.state.session_id.clone());
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.send_prompt_text("Why?", window, cx));
+        })
+        .unwrap();
+        let reasoning = format!("{}\n\n", "considering options ".repeat(30)).repeat(12);
+        events
+            .send_blocking(Event::AgentThinkingChunk {
+                session_id: session,
+                text: reasoning.clone(),
+                elapsed_ms: 900,
+            })
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.find(("thinking-body", 1usize)).visible());
+            let chat = &shell.read(cx).chat;
+            let thinking = chat.markdown[&1].thinking.as_ref().unwrap();
+            assert!(thinking.text.segments.len() > 1);
+            let fed: usize = thinking
+                .text
+                .segments
+                .iter()
+                .map(|part| part.fed - part.start)
+                .sum();
+            assert_eq!(
+                fed,
+                reasoning.len(),
+                "every reasoning byte is rendered once"
+            );
+        })
+        .unwrap();
     }
 
     #[test]

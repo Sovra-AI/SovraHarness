@@ -41,6 +41,11 @@ move them under a version heading when the tag is cut.
   screen instead of the whole reply. GPUI frame-time overlay, same workload: the
   slowest 10% of frames late in a 3,400-token reply fell from 70.5 ms to 10.6 ms
   (inside the 16 ms budget for 60 fps), the slowest 1% from 75.0 ms to 24.2 ms.
+- Reasoning is segmented like answers; while it streams, the pinned panel builds only
+  its last segments. Replies containing link reference definitions stay one block.
+  Load matrix (frame-time overlay, slowest 10% at end of stream, old → new): short
+  12.2 → 5.7 ms, code-heavy 7.5 → 4.3 ms, long 65.6 → 10.2 ms, reasoning + answer
+  ~102 → 33.7 ms; CPU after any reply ≤ 7% of a core (was up to 27%).
 - Highlight code blocks with `gpui-kit`'s `syntect` feature (pure-Rust regexes,
   cached per unchanged block).
 - New chats open on a `SovraSRX`-style welcome: a greeting, a plain-language subtitle and
@@ -63,6 +68,10 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- Streaming a code-heavy reply could crash the app: a segment split was decided only
+  after a line completed, behind text already rendered. Splits are now decided at a
+  line's first byte, with a defensive one-block fallback, covered by an invariant test
+  and a mid-line streaming test.
 - Sending in a conversation restored at startup no longer blanks earlier replies or
   shows one reply's text in place of another: new message ids skip ids already in
   the conversation, and chat rendering state is keyed by position, so duplicate ids

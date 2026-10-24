@@ -5,7 +5,8 @@
 //!
 //! Splits happen only where Markdown is self-contained: at a non-indented line that
 //! follows a blank line, outside fenced code. Scanning is incremental — each call
-//! looks only at newly completed lines.
+//! looks only at new bytes. A split is decided as soon as the first byte of a line
+//! arrives, so it never lands inside text that is already on screen.
 
 /// Segments grow to at least this many bytes before the next safe split.
 pub(crate) const SEGMENT_BYTES: usize = 1536;
@@ -14,40 +15,76 @@ pub(crate) const SEGMENT_BYTES: usize = 1536;
 pub(crate) struct Segmenter {
     /// Byte offsets where segments after the first begin.
     boundaries: Vec<usize>,
-    /// Bytes of complete lines already scanned.
+    /// Start of the line being scanned (all earlier lines are complete).
     scanned: usize,
+    /// Whether the split decision for the line at `scanned` has been made.
+    decided: bool,
     /// The open code fence: its character and length.
     fence: Option<(char, usize)>,
     previous_blank: bool,
     segment_start: usize,
+    /// A link reference definition (`[label]: url`) can resolve links anywhere in
+    /// the reply, so such replies are kept whole.
+    keep_whole: bool,
 }
 
 impl Segmenter {
-    /// Scans the lines of `text` completed since the last call. `text` must extend
-    /// the text previously scanned.
+    /// Scans the bytes of `text` added since the last call. `text` must extend the
+    /// text previously scanned. New boundaries never precede the previous length.
     pub(crate) fn advance(&mut self, text: &str) {
-        while let Some(offset) = text.get(self.scanned..).and_then(|rest| rest.find('\n')) {
+        loop {
             let line_start = self.scanned;
-            let line = &text[line_start..line_start + offset];
-            let blank = line.trim().is_empty();
-            let indented = line.starts_with([' ', '\t']);
-            if !blank
-                && !indented
-                && self.previous_blank
-                && self.fence.is_none()
-                && line_start - self.segment_start >= SEGMENT_BYTES
-            {
-                self.boundaries.push(line_start);
-                self.segment_start = line_start;
+            let Some(rest) = text.get(line_start..) else {
+                return;
+            };
+            if !self.decided {
+                // The rule needs only the line's first byte: a non-blank, non-indented
+                // line after a blank one. Deciding now keeps splits ahead of the text
+                // that has already been rendered.
+                let Some(first) = rest.chars().next() else {
+                    return;
+                };
+                if !self.keep_whole
+                    && !matches!(first, '\n' | '\r' | ' ' | '\t')
+                    && self.previous_blank
+                    && self.fence.is_none()
+                    && line_start - self.segment_start >= SEGMENT_BYTES
+                {
+                    self.boundaries.push(line_start);
+                    self.segment_start = line_start;
+                }
+                self.decided = true;
+            }
+            let Some(offset) = rest.find('\n') else {
+                return;
+            };
+            let line = &rest[..offset];
+            if self.fence.is_none() && is_reference_definition(line) {
+                self.keep_whole = true;
+                self.boundaries.clear();
             }
             self.track_fence(line.trim_start());
-            self.previous_blank = blank;
+            self.previous_blank = line.trim().is_empty();
             self.scanned = line_start + offset + 1;
+            self.decided = false;
+        }
+    }
+
+    /// A segmenter that never splits.
+    pub(crate) fn whole() -> Self {
+        Self {
+            keep_whole: true,
+            ..Self::default()
         }
     }
 
     pub(crate) fn boundaries(&self) -> &[usize] {
         &self.boundaries
+    }
+
+    /// Whether the reply must render as a single segment.
+    pub(crate) fn keep_whole(&self) -> bool {
+        self.keep_whole
     }
 
     fn track_fence(&mut self, line: &str) {
@@ -70,6 +107,17 @@ impl Segmenter {
             Some(_) => {}
         }
     }
+}
+
+/// `[label]: destination`, indented at most three spaces (`CommonMark` 4.7).
+fn is_reference_definition(line: &str) -> bool {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    let Some(rest) = line[indent..].strip_prefix('[').filter(|_| indent <= 3) else {
+        return false;
+    };
+    rest.find("]:").is_some_and(|end| {
+        end > 0 && !rest[..end].contains(']') && !rest[end + 2..].trim().is_empty()
+    })
 }
 
 #[cfg(test)]
@@ -117,6 +165,40 @@ mod tests {
                 "inner ~~~ did not close ~~~~"
             );
         }
+    }
+
+    #[test]
+    fn replies_with_link_reference_definitions_stay_whole() {
+        let paragraph = format!("{} [docs][d]\n\n", "word ".repeat(100));
+        let text = format!("{}[d]: https://example.com\n", paragraph.repeat(12));
+        let mut segmenter = Segmenter::default();
+        segmenter.advance(&text);
+        assert!(segmenter.keep_whole());
+        assert_eq!(segmenter.boundaries(), &[] as &[usize]);
+        assert!(!is_reference_definition("[not a definition] here"));
+        assert!(!is_reference_definition("    [code]: indented four"));
+    }
+
+    #[test]
+    fn streamed_splits_never_land_inside_text_already_scanned() {
+        // Regression: splits were decided only once a line was complete, after its
+        // partial text had already been rendered, and the UI sliced backwards.
+        let code = "```rust\nfn step(input: &str) -> usize {\n    input.len()\n}\n```\n\nExplanation words. ";
+        let text = code.repeat(60);
+        let mut segmenter = Segmenter::default();
+        let mut seen = 0;
+        for end in (1..=text.len()).step_by(5).chain([text.len()]) {
+            let before = segmenter.boundaries().len();
+            segmenter.advance(&text[..end]);
+            for boundary in &segmenter.boundaries()[before..] {
+                assert!(
+                    *boundary >= seen,
+                    "split at {boundary} behind rendered {seen}"
+                );
+            }
+            seen = end;
+        }
+        assert!(segmenter.boundaries().len() > 2);
     }
 
     #[test]
