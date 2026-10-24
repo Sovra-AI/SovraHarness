@@ -30,21 +30,30 @@ use sovra_core::{AgUiWidget, ChatMessage, MessageRole, ResponseModel, WorkspaceS
 use crate::agui_widgets::render_agui_widget;
 use crate::composer::render_composer;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::markdown_segments::Segmenter;
 use crate::shell::{Shell, logo};
+
+/// One rendered slice of a reply (see `markdown_segments`).
+struct Segment {
+    /// Where this segment begins in `ChatMessage::text`.
+    start: usize,
+    /// End of the bytes already handed to `state`. Replies only grow while
+    /// streaming, so new bytes are appended without copying or comparing old ones.
+    fed: usize,
+    state: Entity<TextViewState>,
+    _changed: Subscription,
+}
 
 struct MarkdownMessage {
     /// The message this state was built for; a different message at the same
     /// position rebuilds it.
     id: String,
-    /// Bytes of `ChatMessage::text` already handed to `state`. Messages only grow
-    /// while streaming, so the new suffix is appended without copying or comparing
-    /// the text received so far.
-    answer_len: usize,
+    segmenter: Segmenter,
+    /// Never empty. Earlier segments are frozen; only the last one grows.
+    segments: Vec<Segment>,
     widgets: Vec<AgUiWidget>,
     model: Option<ResponseModel>,
-    state: Entity<TextViewState>,
     thinking: Option<ThinkingView>,
-    _changed: Subscription,
 }
 
 struct ThinkingView {
@@ -55,11 +64,20 @@ struct ThinkingView {
     _changed: Subscription,
 }
 
+/// One virtualized list row: a user message, one segment of a reply, or the
+/// waiting row shown before the first output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+    Message { message: usize, segment: usize },
+    Waiting,
+}
+
 pub(crate) struct ChatPresentation {
     pub(crate) list: ListState,
     /// Keyed by position: a conversation only grows, and saved history can hold
     /// duplicate message ids from older builds.
     markdown: HashMap<usize, MarkdownMessage>,
+    rows: Vec<Row>,
     /// Reasoning disclosures the reader opened (or closed while streaming).
     pub(crate) thinking_toggled: HashSet<usize>,
     session_id: String,
@@ -72,7 +90,7 @@ pub(crate) struct ChatPresentation {
 }
 
 /// Feeds a markdown view only the bytes it has not seen. A shorter text means the
-/// message was replaced (not streamed), so it is re-parsed in full.
+/// text was replaced (not streamed), so it is re-parsed in full.
 fn feed(
     view: &Entity<TextViewState>,
     seen: &mut usize,
@@ -94,28 +112,102 @@ fn feed(
 
 fn markdown_view(
     text: &str,
-    index: usize,
+    message: usize,
+    segment: usize,
     cx: &mut Context<Shell>,
 ) -> (Entity<TextViewState>, Subscription) {
     let view = cx.new(|cx| TextViewState::markdown(text, cx));
     // Parsing runs on a background executor and can finish after the network chunk.
     // Let ListState preserve the reading position or follow the newly measured tail.
     let changed = cx.observe(&view, move |shell, _, cx| {
-        shell.chat.list.remeasure_items(index..index + 1);
+        if let Some(row) = shell.chat.row_index(message, segment) {
+            shell.chat.list.remeasure_items(row..row + 1);
+        }
         shell.refresh_transcript(cx);
     });
     (view, changed)
 }
 
+fn new_segment(start: usize, message: usize, segment: usize, cx: &mut Context<Shell>) -> Segment {
+    let (state, changed) = markdown_view("", message, segment, cx);
+    Segment {
+        start,
+        fed: start,
+        state,
+        _changed: changed,
+    }
+}
+
+impl MarkdownMessage {
+    fn new(message: &ChatMessage, index: usize, cx: &mut Context<Shell>) -> Self {
+        let thinking = (!message.thinking.is_empty()).then(|| {
+            let (state, changed) = markdown_view(&message.thinking, index, 0, cx);
+            ThinkingView {
+                len: message.thinking.len(),
+                state,
+                scroll: ScrollHandle::new(),
+                _changed: changed,
+            }
+        });
+        let mut markdown = Self {
+            id: message.id.clone(),
+            segmenter: Segmenter::default(),
+            segments: Vec::new(),
+            widgets: message.widgets.clone(),
+            model: message.model.clone(),
+            thinking,
+        };
+        markdown.feed_answer(&message.text, index, cx);
+        markdown
+    }
+
+    /// Appends new answer bytes, opening a new segment at each safe split.
+    /// Returns whether anything changed.
+    fn feed_answer(&mut self, text: &str, index: usize, cx: &mut Context<Shell>) -> bool {
+        let fed = self.segments.last().map_or(0, |segment| segment.fed);
+        if !self.segments.is_empty() && text.len() == fed {
+            return false;
+        }
+        if text.len() < fed || !text.is_char_boundary(fed) {
+            // Replaced rather than streamed: start over.
+            self.segmenter = Segmenter::default();
+            self.segments.clear();
+        }
+        if self.segments.is_empty() {
+            self.segments.push(new_segment(0, index, 0, cx));
+        }
+        self.segmenter.advance(text);
+        while self.segments.len() <= self.segmenter.boundaries().len() {
+            let boundary = self.segmenter.boundaries()[self.segments.len() - 1];
+            let last = self.segments.last_mut().expect("segments are never empty");
+            push(&last.state, &text[last.fed..boundary], cx);
+            last.fed = boundary;
+            let next = new_segment(boundary, index, self.segments.len(), cx);
+            self.segments.push(next);
+        }
+        let last = self.segments.last_mut().expect("segments are never empty");
+        push(&last.state, &text[last.fed..], cx);
+        last.fed = text.len();
+        true
+    }
+}
+
+fn push(view: &Entity<TextViewState>, delta: &str, cx: &mut Context<Shell>) {
+    if !delta.is_empty() {
+        view.update(cx, |view, cx| view.push_str(delta, cx));
+    }
+}
+
 impl ChatPresentation {
     pub(crate) fn new(cx: &mut Context<Shell>) -> Self {
-        // Rows carry SovraSRX's 8px vertical padding; the list adds only a small gap.
-        let list = ListState::new(0, ListAlignment::Top, design::tokens(cx).space.compact);
+        // Rows carry their own spacing so segments of one reply sit flush.
+        let list = ListState::new(0, ListAlignment::Top, px(0.));
         list.set_follow_mode(FollowMode::Tail);
         list.set_scroll_handler(cx.listener(|shell, _, _, cx| shell.refresh(cx)));
         Self {
             list,
             markdown: HashMap::new(),
+            rows: Vec::new(),
             thinking_toggled: HashSet::new(),
             session_id: String::new(),
             turn_started: None,
@@ -125,10 +217,23 @@ impl ChatPresentation {
         }
     }
 
+    fn row_index(&self, message: usize, segment: usize) -> Option<usize> {
+        self.rows
+            .iter()
+            .rposition(|row| *row == Row::Message { message, segment })
+    }
+
+    fn remeasure(&self, message: usize, segment: usize) {
+        if let Some(row) = self.row_index(message, segment) {
+            self.list.remeasure_items(row..row + 1);
+        }
+    }
+
     pub(crate) fn sync(&mut self, state: &WorkspaceState, cx: &mut Context<Shell>) {
         if self.session_id != state.session_id {
             self.session_id.clone_from(&state.session_id);
             self.markdown.clear();
+            self.rows.clear();
             self.thinking_toggled.clear();
             self.list.reset(0);
             self.follow_latest();
@@ -140,13 +245,7 @@ impl ChatPresentation {
             let last = self.list.item_count();
             self.list.remeasure_items(last.saturating_sub(1)..last);
         }
-        let count = state.messages.len() + usize::from(awaiting_first_output(state));
-        let previous = self.list.item_count();
-        if count != previous {
-            let start = previous.min(count);
-            self.list.splice(start..previous, count - start);
-            self.list.remeasure_items(start.saturating_sub(1)..count);
-        }
+        let mut changed = Vec::new();
         for (index, message) in state.messages.iter().enumerate() {
             if message.role != MessageRole::Assistant {
                 continue;
@@ -156,60 +255,89 @@ impl ChatPresentation {
                 .get_mut(&index)
                 .filter(|markdown| markdown.id == message.id)
             {
-                let mut changed =
-                    feed(&markdown.state, &mut markdown.answer_len, &message.text, cx);
+                let mut dirty = markdown.feed_answer(&message.text, index, cx);
                 match &mut markdown.thinking {
                     Some(thinking) => {
-                        changed |= feed(&thinking.state, &mut thinking.len, &message.thinking, cx);
+                        dirty |= feed(&thinking.state, &mut thinking.len, &message.thinking, cx);
                     }
                     None if !message.thinking.is_empty() => {
-                        let (state, changed_sub) = markdown_view(&message.thinking, index, cx);
+                        let (state, changed_sub) = markdown_view(&message.thinking, index, 0, cx);
                         markdown.thinking = Some(ThinkingView {
                             len: message.thinking.len(),
                             state,
                             scroll: ScrollHandle::new(),
                             _changed: changed_sub,
                         });
-                        changed = true;
+                        dirty = true;
                     }
                     None => {}
                 }
-                if changed || markdown.widgets != message.widgets || markdown.model != message.model
-                {
+                if dirty || markdown.widgets != message.widgets || markdown.model != message.model {
                     markdown.model.clone_from(&message.model);
                     markdown.widgets.clone_from(&message.widgets);
-                    self.list.remeasure_items(index..index + 1);
+                    changed.push((index, markdown.segments.len()));
                 }
             } else {
-                let (view, changed) = markdown_view(&message.text, index, cx);
-                let thinking = (!message.thinking.is_empty()).then(|| {
-                    let (state, changed) = markdown_view(&message.thinking, index, cx);
-                    ThinkingView {
-                        len: message.thinking.len(),
-                        state,
-                        scroll: ScrollHandle::new(),
-                        _changed: changed,
-                    }
-                });
-                self.markdown.insert(
-                    index,
-                    MarkdownMessage {
-                        id: message.id.clone(),
-                        answer_len: message.text.len(),
-                        widgets: message.widgets.clone(),
-                        model: message.model.clone(),
-                        state: view,
-                        thinking,
-                        _changed: changed,
-                    },
-                );
-                self.list.remeasure_items(index..index + 1);
+                let markdown = MarkdownMessage::new(message, index, cx);
+                changed.push((index, markdown.segments.len()));
+                self.markdown.insert(index, markdown);
             }
+        }
+        let mut rows = Vec::with_capacity(self.rows.len() + 1);
+        for (index, message) in state.messages.iter().enumerate() {
+            let segments = match message.role {
+                MessageRole::User => 1,
+                MessageRole::Assistant => self
+                    .markdown
+                    .get(&index)
+                    .map_or(1, |markdown| markdown.segments.len()),
+            };
+            rows.extend((0..segments).map(|segment| Row::Message {
+                message: index,
+                segment,
+            }));
+        }
+        if awaiting_first_output(state) {
+            rows.push(Row::Waiting);
+        }
+        if rows != self.rows {
+            let kept = self
+                .rows
+                .iter()
+                .zip(&rows)
+                .take_while(|(old, new)| old == new)
+                .count();
+            self.list.splice(kept..self.rows.len(), rows.len() - kept);
+            // The previous last row may lose its live line or actions.
+            self.list
+                .remeasure_items(kept.saturating_sub(1)..rows.len());
+            self.rows = rows;
+        }
+        // Only the first row (thinking, widgets above) and the growing last segment
+        // of a changed reply need measuring again — not every segment.
+        for (message, segments) in changed {
+            self.remeasure(message, 0);
+            self.remeasure(message, segments.saturating_sub(1));
         }
     }
 
     pub(crate) fn follow_latest(&self) {
         self.list.set_follow_mode(FollowMode::Tail);
+    }
+
+    /// All rendered answer text of a reply, across its segments.
+    #[cfg(test)]
+    fn rendered_answer(&self, message: usize, cx: &gpui_kit::App) -> String {
+        self.markdown[&message]
+            .segments
+            .iter()
+            .map(|segment| segment.state.read(cx).rendered_text().as_str().to_owned())
+            .collect()
+    }
+
+    #[cfg(test)]
+    fn segment_count(&self, message: usize) -> usize {
+        self.markdown[&message].segments.len()
     }
 }
 
@@ -438,27 +566,49 @@ fn render_row(
     index: usize,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
-    let row = if let Some(message) = state.messages.get(index) {
-        match message.role {
-            MessageRole::User => render_user_message(state, message, index, cx).into_any_element(),
-            MessageRole::Assistant => {
-                let streaming = state.is_generating && index + 1 == state.messages.len();
-                render_assistant_message(message, index, streaming, chat, cx).into_any_element()
+    // Messages are 22px apart; segments of one reply continue at paragraph spacing.
+    let (row, top, bottom) = match chat.rows.get(index).copied() {
+        Some(Row::Message { message, segment }) => match state.messages.get(message) {
+            Some(msg) if msg.role == MessageRole::User => (
+                render_user_message(state, msg, message, cx).into_any_element(),
+                px(11.),
+                px(11.),
+            ),
+            Some(msg) => {
+                let streaming = state.is_generating && message + 1 == state.messages.len();
+                let segments = chat
+                    .markdown
+                    .get(&message)
+                    .map_or(1, |markdown| markdown.segments.len());
+                (
+                    render_assistant_segment(msg, message, segment, streaming, chat, cx)
+                        .into_any_element(),
+                    if segment == 0 { px(11.) } else { px(16.) },
+                    if segment + 1 == segments {
+                        px(11.)
+                    } else {
+                        px(0.)
+                    },
+                )
             }
-        }
-    } else {
-        h_flex()
-            .w_full()
-            .items_start()
-            .gap(design::tokens(cx).chat.row_gap)
-            .child(assistant_avatar(true, cx))
-            .child(waiting_pill("Sovra is thinking…", chat, cx))
-            .into_any_element()
+            None => (div().into_any_element(), px(0.), px(0.)),
+        },
+        Some(Row::Waiting) | None => (
+            h_flex()
+                .w_full()
+                .items_start()
+                .gap(design::tokens(cx).chat.row_gap)
+                .child(assistant_avatar(true, cx))
+                .child(waiting_pill("Sovra is thinking…", chat, cx))
+                .into_any_element(),
+            px(11.),
+            px(11.),
+        ),
     };
     h_flex()
         .w_full()
         .justify_center()
-        .child(column(chat, cx).py(px(8.)).child(row))
+        .child(column(chat, cx).pt(top).pb(bottom).child(row))
 }
 
 fn render_user_message(
@@ -689,9 +839,10 @@ fn render_thinking(
     block
 }
 
-fn render_assistant_message(
+fn render_assistant_segment(
     msg: &ChatMessage,
     index: usize,
+    segment: usize,
     streaming: bool,
     chat: &ChatPresentation,
     cx: &mut Context<Shell>,
@@ -701,96 +852,114 @@ fn render_assistant_message(
         .markdown
         .get(&index)
         .expect("assistant Markdown is synchronized before rendering");
-    let copy_text = msg.text.clone();
+    let first = segment == 0;
+    let last = segment + 1 == markdown.segments.len();
     let answering = !msg.text.is_empty();
     let mut content = v_flex().flex_1().min_w_0().gap(t.space.small);
-    if let Some(thinking) = &markdown.thinking {
-        content = content.child(render_thinking(
-            msg,
-            thinking,
-            index,
-            streaming && !answering,
-            chat,
-            cx,
-        ));
-    } else if streaming && !answering && msg.widgets.is_empty() {
-        content = content.child(waiting_pill("Sovra is thinking…", chat, cx));
+    if first {
+        if let Some(thinking) = &markdown.thinking {
+            content = content.child(render_thinking(
+                msg,
+                thinking,
+                index,
+                streaming && !answering,
+                chat,
+                cx,
+            ));
+        } else if streaming && !answering && msg.widgets.is_empty() {
+            content = content.child(waiting_pill("Sovra is thinking…", chat, cx));
+        }
     }
-    if answering {
-        content = content.child(
-            div()
-                .id(("assistant-answer", index))
+    if let Some(part) = markdown
+        .segments
+        .get(segment)
+        .filter(|part| part.fed > part.start)
+    {
+        let view = TextView::new(&part.state)
+            .selectable(true)
+            .scrollable(false)
+            .style(design::markdown_style(cx))
+            .code_block_actions(|code, _, cx| {
+                let text = code.code().to_string();
+                design::button("copy-code", "Copy", cx)
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Copy)
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                    })
+            });
+        let body = div()
+            .w_full()
+            .min_w_0()
+            .sovra_text(TextRole::Reading, cx)
+            .child(view);
+        content = content.child(if first {
+            body.id(("assistant-answer", index))
                 .test_support()
-                .w_full()
-                .min_w_0()
-                .sovra_text(TextRole::Reading, cx)
-                .child(
-                    TextView::new(&markdown.state)
-                        .selectable(true)
-                        .scrollable(false)
-                        .style(design::markdown_style(cx))
-                        .code_block_actions(|code, _, cx| {
-                            let text = code.code().to_string();
-                            design::button("copy-code", "Copy", cx)
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::Copy)
-                                .on_click(move |_, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                                })
-                        }),
-                ),
+                .into_any_element()
+        } else {
+            body.into_any_element()
+        });
+    }
+    if last {
+        content = content.children(
+            msg.widgets
+                .iter()
+                .enumerate()
+                .map(|(widget_index, widget)| {
+                    render_agui_widget(widget, index * 10 + widget_index, cx)
+                }),
         );
+        if streaming && answering {
+            content = content.child(live_line(chat, cx));
+        }
+        if !streaming && (answering || msg.model.is_some()) {
+            let copy_text = msg.text.clone();
+            content = content.child(
+                h_flex()
+                    .id(("message-actions", index))
+                    .w_full()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(t.space.compact)
+                    .opacity(t.chat.action_idle_opacity)
+                    .hover(|style| style.opacity(1.))
+                    .children(answering.then(|| {
+                        design::button(("copy-message", index), "", cx)
+                            .ghost()
+                            .xsmall()
+                            .child(
+                                Icon::new(IconName::Copy)
+                                    .xsmall()
+                                    .text_color(t.text_secondary),
+                            )
+                            .px(t.space.compact)
+                            .accessibility_label("Copy response")
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                            })
+                    }))
+                    .children(
+                        msg.model
+                            .as_ref()
+                            .map(|model| render_model_pill(model, index, cx)),
+                    ),
+            );
+        }
     }
-    content = content.children(
-        msg.widgets
-            .iter()
-            .enumerate()
-            .map(|(widget_index, widget)| {
-                render_agui_widget(widget, index * 10 + widget_index, cx)
-            }),
-    );
-    if streaming && answering {
-        content = content.child(live_line(chat, cx));
-    }
-    if !streaming && (answering || msg.model.is_some()) {
-        content = content.child(
-            h_flex()
-                .id(("message-actions", index))
-                .w_full()
-                .flex_wrap()
-                .items_center()
-                .gap(t.space.compact)
-                .opacity(t.chat.action_idle_opacity)
-                .hover(|style| style.opacity(1.))
-                .children(answering.then(|| {
-                    design::button(("copy-message", index), "", cx)
-                        .ghost()
-                        .xsmall()
-                        .child(
-                            Icon::new(IconName::Copy)
-                                .xsmall()
-                                .text_color(t.text_secondary),
-                        )
-                        .px(t.space.compact)
-                        .accessibility_label("Copy response")
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                        })
-                }))
-                .children(
-                    msg.model
-                        .as_ref()
-                        .map(|model| render_model_pill(model, index, cx)),
-                ),
-        );
-    }
+    let gutter = if first {
+        assistant_avatar(streaming, cx).into_any_element()
+    } else {
+        // Continuation rows keep the text aligned under the first row's text.
+        div().w(t.chat.avatar).flex_shrink_0().into_any_element()
+    };
     h_flex()
-        .id(("assistant-msg", index))
+        .id(("assistant-msg", index * 100_000 + segment))
         .w_full()
         .items_start()
         .gap(t.chat.row_gap)
-        .child(assistant_avatar(streaming, cx))
+        .child(gutter)
         .child(content)
 }
 
@@ -940,14 +1109,7 @@ mod tests {
             .unwrap();
         assert!(before > px(10.), "restored answer renders: {before:?}");
         shell.read_with(cx, |shell, cx| {
-            let text = |index: usize| {
-                shell.chat.markdown[&index]
-                    .state
-                    .read(cx)
-                    .rendered_text()
-                    .as_str()
-                    .to_owned()
-            };
+            let text = |index: usize| shell.chat.rendered_answer(index, cx);
             assert!(text(1).contains("earlier answer"));
             assert!(text(3).contains("different second answer"));
         });
@@ -1239,10 +1401,12 @@ mod tests {
             window.render_frame(cx);
             let view = shell.read(cx);
             assert!(view.chat.list.is_following_tail());
-            let rendered = view.chat.markdown[&(view.state.messages.len() - 1)]
-                .state
-                .read(cx)
-                .rendered_text();
+            let last = view.state.messages.len() - 1;
+            assert!(
+                view.chat.segment_count(last) >= 2,
+                "a long reply renders as several virtualized rows"
+            );
+            let rendered = view.chat.rendered_answer(last, cx);
             assert!(rendered.as_str().contains("Heading"));
             assert!(rendered.as_str().contains("Bold"));
             assert!(rendered.as_str().contains("let answer = 42;"));

@@ -12,6 +12,7 @@ mod composer;
 pub mod design;
 mod inspector;
 mod login;
+mod markdown_segments;
 mod model_connection_editor;
 mod model_details;
 mod models_view;
