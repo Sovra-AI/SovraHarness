@@ -847,3 +847,26 @@ fn removed_upload_cannot_reappear_after_preparation_finishes(cx: &mut TestAppCon
     })
     .unwrap();
 }
+
+/// Under server-side decorations (i3, X11 without a compositor) the window
+/// manager already frames the window, so the shell must not stack an empty
+/// in-app bar beneath it.
+#[cfg(target_os = "linux")]
+#[gpui_kit::test]
+fn no_in_app_title_bar_under_window_manager_decorations(cx: &mut TestAppContext) {
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        Root::new(view, window, cx)
+    });
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("sovra-main-workspace").visible());
+        assert!(window.try_find("title-bar").is_none());
+        assert!(window.try_find("title-bar-page").is_none());
+    })
+    .unwrap();
+}

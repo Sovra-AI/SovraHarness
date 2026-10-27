@@ -67,6 +67,15 @@ impl NavTab {
     }
 }
 
+/// The OS window title: the page first so taskbars, Alt-Tab and tiling window
+/// managers stay distinguishable when the product name is truncated.
+pub fn window_title(route: ScreenRoute, tab: NavTab, product: &str) -> String {
+    match route {
+        ScreenRoute::Login => product.to_owned(),
+        ScreenRoute::MainWorkspace => format!("{} — {product}", tab.label()),
+    }
+}
+
 /// Interactive 5-step guided system tutorial walking new users through Sovra.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TourStep {
@@ -1630,6 +1639,18 @@ mod tests {
         assert!(
             !debug_repr.contains("setup:ollama"),
             "must NOT show Ollama setup when key is already set: {debug_repr}"
+        );
+    }
+
+    #[test]
+    fn window_title_names_the_page_before_the_product() {
+        assert_eq!(
+            window_title(ScreenRoute::MainWorkspace, NavTab::Knowledge, "Sovra"),
+            "Knowledge — Sovra"
+        );
+        assert_eq!(
+            window_title(ScreenRoute::Login, NavTab::Knowledge, "Sovra"),
+            "Sovra"
         );
     }
 }

@@ -197,6 +197,13 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- **No more empty bar at the top of the window**: when the window manager
+  already frames the window (i3, X11, KDE and most Linux desktops), Sovra no
+  longer draws its own blank title strip underneath. On macOS, Windows and
+  Linux desktops where Sovra draws the frame, the bar now uses the sidebar's
+  chrome colour and shows the open page. The window title now reads
+  "<page> — Sovra" in taskbars and Alt-Tab, where it was previously blank.
+
 - Embedding model choices now use catalogue metadata before incomplete manual
   entries, matching execution and excluding models known to produce only chat text.
 

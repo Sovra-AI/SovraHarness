@@ -66,5 +66,5 @@ pub use web_search::{
 };
 pub use workspace::{
     ConfigCardStatus, NavTab, PersonalAiConfigCard, ScreenRoute, TourStep, UserProfile,
-    WorkspaceState,
+    WorkspaceState, window_title,
 };
