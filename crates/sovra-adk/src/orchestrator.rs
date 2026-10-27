@@ -19,6 +19,7 @@ use sovra_core::{
 
 use crate::Error;
 use crate::capabilities::{self, CapabilityProvider};
+use crate::text_tool_calls::TextToolCalls;
 
 /// Parent agent id. Matches the roster entry the router already uses.
 pub(crate) const ORCHESTRATOR_ID: &str = "OrchestratorAgent";
@@ -142,7 +143,9 @@ pub(crate) struct OrchestratorParts {
     pub tools_enabled: bool,
 }
 
-pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
+pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
+    // Every agent here can call tools; recover calls a small model prints as text.
+    parts.llm = TextToolCalls::wrap(parts.llm);
     let roster = default_sovra_srx_agents();
     let available: BTreeSet<Capability> = parts
         .providers

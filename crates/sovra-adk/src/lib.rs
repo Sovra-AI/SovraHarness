@@ -13,6 +13,7 @@ mod native_ui;
 mod orchestrator;
 mod skills;
 mod team;
+mod text_tool_calls;
 mod web_search;
 
 pub use artifacts::ArtifactSaver;

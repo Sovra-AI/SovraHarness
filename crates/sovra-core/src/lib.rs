@@ -22,6 +22,7 @@ pub mod skills;
 pub mod specialists;
 mod status;
 pub mod teams;
+mod tool_calls;
 mod web_search;
 mod workspace;
 
@@ -62,6 +63,10 @@ pub use schedules::{
 };
 pub use specialists::{SpecialistAgentSpec, default_sovra_srx_agents, specialist_id_for_route_key};
 pub use status::RuntimeStatus;
+pub use tool_calls::{
+    TextToolCall, may_be_text_tool_call, parse_text_tool_call, split_text_tool_call,
+    text_tool_call_start,
+};
 pub use web_search::{
     EngineOutcome, MAX_FUSED_HITS, QueryOutcome, RankedSearch, SearchHit, WEB_SEARCH_AGENT_ID,
     WebPage, canonical_http_url, civil_date_from_unix_days, fuse_engine_outcomes,

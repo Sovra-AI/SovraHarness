@@ -436,6 +436,96 @@ mod tests {
         );
     }
 
+    /// End to end with a real local model: orchestrator → `WebSearchAgent` →
+    /// built-in search → cited answer. Needs Ollama with `SOVRA_LIVE_MODEL`
+    /// (default `qwen2.5-coder:7b`):
+    /// `cargo test -p sovra-adk live_orchestrator -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs a local Ollama model and the internet"]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "opt-in live test picks its model from the environment"
+    )]
+    fn live_orchestrator_searches_and_cites_real_results() {
+        let model = std::env::var("SOVRA_LIVE_MODEL").unwrap_or_else(|_| "qwen2.5-coder:7b".into());
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("real HTTP needs a reactor");
+        runtime.block_on(async {
+            let config = adk_model::OpenAICompatibleConfig::new(String::new(), &model)
+                .with_provider_name("Ollama")
+                .with_base_url("http://127.0.0.1:11434/v1")
+                .with_parallel_tool_calls(false);
+            let llm: Arc<dyn Llm> =
+                Arc::new(adk_model::OpenAICompatible::new(config).expect("ollama client"));
+            let built_in = SearchClient::built_in(None).expect("built-in search");
+            let found = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let recording = SearchClient {
+                sources: built_in
+                    .sources
+                    .iter()
+                    .map(|source| {
+                        let inner = Arc::clone(&source.search);
+                        let found = Arc::clone(&found);
+                        Source {
+                            name: Arc::clone(&source.name),
+                            search: Arc::new(move |query: String| {
+                                let inner = Arc::clone(&inner);
+                                let found = Arc::clone(&found);
+                                Box::pin(async move {
+                                    let hits = inner(query).await;
+                                    if let Ok(hits) = &hits {
+                                        found
+                                            .lock()
+                                            .expect("found")
+                                            .extend(hits.iter().map(|hit| hit.url.clone()));
+                                    }
+                                    hits
+                                }) as SourceFuture
+                            }),
+                        }
+                    })
+                    .collect(),
+                pages: built_in.pages.clone(),
+            };
+            let harness = AdkHarness::with_llm_and_tools(&AgentConfig::default(), llm, Vec::new())
+                .expect("harness")
+                .with_web_search(recording)
+                .expect("search harness");
+            for (session, prompt) in [
+                (
+                    "live-explicit",
+                    "Search the web for the official Rust programming language website.",
+                ),
+                (
+                    "live-natural",
+                    "What is the latest stable release of the Rust programming language?",
+                ),
+            ] {
+                found.lock().expect("found").clear();
+                let (tx, rx) = async_channel::unbounded();
+                let run = harness.run_prompt(session, prompt, &tx);
+                tokio::time::timeout(std::time::Duration::from_secs(300), run)
+                    .await
+                    .expect("turn finished in time");
+                let answer = collect_answer(&rx).await;
+                let found = found.lock().expect("found").clone();
+                eprintln!("--- {prompt}\nsearch hits: {}\n{answer}\n", found.len());
+                assert!(
+                    !found.is_empty(),
+                    "{prompt}: search never ran or found nothing"
+                );
+                assert!(
+                    found
+                        .iter()
+                        .any(|url| answer.contains(url.trim_end_matches('/'))),
+                    "{prompt}: answer cites no URL the search returned:\n{answer}"
+                );
+            }
+        });
+    }
+
     /// Real network: `cargo test -p sovra-adk live_built_in -- --ignored`.
     #[test]
     #[ignore = "talks to the real Mwmbl and Wikipedia services"]
