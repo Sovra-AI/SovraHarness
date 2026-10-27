@@ -80,7 +80,7 @@ pub use protocol::{Command, Event};
 pub use providers::{
     ModelTier, TierLadderEntry, default_tier_ladder, parse_params_billions, suggest_model_tier,
 };
-pub use routing::required_delegate;
+pub use routing::{needs_current_facts, required_delegate};
 pub use routing_eval::{evaluate_routing, heuristic_answers, resolve_tier_model};
 pub use routing_tree::{
     BranchOp, DecisionBackend, QuestionKind, RouteEvaluation, RouteTarget, RoutingConfig,

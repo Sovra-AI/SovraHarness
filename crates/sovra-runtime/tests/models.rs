@@ -20,6 +20,9 @@ use sovra_providers::{
 };
 use sovra_runtime::{Client, ModelsConfig};
 
+#[path = "models/live_web_search.rs"]
+mod live_web_search;
+
 #[path = "models/memory.rs"]
 mod memory;
 
