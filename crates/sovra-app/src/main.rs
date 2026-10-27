@@ -22,7 +22,8 @@ fn main() -> anyhow::Result<()> {
     let _log_guard = logging::init(&dirs.data_local_dir().join("logs"))?;
     tracing::info!(version = VERSION, "starting SovraHarness");
 
-    let agent_config = AgentConfig::with_api_key(read_gemini_api_key());
+    let mut agent_config = AgentConfig::with_api_key(read_gemini_api_key());
+    agent_config.searxng_base_url = read_searxng_base_url();
     // The composition root picks the memory backend; the runtime opens it on its own
     // executor. Swapping to a remote server (or another backend) happens here only.
     let memory_dir = dirs.data_local_dir().join("memory");
@@ -46,9 +47,22 @@ fn main() -> anyhow::Result<()> {
             Arc::new(sovra_providers::AnthropicProvider),
         ],
     };
-    let client =
-        sovra_runtime::start_with_models(VERSION, agent_config, Some(memory), Some(models))
-            .context("failed to start the runtime")?;
+    let client = sovra_runtime::start_with_file_index(
+        VERSION,
+        agent_config,
+        Some(memory),
+        Some(models),
+        Some(Arc::new(sovra_files::LocalFileStore::new(
+            dirs.data_local_dir().join("attachments"),
+        ))),
+        Some(Arc::new(sovra_skills::LocalSkillStore::new(
+            dirs.data_local_dir().join("skills"),
+        ))),
+        Some(Arc::new(sovra_files::LocalFileIndex::new(
+            dirs.data_local_dir().join("file-index"),
+        ))),
+    )
+    .context("failed to start the runtime")?;
     sovra_ui::run(client);
 
     tracing::info!("exiting");
@@ -77,6 +91,18 @@ fn read_model_keys() -> std::collections::BTreeMap<String, sovra_core::models::M
             })
     })
     .collect()
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sovra-app is the composition root and reads process environment variables once at startup"
+)]
+fn read_searxng_base_url() -> String {
+    std::env::var("SOVRA_SEARXNG_URL")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| sovra_core::DEFAULT_SEARXNG_BASE_URL.to_owned())
 }
 
 #[expect(

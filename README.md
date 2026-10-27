@@ -26,6 +26,63 @@ That's it — no Node, no Python, no system packages on macOS/Windows.
 
 ## Everyday commands
 
+### Skills in chat
+
+Use `/index-folder` to select a folder for local indexing. **Knowledge** shows scan
+progress and provides Cancel, Refresh, Pause/Resume updates, Remove, and text search.
+While Sovra is open, native folder notifications trigger updates and a full check
+every 15 minutes catches missed changes. Large scopes or unavailable notifications
+fall back to periodic checks, shown in Knowledge. Cancel pauses automatic updates;
+Refresh performs a manual scan. Removing an index
+leaves the original files intact. Hidden files, symlinks and generated folders are
+excluded. See [scope and current limits](docs/skills-and-file-knowledge.md).
+
+Type `/` to browse skills. Arrow keys select, Tab or Enter chooses, and Escape
+closes suggestions. Choosing a model procedure fills the draft so you can add a
+request before sending. `/files` (also `/file-system`) opens the attachment picker;
+`/read-files <question>` searches attached content; `/search-files <question>` retrieves
+cited snapshots from indexed folders; `/file-catalog [question]` lists, filters and
+groups indexed files by folder, name, type, size or modification date. With no
+question it shows available folders and counts. `/file-history <file or question>`
+inspects recorded changes and reads historical text with source-version citations.
+History starts with observations Sovra actually recorded; it is not a complete
+filesystem journal or a backup of original file bytes. `/web-search <question>` requests
+web research. Native presentation tools also have commands such as `/table` and `/card`.
+
+`/map-files <project or relationships>` proposes cited document, section, topic,
+person, organization, project and task relationships. Review the exact relationships,
+source excerpts, confidence estimates and dates in **Knowledge → Review file knowledge**,
+then choose **Save inferences** or **Reject**. Approval keeps their model-inference
+label; it does not verify their truth or edit source files. `/file-knowledge [question]`
+explores saved relationships and reads their evidence. Changed source versions are
+excluded by default; historical queries must request and label them explicitly.
+Removing a folder revokes dependent knowledge permanently, even after re-adding it.
+The inaccessible review history remains in the local database.
+
+Source-linked summary storage is under development. It retains provenance,
+invalidates dependent summaries and enforces generation budgets, but background
+summary generation, recursive clustering and compiled maps are not available yet.
+
+For meaning-based file search, open **Knowledge → Set up semantic search** on a folder.
+Choose an installed Ollama embedding model (inspect it in Models to load its
+capabilities), or an embedding model on an OpenAI-compatible connection. The choice
+shows which server receives extracted text and future searches; usage may incur
+provider charges. Background indexing resumes while the app is open, and both
+Knowledge search and `/search-files` combine semantic and keyword results. Progress,
+incomplete coverage and failures remain visible. Disable semantic search to stop
+requests and remove that folder's vectors. Requests already received by a server
+cannot be recalled. No model is downloaded by this feature.
+
+Open **Skills** or use `/skills` to inspect built-ins, create a personal procedure,
+import a folder containing `SKILL.md`, or enable, disable and remove user skills.
+Skill names and aliases are unique. A skill cannot enable unavailable tools, and
+importing a package does not execute its scripts. Keyword indexing stays local; chat retrieval
+sends requested file metadata and matching passages to the AI service you selected. Installed packages live in the
+app's local data directory. File indexing and semantic file knowledge are still
+being implemented; [the scope record](docs/skills-and-file-knowledge.md) tracks them.
+
+### Development
+
 | Command                  | What it does                                                 |
 | ------------------------ | ------------------------------------------------------------ |
 | `cargo xtask dev`        | Persistent live reload: watch, rebuild/relaunch, stream logs  |
@@ -50,13 +107,17 @@ Development builds use a separate plaintext key store in the app data directory
 when `SOVRA_DEV=1` is set by the runner. Release builds always use the OS keychain.
 See the development guide for storage and permission details.
 
-The **Models** tab starts with a 3-step guided setup (`1. Connect AI Service` → `2. Pick Your Model` → `3. Chat & System Tour`). When an API key is already saved, Step 1 collapses into a green confirmation banner and only Step 2 is shown, with curated recommendation cards (`★ Best Free Starter`, `⚡ Best Everyday All-Rounder`, `🧠 Best Step-by-Step Thinker`) alongside a 1-click **Get Free Key at openrouter.ai ↗** browser launcher.
+The **Models** tab guides you through connecting a service and choosing a model.
+It shows only the next needed setup action, with recommendations labeled **Free to
+try**, **Everyday chat**, and **Step-by-step reasoning** using the live catalog.
+**Get an API key ↗** opens OpenRouter when a connection is needed. Once setup is
+complete, your active model and other recommendations replace the setup stepper.
 **Browse all models** opens the complete catalog with a direct 1-click **Use Model** / **✓ Active** action button on every row, optional Ollama connections, favorites and comparison; filters stay closed until needed. Setup, authentication and capability details: [Model library](docs/models.md).
 
-A single **Unified Left Sidebar** (`sidebar.rs` + `chat_history_view.rs`) houses **`+ New Chat`** at the top, primary navigation (`Chat`, `My AI's`, `Knowledge`, `Models`, `Schedules`, `Settings`), a 1-click **Guided System Tour** launcher, instant chat search, `Chats | Scheduled` filter pills, and date-grouped conversation history (`Pinned`, `Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`). After the first exchange in any conversation, the active LLM automatically generates a concise 3–6 word title (`Command::GenerateChatTitle` / `Event::ChatTitleGenerated`), and each row includes a 1-click **AI Title** action alongside `Pin`, `Rename`, and `Delete`.
+A single **Unified Left Sidebar** (`sidebar.rs` + `chat_history_view.rs`) houses **New chat** at the top, primary navigation (`Chat`, `My AI's`, `Knowledge`, `Models`, `Schedules`, `Settings`), a **Take a tour** launcher, instant chat search, `Chats | Scheduled` filter pills, and date-grouped conversation history (`Pinned`, `Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`). After the first exchange in any conversation, the active LLM automatically generates a concise 3–6 word title (`Command::GenerateChatTitle` / `Event::ChatTitleGenerated`), and the selected row exposes named icon actions for generating a title, pinning, renaming, and deleting.
 
 The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
-- **Automatic (recommended):** a fast decision engine (**Laya**, **OpenJev / TypeSafe Jev**,
+- **Automatic:** a fast decision engine (**Laya**, **OpenJev / TypeSafe Jev**,
   or the **Embedded Rust Heuristic**, with offline fail-open and auditable
   `rc1-...` route codes) simulates which model to choose for each task. Chat
   currently uses the model selected in **Models**.
@@ -76,15 +137,25 @@ chat, and it does not need a memory store to be open. The times Sovra keeps are
 under *Show the times Sovra keeps*.
 
 **Settings** is the one place to set Sovra up, written for people new to AI:
-**Appearance** (Light or Dark), **AI connection** (follow the three steps to paste an
+**Appearance** (Light or Dark, and **Text size** from 75% to 200%; also
+**View → Zoom In/Out**, ⌘= / ⌘- / ⌘0), **AI connection** (follow the three steps to paste an
 OpenRouter key; it is kept in the OS keychain and can be checked, replaced or removed)
 and a folded-away **Advanced** section for local or other services, whose technical
 fields stay hidden until you choose *Show technical options*. Then select a chat
 model in **Models**.
 
-**Chat** starts with a normal conversation using the selected model. Its look follows SovraSRX's chat:
-gradient user bubbles, bare replies beside the Sovra avatar and a glass composer. While
-Sovra works, a "Sovra is thinking…" pill shows the elapsed time; models that reason
+**Chat** starts with a normal conversation using the selected model: quiet user
+bubbles, bare replies beside the Sovra avatar and a rounded composer. Each turn
+is answered by `OrchestratorAgent`, which knows the specialist roster and can
+run independent specialists together. Ask it to **search the web for** a topic,
+or send `/web-search <question>`, and it delegates that turn to `WebSearchAgent`:
+a keyless SearXNG search on the active model, with titles and URLs taken from
+the results. The slash command resolves to the question alone; the active
+procedure is what tells the orchestrator to call `WebSearchAgent`. Files already
+in the chat do not replace that turn.
+Settings → **Web search** turns the tool off. `SOVRA_SEARXNG_URL` sets the SearXNG
+origin (default `https://searx.be`). While Sovra works, a "Sovra is thinking…"
+pill shows the elapsed time; models that reason
 stream their thinking into a collapsible panel that folds when the answer starts. Replies render
 as selectable Markdown with code copying. Each new reply includes a model pill
 with its connection and exact model ID on hover; this identity is saved with the
@@ -94,8 +165,65 @@ Visible model reasoning appears in a collapsible panel with an elapsed-time indi
 Enter sends and Shift+Enter adds a line. **Stop** also discards queued prompts.
 Native AG-UI cards and buttons are optional tools for interactive requests, and
 their actions return to the same session with the surface ID and revision.
-Routing simulation remains in **My AI's**. The **Schedules** tab retains the
-`SovraSRX` Schedules Command Center.
+Routing simulation remains in **My AI's**. The **Schedules** tab groups recurring prompts and manual run actions; background
+scheduling is not active yet.
+
+## Your team and Artifacts
+
+**Team** is a group of AI helpers with different strengths, ported from SovraSRX:
+
+- Alex (team lead), Morgan (strategist), Priya (researcher), Jamie (editor),
+  Sam (wellbeing), Robin (home organiser), Noor (curator) and Kai (devil's advocate).
+- Press **Ask my team**, or the team button in the chat box, and the right helpers
+  answer in turn.
+- Helpers who have nothing new to add stay quiet. Alex sums up and suggests next
+  steps, or asks you one question.
+- Type `@priya` (or any handle) to ask one helper, or use `/team` to choose team mode and prepare your message before sending.
+- A live card shows who is answering.
+- On the Team page you can switch helpers on or off, edit them, add ready-made
+  helpers (tech helper, coach, storyteller, paperwork helper) or make your own.
+- Every helper uses the AI you picked in **Models**.
+
+**Artifacts** keeps anything worth saving:
+
+- Press **Save** under a reply or on a code block.
+- You can also ask Sovra or a helper to save something; models that support tools
+  call `save_artifact`.
+- Artifacts are documents, checklists, tables, code, diagrams, web pages, pictures,
+  data and notes.
+- Search them, filter by kind, copy them, or **Save to my computer** (tables save as CSV).
+- Web pages, SVG pictures and Mermaid diagrams also have **Open in browser**.
+  Mermaid diagrams load mermaid.js from jsDelivr, so they need internet to render.
+- Edits keep earlier versions.
+
+Everything streams through AG-UI events. Design, sources and the module layout:
+[teams and artifacts](docs/teams-and-artifacts.md).
+
+## Files in chat
+
+Use **Add files** (the paperclip beside the message) to attach up to eight files,
+20 MB each. Ask a question, or send the files alone for an explanation. Files are
+prepared locally; extracted document text, pictures, and recordings are shared with
+your selected AI when you send the message. Attached files appear in the conversation, and follow-up questions
+can use them again, including after restarting Sovra.
+
+**Models → An AI for each kind of file** keeps separate choices for documents,
+pictures, audio, and video. Documents use your chat AI by default. Pictures require
+an explicit picture-reading model; chat offers **Help me choose an AI**, keeps your
+files and message in place, and shows compatible models. Choosing one returns you
+to your message without sending it. Audio and video use the same guided flow.
+
+Files are accepted regardless of extension, including `.rs`, other source code,
+extensionless files, and unfamiliar binary formats. Text is decoded directly;
+document readers extract supported formats; pictures and recordings use compatible
+models. Binary formats without a decoder offer labelled format/byte inspection,
+not a claim that every proprietary or encrypted format can be fully understood.
+Readers include Office/PDF, email, notebooks, SQLite, binary property lists, SVG,
+raster images and bounded ZIP/TAR/GZIP/XZ/LZMA/BZip2/Zstandard archives. Scanned PDFs
+can be read as pictures (up to 12 pages). See [file reading and limits](docs/files.md)
+for coverage, extraction limitations, model compatibility, and research sources.
+The file agent selects relevant passages from long files, cites extracted-text line
+ranges, and can page through further text or binary search results when tools are enabled.
 
 ## Shipping
 
@@ -125,5 +253,10 @@ before pushing to `main` (enforced by [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTIN
 security and secrets policy lives in [`SECURITY.md`](SECURITY.md).
 
 The native Sovra dark/light design system, embedded SVG branding, usage examples and
-research sources are documented in [`docs/styling.md`](docs/styling.md). Switch
-between both modes in **Settings → Appearance**; the choice is remembered.
+research sources are documented in [`docs/styling.md`](docs/styling.md). The UI uses
+neutral charcoal/paper palettes, restrained violet accents, shared page typography
+and native keyboard controls. Switch
+between both modes in **Settings → Appearance**; the choice is remembered. Layouts adapt
+to any window and display: sizes are rem-based and follow the remembered text size, the
+sidebar and inspector yield to the main pane at Material width classes, and reading
+columns stay capped and centred on large monitors (see *Responsive layout* in the styling guide).

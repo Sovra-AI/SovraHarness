@@ -21,6 +21,12 @@ impl RuntimeStatus {
                 };
             }
             Event::Models(_)
+            | Event::Skills(_)
+            | Event::FileIndex(_)
+            | Event::Teams(_)
+            | Event::Artifacts(_)
+            | Event::AgUi { .. }
+            | Event::FilePrepared(_)
             | Event::ChatHistoryLoaded { .. }
             | Event::ChatTitleGenerated { .. }
             | Event::Pong

@@ -12,10 +12,12 @@ gpui-kit = { workspace = true }
 sovra-core = { workspace = true }
 sovra-runtime = { workspace = true }
 tracing = { workspace = true }
+time = { workspace = true }
 
 serde_json = { workspace = true }
 
 [dev-dependencies]
+async-channel = { workspace = true }
 gpui-kit = { workspace = true, features = ["test-support"] }
 
 [lints]

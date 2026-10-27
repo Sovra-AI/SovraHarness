@@ -11,7 +11,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
     Styled as _, Subscription, TestSupportExt as _, UniformListScrollHandle, Window, div,
     uniform_list,
@@ -67,7 +67,10 @@ impl gpui_kit::EventEmitter<StartSystemTour> for ModelsView {}
 pub struct ModelsView {
     pub(crate) state: ModelsState,
     pub(crate) home_open: bool,
+    /// Measured from this pane by `design::width_probe`; starts single-pane.
+    width_class: design::WidthClass,
     pub(crate) pending_activation: Option<ModelKey>,
+    pub(crate) choosing_purpose: Option<sovra_core::files::ModelPurpose>,
     pub(crate) filter: ModelFilter,
     rows: Vec<ModelKey>,
     pub(crate) selected: Option<ModelKey>,
@@ -189,7 +192,9 @@ impl ModelsView {
         Self {
             state: ModelsState::default(),
             home_open: true,
+            width_class: design::WidthClass::Compact,
             pending_activation: None,
+            choosing_purpose: None,
             filter: ModelFilter {
                 sort: ModelSort::Newest,
                 ..ModelFilter::default()
@@ -256,6 +261,17 @@ impl ModelsView {
 
     pub(crate) fn apply(&mut self, event: &ModelEvent, cx: &mut Context<Self>) {
         self.state.apply(event);
+        if let (Some(purpose), Some(key)) =
+            (self.choosing_purpose, self.pending_activation.as_ref())
+            && matches!(event, ModelEvent::PreferencesChanged(preferences) if preferences.purposes.get(&purpose) == Some(key))
+        {
+            self.pending_activation = None;
+            self.choosing_purpose = None;
+            self.home_open = true;
+            self.selected = None;
+            cx.emit(GoToChat);
+        }
+
         if matches!(event, ModelEvent::Error(_))
             || matches!(event, ModelEvent::PreferencesChanged(preferences)
                 if preferences.active.as_ref() == self.pending_activation.as_ref())
@@ -265,7 +281,13 @@ impl ModelsView {
         if let ModelEvent::ConnectionSaved { id } = event
             && self.pending_save.as_ref() == Some(id)
         {
-            if self.settings_open && self.connection_form.is_some() {
+            if self.choosing_purpose.is_some() {
+                self.settings_open = false;
+                self.connections_open = false;
+                self.connection_form = None;
+                self.form_subscriptions.clear();
+                self.saved_form_refresh = None;
+            } else if self.settings_open && self.connection_form.is_some() {
                 self.saved_form_refresh = Some(id.clone());
             } else {
                 self.connection_form = None;
@@ -291,6 +313,7 @@ impl ModelsView {
             if cx.theme().is_dark() != mode.is_dark() {
                 Theme::change(mode, None, cx);
             }
+            design::set_interface_scale(preferences.interface_scale, cx);
         }
         if matches!(
             event,
@@ -319,6 +342,59 @@ impl ModelsView {
 
     pub(crate) fn rebuild_rows(&mut self) {
         self.rows = self.state.filtered(&self.filter);
+        if let Some(purpose) = self.choosing_purpose {
+            self.rows.retain(|key| {
+                self.state.model(key).is_some_and(|model| {
+                    self.state
+                        .connections
+                        .iter()
+                        .find(|connection| connection.id == key.connection_id)
+                        .is_some_and(|connection| purpose.accepts(model, connection.kind))
+                })
+            });
+        }
+    }
+
+    pub fn open_for_purpose(
+        &mut self,
+        purpose: sovra_core::files::ModelPurpose,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let details: Vec<_> = self
+            .state
+            .connections
+            .iter()
+            .filter(|connection| connection.kind == ProviderKind::Ollama)
+            .flat_map(|connection| {
+                self.state
+                    .catalogs
+                    .get(&connection.id)
+                    .into_iter()
+                    .flat_map(move |catalog| {
+                        catalog
+                            .snapshot
+                            .models
+                            .iter()
+                            .filter(|model| !model.details_loaded)
+                            .map(|model| model.key(&connection.id))
+                    })
+            })
+            .take(32)
+            .collect();
+        for key in details {
+            self.send(ModelCommand::FetchDetails { key }, cx);
+        }
+        self.choosing_purpose = Some(purpose);
+        self.home_open = false;
+        self.settings_open = false;
+        self.connections_open = false;
+        self.selected = None;
+        self.compare_open = false;
+        self.filter = ModelFilter::default();
+        self.set_search("", window, cx);
+        self.controls_dirty = true;
+        cx.notify();
     }
 
     pub fn set_search(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -591,7 +667,7 @@ impl ModelsView {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(gpui_kit::px(2.))
+                    .gap(t.space.hair)
                     .child(
                         h_flex()
                             .flex_wrap()
@@ -698,7 +774,7 @@ impl ModelsView {
                     .items_center()
                     .child(
                         v_flex()
-                            .gap(gpui_kit::px(2.))
+                            .gap(t.space.hair)
                             .child(
                                 h_flex()
                                     .gap(t.space.small)
@@ -710,7 +786,7 @@ impl ModelsView {
                             )
                             .children((!narrow).then(|| {
                                 caption(
-                                    "Choose the brain behind your Personal AI. Switch anytime between cloud and private local models.",
+                                    "Explore online and local models. Compare capabilities and choose what fits.",
                                     cx,
                                 )
                             })),
@@ -730,7 +806,7 @@ impl ModelsView {
                                 .on_click(cx.listener(|view, _, _, cx| view.refresh_visible(cx))),
                             )
                             .child(
-                                design::primary_button("models-connections", "Connections", cx)
+                                design::button("models-connections", "Connections", cx)
                                     .on_click(cx.listener(|view, _, _, cx| {
                                         view.connections_open = !view.connections_open;
                                         view.selected = None;
@@ -796,6 +872,14 @@ impl ModelsView {
             );
         }
 
+        if let Some(purpose) = self.choosing_purpose {
+            hdr = hdr.child(v_flex().gap(t.space.small)
+                .child(div().sovra_text(TextRole::SectionTitle, cx).child(purpose.label()))
+                .child(caption("Only compatible models are shown. Choose one, then return to your waiting message and files.", cx))
+                .child(h_flex().flex_wrap().gap(t.space.small)
+                    .child(design::button("file-model-back", "Back to my message", cx).ghost().on_click(cx.listener(|_, _, _, cx| cx.emit(GoToChat))))
+                    .child(design::button("file-model-connections", "Connect an AI service", cx).on_click(cx.listener(|view, _, window, cx| view.open_openrouter_key_editor(window, cx))))));
+        }
         hdr
     }
 
@@ -939,7 +1023,10 @@ impl ModelsView {
             .model(&key)
             .expect("rows derive from the current catalog");
         let favorite = self.state.preferences.favorites.contains(&key);
-        let active = self.state.preferences.active.as_ref() == Some(&key);
+        let active = self.choosing_purpose.map_or_else(
+            || self.state.preferences.active.as_ref() == Some(&key),
+            |purpose| self.state.preferences.purposes.get(&purpose) == Some(&key),
+        );
         let selected = self.selected.as_ref() == Some(&key);
         let favorite_key = key.clone();
         let name = model.name.clone();
@@ -962,7 +1049,7 @@ impl ModelsView {
             capability_tags.push("Step-by-step reasoning");
         }
         if model.input_modalities.iter().any(|m| m == "image") {
-            capability_tags.push("Vision");
+            capability_tags.push("Reads pictures");
         }
         let capabilities_str = if capability_tags.is_empty() {
             String::new()
@@ -996,7 +1083,9 @@ impl ModelsView {
         let can_chat = model.can_chat();
         let use_key = key.clone();
         let edit_conn = connection_obj.cloned();
-        let use_label = if active && !needs_key {
+        let use_label = if self.choosing_purpose.is_some() && !needs_key {
+            "Use for files"
+        } else if active && !needs_key {
             "✓ Active"
         } else if !can_chat {
             "Non-chat"
@@ -1041,13 +1130,16 @@ impl ModelsView {
                     .child(
                         design::button(("model-use-row", index), use_label, cx)
                             .small()
-                            .disabled(!can_chat || (active && !needs_key))
+                            .disabled(
+                                !can_chat
+                                    || (active && !needs_key && self.choosing_purpose.is_none()),
+                            )
                             .accessibility_label(format!("Use {} in chat", model.id))
                             .on_click(cx.listener(move |view, _, window, cx| {
                                 if needs_key {
                                     view.open_connection(edit_conn.clone(), window, cx);
                                 } else {
-                                    view.choose_model(use_key.clone(), cx);
+                                    view.choose_model(&use_key, cx);
                                 }
                             })),
                     )
@@ -1172,7 +1264,9 @@ impl ModelsView {
                 })
                 .track_scroll(&self.scroll)
                 .flex_1()
-                .min_h_0()
+                // The open filter panel must not shrink this virtual list to
+                // zero, or the first catalog row never enters the frame.
+                .min_h(t.layout.catalog_row_height)
                 .w_full(),
             );
         }
@@ -1182,6 +1276,22 @@ impl ModelsView {
 
 impl Render for ModelsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Measure this pane, not the window: the sidebar and onboarding bar
+        // already take part of the width.
+        div()
+            .relative()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .child(design::width_probe(cx, |view: &mut Self| {
+                &mut view.width_class
+            }))
+            .child(self.render_page(window, cx))
+    }
+}
+
+impl ModelsView {
+    fn render_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if let Some(context_text) = self.pending_context_sync.take() {
             self.always_context_input.update(cx, |input, cx| {
                 input.set_value(context_text, window, cx);
@@ -1203,15 +1313,12 @@ impl Render for ModelsView {
         }
         if self.home_open {
             return self
-                .render_model_home(
-                    window.viewport_size().width < design::tokens(cx).layout.detail_breakpoint,
-                    cx,
-                )
+                .render_model_home(!self.width_class.fits_detail_pane(), cx)
                 .into_any_element();
         }
         self.sync_controls(window, cx);
         let t = design::tokens(cx);
-        let narrow = window.viewport_size().width < t.layout.detail_breakpoint;
+        let narrow = !self.width_class.fits_detail_pane();
         let mut page = v_flex()
             .id("sovra-models-view")
             .test_support()

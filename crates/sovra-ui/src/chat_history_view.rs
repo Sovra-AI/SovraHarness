@@ -17,7 +17,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{
     ChatHistoryFilter, ChatThread, ConversationTopicIcon, NavTab, Timestamp, WorkspaceState,
@@ -54,7 +54,7 @@ pub(crate) fn render_chat_history_section(
         .test_support()
         .w_full()
         .flex_1()
-        .min_h(px(72.))
+        .min_h(t.layout.list_row_min_height)
         .gap(t.space.compact)
         .child(render_rail_search(history_search_input, cx))
         .child(render_filter_pills(state.history_filter, cx))
@@ -79,7 +79,7 @@ fn render_rail_search(
         .items_center()
         .gap(t.space.compact)
         .px(t.space.small)
-        .py(px(2.))
+        .py(t.space.hair)
         .rounded(t.radius.input)
         .sovra_surface(Surface::Subtle, cx)
         .child(
@@ -114,8 +114,8 @@ fn render_filter_pills(
         .aria_label("Filter conversations")
         .w_full()
         .flex_shrink_0()
-        .p(px(3.))
-        .gap(px(4.))
+        .p(t.space.hair)
+        .gap(t.space.compact)
         .rounded(t.radius.pill)
         .sovra_surface(Surface::Subtle, cx)
         .children(ChatHistoryFilter::ALL.into_iter().map(|filter| {
@@ -128,7 +128,7 @@ fn render_filter_pills(
                 .ghost()
                 .selected(is_active)
                 .small()
-                .min_h(px(28.))
+                .min_h(t.layout.compact_control_height)
                 .flex_1()
                 .px(t.space.small)
                 .rounded(t.radius.pill)
@@ -147,6 +147,7 @@ fn render_thread_list(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let searching = !state.history_search.trim().is_empty();
+    let t = design::tokens(cx);
 
     let mut list = v_flex()
         .id("chat-history-list")
@@ -154,7 +155,7 @@ fn render_thread_list(
         .flex_1()
         .min_h_0()
         .w_full()
-        .gap(px(4.))
+        .gap(t.space.compact)
         .overflow_y_scroll();
 
     let visible_non_draft: usize = grouped
@@ -178,9 +179,17 @@ fn render_thread_list(
     }
 
     let mut row_idx = 0usize;
-    if !grouped.pinned.is_empty() {
-        list = list.child(render_section_label("PINNED", cx));
-        for thread in &grouped.pinned {
+    if grouped
+        .pinned
+        .iter()
+        .any(|thread| !thread.is_untouched_draft())
+    {
+        list = list.child(render_section_label("Pinned", cx));
+        for thread in grouped
+            .pinned
+            .iter()
+            .filter(|thread| !thread.is_untouched_draft())
+        {
             list = list.child(render_thread_row(
                 thread,
                 row_idx,
@@ -195,8 +204,11 @@ fn render_thread_list(
     }
 
     for (bucket, items) in &grouped.groups {
-        list = list.child(render_section_label(&bucket.label().to_uppercase(), cx));
-        for thread in items {
+        if items.iter().all(|thread| thread.is_untouched_draft()) {
+            continue;
+        }
+        list = list.child(render_section_label(bucket.label(), cx));
+        for thread in items.iter().filter(|thread| !thread.is_untouched_draft()) {
             list = list.child(render_thread_row(
                 thread,
                 row_idx,
@@ -221,7 +233,8 @@ fn render_section_label(label: &str, cx: &Context<Shell>) -> impl IntoElement + 
     let t = design::tokens(cx);
     div()
         .px(t.space.compact)
-        .pt(px(2.))
+        .pt(t.space.small)
+        .pb(t.space.compact)
         .sovra_text(TextRole::Caption, cx)
         .text_color(t.text_secondary)
         .child(label.to_owned())
@@ -248,7 +261,7 @@ fn render_thread_row(
         ConversationTopicIcon::Document => IconName::FileText,
     };
     let icon_color = if is_active {
-        t.accent.violet
+        cx.theme().link
     } else {
         t.text_secondary
     };
@@ -265,14 +278,14 @@ fn render_thread_row(
     let surface = if is_active {
         Surface::NavActive
     } else {
-        Surface::Subtle
+        Surface::Chrome
     };
 
     let body = if is_renaming {
         h_flex()
             .w_full()
             .items_center()
-            .gap(px(4.))
+            .gap(t.space.compact)
             .child(
                 div().flex_1().min_w_0().child(
                     Input::new(rename_thread_input)
@@ -284,7 +297,7 @@ fn render_thread_row(
             .child(
                 design::button("chat-rename-save", "Save", cx)
                     .small()
-                    .min_h(px(26.))
+                    .min_h(t.layout.compact_control_height)
                     .px(t.space.compact)
                     .on_click(cx.listener(move |shell, _, _, cx| {
                         shell.commit_rename_thread(&thread_id_commit, cx);
@@ -295,13 +308,13 @@ fn render_thread_row(
         v_flex()
             .flex_1()
             .min_w_0()
-            .gap(px(2.))
+            .gap(t.space.hair)
             .child(
                 h_flex()
                     .w_full()
                     .items_center()
                     .justify_between()
-                    .gap(px(4.))
+                    .gap(t.space.compact)
                     .child(
                         div()
                             .id(("chat-thread-title", idx))
@@ -336,89 +349,96 @@ fn render_thread_row(
         .id(("chat-thread-card", idx))
         .w_full()
         .p(t.space.compact)
-        .gap(px(4.))
+        .gap(t.space.compact)
         .sovra_surface(surface, cx)
-        .child(
-            h_flex()
-                .id(("chat-thread-row", idx))
-                .test_support()
-                .role(Role::Button)
-                .aria_label(format!("Open conversation {}", thread.title))
-                .cursor_pointer()
+        .child(if is_renaming {
+            body
+        } else {
+            design::button(("chat-thread-row", idx), "", cx)
+                .accessibility_label(format!("Open conversation {}", thread.title))
+                .ghost()
+                .h_auto()
+                .min_h(t.layout.control_height)
+                .p(t.space.compact)
                 .w_full()
                 .items_start()
                 .gap(t.space.compact)
                 .child(
                     div()
-                        .pt(px(2.))
+                        .pt(t.space.hair)
                         .flex_shrink_0()
                         .child(Icon::new(icon).small().text_color(icon_color)),
                 )
                 .child(body)
                 .on_click(cx.listener(move |shell, _, _, cx| {
                     shell.select_thread(&thread_id_select, cx);
-                })),
-        )
-        .child(
+                }))
+                .into_any_element()
+        })
+        .children(is_active.then(|| {
             h_flex()
                 .w_full()
                 .justify_end()
                 .items_center()
-                .gap(px(4.))
+                .gap(t.space.compact)
                 .child(
-                    design::button(
-                        ("chat-thread-pin", idx),
-                        if is_pinned { "Unpin" } else { "Pin" },
-                        cx,
-                    )
-                    .accessibility_label(if is_pinned {
-                        "Unpin conversation"
-                    } else {
-                        "Pin conversation"
-                    })
-                    .ghost()
-                    .selected(is_pinned)
-                    .xsmall()
-                    .min_h(px(22.))
-                    .px(px(6.))
-                    .on_click(cx.listener(move |shell, _, _, cx| {
-                        shell.toggle_thread_pin(&thread_id_pin, cx);
-                    })),
+                    design::button(("chat-thread-pin", idx), "", cx)
+                        .icon(IconName::Pin)
+                        .tooltip(if is_pinned { "Unpin" } else { "Pin" })
+                        .accessibility_label(if is_pinned {
+                            "Unpin conversation"
+                        } else {
+                            "Pin conversation"
+                        })
+                        .ghost()
+                        .selected(is_pinned)
+                        .xsmall()
+                        .min_h(t.layout.compact_control_height)
+                        .px(t.space.compact)
+                        .on_click(cx.listener(move |shell, _, _, cx| {
+                            shell.toggle_thread_pin(&thread_id_pin, cx);
+                        })),
                 )
                 .children(has_messages.then(|| {
-                    design::button(("chat-thread-ai-title", idx), "AI Title", cx)
+                    design::button(("chat-thread-ai-title", idx), "", cx)
+                        .icon(IconName::Sparkles)
+                        .tooltip("Generate a title")
                         .accessibility_label("Generate conversation title with AI")
                         .ghost()
                         .xsmall()
-                        .min_h(px(22.))
-                        .px(px(6.))
+                        .min_h(t.layout.compact_control_height)
+                        .px(t.space.compact)
                         .on_click(cx.listener(move |shell, _, _, cx| {
                             shell.regenerate_thread_title(&thread_id_ai_title, cx);
                         }))
                 }))
                 .child(
-                    design::button(("chat-thread-rename", idx), "Rename", cx)
+                    design::button(("chat-thread-rename", idx), "", cx)
+                        .icon(IconName::Pencil)
+                        .tooltip("Rename")
                         .accessibility_label("Rename conversation")
                         .ghost()
                         .xsmall()
-                        .min_h(px(22.))
-                        .px(px(6.))
+                        .min_h(t.layout.compact_control_height)
+                        .px(t.space.compact)
                         .on_click(cx.listener(move |shell, _, window, cx| {
                             shell.begin_rename_thread(&thread_id_rename, window, cx);
                         })),
                 )
                 .child(
-                    design::button(("chat-thread-delete", idx), "Delete", cx)
+                    design::button(("chat-thread-delete", idx), "", cx)
+                        .icon(IconName::Trash)
+                        .tooltip("Delete")
                         .accessibility_label("Delete conversation")
                         .ghost()
                         .xsmall()
-                        .min_h(px(22.))
-                        .px(px(6.))
+                        .min_h(t.layout.compact_control_height)
+                        .px(t.space.compact)
                         .on_click(cx.listener(move |shell, _, _, cx| {
                             shell.delete_thread(&thread_id_delete, cx);
                         })),
-                ),
-        )
+                )
+        }))
 }
 
 fn render_empty_chats_hint(cx: &Context<Shell>) -> impl IntoElement + use<> {
@@ -428,7 +448,7 @@ fn render_empty_chats_hint(cx: &Context<Shell>) -> impl IntoElement + use<> {
         .test_support()
         .w_full()
         .p(t.space.small)
-        .gap(px(4.))
+        .gap(t.space.compact)
         .sovra_surface(Surface::Subtle, cx)
         .child(
             div()
@@ -449,7 +469,7 @@ fn render_empty_rail(
             .test_support()
             .w_full()
             .p(t.space.medium)
-            .gap(px(4.))
+            .gap(t.space.compact)
             .items_center()
             .sovra_surface(Surface::Subtle, cx)
             .child(
@@ -481,7 +501,7 @@ fn render_empty_rail(
                     .child(
                         Icon::new(IconName::Calendar)
                             .small()
-                            .text_color(t.accent.violet),
+                            .text_color(cx.theme().link),
                     )
                     .child(
                         div()

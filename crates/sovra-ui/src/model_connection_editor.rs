@@ -47,6 +47,7 @@ pub(crate) struct ManualModelForm {
     name: Entity<InputState>,
     context: Entity<InputState>,
     tools: bool,
+    inputs: std::collections::BTreeSet<String>,
 }
 
 fn input(
@@ -807,6 +808,7 @@ impl ModelsView {
             name: input("", "Optional display name", false, window, cx),
             context: input("", "Unknown", false, window, cx),
             tools: false,
+            inputs: ["text".into()].into_iter().collect(),
         });
         self.state.error = None;
         cx.notify();
@@ -837,7 +839,7 @@ impl ModelsView {
         let model = ModelInfo {
             id: form.id.read(cx).value().trim().to_owned(), name: form.name.read(cx).value().trim().to_owned(),
             author: "Custom".into(), description: "Manually configured chat model. Capabilities and context are supplied by you; pricing is not reported.".into(),
-            context_length, input_modalities:vec!["text".into()],output_modalities:vec!["text".into()],
+            context_length, input_modalities:form.inputs.iter().cloned().collect(),output_modalities:vec!["text".into()],
             supported_parameters: if form.tools { vec!["tools".into()] } else { Vec::new() }, manual:true, details_loaded:true,
             ..ModelInfo::default()
         };
@@ -860,6 +862,16 @@ impl ModelsView {
             .child(field("manual-model-id","Model name on the service",&form.id,"Copy it exactly, for example qwen3:8b.",cx))
             .child(field("manual-model-name","Friendly name",&form.name,"Optional. What Sovra should call it.",cx))
             .child(field("manual-model-context","Memory size (tokens)",&form.context,"Optional. How much text the model can keep in mind at once. Leave empty if you don't know.",cx))
+            .child(caption("What can this model read? Select only the inputs your service says it supports.",cx))
+            .children([( "image", "Pictures" ), ( "audio", "Audio recordings" ), ( "video", "Videos" )].into_iter().enumerate().map(|(index, (modality, label))| {
+                Checkbox::new(("manual-model-input", index)).cursor_pointer().label(label).checked(form.inputs.contains(modality))
+                    .on_click(cx.listener(move |view, checked, _, cx| {
+                        if let Some(form) = &mut view.manual_form {
+                            if *checked { form.inputs.insert(modality.into()); } else { form.inputs.remove(modality); }
+                        }
+                        cx.notify();
+                    }))
+            }))
             .child(Checkbox::new("manual-model-tools").cursor_pointer().label("This model can use tools").checked(form.tools)
                 .on_click(cx.listener(|view,checked,_,cx| { if let Some(form) = &mut view.manual_form { form.tools = *checked; } cx.notify(); })))
             .child(h_flex().gap(t.space.small)

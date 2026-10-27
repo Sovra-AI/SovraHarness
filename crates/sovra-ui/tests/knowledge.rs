@@ -95,3 +95,118 @@ fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn semantic_folder_choice_discloses_the_destination_and_fits_each_layout(cx: &mut TestAppContext) {
+    use gpui_kit::component::{Theme, ThemeMode};
+    use gpui_kit::{ScrollDelta, point};
+    use sovra_core::{Command, Event, file_index::*, models::*};
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+        let (client, commands, events) = Client::loopback();
+        cx.update(|cx| sovra_ui::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let mut connection = ModelConnection::new("local", ProviderKind::Ollama);
+        connection.manual_models.push(ModelInfo {
+            id: "embed-v1".into(),
+            output_modalities: vec!["embeddings".into()],
+            ..ModelInfo::default()
+        });
+        let target =
+            semantic::EmbeddingTarget::for_embeddings(&connection, &connection.manual_models[0])
+                .unwrap();
+        events
+            .send_blocking(Event::Models(ModelEvent::Loaded {
+                connections: vec![connection],
+                preferences: ModelPreferences::default(),
+            }))
+            .unwrap();
+        events
+            .send_blocking(Event::FileIndex(IndexEvent::Roots(vec![IndexedRoot {
+                id: "folder".into(),
+                path: "/chosen/documents".into(),
+                status: IndexStatus::Ready,
+                progress: IndexProgress::default(),
+                issues: vec![],
+                completed_at: Some(1),
+                auto_refresh: false,
+            }])))
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            cx.update(|cx| {
+                Theme::change(mode, None, cx);
+                sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            });
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx));
+                window.render_frame(cx);
+                window.scroll(
+                    "sovra-knowledge-view",
+                    ScrollDelta::Pixels(point(px(0.), px(5000.))),
+                    cx,
+                );
+                for _ in 0..30 {
+                    let choice = window.find("choose-semantic-folder");
+                    if choice.visible()
+                        && choice.bounds().bottom() < px(height - 60.)
+                        && choice.bounds().top() > px(60.)
+                    {
+                        break;
+                    }
+                    window.scroll(
+                        "sovra-knowledge-view",
+                        ScrollDelta::Pixels(point(px(0.), px(-80.))),
+                        cx,
+                    );
+                }
+                window.click("choose-semantic-folder", cx);
+                window.render_frame(cx);
+                assert!(window.try_find("semantic-chooser").is_some());
+                while let Ok(command) = commands.try_recv() {
+                    assert!(!matches!(
+                        command,
+                        Command::FileIndex(IndexCommand::ConfigureSemantic { .. })
+                    ));
+                }
+                for _ in 0..40 {
+                    let choice = window.find(("enable-semantic", 0usize));
+                    if choice.visible()
+                        && choice.bounds().bottom() < px(height - 60.)
+                        && choice.bounds().top() > px(60.)
+                    {
+                        break;
+                    }
+                    window.scroll(
+                        "sovra-knowledge-view",
+                        ScrollDelta::Pixels(point(px(0.), px(-80.))),
+                        cx,
+                    );
+                }
+                let choice = window.find(("enable-semantic", 0usize));
+                assert!(choice.visible(), "{width}@{scale}: {choice:?}");
+                let page = window.find("file-index-panel").bounds();
+                assert!(choice.bounds().right() <= page.right());
+                let destination = window.find("semantic-destination-0");
+                assert_eq!(destination.label(), Some(target.base_url.as_str()));
+                assert!(destination.bounds().right() <= page.right());
+                window.click(("enable-semantic", 0usize), cx);
+                let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+                assert!(
+                    sent.contains(&Command::FileIndex(IndexCommand::ConfigureSemantic {
+                        root_id: "folder".into(),
+                        target: Some(target.clone())
+                    }))
+                );
+            })
+            .unwrap();
+        }
+    }
+}

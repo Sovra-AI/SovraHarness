@@ -62,6 +62,77 @@ pub enum AgUiWidget {
         title: String,
         summary: String,
     },
+    /// Live team card: AG-UI `ACTIVITY_SNAPSHOT` content for a team run.
+    TeamActivity(crate::teams::TeamActivity),
+    /// An artifact an agent saved during the turn, shown as a card to open it.
+    ArtifactSaved {
+        artifact_id: String,
+        title: String,
+        artifact_kind: crate::artifacts::ArtifactKind,
+    },
+}
+
+/// Who wrote a message when it was not the default assistant: a team member.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Speaker {
+    pub member_id: String,
+    pub name: String,
+    pub icon: String,
+    pub role: String,
+}
+
+/// How an AG-UI subagent invocation ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentOutcome {
+    Success,
+    /// The member chose not to speak (`<pass/>`); nothing was shown.
+    Passed,
+    Failed,
+}
+
+/// The AG-UI protocol events Sovra streams for multi-agent runs, typed instead of
+/// JSON (<https://docs.ag-ui.com/concepts/events>). Field names follow the spec;
+/// `subagent_run_id` attributes a message to one team member's invocation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgUiEvent {
+    RunStarted {
+        run_id: String,
+    },
+    /// Replaces the activity message `message_id` (`activityType: "sovra.team"`).
+    ActivitySnapshot {
+        message_id: String,
+        activity: crate::teams::TeamActivity,
+    },
+    SubagentStarted {
+        subagent_run_id: String,
+        /// The member handle; `speaker` carries how to show it.
+        name: String,
+        description: String,
+        speaker: Speaker,
+    },
+    TextMessageStart {
+        message_id: String,
+        subagent_run_id: Option<String>,
+    },
+    TextMessageContent {
+        message_id: String,
+        delta: String,
+    },
+    TextMessageEnd {
+        message_id: String,
+    },
+    SubagentFinished {
+        subagent_run_id: String,
+        outcome: SubagentOutcome,
+    },
+    RunFinished {
+        run_id: String,
+    },
+    RunError {
+        message: String,
+    },
 }
 
 /// Immutable execution identity retained with a reply, independently of current selection.
@@ -81,6 +152,8 @@ pub struct ChatMessage {
     pub timestamp: String,
     pub text: String,
     pub widgets: Vec<AgUiWidget>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<crate::files::Attachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ResponseModel>,
     /// The model's visible reasoning, streamed before (or between) answer text.
@@ -89,6 +162,9 @@ pub struct ChatMessage {
     /// How long the model had been working when its latest reasoning arrived.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_ms: Option<u64>,
+    /// The team member who wrote this reply; `None` for Sovra itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<Speaker>,
 }
 
 impl ChatMessage {
@@ -105,9 +181,11 @@ impl ChatMessage {
             timestamp: timestamp.into(),
             text: text.into(),
             widgets: Vec::new(),
+            attachments: Vec::new(),
             model: None,
             thinking: String::new(),
             thinking_ms: None,
+            speaker: None,
         }
     }
 
@@ -125,9 +203,11 @@ impl ChatMessage {
             timestamp: timestamp.into(),
             text: text.into(),
             widgets,
+            attachments: Vec::new(),
             model: None,
             thinking: String::new(),
             thinking_ms: None,
+            speaker: None,
         }
     }
 }

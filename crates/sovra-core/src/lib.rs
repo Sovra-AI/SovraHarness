@@ -5,7 +5,10 @@
 
 mod agent;
 mod agui;
+pub mod artifacts;
 pub mod chat_history;
+pub mod file_index;
+pub mod files;
 mod knowledge;
 mod memory;
 pub mod models;
@@ -14,15 +17,20 @@ pub mod providers;
 pub mod routing_eval;
 pub mod routing_tree;
 mod schedules;
+pub mod skills;
 pub mod specialists;
 mod status;
+pub mod teams;
+mod web_search;
 mod workspace;
 
-pub use agent::{AgentConfig, DEFAULT_GEMINI_MODEL, DEFAULT_SYSTEM_INSTRUCTION};
+pub use agent::{
+    AgentConfig, DEFAULT_GEMINI_MODEL, DEFAULT_SEARXNG_BASE_URL, DEFAULT_SYSTEM_INSTRUCTION,
+};
 pub use agui::{
-    AgUiWidget, BuildStep, BuildStepState, ChatMessage, ClarifyChip, LLM_SETUP_SURFACE_ID,
-    MessageRole, ResponseModel, UiComponent, default_llm_setup_widget,
-    default_personal_ai_build_widget, llm_setup_widget_for_stage,
+    AgUiEvent, AgUiWidget, BuildStep, BuildStepState, ChatMessage, ClarifyChip,
+    LLM_SETUP_SURFACE_ID, MessageRole, ResponseModel, Speaker, SubagentOutcome, UiComponent,
+    default_llm_setup_widget, default_personal_ai_build_widget, llm_setup_widget_for_stage,
 };
 pub use chat_history::{
     ChatHistoryFilter, ChatThread, ConversationKind, ConversationTopicIcon, GroupedHistory,
@@ -52,6 +60,10 @@ pub use schedules::{
 };
 pub use specialists::{SpecialistAgentSpec, default_sovra_srx_agents, specialist_id_for_route_key};
 pub use status::RuntimeStatus;
+pub use web_search::{
+    QueryOutcome, RankedSearch, SearchHit, WEB_SEARCH_AGENT_ID, canonical_http_url,
+    is_explicit_web_search, parse_and_rank_searxng, rank_search_outcomes,
+};
 pub use workspace::{
     ConfigCardStatus, NavTab, PersonalAiConfigCard, ScreenRoute, TourStep, UserProfile,
     WorkspaceState,

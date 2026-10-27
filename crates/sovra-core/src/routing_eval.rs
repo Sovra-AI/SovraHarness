@@ -10,6 +10,7 @@ use crate::routing_tree::{
     TreeBranch, TreeNode, TreeNodeKind, TypedAnswer,
 };
 use crate::specialists::{SpecialistAgentSpec, specialist_id_for_route_key};
+use crate::web_search::{WEB_SEARCH_AGENT_ID, is_explicit_web_search};
 
 const CODE_UNCERTAIN: u8 = 1;
 const CODE_DEFAULT: u8 = 2;
@@ -59,15 +60,12 @@ pub fn heuristic_answers(prompt: &str) -> (ModelTier, BTreeMap<String, TypedAnsw
         || lower.contains("architecture")
         || lower.contains("design a")
         || lower.contains("and then");
-    let is_greeting = word_count <= 12
-        && (lower.starts_with("hi")
-            || lower.starts_with("hello")
-            || lower.starts_with("hey")
-            || lower.starts_with("thanks")
-            || lower.starts_with("thank you")
-            || lower.starts_with("what time"));
+    let explicit_web = is_explicit_web_search(&lower);
+    let is_greeting = is_short_greeting(&lower, word_count) && !explicit_web;
 
-    let tier = if has_code || has_math || has_multi_step {
+    let tier = if explicit_web {
+        ModelTier::Fast
+    } else if has_code || has_math || has_multi_step {
         ModelTier::Deep
     } else if has_market || has_housing || has_search || word_count > 16 {
         ModelTier::Standard
@@ -75,7 +73,10 @@ pub fn heuristic_answers(prompt: &str) -> (ModelTier, BTreeMap<String, TypedAnsw
         ModelTier::Fast
     };
 
-    let (route_choice, route_conf_bp) = if is_greeting && !has_search && !has_code {
+    let (route_choice, route_conf_bp) = if explicit_web {
+        // Topic words inside the query must not push this onto the planner.
+        ("single_task", 970)
+    } else if is_greeting && !has_search && !has_code {
         ("chat_reply", 930)
     } else if has_multi_step {
         ("multi_step", 910)
@@ -83,13 +84,15 @@ pub fn heuristic_answers(prompt: &str) -> (ModelTier, BTreeMap<String, TypedAnsw
         ("single_task", 880)
     };
 
-    let live_bp = if has_search || has_market || has_housing {
+    let live_bp = if explicit_web || has_search || has_market || has_housing {
         920
     } else {
         80
     };
 
-    let (spec_choice, spec_conf_bp) = if has_code {
+    let (spec_choice, spec_conf_bp) = if explicit_web {
+        ("web_search", 980)
+    } else if has_code {
         ("coding", 920)
     } else if has_market {
         ("stock_market", 900)
@@ -146,7 +149,7 @@ pub fn evaluate_routing(
         .clone()
         .unwrap_or_else(|| resolve_tier_model(&config.tier_ladder, ModelTier::Standard));
 
-    match config.mode {
+    let evaluation = match config.mode {
         SelectionMode::SingleGlobalModel => RouteEvaluation {
             route_kind: "single_global".to_owned(),
             tier: ModelTier::Standard,
@@ -201,7 +204,73 @@ pub fn evaluate_routing(
         SelectionMode::DynamicTreeRouting => {
             evaluate_tree_spec(config, specialists, prompt, external_answers, backend_used)
         }
+    };
+    settle_web_search(config, specialists, prompt, evaluation)
+}
+
+fn is_short_greeting(lower: &str, word_count: usize) -> bool {
+    word_count <= 12
+        && (lower.starts_with("hi")
+            || lower.starts_with("hello")
+            || lower.starts_with("hey")
+            || lower.starts_with("thanks")
+            || lower.starts_with("thank you")
+            || lower.starts_with("what time"))
+}
+
+/// An explicit "search the web" phrase selects `WebSearchAgent` even when an
+/// external decision model, or a topic keyword such as "rust", disagrees.
+/// A short greeting is never that specialist.
+fn settle_web_search(
+    config: &RoutingConfig,
+    specialists: &[SpecialistAgentSpec],
+    prompt: &str,
+    mut evaluation: RouteEvaluation,
+) -> RouteEvaluation {
+    if config.mode == SelectionMode::SingleGlobalModel {
+        return evaluation;
     }
+    if is_explicit_web_search(prompt) {
+        if evaluation.specialist_id.as_deref() == Some(WEB_SEARCH_AGENT_ID) {
+            return evaluation;
+        }
+        let agent = specialists
+            .iter()
+            .find(|agent| agent.id == WEB_SEARCH_AGENT_ID);
+        let tier = ModelTier::Fast;
+        let model = agent
+            .and_then(|agent| agent.model_override.clone())
+            .or_else(|| config.global_model.clone())
+            .unwrap_or_else(|| resolve_tier_model(&config.tier_ladder, tier));
+        "direct_dispatch".clone_into(&mut evaluation.route_kind);
+        evaluation.tier = tier;
+        evaluation.specialist_id = Some(WEB_SEARCH_AGENT_ID.to_owned());
+        evaluation.selected_model = model;
+        evaluation.confidence_bp = evaluation.confidence_bp.max(960);
+        evaluation.reason = format!(
+            "Explicit web search -> {WEB_SEARCH_AGENT_ID} ({})",
+            tier.short_label()
+        );
+        evaluation.trace.push(TraceStep {
+            node_id: "leaf_web_search".to_owned(),
+            node_label: "Direct Dispatch · WebSearchAgent".to_owned(),
+            summary: "Explicit web-search phrasing overrides topic keywords".to_owned(),
+            next_node: None,
+        });
+        return evaluation;
+    }
+    let trimmed = prompt.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let word_count = trimmed.split_whitespace().count();
+    if is_short_greeting(&lower, word_count)
+        && evaluation.specialist_id.as_deref() == Some(WEB_SEARCH_AGENT_ID)
+    {
+        evaluation.specialist_id = None;
+        "fast_reply".clone_into(&mut evaluation.route_kind);
+        evaluation.tier = ModelTier::Fast;
+        "Greeting stays on the fast reply path".clone_into(&mut evaluation.reason);
+    }
+    evaluation
 }
 
 fn evaluate_tree_spec(
@@ -510,5 +579,62 @@ mod tests {
             DecisionBackend::EmbeddedHeuristic,
         );
         assert_eq!(global_eval.selected_model, global_key);
+    }
+
+    #[test]
+    fn explicit_web_search_beats_topic_keywords() {
+        let cfg = RoutingConfig::default();
+        let agents = default_sovra_srx_agents();
+        let eval = evaluate_routing(
+            &cfg,
+            &agents,
+            "search the web for rust async traits",
+            None,
+            DecisionBackend::EmbeddedHeuristic,
+        );
+        assert_eq!(eval.specialist_id.as_deref(), Some("WebSearchAgent"));
+        assert_eq!(eval.route_kind, "direct_dispatch");
+
+        let hello = evaluate_routing(
+            &cfg,
+            &agents,
+            "hello",
+            None,
+            DecisionBackend::EmbeddedHeuristic,
+        );
+        assert_ne!(hello.specialist_id.as_deref(), Some("WebSearchAgent"));
+    }
+
+    #[test]
+    fn explicit_web_search_overrides_an_external_coding_answer() {
+        let cfg = RoutingConfig::default();
+        let agents = default_sovra_srx_agents();
+        let mut external = BTreeMap::new();
+        external.insert(
+            "route".to_owned(),
+            TypedAnswer {
+                choice: Some("single_task".to_owned()),
+                confidence_bp: 990,
+                noul_bp: None,
+                tier: None,
+            },
+        );
+        external.insert(
+            "specialist".to_owned(),
+            TypedAnswer {
+                choice: Some("coding".to_owned()),
+                confidence_bp: 990,
+                noul_bp: None,
+                tier: None,
+            },
+        );
+        let eval = evaluate_routing(
+            &cfg,
+            &agents,
+            "search the web for rust release notes",
+            Some(&external),
+            DecisionBackend::Laya,
+        );
+        assert_eq!(eval.specialist_id.as_deref(), Some("WebSearchAgent"));
     }
 }

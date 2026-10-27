@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+memchr = { workspace = true }
 adk-agent = { workspace = true }
 adk-core = { workspace = true }
 adk-model = { workspace = true }
@@ -25,7 +26,10 @@ sovra-core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-
+[dev-dependencies]
+# ADK wraps tool execution in `tokio::time::timeout`. Tests that drive the real
+# harness need a reactor. Library code in this crate does not depend on tokio.
+tokio = { workspace = true }
 
 [lints]
 workspace = true

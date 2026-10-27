@@ -13,6 +13,16 @@ use crate::routing_tree::{DecisionBackend, RouteEvaluation, SelectionMode};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Models(crate::models::ModelCommand),
+    Files(crate::files::FileCommand),
+    FileIndex(crate::file_index::IndexCommand),
+    Skills(crate::skills::SkillCommand),
+    Teams(crate::teams::TeamCommand),
+    Artifacts(crate::artifacts::ArtifactCommand),
+    RunWithFiles {
+        session_id: String,
+        prompt: String,
+        attachment_ids: Vec<String>,
+    },
     /// Load persisted conversation threads from the memory store.
     LoadChatHistory,
     /// Upsert a conversation thread (metadata + messages) to persistent storage.
@@ -64,6 +74,16 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Models(crate::models::ModelEvent),
+    FilePrepared(crate::files::FilePrepared),
+    FileIndex(crate::file_index::IndexEvent),
+    Skills(crate::skills::SkillEvent),
+    Teams(crate::teams::TeamEvent),
+    Artifacts(crate::artifacts::ArtifactEvent),
+    /// An AG-UI protocol event for `session_id` (team runs stream through these).
+    AgUi {
+        session_id: String,
+        event: crate::agui::AgUiEvent,
+    },
     /// Persisted conversation threads loaded from the memory store.
     ChatHistoryLoaded {
         threads: Vec<ChatThread>,

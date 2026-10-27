@@ -2,16 +2,16 @@
 
 use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a small subset
 use gpui_kit::component::{
-    Icon, Sizable as _,
+    Icon, Sizable as _, h_flex,
     input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
-    TestSupportExt as _, div, px,
+    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
 };
 
-use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::design::{self, SovraStyled as _, Surface};
 use crate::shell::{Shell, logo};
 
 pub(crate) fn render_login_screen(
@@ -28,33 +28,32 @@ pub(crate) fn render_login_screen(
         .min_h_0()
         .w_full()
         .items_center()
-        .justify_center()
+        .overflow_y_scroll()
         .p(t.space.large)
         .child(
             v_flex()
                 .id("login-glass-card")
+                .test_support()
                 .w_full()
-                .max_w(px(432.))
+                .flex_shrink_0()
+                .my_auto()
+                .max_w(t.layout.dialog_width)
                 .sovra_surface(Surface::Glass, cx)
                 .items_center()
-                .gap(t.space.medium)
+                .gap(t.space.small)
                 .p(t.space.large)
-                .child(logo("login-logo", px(64.)))
                 .child(
-                    v_flex()
+                    h_flex()
+                        .w_full()
                         .items_center()
-                        .gap(px(4.))
-                        .child(
-                            div()
-                                .sovra_text(TextRole::PageTitle, cx)
-                                .child("Welcome back"),
-                        )
-                        .child(
-                            div()
-                                .sovra_text(TextRole::Body, cx)
-                                .text_color(t.text_secondary)
-                                .child("Sign in to continue to Sovra."),
-                        ),
+                        .gap(t.space.small)
+                        .pb(t.space.small)
+                        .child(logo("login-logo", t.layout.logo_hero))
+                        .child(design::page_header(
+                            "Welcome back",
+                            "Sign in to continue to Sovra.",
+                            cx,
+                        )),
                 )
                 .child(
                     v_flex()

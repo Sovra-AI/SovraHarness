@@ -5,13 +5,13 @@
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, h_flex,
+    ActiveTheme as _, Icon, Selectable as _, Sizable as _, h_flex,
     input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
+    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{
     DecisionBackend, ModelTier, RouteEvaluation, SelectionMode, SpecialistAgentSpec, TreeNode,
@@ -30,14 +30,10 @@ pub(crate) fn render_my_ais_view(
     let t = design::tokens(cx);
 
     let mut page = v_flex()
-        .id("sovra-my-ais-view")
-        .test_support()
-        .flex_1()
-        .min_w_0()
-        .h_full()
-        .p(t.space.large)
-        .gap(t.space.medium)
-        .overflow_y_scroll()
+        .w_full()
+        .max_w(t.layout.page_width)
+        .mx_auto()
+        .gap(t.space.large)
         .child(render_header(cx))
         .child(render_mode_selector(state.routing.mode, cx));
     if state.routing.mode == SelectionMode::PerAgentModel {
@@ -50,7 +46,7 @@ pub(crate) fn render_my_ais_view(
         .gap(t.space.small)
         .child(
             v_flex()
-                .gap(px(2.))
+                .gap(t.space.hair)
                 .child(
                     div()
                         .sovra_text(TextRole::SectionTitle, cx)
@@ -60,7 +56,7 @@ pub(crate) fn render_my_ais_view(
                     div()
                         .sovra_text(TextRole::Caption, cx)
                         .text_color(t.text_secondary)
-                        .child("For the curious. You never need to change anything here."),
+                        .child("Explore routing decisions and try a sample prompt."),
                 ),
         )
         .child(
@@ -82,7 +78,15 @@ pub(crate) fn render_my_ais_view(
             .child(render_router_engine_and_simulator(state, sim_input, cx))
             .child(render_routing_tree_section(state, cx));
     }
-    page.child(advanced)
+    v_flex()
+        .id("sovra-my-ais-view")
+        .test_support()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .overflow_y_scroll()
+        .p(t.space.large)
+        .child(page.child(advanced))
 }
 
 fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
@@ -94,19 +98,11 @@ fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
         .gap(t.space.small)
         .items_center()
         .justify_between()
-        .child(
-            v_flex()
-                .gap(px(2.))
-                .child(div().sovra_text(TextRole::PageTitle, cx).child("My AI's"))
-                .child(
-                    div()
-                        .sovra_text(TextRole::Body, cx)
-                        .text_color(t.text_secondary)
-                        .child(
-                            "Choose how Sovra decides which AI answers you. Not sure? Leave it on Automatic.",
-                        ),
-                ),
-        )
+        .child(design::page_header(
+            "My AI's",
+            "Choose how Sovra finds the right AI for each task.",
+            cx,
+        ))
         .child(
             design::button("open-models-catalog-btn", "Pick a model", cx).on_click(cx.listener(
                 |shell, _, _, cx| {
@@ -128,7 +124,7 @@ fn mode_copy(mode: SelectionMode) -> (&'static str, &'static str) {
             "Decide how much effort Sovra puts into each kind of task.",
         ),
         SelectionMode::DynamicTreeRouting => (
-            "Automatic (recommended)",
+            "Automatic",
             "Sovra uses a quick AI for simple questions and a more powerful one for hard ones.",
         ),
     }
@@ -161,23 +157,15 @@ fn render_mode_selector(
                 .map(|(idx, mode)| {
                     let selected = mode == active_mode;
                     let (title, description) = mode_copy(mode);
-                    let surface = if selected {
-                        Surface::NavActive
-                    } else {
-                        Surface::Matte
-                    };
-                    h_flex()
-                        .id(("routing-mode-btn", idx))
-                        .test_support()
-                        .role(Role::Button)
-                        .aria_label(title)
-                        .cursor_pointer()
+                    design::button(("routing-mode-btn", idx), "", cx)
+                        .accessibility_label(title)
+                        .selected(selected)
                         .flex_1()
-                        .min_w(px(220.))
-                        .p(t.space.medium)
-                        .items_start()
-                        .gap(t.space.small)
-                        .sovra_surface(surface, cx)
+                        .min_w(t.layout.card_min_width)
+                        .h_auto()
+                        .whitespace_normal()
+                        .p(t.space.large)
+                        .rounded(t.radius.card)
                         .child(
                             Icon::new(if selected {
                                 IconName::CircleCheck
@@ -186,7 +174,7 @@ fn render_mode_selector(
                             })
                             .small()
                             .text_color(if selected {
-                                t.accent.violet
+                                cx.theme().link
                             } else {
                                 t.text_secondary
                             }),
@@ -195,8 +183,9 @@ fn render_mode_selector(
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .gap(px(2.))
-                                .child(div().sovra_text(TextRole::Body, cx).child(title))
+                                .whitespace_normal()
+                                .gap(t.space.small)
+                                .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
                                 .child(
                                     div()
                                         .sovra_text(TextRole::Caption, cx)
@@ -234,7 +223,7 @@ fn render_router_engine_and_simulator(
                 .justify_between()
                 .child(
                     v_flex()
-                        .gap(px(2.))
+                        .gap(t.space.hair)
                         .child(
                             div()
                                 .sovra_text(TextRole::SectionTitle, cx)
@@ -250,28 +239,15 @@ fn render_router_engine_and_simulator(
                         ),
                 )
                 .child(
-                    h_flex().gap(t.space.compact).children(
+                    h_flex().flex_wrap().gap(t.space.compact).children(
                         DecisionBackend::ALL
                             .into_iter()
                             .enumerate()
                             .map(|(idx, backend)| {
                                 let is_active = state.routing.backend == backend;
-                                h_flex()
-                                    .id(("decision-backend-btn", idx))
-                                    .test_support()
-                                    .role(Role::Button)
-                                    .aria_label(backend.label())
-                                    .cursor_pointer()
-                                    .px(t.space.small)
-                                    .py(px(6.))
-                                    .rounded(t.radius.pill)
-                                    .bg(if is_active {
-                                        t.nav_active_background
-                                    } else {
-                                        t.subtle
-                                    })
-                                    .sovra_text(TextRole::Caption, cx)
-                                    .child(backend.label())
+                                design::button(("decision-backend-btn", idx), backend.label(), cx)
+                                    .selected(is_active)
+                                    .small()
                                     .on_click(cx.listener(move |shell, _, _, cx| {
                                         shell.set_decision_backend(backend, cx);
                                     }))
@@ -319,7 +295,7 @@ fn render_evaluation_trace(
         .test_support()
         .w_full()
         .p(t.space.small)
-        .gap(px(4.))
+        .gap(t.space.compact)
         .sovra_surface(Surface::Subtle, cx)
         .child(
             h_flex()
@@ -410,9 +386,9 @@ fn render_tree_node_card(node: &TreeNode, cx: &Context<Shell>) -> impl IntoEleme
     };
 
     v_flex()
-        .w(px(260.))
+        .w(t.layout.side_panel_width)
         .p(t.space.small)
-        .gap(px(4.))
+        .gap(t.space.compact)
         .sovra_surface(Surface::Matte, cx)
         .child(
             div()
@@ -487,7 +463,7 @@ fn render_specialist_row(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .gap(px(2.))
+                .gap(t.space.hair)
                 .child(
                     div()
                         .sovra_text(TextRole::Body, cx)
@@ -501,23 +477,13 @@ fn render_specialist_row(
                 ),
         )
         .child(
-            h_flex()
-                .id(("specialist-tier-btn", idx))
-                .test_support()
-                .role(Role::Button)
-                .aria_label(format!(
-                    "Effort for {}: {}. Click to change",
+            design::button(("specialist-tier-btn", idx), tier_copy(current_tier), cx)
+                .accessibility_label(format!(
+                    "Effort for {}: {}. Activate to change",
                     spec.name,
                     tier_copy(current_tier)
                 ))
-                .cursor_pointer()
-                .flex_shrink_0()
-                .px(t.space.small)
-                .py(px(6.))
-                .rounded(t.radius.button)
-                .bg(t.nav_active_background)
-                .sovra_text(TextRole::Caption, cx)
-                .child(tier_copy(current_tier))
+                .small()
                 .on_click(cx.listener(move |shell, _, _, cx| {
                     shell.cycle_specialist_tier(&spec_id, next_tier, cx);
                 })),

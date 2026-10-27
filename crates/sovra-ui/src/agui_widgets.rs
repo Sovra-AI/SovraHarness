@@ -8,7 +8,7 @@ use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{AgUiWidget, BuildStep, BuildStepState, ClarifyChip};
 
@@ -40,7 +40,152 @@ pub(crate) fn render_agui_widget(
             title,
             summary,
         } => render_surface_card(surface_id, title, summary, cx).into_any_element(),
+        AgUiWidget::TeamActivity(activity) => {
+            render_team_activity(activity, index, cx).into_any_element()
+        }
+        AgUiWidget::ArtifactSaved {
+            artifact_id,
+            title,
+            artifact_kind,
+        } => {
+            render_artifact_saved(artifact_id, title, *artifact_kind, index, cx).into_any_element()
+        }
     }
+}
+
+/// The live team card (AG-UI `ACTIVITY_SNAPSHOT`, `activityType: "sovra.team"`):
+/// who is on it, who is speaking, who passed, in plain words.
+fn render_team_activity(
+    activity: &sovra_core::teams::TeamActivity,
+    index: usize,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    use sovra_core::teams::SpeakerState;
+    let t = design::tokens(cx);
+    let theme = cx.theme();
+    let (primary, success, muted, danger) = (
+        theme.primary,
+        theme.success,
+        theme.muted_foreground,
+        theme.danger,
+    );
+    v_flex()
+        .id(("team-activity", index))
+        .test_support()
+        .w_full()
+        .max_w(t.layout.card_max_width)
+        .sovra_surface(Surface::Matte, cx)
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .child(
+            h_flex()
+                .gap(t.space.small)
+                .items_center()
+                .child(Icon::new(IconName::Users).small().text_color(primary))
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child(if activity.finished {
+                            "Your team".to_owned()
+                        } else {
+                            format!(
+                                "Your team · round {} of {}",
+                                activity.round, activity.max_rounds
+                            )
+                        }),
+                ),
+        )
+        .child(
+            div()
+                .id(("team-activity-status", index))
+                .test_support()
+                .sovra_text(TextRole::Body, cx)
+                .text_color(t.text_secondary)
+                .child(activity.status.clone()),
+        )
+        .child(
+            h_flex()
+                .flex_wrap()
+                .gap(t.space.small)
+                .children(activity.speakers.iter().map(|row| {
+                    let (label, color) = match row.state {
+                        SpeakerState::Waiting => ("Waiting", muted),
+                        SpeakerState::Speaking => ("Answering…", primary),
+                        SpeakerState::Done => ("Done", success),
+                        SpeakerState::Passed => ("Nothing to add", muted),
+                        SpeakerState::Failed => ("Couldn't answer", danger),
+                    };
+                    h_flex()
+                        .gap(t.space.compact)
+                        .items_center()
+                        .px(t.space.small)
+                        .py(t.space.compact)
+                        .rounded(t.radius.pill)
+                        .border_1()
+                        .border_color(t.material_border)
+                        .child(crate::chat_view::member_avatar(
+                            &row.icon,
+                            t.layout.icon_medium,
+                            cx,
+                        ))
+                        .child(
+                            div()
+                                .sovra_text(TextRole::Caption, cx)
+                                .child(row.name.clone()),
+                        )
+                        .child(
+                            div()
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(color)
+                                .child(label),
+                        )
+                })),
+        )
+}
+
+/// An agent saved something with `save_artifact`: a card to open it.
+fn render_artifact_saved(
+    artifact_id: &str,
+    title: &str,
+    kind: sovra_core::artifacts::ArtifactKind,
+    index: usize,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let id = artifact_id.to_owned();
+    h_flex()
+        .id(("artifact-saved", index))
+        .test_support()
+        .w_full()
+        .max_w(t.layout.card_max_width)
+        .flex_wrap()
+        .items_center()
+        .gap(t.space.small)
+        .p(t.space.small)
+        .sovra_surface(Surface::Subtle, cx)
+        .child(Icon::new(crate::artifacts_view::kind_icon(kind)).text_color(cx.theme().primary))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .text_ellipsis()
+                        .child(title.to_owned()),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(format!("{} saved to Artifacts", kind.label())),
+                ),
+        )
+        .child(
+            design::button(("artifact-saved-open", index), "Open", cx)
+                .small()
+                .on_click(cx.listener(move |shell, _, _, cx| shell.open_artifact(&id, cx))),
+        )
 }
 
 fn render_build_progress(
@@ -58,7 +203,7 @@ fn render_build_progress(
         .id("agui-build-progress-card")
         .test_support()
         .w_full()
-        .max_w(px(560.))
+        .max_w(t.layout.card_max_width)
         .sovra_surface(Surface::Matte, cx)
         .p(t.space.medium)
         .gap(t.space.small)
@@ -69,7 +214,7 @@ fn render_build_progress(
                 .child(progress_ring_badge(all_done, cx))
                 .child(
                     v_flex()
-                        .gap(px(2.))
+                        .gap(t.space.hair)
                         .child(
                             div()
                                 .sovra_text(TextRole::SectionTitle, cx)
@@ -83,7 +228,7 @@ fn render_build_progress(
                         ),
                 ),
         )
-        .child(div().h(px(1.)).w_full().bg(theme.border))
+        .child(div().h(t.layout.hairline).w_full().bg(theme.border))
         .child(
             v_flex()
                 .gap(t.space.compact)
@@ -112,7 +257,7 @@ fn progress_ring_badge(all_done: bool, cx: &Context<Shell>) -> impl IntoElement 
         IconName::LoaderCircle
     };
     h_flex()
-        .size(px(36.))
+        .size(t.layout.control_height)
         .flex_shrink_0()
         .items_center()
         .justify_center()
@@ -138,10 +283,10 @@ fn render_step_row(step: &BuildStep, cx: &Context<Shell>) -> impl IntoElement + 
     h_flex()
         .items_center()
         .gap(t.space.small)
-        .py(px(2.))
+        .py(t.space.hair)
         .child(
             h_flex()
-                .size(px(20.))
+                .size(t.layout.icon_small)
                 .flex_shrink_0()
                 .items_center()
                 .justify_center()
@@ -185,7 +330,7 @@ fn render_clarify_chips(
                         .id(("agui-chip", widget_idx * 100 + chip_idx))
                         .cursor_pointer()
                         .px(t.space.small)
-                        .py(px(4.))
+                        .py(t.space.compact)
                         .rounded(t.radius.pill)
                         .bg(t.nav_active_background)
                         .sovra_text(TextRole::Caption, cx)
@@ -207,7 +352,7 @@ fn render_surface_card(
     v_flex()
         .sovra_surface(Surface::Subtle, cx)
         .p(t.space.small)
-        .gap(px(4.))
+        .gap(t.space.compact)
         .child(
             h_flex()
                 .justify_between()

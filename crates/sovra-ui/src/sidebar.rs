@@ -9,8 +9,8 @@ use gpui_kit::component::{
     input::InputState, v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
+    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{NavTab, WorkspaceState};
 
@@ -40,8 +40,8 @@ pub(crate) fn render_sidebar(
         .min_h_0()
         .flex_shrink_0()
         .justify_between()
-        .p(t.space.compact)
-        .gap(t.space.compact)
+        .p(t.space.small)
+        .gap(t.space.small)
         .sovra_surface(Surface::Chrome, cx)
         .border_r_1()
         .border_color(border)
@@ -51,10 +51,20 @@ pub(crate) fn render_sidebar(
                 .flex_1()
                 .min_h_0()
                 .w_full()
-                .gap(px(2.))
+                .gap(t.space.small)
                 .child(render_brand_header(cx))
                 .child(render_new_chat_button(cx))
-                .child(render_nav_list(state, cx))
+                // In short windows the destinations scroll instead of pushing
+                // the chat history out of the sidebar.
+                .child(
+                    div()
+                        .id("sidebar-nav-scroll")
+                        .w_full()
+                        .flex_shrink_1()
+                        .min_h(t.layout.control_height + t.layout.control_height)
+                        .overflow_y_scroll()
+                        .child(render_nav_list(state, cx)),
+                )
                 .child(div().w_full().border_b_1().border_color(border))
                 .child(render_chat_history_section(
                     state,
@@ -68,7 +78,7 @@ pub(crate) fn render_sidebar(
                 .flex_shrink_0()
                 .gap(t.space.compact)
                 .child(
-                    design::button("sidebar-tour-btn", "Guided System Tour", cx)
+                    design::button("sidebar-tour-btn", "Take a tour", cx)
                         .small()
                         .ghost()
                         .w_full()
@@ -96,7 +106,7 @@ fn render_collapsed_sidebar(
         .min_h_0()
         .flex_shrink_0()
         .justify_between()
-        .py(px(4.))
+        .py(t.space.compact)
         .px(t.space.compact)
         .items_center()
         .sovra_surface(Surface::Chrome, cx)
@@ -105,16 +115,20 @@ fn render_collapsed_sidebar(
         .child(
             v_flex()
                 .id("chat-history-rail-collapsed")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
                 .test_support()
                 .items_center()
-                .gap(px(2.))
-                .child(logo("sidebar-logo", px(20.)))
+                .gap(t.space.hair)
+                // No logo here: at the minimum window the rail needs every row for
+                // destinations (Material rails keep branding optional).
                 .child(
                     design::button("chat-history-expand-btn", "", cx)
                         .accessibility_label("Expand sidebar and chat history")
                         .ghost()
                         .xsmall()
-                        .min_h(px(24.))
+                        .min_h(t.layout.compact_control_height)
                         .px(t.space.compact)
                         .child(
                             Icon::new(IconName::PanelLeftOpen)
@@ -130,12 +144,12 @@ fn render_collapsed_sidebar(
                         .accessibility_label("Start a new chat")
                         .ghost()
                         .xsmall()
-                        .min_h(px(24.))
+                        .min_h(t.layout.compact_control_height)
                         .px(t.space.compact)
                         .child(
                             Icon::new(IconName::Plus)
                                 .small()
-                                .text_color(t.accent.violet),
+                                .text_color(cx.theme().link),
                         )
                         .on_click(cx.listener(|shell, _, window, cx| {
                             shell.start_new_chat(window, cx);
@@ -145,7 +159,7 @@ fn render_collapsed_sidebar(
                     let is_active = state.active_tab == tab;
                     let (id, icon) = nav_tab_meta(tab);
                     let icon_color = if is_active {
-                        t.accent.violet
+                        cx.theme().link
                     } else {
                         t.text_secondary
                     };
@@ -153,7 +167,7 @@ fn render_collapsed_sidebar(
                         .accessibility_label(tab.label())
                         .ghost()
                         .xsmall()
-                        .min_h(px(24.))
+                        .min_h(t.layout.compact_control_height)
                         .selected(is_active)
                         .px(t.space.compact)
                         .child(
@@ -172,11 +186,11 @@ fn render_collapsed_sidebar(
                 .accessibility_label("User profile and sign out")
                 .ghost()
                 .xsmall()
-                .min_h(px(24.))
+                .min_h(t.layout.compact_control_height)
                 .px(t.space.compact)
                 .child(
                     h_flex()
-                        .size(px(24.))
+                        .size(t.layout.icon_medium)
                         .items_center()
                         .justify_center()
                         .rounded(t.radius.pill)
@@ -202,11 +216,7 @@ fn render_brand_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
                 .items_center()
                 .gap(t.space.compact)
                 .child(logo("sidebar-logo", t.layout.logo_small))
-                .child(
-                    div()
-                        .sovra_text(TextRole::SectionTitle, cx)
-                        .child("S O V R A"),
-                ),
+                .child(div().sovra_text(TextRole::SectionTitle, cx).child("Sovra")),
         )
         .child(
             design::button("chat-history-collapse-btn", "", cx)
@@ -227,7 +237,8 @@ fn render_brand_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
 
 fn render_new_chat_button(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    design::primary_button("chat-new-btn", "+ New Chat", cx)
+    design::button("chat-new-btn", "New chat", cx)
+        .icon(IconName::Plus)
         .accessibility_label("Start a new chat")
         .small()
         .w_full()
@@ -245,14 +256,18 @@ fn nav_tab_meta(tab: NavTab) -> (&'static str, IconName) {
         NavTab::Models => ("nav-models", IconName::Box),
         NavTab::Schedules => ("nav-schedules", IconName::Calendar),
         NavTab::Settings => ("nav-settings", IconName::Settings),
+        NavTab::Skills => ("nav-skills", IconName::BookOpen),
+        NavTab::Team => ("nav-team", IconName::Users),
+        NavTab::Artifacts => ("nav-artifacts", IconName::LibraryBig),
     }
 }
 
 fn render_nav_list(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
     let active = state.active_tab;
     let tour_target = state.tour_step.map(|s| (s.target_tab(), s.step_number()));
     v_flex()
-        .gap(px(1.))
+        .gap(t.space.hair)
         .children(NavTab::ALL.into_iter().map(|tab| {
             let badge = tour_target
                 .filter(|(t, _)| *t == tab)
@@ -276,7 +291,7 @@ fn render_nav_item(
         t.text_secondary
     };
     let icon_color = if is_active || spotlight_badge.is_some() {
-        t.accent.violet
+        cx.theme().link
     } else {
         t.text_secondary
     };
@@ -284,8 +299,8 @@ fn render_nav_item(
     design::button(id, "", cx)
         .accessibility_label(tab.label())
         .ghost()
-        .xsmall()
-        .min_h(px(22.))
+        .small()
+        .min_h(t.layout.navigation_height)
         .selected(is_active)
         .child(
             h_flex()
@@ -311,11 +326,11 @@ fn render_nav_item(
                         .id(("nav-spotlight-badge", tab as usize))
                         .test_support()
                         .px(t.space.compact)
-                        .py(px(2.))
+                        .py(t.space.hair)
                         .rounded(t.radius.pill)
                         .bg(t.subtle)
                         .sovra_text(TextRole::Caption, cx)
-                        .text_color(t.accent.violet)
+                        .text_color(cx.theme().link)
                         .child(badge_text)
                 })),
         )
@@ -336,25 +351,22 @@ fn render_user_profile(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    h_flex()
-        .id("sidebar-user-profile")
-        .test_support()
-        .role(Role::Button)
-        .aria_label("User profile and sign out")
-        .cursor_pointer()
+    design::button("sidebar-user-profile", "", cx)
+        .accessibility_label("User profile and sign out")
+        .ghost()
+        .h_auto()
         .w_full()
         .items_center()
         .justify_between()
         .p(t.space.compact)
         .rounded(t.radius.input)
-        .sovra_surface(Surface::Subtle, cx)
         .child(
             h_flex()
                 .items_center()
                 .gap(t.space.compact)
                 .child(
                     h_flex()
-                        .size(px(32.))
+                        .size(t.layout.profile_avatar)
                         .flex_shrink_0()
                         .items_center()
                         .justify_center()
@@ -368,12 +380,14 @@ fn render_user_profile(
                         .child(
                             div()
                                 .sovra_text(TextRole::Caption, cx)
+                                .truncate()
                                 .child(state.user.full_name.clone()),
                         )
                         .child(
                             div()
                                 .sovra_text(TextRole::Caption, cx)
                                 .text_color(t.text_secondary)
+                                .truncate()
                                 .child(state.user.workspace_label.clone()),
                         ),
                 ),

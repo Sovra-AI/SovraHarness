@@ -5,6 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+mod destination;
+pub use destination::{ModelDestination, ModelWork, model_destinations};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ProviderKind {
     OpenRouter,
@@ -231,6 +234,76 @@ pub enum Appearance {
     Light,
 }
 
+/// Interface size relative to the native 16px root (browser-style page zoom).
+///
+/// Every rem-based length and text role scales with it, independently of the
+/// display's own scale factor. Fixed levels keep layouts testable; saved values
+/// from elsewhere snap to the nearest level instead of failing to load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(from = "u16", into = "u16")]
+pub struct InterfaceScale(u16);
+
+impl InterfaceScale {
+    const LEVELS: [u16; 9] = [75, 80, 90, 100, 110, 125, 150, 175, 200];
+    pub const SMALLEST: Self = Self(Self::LEVELS[0]);
+    pub const LARGEST: Self = Self(Self::LEVELS[Self::LEVELS.len() - 1]);
+
+    #[must_use]
+    pub fn from_percent(percent: u16) -> Self {
+        let nearest = Self::LEVELS
+            .iter()
+            .min_by_key(|level| level.abs_diff(percent))
+            .copied()
+            .unwrap_or(100);
+        Self(nearest)
+    }
+
+    #[must_use]
+    pub fn percent(self) -> u16 {
+        self.0
+    }
+
+    /// Multiplier for the root font size.
+    #[must_use]
+    pub fn factor(self) -> f32 {
+        f32::from(self.0) / 100.
+    }
+
+    #[must_use]
+    pub fn larger(self) -> Self {
+        self.step(1)
+    }
+
+    #[must_use]
+    pub fn smaller(self) -> Self {
+        self.step(-1)
+    }
+
+    fn step(self, by: isize) -> Self {
+        let index = Self::LEVELS.iter().position(|&l| l == self.0).unwrap_or(3);
+        let next = index.saturating_add_signed(by).min(Self::LEVELS.len() - 1);
+        Self(Self::LEVELS[next])
+    }
+}
+
+impl Default for InterfaceScale {
+    fn default() -> Self {
+        Self(100)
+    }
+}
+
+impl From<u16> for InterfaceScale {
+    fn from(percent: u16) -> Self {
+        Self::from_percent(percent)
+    }
+}
+
+impl From<InterfaceScale> for u16 {
+    fn from(scale: InterfaceScale) -> Self {
+        scale.0
+    }
+}
+
 /// Default conversational tone and explanation style for the Personal AI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -358,9 +431,14 @@ impl AgentSettings {
 pub struct ModelPreferences {
     pub favorites: BTreeSet<ModelKey>,
     pub active: Option<ModelKey>,
+    /// Explicit media choices; documents use the chat model until assigned separately.
+    #[serde(default)]
+    pub purposes: BTreeMap<crate::files::ModelPurpose, ModelKey>,
     /// `default` keeps files written before this field existed loadable.
     #[serde(default)]
     pub appearance: Appearance,
+    #[serde(default)]
+    pub interface_scale: InterfaceScale,
     /// Standing context, tone, memory, tool, and safety preferences for the agent.
     #[serde(default)]
     pub agent_settings: AgentSettings,
@@ -565,6 +643,9 @@ impl ModelsState {
                 self.connections.retain(|c| c.id != *id);
                 self.catalogs.remove(id);
                 self.preferences
+                    .purposes
+                    .retain(|_, key| key.connection_id != *id);
+                self.preferences
                     .favorites
                     .retain(|k| k.connection_id != *id);
                 if self
@@ -603,6 +684,77 @@ impl ModelsState {
             .models
             .iter()
             .find(|m| m.id == key.model_id)
+    }
+
+    /// Resolves a file turn without silently changing the user's chosen media models.
+    pub fn model_for_files(
+        &self,
+        attachments: &[crate::files::Attachment],
+    ) -> Result<ModelKey, crate::files::FileSetup> {
+        use crate::files::{FileSetup, ModelPurpose};
+        let purpose = attachments
+            .iter()
+            .map(|file| file.purpose)
+            .max()
+            .unwrap_or(ModelPurpose::Documents);
+        let fail = |message: String| FileSetup { purpose, message };
+        if !self.loaded {
+            return Err(fail(
+                "Your model settings are still loading. Your files are safe here.".into(),
+            ));
+        }
+        for required in attachments.iter().map(|file| file.purpose) {
+            if required != ModelPurpose::Documents
+                && !self.preferences.purposes.contains_key(&required)
+            {
+                return Err(FileSetup {
+                    purpose: required,
+                    message: format!(
+                        "Let's choose an AI to {}. Your files and message will stay here while you set it up.",
+                        required.label().to_lowercase()
+                    ),
+                });
+            }
+        }
+        let key = self.preferences.purposes.get(&purpose)
+            .or_else(|| (purpose == ModelPurpose::Documents).then_some(self.preferences.active.as_ref()).flatten())
+            .ok_or_else(|| fail(format!("Let's choose an AI to {}. Your files and message will stay here while you set it up.", purpose.label().to_lowercase())))?;
+        let connection = self.connections.iter().find(|connection| connection.id == key.connection_id)
+            .ok_or_else(|| fail("The service for this model is no longer connected. Choose another model to continue.".into()))?;
+        if connection.authentication != Authentication::None
+            && !connection.has_credential
+            && !connection.environment_credential
+        {
+            return Err(fail(format!(
+                "Add the key for {} so I can read this file. Your files and message will stay here.",
+                connection.name
+            )));
+        }
+        let model = self.model(key).ok_or_else(|| {
+            fail(
+                "This model is not available yet. Refresh its service or choose another model."
+                    .into(),
+            )
+        })?;
+        if !attachments
+            .iter()
+            .all(|file| file.purpose.accepts(model, connection.kind))
+        {
+            return Err(fail("These files need a model that can read all their formats. Choose a compatible model, or send the different kinds of files separately.".into()));
+        }
+        // OpenAI-compatible chat adapters can encode only WAV and MP3 audio.
+        if connection.kind == ProviderKind::OpenAiCompatible
+            && attachments.iter().any(|file| {
+                file.purpose == ModelPurpose::Audio
+                    && !matches!(
+                        file.mime_type.as_str(),
+                        "audio/wav" | "audio/x-wav" | "audio/mpeg" | "audio/mp3"
+                    )
+            })
+        {
+            return Err(fail("This service reads WAV and MP3 audio. Save the recording in one of those formats, or choose an audio model through OpenRouter.".into()));
+        }
+        Ok(key.clone())
     }
 
     /// Returns `true` when a chat model is selected and its connection has any required key.
@@ -1011,6 +1163,10 @@ pub enum ModelCommand {
     Activate {
         key: ModelKey,
     },
+    AssignPurpose {
+        purpose: crate::files::ModelPurpose,
+        key: Option<ModelKey>,
+    },
     FetchDetails {
         key: ModelKey,
     },
@@ -1021,6 +1177,9 @@ pub enum ModelCommand {
     CancelPull,
     SetAppearance {
         appearance: Appearance,
+    },
+    SetInterfaceScale {
+        scale: InterfaceScale,
     },
     SetAgentSettings {
         settings: AgentSettings,

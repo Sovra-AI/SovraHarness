@@ -68,7 +68,8 @@ fn fixture_events(models: Vec<ModelInfo>) -> [ModelEvent; 2] {
 #[gpui_kit::test]
 fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
     let (client, commands, events) = Client::loopback();
-    let (window, shell) = open_shell(cx, client, 1280., 820.);
+    // Exercise the wide layout with filters and the catalog visible together.
+    let (window, shell) = open_shell(cx, client, 1600., 820.);
     let models = vec![
         model("example/alpha", "Alpha", "text", true),
         model("example/beta", "Beta", "text", false),

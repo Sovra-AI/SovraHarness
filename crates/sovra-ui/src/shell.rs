@@ -7,8 +7,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement as _, Pixels, Render, Role, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Task, TestSupportExt as _, Window, div, img,
+    IntoElement, ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Task, TestSupportExt as _, Window, div, img,
 };
 use sovra_core::{
     ChatHistoryFilter, Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScreenRoute,
@@ -38,7 +38,12 @@ pub struct Shell {
     focus_handle: FocusHandle,
     history_compact: bool,
     history_overlay_open: bool,
+    inspector_docked: bool,
     pub(crate) composer_input: Entity<TextareaState>,
+    pub(crate) skills: sovra_core::skills::SkillCatalog,
+    pub(crate) skill_menu: crate::skill_menu::MenuState,
+    pub(crate) skill_library: crate::skill_library::SkillLibrary,
+    pub(crate) file_index: crate::file_index_view::FileIndexView,
     search_input: Entity<InputState>,
     history_search_input: Entity<InputState>,
     rename_thread_input: Entity<InputState>,
@@ -50,19 +55,24 @@ pub struct Shell {
     login_password_input: Entity<InputState>,
     sim_route_input: Entity<InputState>,
     pub(crate) my_ais_advanced_open: bool,
-    knowledge_times_open: bool,
+    pub(crate) knowledge_times_open: bool,
     models: Entity<crate::ModelsView>,
+    team_view: Entity<crate::team_view::TeamView>,
+    artifacts_view: Entity<crate::artifacts_view::ArtifactsView>,
     /// The conversation, rendered as a cached view: composer cursor blinks, sidebar
     /// and timer updates reuse its last frame instead of laying out every message.
     pub(crate) transcript: Entity<crate::chat_view::Transcript>,
     /// Redraws once a second while a turn runs, for the elapsed timer.
     turn_ticker: Option<Task<()>>,
+    file_picker: Option<Task<()>>,
+    next_attachment_id: u64,
     _events: Task<()>,
     _composer_events: Subscription,
     _history_search_events: Subscription,
     _models_events: Subscription,
     _models_navigation: Subscription,
     _models_tour: Subscription,
+    _team_ask: Subscription,
 }
 
 impl std::fmt::Debug for Shell {
@@ -95,7 +105,10 @@ impl Shell {
                     secondary: false,
                     shift: false,
                 } => shell.submit_composer(window, cx),
-                InputEvent::Change => cx.notify(),
+                InputEvent::Change => {
+                    shell.skill_menu = crate::skill_menu::MenuState::default();
+                    cx.notify();
+                }
                 InputEvent::Focus | InputEvent::Blur => {
                     shell.chat.composer_focused = matches!(event, InputEvent::Focus);
                     cx.notify();
@@ -105,6 +118,8 @@ impl Shell {
         );
         let search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search anything..."));
+        let skill_library = crate::skill_library::SkillLibrary::new(window, cx);
+        let file_index = crate::file_index_view::FileIndexView::new(window, cx);
         let history_search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search chats…"));
         let history_search_events = cx.subscribe_in(
@@ -217,6 +232,29 @@ impl Shell {
                 let applied = this.update(cx, |shell, cx| {
                     let mut should_persist_thread = false;
                     for event in batch {
+                        if let sovra_core::Event::FileIndex(event) = &event {
+                            shell.file_index.state.apply(event);
+                        }
+                        if let sovra_core::Event::Skills(event) = &event {
+                            shell.skill_library.notice = match shell.skills.apply(event) {
+                                Ok(issues) => issues.join("\n"),
+                                Err(error) => error.to_string(),
+                            };
+                        }
+                        if let sovra_core::Event::FilePrepared(prepared) = &event {
+                            let applied = shell
+                                .state
+                                .file_drafts
+                                .get_mut(&prepared.session_id)
+                                .is_some_and(|draft| draft.apply(prepared));
+                            if !applied {
+                                let _ = cx.global::<RuntimeClient>().0.send(Command::Files(
+                                    sovra_core::files::FileCommand::Discard {
+                                        id: prepared.id.clone(),
+                                    },
+                                ));
+                            }
+                        }
                         if let sovra_core::Event::Models(event) = &event {
                             shell
                                 .models
@@ -237,8 +275,23 @@ impl Shell {
                             }
                             _ => None,
                         };
+                        if let sovra_core::Event::Artifacts(
+                            sovra_core::artifacts::ArtifactEvent::ReadyToOpen { path, .. },
+                        ) = &event
+                        {
+                            cx.open_url(&format!("file://{path}"));
+                        }
+                        if matches!(event, sovra_core::Event::Ready { .. }) {
+                            // The roster and library feed chat (@mentions, Saved).
+                            let client = &cx.global::<RuntimeClient>().0;
+                            let _ =
+                                client.send(Command::Teams(sovra_core::teams::TeamCommand::Load));
+                            let _ = client.send(Command::Artifacts(
+                                sovra_core::artifacts::ArtifactCommand::Load,
+                            ));
+                        }
                         if let Some(next_prompt) = shell.state.apply_event(&event) {
-                            shell.dispatch_runtime_prompt(next_prompt, cx);
+                            shell.dispatch_runtime_prompt(&next_prompt, cx);
                             should_persist_thread = true;
                         }
                         if let Some(session_id) = completed_session
@@ -266,8 +319,25 @@ impl Shell {
             }
         });
         let shell_handle = cx.entity().downgrade();
+        let team_view = {
+            let shell = shell_handle.clone();
+            cx.new(|cx| crate::team_view::TeamView::new(shell, window, cx))
+        };
+        let artifacts_view = {
+            let shell = shell_handle.clone();
+            cx.new(|cx| crate::artifacts_view::ArtifactsView::new(shell, window, cx))
+        };
+        let team_ask = cx.subscribe_in(
+            &team_view,
+            window,
+            |shell, _, ask: &crate::team_view::AskTeam, window, cx| {
+                shell.ask_team(ask.member.as_deref(), window, cx);
+            },
+        );
         Self {
             state: WorkspaceState::default(),
+            file_picker: None,
+            next_attachment_id: 0,
             chat: ChatPresentation::new(cx),
             _composer_events: composer_events,
             _history_search_events: history_search_events,
@@ -275,10 +345,14 @@ impl Shell {
             _models_navigation: models_navigation,
             _models_tour: models_tour,
             focus_handle,
-            history_compact: window.viewport_size().width
-                < design::tokens(cx).layout.history_breakpoint,
+            history_compact: Self::sidebar_rail(window),
             history_overlay_open: false,
+            inspector_docked: design::WidthClass::of_window(window).fits_side_pane(),
             composer_input,
+            skills: sovra_core::skills::SkillCatalog::default(),
+            skill_menu: crate::skill_menu::MenuState::default(),
+            skill_library,
+            file_index,
             search_input,
             history_search_input,
             rename_thread_input,
@@ -292,6 +366,9 @@ impl Shell {
             my_ais_advanced_open: false,
             knowledge_times_open: false,
             models,
+            team_view,
+            artifacts_view,
+            _team_ask: team_ask,
             turn_ticker: None,
             transcript: cx.new(|_| crate::chat_view::Transcript::new(shell_handle)),
             _events: task,
@@ -300,7 +377,26 @@ impl Shell {
 
     /// State changed: redraw the shell and the cached conversation view.
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.state.file_setup = self
+            .state
+            .file_drafts
+            .get(&self.state.session_id)
+            .and_then(sovra_core::files::AttachmentDraft::ready)
+            .filter(|files| !files.is_empty())
+            .and_then(|files| self.models.read(cx).state.model_for_files(&files).err());
         self.refresh_transcript(cx);
+        // Team and Artifacts read the roster and library from this state.
+        match self.state.active_tab {
+            NavTab::Team => self.team_view.update(cx, |_, cx| cx.notify()),
+            NavTab::Artifacts => self.artifacts_view.update(cx, |_, cx| cx.notify()),
+            NavTab::Chat
+            | NavTab::MyAis
+            | NavTab::Knowledge
+            | NavTab::Models
+            | NavTab::Schedules
+            | NavTab::Settings
+            | NavTab::Skills => {}
+        }
         cx.notify();
     }
 
@@ -315,6 +411,31 @@ impl Shell {
 
     pub fn workspace(&self) -> &WorkspaceState {
         &self.state
+    }
+
+    /// Opens one artifact in the Artifacts page (from a chat card).
+    pub fn open_artifact(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.select_tab(NavTab::Artifacts, cx);
+        self.artifacts_view.update(cx, |view, cx| view.show(id, cx));
+    }
+
+    /// "Ask my team" goes to Chat in team mode; "Ask Priya" pre-fills `@priya`.
+    pub(crate) fn ask_team(
+        &mut self,
+        member: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_tab(NavTab::Chat, cx);
+        match member {
+            Some(id) => self.fill_composer_draft(&format!("@{id} "), window, cx),
+            None => self.state.team_mode = true,
+        }
+        self.composer_input
+            .read(cx)
+            .focus_handle(cx)
+            .focus(window, cx);
+        self.refresh(cx);
     }
 
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
@@ -416,7 +537,70 @@ impl Shell {
     }
 
     pub fn submit_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.accept_skill_suggestion(window, cx) {
+            return;
+        }
         let text = self.composer_input.read(cx).value().to_string();
+        match self.skills.resolve(&text) {
+            Ok(Some(invocation)) => {
+                if let sovra_core::skills::SkillKind::Action(action) = invocation.skill.kind {
+                    self.run_skill_action(action, invocation.arguments, window, cx);
+                    return;
+                }
+                // An explicit procedure uses the skill-aware orchestrator even
+                // when the preceding conversation was in team mode.
+                self.state.team_mode = false;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.skill_menu.notice = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        }
+        if self
+            .state
+            .file_drafts
+            .get(&self.state.session_id)
+            .is_some_and(|draft| !draft.files.is_empty())
+        {
+            if self.state.is_generating {
+                return;
+            }
+            let Some(files) = self
+                .state
+                .file_drafts
+                .get(&self.state.session_id)
+                .and_then(sovra_core::files::AttachmentDraft::ready)
+            else {
+                return;
+            };
+            if let Err(setup) = self.models.read(cx).state.model_for_files(&files) {
+                self.open_file_model_setup(setup.purpose, window, cx);
+                return;
+            }
+            let prompt = if text.trim().is_empty() {
+                "Please help me understand these files.".to_owned()
+            } else {
+                text
+            };
+            let ids = files.iter().map(|file| file.id.clone()).collect();
+            if self.state.submit_file_prompt(&prompt, files) {
+                self.state.file_drafts.remove(&self.state.session_id);
+                self.composer_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.chat.follow_latest();
+                let _ = cx.global::<RuntimeClient>().0.send(Command::RunWithFiles {
+                    session_id: self.state.session_id.clone(),
+                    prompt,
+                    attachment_ids: ids,
+                });
+                self.persist_active_thread(cx);
+                self.refresh(cx);
+            }
+            return;
+        }
+
         if text.trim().is_empty() {
             return;
         }
@@ -426,6 +610,123 @@ impl Shell {
         self.send_prompt_text(&text, window, cx);
     }
 
+    pub fn choose_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let session_id = self.state.session_id.clone();
+        let original = self.composer_input.read(cx).value().to_string();
+        let remaining = self
+            .skills
+            .resolve(&original)
+            .ok()
+            .flatten()
+            .filter(|invocation| {
+                invocation.skill.kind
+                    == sovra_core::skills::SkillKind::Action(
+                        sovra_core::skills::SkillAction::AddFiles,
+                    )
+            })
+            .map(|invocation| invocation.arguments.to_owned());
+        let selection = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Add to chat".into()),
+        });
+        self.file_picker = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = selection.await;
+            let _ = this.update_in(cx, |shell, window, cx| match result {
+                Ok(Ok(Some(paths))) => {
+                    if !paths.is_empty()
+                        && shell.state.session_id == session_id
+                        && shell.composer_input.read(cx).value().as_ref() == original
+                        && let Some(remaining) = remaining
+                    {
+                        shell.fill_composer_draft(&remaining, window, cx);
+                    }
+                    shell.add_files_to_session(&session_id, paths, cx);
+                }
+                Ok(Ok(None)) => {}
+                _ => {
+                    shell
+                        .state
+                        .file_drafts
+                        .entry(session_id)
+                        .or_default()
+                        .notice =
+                        Some("The file picker couldn't open. Please try Add files again.".into());
+                    shell.refresh(cx);
+                }
+            });
+        }));
+    }
+
+    /// Native picker and drop targets share the same command path; no file IO occurs here.
+    pub fn add_files(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        self.add_files_to_session(&self.state.session_id.clone(), paths, cx);
+    }
+
+    fn add_files_to_session(
+        &mut self,
+        session_id: &str,
+        paths: Vec<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        for path in paths {
+            self.next_attachment_id += 1;
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |time| time.as_nanos());
+            let id = format!("file-{stamp}-{}", self.next_attachment_id);
+            let name = path
+                .file_name()
+                .map_or_else(|| "File".into(), |name| name.to_string_lossy().into_owned());
+            let draft = self.state.file_drafts.entry(session_id.into()).or_default();
+            if !draft.begin(id.clone(), name) {
+                break;
+            }
+            if cx
+                .global::<RuntimeClient>()
+                .0
+                .send(Command::Files(sovra_core::files::FileCommand::Prepare {
+                    session_id: session_id.into(),
+                    id: id.clone(),
+                    path,
+                }))
+                .is_err()
+            {
+                draft.apply(&sovra_core::files::FilePrepared {
+                    session_id: session_id.into(),
+                    id,
+                    result: Err(sovra_core::files::FileError(
+                        "The file reader is unavailable. Please try again.".into(),
+                    )),
+                });
+            }
+        }
+        self.refresh(cx);
+    }
+
+    pub fn remove_attachment(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(draft) = self.state.file_drafts.get_mut(&self.state.session_id) {
+            draft.remove(id);
+        }
+        let _ = cx.global::<RuntimeClient>().0.send(Command::Files(
+            sovra_core::files::FileCommand::Discard { id: id.into() },
+        ));
+        self.refresh(cx);
+    }
+
+    pub fn open_file_model_setup(
+        &mut self,
+        purpose: sovra_core::files::ModelPurpose,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_tab(NavTab::Models, cx);
+        self.models.update(cx, |models, cx| {
+            models.open_for_purpose(purpose, window, cx);
+        });
+    }
+
     pub fn fill_composer_draft(
         &mut self,
         draft: &str,
@@ -433,8 +734,11 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let owned = draft.to_owned();
+        let end = owned.len();
+        self.skill_menu = crate::skill_menu::MenuState::default();
         self.composer_input.update(cx, |input, cx| {
-            input.set_value(owned, window, cx);
+            input.replace_all(owned, window, cx);
+            input.set_selected_range(end..end, cx);
         });
         self.refresh(cx);
     }
@@ -444,7 +748,7 @@ impl Shell {
             self.chat.follow_latest();
         }
         if let Some(dispatched) = self.state.submit_prompt(prompt) {
-            self.dispatch_runtime_prompt(dispatched, cx);
+            self.dispatch_runtime_prompt(&dispatched, cx);
         }
         self.persist_active_thread(cx);
         self.refresh(cx);
@@ -743,25 +1047,53 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         if let Some(dispatched) = self.state.trigger_schedule(schedule_id) {
-            self.dispatch_runtime_prompt(dispatched, cx);
+            self.dispatch_runtime_prompt(&dispatched, cx);
             self.persist_active_thread(cx);
         }
         self.refresh(cx);
     }
 
-    fn dispatch_runtime_prompt(&self, prompt: String, cx: &mut Context<Self>) {
+    fn dispatch_runtime_prompt(&self, prompt: &str, cx: &mut Context<Self>) {
         let session_id = self.state.session_id.clone();
-        let _ = cx
-            .global::<RuntimeClient>()
-            .0
-            .send(Command::RunPrompt { session_id, prompt });
+        if let Some(prompt) = self.state.team_prompt(prompt) {
+            let _ = cx.global::<RuntimeClient>().0.send(Command::Teams(
+                sovra_core::teams::TeamCommand::Run {
+                    session_id,
+                    prompt: prompt.to_owned(),
+                    history: self.state.team_history(),
+                },
+            ));
+            return;
+        }
+        let command = self
+            .state
+            .messages
+            .iter()
+            .rev()
+            .find(|message| !message.attachments.is_empty())
+            .map_or_else(
+                || Command::RunPrompt {
+                    session_id: session_id.clone(),
+                    prompt: prompt.to_owned(),
+                },
+                |message| Command::RunWithFiles {
+                    session_id: session_id.clone(),
+                    prompt: prompt.to_owned(),
+                    attachment_ids: message
+                        .attachments
+                        .iter()
+                        .map(|file| file.id.clone())
+                        .collect(),
+                },
+            );
+        let _ = cx.global::<RuntimeClient>().0.send(command);
     }
 }
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let compact = window.viewport_size().width < design::tokens(cx).layout.history_breakpoint;
-        self.chat.viewport_width = window.viewport_size().width;
+        let compact = Self::sidebar_rail(window);
+        self.inspector_docked = design::WidthClass::of_window(window).fits_side_pane();
         if self.history_compact != compact {
             self.history_compact = compact;
             self.history_overlay_open = false;
@@ -809,6 +1141,14 @@ impl Render for Shell {
 }
 
 impl Shell {
+    /// The shell is the window's root, so it alone sizes top-level panes from the
+    /// window; nested views measure their own container with `design::width_probe`.
+    /// Order of yielding: inspector undocks first (below Large), then the sidebar
+    /// becomes an icon rail with an overlay (below Expanded).
+    fn sidebar_rail(window: &Window) -> bool {
+        design::WidthClass::of_window(window) < design::WidthClass::Expanded
+    }
+
     fn ensure_turn_ticker(&mut self, cx: &mut Context<Self>) {
         if !self.state.is_generating {
             self.turn_ticker = None;
@@ -873,17 +1213,22 @@ impl Shell {
                         .min_h_0()
                         .h_full()
                         .overflow_hidden()
-                        .child(render_chat_column(
-                            &self.state,
-                            &self.composer_input,
-                            &self.chat,
-                            &self.transcript,
-                            cx,
-                        ))
+                        .child(render_chat_column(self, cx))
                         .into_any_element(),
-                    NavTab::Knowledge => {
-                        render_knowledge_view(self.knowledge_times_open, cx).into_any_element()
-                    }
+                    NavTab::Knowledge => render_knowledge_view(self, cx).into_any_element(),
+                    NavTab::Skills => crate::skill_library::render(self, cx).into_any_element(),
+                    NavTab::Team => div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(self.team_view.clone())
+                        .into_any_element(),
+                    NavTab::Artifacts => div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(self.artifacts_view.clone())
+                        .into_any_element(),
                 };
 
                 let sidebar_collapsed = self.history_compact || self.state.history_collapsed;
@@ -916,7 +1261,7 @@ impl Shell {
                             )
                         }),
                     );
-                if self.state.active_tab == NavTab::Knowledge {
+                if self.state.active_tab == NavTab::Knowledge && self.inspector_docked {
                     body = body.child(render_inspector(&self.state, &self.search_input, cx));
                 }
                 v_flex()
@@ -936,7 +1281,7 @@ impl Shell {
     }
 }
 
-pub(crate) fn logo(id: &'static str, size: Pixels) -> impl IntoElement {
+pub(crate) fn logo(id: &'static str, size: gpui_kit::Rems) -> impl IntoElement {
     div()
         .id(id)
         .role(Role::Image)

@@ -490,3 +490,34 @@ fn setup_stage_and_curated_recommendations_progress_deterministically() {
         }
     );
 }
+
+#[test]
+fn interface_scale_steps_through_fixed_zoom_levels_and_clamps_at_the_ends() {
+    let default = InterfaceScale::default();
+    assert_eq!(default.percent(), 100);
+    assert_eq!(default.larger().percent(), 110);
+    assert_eq!(default.smaller().percent(), 90);
+    let mut largest = default;
+    let mut smallest = default;
+    for _ in 0..20 {
+        largest = largest.larger();
+        smallest = smallest.smaller();
+    }
+    assert_eq!(largest, InterfaceScale::LARGEST);
+    assert_eq!(smallest, InterfaceScale::SMALLEST);
+    assert!((InterfaceScale::from_percent(150).factor() - 1.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn interface_scale_snaps_unknown_saved_values_to_the_nearest_level() {
+    assert_eq!(InterfaceScale::from_percent(0), InterfaceScale::SMALLEST);
+    assert_eq!(InterfaceScale::from_percent(1000), InterfaceScale::LARGEST);
+    assert_eq!(InterfaceScale::from_percent(104).percent(), 100);
+    assert_eq!(InterfaceScale::from_percent(106).percent(), 110);
+    let saved: InterfaceScale = serde_json::from_str("120").expect("number");
+    assert_eq!(saved.percent(), 125);
+    assert_eq!(serde_json::to_string(&saved).expect("serialize"), "125");
+    let older: ModelPreferences = serde_json::from_str("{\"favorites\":[],\"active\":null}")
+        .expect("preferences saved before interface scale existed");
+    assert_eq!(older.interface_scale, InterfaceScale::default());
+}

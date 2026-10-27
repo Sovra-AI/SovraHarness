@@ -53,7 +53,10 @@ impl ModelsView {
         let activate_key = key.clone();
         let compare_key = key.clone();
         let favorite = self.state.preferences.favorites.contains(key);
-        let active = self.state.preferences.active.as_ref() == Some(key);
+        let active = self.choosing_purpose.map_or_else(
+            || self.state.preferences.active.as_ref() == Some(key),
+            |purpose| self.state.preferences.purposes.get(&purpose) == Some(key),
+        );
         let missing_key = connection.is_some_and(|c| {
             c.authentication != sovra_core::models::Authentication::None
                 && !c.has_credential
@@ -63,6 +66,8 @@ impl ModelsView {
             "Can't be used in chat"
         } else if missing_key {
             "Add your key to use this"
+        } else if self.choosing_purpose.is_some() {
+            "Use for these files"
         } else if active {
             "Currently in use"
         } else {
@@ -72,6 +77,8 @@ impl ModelsView {
             "This model generates non-text output (such as images, video, or embeddings) and cannot be used for chat."
         } else if missing_key {
             "Ready to connect — add your API key once in Settings or Connections to start chatting."
+        } else if self.choosing_purpose.is_some() {
+            "This choice will be saved for this kind of file. Your everyday chat AI stays the same."
         } else if active {
             "✓ Active now — your Personal AI is currently using this model for new conversations."
         } else {
@@ -109,10 +116,10 @@ impl ModelsView {
                         view.compare_open = true; cx.notify();
                     }))))
             .child(h_flex().flex_wrap().gap(t.space.compact)
-                .child(design::primary_button("model-activate",action_label,cx).disabled(!model.can_chat() || (active && !missing_key))
+                .child(design::primary_button("model-activate",action_label,cx).disabled(!model.can_chat() || (active && !missing_key && self.choosing_purpose.is_none()))
                     .on_click(cx.listener(move |view,_,window,cx| {
                         if missing_key { view.open_connection(edit_connection.clone(),window,cx); }
-                        else { view.choose_model(activate_key.clone(),cx); }
+                        else { view.choose_model(&activate_key,cx); }
                     })))
                 .children((active && !missing_key && model.can_chat()).then(|| {
                     design::primary_button("model-details-go-chat", "Go to Chat →", cx)

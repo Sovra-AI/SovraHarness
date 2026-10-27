@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
 use sovra_adk::AdkHarness;
+use sovra_core::files::ModelPurpose;
 use sovra_core::models::{
     Authentication, CatalogSnapshot, CatalogState, CredentialChange, ModelCommand, ModelConnection,
     ModelError, ModelEvent, ModelInfo, ModelKey, ModelProvider, ModelSecret, ProviderKind,
@@ -35,16 +36,27 @@ impl std::fmt::Debug for ModelsConfig {
 pub(crate) enum ModelExecution {
     Legacy,
     Selected {
-        harness: AdkHarness,
+        // Boxed: `AdkHarness` dwarfs the other variants (`clippy::large_enum_variant`).
+        harness: Box<AdkHarness>,
         timeout: Duration,
     },
     Unavailable(String),
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FileModel {
+    key: ModelKey,
+    pub(crate) model: ModelInfo,
+    pub(crate) provider: ProviderKind,
+    pub(crate) execution: ModelExecution,
+}
+
 pub(crate) struct ModelsRuntime {
     commands: Sender<ModelCommand>,
     pub(crate) execution: Arc<RwLock<ModelExecution>>,
+    pub(crate) file_models: Arc<RwLock<BTreeMap<ModelPurpose, FileModel>>>,
     pub(crate) memory_enabled: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) web_search_enabled: Arc<std::sync::atomic::AtomicBool>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -54,7 +66,9 @@ impl ModelsRuntime {
         let execution = Arc::new(RwLock::new(ModelExecution::Unavailable(
             "Model settings are still loading.".into(),
         )));
+        let file_models = Arc::new(RwLock::new(BTreeMap::new()));
         let memory_enabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let web_search_enabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let actor = ModelActor {
             repository: config.repository,
             providers: config
@@ -73,13 +87,17 @@ impl ModelsRuntime {
             pull_progress: async_channel::bounded(16),
             agent,
             execution: execution.clone(),
+            file_models: file_models.clone(),
             memory_enabled: memory_enabled.clone(),
+            web_search_enabled: web_search_enabled.clone(),
             events,
         };
         Self {
             commands,
             execution,
+            file_models,
             memory_enabled,
+            web_search_enabled,
             // sovra-runtime owns the executor; this actor is the sanctioned spawn point
             // (owned JoinHandle, aborted on drop). The workspace-wide disallow steers
             // other crates here.
@@ -144,7 +162,9 @@ struct ModelActor {
     pull_progress: PullProgressChannel,
     agent: AgentConfig,
     execution: Arc<RwLock<ModelExecution>>,
+    file_models: Arc<RwLock<BTreeMap<ModelPurpose, FileModel>>>,
     memory_enabled: Arc<std::sync::atomic::AtomicBool>,
+    web_search_enabled: Arc<std::sync::atomic::AtomicBool>,
     events: Sender<Event>,
 }
 
@@ -191,6 +211,10 @@ impl ModelActor {
         self.saved = blocking(move || repository.load()).await?;
         self.memory_enabled.store(
             self.saved.preferences.agent_settings.memory_enabled,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.web_search_enabled.store(
+            self.saved.preferences.agent_settings.web_search_enabled,
             std::sync::atomic::Ordering::Relaxed,
         );
         for index in 0..self.saved.connections.len() {
@@ -257,6 +281,7 @@ impl ModelActor {
                 "No AI model is active yet. Add an OpenRouter key in Settings, set up free local Ollama, or connect an OpenAI-compatible URL, then pick a model in Models.".into(),
             );
         }
+        self.rebuild_file_models().await;
         Ok(())
     }
 
@@ -325,6 +350,13 @@ impl ModelActor {
     }
 
     async fn command(&mut self, command: ModelCommand) -> Result<(), ModelError> {
+        let rebuild_files = matches!(
+            &command,
+            ModelCommand::SaveConnection { .. }
+                | ModelCommand::DeleteConnection { .. }
+                | ModelCommand::RemoveManualModel { .. }
+                | ModelCommand::SetAgentSettings { .. }
+        );
         if !self.loaded {
             if matches!(command, ModelCommand::Load) {
                 return self.load().await;
@@ -438,13 +470,28 @@ impl ModelActor {
                 ))
                 .await;
             }
+            ModelCommand::SetInterfaceScale { scale } => {
+                let mut saved = self.saved.clone();
+                saved.preferences.interface_scale = scale;
+                self.persist(saved.clone()).await?;
+                self.saved = saved;
+                self.emit(ModelEvent::PreferencesChanged(
+                    self.saved.preferences.clone(),
+                ))
+                .await;
+            }
             ModelCommand::SetAgentSettings { settings } => {
                 let mut saved = self.saved.clone();
                 saved.preferences.agent_settings = settings;
                 self.persist(saved.clone()).await?;
                 self.saved = saved;
+                self.file_models.write().await.clear();
                 self.memory_enabled.store(
                     self.saved.preferences.agent_settings.memory_enabled,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                self.web_search_enabled.store(
+                    self.saved.preferences.agent_settings.web_search_enabled,
                     std::sync::atomic::Ordering::Relaxed,
                 );
                 if let Some(active) = self.saved.preferences.active.clone() {
@@ -470,6 +517,9 @@ impl ModelActor {
                 .await;
             }
             ModelCommand::Activate { key } => self.activate(&key, true).await?,
+            ModelCommand::AssignPurpose { purpose, key } => {
+                self.assign_purpose(purpose, key).await?;
+            }
             ModelCommand::FetchDetails { key } => {
                 let connection = self.connection(&key.connection_id)?;
                 let model = self.find_model(&key)?;
@@ -548,6 +598,9 @@ impl ModelActor {
                 .await;
             }
         }
+        if rebuild_files {
+            self.rebuild_file_models().await;
+        }
         Ok(())
     }
 
@@ -557,7 +610,10 @@ impl ModelActor {
             .ok_or_else(|| ModelError("This model is no longer in the catalog. Refresh the connection and select a model.".into()))
     }
 
-    async fn activate(&mut self, key: &ModelKey, persist: bool) -> Result<(), ModelError> {
+    async fn configure_model(
+        &self,
+        key: &ModelKey,
+    ) -> Result<(AdkHarness, ModelInfo, ModelConnection), ModelError> {
         let connection = self.connection(&key.connection_id)?;
         let model = self.find_model(key)?;
         if !model.can_chat() {
@@ -590,6 +646,11 @@ impl ModelActor {
                             .into(),
                     )
                 })?;
+        Ok((harness, effective_model, connection))
+    }
+
+    async fn activate(&mut self, key: &ModelKey, persist: bool) -> Result<(), ModelError> {
+        let (harness, model, connection) = self.configure_model(key).await?;
         if persist {
             let mut saved = self.saved.clone();
             saved.preferences.active = Some(key.clone());
@@ -597,9 +658,10 @@ impl ModelActor {
             self.saved = saved;
         }
         *self.execution.write().await = ModelExecution::Selected {
-            harness,
+            harness: Box::new(harness),
             timeout: Duration::from_secs(connection.timeout_seconds),
         };
+        self.rebuild_file_models().await;
         self.emit(ModelEvent::PreferencesChanged(
             self.saved.preferences.clone(),
         ))
@@ -611,6 +673,86 @@ impl ModelActor {
             )))
             .await;
         }
+        Ok(())
+    }
+
+    async fn rebuild_file_models(&self) {
+        let previous = self.file_models.read().await.clone();
+        let mut executions = BTreeMap::new();
+        for purpose in ModelPurpose::ALL {
+            let key = self.saved.preferences.purposes.get(&purpose).or_else(|| {
+                (purpose == ModelPurpose::Documents)
+                    .then_some(self.saved.preferences.active.as_ref())
+                    .flatten()
+            });
+            let Some(key) = key else {
+                continue;
+            };
+            if let Ok((harness, model, connection)) = self.configure_model(key).await
+                && purpose.accepts(&model, connection.kind)
+            {
+                executions.insert(
+                    purpose,
+                    FileModel {
+                        key: key.clone(),
+                        model: model.clone(),
+                        provider: connection.kind,
+                        execution: if self.saved.preferences.active.as_ref() == Some(key) {
+                            self.execution.read().await.clone()
+                        } else if let Some(prior) = previous.get(&purpose).filter(|prior| {
+                            prior.key == *key
+                                && prior.model == model
+                                && prior.provider == connection.kind
+                        }) {
+                            prior.execution.clone()
+                        } else {
+                            ModelExecution::Selected {
+                                harness: Box::new(harness),
+                                timeout: Duration::from_secs(connection.timeout_seconds),
+                            }
+                        },
+                    },
+                );
+            }
+        }
+        *self.file_models.write().await = executions;
+    }
+
+    async fn assign_purpose(
+        &mut self,
+        purpose: ModelPurpose,
+        key: Option<ModelKey>,
+    ) -> Result<(), ModelError> {
+        if let Some(key) = &key {
+            let (_, model, connection) = self.configure_model(key).await?;
+            if !purpose.accepts(&model, connection.kind) {
+                return Err(ModelError(format!(
+                    "Choose a model that can {}. This model or connection cannot handle that kind of input.",
+                    purpose.label().to_lowercase()
+                )));
+            }
+        }
+        let mut saved = self.saved.clone();
+        match key {
+            Some(key) => {
+                saved.preferences.purposes.insert(purpose, key);
+            }
+            None => {
+                saved.preferences.purposes.remove(&purpose);
+            }
+        }
+        self.persist(saved.clone()).await?;
+        self.saved = saved;
+        self.rebuild_file_models().await;
+        self.emit(ModelEvent::PreferencesChanged(
+            self.saved.preferences.clone(),
+        ))
+        .await;
+        self.emit(ModelEvent::Notice(format!(
+            "Saved: {}. Your chat and attachments are waiting for you.",
+            purpose.label()
+        )))
+        .await;
         Ok(())
     }
 
@@ -713,6 +855,7 @@ impl ModelActor {
         })
         .await?;
         self.saved = saved;
+        self.file_models.write().await.clear();
         if let Some(job) = self.refreshes.remove(&connection.id) {
             job.abort();
         }
@@ -762,6 +905,10 @@ impl ModelActor {
     async fn delete_connection(&mut self, id: &str) -> Result<(), ModelError> {
         let mut saved = self.saved.clone();
         saved.connections.retain(|c| c.id != id);
+        saved
+            .preferences
+            .purposes
+            .retain(|_, key| key.connection_id != id);
         saved
             .preferences
             .favorites
@@ -913,6 +1060,19 @@ impl ModelActor {
                         {
                             *existing = (*model).clone();
                         }
+                        // Background consumers resolve capabilities from the saved
+                        // catalogue. Publish the choice only after saving its details.
+                        if let Some(catalog) = self.catalogs.get(&key.connection_id) {
+                            let snapshot = catalog.snapshot.clone();
+                            let id = key.connection_id.clone();
+                            let repository = self.repository.clone();
+                            if let Err(error) =
+                                blocking(move || repository.save_catalog(&id, &snapshot)).await
+                            {
+                                self.emit(ModelEvent::Error(error.0)).await;
+                                return;
+                            }
+                        }
                         self.emit(ModelEvent::DetailsLoaded { key, model }).await;
                     }
                     Err(error) => self.emit(ModelEvent::Error(error.0)).await,
@@ -957,6 +1117,7 @@ impl ModelActor {
                 }
             }
         }
+        self.rebuild_file_models().await;
     }
 }
 

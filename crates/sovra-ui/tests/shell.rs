@@ -348,6 +348,10 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
         window.render_frame(cx);
         assert!(window.find("chat-history-rail").visible());
         assert!(window.find("chat-filter-pills").visible());
+        assert!(
+            window.try_find(("chat-thread-row", 0usize)).is_none(),
+            "untouched drafts are not conversation history"
+        );
 
         // Send a prompt in the first thread and verify auto-titling in the history rail.
         shell.update(cx, |shell, cx| {
@@ -642,6 +646,204 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
             window.find(("chat-thread-row", 0usize)).label(),
             Some("Open conversation Rust Zero-Copy HTTP/3 Parser")
         );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn file_setup_keeps_draft_and_returns_to_send_real_attachments(cx: &mut TestAppContext) {
+    file_setup_flow(cx, false, sovra_core::models::Appearance::Dark);
+}
+
+#[gpui_kit::test]
+fn file_setup_is_reachable_at_minimum_size_in_light_mode(cx: &mut TestAppContext) {
+    file_setup_flow(cx, true, sovra_core::models::Appearance::Light);
+}
+
+#[gpui_kit::test]
+fn file_setup_is_reachable_at_minimum_size_in_dark_mode(cx: &mut TestAppContext) {
+    file_setup_flow(cx, true, sovra_core::models::Appearance::Dark);
+}
+
+fn file_setup_flow(
+    cx: &mut TestAppContext,
+    compact: bool,
+    appearance: sovra_core::models::Appearance,
+) {
+    use sovra_core::files::{Attachment, FileCommand, FilePrepared, ModelPurpose};
+    use sovra_core::models::*;
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut entity = None;
+    let dimensions = if compact {
+        size(px(640.), px(420.))
+    } else {
+        size(px(1280.), px(820.))
+    };
+    let window = cx.open_window(dimensions, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        entity = Some(shell.clone());
+        Root::new(shell, window, cx)
+    });
+    let shell = entity.expect("file setup test fixture succeeds");
+    let mut connection = ModelConnection::new("pictures", ProviderKind::OpenRouter);
+    connection.has_credential = true;
+    let model = ModelInfo {
+        id: "reader".into(),
+        name: "Picture Reader".into(),
+        input_modalities: vec!["text".into(), "image".into()],
+        output_modalities: vec!["text".into()],
+        ..ModelInfo::default()
+    };
+    let key = model.key("pictures");
+    let mut preferences = ModelPreferences {
+        active: Some(key.clone()),
+        appearance,
+        ..ModelPreferences::default()
+    };
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection],
+            preferences: preferences.clone(),
+        }))
+        .expect("file setup test fixture succeeds");
+    events
+        .send_blocking(Event::Models(ModelEvent::CatalogLoaded {
+            connection_id: "pictures".into(),
+            snapshot: CatalogSnapshot {
+                models: vec![model],
+                ..CatalogSnapshot::default()
+            },
+            cached: false,
+        }))
+        .expect("file setup test fixture succeeds");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.fill_composer_draft("What does this sign say?", window, cx);
+        });
+        window.render_frame(cx);
+        window.click("composer-add-files", cx);
+    })
+    .expect("file setup test fixture succeeds");
+    cx.simulate_path_prompt_response(|options| {
+        assert!(options.files && options.multiple && !options.directories);
+        Some(vec!["sign.png".into()])
+    });
+    cx.run_until_parked();
+    let request = std::iter::from_fn(|| commands.try_recv().ok())
+        .find_map(|command| {
+            if let Command::Files(FileCommand::Prepare { session_id, id, .. }) = command {
+                Some((session_id, id))
+            } else {
+                None
+            }
+        })
+        .expect("file setup test fixture succeeds");
+    let attachment = Attachment {
+        id: request.1.clone(),
+        name: "sign.png".into(),
+        mime_type: "image/png".into(),
+        size_bytes: 42,
+        purpose: ModelPurpose::Images,
+        sections: 1,
+        note: None,
+        thumbnail: Vec::new(),
+    };
+    events
+        .send_blocking(Event::FilePrepared(FilePrepared {
+            session_id: request.0,
+            id: request.1.clone(),
+            result: Ok(attachment.clone()),
+        }))
+        .expect("file setup test fixture succeeds");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("attachment-model-guidance").visible());
+        let guidance = window.find("attachment-choose-model").bounds();
+        assert!(guidance.top() >= px(0.) && guidance.bottom() <= dimensions.height);
+        assert_eq!(
+            shell.read(cx).workspace().messages,
+            [] as [sovra_core::ChatMessage; 0]
+        );
+        window.click("attachment-choose-model", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Models);
+        let choose = window.find(("model-use-row", 0usize)).bounds();
+        assert!(choose.top() >= px(0.) && choose.bottom() <= dimensions.height);
+        window.click(("model-use-row", 0usize), cx);
+    })
+    .expect("file setup test fixture succeeds");
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+            command,
+            Command::Models(ModelCommand::AssignPurpose {
+                purpose: ModelPurpose::Images,
+                key: Some(_)
+            })
+        ))
+    );
+    preferences.purposes.insert(ModelPurpose::Images, key);
+    events
+        .send_blocking(Event::Models(ModelEvent::PreferencesChanged(preferences)))
+        .expect("file setup test fixture succeeds");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
+        assert!(window.try_find("attachment-model-guidance").is_none());
+        window.click("composer-send-btn", cx);
+        window.render_frame(cx);
+        let message = &shell.read(cx).workspace().messages[0];
+        assert_eq!(message.text, "What does this sign say?");
+        assert_eq!(message.attachments, vec![attachment]);
+    })
+    .expect("file setup test fixture succeeds");
+    assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::RunWithFiles { prompt, attachment_ids, .. } if prompt == "What does this sign say?" && attachment_ids == vec![request.1.clone()])));
+}
+
+#[gpui_kit::test]
+fn removed_upload_cannot_reappear_after_preparation_finishes(cx: &mut TestAppContext) {
+    use sovra_core::files::{FileCommand, FileError, FilePrepared};
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut entity = None;
+    let window = cx.open_window(size(px(640.), px(420.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        entity = Some(shell.clone());
+        Root::new(shell, window, cx)
+    });
+    let shell = entity.unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.add_files(vec!["notes.txt".into()], cx);
+        });
+        window.render_frame(cx);
+        assert!(window.find("attachment-draft-strip").visible());
+        window.click(("remove-attachment", 0usize), cx);
+    })
+    .unwrap();
+    let (session_id, id) = std::iter::from_fn(|| commands.try_recv().ok())
+        .find_map(|command| {
+            if let Command::Files(FileCommand::Prepare { session_id, id, .. }) = command {
+                Some((session_id, id))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    events
+        .send_blocking(Event::FilePrepared(FilePrepared {
+            session_id,
+            id,
+            result: Err(FileError("late error".into())),
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("attachment-draft-strip").is_none());
     })
     .unwrap();
 }

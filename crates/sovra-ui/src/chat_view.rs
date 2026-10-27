@@ -1,5 +1,5 @@
-//! The standard chat, styled after `SovraSRX`: bare assistant replies beside the Sovra
-//! avatar, gradient user bubbles, a "Thinking…" pill with an elapsed timer and a
+//! The standard chat: bare assistant replies beside the Sovra
+//! avatar, neutral user bubbles, a "Thinking…" pill with an elapsed timer and a
 //! collapsible view of the model's reasoning. Rendering stays cheap while streaming:
 //! rows are virtualized, Markdown is fed only appended bytes (parsed off the UI
 //! thread), collapsed reasoning is never built, and the only continuous animation is
@@ -13,7 +13,6 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
-    input::TextareaState,
     shimmer::ShimmerText,
     text::{TextView, TextViewState},
     tooltip::Tooltip,
@@ -21,7 +20,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AppContext as _, ClipboardItem, Context, Entity, FollowMode, InteractiveElement as _,
-    IntoElement, ListAlignment, ListState, ParentElement as _, Pixels, Render, Role, ScrollHandle,
+    IntoElement, ListAlignment, ListState, ParentElement as _, Rems, Render, Role, ScrollHandle,
     StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription,
     TestSupportExt as _, WeakEntity, Window, div, list, px, relative,
 };
@@ -90,8 +89,6 @@ pub(crate) struct ChatPresentation {
     pub(crate) turn_started: Option<Instant>,
     was_generating: bool,
     pub(crate) composer_focused: bool,
-    /// Window width, for `SovraSRX`'s responsive reading column.
-    pub(crate) viewport_width: Pixels,
 }
 
 fn markdown_view(
@@ -253,7 +250,6 @@ impl ChatPresentation {
             turn_started: None,
             was_generating: false,
             composer_focused: false,
-            viewport_width: px(0.),
         }
     }
 
@@ -385,22 +381,13 @@ pub(crate) fn elapsed_label(ms: u64) -> String {
     }
 }
 
-fn column_width(chat: &ChatPresentation, cx: &Context<Shell>) -> Option<Pixels> {
-    design::tokens(cx)
-        .chat
-        .column_widths
-        .iter()
-        .rev()
-        .find(|(breakpoint, _)| chat.viewport_width >= *breakpoint)
-        .map(|(_, width)| *width)
-}
-
-fn column(chat: &ChatPresentation, cx: &Context<Shell>) -> gpui_kit::Div {
-    let column = div().w_full().min_w_0();
-    match column_width(chat, cx) {
-        Some(width) => column.max_w(width),
-        None => column,
-    }
+/// Fills narrow panes and caps prose at a readable measure on wide ones; the
+/// cap is in rems, so it tracks the interface scale without breakpoints.
+fn column(cx: &Context<Shell>) -> gpui_kit::Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .max_w(design::tokens(cx).chat.column_width)
 }
 
 /// The conversation list, rendered by its own entity so `Shell` can embed it with
@@ -480,14 +467,20 @@ fn render_transcript(chat: &ChatPresentation, cx: &mut Context<Shell>) -> impl I
 }
 
 pub(crate) fn render_chat_column(
-    state: &WorkspaceState,
-    composer_input: &Entity<TextareaState>,
-    chat: &ChatPresentation,
-    transcript: &Entity<Transcript>,
+    shell: &Shell,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
+    let Shell {
+        state, transcript, ..
+    } = shell;
     let t = design::tokens(cx);
-    let welcome = state.messages.is_empty() && !state.is_generating;
+    let welcome = state.messages.is_empty()
+        && shell.composer_input.read(cx).value().is_empty()
+        && !state.is_generating
+        && state
+            .file_drafts
+            .get(&state.session_id)
+            .is_none_or(|draft| draft.files.is_empty());
     let mut area = StyleRefinement::default().w_full().min_h_0();
     // The empty list yields its height to the welcome block.
     area.flex_grow = Some(if welcome { 0. } else { 1. });
@@ -499,23 +492,33 @@ pub(crate) fn render_chat_column(
         .min_w_0()
         .min_h_0()
         .h_full()
-        .px(t.space.medium)
-        .pb(t.space.small)
+        .px(t.space.large)
+        .pb(t.space.medium)
         .overflow_hidden()
         .children(welcome.then(|| render_welcome(state, cx)))
         .child(transcript.clone().cached(area))
+        .children(crate::skill_menu::render(shell, cx).map(|menu| {
+            // Keep a real hit target. A flexible chat column would otherwise
+            // shrink this menu to zero height and swallow its clicks.
+            h_flex()
+                .w_full()
+                .flex_shrink_0()
+                .max_h(t.layout.command_menu_height)
+                .justify_center()
+                .child(column(cx).child(menu))
+        }))
         .child(
             h_flex()
                 .w_full()
                 .justify_center()
-                .child(column(chat, cx).child(render_composer(state, composer_input, chat, cx))),
+                .child(column(cx).child(render_composer(shell, cx))),
         )
 }
 
 /// Starters for people who don't know what to ask an AI yet.
 const STARTERS: [(&str, &str); 4] = [
     (
-        "Explain something simply",
+        "Understand something",
         "Explain this to me simply, like I'm new to it: ",
     ),
     (
@@ -527,7 +530,7 @@ const STARTERS: [(&str, &str); 4] = [
         "Help me plan my week. Here's what I need to get done: ",
     ),
     (
-        "Summarize a text",
+        "Summarize a document",
         "Summarize this in a few bullet points:\n\n",
     ),
 ];
@@ -543,45 +546,51 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
         .next()
         .unwrap_or("there")
         .to_owned();
+    // Scrolls inside its pane in short windows, so the composer always fits.
     h_flex()
         .id("chat-welcome")
-        .test_support()
         .w_full()
         .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .test_support()
         .justify_center()
-        .items_center()
         .child(
             v_flex()
                 .w_full()
+                .my_auto()
                 .max_w(t.chat.welcome_width)
-                .gap(t.space.small)
+                .gap(t.space.medium)
+                .child(logo("chat-welcome-logo", t.layout.logo_hero))
                 .child(
                     div()
-                        .sovra_text(TextRole::PageTitle, cx)
-                        .child(format!("Hi {first_name}, what can I help with?")),
+                        .sovra_text(TextRole::Display, cx)
+                        .child(format!("What’s on your mind, {first_name}?")),
                 )
                 .child(
                     div()
                         .sovra_text(TextRole::Body, cx)
                         .text_color(t.text_secondary)
-                        .child("Ask anything in your own words. Pick a starter if you're not sure where to begin."),
+                        .child("A question, an idea, a little help getting started."),
                 )
                 .child(
-                    h_flex().flex_wrap().gap(t.space.compact).pt(t.space.small).children(
-                        STARTERS.iter().enumerate().map(|(index, (label, draft))| {
+                    h_flex()
+                        .flex_wrap()
+                        .gap(t.space.compact)
+                        .pt(t.space.small)
+                        .children(STARTERS.iter().enumerate().map(|(index, (label, draft))| {
                             design::button(("chat-starter", index), *label, cx)
                                 .ghost()
                                 .small()
                                 .min_h(t.chat.chip_height)
                                 .px(t.space.small)
-                                .rounded(t.radius.pill)
+                                .rounded(t.radius.input)
                                 .border_1()
                                 .border_color(t.chat.chip_border)
                                 .on_click(cx.listener(move |shell, _, window, cx| {
                                     shell.fill_composer_draft(draft, window, cx);
                                 }))
-                        }),
-                    ),
+                        })),
                 ),
         )
 }
@@ -592,13 +601,15 @@ fn render_row(
     index: usize,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
-    // Messages are 22px apart; segments of one reply continue at paragraph spacing.
+    // Messages are 1.375rem apart; segments of one reply continue at paragraph spacing.
+    let t = design::tokens(cx);
+    let (message_gap, paragraph_gap) = (t.chat.message_padding, t.space.medium);
     let (row, top, bottom) = match chat.rows.get(index).copied() {
         Some(Row::Message { message, segment }) => match state.messages.get(message) {
             Some(msg) if msg.role == MessageRole::User => (
                 render_user_message(state, msg, message, cx).into_any_element(),
-                px(11.),
-                px(11.),
+                message_gap,
+                message_gap,
             ),
             Some(msg) => {
                 let streaming = state.is_generating && message + 1 == state.messages.len();
@@ -608,22 +619,22 @@ fn render_row(
                     .and_then(|answer| answer.segments.get(segment))
                     .is_some_and(|part| part.soft);
                 (
-                    render_assistant_segment(msg, message, segment, streaming, chat, cx)
+                    render_assistant_segment(state, msg, message, segment, streaming, chat, cx)
                         .into_any_element(),
                     // A paragraph continued between sentences gets no gap.
                     match (segment, soft) {
-                        (0, _) => px(11.),
-                        (_, true) => px(0.),
-                        (_, false) => px(16.),
+                        (0, _) => message_gap,
+                        (_, true) => Rems::ZERO,
+                        (_, false) => paragraph_gap,
                     },
                     if segment + 1 == segments {
-                        px(11.)
+                        message_gap
                     } else {
-                        px(0.)
+                        Rems::ZERO
                     },
                 )
             }
-            None => (div().into_any_element(), px(0.), px(0.)),
+            None => (div().into_any_element(), Rems::ZERO, Rems::ZERO),
         },
         Some(Row::Waiting) | None => (
             h_flex()
@@ -633,14 +644,14 @@ fn render_row(
                 .child(assistant_avatar(true, cx))
                 .child(waiting_pill("Sovra is thinking…", chat, cx))
                 .into_any_element(),
-            px(11.),
-            px(11.),
+            message_gap,
+            message_gap,
         ),
     };
     h_flex()
         .w_full()
         .justify_center()
-        .child(column(chat, cx).pt(top).pb(bottom).child(row))
+        .child(column(cx).pt(top).pb(bottom).child(row))
 }
 
 fn render_user_message(
@@ -678,7 +689,7 @@ fn render_user_message(
             div()
                 .max_w(relative(0.74))
                 .min_w_0()
-                .px(px(16.))
+                .px(t.space.medium)
                 .py(t.space.small)
                 .bg(chat.user_bubble)
                 .rounded_tl(chat.user_bubble_radius)
@@ -688,12 +699,27 @@ fn render_user_message(
                 .shadow(vec![chat.user_bubble_shadow.clone()])
                 .sovra_text(TextRole::Body, cx)
                 .text_color(chat.user_bubble_foreground)
+                .child(
+                    v_flex()
+                        .gap(t.space.small)
+                        .children(msg.attachments.iter().map(|file| {
+                            v_flex()
+                                .gap(t.space.compact)
+                                .child(crate::widgets::attachments::file_card(file, cx))
+                                .children(file.note.as_ref().map(|note| {
+                                    div()
+                                        .sovra_text(TextRole::Caption, cx)
+                                        .text_color(t.text_secondary)
+                                        .child(note.clone())
+                                }))
+                        })),
+                )
                 .child(msg.text.clone()),
         )
         .child(
             h_flex()
                 .size(chat.avatar)
-                .mt(px(4.))
+                .mt(t.space.compact)
                 .flex_shrink_0()
                 .items_center()
                 .justify_center()
@@ -706,25 +732,46 @@ fn render_user_message(
 
 /// The Sovra logo; a ring marks the reply that is still being written. The ring is
 /// static on purpose: a pulsing one would redraw the window every frame.
+/// A team member's face: their emoji in a soft circle, sized like the Sovra avatar.
+pub(crate) fn member_avatar<V>(
+    icon: &str,
+    size: Rems,
+    cx: &Context<V>,
+) -> impl IntoElement + use<V> {
+    let t = design::tokens(cx);
+    div()
+        .size(size)
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(t.subtle)
+        .border_1()
+        .border_color(t.material_border)
+        .text_size(size * 0.55)
+        .child(icon.to_owned())
+}
+
 fn assistant_avatar(active: bool, cx: &Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let chat = &t.chat;
     h_flex()
         .relative()
         .size(chat.avatar)
-        .mt(px(4.))
+        .mt(t.space.compact)
         .flex_shrink_0()
         .items_center()
         .justify_center()
         .rounded_full()
         .bg(t.subtle)
-        .child(logo("assistant-avatar", chat.avatar - px(8.)))
+        .child(logo("assistant-avatar", chat.avatar - t.space.small))
         .children(active.then(|| {
             div()
                 .absolute()
-                .top(px(-3.))
-                .left(px(-3.))
-                .size(chat.avatar + px(6.))
+                .top(-chat.avatar_ring_offset)
+                .left(-chat.avatar_ring_offset)
+                .size(chat.avatar + chat.avatar_ring_offset + chat.avatar_ring_offset)
                 .rounded_full()
                 .border_1()
                 .border_color(chat.avatar_ring)
@@ -750,11 +797,11 @@ fn waiting_pill(
         .test_support()
         .role(Role::Status)
         .aria_label(label)
-        .mt(px(4.))
+        .mt(t.space.compact)
         .gap(t.space.compact)
         .items_center()
-        .px(px(10.))
-        .py(px(4.))
+        .px(t.space.small)
+        .py(t.space.compact)
         .rounded(t.radius.pill)
         .bg(t.chat.thinking_pill)
         .sovra_text(TextRole::Caption, cx)
@@ -775,7 +822,7 @@ fn live_line(chat: &ChatPresentation, cx: &Context<Shell>) -> impl IntoElement +
         .items_center()
         .sovra_text(TextRole::Caption, cx)
         .text_color(t.text_secondary)
-        .child(div().size(px(8.)).rounded_full().bg(t.accent.violet))
+        .child(div().size(t.space.small).rounded_full().bg(t.accent.violet))
         .child("Writing…")
         .child(format!("· {}", turn_elapsed(chat)))
 }
@@ -876,9 +923,9 @@ fn render_thinking(
                         .map(|part| {
                             div()
                                 .pt(if part.start > 0 && !part.soft {
-                                    px(12.)
+                                    t.space.small + t.space.compact
                                 } else {
-                                    px(0.)
+                                    Rems::ZERO
                                 })
                                 .child(
                                     TextView::new(&part.state)
@@ -893,6 +940,7 @@ fn render_thinking(
 }
 
 fn render_assistant_segment(
+    state: &WorkspaceState,
     msg: &ChatMessage,
     index: usize,
     segment: usize,
@@ -909,6 +957,17 @@ fn render_assistant_segment(
     let last = segment + 1 == markdown.answer.segments.len();
     let answering = !msg.text.is_empty();
     let mut content = v_flex().flex_1().min_w_0().gap(t.space.small);
+    if first && let Some(speaker) = &msg.speaker {
+        content = content.child(
+            div()
+                .id(("team-speaker", index))
+                .test_support()
+                .mt(t.space.compact)
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(format!("{} · {}", speaker.name, speaker.role)),
+        );
+    }
     if first {
         if let Some(thinking) = &markdown.thinking {
             content = content.child(render_thinking(
@@ -919,7 +978,7 @@ fn render_assistant_segment(
                 chat,
                 cx,
             ));
-        } else if streaming && !answering && msg.widgets.is_empty() {
+        } else if streaming && !answering && msg.widgets.is_empty() && msg.speaker.is_none() {
             content = content.child(waiting_pill("Sovra is thinking…", chat, cx));
         }
     }
@@ -929,19 +988,52 @@ fn render_assistant_segment(
         .get(segment)
         .filter(|part| part.fed > part.start)
     {
+        let source = sovra_core::artifacts::ArtifactSource {
+            session_id: state.session_id.clone(),
+            message_id: msg.id.clone(),
+            author: msg
+                .speaker
+                .as_ref()
+                .map_or_else(|| "Sovra".to_owned(), |speaker| speaker.name.clone()),
+        };
         let view = TextView::new(&part.state)
             .selectable(true)
             .scrollable(false)
             .style(design::markdown_style(cx))
-            .code_block_actions(|code, _, cx| {
+            .code_block_actions(move |code, _, cx| {
                 let text = code.code().to_string();
-                design::button("copy-code", "Copy", cx)
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::Copy)
-                    .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                    })
+                let language = code.lang().map(|lang| lang.to_string()).unwrap_or_default();
+                let save = sovra_core::artifacts::draft_from_piece(
+                    &language,
+                    &text,
+                    source.clone(),
+                    "Saved snippet",
+                );
+                h_flex()
+                    .gap(design::tokens(cx).space.hair)
+                    .child(
+                        design::button("copy-code", "Copy", cx)
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Copy)
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                            }),
+                    )
+                    .child(
+                        design::button("save-code", "Save", cx)
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Bookmark)
+                            .accessibility_label("Save this to Artifacts")
+                            .on_click(move |_, _, cx| {
+                                let _ = cx.global::<crate::RuntimeClient>().0.send(
+                                    sovra_core::Command::Artifacts(
+                                        sovra_core::artifacts::ArtifactCommand::Save(save.clone()),
+                                    ),
+                                );
+                            }),
+                    )
             });
         let body = div()
             .w_full()
@@ -972,6 +1064,20 @@ fn render_assistant_segment(
         }
         if !streaming && (answering || msg.model.is_some()) {
             let copy_text = msg.text.clone();
+            let saved = state
+                .artifacts
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.source.message_id == msg.id);
+            let save_text = msg.text.clone();
+            let source = sovra_core::artifacts::ArtifactSource {
+                session_id: state.session_id.clone(),
+                message_id: msg.id.clone(),
+                author: msg
+                    .speaker
+                    .as_ref()
+                    .map_or_else(|| "Sovra".to_owned(), |speaker| speaker.name.clone()),
+            };
             content = content.child(
                 h_flex()
                     .id(("message-actions", index))
@@ -996,6 +1102,39 @@ fn render_assistant_segment(
                                 cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                             })
                     }))
+                    .children(answering.then(|| {
+                        design::button(
+                            ("save-message", index),
+                            if saved { "Saved" } else { "Save" },
+                            cx,
+                        )
+                        .ghost()
+                        .xsmall()
+                        .icon(Icon::new(if saved {
+                            IconName::Check
+                        } else {
+                            IconName::Bookmark
+                        }))
+                        .px(t.space.compact)
+                        .accessibility_label(if saved {
+                            "Saved to Artifacts"
+                        } else {
+                            "Save this answer to Artifacts"
+                        })
+                        .tooltip("Keep this in Artifacts")
+                        .on_click(move |_, _, cx| {
+                            let draft = sovra_core::artifacts::draft_from_reply(
+                                &save_text,
+                                source.clone(),
+                                "Saved answer",
+                            );
+                            let _ = cx.global::<crate::RuntimeClient>().0.send(
+                                sovra_core::Command::Artifacts(
+                                    sovra_core::artifacts::ArtifactCommand::Save(draft),
+                                ),
+                            );
+                        })
+                    }))
                     .children(
                         msg.model
                             .as_ref()
@@ -1004,7 +1143,12 @@ fn render_assistant_segment(
             );
         }
     }
-    let gutter = if first {
+    let gutter = if first && let Some(speaker) = &msg.speaker {
+        div()
+            .mt(t.space.compact)
+            .child(member_avatar(&speaker.icon, t.chat.avatar, cx))
+            .into_any_element()
+    } else if first {
         assistant_avatar(streaming, cx).into_any_element()
     } else {
         // Continuation rows keep the text aligned under the first row's text.

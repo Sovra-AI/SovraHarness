@@ -4,18 +4,27 @@
 //! `adk-tool`, and `adk-ui` (native AG-UI / A2UI surfaces) behind a pure `sovra-core`
 //! boundary so upstream crates never depend on ADK types directly.
 
+mod artifacts;
 pub mod decision_client;
+mod file_index;
+mod files;
 mod native_ui;
+mod orchestrator;
+mod skills;
+mod team;
+mod web_search;
+
+pub use artifacts::ArtifactSaver;
+pub use team::TeamTurn;
+pub use web_search::SearchClient;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use adk_agent::LlmAgentBuilder;
-use adk_core::{Content, EventTextDeltas, Llm, Part, Tool};
+use adk_core::{Agent, Content, EventTextDeltas, Llm, Part, Tool};
 use adk_model::GeminiModel;
 use adk_runner::Runner;
 use adk_session::{CreateRequest, GetRequest, InMemorySessionService, SessionService};
-use adk_tool::GoogleSearchTool;
 use async_channel::Sender;
 use futures::StreamExt as _;
 use sovra_core::models::{Authentication, ModelConnection, ModelInfo, ModelSecret, ProviderKind};
@@ -40,6 +49,10 @@ pub enum Error {
     Execution(#[source] adk_core::AdkError),
     #[error("Laya/OpenJev decision router unavailable: {0}")]
     DecisionRouter(String),
+    #[error("failed to build the web search client: {0}")]
+    SearchClient(String),
+    #[error("{0}")]
+    Skill(String),
 }
 
 /// High-level ADK-Rust harness managing sessions, AG-UI tools, and agent execution.
@@ -50,6 +63,17 @@ pub struct AdkHarness {
     sessions: Arc<InMemorySessionService>,
     secrets: Vec<ModelSecret>,
     response_model: ResponseModel,
+    llm: Arc<dyn Llm>,
+    base_tools: Vec<Arc<dyn Tool>>,
+    base_instruction: String,
+    file_reader: Option<Arc<files::ReadAttachment>>,
+    /// Built parent. Its sub-agents are the roster delegates.
+    root: Arc<dyn Agent>,
+    search: Option<SearchClient>,
+    web_search_enabled: bool,
+    tools_enabled: bool,
+    /// Set by [`AdkHarness::with_artifact_saver`]; team members inherit it.
+    artifact_saver: Option<ArtifactSaver>,
 }
 
 impl std::fmt::Debug for AdkHarness {
@@ -61,6 +85,101 @@ impl std::fmt::Debug for AdkHarness {
 }
 
 impl AdkHarness {
+    /// Attach only the scoped index reader supplied by the runtime. This never
+    /// gives the model arbitrary path access or enables unsupported model tools.
+    pub fn with_indexed_files(
+        &self,
+        reader: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
+    ) -> Result<Self, Error> {
+        let mut tools = self.base_tools.clone();
+        tools.retain(|tool| !file_index::TOOL_NAMES.contains(&tool.name()));
+        if self.tools_enabled
+            && let Some(reader) = reader
+        {
+            tools.extend(file_index::tools(&reader));
+        }
+        self.rebuild(self.base_instruction.clone(), tools)
+    }
+    /// Apply an explicitly selected procedure without inserting it into user history.
+    pub fn with_skill(&self, skill: &sovra_core::skills::Skill) -> Result<Self, Error> {
+        skill
+            .validate()
+            .map_err(|error| Error::Skill(error.to_string()))?;
+        if !skill.enabled || !matches!(skill.kind, sovra_core::skills::SkillKind::Procedure) {
+            return Err(Error::Skill(
+                "This skill cannot run as a model procedure.".into(),
+            ));
+        }
+        for tool in &skill.tools {
+            if !self.skill_capabilities().contains(tool) {
+                return Err(Error::Skill(format!(
+                    "/{} needs {tool}, which is unavailable in this turn. Check tool settings and attach files if needed.",
+                    skill.name
+                )));
+            }
+        }
+        self.rebuild(
+            format!("{}\n\n{}", self.base_instruction, skill.instruction_block()),
+            self.base_tools.clone(),
+        )
+    }
+
+    /// A per-turn catalogue; replacement does not accumulate duplicate loaders.
+    pub fn with_skill_catalog(
+        &self,
+        catalog: Arc<sovra_core::skills::SkillCatalog>,
+    ) -> Result<Self, Error> {
+        self.with_skill_library(catalog, None)
+    }
+
+    pub fn with_skill_library(
+        &self,
+        catalog: Arc<sovra_core::skills::SkillCatalog>,
+        resources: Option<Arc<dyn sovra_core::skills::SkillResources>>,
+    ) -> Result<Self, Error> {
+        let mut tools = self.base_tools.clone();
+        tools.retain(|tool| tool.name() != "load_skill");
+        if self.tools_enabled {
+            let mut loader = skills::LoadSkill::new(catalog, self.skill_capabilities());
+            loader.resources = resources;
+            tools.push(Arc::new(loader));
+        }
+        self.rebuild(self.base_instruction.clone(), tools)
+    }
+
+    fn skill_capabilities(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .base_tools
+            .iter()
+            .map(|tool| tool.name().into())
+            .collect();
+        names.extend(
+            self.root
+                .sub_agents()
+                .iter()
+                .map(|agent| agent.name().into()),
+        );
+        // `web_search` stays on WebSearchAgent. Advertising it here let `/web-search`
+        // activate against a tool the parent strips.
+        names
+    }
+
+    /// Roster delegates attached to the built orchestrator, in roster order.
+    ///
+    /// Each pair is the specialist id and description ADK exposes for that child.
+    pub fn delegates(&self) -> Vec<(String, String)> {
+        self.root
+            .sub_agents()
+            .iter()
+            .map(|agent| (agent.name().to_owned(), agent.description().to_owned()))
+            .collect()
+    }
+
+    /// Name of the agent that answers the turn.
+    pub fn orchestrator_name(&self) -> &str {
+        self.root.name()
+    }
+
     fn safe_error(&self, error: &impl std::fmt::Display) -> String {
         let mut message = error.to_string();
         for secret in &self.secrets {
@@ -151,12 +270,16 @@ impl AdkHarness {
                 Arc::new(adk_model::AnthropicClient::new(anthropic).map_err(Error::ModelInit)?)
             }
         };
-        let tools = if model.supports("tools") {
-            native_ui::tools()
-        } else {
-            Vec::new()
-        };
-        let mut harness = Self::with_llm_and_tools(config, llm, tools)?;
+        let tools = web_search::chat_tools(model.supports("tools"), None);
+        let mut harness = Self::assemble(
+            config,
+            llm,
+            tools,
+            None,
+            None,
+            false,
+            model.supports("tools"),
+        )?;
         harness.response_model = ResponseModel {
             model_id: model.id.clone(),
             name: model.name.clone(),
@@ -168,14 +291,15 @@ impl AdkHarness {
         Ok(harness)
     }
 
-    /// Builds an `AdkHarness` backed by Google's `GeminiModel`, `GoogleSearchTool`, and
-    /// `adk-ui`'s native `UiToolset` (`ag_ui` / `a2ui` surface rendering tools).
+    /// Builds an `AdkHarness` backed by Google's `GeminiModel` and `adk-ui`'s native
+    /// `UiToolset` (`ag_ui` / `a2ui` surface rendering tools).
+    ///
+    /// Web search is not `GoogleSearchTool`. The orchestrator attaches the in-repo
+    /// `SearXNG` tool to `WebSearchAgent` only when [`Self::with_web_search`] is used.
     pub fn from_gemini_config(config: &AgentConfig) -> Result<Self, Error> {
         let api_key = config.api_key.as_deref().ok_or(Error::MissingApiKey)?;
         let model = GeminiModel::new(api_key, &config.model).map_err(Error::ModelInit)?;
-        let mut tools: Vec<Arc<dyn Tool>> = vec![Arc::new(GoogleSearchTool::new())];
-        tools.extend(native_ui::tools());
-        let mut harness = Self::with_llm_and_tools(config, Arc::new(model), tools)?;
+        let mut harness = Self::with_llm_and_tools(config, Arc::new(model), native_ui::tools())?;
         harness.response_model = ResponseModel {
             model_id: config.model.clone(),
             name: config.model.clone(),
@@ -190,32 +314,179 @@ impl AdkHarness {
         llm: Arc<dyn Llm>,
         tools: Vec<Arc<dyn Tool>>,
     ) -> Result<Self, Error> {
+        Self::assemble(config, llm, tools, None, None, false, true)
+    }
+
+    /// Same chat model and session. The parent stays the orchestrator and gains
+    /// `WebSearchAgent` with the in-repo search tool.
+    pub fn with_web_search(&self, client: SearchClient) -> Result<Self, Error> {
+        self.rebuild_configured(
+            self.base_instruction.clone(),
+            self.tools_without_search(),
+            Some(client),
+            true,
+        )
+    }
+
+    /// Drops `WebSearchAgent` so this turn cannot answer from web hits.
+    pub fn without_web_search(&self) -> Result<Self, Error> {
+        self.rebuild_configured(
+            web_search::web_search_disabled_instruction(&self.base_instruction),
+            self.tools_without_search(),
+            None,
+            false,
+        )
+    }
+
+    /// Same provider session, specialized for the files explicitly attached to this chat.
+    pub fn with_files(
+        &self,
+        files: Arc<Vec<sovra_core::files::FileContent>>,
+        tools_enabled: bool,
+    ) -> Result<Self, Error> {
+        let reader = Arc::new(files::ReadAttachment::new(files));
+        let mut tools = self.tools_without_search();
+        tools.retain(|tool| tool.name() != "read_attachment");
+        if tools_enabled {
+            tools.push(reader.clone());
+        }
+        let mut base = self.clone();
+        base.tools_enabled &= tools_enabled;
+        let mut harness = base.rebuild(files::instruction(&self.base_instruction), tools)?;
+        harness.file_reader = Some(reader);
+        Ok(harness)
+    }
+
+    /// Executes actual text/media inputs. The caller has already validated the model's modalities.
+    pub async fn run_with_files(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        char_budget: usize,
+        events: &Sender<Event>,
+    ) {
+        let Some(reader) = &self.file_reader else {
+            let _ = events
+                .send(Event::AgentError {
+                    session_id: session_id.into(),
+                    message: "No files are prepared for this reader. Add the files again.".into(),
+                })
+                .await;
+            return;
+        };
+        if let Err(error) = self.ensure_session(session_id).await {
+            let _ = events
+                .send(Event::AgentError {
+                    session_id: session_id.into(),
+                    message: self.safe_error(&error),
+                })
+                .await;
+            return;
+        }
+        self.stream_content(
+            session_id,
+            files::content(prompt, reader, char_budget),
+            events,
+        )
+        .await;
+    }
+
+    fn tools_without_search(&self) -> Vec<Arc<dyn Tool>> {
+        self.base_tools
+            .iter()
+            .filter(|tool| {
+                let name = tool.name();
+                name != "web_search" && name != "google_search"
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn rebuild(&self, instruction: String, tools: Vec<Arc<dyn Tool>>) -> Result<Self, Error> {
+        self.rebuild_configured(
+            instruction,
+            tools,
+            self.search.clone(),
+            self.web_search_enabled,
+        )
+    }
+
+    fn rebuild_configured(
+        &self,
+        instruction: String,
+        tools: Vec<Arc<dyn Tool>>,
+        search: Option<SearchClient>,
+        web_search_enabled: bool,
+    ) -> Result<Self, Error> {
+        let config = AgentConfig {
+            app_name: self.app_name.clone(),
+            agent_name: orchestrator::ORCHESTRATOR_ID.to_owned(),
+            model: self.response_model.model_id.clone(),
+            instruction,
+            api_key: None,
+            ..AgentConfig::default()
+        };
+        let mut built = Self::assemble(
+            &config,
+            Arc::clone(&self.llm),
+            tools,
+            Some(Arc::clone(&self.sessions)),
+            search,
+            web_search_enabled,
+            self.tools_enabled,
+        )?;
+        built.response_model.clone_from(&self.response_model);
+        built.secrets.clone_from(&self.secrets);
+        built.artifact_saver.clone_from(&self.artifact_saver);
+        built.file_reader.clone_from(&self.file_reader);
+        Ok(built)
+    }
+
+    fn assemble(
+        config: &AgentConfig,
+        llm: Arc<dyn Llm>,
+        tools: Vec<Arc<dyn Tool>>,
+        sessions: Option<Arc<InMemorySessionService>>,
+        search: Option<SearchClient>,
+        web_search_enabled: bool,
+        tools_enabled: bool,
+    ) -> Result<Self, Error> {
+        let web_search_enabled = web_search_enabled && tools_enabled;
         let response_model = ResponseModel {
             model_id: llm.name().into(),
             name: llm.name().into(),
             provider: String::new(),
         };
+        let base_instruction = config.instruction.clone();
         let instruction = if tools.is_empty() {
-            config.instruction.clone()
+            base_instruction.clone()
         } else {
             format!(
-                "{}\n\nNative UI tools are optional. Answer normal conversational questions directly in Markdown, including ordinary lists and tables. Use a native UI tool only when the user asks for an interactive interface or when a concrete choice or confirmation benefits from buttons. Do not turn greetings, explanations or simple answers into cards, menus or task workflows. Never invent progress, actions or tool results. Button replies contain surface_ref and a button_click event. Use only tools actually available in this session.",
-                config.instruction
+                "{base_instruction}\n\nNative UI tools are optional. Answer normal conversational questions directly in Markdown, including ordinary lists and tables. Use a native UI tool only when the user asks for an interactive interface or when a concrete choice or confirmation benefits from buttons. Do not turn greetings, explanations or simple answers into cards, menus or task workflows. Never invent progress, actions or tool results. Button replies contain surface_ref and a button_click event. Use only tools actually available in this session."
             )
         };
-        let mut builder = LlmAgentBuilder::new(&config.agent_name)
-            .description("Sovra conversational assistant")
-            .instruction(instruction)
-            .model(llm);
-        for tool in tools {
-            builder = builder.tool(tool);
-        }
-        let agent = builder.build().map_err(Error::AgentBuild)?;
-        let sessions = Arc::new(InMemorySessionService::new());
+        let stored_tools = tools
+            .into_iter()
+            .filter(|tool| {
+                let name = tool.name();
+                tools_enabled && name != "web_search" && name != "google_search"
+            })
+            .collect::<Vec<_>>();
+        let root = orchestrator::build(orchestrator::OrchestratorParts {
+            llm: Arc::clone(&llm),
+            parent_tools: stored_tools.clone(),
+            instruction,
+            search: search.clone(),
+            web_search_enabled,
+            tools_enabled,
+        })?;
+        let sessions = sessions.unwrap_or_else(|| Arc::new(InMemorySessionService::new()));
+        let session_service: Arc<dyn SessionService> =
+            Arc::clone(&sessions) as Arc<dyn SessionService>;
         let runner = Runner::builder()
             .app_name(&config.app_name)
-            .agent(Arc::new(agent))
-            .session_service(sessions.clone())
+            .agent(Arc::clone(&root) as Arc<dyn Agent>)
+            .session_service(session_service)
             .build()
             .map_err(Error::RunnerBuild)?;
         Ok(Self {
@@ -224,6 +495,15 @@ impl AdkHarness {
             sessions,
             response_model,
             secrets: config.api_key.iter().cloned().map(ModelSecret).collect(),
+            llm,
+            base_tools: stored_tools,
+            base_instruction,
+            file_reader: None,
+            artifact_saver: None,
+            root,
+            search,
+            web_search_enabled,
+            tools_enabled,
         })
     }
 
@@ -243,7 +523,8 @@ impl AdkHarness {
                 .await;
             return;
         }
-        self.stream_turn(session_id, prompt, events).await;
+        self.stream_content(session_id, Content::new("user").with_text(prompt), events)
+            .await;
     }
 
     async fn ensure_session(&self, session_id: &str) -> Result<(), Error> {
@@ -270,8 +551,7 @@ impl AdkHarness {
             .map_err(Error::Session)
     }
 
-    async fn stream_turn(&self, session_id: &str, prompt: &str, events: &Sender<Event>) {
-        let content = Content::new("user").with_text(prompt);
+    async fn stream_content(&self, session_id: &str, content: Content, events: &Sender<Event>) {
         let mut stream = match self
             .runner
             .run_str(DEFAULT_USER_ID, session_id, content)
@@ -390,7 +670,8 @@ async fn forward_adk_event(
     started: std::time::Instant,
     events: &Sender<Event>,
 ) -> bool {
-    let widgets = native_ui::extract_surfaces(adk_event);
+    let mut widgets = native_ui::extract_surfaces(adk_event);
+    widgets.extend(artifacts::saved_artifact_widgets(adk_event));
     let (thinking, text) = extract_output(adk_event);
     if (!widgets.is_empty() || text.is_some() || thinking.is_some())
         && let Some(model) = response_model.take()

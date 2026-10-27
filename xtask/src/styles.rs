@@ -33,6 +33,7 @@ fn check_views(directory: &Path, design: &Path) -> anyhow::Result<()> {
             check_views(&path, design)?;
         } else if path.extension().is_some_and(|ext| ext == "rs") {
             let source = std::fs::read_to_string(&path)?;
+            check_adaptive_sizes(&path, &source)?;
             for (line, text) in source.lines().enumerate() {
                 let code = text.split("//").next().unwrap_or_default();
                 // Deliberately a source guard, not a Rust parser: catches common
@@ -91,4 +92,88 @@ fn check_views(directory: &Path, design: &Path) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Responsive layout rules (docs/styling.md → Responsive layout): sizes come from
+/// rem-based tokens so they follow the interface scale, and only the shell —
+/// the window's root view — may size panes from the window instead of measuring
+/// its own container. Test modules may use literal window sizes.
+fn check_adaptive_sizes(path: &Path, source: &str) -> anyhow::Result<()> {
+    let shell = path.file_name().is_some_and(|name| name == "shell.rs");
+    for (line, text) in source.lines().enumerate() {
+        if text.starts_with("mod tests") {
+            break;
+        }
+        let code = text.split("//").next().unwrap_or_default();
+        let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        let literal = |call: &str| {
+            compact.match_indices(call).any(|(at, _)| {
+                let method = compact[..at].ends_with('.');
+                let argument = &compact[at + call.len()..];
+                !method && !argument.starts_with("0.)") && !argument.starts_with("0.0)")
+            })
+        };
+        if literal("px(") || literal("rems(") {
+            bail!(
+                "{}:{}: use rem-based tokens from design::tokens(cx) instead of literal sizes, \
+                 so layouts follow the interface scale; see docs/styling.md → Responsive layout",
+                path.display(),
+                line + 1
+            );
+        }
+        if !shell && (compact.contains("viewport_size()") || compact.contains("of_window(")) {
+            bail!(
+                "{}:{}: size a view from its own container with design::width_probe, not the \
+                 window; see docs/styling.md → Responsive layout",
+                path.display(),
+                line + 1
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::check_adaptive_sizes;
+
+    fn passes(file: &str, source: &str) -> bool {
+        check_adaptive_sizes(Path::new(file), source).is_ok()
+    }
+
+    #[test]
+    fn literal_sizes_are_rejected_but_tokens_padding_and_zero_pass() {
+        assert!(!passes("view.rs", "    .w(px(260.))"));
+        assert!(!passes("view.rs", "    .gap(gpui_kit::px(2.))"));
+        assert!(!passes("view.rs", "    .max_w(rems(40.))"));
+        assert!(passes(
+            "view.rs",
+            "    .px(t.space.small).w(t.layout.sidebar_width)"
+        ));
+        assert!(passes(
+            "view.rs",
+            "    ListState::new(0, ListAlignment::Top, px(0.))"
+        ));
+        assert!(passes(
+            "view.rs",
+            "    // a .w(px(260.)) example in a comment"
+        ));
+        assert!(passes(
+            "view.rs",
+            "mod tests {\n    size(px(640.), px(420.))"
+        ));
+    }
+
+    #[test]
+    fn only_the_shell_reads_the_window_width() {
+        let source = "    let narrow = window.viewport_size().width < limit;";
+        assert!(!passes("models_view.rs", source));
+        assert!(passes("shell.rs", source));
+        assert!(!passes(
+            "models_view.rs",
+            "    WidthClass::of_window(window)"
+        ));
+    }
 }

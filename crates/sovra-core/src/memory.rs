@@ -284,6 +284,34 @@ pub trait MemoryStore: Send + Sync {
     ) -> Result<(), MemoryError> {
         Ok(())
     }
+
+    /// The saved team roster; `None` before the user's team was first saved.
+    async fn load_team(&self) -> Result<Option<Vec<crate::teams::TeamMember>>, MemoryError> {
+        Ok(None)
+    }
+
+    /// Replaces the saved team roster.
+    async fn save_team(&self, _members: &[crate::teams::TeamMember]) -> Result<(), MemoryError> {
+        Ok(())
+    }
+
+    /// Non-deleted artifacts, newest first.
+    async fn list_artifacts(&self) -> Result<Vec<crate::artifacts::Artifact>, MemoryError> {
+        Ok(Vec::new())
+    }
+
+    /// Upserts an artifact (its versions travel with it).
+    async fn save_artifact(
+        &self,
+        _artifact: &crate::artifacts::Artifact,
+    ) -> Result<(), MemoryError> {
+        Ok(())
+    }
+
+    /// Soft-deletes an artifact as of `at`.
+    async fn delete_artifact(&self, _id: &str, _at: Timestamp) -> Result<(), MemoryError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

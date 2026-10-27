@@ -167,3 +167,55 @@ architecture. Changing it requires a stated reason in the same change.
 - Extend this system before inventing local styles. Do not copy the web stack or
   duplicate token values/rules for individual agents. `check-styles` runs in CI and
   hooks; keep the contrast and headless rendering checks passing with `cargo xtask ci`.
+
+## Teams and artifacts (all agents)
+
+Design and sources: `docs/teams-and-artifacts.md`.
+
+- **Multi-agent output streams as AG-UI.**
+  - Team turns emit `Event::AgUi` with typed `sovra_core::AgUiEvent`s (`RUN_*`,
+    `ACTIVITY_SNAPSHOT`, `SUBAGENT_*`, `TEXT_MESSAGE_*`), with spec field names.
+  - Attribute every member message through `subagent_run_id`.
+  - Do not add ad-hoc team events beside these.
+- **Team rules are pure** in `sovra-core/src/teams.rs`: who speaks, passes, the
+  Conductor tail, `VisibleStream`. `sovra-adk/src/team.rs` only runs turns.
+  Never show `<pass/>` or `[[CONDUCTOR: …]]` text.
+- **Artifact kinds are data.** One `ArtifactKind` variant plus one `KINDS` row, an
+  icon in `artifacts_view::kind_icon`, and nothing else.
+- **Anything an agent produces must be saveable.** Replies and code blocks have
+  **Save**; agents with tools get `save_artifact` via `AdkHarness::with_artifact_saver`.
+- **Artifacts are never executed in-app.** Preview as source; HTML, SVG and Mermaid
+  open in the browser from a throwaway copy.
+- **Plain words for non-technical people.** Say "helper", "Save", "Open in browser" —
+  never "persona", "agent" or "export". Never lose work: edits keep versions, deletes
+  are soft and ask twice, built-in helpers switch off instead of being deleted.
+
+## Responsive layout (all agents, every UI change)
+
+The UI must work in any window on any display, from the minimum window to an
+ultrawide monitor, at any display scale factor and any **Text size** (75–200%).
+Rules and sources: `docs/styling.md` → *Responsive layout*. `check-styles` enforces
+the first two rules.
+
+- **Size in rems, from tokens.** Views take every size from `design::tokens(cx)`
+  (rem-based, follows the interface scale). Never write `px(N)`/`rems(N)` in a view.
+  Pixels are only for 1px hairlines, shadows, and OS window bounds in `design/`.
+  Never compute physical pixels; GPUI owns the scale factor and pixel snapping.
+- **Decide from the container, not the window.** Use `design::WidthClass`
+  (Material 3: compact <37.5rem, medium <52.5, expanded <75, large <100, extra-large).
+  Only `shell.rs` (the window root) may read `viewport_size()`/`of_window`; nested
+  views measure their own pane with `design::width_probe` and re-render on class change.
+- **Yield in a fixed order:** the window's inspector undocks first (window below Large;
+  a list/detail view undocks its detail when its own pane is below Expanded),
+  then the sidebar becomes a rail with an overlay (below Expanded), so side panes never
+  squeeze the main pane under `layout.content_min_width` (25rem) where the window has
+  room for it. The same features stay reachable at every size.
+- **Flex, don't fix.** Main panes `flex_1().min_w_0().min_h_0()`, fixed rails
+  `flex_shrink_0()`. Text in flex rows gets `min_w_0` plus truncation/wrapping. Rows of
+  actions `flex_wrap`. Content that can outgrow its pane scrolls inside it.
+- **Cap and centre what is read.** Prose uses `chat.column_width`, forms
+  `layout.reading_width`, card pages `layout.page_width`. Use `w_full().max_w(..)` in a
+  centred container, never full-bleed text on large monitors.
+- **Prove it.** Layout changes get a headless test at the minimum window
+  (640×420), a wide window (≥2560px) and 200% interface size (`tests/styling.rs`).
+

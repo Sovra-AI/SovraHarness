@@ -20,6 +20,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use sovra_core::artifacts::Artifact;
+use sovra_core::teams::TeamMember;
 use sovra_core::{
     ChatThread, ConversationKind, Embedding, Episode, EpisodeId, EpisodeKind, Fact, FactId,
     MemoryError, MemoryStore, NewEpisode, NewFact, RecallQuery, RecalledFact, Timestamp, fuse_rrf,
@@ -433,9 +435,111 @@ impl MemoryStore for SurrealStore {
         .await?;
         Ok(())
     }
+
+    async fn load_team(&self) -> Result<Option<Vec<TeamMember>>, MemoryError> {
+        let rows: Vec<TeamRow> = self
+            .query(
+                "SELECT members_json FROM $record;",
+                ("record", RecordId::new("team", "roster")),
+            )
+            .await?
+            .take(0)
+            .map_err(|e| backend(&e))?;
+        rows.into_iter()
+            .next()
+            .map(|row| {
+                serde_json::from_str(&row.members_json)
+                    .map_err(|e| MemoryError::Backend(format!("deserialize team: {e}")))
+            })
+            .transpose()
+    }
+
+    async fn save_team(&self, members: &[TeamMember]) -> Result<(), MemoryError> {
+        let members_json = serde_json::to_string(members)
+            .map_err(|e| MemoryError::Backend(format!("serialize team: {e}")))?;
+        self.query(
+            "UPSERT $record CONTENT $data;",
+            (
+                "record",
+                RecordId::new("team", "roster"),
+                "data",
+                TeamRow { members_json },
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn list_artifacts(&self) -> Result<Vec<Artifact>, MemoryError> {
+        let rows: Vec<ArtifactRow> = self
+            .query(
+                "SELECT artifact_id, updated_at, artifact_json, deleted_at FROM artifact \
+                 WHERE deleted_at IS NONE ORDER BY updated_at DESC LIMIT $limit;",
+                // A library far beyond any desktop user's; bounds one query's memory.
+                ("limit", 10_000_i64),
+            )
+            .await?
+            .take(0)
+            .map_err(|e| backend(&e))?;
+        rows.into_iter()
+            .map(|row| {
+                serde_json::from_str(&row.artifact_json)
+                    .map_err(|e| MemoryError::Backend(format!("deserialize artifact: {e}")))
+            })
+            .collect()
+    }
+
+    async fn save_artifact(&self, artifact: &Artifact) -> Result<(), MemoryError> {
+        let artifact_json = serde_json::to_string(artifact)
+            .map_err(|e| MemoryError::Backend(format!("serialize artifact: {e}")))?;
+        let row = ArtifactRow {
+            artifact_id: artifact.id.clone(),
+            updated_at: artifact.updated_at.millis(),
+            artifact_json,
+            deleted_at: None,
+        };
+        self.query(
+            "UPSERT $record CONTENT $data;",
+            (
+                "record",
+                RecordId::new("artifact", entity_key(&artifact.id)),
+                "data",
+                row,
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_artifact(&self, id: &str, at: Timestamp) -> Result<(), MemoryError> {
+        self.query(
+            "UPDATE $record SET deleted_at = $at;",
+            (
+                "record",
+                RecordId::new("artifact", entity_key(id)),
+                "at",
+                at.millis(),
+            ),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 // --- rows ---------------------------------------------------------------------------
+
+#[derive(Debug, SurrealValue)]
+struct TeamRow {
+    members_json: String,
+}
+
+#[derive(Debug, SurrealValue)]
+struct ArtifactRow {
+    artifact_id: String,
+    updated_at: i64,
+    artifact_json: String,
+    deleted_at: Option<i64>,
+}
 
 #[derive(Debug, SurrealValue)]
 struct ChatThreadRow {

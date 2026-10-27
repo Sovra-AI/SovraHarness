@@ -22,6 +22,12 @@ use sovra_providers::{
 };
 use sovra_runtime::{Client, ModelsConfig};
 
+#[path = "models/semantic.rs"]
+mod semantic;
+
+#[path = "models/summaries.rs"]
+mod summaries;
+
 #[derive(Default)]
 struct TestCredentials(Mutex<BTreeMap<String, ModelSecret>>);
 impl CredentialStore for TestCredentials {
@@ -766,7 +772,7 @@ async fn conversational_reply_arrives_before_the_server_finishes_without_cards_o
                     assert!(responder.replace(model).is_none());
                 }
                 Event::AgentChunk { text, .. } => break text,
-                Event::Models(_) | Event::Ready { .. } => {}
+                Event::Models(_) | Event::Ready { .. } | Event::RouteEvaluated { .. } => {}
                 event => panic!("unexpected event before first text: {event:?}"),
             }
         }
@@ -830,6 +836,32 @@ async fn appearance_choice_survives_restart() {
 }
 
 #[tokio::test]
+async fn interface_scale_survives_restart() {
+    let server = Server::new(|_| Reply::json(&json!({"data":[]})));
+    let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/api/v1", server.url());
+    let fixture = Fixture::new(connection, None);
+    let client = fixture.start();
+    catalog(&client).await;
+    let scale = InterfaceScale::from_percent(125);
+    send(&client, ModelCommand::SetInterfaceScale { scale });
+    event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::PreferencesChanged(p)) if p.interface_scale == scale)
+    })
+    .await;
+    stop(client).await;
+    let client = fixture.start();
+    let loaded = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
+    assert!(
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.interface_scale == scale)
+    );
+    stop(client).await;
+}
+
+#[tokio::test]
 async fn onboarding_completion_and_replay_survive_restart() {
     let server = Server::new(|_| Reply::json(&json!({"data":[]})));
     let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
@@ -856,4 +888,239 @@ async fn onboarding_completion_and_replay_survive_restart() {
         );
         stop(client).await;
     }
+}
+
+struct AttachmentFixture;
+impl sovra_core::files::FileStore for AttachmentFixture {
+    fn prepare(
+        &self,
+        id: &str,
+        _path: &std::path::Path,
+    ) -> Result<sovra_core::files::Attachment, sovra_core::files::FileError> {
+        self.load(id).map(|file| file.attachment)
+    }
+    fn load(
+        &self,
+        id: &str,
+    ) -> Result<sovra_core::files::FileContent, sovra_core::files::FileError> {
+        use sovra_core::files::{Attachment, FileContent, FileError, MediaPart, ModelPurpose};
+        let (purpose, mime, text, data) = match id {
+            "test-image" => (ModelPurpose::Images, "image/png", "", vec![137, 80, 78, 71]),
+            "test-document" => (
+                ModelPurpose::Documents,
+                "text/plain",
+                "The garden invoice total is 93 dirhams.",
+                Vec::new(),
+            ),
+            _ => return Err(FileError("Please add this missing file again.".into())),
+        };
+        Ok(FileContent {
+            raw: None,
+            attachment: Attachment {
+                id: id.into(),
+                name: format!("{id}.file"),
+                mime_type: mime.into(),
+                size_bytes: 42,
+                purpose,
+                sections: 1,
+                note: None,
+                thumbnail: Vec::new(),
+            },
+            text: text.into(),
+            media: if data.is_empty() {
+                Vec::new()
+            } else {
+                vec![MediaPart {
+                    mime_type: mime.into(),
+                    data,
+                }]
+            },
+        })
+    }
+    fn discard(&self, _id: &str) -> Result<(), sovra_core::files::FileError> {
+        Ok(())
+    }
+}
+
+fn attachment_reply(model: &str) -> Reply {
+    Reply {
+        status: 200,
+        content_type: "text/event-stream",
+        tail: None,
+        body: format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({"id":"files","object":"chat.completion.chunk","created":1,"model":model,"choices":[{"index":0,"delta":{"role":"assistant","content":"The total is 93 dirhams."},"finish_reason":null}]}),
+            json!({"id":"files","object":"chat.completion.chunk","created":1,"model":model,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]})
+        ),
+    }
+}
+
+#[tokio::test]
+async fn purpose_assignment_keeps_chat_model_and_sends_real_images_and_document_evidence() {
+    use sovra_core::files::ModelPurpose;
+    let server = Server::new(|request| {
+        if request.path == "/v1/models" {
+            return Reply::json(&json!({"data":[{"id":"chat"},{"id":"vision"}]}));
+        }
+        attachment_reply(request.body["model"].as_str().unwrap())
+    });
+    let mut connection = ModelConnection::new("files", ProviderKind::OpenAiCompatible);
+    connection.base_url = format!("{}/v1", server.url());
+    connection.manual_models = vec![ModelInfo {
+        id: "vision".into(),
+        name: "Picture reader".into(),
+        input_modalities: vec!["text".into(), "image".into()],
+        output_modalities: vec!["text".into()],
+        manual: true,
+        ..ModelInfo::default()
+    }];
+    let fixture = Fixture::new(connection, None);
+    let client = sovra_runtime::start_with_files(
+        "test",
+        AgentConfig::default(),
+        None,
+        Some(ModelsConfig {
+            repository: fixture.repo.clone(),
+            providers: vec![Arc::new(CompatibleProvider)],
+        }),
+        Some(Arc::new(AttachmentFixture)),
+    )
+    .unwrap();
+    catalog(&client).await;
+    let chat = ModelKey {
+        connection_id: "files".into(),
+        model_id: "chat".into(),
+    };
+    let vision = ModelKey {
+        connection_id: "files".into(),
+        model_id: "vision".into(),
+    };
+    send(&client, ModelCommand::Activate { key: chat.clone() });
+    event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(preferences)) if preferences.active.as_ref() == Some(&chat))).await;
+    send(
+        &client,
+        ModelCommand::AssignPurpose {
+            purpose: ModelPurpose::Images,
+            key: Some(chat.clone()),
+        },
+    );
+    event(&client, |event| {
+        matches!(event, Event::Models(ModelEvent::Error(_)))
+    })
+    .await;
+    assert!(fixture.repo.load().unwrap().preferences.purposes.is_empty());
+    send(
+        &client,
+        ModelCommand::AssignPurpose {
+            purpose: ModelPurpose::Images,
+            key: Some(vision.clone()),
+        },
+    );
+    let changed = event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(preferences)) if preferences.purposes.get(&ModelPurpose::Images) == Some(&vision))).await;
+    assert!(
+        matches!(changed, Event::Models(ModelEvent::PreferencesChanged(preferences)) if preferences.active == Some(chat))
+    );
+    for (session_id, id) in [
+        ("picture-chat", "test-image"),
+        ("document-chat", "test-document"),
+    ] {
+        client
+            .send(Command::RunWithFiles {
+                session_id: session_id.into(),
+                prompt: "What is the invoice total?".into(),
+                attachment_ids: vec![id.into()],
+            })
+            .unwrap();
+        let completed = event(&client, |event| {
+            matches!(
+                event,
+                Event::AgentCompleted { .. } | Event::AgentError { .. }
+            )
+        })
+        .await;
+        assert!(
+            matches!(completed, Event::AgentCompleted { .. }),
+            "{completed:?}"
+        );
+    }
+    client
+        .send(Command::RunPrompt {
+            session_id: "picture-chat".into(),
+            prompt: "Explain that again.".into(),
+        })
+        .unwrap();
+    event(&client, |event| {
+        matches!(event, Event::AgentCompleted { .. })
+    })
+    .await;
+    {
+        let requests = server.requests.lock().unwrap();
+        let requests: Vec<_> = requests
+            .iter()
+            .filter(|request| request.path.ends_with("chat/completions"))
+            .collect();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0].body["model"], "vision");
+        let picture = requests[0].body.to_string();
+        assert!(
+            picture.contains("data:image/png;base64,iVBORw=="),
+            "{picture}"
+        );
+        assert!(
+            requests[1]
+                .body
+                .to_string()
+                .contains("garden invoice total is 93")
+        );
+        assert_eq!(requests[2].body["model"], "vision");
+    }
+    stop(client).await;
+    assert_eq!(
+        fixture
+            .repo
+            .load()
+            .unwrap()
+            .preferences
+            .purposes
+            .get(&ModelPurpose::Images),
+        Some(&vision)
+    );
+}
+
+#[tokio::test]
+async fn uploads_report_results_and_missing_storage_explains_how_to_recover() {
+    use sovra_core::files::{FileCommand, FilePrepared};
+    let client = sovra_runtime::start_with_files(
+        "test",
+        AgentConfig::default(),
+        None,
+        None,
+        Some(Arc::new(AttachmentFixture)),
+    )
+    .unwrap();
+    client
+        .send(Command::Files(FileCommand::Prepare {
+            session_id: "draft".into(),
+            id: "test-image".into(),
+            path: "chosen.png".into(),
+        }))
+        .unwrap();
+    let ready = event(&client, |event| matches!(event, Event::FilePrepared(_))).await;
+    assert!(matches!(
+        ready,
+        Event::FilePrepared(FilePrepared { result: Ok(_), .. })
+    ));
+    client
+        .send(Command::Files(FileCommand::Prepare {
+            session_id: "draft".into(),
+            id: "gone".into(),
+            path: "gone.txt".into(),
+        }))
+        .unwrap();
+    let failed = event(&client, |event| matches!(event, Event::FilePrepared(_))).await;
+    assert!(matches!(
+        failed,
+        Event::FilePrepared(FilePrepared { result: Err(_), .. })
+    ));
+    stop(client).await;
 }

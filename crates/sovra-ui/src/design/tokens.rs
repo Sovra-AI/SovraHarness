@@ -3,23 +3,24 @@
 use std::time::Duration;
 
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::{
-    App, Background, BoxShadow, Hsla, Pixels, linear_color_stop, linear_gradient, point, px,
-};
+use gpui_kit::{App, Background, BoxShadow, Hsla, Pixels, Rems, point, px};
 
 use super::palette::{
-    self, BLACK, INDIGO, INDIGO_FILL, LILAC, VIOLET, VIOLET_DEEP, VIOLET_LIGHT, WHITE, colour,
+    self, BLACK, INDIGO, LILAC, VIOLET, VIOLET_DEEP, VIOLET_LIGHT, WHITE, colour,
 };
 
-/// The standard chat surface, ported from `SovraSRX`'s chat (`CopilotKit` overrides):
-/// bare assistant text beside a 28px avatar, a gradient user bubble with a sharp
-/// tail corner, a glass composer and a responsive reading column.
+/// Native conversation roles: quiet user bubbles, readable assistant text,
+/// clear composer focus and a responsive reading column.
 #[derive(Debug, Clone)]
 pub struct ChatTokens {
-    /// Column widths at the 900 / 1200 / 1536px window breakpoints (100% below 900).
-    pub column_widths: [(Pixels, Pixels); 3],
-    pub avatar: Pixels,
-    pub row_gap: Pixels,
+    /// Prose measure: about 80 characters of 16px reading text (WCAG 1.4.8).
+    pub column_width: Rems,
+    pub avatar: Rems,
+    /// The live ring sits this far outside the avatar.
+    pub avatar_ring_offset: Rems,
+    pub row_gap: Rems,
+    /// Above and below each message; two of them separate consecutive messages.
+    pub message_padding: Rems,
     pub user_bubble: Background,
     pub user_bubble_foreground: Hsla,
     pub user_bubble_radius: Pixels,
@@ -28,22 +29,22 @@ pub struct ChatTokens {
     pub avatar_ring: Hsla,
     pub thinking_pill: Hsla,
     pub thinking_rule: Hsla,
-    pub thinking_max_height: Pixels,
+    pub thinking_max_height: Rems,
     pub composer_background: Hsla,
     pub composer_border: Hsla,
     pub composer_focus_border: Hsla,
     pub composer_focus_glow: BoxShadow,
     pub composer_radius: Pixels,
-    pub send_size: Pixels,
+    pub send_size: Rems,
     pub send_ready_background: Hsla,
     pub send_ready_foreground: Hsla,
     pub send_idle_foreground: Hsla,
     pub stop_background: Hsla,
     pub code_radius: Pixels,
     pub action_idle_opacity: f32,
-    pub welcome_width: Pixels,
+    pub welcome_width: Rems,
     pub chip_border: Hsla,
-    pub chip_height: Pixels,
+    pub chip_height: Rems,
 }
 
 /// Source accent ramp for charts/decorations. Text uses contrast-tested theme roles.
@@ -64,19 +65,22 @@ pub struct AccentTokens {
     pub slate: Hsla,
 }
 
-/// Logical pixels, never physical device pixels. Desktop caps from the source CSS.
 #[derive(Debug, Clone, Copy)]
 pub struct SpaceTokens {
-    pub compact: Pixels,
-    pub small: Pixels,
-    pub medium: Pixels,
-    pub large: Pixels,
-    pub extra: Pixels,
-    pub section: Pixels,
+    pub hair: Rems,
+    pub compact: Rems,
+    pub snug: Rems,
+    pub small: Rems,
+    pub medium: Rems,
+    pub large: Rems,
+    pub extra: Rems,
+    pub section: Rems,
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Corner radii in pixels (GPUI buttons take pixels), scaled with the root size.
 pub struct RadiusTokens {
+    pub small: Pixels,
     pub button: Pixels,
     pub input: Pixels,
     pub card: Pixels,
@@ -84,26 +88,46 @@ pub struct RadiusTokens {
     pub pill: Pixels,
 }
 
+/// Geometry in rems so it follows the interface scale; see `docs/styling.md`
+/// → Responsive layout. Only hairlines and OS window bounds are logical pixels.
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutTokens {
-    pub catalog_row_height: Pixels,
-    pub detail_width: Pixels,
-    pub detail_breakpoint: Pixels,
-    pub filter_width: Pixels,
-    pub reading_width: Pixels,
-    pub wide_reading_width: Pixels,
-    pub page_width: Pixels,
-    pub control_height: Pixels,
-    pub logo_small: Pixels,
-    pub logo_hero: Pixels,
-    pub status_height: Pixels,
-    pub sidebar_width: Pixels,
-    pub history_rail_width: Pixels,
-    pub history_compact_width: Pixels,
-    pub history_breakpoint: Pixels,
-    pub inspector_width: Pixels,
+    /// Borders and dividers stay one logical pixel at every interface scale.
+    pub hairline: Pixels,
+    pub catalog_row_height: Rems,
+    pub detail_width: Rems,
+    pub filter_width: Rems,
+    /// Forms and settings; prose uses the narrower `chat.column_width`.
+    pub reading_width: Rems,
+    /// Side panes yield (undock, rail) before the main pane drops below this.
+    pub content_min_width: Rems,
+    pub card_min_width: Rems,
+    pub card_max_width: Rems,
+    pub dialog_width: Rems,
+    pub side_panel_width: Rems,
+    pub list_row_min_height: Rems,
+    pub command_menu_height: Rems,
+    pub attachment_width: Rems,
+    pub attachment_preview: Rems,
+    pub page_width: Rems,
+    pub control_height: Rems,
+    pub compact_control_height: Rems,
+    pub navigation_height: Rems,
+    pub icon_small: Rems,
+    pub icon_medium: Rems,
+    pub profile_avatar: Rems,
+    pub logo_small: Rems,
+    pub logo_medium: Rems,
+    pub logo_hero: Rems,
+    pub status_height: Rems,
+    pub sidebar_width: Rems,
+    pub history_compact_width: Rems,
+    pub inspector_width: Rems,
+    /// Preferred first-launch size; clamped to the display's visible area.
     pub window_width: Pixels,
     pub window_height: Pixels,
+    pub window_max_width: Pixels,
+    pub window_max_height: Pixels,
     pub window_min_width: Pixels,
     pub window_min_height: Pixels,
 }
@@ -148,11 +172,18 @@ pub struct SovraTokens {
     pub code_background: Hsla,
 }
 
+/// Authored in the 16px reference pixels of the source design, stored as rems.
+fn rem(reference_px: f32) -> Rems {
+    Rems(reference_px / 16.)
+}
+
 /// Derive from the current GPUI mode, avoiding a second mutable theme global.
 pub fn tokens(cx: &App) -> SovraTokens {
     let p = palette::palette(cx.theme().mode);
     let dark = cx.theme().is_dark();
     let canvas = colour(p.canvas);
+    let root = cx.theme().font_size / px(super::responsive::BASE_FONT_SIZE);
+    let radius = |reference_px: f32| px(reference_px * root);
     let layer = |opacity| canvas.blend(colour(WHITE).alpha(opacity));
     let shadow = |y, blur, spread, opacity| BoxShadow {
         color: colour(if dark { BLACK } else { 0x4c_1d_95 }).alpha(opacity),
@@ -185,39 +216,58 @@ pub fn tokens(cx: &App) -> SovraTokens {
             slate: colour(0x64_74_8b),
         },
         space: SpaceTokens {
-            compact: px(6.),
-            small: px(12.),
-            medium: px(18.),
-            large: px(24.),
-            extra: px(36.),
-            section: px(48.),
+            hair: rem(2.),
+            compact: rem(4.),
+            snug: rem(6.),
+            small: rem(8.),
+            medium: rem(16.),
+            large: rem(24.),
+            extra: rem(32.),
+            section: rem(48.),
         },
         radius: RadiusTokens {
-            button: px(13.),
-            input: px(12.),
-            card: px(18.),
-            panel: px(22.),
-            pill: px(999.),
+            small: radius(6.),
+            button: radius(10.),
+            input: radius(10.),
+            card: radius(14.),
+            panel: radius(18.),
+            pill: radius(999.),
         },
         layout: LayoutTokens {
-            catalog_row_height: px(116.),
-            detail_width: px(360.),
-            detail_breakpoint: px(1120.),
-            filter_width: px(158.),
-            reading_width: px(768.),
-            wide_reading_width: px(880.),
-            page_width: px(1440.),
-            control_height: px(40.),
-            logo_small: px(28.),
-            logo_hero: px(96.),
-            status_height: px(32.),
-            sidebar_width: px(276.),
-            history_rail_width: px(276.),
-            history_compact_width: px(48.),
-            history_breakpoint: px(760.),
-            inspector_width: px(320.),
+            hairline: px(1.),
+            catalog_row_height: rem(116.),
+            detail_width: rem(360.),
+            filter_width: rem(160.),
+            reading_width: rem(768.),
+            content_min_width: rem(400.),
+            card_min_width: rem(224.),
+            card_max_width: rem(560.),
+            dialog_width: rem(432.),
+            side_panel_width: rem(260.),
+            list_row_min_height: rem(72.),
+            command_menu_height: rem(128.),
+            attachment_width: rem(240.),
+            attachment_preview: rem(40.),
+            page_width: rem(1080.),
+            control_height: rem(36.),
+            compact_control_height: rem(28.),
+            // The macOS default (medium) sidebar row is 28pt (HIG → Sidebars); nine
+            // destinations must leave the chat history visible at the default window.
+            navigation_height: rem(28.),
+            icon_small: rem(20.),
+            icon_medium: rem(24.),
+            profile_avatar: rem(32.),
+            logo_small: rem(28.),
+            logo_medium: rem(44.),
+            logo_hero: rem(56.),
+            status_height: rem(26.),
+            sidebar_width: rem(256.),
+            history_compact_width: rem(56.),
+            inspector_width: rem(320.),
             window_width: px(1280.),
             window_height: px(820.),
+            window_max_width: px(1600.),
+            window_max_height: px(1040.),
             window_min_width: px(640.),
             window_min_height: px(420.),
         },
@@ -230,23 +280,18 @@ pub fn tokens(cx: &App) -> SovraTokens {
             enter_distance: px(if cx.reduce_motion() { 0. } else { 8. }),
         },
         chat: ChatTokens {
-            column_widths: [
-                (px(900.), px(720.)),
-                (px(1200.), px(768.)),
-                (px(1536.), px(880.)),
-            ],
-            avatar: px(28.),
-            row_gap: px(12.),
-            // SovraSRX uses #8b5cf6 -> #6366f1; the brand fills keep white text >= 4.5:1.
-            user_bubble: linear_gradient(
-                135.,
-                linear_color_stop(colour(VIOLET), 0.),
-                linear_color_stop(colour(INDIGO_FILL), 1.),
-            ),
-            user_bubble_foreground: colour(WHITE),
-            user_bubble_radius: px(14.),
-            user_bubble_tail_radius: px(4.),
-            user_bubble_shadow: shadow(4., 18., 0., if dark { 0.4 } else { 0.14 }),
+            column_width: rem(736.),
+            avatar: rem(28.),
+            avatar_ring_offset: rem(3.),
+            row_gap: rem(16.),
+            message_padding: rem(11.),
+            // Authorship is conveyed by alignment and the avatar; a quiet fill
+            // keeps long conversations from becoming a wall of brand colour.
+            user_bubble: colour(p.hover).into(),
+            user_bubble_foreground: colour(p.text),
+            user_bubble_radius: radius(14.),
+            user_bubble_tail_radius: radius(14.),
+            user_bubble_shadow: shadow(0., 0., 0., 0.),
             avatar_ring: colour(VIOLET_LIGHT).alpha(0.55),
             thinking_pill: if dark {
                 canvas.blend(colour(VIOLET_LIGHT).alpha(0.12))
@@ -254,8 +299,8 @@ pub fn tokens(cx: &App) -> SovraTokens {
                 colour(0xf1_ea_ff)
             },
             thinking_rule: colour(VIOLET_LIGHT).alpha(0.3),
-            thinking_max_height: px(240.),
-            composer_background: layer(if dark { 0.05 } else { 0.9 }),
+            thinking_max_height: rem(240.),
+            composer_background: colour(p.surface),
             composer_border: colour(if dark { WHITE } else { 0x4c_1d_95 }).alpha(if dark {
                 0.1
             } else {
@@ -269,35 +314,35 @@ pub fn tokens(cx: &App) -> SovraTokens {
                 spread_radius: px(0.),
                 inset: false,
             },
-            composer_radius: px(12.),
-            send_size: px(34.),
+            composer_radius: radius(18.),
+            send_size: rem(36.),
             send_ready_background: colour(if dark { WHITE } else { 0x0a_0a_0f }),
             send_ready_foreground: colour(if dark { 0x0a_0a_0f } else { WHITE }),
             send_idle_foreground: colour(p.secondary_text),
             stop_background: colour(0xdc_26_26),
-            code_radius: px(6.),
-            action_idle_opacity: 0.55,
-            welcome_width: px(680.),
-            chip_border: colour(VIOLET).alpha(0.2),
-            chip_height: px(36.),
+            code_radius: radius(6.),
+            action_idle_opacity: 1.0,
+            welcome_width: rem(680.),
+            chip_border: p.border,
+            chip_height: rem(36.),
         },
         text_secondary: colour(p.secondary_text),
         canvas,
         // Precompose glass on the canvas: stable contrast, no backdrop sampling
         // or platform-specific vibrancy, including remote/low-power desktops.
         chrome: if dark {
-            canvas.blend(colour(0x0c_0a_11).alpha(0.78))
+            colour(0x16_17_1c)
         } else {
-            colour(0xfb_fa_ff)
+            colour(0xf5_f5_f9)
         },
-        glass: layer(if dark { 0.065 } else { 0.76 }),
-        subtle: layer(if dark { 0.035 } else { 0.52 }),
+        glass: colour(p.surface),
+        subtle: if dark {
+            layer(0.025)
+        } else {
+            colour(0xf5_f5_f9)
+        },
         matte: colour(p.surface),
-        elevated: if dark {
-            canvas.blend(colour(p.hover).alpha(0.9))
-        } else {
-            layer(0.94)
-        },
+        elevated: if dark { colour(p.hover) } else { layer(0.94) },
         material_border: colour(if dark { WHITE } else { 0x4c_1d_95 }).alpha(if dark {
             0.14
         } else {
@@ -310,13 +355,13 @@ pub fn tokens(cx: &App) -> SovraTokens {
         }),
         material_shadow: shadow(18., 44., -24., if dark { 0.72 } else { 0.2 }),
         elevated_shadow: shadow(30., 72., -30., if dark { 0.82 } else { 0.28 }),
-        button_shadow: shadow(8., 20., -10., 0.6),
-        button_shadow_hover: shadow(10., 24., -10., 0.7),
+        button_shadow: shadow(2., 6., -2., if dark { 0.3 } else { 0.12 }),
+        button_shadow_hover: shadow(3., 8., -2., if dark { 0.4 } else { 0.16 }),
         assistant_background: layer(if dark { 0.04 } else { 0.8 }),
         user_bubble_background: if dark {
             canvas.blend(colour(VIOLET).alpha(0.22))
         } else {
-            colour(0xed_e4_ff)
+            colour(p.hover)
         },
         hero_banner_background: if dark {
             canvas.blend(colour(INDIGO).alpha(0.18))
@@ -324,9 +369,9 @@ pub fn tokens(cx: &App) -> SovraTokens {
             colour(0xef_e8_ff)
         },
         nav_active_background: if dark {
-            canvas.blend(colour(VIOLET).alpha(0.24))
+            canvas.blend(colour(VIOLET_LIGHT).alpha(0.16))
         } else {
-            colour(0xe9_df_ff)
+            colour(0xed_e9_f9)
         },
         status_pill_background: if dark {
             canvas.blend(colour(0x22_c5_5e).alpha(0.18))

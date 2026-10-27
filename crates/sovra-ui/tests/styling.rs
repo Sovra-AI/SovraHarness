@@ -176,3 +176,228 @@ fn buttons_and_clickable_controls_use_pointer_cursor(cx: &mut TestAppContext) {
         );
     });
 }
+
+#[gpui_kit::test]
+fn routing_choices_are_keyboard_operable(cx: &mut TestAppContext) {
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell_entity = None;
+    let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        shell_entity = Some(shell.clone());
+        Root::new(shell, window, cx)
+    });
+    let shell = shell_entity.unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-my-ais", cx);
+        window.render_frame(cx);
+        for _ in 0..50 {
+            window.press("tab", cx);
+            if window.find(("routing-mode-btn", 1usize)).focused() == Some(true) {
+                break;
+            }
+        }
+        assert_eq!(
+            window.find(("routing-mode-btn", 1usize)).focused(),
+            Some(true)
+        );
+        window.press("space", cx);
+        assert_eq!(
+            shell.read(cx).workspace().routing.mode,
+            sovra_core::SelectionMode::PerAgentModel
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let dimensions = size(px(640.), px(420.));
+    let window = cx.open_window(dimensions, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        Root::new(shell, window, cx)
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            Theme::change(mode, Some(window), cx);
+            window.render_frame(cx);
+            for (tab, page) in [
+                ("nav-my-ais", "sovra-my-ais-view"),
+                ("nav-knowledge", "sovra-knowledge-view"),
+                ("nav-schedules", "sovra-schedules-view"),
+                ("nav-settings", "sovra-settings-view"),
+                ("nav-models", "models-setup-home"),
+            ] {
+                window.click(tab, cx);
+                window.render_frame(cx);
+                let bounds = window.find(page).bounds();
+                assert!(
+                    bounds.left() >= px(0.) && bounds.right() <= dimensions.width,
+                    "{page}"
+                );
+                assert!(
+                    bounds.top() >= px(0.) && bounds.bottom() <= dimensions.height,
+                    "{page}"
+                );
+                if tab == "nav-knowledge" {
+                    assert!(
+                        bounds.size.width >= px(500.),
+                        "reading space must survive at minimum width"
+                    );
+                }
+                if tab == "nav-schedules" {
+                    let action = window.find(("schedule-run", 0usize));
+                    assert!(
+                        action.bounds().right() <= dimensions.width,
+                        "schedule action overflow"
+                    );
+                    assert!(
+                        action.focused().is_some(),
+                        "schedule action needs native keyboard focus"
+                    );
+                }
+            }
+        }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn login_controls_stay_inside_the_minimum_window(cx: &mut TestAppContext) {
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let dimensions = size(px(640.), px(420.));
+    let window = cx.open_window(dimensions, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        Root::new(shell, window, cx)
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("sidebar-user-profile", cx);
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            Theme::change(mode, Some(window), cx);
+            window.render_frame(cx);
+            let page = window.find("sovra-login-screen").bounds();
+            for id in ["login-glass-card", "login-submit-btn", "login-google-btn"] {
+                let bounds = window.find(id).bounds();
+                assert!(
+                    bounds.top() >= page.top() && bounds.bottom() <= page.bottom(),
+                    "{id} must fit the login viewport"
+                );
+            }
+        }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn interface_scale_resizes_the_layout_and_survives_theme_changes(cx: &mut TestAppContext) {
+    use sovra_core::models::InterfaceScale;
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        Root::new(shell, window, cx)
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let full = window.find("sovra-sidebar").bounds().size.width;
+        assert!(full >= px(240.), "full sidebar at 100%: {full:?}");
+
+        design::set_interface_scale(InterfaceScale::from_percent(150), cx);
+        window.render_frame(cx);
+        assert!((window.rem_size() - px(24.)).abs() < px(0.01));
+        // 1100px is under 52.5rem at 24px/rem, so the sidebar yields to a rail.
+        let rail = window.find("sovra-sidebar").bounds().size.width;
+        assert!(rail < full, "zoomed sidebar collapses to a rail: {rail:?}");
+        assert!(window.try_find("chat-history-rail-collapsed").is_some());
+        let main = window.find("sovra-chat-main").bounds().size.width;
+        let floor = design::tokens(cx)
+            .layout
+            .content_min_width
+            .to_pixels(window.rem_size());
+        assert!(
+            main >= floor,
+            "side panes yield before the main pane: {main:?}"
+        );
+
+        Theme::change(ThemeMode::Light, Some(window), cx);
+        window.render_frame(cx);
+        assert_eq!(design::interface_scale(cx).percent(), 150);
+
+        design::set_interface_scale(InterfaceScale::default(), cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("sovra-sidebar").bounds().size.width, full);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn wide_windows_keep_a_centred_readable_column(cx: &mut TestAppContext) {
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let dimensions = size(px(2560.), px(1440.));
+    let window = cx.open_window(dimensions, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        Root::new(shell, window, cx)
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let main = window.find("sovra-chat-main").bounds();
+        let composer = window.find("chat-composer-input").bounds();
+        let cap = design::tokens(cx)
+            .chat
+            .column_width
+            .to_pixels(window.rem_size());
+        assert!(composer.size.width <= cap, "{composer:?} exceeds {cap:?}");
+        let left = composer.left() - main.left();
+        let right = main.right() - composer.right();
+        assert!(
+            (left - right).abs() < px(80.),
+            "column is centred: {left:?} vs {right:?}"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
+    use sovra_core::models::InterfaceScale;
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let dimensions = size(px(1280.), px(820.));
+    let window = cx.open_window(dimensions, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        Root::new(shell, window, cx)
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        design::set_interface_scale(InterfaceScale::LARGEST, cx);
+        window.render_frame(cx);
+        for (tab, page) in [
+            ("nav-chat", "sovra-chat-main"),
+            ("nav-my-ais", "sovra-my-ais-view"),
+            ("nav-knowledge", "sovra-knowledge-view"),
+            ("nav-schedules", "sovra-schedules-view"),
+            ("nav-settings", "sovra-settings-view"),
+            ("nav-models", "models-setup-home"),
+        ] {
+            window.click(tab, cx);
+            window.render_frame(cx);
+            let bounds = window.find(page).bounds();
+            assert!(
+                bounds.left() >= px(0.) && bounds.right() <= dimensions.width,
+                "{page} overflows horizontally at 200%: {bounds:?}"
+            );
+        }
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        let larger = window.find("settings-text-larger");
+        assert!(larger.bounds().right() <= dimensions.width);
+        window.click("settings-text-reset", cx);
+        assert_eq!(design::interface_scale(cx).percent(), 100);
+    })
+    .unwrap();
+}

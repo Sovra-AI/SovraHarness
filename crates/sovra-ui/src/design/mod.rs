@@ -4,6 +4,7 @@
 //! [`SovraStyled`]. All raw visual values belong in this module tree.
 
 mod palette;
+mod responsive;
 mod styles;
 mod tokens;
 
@@ -13,8 +14,12 @@ use gpui_kit::App;
 use gpui_kit::base::{Easing, Spring};
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode, highlighter::HighlightTheme};
 
+pub use responsive::{
+    WidthClass, initial_window_bounds, interface_scale, set_interface_scale, width_probe,
+};
 pub use styles::{
-    SovraStyled, Surface, TextRole, button, markdown_style, primary_button, round_icon_button,
+    SovraStyled, Surface, TextRole, button, markdown_style, page_header, primary_button,
+    round_icon_button,
 };
 pub use tokens::{
     AccentTokens, ChatTokens, LayoutTokens, MotionTokens, RadiusTokens, SovraTokens, SpaceTokens,
@@ -29,12 +34,12 @@ pub(crate) fn init(cx: &mut App) {
                 ThemeMode::Light => "Sovra Light".into(),
             },
             mode,
-            font_size: Some(16.),
-            mono_font_size: Some(13.),
+            font_size: Some(responsive::BASE_FONT_SIZE),
+            mono_font_size: Some(responsive::BASE_MONO_FONT_SIZE),
             // Keep GPUI's platform font resolution: SF on macOS and installed
             // native fallbacks elsewhere, without network font downloads.
-            radius: Some(12),
-            radius_lg: Some(22),
+            radius: Some(10),
+            radius_lg: Some(18),
             shadow: Some(true),
             colors: palette::config(mode),
             // Without a mode-specific style the component keeps its light code theme,

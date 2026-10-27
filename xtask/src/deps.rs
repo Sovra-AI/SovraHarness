@@ -13,6 +13,11 @@ use serde_json::Value;
 const LAYERS: &[(&str, &[&str])] = &[
     ("sovra-core", &[]),
     ("sovra-adk", &["sovra-core"]),
+    // Document codecs and managed attachment IO are a separate adapter dependency
+    // set. Runtime receives the core FileStore port from the composition root.
+    ("sovra-files", &["sovra-core"]),
+    // Skill package IO and bounded YAML parsing stay behind the core SkillStore port.
+    ("sovra-skills", &["sovra-core"]),
     // Provider HTTP, catalog persistence and OS credentials form an IO boundary;
     // core stays pure, and UI receives only protocol data through runtime.
     ("sovra-providers", &["sovra-core"]),
@@ -26,8 +31,10 @@ const LAYERS: &[(&str, &[&str])] = &[
         "sovra-app",
         &[
             "sovra-core",
+            "sovra-files",
             "sovra-providers",
             "sovra-runtime",
+            "sovra-skills",
             "sovra-store-surreal",
             "sovra-ui",
         ],
@@ -91,7 +98,8 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
 ];
 
 /// External crates `sovra-core` may use: pure, no IO, no async runtime, no GUI.
-const CORE_ALLOWED_EXTERNAL: &[&str] = &["serde", "thiserror", "async-trait"];
+/// `serde_json` parses `SearXNG` result documents for ranking. It performs no IO.
+const CORE_ALLOWED_EXTERNAL: &[&str] = &["serde", "serde_json", "thiserror", "async-trait"];
 
 pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
     let output = Command::new(env!("CARGO"))

@@ -3,7 +3,14 @@
 
 mod catalog;
 mod connection;
+mod destination;
+mod embeddings;
+mod summaries;
+mod transport;
+pub use destination::ResolvedModel;
 mod storage;
+pub use embeddings::HttpEmbedder;
+pub use summaries::HttpSummarizer;
 
 pub use catalog::{
     AnthropicProvider, CompatibleProvider, OllamaProvider, OpenRouterProvider, pull_ollama,

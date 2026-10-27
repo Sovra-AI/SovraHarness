@@ -272,3 +272,36 @@ fn older_chat_messages_load_without_inventing_a_model() {
     .unwrap();
     assert!(message.model.is_none());
 }
+
+#[tokio::test]
+async fn team_roster_and_artifacts_survive_and_soft_delete() {
+    use sovra_core::artifacts::{Artifact, ArtifactDraft, ArtifactKind, ArtifactSource};
+    let store = open_store().await;
+    assert_eq!(store.load_team().await.expect("empty team"), None);
+    let mut team = sovra_core::teams::default_team();
+    team[1].name = "Morgana".into();
+    store.save_team(&team).await.expect("save team");
+    assert_eq!(store.load_team().await.expect("load team"), Some(team));
+
+    let draft = |title: &str| ArtifactDraft {
+        title: title.into(),
+        kind: ArtifactKind::Code,
+        language: "python".into(),
+        content: "print('hi')".into(),
+        source: ArtifactSource::default(),
+    };
+    let mut first = Artifact::from_draft("art-1".into(), draft("First"), Timestamp(1));
+    let second = Artifact::from_draft("art-2".into(), draft("Second"), Timestamp(2));
+    store.save_artifact(&first).await.expect("save first");
+    store.save_artifact(&second).await.expect("save second");
+    first.edit("First, edited", "print('bye')", Timestamp(3));
+    store.save_artifact(&first).await.expect("update first");
+    let listed = store.list_artifacts().await.expect("list artifacts");
+    assert_eq!(listed, [first.clone(), second]);
+    assert_eq!(listed[0].versions.len(), 1);
+    store
+        .delete_artifact("art-2", Timestamp(4))
+        .await
+        .expect("delete");
+    assert_eq!(store.list_artifacts().await.expect("list"), [first]);
+}

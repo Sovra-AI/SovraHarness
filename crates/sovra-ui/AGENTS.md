@@ -13,5 +13,11 @@ GPUI views. Owns windows, views, actions, key bindings, menus and theming.
   and `design::button`. New shared roles go in `src/design/`, never raw literals in views.
 - Every interactive element needs an accessible label and visible keyboard focus.
   Check both Sovra modes and minimum window bounds. Preserve native control behaviour.
+- Responsive layout (root `AGENTS.md` → Responsive layout): rem tokens only, no `px(N)`;
+  views measure their pane with `design::width_probe`/`WidthClass`, never the window;
+  cap reading widths; test minimum, wide (≥2560px) and 200% interface size.
 - Keep the SVG logo embedded through `assets.rs` and render it in colour with `img`.
 - Test views headlessly with `#[gpui_kit::test]` + `Client::loopback()` (`tests/shell.rs`).
+- Team and Artifacts views (`team_view.rs`, `artifacts_view.rs`) read the roster and
+  library from the shell's `WorkspaceState` and change them only through
+  `Command::Teams` / `Command::Artifacts`; they own just their form state.

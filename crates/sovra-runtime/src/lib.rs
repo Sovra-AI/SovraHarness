@@ -4,15 +4,20 @@
 //!
 //! The UI never sees tokio, and this crate never sees the UI.
 
+mod artifacts;
+mod file_index;
+mod files;
 mod models;
+mod skills;
+mod teams;
 pub use models::ModelsConfig;
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
-use sovra_adk::AdkHarness;
 use sovra_adk::decision_client::fetch_systemone_answers;
+use sovra_adk::{AdkHarness, SearchClient};
 use sovra_core::{
     AgentConfig, Command, EpisodeKind, Event, MemoryError, MemoryStore, NewEpisode, RoutingConfig,
     SpecialistAgentSpec, Timestamp, default_sovra_srx_agents, evaluate_routing,
@@ -84,6 +89,42 @@ pub fn start_with_models(
     memory: Option<MemoryFactory>,
     models: Option<ModelsConfig>,
 ) -> Result<Client, Error> {
+    start_with_files(version, agent_config, memory, models, None)
+}
+
+/// Starts the engine with a local attachment adapter supplied by the composition root.
+pub fn start_with_files(
+    version: &str,
+    agent_config: AgentConfig,
+    memory: Option<MemoryFactory>,
+    models: Option<ModelsConfig>,
+    files: Option<Arc<dyn sovra_core::files::FileStore>>,
+) -> Result<Client, Error> {
+    start_with_skills(version, agent_config, memory, models, files, None)
+}
+
+/// Starts with user-authored skill packages supplied by the composition root.
+pub fn start_with_skills(
+    version: &str,
+    agent_config: AgentConfig,
+    memory: Option<MemoryFactory>,
+    models: Option<ModelsConfig>,
+    files: Option<Arc<dyn sovra_core::files::FileStore>>,
+    skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+) -> Result<Client, Error> {
+    start_with_file_index(version, agent_config, memory, models, files, skills, None)
+}
+
+/// Starts with a persistent index of explicitly selected local folders.
+pub fn start_with_file_index(
+    version: &str,
+    agent_config: AgentConfig,
+    memory: Option<MemoryFactory>,
+    models: Option<ModelsConfig>,
+    files: Option<Arc<dyn sovra_core::files::FileStore>>,
+    skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+    index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+) -> Result<Client, Error> {
     let (client, commands, events) = Client::loopback();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -98,8 +139,13 @@ pub fn start_with_models(
             runtime.block_on(serve(
                 version,
                 agent_config,
-                memory,
-                models,
+                Services {
+                    memory,
+                    models,
+                    files,
+                    skills,
+                    index,
+                },
                 handle,
                 commands,
                 events,
@@ -109,22 +155,59 @@ pub fn start_with_models(
     Ok(client)
 }
 
+struct Services {
+    memory: Option<MemoryFactory>,
+    models: Option<ModelsConfig>,
+    files: Option<Arc<dyn sovra_core::files::FileStore>>,
+    skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+    index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+}
+
 async fn serve(
     version: String,
     agent_config: AgentConfig,
-    memory_factory: Option<MemoryFactory>,
-    models: Option<ModelsConfig>,
+    services: Services,
     handle: tokio::runtime::Handle,
     commands: Receiver<Command>,
     events: Sender<Event>,
 ) {
+    let Services {
+        memory: memory_factory,
+        models,
+        files,
+        skills: skill_store,
+        index,
+    } = services;
+    let mut file_index = file_index::IndexRuntime::start(
+        index,
+        events.clone(),
+        &handle,
+        models.as_ref().map(|m| m.repository.clone()),
+    );
+    let file_jobs = files
+        .as_ref()
+        .map(|store| files::FileRuntime::start(store.clone(), events.clone(), &handle));
+    let load_skills = skill_store.is_some();
+    let skills = skills::SkillsRuntime::start(skill_store, events.clone(), &handle);
+    let mut session_files = std::collections::BTreeMap::<String, Vec<String>>::new();
     let harness = build_harness(&agent_config);
+    let search = SearchClient::http(&agent_config.searxng_base_url).unwrap_or_else(|error| {
+        tracing::warn!(%error, "web search client unavailable");
+        SearchClient::failing(error.to_string())
+    });
     let models = models
         .map(|config| models::ModelsRuntime::start(config, agent_config.clone(), events.clone()));
     let mut runs = std::collections::BTreeMap::<String, ActiveRun>::new();
     let mut routing_config = RoutingConfig::default();
     let mut specialists = default_sovra_srx_agents();
     let memory = open_memory(memory_factory).await;
+    // Browser views are throwaway copies, so the OS temp directory is the right home.
+    let artifact_library = artifacts::ArtifactRuntime::new(
+        memory.clone(),
+        events.clone(),
+        std::env::temp_dir().join("sovra-artifact-views"),
+    );
+    let team = teams::TeamRuntime::new(memory.clone(), events.clone());
     tracing::info!(
         %version,
         adk_configured = harness.is_some(),
@@ -134,13 +217,151 @@ async fn serve(
     if events.send(Event::Ready { version }).await.is_err() {
         return;
     }
+    if load_skills {
+        skills.send(sovra_core::skills::SkillCommand::Refresh);
+    }
     if let Some(store) = &memory {
         spawn_load_chat_history(&handle, store.clone(), events.clone());
     }
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");
         runs.retain(|_, run| !run.task.is_finished());
+        let skill_catalog = skills.catalog.read().await.clone();
+        // Files stay on the session. An explicit web-search question is still
+        // answered by the orchestrator, which delegates to WebSearchAgent.
+        // Loading those files on the search turn would hide that delegation.
+        let web_search_enabled = models.as_ref().is_none_or(|runtime| {
+            runtime
+                .web_search_enabled
+                .load(std::sync::atomic::Ordering::Relaxed)
+        });
+        let command = match command {
+            Command::RunPrompt { session_id, prompt }
+                if session_files.contains_key(&session_id)
+                    && !(web_search_enabled
+                        && skills::web_without_files(&skill_catalog, &prompt)) =>
+            {
+                let attachment_ids = session_files.get(&session_id).cloned().unwrap_or_default();
+                Command::RunWithFiles {
+                    session_id,
+                    prompt,
+                    attachment_ids,
+                }
+            }
+            Command::RunWithFiles {
+                session_id,
+                prompt,
+                attachment_ids,
+            } if web_search_enabled && skills::web_without_files(&skill_catalog, &prompt) => {
+                session_files.insert(session_id.clone(), attachment_ids);
+                Command::RunPrompt { session_id, prompt }
+            }
+            other => other,
+        };
         match command {
+            Command::Skills(command) => skills.send(command),
+            Command::FileIndex(command) => file_index.send(command),
+            Command::Teams(sovra_core::teams::TeamCommand::Run {
+                session_id,
+                prompt,
+                history,
+            }) => {
+                let selected = match models.as_ref() {
+                    Some(models) => match models.execution.read().await.clone() {
+                        models::ModelExecution::Legacy => harness.clone().map(|h| (h, None)),
+                        models::ModelExecution::Selected { harness, timeout } => {
+                            Some((*harness, Some(timeout)))
+                        }
+                        models::ModelExecution::Unavailable(message) => {
+                            let _ = events
+                                .send(Event::AgUiSurface {
+                                    session_id: session_id.clone(),
+                                    widget: sovra_core::default_llm_setup_widget(Some(&message)),
+                                })
+                                .await;
+                            None
+                        }
+                    },
+                    None => harness.clone().map(|h| (h, None)),
+                };
+                let Some((base, timeout)) = selected else {
+                    let _ = events
+                        .send(Event::AgUi {
+                            session_id,
+                            event: sovra_core::AgUiEvent::RunError {
+                                message: "Connect an AI in Models so your team can answer.".into(),
+                            },
+                        })
+                        .await;
+                    continue;
+                };
+                let base = base
+                    .with_artifact_saver(artifact_library.saver())
+                    .unwrap_or(base);
+                if let Some(previous) = runs.remove(&session_id) {
+                    previous.interrupt(&session_id);
+                    previous.task.abort();
+                }
+                let run =
+                    team.spawn_run(&handle, base, session_id.clone(), prompt, history, timeout);
+                runs.insert(session_id, run);
+            }
+            Command::Teams(command) => team.handle(&handle, command),
+            Command::Artifacts(command) => artifact_library.handle(&handle, command),
+            Command::Files(command) => {
+                if let Some(jobs) = &file_jobs {
+                    jobs.send(command);
+                } else if let sovra_core::files::FileCommand::Prepare { session_id, id, .. } =
+                    command
+                {
+                    let _ = events
+                        .send(Event::FilePrepared(sovra_core::files::FilePrepared {
+                            session_id,
+                            id,
+                            result: Err(sovra_core::files::FileError(
+                                "File reading is not available in this session.".into(),
+                            )),
+                        }))
+                        .await;
+                }
+            }
+            Command::RunWithFiles {
+                session_id,
+                prompt,
+                attachment_ids,
+            } => {
+                let (Some(store), Some(models)) = (&files, &models) else {
+                    let _ = events
+                        .send(Event::AgentError {
+                            session_id,
+                            message: "Connect a model in Models to read your files.".into(),
+                        })
+                        .await;
+                    continue;
+                };
+                if let Some(previous) = runs.remove(&session_id) {
+                    previous.interrupt(&session_id);
+                    previous.task.abort();
+                }
+                session_files.insert(session_id.clone(), attachment_ids.clone());
+                let run = files::spawn_prompt(
+                    &handle,
+                    files::FilePrompt {
+                        session_id: session_id.clone(),
+                        prompt,
+                        ids: attachment_ids,
+                        store: store.clone(),
+                        skills: skill_catalog.clone(),
+                        skill_resources: skills.resources.clone(),
+                        indexed_files: file_index.reader.clone(),
+                        models: models.file_models.clone(),
+                        events: events.clone(),
+                        web_search_enabled,
+                        search: search.clone(),
+                    },
+                );
+                runs.insert(session_id, run);
+            }
             Command::Models(command) => {
                 if let Some(models) = &models {
                     models.send(command);
@@ -164,6 +385,21 @@ async fn serve(
                 }
             }
             Command::SaveChatThread { thread } => {
+                if let Some(message) = thread
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|message| !message.attachments.is_empty())
+                {
+                    session_files.insert(
+                        thread.id.clone(),
+                        message
+                            .attachments
+                            .iter()
+                            .map(|file| file.id.clone())
+                            .collect(),
+                    );
+                }
                 if let Some(store) = &memory {
                     let store = store.clone();
                     let mut thread = *thread;
@@ -182,6 +418,7 @@ async fn serve(
                 }
             }
             Command::DeleteChatThread { session_id } => {
+                session_files.remove(&session_id);
                 if let Some(store) = &memory {
                     let store = store.clone();
                     let at = now();
@@ -231,7 +468,7 @@ async fn serve(
                     match models.execution.read().await.clone() {
                         models::ModelExecution::Legacy => (harness.clone(), None),
                         models::ModelExecution::Selected { harness, timeout } => {
-                            (Some(harness), Some(timeout))
+                            (Some(*harness), Some(timeout))
                         }
                         models::ModelExecution::Unavailable(message) => {
                             let _ = events
@@ -250,6 +487,10 @@ async fn serve(
                 let memory_enabled = models
                     .as_ref()
                     .is_none_or(|m| m.memory_enabled.load(std::sync::atomic::Ordering::Relaxed));
+                let web_search_enabled = models.as_ref().is_none_or(|m| {
+                    m.web_search_enabled
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                });
                 if memory_enabled && let Some(store) = &memory {
                     record_episode(
                         &handle,
@@ -268,25 +509,37 @@ async fn serve(
                     events.clone()
                 };
                 if let Some(previous) = runs.remove(&session_id) {
-                    previous.harness.interrupt(&session_id);
+                    previous.interrupt(&session_id);
                     previous.task.abort();
                 }
-                if let Some(run) = dispatch_prompt(
-                    selected,
+                // Any reply may keep what it makes in Artifacts (`save_artifact`).
+                let selected = selected.map(|base| {
+                    base.with_artifact_saver(artifact_library.saver())
+                        .unwrap_or(base)
+                });
+                let run = spawn_prompt(
                     &handle,
-                    session_id.clone(),
-                    prompt,
-                    events,
-                    timeout,
-                )
-                .await
-                {
-                    runs.insert(session_id, run);
-                }
+                    PromptJob {
+                        harness: selected,
+                        session_id: session_id.clone(),
+                        prompt,
+                        events,
+                        timeout,
+                        routing: routing_config.clone(),
+                        specialists: specialists.clone(),
+                        api_key: agent_config.api_key.clone(),
+                        web_search_enabled,
+                        search: search.clone(),
+                        skills: skill_catalog.clone(),
+                        skill_resources: skills.resources.clone(),
+                        indexed_files: file_index.reader.clone(),
+                    },
+                );
+                runs.insert(session_id, run);
             }
             Command::InterruptSession { session_id } => {
                 if let Some(run) = runs.remove(&session_id) {
-                    run.harness.interrupt(&session_id);
+                    run.interrupt(&session_id);
                     run.task.abort();
                     tracing::info!(%session_id, "session interrupted");
                 }
@@ -299,7 +552,7 @@ async fn serve(
                 let selected = if let Some(models) = &models {
                     match models.execution.read().await.clone() {
                         models::ModelExecution::Legacy => harness.clone(),
-                        models::ModelExecution::Selected { harness, .. } => Some(harness),
+                        models::ModelExecution::Selected { harness, .. } => Some(*harness),
                         models::ModelExecution::Unavailable(_) => None,
                     }
                 } else {
@@ -330,7 +583,7 @@ async fn serve(
         }
     }
     for (session, run) in runs {
-        run.harness.interrupt(&session);
+        run.interrupt(&session);
         run.task.abort();
     }
     let _ = events.send(Event::Stopped).await;
@@ -445,6 +698,12 @@ fn tap_agent_events(
                     }
                 }
                 Event::Models(_)
+                | Event::Skills(_)
+                | Event::Teams(_)
+                | Event::Artifacts(_)
+                | Event::AgUi { .. }
+                | Event::FilePrepared(_)
+                | Event::FileIndex(_)
                 | Event::ChatHistoryLoaded { .. }
                 | Event::Ready { .. }
                 | Event::Pong
@@ -487,30 +746,138 @@ fn build_harness(agent_config: &AgentConfig) -> Option<AdkHarness> {
 }
 
 struct ActiveRun {
-    harness: AdkHarness,
+    harness: Arc<std::sync::RwLock<Option<AdkHarness>>>,
     task: tokio::task::JoinHandle<()>,
 }
 
-async fn dispatch_prompt(
+impl ActiveRun {
+    fn interrupt(&self, session_id: &str) {
+        let guard = self
+            .harness
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(harness) = guard.as_ref() {
+            harness.interrupt(session_id);
+        }
+    }
+}
+
+struct PromptJob {
     harness: Option<AdkHarness>,
-    handle: &tokio::runtime::Handle,
     session_id: String,
     prompt: String,
     events: Sender<Event>,
     timeout: Option<std::time::Duration>,
-) -> Option<ActiveRun> {
-    let Some(adk) = harness else {
-        let _ = events
-            .send(Event::AgentError {
-                session_id,
-                message: "Gemini API key is not configured (set GEMINI_API_KEY or GOOGLE_API_KEY)"
-                    .to_owned(),
-            })
-            .await;
-        return None;
-    };
-    let harness = adk.clone();
+    routing: RoutingConfig,
+    specialists: Vec<SpecialistAgentSpec>,
+    api_key: Option<String>,
+    web_search_enabled: bool,
+    search: SearchClient,
+    skills: Arc<sovra_core::skills::SkillCatalog>,
+    skill_resources: Option<Arc<dyn sovra_core::skills::SkillResources>>,
+    indexed_files: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
+}
+
+fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
+    let PromptJob {
+        harness,
+        session_id,
+        prompt,
+        events,
+        timeout,
+        routing,
+        specialists,
+        api_key,
+        web_search_enabled,
+        search,
+        skills,
+        skill_resources,
+        indexed_files,
+    } = job;
+    let slot = Arc::new(std::sync::RwLock::new(harness.clone()));
+    let harness_slot = Arc::clone(&slot);
     let task = handle.spawn(async move {
+        let (skill, prompt) = match skills::resolve(&skills, &prompt) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                let _ = events.send(Event::AgentError { session_id, message: error.to_string() }).await;
+                return;
+            }
+        };
+        let external = fetch_systemone_answers(&routing, api_key.as_deref(), &prompt)
+            .await
+            .ok()
+            .flatten();
+        let evaluation = evaluate_routing(
+            &routing,
+            &specialists,
+            &prompt,
+            external.as_ref(),
+            routing.backend,
+        );
+        if events
+            .send(Event::RouteEvaluated {
+                evaluation: Box::new(evaluation),
+            })
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let Some(base) = harness else {
+            let _ = events
+                .send(Event::AgentError {
+                    session_id,
+                    message:
+                        "Gemini API key is not configured (set GEMINI_API_KEY or GOOGLE_API_KEY)"
+                            .to_owned(),
+                })
+                .await;
+            return;
+        };
+        // Every turn is the orchestrator. The setting only adds or removes
+        // WebSearchAgent; it does not replace the parent with that specialist.
+        let adk = if web_search_enabled {
+            match base.with_web_search(search) {
+                Ok(adk) => adk,
+                Err(error) => {
+                    let _ = events
+                        .send(Event::AgentError {
+                            session_id,
+                            message: error.to_string(),
+                        })
+                        .await;
+                    return;
+                }
+            }
+        } else {
+            match base.without_web_search() {
+                Ok(adk) => adk,
+                Err(error) => {
+                    let _ = events
+                        .send(Event::AgentError {
+                            session_id,
+                            message: error.to_string(),
+                        })
+                        .await;
+                    return;
+                }
+            }
+        };
+        let adk = match adk.with_indexed_files(indexed_files).and_then(|adk| adk.with_skill_library(skills, skill_resources))
+            .and_then(|adk| skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill))) {
+            Ok(adk) => adk,
+            Err(error) => {
+                let _ = events.send(Event::AgentError { session_id, message: error.to_string() }).await;
+                return;
+            }
+        };
+        {
+            let mut guard = harness_slot
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *guard = Some(adk.clone());
+        }
         let run = adk.run_prompt(&session_id, &prompt, &events);
         if let Some(timeout) = timeout {
             if tokio::time::timeout(timeout, run).await.is_err() {
@@ -526,7 +893,10 @@ async fn dispatch_prompt(
             run.await;
         }
     });
-    Some(ActiveRun { harness, task })
+    ActiveRun {
+        harness: slot,
+        task,
+    }
 }
 
 #[cfg(test)]
@@ -581,6 +951,125 @@ mod tests {
                 other => panic!("expected AgentError, got {other:?}"),
             }
         }
+        client.send(Command::Shutdown).unwrap();
+        assert_eq!(events.recv_blocking().unwrap(), Event::Stopped);
+    }
+
+    #[test]
+    fn run_prompt_labels_explicit_web_search_before_the_missing_key_error() {
+        let client = start("9.9.9").unwrap();
+        let events = client.events();
+        assert!(matches!(
+            events.recv_blocking().unwrap(),
+            Event::Ready { .. }
+        ));
+
+        client
+            .send(Command::RunPrompt {
+                session_id: "s-search".into(),
+                prompt: "search the web for rust release notes".into(),
+            })
+            .unwrap();
+        match events.recv_blocking().unwrap() {
+            Event::RouteEvaluated { evaluation } => {
+                assert_eq!(
+                    evaluation.specialist_id.as_deref(),
+                    Some(sovra_core::WEB_SEARCH_AGENT_ID)
+                );
+            }
+            other => panic!("expected RouteEvaluated before the missing-key error, got {other:?}"),
+        }
+        match events.recv_blocking().unwrap() {
+            Event::AgentError {
+                session_id,
+                message,
+            } => {
+                assert_eq!(session_id, "s-search");
+                assert!(message.contains("GEMINI_API_KEY"));
+            }
+            other => panic!("expected missing-key error after the route, got {other:?}"),
+        }
+
+        client
+            .send(Command::RunPrompt {
+                session_id: "s-hello".into(),
+                prompt: "hello".into(),
+            })
+            .unwrap();
+        match events.recv_blocking().unwrap() {
+            Event::RouteEvaluated { evaluation } => {
+                assert_ne!(
+                    evaluation.specialist_id.as_deref(),
+                    Some(sovra_core::WEB_SEARCH_AGENT_ID)
+                );
+            }
+            other => panic!("expected a route for the greeting, got {other:?}"),
+        }
+        match events.recv_blocking().unwrap() {
+            Event::AgentError { session_id, .. } => assert_eq!(session_id, "s-hello"),
+            other => panic!("expected missing-key error for the greeting, got {other:?}"),
+        }
+
+        client.send(Command::Shutdown).unwrap();
+        assert_eq!(events.recv_blocking().unwrap(), Event::Stopped);
+    }
+
+    #[test]
+    fn attached_files_do_not_hide_an_explicit_web_search() {
+        let client = start("9.9.9").unwrap();
+        let events = client.events();
+        assert!(matches!(
+            events.recv_blocking().unwrap(),
+            Event::Ready { .. }
+        ));
+
+        client
+            .send(Command::RunWithFiles {
+                session_id: "s-files".into(),
+                prompt: "search the web for rust release notes".into(),
+                attachment_ids: vec!["cargo-deny-gather".into()],
+            })
+            .unwrap();
+        match events.recv_blocking().unwrap() {
+            Event::RouteEvaluated { evaluation } => {
+                assert_eq!(
+                    evaluation.specialist_id.as_deref(),
+                    Some(sovra_core::WEB_SEARCH_AGENT_ID)
+                );
+            }
+            other => panic!("expected WebSearchAgent before any file error, got {other:?}"),
+        }
+        match events.recv_blocking().unwrap() {
+            Event::AgentError {
+                session_id,
+                message,
+            } => {
+                assert_eq!(session_id, "s-files");
+                assert!(message.contains("GEMINI_API_KEY"), "{message}");
+            }
+            other => panic!("expected missing-key error after the route, got {other:?}"),
+        }
+
+        client
+            .send(Command::RunPrompt {
+                session_id: "s-files".into(),
+                prompt: "what does this file say?".into(),
+            })
+            .unwrap();
+        match events.recv_blocking().unwrap() {
+            Event::AgentError {
+                session_id,
+                message,
+            } => {
+                assert_eq!(session_id, "s-files");
+                assert!(
+                    message.contains("Connect a model"),
+                    "file question left the file path: {message}"
+                );
+            }
+            other => panic!("expected the file reader path, got {other:?}"),
+        }
+
         client.send(Command::Shutdown).unwrap();
         assert_eq!(events.recv_blocking().unwrap(), Event::Stopped);
     }

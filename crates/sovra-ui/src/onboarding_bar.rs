@@ -44,16 +44,16 @@ fn render_tour_coach_bar(
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let step_num = step.step_number();
-    let badge_text = format!("INTERACTIVE SYSTEM TOUR · STEP {step_num} OF 5");
+    let badge_text = format!("Quick tour · {step_num} of 5");
     let next_label = match step.next() {
-        Some(next) => format!("Next: Step {} →", next.step_number()),
-        None => "Finish Tour & Start Chatting ✓".to_owned(),
+        Some(next) => format!("Next: {}", next.title()),
+        None => "Finish tour".to_owned(),
     };
 
     let mut actions = h_flex().flex_wrap().items_center().gap(t.space.compact);
     if step == TourStep::WelcomeChat {
         actions = actions.child(
-            design::button("tour-try-sample-btn", "Try Sample Question", cx)
+            design::button("tour-try-sample-btn", "Try a question", cx)
                 .small()
                 .on_click(cx.listener(|shell, _, window, cx| {
                     shell.fill_composer_draft(
@@ -94,7 +94,7 @@ fn render_tour_coach_bar(
                 })),
         )
         .child(
-            design::button("tour-skip-btn", "End Tour", cx)
+            design::button("tour-skip-btn", "End tour", cx)
                 .small()
                 .ghost()
                 .on_click(cx.listener(|shell, _, _, cx| {

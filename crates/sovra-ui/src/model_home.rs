@@ -38,6 +38,7 @@ impl ModelsView {
 
     pub(crate) fn open_model_home(&mut self, cx: &mut Context<Self>) {
         self.home_open = true;
+        self.choosing_purpose = None;
         self.settings_open = false;
         self.connections_open = false;
         self.connection_form = None;
@@ -48,10 +49,17 @@ impl ModelsView {
         cx.notify();
     }
 
-    pub(crate) fn choose_model(&mut self, key: ModelKey, cx: &mut Context<Self>) {
+    pub(crate) fn choose_model(&mut self, key: &ModelKey, cx: &mut Context<Self>) {
         self.state.error = None;
         self.pending_activation = Some(key.clone());
-        self.send(ModelCommand::Activate { key }, cx);
+        let command = self.choosing_purpose.map_or_else(
+            || ModelCommand::Activate { key: key.clone() },
+            |purpose| ModelCommand::AssignPurpose {
+                purpose,
+                key: Some(key.clone()),
+            },
+        );
+        self.send(command, cx);
         if self.state.error.is_some() {
             self.pending_activation = None;
         }
@@ -109,19 +117,19 @@ impl ModelsView {
             .map_or_else(|| "Ready to use".to_owned(), price_summary);
         let key = rec.key.clone();
         let button_label = if is_active {
-            "✓ Active Now"
+            "Active"
         } else if is_activating {
             "Choosing…"
         } else {
-            "Use This Model"
+            "Use model"
         };
 
         v_flex()
             .id(("models-home-rec", index))
             .test_support()
             .w_full()
-            .p(t.space.small)
-            .gap(t.space.compact)
+            .p(t.space.medium)
+            .gap(t.space.small)
             .sovra_surface(
                 if is_active {
                     Surface::NavActive
@@ -145,11 +153,11 @@ impl ModelsView {
                             .child(div().sovra_text(TextRole::Body, cx).child(rec.name.clone())),
                     )
                     .child(
-                        design::primary_button(("models-home-rec-btn", index), button_label, cx)
+                        design::button(("models-home-rec-btn", index), button_label, cx)
                             .small()
                             .disabled(is_active || self.pending_activation.is_some())
                             .on_click(cx.listener(move |view, _, _, cx| {
-                                view.choose_model(key.clone(), cx);
+                                view.choose_model(&key, cx);
                             })),
                     ),
             )
@@ -194,23 +202,16 @@ impl ModelsView {
                     .justify_between()
                     .items_center()
                     .gap(t.space.small)
-                    .child(
-                        div()
-                            .sovra_text(
-                                if narrow {
-                                    TextRole::SectionTitle
-                                } else {
-                                    TextRole::PageTitle
-                                },
-                                cx,
-                            )
-                            .child(if narrow { "Models" } else { "Choose your AI" }),
-                    )
+                    .child(design::page_header(
+                        "Models",
+                        "Find the right AI for the way you work.",
+                        cx,
+                    ))
                     .child(
                         h_flex()
                             .gap(t.space.compact)
                             .child(
-                                design::button("models-start-tour", "Interactive Tour", cx)
+                                design::button("models-start-tour", "Take a tour", cx)
                                     .small()
                                     .ghost()
                                     .on_click(cx.listener(|_, _, _, cx| cx.emit(StartSystemTour))),
@@ -225,7 +226,8 @@ impl ModelsView {
                     ),
             )
             .children(
-                (!narrow).then(|| Self::render_setup_stepper(any_connected, active.is_some(), cx)),
+                (!narrow && active.is_none())
+                    .then(|| Self::render_setup_stepper(any_connected, false, cx)),
             );
 
         if let Some(error) = &self.state.error {
@@ -249,7 +251,7 @@ impl ModelsView {
                 .model(key)
                 .map_or_else(|| key.model_id.clone(), |model| model.name.clone());
             next = next
-                .child(caption("✓ SETUP COMPLETE · YOUR SELECTED AI", cx))
+                .child(caption("Your active AI", cx))
                 .child(
                     div()
                         .id("models-home-active-name")
@@ -258,7 +260,7 @@ impl ModelsView {
                         .child(name),
                 )
                 .child(caption(
-                    "Your choice is saved. Go to Chat to send a message, or take a short tour of Sovra.",
+                    "Ready for your next conversation. You can switch models anytime.",
                     cx,
                 ))
                 .child(
@@ -266,31 +268,14 @@ impl ModelsView {
                         .flex_wrap()
                         .gap(t.space.small)
                         .child(
-                            design::primary_button("models-home-chat", "Go to Chat →", cx)
+                            design::primary_button("models-home-chat", "Go to chat", cx)
                                 .on_click(cx.listener(|_, _, _, cx| cx.emit(GoToChat))),
                         )
                         .child(
-                            design::button(
-                                "models-home-take-tour",
-                                "Take 1-Minute System Tour",
-                                cx,
-                            )
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(StartSystemTour))),
+                            design::button("models-home-take-tour", "Take a tour", cx)
+                                .on_click(cx.listener(|_, _, _, cx| cx.emit(StartSystemTour))),
                         ),
                 );
-            if !recommendations.is_empty() {
-                next = next
-                    .child(caption(
-                        "Switch to another recommended model in 1 click:",
-                        cx,
-                    ))
-                    .children(
-                        recommendations
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, rec)| self.render_recommendation_card(idx, rec, cx)),
-                    );
-            }
         } else if let SetupStage::NeedsModelKey {
             model_id,
             connection_name,
@@ -382,7 +367,7 @@ impl ModelsView {
                                 .disabled(self.pending_activation.is_some())
                                 .on_click(cx.listener(
                                     move |view, _, _, cx| {
-                                        view.choose_model(key.clone(), cx);
+                                        view.choose_model(&key, cx);
                                     },
                                 )),
                             )
@@ -442,7 +427,7 @@ impl ModelsView {
                         .child(
                             design::primary_button(
                                 "models-home-connect",
-                                "Connect OpenRouter Key →",
+                                "Connect OpenRouter",
                                 cx,
                             )
                             .on_click(cx.listener(|view, _, window, cx| {
@@ -452,7 +437,7 @@ impl ModelsView {
                         .child(
                             design::button(
                                 "models-home-open-openrouter",
-                                "Get Free Key at openrouter.ai ↗",
+                                "Get an API key ↗",
                                 cx,
                             )
                             .on_click(|_, _, cx| cx.open_url("https://openrouter.ai/keys")),
@@ -464,12 +449,101 @@ impl ModelsView {
                         .child("OpenRouter supplies the AI answers. Create an account and copy its connection key, then paste the key here. Some models are free; others charge for use."),
                 )
                 .child(caption(
-                    "1) Click “Get Free Key at openrouter.ai” to open the website and create a key (starts with sk-or-).  2) Click “Connect OpenRouter Key” to paste it.",
+                    "Create a key on OpenRouter, then choose Connect OpenRouter to add it here.",
                     cx,
                 ));
         }
 
         content = content.child(next);
+        content = content.child(
+            v_flex()
+                .w_full()
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("An AI for each kind of file"),
+                )
+                .child(caption(
+                    "Choose once. Sovra will use the right AI when you add a file in chat.",
+                    cx,
+                ))
+                .children(
+                    sovra_core::files::ModelPurpose::ALL
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, purpose)| {
+                            let key = self.state.preferences.purposes.get(&purpose);
+                            let name = key.map_or_else(
+                                || {
+                                    if purpose == sovra_core::files::ModelPurpose::Documents {
+                                        "Uses your chat AI".to_owned()
+                                    } else {
+                                        "Choose when you need it".to_owned()
+                                    }
+                                },
+                                |key| {
+                                    self.state.model(key).map_or_else(
+                                        || key.model_id.clone(),
+                                        |model| model.name.clone(),
+                                    )
+                                },
+                            );
+                            h_flex()
+                                .w_full()
+                                .flex_wrap()
+                                .justify_between()
+                                .items_center()
+                                .gap(t.space.small)
+                                .p(t.space.medium)
+                                .sovra_surface(Surface::Subtle, cx)
+                                .child(
+                                    v_flex()
+                                        .min_w_0()
+                                        .gap(t.space.compact)
+                                        .child(
+                                            div()
+                                                .sovra_text(TextRole::Body, cx)
+                                                .child(purpose.label()),
+                                        )
+                                        .child(caption(name, cx)),
+                                )
+                                .child(
+                                    design::button(
+                                        ("model-purpose", index),
+                                        if key.is_some() { "Change" } else { "Choose AI" },
+                                        cx,
+                                    )
+                                    .accessibility_label(format!(
+                                        "Choose AI to {}",
+                                        purpose.label().to_lowercase()
+                                    ))
+                                    .on_click(cx.listener(
+                                        move |view, _, window, cx| {
+                                            view.open_for_purpose(purpose, window, cx);
+                                        },
+                                    )),
+                                )
+                        }),
+                ),
+        );
+        if active.is_some() && !recommendations.is_empty() {
+            content = content.child(
+                v_flex()
+                    .gap(t.space.small)
+                    .child(
+                        div()
+                            .sovra_text(TextRole::SectionTitle, cx)
+                            .child("Explore other models"),
+                    )
+                    .children(
+                        recommendations
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, rec)| self.render_recommendation_card(idx, rec, cx)),
+                    ),
+            );
+        }
         if matches!(stage, SetupStage::NeedsConnection) {
             content = content.child(
                 v_flex()
@@ -488,7 +562,7 @@ impl ModelsView {
                             .flex_wrap()
                             .gap(t.space.small)
                             .child(
-                                design::button("models-home-local", "Use Ollama (Free Local)", cx)
+                                design::button("models-home-local", "Use Ollama", cx)
                                     .ghost()
                                     .on_click(cx.listener(|view, _, window, cx| {
                                         view.open_ollama_setup(window, cx);
@@ -497,7 +571,7 @@ impl ModelsView {
                             .child(
                                 design::button(
                                     "models-home-other",
-                                    "Connect OpenAI-Compatible URL",
+                                    "Connect a server",
                                     cx,
                                 )
                                 .ghost()
@@ -515,7 +589,7 @@ impl ModelsView {
             .size_full()
             .min_w_0()
             .min_h_0()
-            .p(spacing)
+            .p(t.space.large)
             .overflow_y_scroll()
             .child(content)
     }

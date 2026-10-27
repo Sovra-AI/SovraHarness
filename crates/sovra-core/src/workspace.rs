@@ -32,13 +32,21 @@ pub enum NavTab {
     Models,
     Schedules,
     Settings,
+    Skills,
+    /// The user's AI team (`SovraSRX` Team).
+    Team,
+    /// Everything kept from chats: documents, code, tables, diagrams.
+    Artifacts,
 }
 
 impl NavTab {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 9] = [
         Self::Chat,
+        Self::Team,
+        Self::Artifacts,
         Self::MyAis,
         Self::Knowledge,
+        Self::Skills,
         Self::Models,
         Self::Schedules,
         Self::Settings,
@@ -52,6 +60,9 @@ impl NavTab {
             Self::Models => "Models",
             Self::Schedules => "Schedules",
             Self::Settings => "Settings",
+            Self::Skills => "Skills",
+            Self::Team => "Team",
+            Self::Artifacts => "Artifacts",
         }
     }
 }
@@ -225,6 +236,8 @@ pub struct WorkspaceState {
     pub history_collapsed: bool,
     pub renaming_thread_id: Option<String>,
     pub queued_prompts: Vec<String>,
+    pub file_drafts: std::collections::BTreeMap<String, crate::files::AttachmentDraft>,
+    pub file_setup: Option<crate::files::FileSetup>,
     pub is_generating: bool,
     pub ai_name: String,
     pub ai_description: String,
@@ -252,6 +265,14 @@ pub struct WorkspaceState {
     /// Session IDs that have already requested or received an LLM-generated title.
     titled_threads: std::collections::BTreeSet<String>,
     model_connections: Vec<crate::models::ModelConnection>,
+    /// The user's AI team, folded from [`Event::Teams`].
+    pub team: crate::teams::TeamRoster,
+    /// Saved artifacts, folded from [`Event::Artifacts`].
+    pub artifacts: crate::artifacts::ArtifactLibrary,
+    /// The composer sends prompts to the whole team instead of Sovra alone.
+    pub team_mode: bool,
+    /// AG-UI `subagentRunId` → the member it belongs to, for attributing messages.
+    team_subagents: std::collections::BTreeMap<String, crate::agui::Speaker>,
     next_msg_seq: u64,
     next_thread_seq: u64,
 }
@@ -275,6 +296,8 @@ impl Default for WorkspaceState {
             history_collapsed: false,
             renaming_thread_id: None,
             queued_prompts: Vec::new(),
+            file_drafts: std::collections::BTreeMap::new(),
+            file_setup: None,
             is_generating: false,
             ai_name: "My Personal AI".to_owned(),
             ai_description:
@@ -296,6 +319,10 @@ impl Default for WorkspaceState {
             user_renamed_threads: std::collections::BTreeSet::new(),
             titled_threads: std::collections::BTreeSet::new(),
             model_connections: Vec::new(),
+            team: crate::teams::TeamRoster::default(),
+            artifacts: crate::artifacts::ArtifactLibrary::default(),
+            team_mode: false,
+            team_subagents: std::collections::BTreeMap::new(),
             next_msg_seq: 0,
             next_thread_seq: 1,
         }
@@ -791,6 +818,26 @@ impl WorkspaceState {
         Some(prompt.to_owned())
     }
 
+    /// File turns remain in the composer until ready and are never queued without their files.
+    pub fn submit_file_prompt(
+        &mut self,
+        prompt: &str,
+        attachments: Vec<crate::files::Attachment>,
+    ) -> bool {
+        if self.is_generating
+            || attachments.is_empty()
+            || attachments.len() > crate::files::MAX_ATTACHMENTS
+        {
+            return false;
+        }
+        self.append_user_turn(prompt);
+        if let Some(message) = self.messages.last_mut() {
+            message.attachments = attachments;
+        }
+        self.sync_active_thread();
+        true
+    }
+
     /// Stops the visible turn and discards queued work so Stop cannot trigger another request.
     pub fn interrupt_generation(&mut self) {
         self.is_generating = false;
@@ -949,7 +996,21 @@ impl WorkspaceState {
                 let _ = self.apply_generated_title(session_id, title);
                 None
             }
-            Event::Ready { .. } | Event::Pong | Event::Stopped => None,
+            Event::Skills(_)
+            | Event::FileIndex(_)
+            | Event::Ready { .. }
+            | Event::Pong
+            | Event::Stopped
+            | Event::FilePrepared(_) => None,
+            Event::Teams(team_event) => {
+                self.team.apply(team_event);
+                None
+            }
+            Event::Artifacts(artifact_event) => {
+                self.artifacts.apply(artifact_event);
+                None
+            }
+            Event::AgUi { session_id, event } => self.apply_agui(session_id, event),
             Event::AgentResponseStarted { session_id, .. }
             | Event::AgentChunk { session_id, .. }
             | Event::AgentThinkingChunk { session_id, .. }
@@ -1002,6 +1063,120 @@ impl WorkspaceState {
                 self.dequeue_next_prompt()
             }
         }
+    }
+
+    /// Folds one AG-UI run event into the conversation it belongs to. Events for
+    /// another conversation still finish its run, so its composer is not stuck.
+    fn apply_agui(&mut self, session_id: &str, event: &crate::agui::AgUiEvent) -> Option<String> {
+        use crate::agui::AgUiEvent;
+        if session_id != self.session_id {
+            return None;
+        }
+        match event {
+            AgUiEvent::RunStarted { .. } => {
+                self.is_generating = true;
+                None
+            }
+            AgUiEvent::ActivitySnapshot {
+                message_id,
+                activity,
+            } => {
+                let widget = AgUiWidget::TeamActivity(activity.clone());
+                if let Some(message) = self.messages.iter_mut().find(|m| m.id == *message_id) {
+                    message.widgets = vec![widget];
+                } else {
+                    let mut message =
+                        ChatMessage::assistant(message_id.clone(), "", "Just now", vec![widget]);
+                    "Team".clone_into(&mut message.author);
+                    self.messages.push(message);
+                }
+                None
+            }
+            AgUiEvent::SubagentStarted {
+                subagent_run_id,
+                speaker,
+                ..
+            } => {
+                self.team_subagents
+                    .insert(subagent_run_id.clone(), speaker.clone());
+                None
+            }
+            AgUiEvent::TextMessageStart {
+                message_id,
+                subagent_run_id,
+            } => {
+                if self.messages.iter().any(|m| m.id == *message_id) {
+                    return None;
+                }
+                let speaker = subagent_run_id
+                    .as_ref()
+                    .and_then(|id| self.team_subagents.get(id))
+                    .cloned();
+                let mut message =
+                    ChatMessage::assistant(message_id.clone(), "", "Just now", Vec::new());
+                if let Some(speaker) = speaker {
+                    message.author.clone_from(&speaker.name);
+                    message.speaker = Some(speaker);
+                }
+                self.messages.push(message);
+                None
+            }
+            AgUiEvent::TextMessageContent { message_id, delta } => {
+                if let Some(message) = self.messages.iter_mut().rev().find(|m| m.id == *message_id)
+                {
+                    message.text.push_str(delta);
+                }
+                None
+            }
+            AgUiEvent::TextMessageEnd { message_id } => {
+                // A member that streamed nothing (a pass) leaves no empty bubble.
+                self.messages.retain(|m| {
+                    m.id != *message_id || !m.text.trim().is_empty() || !m.widgets.is_empty()
+                });
+                self.sync_active_thread();
+                None
+            }
+            AgUiEvent::SubagentFinished { .. } => None,
+            AgUiEvent::RunFinished { .. } => {
+                self.is_generating = false;
+                self.team_subagents.clear();
+                self.sync_active_thread();
+                self.dequeue_next_prompt()
+            }
+            AgUiEvent::RunError { message } => {
+                self.is_generating = false;
+                self.team_subagents.clear();
+                self.append_or_extend_assistant(&format!("Note: {message}"));
+                self.sync_active_thread();
+                self.dequeue_next_prompt()
+            }
+        }
+    }
+
+    /// Whether `prompt` goes to the team: team mode, `/team …` or an `@member`.
+    /// Returns the prompt to send without the `/team` command.
+    pub fn team_prompt<'a>(&self, prompt: &'a str) -> Option<&'a str> {
+        if let Some(rest) = crate::teams::strip_team_command(prompt) {
+            return Some(rest);
+        }
+        (self.team_mode || crate::teams::mentions_member(prompt, &self.team.members))
+            .then_some(prompt)
+    }
+
+    /// The visible conversation as the team sees it, oldest first.
+    pub fn team_history(&self) -> Vec<crate::teams::TranscriptLine> {
+        self.messages
+            .iter()
+            .filter(|m| !m.text.trim().is_empty())
+            .map(|m| crate::teams::TranscriptLine {
+                speaker: match (&m.role, &m.speaker) {
+                    (crate::agui::MessageRole::User, _) => "User".to_owned(),
+                    (crate::agui::MessageRole::Assistant, Some(speaker)) => speaker.name.clone(),
+                    (crate::agui::MessageRole::Assistant, None) => "Sovra".to_owned(),
+                },
+                text: m.text.clone(),
+            })
+            .collect()
     }
 
     /// Message ids key per-message UI state, so they must be unique within the

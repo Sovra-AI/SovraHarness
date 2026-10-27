@@ -3,7 +3,7 @@
 //! The picture comes from [`sovra_core::memory_explanation`]. Drawing it does
 //! not open a memory store or do any other IO.
 
-use gpui_kit::component::{ActiveTheme as _, button::ButtonVariants as _, v_flex};
+use gpui_kit::component::{ActiveTheme as _, button::ButtonVariants as _, h_flex, v_flex};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
@@ -14,7 +14,7 @@ use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
 pub(crate) fn render_knowledge_view(
-    times_open: bool,
+    shell: &Shell,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let story = memory_explanation();
@@ -23,12 +23,13 @@ pub(crate) fn render_knowledge_view(
         .w_full()
         .max_w(t.layout.reading_width)
         .gap(t.space.medium)
+        .child(crate::file_index_view::render(shell, cx))
         .child(render_intro(&story, cx))
         .child(render_story(&story, cx))
         .child(render_about(&story, cx))
         .child(render_search(&story, cx))
-        .child(render_times_toggle(times_open, cx));
-    if times_open {
+        .child(render_times_toggle(shell.knowledge_times_open, cx));
+    if shell.knowledge_times_open {
         column = column.child(render_times(&story, cx));
     }
     v_flex()
@@ -48,16 +49,14 @@ fn render_intro(story: &MemoryExplanation, cx: &mut Context<Shell>) -> impl Into
         .id("knowledge-intro")
         .test_support()
         .aria_label(format!("{} {}", story.title, story.lead))
-        .gap(t.space.compact)
+        .child(design::page_header(
+            "Knowledge",
+            "How Sovra remembers, learns, and keeps context.",
+            cx,
+        ))
         .child(
             div()
-                .sovra_text(TextRole::Caption, cx)
-                .text_color(cx.theme().link)
-                .child("How Sovra remembers"),
-        )
-        .child(div().sovra_text(TextRole::PageTitle, cx).child(story.title))
-        .child(
-            div()
+                .mt(t.space.medium)
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
                 .child(story.lead),
@@ -69,7 +68,9 @@ fn render_story(story: &MemoryExplanation, cx: &mut Context<Shell>) -> impl Into
     v_flex()
         .id("knowledge-story")
         .test_support()
-        .gap(t.space.small)
+        .sovra_surface(Surface::Matte, cx)
+        .p(t.space.large)
+        .gap(t.space.large)
         .children(
             story
                 .steps
@@ -86,30 +87,42 @@ fn render_step(
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let number = index + 1;
-    v_flex()
+    h_flex()
         .id(("knowledge-step", index))
         .test_support()
         .aria_label(format!("Step {number}. {} {}", step.heading, step.body))
         .w_full()
-        .sovra_surface(Surface::Matte, cx)
-        .p(t.space.medium)
-        .gap(t.space.compact)
+        .items_start()
+        .gap(t.space.medium)
         .child(
             div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(t.layout.logo_small)
+                .flex_shrink_0()
+                .rounded(t.radius.pill)
+                .bg(t.nav_active_background)
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(cx.theme().link)
-                .child(format!("Step {number}")),
+                .child(number.to_string()),
         )
         .child(
-            div()
-                .sovra_text(TextRole::SectionTitle, cx)
-                .child(step.heading),
-        )
-        .child(
-            div()
-                .sovra_text(TextRole::Body, cx)
-                .text_color(t.text_secondary)
-                .child(step.body),
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(t.space.compact)
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child(step.heading),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .text_color(t.text_secondary)
+                        .child(step.body),
+                ),
         )
 }
 
@@ -139,7 +152,7 @@ fn render_about(story: &MemoryExplanation, cx: &mut Context<Shell>) -> impl Into
 fn render_belief(belief: &BeliefPicture, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let surface = match belief.standing {
-        BeliefStanding::Current => Surface::Elevated,
+        BeliefStanding::Current => Surface::Matte,
         BeliefStanding::History => Surface::Subtle,
     };
     v_flex()

@@ -18,6 +18,11 @@ DEFINE TABLE OVERWRITE chat_thread SCHEMALESS;
 DEFINE INDEX OVERWRITE chat_thread_session ON chat_thread FIELDS session_id UNIQUE;
 DEFINE INDEX OVERWRITE chat_thread_updated ON chat_thread FIELDS updated_at;
 
+DEFINE TABLE OVERWRITE team SCHEMALESS;
+
+DEFINE TABLE OVERWRITE artifact SCHEMALESS;
+DEFINE INDEX OVERWRITE artifact_updated ON artifact FIELDS updated_at;
+
 DEFINE TABLE OVERWRITE fact SCHEMALESS;
 DEFINE INDEX OVERWRITE fact_created ON fact FIELDS created_at;
 

@@ -5,13 +5,15 @@
 
 use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a small subset
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, h_flex,
+    ActiveTheme as _, Icon, Sizable as _,
+    button::ButtonVariants as _,
+    h_flex,
     input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
+    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{ConfigCardStatus, PersonalAiConfigCard, WorkspaceState};
 
@@ -70,7 +72,7 @@ fn render_search_bar(
         .items_center()
         .gap(t.space.compact)
         .px(t.space.small)
-        .py(px(4.))
+        .py(t.space.compact)
         .rounded(t.radius.pill)
         .sovra_surface(Surface::Subtle, cx)
         .child(
@@ -89,9 +91,9 @@ fn render_search_bar(
         )
         .child(
             h_flex()
-                .px(px(6.))
-                .py(px(2.))
-                .rounded(px(6.))
+                .px(t.space.snug)
+                .py(t.space.hair)
+                .rounded(t.radius.small)
                 .bg(t.matte)
                 .border_1()
                 .border_color(theme.border)
@@ -112,7 +114,7 @@ fn render_inspector_header(
         "● Ready"
     };
     v_flex()
-        .gap(px(2.))
+        .gap(t.space.hair)
         .pt(t.space.compact)
         .child(
             h_flex()
@@ -132,7 +134,7 @@ fn render_inspector_header(
                             h_flex()
                                 .id("inspector-status-pill")
                                 .px(t.space.small)
-                                .py(px(2.))
+                                .py(t.space.hair)
                                 .rounded(t.radius.pill)
                                 .bg(t.status_pill_background)
                                 .sovra_text(TextRole::Caption, cx)
@@ -142,7 +144,7 @@ fn render_inspector_header(
                 )
                 .child(
                     h_flex()
-                        .size(px(28.))
+                        .size(t.layout.compact_control_height)
                         .items_center()
                         .justify_center()
                         .rounded(t.radius.input)
@@ -171,12 +173,12 @@ fn render_persona_card(state: &WorkspaceState, cx: &Context<Shell>) -> impl Into
         .gap(t.space.small)
         .p(t.space.small)
         .sovra_surface(Surface::Subtle, cx)
-        .child(logo("inspector-persona-orb", px(46.)))
+        .child(logo("inspector-persona-orb", t.layout.logo_medium))
         .child(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .gap(px(2.))
+                .gap(t.space.hair)
                 .child(
                     h_flex()
                         .items_center()
@@ -220,16 +222,12 @@ fn render_config_card(
     };
     let key = card.key.clone();
 
-    h_flex()
-        .id(("inspector-card", idx))
-        .role(Role::Button)
-        .aria_label(card.title.clone())
-        .cursor_pointer()
+    design::button(("inspector-card", idx), "", cx)
+        .ghost()
+        .accessibility_label(card.title.clone())
         .w_full()
-        .items_center()
-        .justify_between()
+        .h_auto()
         .p(t.space.small)
-        .sovra_surface(Surface::Matte, cx)
         .child(
             h_flex()
                 .flex_1()
@@ -238,7 +236,7 @@ fn render_config_card(
                 .gap(t.space.small)
                 .child(
                     h_flex()
-                        .size(px(30.))
+                        .size(t.layout.compact_control_height)
                         .flex_shrink_0()
                         .items_center()
                         .justify_center()
@@ -259,6 +257,7 @@ fn render_config_card(
                             div()
                                 .sovra_text(TextRole::Caption, cx)
                                 .text_color(t.text_secondary)
+                                .whitespace_normal()
                                 .child(card.subtitle.clone()),
                         ),
                 ),
@@ -267,7 +266,7 @@ fn render_config_card(
             h_flex()
                 .flex_shrink_0()
                 .items_center()
-                .gap(px(4.))
+                .gap(t.space.compact)
                 .child(Icon::new(status_icon).small().text_color(status_color))
                 .child(
                     div()

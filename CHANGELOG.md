@@ -13,6 +13,94 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Summary model transport (in progress)**: a single-request adapter supports Ollama, Anthropic, OpenRouter and compatible chat endpoints without tools. It revalidates model destinations when constructed, validates prepared source scope and size, uses conservative context admission, and accepts only completed JSON with valid input citations. Embeddings and summaries share bounded HTTP response handling. Scheduler, consent UI and recursive generation remain pending.
+
+- **RAPTOR clustering engine (in progress)**: global/local UMAP reductions feed full-covariance Gaussian mixtures selected by BIC. Soft assignments retain overlap and source coverage; recursive grouping fits request budgets and identifies fallback partitions explicitly. Computation runs on one CPU worker with cancellation and finite work limits. Background generation and retrieval integration remain pending.
+
+- **Summary storage foundation (in progress)**: immutable summaries retain exact source inputs, model provenance and claim citations. Source changes and derived corrections invalidate dependent summaries; revoked folder grants remain revoked after re-adding a folder. Request reservations persist across restarts, enforce a chosen budget, and reject results from paused or changed work. Background generation, RAPTOR clustering and compiled maps are not yet exposed.
+
+- **Reviewed file knowledge**: `/map-files` proposes typed relationships between logical documents, sections, topics, people, organizations, projects, tasks and exact source versions. Knowledge shows the structured preview, full cited excerpts, extraction caveats, confidence estimates, dates and replacements before Save or Reject. Only native review can approve; saved claims remain model inferences. `/file-knowledge` supports bounded traversal and evidence reads with independent recorded/world dates and supersession history. Changed sources block approval and require explicit historical retrieval; revoked grants cannot be restored by re-adding a folder. Original files remain unchanged.
+
+- **Opt-in semantic file search**: each indexed folder can use an explicitly chosen Ollama or OpenAI-compatible embedding model. Knowledge names the destination before enabling background passage indexing. Search combines keyword and cosine rankings with source-version citations; incomplete coverage and embedding failures are disclosed to both the UI and agent. Changing the configured server/model requires a new choice, and disabling/removing the folder cancels outstanding work and removes its vectors. No model downloads or embedding requests occur automatically for unconfigured folders.
+
+- **File history and provenance**: `/file-history` (also `/file-provenance` and `/file-versions`) inspects an append-only observation log, including observed renames, metadata/content changes, scan status and extraction revisions. Historical passages retain their original observed paths and version citations, support bounded continuation, and become inaccessible when a folder grant is removed. Missing eligible paths are distinguished from proven deletions; legacy index state is labelled as imported, with unknown provenance and real-world validity left explicit.
+
+- **File catalogue skill**: `/file-catalog` (also `/query-files` and `/list-files`) discovers indexed scopes, filters observed files by literal name/path, MIME type, size, filesystem modification time, extraction status and text keywords, and groups counts by folder, directory, extension or MIME type. Results include scan coverage, unknown-size counts and revision-bound pagination. Large, unsupported and blank files, and files whose text extraction fails, retain metadata without claiming readable content; existing indexes migrate transactionally and preserve citations. Queries over 32 keywords return a clear error instead of silently dropping terms.
+
+- **Local folder indexing (in progress)**: `/index-folder` opens the native folder chooser; Knowledge shows measured progress, cancellation, refresh, removal and local text search. A persistent SQLite FTS index reuses content-defined chunks, keeps source-version citations, skips symlinks/hidden/generated inputs, and preserves unvisited records when a scan is cancelled. Sources remain read-only. `/search-files` lets the agent retrieve bounded source passages and cite extracted-text lines through the orchestrator. Bounded native watches coalesce changes with periodic reconciliation, visible fallback, and persisted pause/resume controls. Derived knowledge remains in progress.
+
+- **AI team and Artifacts (`sovra-core`, `sovra-adk`, `sovra-runtime`, `sovra-store-surreal`, `sovra-ui`)**:
+  - **Team, ported from SovraSRX team chats.**
+    - Eight seeded helpers, with a moderating Conductor (Alex).
+    - The first speakers are chosen by `@mention`, then name, then "everyone" words,
+      then expertise.
+    - Members may pass (`<pass/>`), which is never shown.
+    - The Conductor's verdict tail (`CONTINUE` / `YIELD_TO_USER` / `ASK_USER`) is hidden.
+    - A turn has at most 3 rounds and 8 replies.
+  - **Streamed as AG-UI events.** Team turns use `RUN_*`, an `ACTIVITY_SNAPSHOT`
+    live team card, `SUBAGENT_STARTED/FINISHED` and `TEXT_MESSAGE_*`, through the
+    new `Event::AgUi`.
+  - **Team page.** Switch helpers on or off, edit them, add ready-made helpers or make
+    your own, and restore originals.
+    - "Ask my team" and the composer's team button switch chat into team mode.
+    - `/team` and `@handle` also send a message to the team.
+  - **Artifacts.**
+    - Nine kinds, one table row each, so adding a kind is one variant plus one row.
+    - **Save** on every reply and code block. The main block becomes the artifact;
+      otherwise the whole reply is saved as a document.
+    - A `save_artifact` tool for agents, with an in-chat AG-UI card.
+    - A library page with search, kind filters, preview, copy, **Save to my computer**
+      (tables as CSV) and **Open in browser** for HTML, SVG and Mermaid.
+    - Edits keep earlier versions; delete is a soft delete and asks for a second click.
+  - **Persistence.** The roster and artifacts are saved in the embedded SurrealDB store.
+  - See `docs/teams-and-artifacts.md`.
+
+- **Skill workflows (in progress)**: one validated command catalogue backs native slash
+  suggestions, explicit model procedures and the Skills page. Local user skills use
+  bounded SKILL.md packages with private, atomic writes, retained resources, enable/disable,
+  import and removal. File indexing and the broader knowledge pipeline remain tracked in
+  `docs/skills-and-file-knowledge.md` and are not yet complete.
+
+- **File-agent retrieval and citations**: small prompt budgets now prioritize matching
+  passages, including short identifiers and numbers, with extracted-text line ranges.
+  Text search and binary search have explicit continuation cursors; binary search also
+  accepts hexadecimal byte patterns. Prompt excerpts and tools share one cached index
+  built on a runtime-owned blocking task, and malformed tool offsets are rejected.
+  Rebuilding a reader replaces its old attachment tool and honors disabled tools.
+
+- **Extension-independent file reading**: fixes `.rs` and other readable source/config
+  files being rejected by the document parser. Preserves UTF-8 text and supports
+  UTF-16/32 plus detected legacy encodings, signature-aware renamed containers,
+  bounded XZ/LZMA/BZip2/Zstandard reading, SVG rendering, SQLite tables, binary
+  property lists and executable metadata. Unknown, empty, encrypted or damaged
+  formats remain available as explicitly labelled inspection with retained bytes
+  and bounded byte tools; inspection never implies complete semantic decoding.
+  Text sections borrow source slices, repeated tool searches cache case folding,
+  and binary search uses `memchr`. See `docs/files.md` for concrete limits.
+
+- **Responsive, scalable layout (`sovra-core`, `sovra-runtime`, `sovra-ui`, `xtask`)**:
+  every design-token size is now in rems, so the whole UI follows a remembered
+  **Text size** (75–200%) in **Settings → Appearance**, **View → Zoom In/Out/Actual Size**
+  and ⌘= / ⌘- / ⌘0 (`ModelCommand::SetInterfaceScale`). Panes adapt by Material 3 width
+  classes measured in rems: the sidebar becomes a rail below 840 reference px, docked
+  inspector/detail panes need 1200, and the models view measures its own pane rather
+  than the window. Chat prose is capped at a centred ~80-character column on wide
+  monitors, Markdown headings scale with the text, and the first window is fitted to
+  the display's visible area. `cargo xtask check-styles` now rejects literal `px`/`rems`
+  sizes in views and window-width checks outside the shell; rules live in `AGENTS.md`
+  and `docs/styling.md` → *Responsive layout*.
+
+- **Files in chat and task-specific models**: native multi-file picker, preparation/error
+  cards, image thumbnails, remove controls, saved transcript attachments, and draft-preserving
+  model setup for pictures, audio and video. Document models default to the existing chat
+  selection; media choices persist separately and filter by known input/transport capabilities.
+- **Local file reader (`sovra-files`)**: Xberg 1.3.10 for documents, pure Rust PDF reading,
+  normalized raster images and scanned-PDF page inputs, bounded ZIP/TAR/GZIP traversal,
+  private managed storage, and attached-file reading with actual multimodal parts plus a read-only
+  section/search tool for long documents. See `docs/files.md` for supported families and limits.
+
+- **Keyless web search (`sovra-core`, `sovra-adk`, `sovra-runtime`, `sovra-app`)**:
+  Chat turns are answered by `OrchestratorAgent`, built from the Sovra SRX roster so independent specialists can run at the same time. Asking to "search the web for …" delegates to `WebSearchAgent`, even when the topic contains words such as "rust" or "code", and even when that chat already has files attached. `/web-search <question>` requests that same delegate: after the slash command resolves to the question alone, the active procedure tells the orchestrator to call `WebSearchAgent`. Only that delegate receives a read-only `SearXNG` search (`GET /search?format=json`) with no API key. Several queries in one call run together, and a failed query does not drop the others. The answer cites titles and URLs from that response only. Settings **Web search** removes `WebSearchAgent` and the tool. `SOVRA_SEARXNG_URL` overrides the default origin (`https://searx.be`).
 - **Unified Single Left Sidebar & AI-Generated Conversation Titles (`sovra-core`, `sovra-adk`, `sovra-runtime`, `sovra-ui`)**:
   - Consolidated the navigation sidebar and conversation history rail into a single unified left sidebar (`sidebar.rs` + `chat_history_view.rs`), eliminating the double-sidebar layout.
   - Placed a prominent **`+ New Chat`** button at the top of the sidebar above primary navigation, followed by search, `Chats | Scheduled` filter pills, and date-grouped conversation history (`Pinned`, `Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`) that remains accessible across all workspace tabs and collapses cleanly into a compact icon rail on narrow viewports.
@@ -30,6 +118,14 @@ move them under a version heading when the tag is cut.
   no memory store is open. The times Sovra keeps stay behind a labeled control.
 
 ### Changed
+
+- Refine the native UI throughout: neutral charcoal/paper palettes, restrained
+  violet accents, consistent typography and spacing, flatter cards, quieter chat
+  bubbles and a more comfortable composer. Unify page headers and simplify setup
+  and settings copy. Improve navigation targets and selected-conversation actions.
+- Use native keyboard-operable buttons for routing choices and conversation/profile
+  actions. Keep Knowledge readable by hiding its secondary inspector at compact
+  widths. Document the research and native styling decisions in `docs/styling.md`.
 
 - Start Models with a guided connection → model choice → Chat flow. Offer an
   explicitly free, text-capable online model when available; wait for runtime
@@ -100,6 +196,17 @@ move them under a version heading when the tag is cut.
   tools", "Thinks step by step", plain prices and clearer Ollama download help.
 
 ### Fixed
+
+- Embedding model choices now use catalogue metadata before incomplete manual
+  entries, matching execution and excluding models known to produce only chat text.
+
+- Turning folder auto-refresh on or pausing it applies on the next indexer turn.
+  Those edits no longer wait for a one-second tick that can be skipped while
+  other work is running.
+- Keep login controls within the minimum window and make schedule actions
+  keyboard operable.
+- Keep untouched chat drafts out of conversation history, avoiding misleading
+  epoch-based ages before the first message.
 
 - Send missing-key setup to the selected model's own service, including custom
   connections; avoid repeating setup prompts inside Models and Settings.

@@ -2,15 +2,15 @@
 //! `ScheduleForm` from `SovraSRXProduction`).
 
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _,
+    ActiveTheme as _, IconName, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div, px,
+    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{ScheduleItem, ScheduleStatus, WorkspaceState};
 
@@ -29,14 +29,10 @@ pub(crate) fn render_schedules_view(
     let stats = state.schedule_stats();
 
     let mut page = v_flex()
-        .id("sovra-schedules-view")
-        .test_support()
-        .flex_1()
-        .min_w_0()
-        .h_full()
-        .p(t.space.large)
-        .gap(t.space.medium)
-        .overflow_y_scroll()
+        .w_full()
+        .max_w(t.layout.page_width)
+        .mx_auto()
+        .gap(t.space.large)
         .child(render_header(schedule_form_open, cx))
         .child(
             h_flex()
@@ -68,7 +64,7 @@ pub(crate) fn render_schedules_view(
         ));
     }
 
-    if state.schedules.is_empty() {
+    let content = if state.schedules.is_empty() {
         page.child(render_schedules_placeholder(cx))
     } else {
         page.child(
@@ -84,32 +80,31 @@ pub(crate) fn render_schedules_view(
                         .map(|(idx, item)| render_schedule_row(item, idx, cx)),
                 ),
         )
-    }
+    };
+    v_flex()
+        .id("sovra-schedules-view")
+        .test_support()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .overflow_y_scroll()
+        .p(t.space.large)
+        .child(content)
 }
 
 fn render_header(schedule_form_open: bool, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     h_flex()
         .w_full()
+        .flex_wrap()
+        .gap(t.space.medium)
         .items_center()
         .justify_between()
-        .child(
-            v_flex()
-                .gap(px(2.))
-                .child(
-                    div()
-                        .sovra_text(TextRole::Caption, cx)
-                        .text_color(cx.theme().link)
-                        .child("AUTOMATION · COMMAND CENTER"),
-                )
-                .child(div().sovra_text(TextRole::PageTitle, cx).child("Schedules"))
-                .child(
-                    div()
-                        .sovra_text(TextRole::Body, cx)
-                        .text_color(t.text_secondary)
-                        .child("Turn recurring work into reliable routines and monitor every run."),
-                ),
-        )
+        .child(design::page_header(
+            "Schedules",
+            "Keep your recurring prompts in one place. Run them when you’re ready.",
+            cx,
+        ))
         .child(
             h_flex()
                 .items_center()
@@ -129,11 +124,11 @@ fn render_header(schedule_form_open: bool, cx: &mut Context<Shell>) -> impl Into
                     })),
                 )
                 .child(
-                    design::primary_button("back-to-chat-btn", "Back to Chat", cx).on_click(
-                        cx.listener(|shell, _, _, cx| {
+                    design::button("back-to-chat-btn", "Back to chat", cx)
+                        .ghost()
+                        .on_click(cx.listener(|shell, _, _, cx| {
                             shell.select_tab(sovra_core::NavTab::Chat, cx);
-                        }),
-                    ),
+                        })),
                 ),
         )
 }
@@ -155,7 +150,7 @@ fn render_schedule_form(
         .child(
             div()
                 .sovra_text(TextRole::SectionTitle, cx)
-                .child("New automation schedule"),
+                .child("New schedule"),
         )
         .child(
             h_flex()
@@ -210,7 +205,7 @@ fn render_schedules_placeholder(cx: &mut Context<Shell>) -> impl IntoElement + u
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
                 .child(
-                    "Create your first schedule to automate daily reports, market checks, data syncs, and more.",
+                    "Save a prompt and a cadence, then run it from here. Background scheduling is not active yet.",
                 ),
         )
         .child(
@@ -227,7 +222,7 @@ fn render_stat_card(label: &str, value: &str, cx: &Context<Shell>) -> impl IntoE
     v_flex()
         .flex_1()
         .p(t.space.medium)
-        .gap(px(4.))
+        .gap(t.space.compact)
         .sovra_surface(Surface::Matte, cx)
         .child(
             div()
@@ -263,6 +258,7 @@ fn render_schedule_row(
         .id(("schedule-row", idx))
         .test_support()
         .w_full()
+        .flex_wrap()
         .items_center()
         .justify_between()
         .p(t.space.medium)
@@ -271,7 +267,7 @@ fn render_schedule_row(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .gap(px(4.))
+                .gap(t.space.compact)
                 .child(
                     h_flex()
                         .items_center()
@@ -284,7 +280,7 @@ fn render_schedule_row(
                         .child(
                             div()
                                 .px(t.space.compact)
-                                .py(px(2.))
+                                .py(t.space.hair)
                                 .rounded(t.radius.pill)
                                 .bg(t.subtle)
                                 .sovra_text(TextRole::Caption, cx)
@@ -307,42 +303,22 @@ fn render_schedule_row(
                 .items_center()
                 .gap(t.space.small)
                 .child(
-                    h_flex()
-                        .id(("schedule-toggle", idx))
-                        .test_support()
-                        .role(Role::Button)
-                        .aria_label("Toggle schedule status")
-                        .cursor_pointer()
-                        .px(t.space.small)
-                        .py(px(6.))
-                        .rounded(t.radius.button)
-                        .sovra_surface(Surface::Subtle, cx)
-                        .sovra_text(TextRole::Caption, cx)
-                        .child(if is_active { "Pause" } else { "Resume" })
-                        .on_click(cx.listener(move |shell, _, _, cx| {
-                            shell.toggle_schedule(&schedule_id_toggle, cx);
-                        })),
+                    design::button(
+                        ("schedule-toggle", idx),
+                        if is_active { "Pause" } else { "Resume" },
+                        cx,
+                    )
+                    .accessibility_label("Toggle schedule status")
+                    .small()
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        shell.toggle_schedule(&schedule_id_toggle, cx);
+                    })),
                 )
                 .child(
-                    h_flex()
-                        .id(("schedule-run", idx))
-                        .test_support()
-                        .role(Role::Button)
-                        .aria_label("Run schedule now in chat")
-                        .cursor_pointer()
-                        .px(t.space.small)
-                        .py(px(6.))
-                        .items_center()
-                        .gap(px(4.))
-                        .rounded(t.radius.button)
-                        .bg(t.nav_active_background)
-                        .sovra_text(TextRole::Caption, cx)
-                        .child(
-                            Icon::new(IconName::Play)
-                                .xsmall()
-                                .text_color(t.accent.violet),
-                        )
-                        .child("Run in Chat")
+                    design::button(("schedule-run", idx), "Run in chat", cx)
+                        .accessibility_label("Run schedule now in chat")
+                        .icon(IconName::Play)
+                        .small()
                         .on_click(cx.listener(move |shell, _, window, cx| {
                             shell.run_schedule_in_chat(&schedule_id_run, window, cx);
                         })),

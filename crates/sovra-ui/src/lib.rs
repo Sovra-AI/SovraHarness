@@ -5,12 +5,15 @@
 
 mod agui_widgets;
 mod app_menu;
+mod artifacts_view;
 mod assets;
 mod chat_history_view;
 mod chat_view;
 mod composer;
 pub mod design;
+mod file_index_view;
 mod inspector;
+mod knowledge_review;
 mod knowledge_view;
 mod login;
 mod markdown_segments;
@@ -25,9 +28,13 @@ mod schedules_view;
 mod settings_view;
 mod shell;
 mod sidebar;
+mod skill_library;
+mod skill_menu;
+mod team_view;
+mod widgets;
 
 use gpui_kit::component::TitleBar;
-use gpui_kit::{App, AppContext as _, Bounds, Global, WindowBounds, WindowOptions};
+use gpui_kit::{App, AppContext as _, Global, WindowBounds, WindowOptions};
 use sovra_runtime::Client;
 
 pub use models_view::ModelsView;
@@ -64,11 +71,7 @@ pub fn init(client: Client, cx: &mut App) {
 fn open_main_window(cx: &mut App) {
     let layout = design::tokens(cx).layout;
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            gpui_kit::size(layout.window_width, layout.window_height),
-            cx,
-        ))),
+        window_bounds: Some(WindowBounds::Windowed(design::initial_window_bounds(cx))),
         window_min_size: Some(gpui_kit::size(
             layout.window_min_width,
             layout.window_min_height,

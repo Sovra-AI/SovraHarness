@@ -11,8 +11,8 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, div,
 };
 use sovra_core::models::{
-    AgentSettings, Appearance, Authentication, CredentialChange, ModelCommand, ProviderKind,
-    ResponseStyle,
+    AgentSettings, Appearance, Authentication, CredentialChange, InterfaceScale, ModelCommand,
+    ProviderKind, ResponseStyle,
 };
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
@@ -45,9 +45,9 @@ pub(crate) fn settings_section(
         .id(id)
         .test_support()
         .w_full()
-        .p(t.space.small)
-        .gap(t.space.compact)
-        .sovra_surface(Surface::Subtle, cx)
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .sovra_surface(Surface::Matte, cx)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
         .child(caption(description, cx))
 }
@@ -61,33 +61,25 @@ impl ModelsView {
             .size_full()
             .min_w_0()
             .min_h_0()
-            .p(t.space.medium)
-            .gap(t.space.small)
+            .p(t.space.large)
+            .gap(t.space.large)
             .child(
                 h_flex()
                     .justify_between()
                     .items_center()
                     .flex_wrap()
                     .gap(t.space.small)
+                    .child(design::page_header(
+                        "Settings",
+                        "Make Sovra feel like your own.",
+                        cx,
+                    ))
                     .child(
-                        v_flex()
-                            .gap(t.space.compact)
-                            .child(div().sovra_text(TextRole::PageTitle, cx).child("Settings"))
-                            .child(caption(
-                                "One place to connect your AI brain, see your active key, and personalize how Sovra helps you.",
-                                cx,
-                            )),
-                    )
-                    .child(
-                        design::button(
-                            "settings-restart-tour",
-                            "Take Interactive System Tour",
-                            cx,
-                        )
-                        .small()
-                        .on_click(cx.listener(|_, _, _, cx| {
-                            cx.emit(crate::models_view::StartSystemTour);
-                        })),
+                        design::button("settings-restart-tour", "Take a tour", cx)
+                            .small()
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(crate::models_view::StartSystemTour);
+                            })),
                     ),
             );
         if let Some(error) = &self.state.error {
@@ -136,7 +128,7 @@ impl ModelsView {
         settings_section(
             "settings-appearance",
             "Appearance",
-            "Choose how Sovra looks. Dark is gentle on your eyes; Light looks like a page of paper.",
+            "Choose a light or dark workspace.",
             cx,
         )
         .child(h_flex().gap(t.space.compact).children(
@@ -166,6 +158,50 @@ impl ModelsView {
                 }))
             }),
         ))
+        .child(Self::render_text_size(cx))
+    }
+
+    /// Interface size (zoom); the same levels as View → Zoom In/Out and ⌘=/⌘-/⌘0.
+    fn render_text_size(cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let scale = design::interface_scale(cx);
+        h_flex()
+            .id("settings-text-size")
+            .flex_wrap()
+            .items_center()
+            .gap(t.space.compact)
+            .child(
+                div()
+                    .sovra_text(TextRole::Body, cx)
+                    .text_color(t.text_secondary)
+                    .child("Text size"),
+            )
+            .child(
+                design::button("settings-text-smaller", "A−", cx)
+                    .accessibility_label("Make text smaller")
+                    .tooltip("Make text smaller (⌘−)")
+                    .disabled(scale == InterfaceScale::SMALLEST)
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        crate::app_menu::zoom(scale.smaller(), cx);
+                    })),
+            )
+            .child(
+                design::button("settings-text-reset", format!("{}%", scale.percent()), cx)
+                    .accessibility_label(format!("Text size {}%, reset to 100%", scale.percent()))
+                    .tooltip("Actual size (⌘0)")
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        crate::app_menu::zoom(InterfaceScale::default(), cx);
+                    })),
+            )
+            .child(
+                design::button("settings-text-larger", "A+", cx)
+                    .accessibility_label("Make text larger")
+                    .tooltip("Make text larger (⌘=)")
+                    .disabled(scale == InterfaceScale::LARGEST)
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        crate::app_menu::zoom(scale.larger(), cx);
+                    })),
+            )
     }
 
     fn render_ai_connection_section(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -190,8 +226,8 @@ impl ModelsView {
 
         settings_section(
             "settings-ai",
-            "OpenRouter API Key & Active AI",
-            "Sovra uses OpenRouter so one key unlocks 300+ online AI models. Add your OpenRouter key once, then choose a model.",
+            "AI connection",
+            "Connect OpenRouter once, then choose from its online models.",
             cx,
         )
         .child(
@@ -245,7 +281,7 @@ impl ModelsView {
                     })),
                 )
                 .child(
-                    design::button("settings-choose-model", "Choose Active Model", cx).on_click(
+                    design::button("settings-choose-model", "Choose a model", cx).on_click(
                         cx.listener(|view, _, _, cx| {
                             view.open_model_home(cx);
                         }),
@@ -267,8 +303,8 @@ impl ModelsView {
         };
         settings_section(
             "settings-always-context",
-            "Always-On Context (What Sovra Should Always Know)",
-            "What is this? Think of this as a sticky note on Sovra's desk. Anything you write here is automatically shared with your AI in every new chat — such as who you are, your job or hobbies, or how you want things explained — so you never have to repeat yourself.",
+            "Personal instructions",
+            "Tell Sovra what to keep in mind in every chat: your work, preferences, or how you like answers.",
             cx,
         )
         .child(caption(status_label, cx))
@@ -322,15 +358,15 @@ impl ModelsView {
         let style_desc = current.response_style.description();
         settings_section(
             "settings-agent-behavior",
-            "How Your AI Thinks, Remembers & Uses Tools",
-            "Sovra is an Agentic AI: beyond answering questions, it can remember past chats, display interactive checklists and cards, and look up facts. Here is what each setting does in plain English:",
+            "Memory & tools",
+            "Choose what Sovra can use to help you.",
             cx,
         )
         .child(
             v_flex()
                 .gap(t.space.compact)
                 .child(caption(
-                    "Default reply style — How should Sovra explain things to you?",
+                    "Reply style",
                     cx,
                 ))
                 .child(
@@ -355,11 +391,11 @@ impl ModelsView {
         )
         .child(
             v_flex()
-                .gap(gpui_kit::px(2.))
+                .gap(t.space.hair)
                 .child(
                     Checkbox::new("settings-memory-toggle")
                         .cursor_pointer()
-                        .label("Remember helpful context across conversations (Long-term Memory)")
+                        .label("Remember across conversations")
                         .checked(current.memory_enabled)
                         .on_click(cx.listener(|view, checked, _, cx| {
                             let mut next = view.state.preferences.agent_settings.clone();
@@ -374,11 +410,11 @@ impl ModelsView {
         )
         .child(
             v_flex()
-                .gap(gpui_kit::px(2.))
+                .gap(t.space.hair)
                 .child(
                     Checkbox::new("settings-tools-toggle")
                         .cursor_pointer()
-                        .label("Allow interactive cards, checklists, and tables in chat (Agent Tools)")
+                        .label("Interactive answers")
                         .checked(current.tools_enabled)
                         .on_click(cx.listener(|view, checked, _, cx| {
                             let mut next = view.state.preferences.agent_settings.clone();
@@ -393,11 +429,11 @@ impl ModelsView {
         )
         .child(
             v_flex()
-                .gap(gpui_kit::px(2.))
+                .gap(t.space.hair)
                 .child(
                     Checkbox::new("settings-web-search-toggle")
                         .cursor_pointer()
-                        .label("Allow web search for current news and live information")
+                        .label("Web search")
                         .checked(current.web_search_enabled)
                         .on_click(cx.listener(|view, checked, _, cx| {
                             let mut next = view.state.preferences.agent_settings.clone();
@@ -412,11 +448,11 @@ impl ModelsView {
         )
         .child(
             v_flex()
-                .gap(gpui_kit::px(2.))
+                .gap(t.space.hair)
                 .child(
                     Checkbox::new("settings-confirm-actions-toggle")
                         .cursor_pointer()
-                        .label("Always ask for my permission before important actions (Safety Guardrail)")
+                        .label("Confirm important actions")
                         .checked(current.confirm_actions)
                         .on_click(cx.listener(|view, checked, _, cx| {
                             let mut next = view.state.preferences.agent_settings.clone();
@@ -435,7 +471,7 @@ impl ModelsView {
         let t = design::tokens(cx);
         let mut advanced = settings_section(
             "settings-advanced",
-            "Local Ollama & OpenAI-Compatible URLs",
+            "Other connections",
             "Run free AI on your computer with Ollama (no key needed), or connect any OpenAI-compatible URL (LM Studio, vLLM, llama.cpp).",
             cx,
         )
@@ -461,7 +497,7 @@ impl ModelsView {
                 .child(
                     design::button(
                         "settings-ollama-btn",
-                        "Set up Ollama (Free local AI)",
+                        "Set up Ollama",
                         cx,
                     )
                     .on_click(cx.listener(|view, _, window, cx| {
@@ -471,7 +507,7 @@ impl ModelsView {
                 .child(
                     design::button(
                         "settings-openai-url-btn",
-                        "Add OpenAI-Compatible URL",
+                        "Add a server",
                         cx,
                     )
                     .on_click(cx.listener(|view, _, window, cx| {
