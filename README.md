@@ -146,15 +146,20 @@ model in **Models**.
 
 **Chat** starts with a normal conversation using the selected model: quiet user
 bubbles, bare replies beside the Sovra avatar and a rounded composer. Each turn
-is answered by `OrchestratorAgent`, which knows the specialist roster and can
-run independent specialists together. Ask it to **search the web for** a topic,
-or send `/web-search <question>`, and it delegates that turn to `WebSearchAgent`:
-a keyless SearXNG search on the active model, with titles and URLs taken from
-the results. The slash command resolves to the question alone; the active
-procedure is what tells the orchestrator to call `WebSearchAgent`. Files already
-in the chat do not replace that turn.
-Settings → **Web search** turns the tool off. `SOVRA_SEARXNG_URL` sets the SearXNG
-origin (default `https://searx.be`). While Sovra works, a "Sovra is thinking…"
+is answered by `OrchestratorAgent`, which offers only the specialists that can
+actually do their job this turn and can run independent ones together. Web search
+works out of the box: no account, key, server or setup. Ask a question that needs
+current facts (news, prices, opening hours, recent events), say "search the web
+for…" or "look it up online", or send `/web-search <question>`, and it delegates to
+`WebSearchAgent`. That helper searches free, open services built into the app
+([Mwmbl](https://mwmbl.org), an open-source non-profit web index, and Wikipedia),
+opens the most useful pages to read them, and answers in plain words with source
+links taken only from what it found. Research, market, housing and scholar helpers
+use the same search. Pages are read as text, never run, and nothing on this
+computer or the home network can be opened.
+Settings → **Web search** turns it off, along with every helper that needs it.
+Optionally, `SOVRA_SEARXNG_URL` adds your own self-hosted SearXNG as one more
+source. While Sovra works, a "Sovra is thinking…"
 pill shows the elapsed time; models that reason
 stream their thinking into a collapsible panel that folds when the answer starts. Replies render
 as selectable Markdown with code copying. Each new reply includes a model pill

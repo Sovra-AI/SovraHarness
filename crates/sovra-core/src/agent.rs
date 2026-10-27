@@ -7,9 +7,6 @@ pub const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash";
 /// Default system instruction for the Sovra assistant agent.
 pub const DEFAULT_SYSTEM_INSTRUCTION: &str = "You are Sovra, a helpful conversational assistant. Respond naturally to what the user says and answer their question directly. Match the level of detail to the request. Use Markdown when it improves readability, with fenced code blocks for code. Be accurate and clear about uncertainty. Ask for clarification only when needed to give a useful answer. Do not assume the user wants an engineering task, an agent workflow, or a setup process. Never claim to have performed an action without a real tool result.";
 
-/// Default keyless `SearXNG` origin. Override with `SOVRA_SEARXNG_URL` at startup.
-pub const DEFAULT_SEARXNG_BASE_URL: &str = "https://searx.be";
-
 /// Pure configuration for initializing an ADK-backed agent runner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentConfig {
@@ -23,8 +20,10 @@ pub struct AgentConfig {
     pub instruction: String,
     /// Optional Google / Gemini API key read once at process startup.
     pub api_key: Option<String>,
-    /// `SearXNG` origin (`https://host`) read once at startup. The search client adds `/search`.
-    pub searxng_base_url: String,
+    /// Optional self-hosted `SearXNG` origin (`https://host`) read once at startup.
+    /// Web search works without it; when set, it is one more source beside the
+    /// built-in ones. The search client adds `/search`.
+    pub searxng_base_url: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -35,7 +34,7 @@ impl Default for AgentConfig {
             model: DEFAULT_GEMINI_MODEL.to_owned(),
             instruction: DEFAULT_SYSTEM_INSTRUCTION.to_owned(),
             api_key: None,
-            searxng_base_url: DEFAULT_SEARXNG_BASE_URL.to_owned(),
+            searxng_base_url: None,
         }
     }
 }

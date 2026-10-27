@@ -56,7 +56,7 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             "WebSearchAgent",
             "web_search",
             "Web Search Specialist",
-            "Current facts, links, news, or quick lookups from the open web.",
+            "Looks things up on the internet: news, prices, opening hours, recent events, or any fact worth checking. Answers with source links.",
             true,
             ModelTier::Fast,
         ),

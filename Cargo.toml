@@ -53,6 +53,8 @@ flate2 = "1.1.10"
 bzip2-rs = "0.1.2"
 lzma-rust2 = { version = "0.23.0", default-features = false, features = ["std", "xz", "lzip"] }
 ruzstd = "0.9.1"
+# HTML parsing for reading web pages the search helper opens (pure Rust, html5ever).
+scraper = { version = "0.27.0", default-features = false }
 rusqlite = { version = "0.41.0", default-features = false, features = ["bundled", "serialize", "limits", "hooks"] }
 tar = "0.4.46"
 zip = { version = "9.0.2", default-features = false, features = ["deflate"] }

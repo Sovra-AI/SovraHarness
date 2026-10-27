@@ -1,16 +1,24 @@
-//! Chat orchestrator. One parent knows the Sovra SRX roster and delegates
-//! through ADK `AgentTool`s, so independent specialists can run together on
-//! isolated branches. Only `WebSearchAgent` receives the `SearXNG` tool.
+//! Chat orchestrator. One parent delegates to roster specialists through ADK
+//! `AgentTool`s, so independent specialists run together on isolated branches.
+//!
+//! Which specialists exist this turn is decided in `sovra-core` from the
+//! capabilities actually present; each specialist gets exactly its providers'
+//! tools. The orchestrator names no specialist itself, so the roster can grow.
 
 use std::sync::Arc;
 
 use adk_agent::{Agent, LlmAgent, LlmAgentBuilder};
 use adk_core::{Llm, Tool};
 use adk_tool::{AgentTool, AgentToolSessionSnapshot};
-use sovra_core::{SpecialistAgentSpec, WEB_SEARCH_AGENT_ID, default_sovra_srx_agents};
+use std::collections::BTreeSet;
+
+use sovra_core::{
+    Capability, SpecialistAgentSpec, available_specialists, default_sovra_srx_agents,
+    required_capabilities,
+};
 
 use crate::Error;
-use crate::web_search::{self, SearchClient};
+use crate::capabilities::{self, CapabilityProvider};
 
 /// Parent agent id. Matches the roster entry the router already uses.
 pub(crate) const ORCHESTRATOR_ID: &str = "OrchestratorAgent";
@@ -128,18 +136,24 @@ pub(crate) struct OrchestratorParts {
     pub llm: Arc<dyn Llm>,
     pub parent_tools: Vec<Arc<dyn Tool>>,
     pub instruction: String,
-    pub search: Option<SearchClient>,
-    pub web_search_enabled: bool,
+    /// Real tool sets this turn. Specialists whose requirements are unmet are
+    /// not offered, so the parent cannot route to one that would only guess.
+    pub providers: Vec<Arc<dyn CapabilityProvider>>,
     pub tools_enabled: bool,
 }
 
 pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
     let roster = default_sovra_srx_agents();
-    let attach_search = parts.web_search_enabled && parts.search.is_some();
-    let selected: Vec<&SpecialistAgentSpec> = roster
+    let available: BTreeSet<Capability> = parts
+        .providers
         .iter()
-        .filter(|spec| parts.tools_enabled && (attach_search || spec.id != WEB_SEARCH_AGENT_ID))
+        .map(|provider| provider.capability())
         .collect();
+    let selected: Vec<&SpecialistAgentSpec> = if parts.tools_enabled {
+        available_specialists(&roster, &available)
+    } else {
+        Vec::new()
+    };
     let description = roster
         .iter()
         .find(|spec| spec.id == ORCHESTRATOR_ID)
@@ -150,23 +164,23 @@ pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
 
     let mut delegates = Vec::with_capacity(selected.len());
     for spec in &selected {
-        let tools = if spec.id == WEB_SEARCH_AGENT_ID {
-            let client = parts
-                .search
-                .clone()
-                .ok_or_else(|| Error::SearchClient("web search client is missing".into()))?;
-            vec![web_search::web_search_tool(client)]
-        } else {
-            Vec::new()
-        };
-        let instruction = if spec.id == WEB_SEARCH_AGENT_ID {
-            web_search::web_search_instruction("")
-        } else {
-            format!(
-                "You are {}. {}. Answer only the request in this call. Do not invent titles or URLs.",
-                spec.id, spec.description
-            )
-        };
+        let needs = required_capabilities(&spec.id);
+        let equipping: Vec<&Arc<dyn CapabilityProvider>> = parts
+            .providers
+            .iter()
+            .filter(|provider| needs.contains(&provider.capability()))
+            .collect();
+        let tools = equipping
+            .iter()
+            .flat_map(|provider| provider.tools())
+            .collect();
+        let mut instruction = format!(
+            "You are {}. {} Answer only the request in this call. Do not invent titles or URLs.",
+            spec.id, spec.description
+        );
+        for provider in &equipping {
+            instruction.push_str(&provider.procedure());
+        }
         delegates.push(child_agent(
             spec,
             Arc::clone(&parts.llm),
@@ -178,7 +192,7 @@ pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
     let mut parent_tools = Vec::new();
     for tool in parts.parent_tools {
         let name = tool.name();
-        if name == "web_search" || name == "google_search" {
+        if capabilities::is_provider_tool(name) {
             continue;
         }
         if selected.iter().any(|spec| spec.id == name) {
@@ -187,7 +201,17 @@ pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
         parent_tools.push(tool);
     }
 
-    let instruction = parent_instruction(&parts.instruction, &selected, attach_search);
+    let routing_rules: Vec<String> = parts
+        .providers
+        .iter()
+        .filter_map(|provider| provider.routing_rule())
+        .collect();
+    let instruction = parent_instruction(
+        &parts.instruction,
+        &selected,
+        &routing_rules,
+        available.contains(&Capability::WebSearch),
+    );
     let mut builder = LlmAgentBuilder::new(ORCHESTRATOR_ID)
         .description(description.clone())
         .instruction(instruction)
@@ -205,6 +229,11 @@ pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
         builder = builder.tool(Arc::new(DelegateTool { inner: agent_tool }));
     }
     let inner = builder.build().map_err(Error::AgentBuild)?;
+    tracing::debug!(
+        specialists = delegates.len(),
+        capabilities = ?available,
+        "orchestrator built"
+    );
     Ok(Arc::new(Orchestrator {
         description,
         inner,
@@ -229,10 +258,15 @@ fn child_agent(
     Ok(Arc::new(agent))
 }
 
+/// The parent's instruction: the catalogue it routes from, then the rules.
+///
+/// ADK routes by description, so the catalogue lists only specialists that can
+/// do their job this turn, and each provider adds its own "when to call" rule.
 fn parent_instruction(
     base: &str,
     delegates: &[&SpecialistAgentSpec],
-    web_search_enabled: bool,
+    routing_rules: &[String],
+    web_search_available: bool,
 ) -> String {
     let mut catalog = String::new();
     for spec in delegates {
@@ -242,27 +276,43 @@ fn parent_instruction(
         catalog.push_str(&spec.description);
         catalog.push('\n');
     }
-    let search_rule = if web_search_enabled && active_skill_requests(base, WEB_SEARCH_AGENT_ID) {
-        "The active procedure requests WebSearchAgent. Call the WebSearchAgent tool before you \
-         answer, even when the user's message is only the question and does not say \"search the \
-         web\", \"search the internet\", or \"web search for\". Then cite only the titles and URLs \
-         WebSearchAgent returns."
-    } else if web_search_enabled {
-        "When the user says \"search the web\", \"search the internet\", or \"web search for\", \
-         call the WebSearchAgent tool before you answer, even if files are attached and even if \
-         the topic mentions rust or code. Then cite only the titles and URLs WebSearchAgent \
-         returns. A greeting or any other question is answered by you directly, without calling \
-         WebSearchAgent."
-    } else {
-        "Web search is off. WebSearchAgent is not available. Do not invent titles or URLs and do \
-         not claim to have searched the web."
-    };
+    if catalog.is_empty() {
+        catalog.push_str("(none this turn)\n");
+    }
+    let mut rules: Vec<String> = delegates
+        .iter()
+        .filter(|spec| active_skill_requests(base, &spec.id))
+        .map(|spec| {
+            format!(
+                "The active procedure requests {id}. Call the {id} tool before you answer, even \
+                 when the user's message is only the question and does not say \"search the \
+                 web\", \"search the internet\", or \"web search for\". Then use only what {id} \
+                 returns and cite only the titles and URLs it gives.",
+                id = spec.id
+            )
+        })
+        .collect();
+    rules.extend(routing_rules.iter().cloned());
+    if !web_search_available {
+        rules.push(
+            "Web search is off. No specialist can reach the internet this turn. Do not invent \
+             titles or URLs and do not claim to have searched the web."
+                .to_owned(),
+        );
+    }
+    rules.push(
+        "Only the specialists listed above exist this turn. If a request needs something none \
+         of them can do (for example email, calendars or running code), say plainly that it is \
+         not available yet instead of guessing."
+            .to_owned(),
+    );
     format!(
         "{base}\n\nYou are {ORCHESTRATOR_ID}. You speak to the user. These are the specialists \
-         you can call as tools:\n{catalog}{search_rule}\n\
+         you can call as tools:\n{catalog}{rules}\n\
          Call a specialist by its tool name. Independent specialists run at the same time, and \
          each one sees only the request you send it. Do not transfer the conversation away from \
-         yourself."
+         yourself.",
+        rules = rules.join("\n")
     )
 }
 
@@ -328,6 +378,9 @@ mod tests {
     use sovra_core::skills::SkillCatalog;
     use sovra_core::{AgentConfig, Event, WEB_SEARCH_AGENT_ID, default_sovra_srx_agents};
 
+    use super::{BTreeSet, Capability, available_specialists, parent_instruction};
+    use crate::capabilities::CapabilityProvider as _;
+
     use super::ORCHESTRATOR_ID;
     use crate::AdkHarness;
     use crate::web_search::SearchClient;
@@ -355,11 +408,16 @@ mod tests {
             .block_on(future)
     }
 
+    /// What core says the orchestrator may offer with (or without) web search.
     fn roster_pairs(include_search: bool) -> Vec<(String, String)> {
-        default_sovra_srx_agents()
+        let roster = default_sovra_srx_agents();
+        let mut available = BTreeSet::new();
+        if include_search {
+            available.insert(Capability::WebSearch);
+        }
+        available_specialists(&roster, &available)
             .into_iter()
-            .filter(|spec| include_search || spec.id != WEB_SEARCH_AGENT_ID)
-            .map(|spec| (spec.id, spec.description))
+            .map(|spec| (spec.id.clone(), spec.description.clone()))
             .collect()
     }
 
@@ -378,8 +436,111 @@ mod tests {
         assert_eq!(disabled.orchestrator_name(), ORCHESTRATOR_ID);
         let remaining = roster_pairs(false);
         assert_eq!(disabled.delegates(), remaining);
-        assert!(remaining.iter().all(|(id, _)| id != WEB_SEARCH_AGENT_ID));
-        assert_eq!(remaining.len() + 1, roster_pairs(true).len());
+        // Every web-backed specialist leaves with the search, not just WebSearchAgent.
+        for web_backed in [WEB_SEARCH_AGENT_ID, "DeepResearchAgent", "StockMarketAgent"] {
+            assert!(
+                remaining.iter().all(|(id, _)| id != web_backed),
+                "{web_backed}"
+            );
+        }
+        assert_eq!(remaining.len() + 5, roster_pairs(true).len());
+    }
+
+    #[test]
+    fn orchestrator_offers_only_specialists_that_can_do_their_job() {
+        let enabled = harness_with(Arc::new(IdleLlm))
+            .with_web_search(SearchClient::failing("unused"))
+            .expect("enabled orchestrator");
+        let ids: Vec<String> = enabled.delegates().into_iter().map(|(id, _)| id).collect();
+        for absent in [
+            ORCHESTRATOR_ID,
+            "GoogleWorkspace",
+            "TodosAgent",
+            "GitHubAgent",
+            "ExecutionAgent",
+        ] {
+            assert!(
+                !ids.iter().any(|id| id == absent),
+                "{absent} offered without its tools"
+            );
+        }
+        for present in [WEB_SEARCH_AGENT_ID, "DeepResearchAgent", "CodingAgent"] {
+            assert!(ids.iter().any(|id| id == present), "{present} missing");
+        }
+    }
+
+    #[test]
+    fn parent_instruction_lists_the_catalogue_and_each_providers_rule() {
+        let roster = default_sovra_srx_agents();
+        let selected = available_specialists(&roster, &BTreeSet::from([Capability::WebSearch]));
+        let provider = crate::capabilities::WebSearchProvider::new(SearchClient::failing("x"));
+        let rules = vec![provider.routing_rule().expect("web rule")];
+        let with_web = parent_instruction("base", &selected, &rules, true);
+        assert!(with_web.contains("- WebSearchAgent: Looks things up on the internet"));
+        assert!(with_web.contains("opening hours"));
+        assert!(!with_web.contains("Web search is off"));
+        assert!(!with_web.contains("- GoogleWorkspace"));
+        assert!(with_web.contains("not available yet"));
+
+        let offline = available_specialists(&roster, &BTreeSet::new());
+        let without = parent_instruction("base", &offline, &[], false);
+        assert!(without.contains("Web search is off"));
+        assert!(!without.contains("- WebSearchAgent"));
+    }
+
+    #[test]
+    fn web_backed_specialists_carry_the_search_tools_and_procedure() {
+        drive(async {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let recorder = Arc::new(ToolsByAgentLlm {
+                seen: Arc::clone(&seen),
+            });
+            let harness = harness_with(recorder)
+                .with_web_search(SearchClient::failing("unused"))
+                .expect("enabled");
+            let (tx, rx) = async_channel::unbounded();
+            harness.run_prompt("tools-by-agent", "hello", &tx).await;
+            let _ = collect_answer(&rx).await;
+            let seen = seen.lock().expect("seen");
+            let parent = seen.first().expect("parent request");
+            assert!(parent.iter().any(|name| name == "DeepResearchAgent"));
+            assert!(
+                parent
+                    .iter()
+                    .all(|name| name != "web_search" && name != "read_web_page")
+            );
+        });
+    }
+
+    /// Records the tool names of every request it receives.
+    struct ToolsByAgentLlm {
+        seen: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Llm for ToolsByAgentLlm {
+        fn name(&self) -> &'static str {
+            "tools-by-agent"
+        }
+
+        async fn generate_content(
+            &self,
+            request: LlmRequest,
+            _stream: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            self.seen
+                .lock()
+                .expect("seen")
+                .push(request.tools.keys().cloned().collect());
+            let response = LlmResponse {
+                content: Some(Content::new("model").with_text("hello")),
+                finish_reason: Some(FinishReason::Stop),
+                partial: false,
+                turn_complete: true,
+                ..LlmResponse::default()
+            };
+            Ok(Box::pin(stream::once(async move { Ok(response) })))
+        }
     }
 
     #[test]

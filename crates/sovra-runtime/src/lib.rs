@@ -191,10 +191,11 @@ async fn serve(
     let skills = skills::SkillsRuntime::start(skill_store, events.clone(), &handle);
     let mut session_files = std::collections::BTreeMap::<String, Vec<String>>::new();
     let harness = build_harness(&agent_config);
-    let search = SearchClient::http(&agent_config.searxng_base_url).unwrap_or_else(|error| {
-        tracing::warn!(%error, "web search client unavailable");
-        SearchClient::failing(error.to_string())
-    });
+    let search =
+        SearchClient::built_in(agent_config.searxng_base_url.as_deref()).unwrap_or_else(|error| {
+            tracing::warn!(%error, "web search client unavailable");
+            SearchClient::failing(error.to_string())
+        });
     let models = models
         .map(|config| models::ModelsRuntime::start(config, agent_config.clone(), events.clone()));
     let mut runs = std::collections::BTreeMap::<String, ActiveRun>::new();

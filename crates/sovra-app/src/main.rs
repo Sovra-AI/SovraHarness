@@ -97,12 +97,12 @@ fn read_model_keys() -> std::collections::BTreeMap<String, sovra_core::models::M
     clippy::disallowed_methods,
     reason = "sovra-app is the composition root and reads process environment variables once at startup"
 )]
-fn read_searxng_base_url() -> String {
+/// Optional: web search needs no setup. A self-hosted `SearXNG` only adds a source.
+fn read_searxng_base_url() -> Option<String> {
     std::env::var("SOVRA_SEARXNG_URL")
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| sovra_core::DEFAULT_SEARXNG_BASE_URL.to_owned())
 }
 
 #[expect(

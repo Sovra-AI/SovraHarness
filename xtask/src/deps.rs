@@ -98,7 +98,7 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
 ];
 
 /// External crates `sovra-core` may use: pure, no IO, no async runtime, no GUI.
-/// `serde_json` parses `SearXNG` result documents for ranking. It performs no IO.
+/// `serde_json` parses search source JSON (Mwmbl, Wikipedia, `SearXNG`) for ranking. It performs no IO.
 const CORE_ALLOWED_EXTERNAL: &[&str] = &["serde", "serde_json", "thiserror", "async-trait"];
 
 pub(crate) fn check(root: &Path) -> anyhow::Result<()> {

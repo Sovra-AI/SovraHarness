@@ -5,6 +5,7 @@
 //! boundary so upstream crates never depend on ADK types directly.
 
 mod artifacts;
+mod capabilities;
 pub mod decision_client;
 mod file_index;
 mod files;
@@ -31,6 +32,21 @@ use sovra_core::models::{Authentication, ModelConnection, ModelInfo, ModelSecret
 use sovra_core::{AgentConfig, Event, ResponseModel};
 
 const DEFAULT_USER_ID: &str = "local-user";
+
+/// The one place capability providers are registered for a turn. A new
+/// integration adds its provider here; the orchestrator and roster pick it up.
+fn capability_providers(
+    search: Option<&SearchClient>,
+    web_search_enabled: bool,
+) -> Vec<Arc<dyn capabilities::CapabilityProvider>> {
+    let mut providers: Vec<Arc<dyn capabilities::CapabilityProvider>> = Vec::new();
+    if web_search_enabled && let Some(client) = search {
+        providers.push(Arc::new(capabilities::WebSearchProvider::new(
+            client.clone(),
+        )));
+    }
+    providers
+}
 
 /// Errors returned by the `sovra-adk` adapter boundary.
 #[derive(Debug, thiserror::Error)]
@@ -294,8 +310,8 @@ impl AdkHarness {
     /// Builds an `AdkHarness` backed by Google's `GeminiModel` and `adk-ui`'s native
     /// `UiToolset` (`ag_ui` / `a2ui` surface rendering tools).
     ///
-    /// Web search is not `GoogleSearchTool`. The orchestrator attaches the in-repo
-    /// `SearXNG` tool to `WebSearchAgent` only when [`Self::with_web_search`] is used.
+    /// Web search is not `GoogleSearchTool`. The orchestrator attaches the built-in,
+    /// keyless search tools to `WebSearchAgent` only when [`Self::with_web_search`] is used.
     pub fn from_gemini_config(config: &AgentConfig) -> Result<Self, Error> {
         let api_key = config.api_key.as_deref().ok_or(Error::MissingApiKey)?;
         let model = GeminiModel::new(api_key, &config.model).map_err(Error::ModelInit)?;
@@ -394,10 +410,7 @@ impl AdkHarness {
     fn tools_without_search(&self) -> Vec<Arc<dyn Tool>> {
         self.base_tools
             .iter()
-            .filter(|tool| {
-                let name = tool.name();
-                name != "web_search" && name != "google_search"
-            })
+            .filter(|tool| !web_search::is_search_tool(tool.name()))
             .cloned()
             .collect()
     }
@@ -467,17 +480,13 @@ impl AdkHarness {
         };
         let stored_tools = tools
             .into_iter()
-            .filter(|tool| {
-                let name = tool.name();
-                tools_enabled && name != "web_search" && name != "google_search"
-            })
+            .filter(|tool| tools_enabled && !web_search::is_search_tool(tool.name()))
             .collect::<Vec<_>>();
         let root = orchestrator::build(orchestrator::OrchestratorParts {
             llm: Arc::clone(&llm),
             parent_tools: stored_tools.clone(),
             instruction,
-            search: search.clone(),
-            web_search_enabled,
+            providers: capability_providers(search.as_ref(), web_search_enabled),
             tools_enabled,
         })?;
         let sessions = sessions.unwrap_or_else(|| Arc::new(InMemorySessionService::new()));
