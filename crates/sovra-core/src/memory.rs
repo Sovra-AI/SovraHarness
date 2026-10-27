@@ -15,6 +15,25 @@
 
 use async_trait::async_trait;
 
+mod ingestion;
+pub use ingestion::*;
+mod consolidation;
+pub use consolidation::consolidation_context;
+mod recall;
+pub use recall::*;
+mod citations;
+pub use citations::{MAX_MEMORY_CITATIONS, memory_citations};
+mod lifecycle;
+pub use lifecycle::*;
+mod semantic;
+pub use semantic::*;
+
+/// Public result bounds prevent an accidental unbounded memory scan or prompt.
+pub const MAX_RECALL_RESULTS: usize = 200;
+const MAX_FACT_BYTES: usize = 16 * 1024;
+const MAX_QUERY_BYTES: usize = 4 * 1024;
+const MAX_EPISODE_BYTES: usize = 128 * 1024;
+
 /// Milliseconds since the Unix epoch. Core has no clock — adapters and the runtime
 /// construct these at their edges.
 #[derive(
@@ -60,6 +79,20 @@ impl Embedding {
     pub fn dimension(&self) -> usize {
         self.vector.len()
     }
+
+    /// Cosine similarity is undefined for zero vectors and non-finite components.
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        if self.model.trim().is_empty()
+            || self.model.len() > 512
+            || self.vector.is_empty()
+            || self.vector.len() > 16_384
+            || self.vector.iter().any(|value| !value.is_finite())
+            || !self.vector.iter().any(|value| *value != 0.0)
+        {
+            return Err(MemoryError::InvalidInput("invalid embedding".into()));
+        }
+        Ok(())
+    }
 }
 
 /// An episode to record.
@@ -71,8 +104,21 @@ pub struct NewEpisode {
     pub occurred_at: Timestamp,
 }
 
+impl NewEpisode {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        if self.session_id.trim().is_empty()
+            || self.session_id.len() > 512
+            || self.content.trim().is_empty()
+            || self.content.len() > MAX_EPISODE_BYTES
+        {
+            return Err(MemoryError::InvalidInput("invalid memory episode".into()));
+        }
+        Ok(())
+    }
+}
+
 /// A stored episode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Episode {
     pub id: EpisodeId,
     pub session_id: String,
@@ -96,12 +142,40 @@ pub struct NewFact {
     pub replaces: Option<FactId>,
 }
 
+impl NewFact {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        if self.content.trim().is_empty() || self.content.len() > MAX_FACT_BYTES {
+            return Err(MemoryError::InvalidInput(
+                "memory text is empty or too long".into(),
+            ));
+        }
+        if self.entities.len() > 32
+            || self
+                .entities
+                .iter()
+                .any(|name| name.trim().is_empty() || name.len() > 256)
+        {
+            return Err(MemoryError::InvalidInput("invalid memory entities".into()));
+        }
+        if let Some(embedding) = &self.embedding {
+            embedding.validate()?;
+        }
+        Ok(())
+    }
+}
+
 /// A stored fact with bi-temporal validity.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fact {
     pub id: FactId,
     pub content: String,
     pub entities: Vec<String>,
+    /// Immutable evidence for this statement, if the original writer supplied it.
+    pub source: Option<EpisodeId>,
+    /// Earlier belief replaced by this statement; retained for correction history.
+    pub replaces: Option<FactId>,
+    /// Model-derived interpretations retain their exact evidence and model identity.
+    pub extraction: Option<MemoryExtraction>,
     /// Ingestion time (always set by the store).
     pub created_at: Timestamp,
     /// When the fact became true in the world, when known.
@@ -110,12 +184,14 @@ pub struct Fact {
     pub invalid_at: Option<Timestamp>,
     /// When the system superseded it (never deleted).
     pub expired_at: Option<Timestamp>,
+    /// Explicit user withdrawal; excluded from recall even for earlier dates.
+    pub stopped_at: Option<Timestamp>,
 }
 
 impl Fact {
     /// A fact the agent should still believe.
     pub fn is_current(&self) -> bool {
-        self.invalid_at.is_none() && self.expired_at.is_none()
+        self.stopped_at.is_none() && self.invalid_at.is_none() && self.expired_at.is_none()
     }
 }
 
@@ -132,9 +208,36 @@ pub struct RecallQuery {
     pub limit: usize,
     /// Include superseded facts (history view). Defaults to current facts only.
     pub include_expired: bool,
+    /// World time at which a claim should apply. Use `include_expired` for history.
+    pub valid_at: Option<Timestamp>,
+    /// Recorded knowledge cutoff; later corrections must not change earlier beliefs.
+    pub known_at: Option<Timestamp>,
 }
 
 impl RecallQuery {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        if self.limit > MAX_RECALL_RESULTS {
+            return Err(MemoryError::InvalidInput(format!(
+                "request at most {MAX_RECALL_RESULTS} memories at a time"
+            )));
+        }
+        if self
+            .text
+            .as_ref()
+            .is_some_and(|text| text.trim().is_empty() || text.len() > MAX_QUERY_BYTES)
+            || self
+                .entity
+                .as_ref()
+                .is_some_and(|name| name.trim().is_empty() || name.len() > 256)
+        {
+            return Err(MemoryError::InvalidInput("invalid memory search".into()));
+        }
+        if let Some(embedding) = &self.embedding {
+            embedding.validate()?;
+        }
+        Ok(())
+    }
+
     /// Recency-ordered recall of current facts.
     pub fn recent(limit: usize) -> Self {
         Self {
@@ -143,6 +246,8 @@ impl RecallQuery {
             entity: None,
             limit,
             include_expired: false,
+            valid_at: None,
+            known_at: None,
         }
     }
 
@@ -154,6 +259,8 @@ impl RecallQuery {
             entity: None,
             limit,
             include_expired: false,
+            valid_at: None,
+            known_at: None,
         }
     }
 }
@@ -179,9 +286,14 @@ pub fn fuse_rrf(legs: Vec<Vec<Fact>>, limit: usize) -> Vec<RecalledFact> {
     let mut fused: std::collections::HashMap<FactId, RecalledFact> =
         std::collections::HashMap::new();
     for leg in legs {
-        for (rank, fact) in leg.into_iter().enumerate() {
+        let mut seen = std::collections::HashSet::new();
+        for (rank, fact) in leg
+            .into_iter()
+            .filter(|fact| seen.insert(fact.id.clone()))
+            .enumerate()
+        {
             #[allow(clippy::cast_precision_loss, reason = "ranks are tiny")]
-            let contribution = 1.0 / (RRF_K + rank as f32);
+            let contribution = 1.0 / (RRF_K + 1.0 + rank as f32);
             if let Some(existing) = fused.get_mut(&fact.id) {
                 existing.score += contribution;
             } else {
@@ -213,6 +325,8 @@ pub fn fuse_rrf(legs: Vec<Vec<Fact>>, limit: usize) -> Vec<RecalledFact> {
 /// keeping backend types out of every caller.
 #[derive(Debug, thiserror::Error)]
 pub enum MemoryError {
+    #[error("invalid memory request: {0}")]
+    InvalidInput(String),
     #[error("memory store unavailable: {0}")]
     Unavailable(String),
     #[error("memory query failed: {0}")]
@@ -236,11 +350,83 @@ pub enum MemoryError {
 /// and the interface stays pure.
 #[async_trait]
 pub trait MemoryStore: Send + Sync {
+    /// Explicit destination consent is separate from folder embedding permissions.
+    async fn memory_semantics(&self) -> Result<MemorySemanticState, MemoryError> {
+        Ok(MemorySemanticState::default())
+    }
+    async fn configure_memory_semantics(
+        &self,
+        _target: Option<crate::models::ModelDestination>,
+    ) -> Result<MemorySemanticState, MemoryError> {
+        Err(MemoryError::Backend(
+            "Semantic memory is unavailable.".into(),
+        ))
+    }
+    /// Checks only the supplied bounded page; callers own the pagination cursor.
+    async fn memory_embedding_inputs(
+        &self,
+        _setting: &MemorySemanticSetting,
+        _ids: &[FactId],
+    ) -> Result<Vec<MemoryEmbeddingInput>, MemoryError> {
+        Err(MemoryError::Backend(
+            "Semantic memory is unavailable.".into(),
+        ))
+    }
+    /// The entire batch must match the active index and remembering policy generation.
+    async fn commit_memory_vectors(
+        &self,
+        _setting: &MemorySemanticSetting,
+        _policy: MemoryPolicy,
+        _vectors: Vec<MemoryVector>,
+    ) -> Result<(), MemoryError> {
+        Err(MemoryError::Backend(
+            "Semantic memory is unavailable.".into(),
+        ))
+    }
+    async fn semantic_memories(
+        &self,
+        _setting: &MemorySemanticSetting,
+        _vector: &crate::file_index::semantic::EmbeddingVector,
+        _search: MemorySearch,
+        _now: Timestamp,
+    ) -> Result<Vec<MemorySemanticHit>, MemoryError> {
+        Err(MemoryError::Backend(
+            "Semantic memory is unavailable.".into(),
+        ))
+    }
+
     /// Cheap liveness/readiness probe.
     async fn health(&self) -> Result<(), MemoryError>;
 
+    async fn memory_policy(&self) -> Result<MemoryPolicy, MemoryError>;
+    /// Disabling cancels queued/leased work; re-enabling never revives it.
+    async fn set_memory_enabled(&self, enabled: bool) -> Result<MemoryPolicy, MemoryError>;
+    /// Atomically records evidence and its job; repeating a key must preserve the input.
+    async fn enqueue_memory(&self, input: MemoryInput) -> Result<EpisodeId, MemoryError>;
+    /// Claims at most one due job, recovering abandoned leases with bounded attempts.
+    async fn claim_memory(&self, at: Timestamp) -> Result<Option<MemoryClaim>, MemoryError>;
+    /// Saves the whole validated batch and completes its job in one transaction.
+    async fn complete_memory(
+        &self,
+        claim: &MemoryClaim,
+        candidates: Vec<MemoryCandidate>,
+        model: &str,
+        at: Timestamp,
+    ) -> Result<Vec<FactId>, MemoryError>;
+    /// Retries with backoff, then retains a visible failed state after the attempt bound.
+    async fn fail_memory(
+        &self,
+        claim: &MemoryClaim,
+        message: &str,
+        at: Timestamp,
+    ) -> Result<(), MemoryError>;
+    async fn memory_job(&self, episode: &EpisodeId) -> Result<MemoryJob, MemoryError>;
+
     /// Appends an immutable episode.
     async fn record_episode(&self, episode: NewEpisode) -> Result<EpisodeId, MemoryError>;
+
+    /// Read the immutable evidence referenced by a fact; absent IDs return `NotFound`.
+    async fn episode(&self, id: &EpisodeId) -> Result<Episode, MemoryError>;
 
     /// Most recent episodes for a session, newest first.
     async fn recent_episodes(
@@ -257,8 +443,37 @@ pub trait MemoryStore: Send + Sync {
     /// Never deletes.
     async fn invalidate_fact(&self, id: &FactId, at: Timestamp) -> Result<(), MemoryError>;
 
+    /// Retain the record for review, but revoke its use in current and historical recall.
+    async fn stop_memory(&self, _id: &FactId, _at: Timestamp) -> Result<(), MemoryError> {
+        Err(MemoryError::Backend(
+            "Stopping saved details is unavailable.".into(),
+        ))
+    }
+
     /// Retrieves facts by semantic similarity, entity, and/or recency per [`RecallQuery`].
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError>;
+
+    /// Bounded current/history browsing, independent of automatic remembering policy.
+    async fn list_memories(&self, _query: MemoryListQuery) -> Result<MemoryPage, MemoryError> {
+        Err(MemoryError::Backend(
+            "Memory browsing is unavailable.".into(),
+        ))
+    }
+
+    /// Exact fact lookup for source inspection and reviewing a retained version.
+    async fn memory_fact(&self, _id: &FactId) -> Result<Fact, MemoryError> {
+        Err(MemoryError::Backend(
+            "Memory inspection is unavailable.".into(),
+        ))
+    }
+
+    /// Explicit user action, permitted while automatic remembering is paused.
+    /// The source note, replacement, and invalidation must commit together.
+    async fn correct_memory(&self, _correction: MemoryCorrection) -> Result<FactId, MemoryError> {
+        Err(MemoryError::Backend(
+            "Memory correction is unavailable.".into(),
+        ))
+    }
 
     /// Upserts a conversation thread (including its messages and metadata) into the store.
     async fn save_chat_thread(
@@ -312,6 +527,21 @@ pub trait MemoryStore: Send + Sync {
     async fn delete_artifact(&self, _id: &str, _at: Timestamp) -> Result<(), MemoryError> {
         Ok(())
     }
+
+    /// Loads persisted personal channel connections (such as `WhatsApp` Personal companion state).
+    async fn load_connections(
+        &self,
+    ) -> Result<Option<crate::connections::ConnectionsState>, MemoryError> {
+        Ok(None)
+    }
+
+    /// Saves personal channel connections state.
+    async fn save_connections(
+        &self,
+        _state: &crate::connections::ConnectionsState,
+    ) -> Result<(), MemoryError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -323,10 +553,14 @@ mod tests {
             id: FactId(id.into()),
             content: format!("fact {id}"),
             entities: vec![],
+            source: None,
+            replaces: None,
+            extraction: None,
             created_at: Timestamp(1_000),
             valid_at: None,
             invalid_at: None,
             expired_at: None,
+            stopped_at: None,
         }
     }
 
@@ -391,5 +625,83 @@ mod tests {
         let fused = fuse_rrf(vec![vec![fact("a"), fact("b"), fact("c")]], 2);
         assert_eq!(fused.len(), 2);
         assert_eq!(fused[0].fact.id, FactId("a".into()));
+    }
+
+    #[test]
+    fn rrf_uses_one_based_ranks_and_ignores_duplicate_hits_in_one_leg() {
+        let unique = fuse_rrf(vec![vec![fact("a"), fact("b")]], 10);
+        let repeated = fuse_rrf(vec![vec![fact("a"), fact("a"), fact("b")]], 10);
+        assert_eq!(
+            unique, repeated,
+            "one retrieval path cannot vote twice for a fact"
+        );
+        assert!((unique[0].score - 1.0 / 61.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn memory_requests_reject_unbounded_or_invalid_input() {
+        for vector in [vec![], vec![0.0; 3], vec![f32::NAN], vec![f32::INFINITY]] {
+            assert!(
+                Embedding {
+                    model: "test".into(),
+                    vector
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        assert!(
+            Embedding {
+                model: "test".into(),
+                vector: vec![0.0, 1.0]
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(RecallQuery::recent(usize::MAX).validate().is_err());
+        assert!(RecallQuery::recent(MAX_RECALL_RESULTS).validate().is_ok());
+        assert!(RecallQuery::recent(0).validate().is_ok());
+        let mut query = RecallQuery::recent(10);
+        query.text = Some(" ".into());
+        assert!(query.validate().is_err());
+        query.text = Some("Lisbon".into());
+        assert!(query.validate().is_ok());
+        query.entity = Some("x".repeat(257));
+        assert!(query.validate().is_err());
+
+        let mut candidate = NewFact {
+            content: "Maya lives in Lisbon".into(),
+            entities: vec!["Maya".into()],
+            embedding: None,
+            source: None,
+            valid_at: None,
+            replaces: None,
+        };
+        assert!(candidate.validate().is_ok());
+        candidate.content = "x".repeat(MAX_FACT_BYTES + 1);
+        assert!(candidate.validate().is_err());
+        candidate.content = "Maya lives in Lisbon".into();
+        candidate.entities = vec![String::new()];
+        assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn episodes_require_bounded_content_and_a_session() {
+        let mut episode = NewEpisode {
+            session_id: "chat-1".into(),
+            kind: EpisodeKind::UserMessage,
+            content: "I live in Lisbon".into(),
+            occurred_at: Timestamp(1),
+        };
+        assert!(episode.validate().is_ok());
+        episode.content = "x".repeat(MAX_EPISODE_BYTES + 1);
+        assert!(episode.validate().is_err());
+        episode.content = " ".into();
+        assert!(episode.validate().is_err());
+        episode.content = "hello".into();
+        episode.session_id = "x".repeat(513);
+        assert!(episode.validate().is_err());
+        episode.session_id.clear();
+        assert!(episode.validate().is_err());
     }
 }

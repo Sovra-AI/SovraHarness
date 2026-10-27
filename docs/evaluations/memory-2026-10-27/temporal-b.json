@@ -1,0 +1,878 @@
+{
+  "suite": "synthetic-memory-temporal-v1",
+  "model": "anthropic/claude-haiku-5.5",
+  "connection_id": "openrouter",
+  "seeded_distractors": 100,
+  "semantic_search": false,
+  "scoring": "manual review required; no automated quality score",
+  "status": "observations_complete",
+  "observations": [
+    {
+      "id": "initial",
+      "prompt": "I started living in Porto on 2024-01-01.",
+      "expected_for_manual_review": "Current Porto residence valid from 2024-01-01.",
+      "answer": "Thanks for sharing that. It sounds like you've been settled in Porto since 1 January 2024. Is there anything you'd like help with, like finding a place to rent or buy, looking into neighbourhoods, or planning your budget there?",
+      "answer_ms": 2300,
+      "answer_and_extraction_ms": 4758,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [
+        {
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "valid_at": 1704067200000,
+          "replaces": null
+        }
+      ],
+      "extracted_fact_ids": [
+        "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca"
+      ],
+      "facts_after": [
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    },
+    {
+      "id": "update",
+      "prompt": "Correction: I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+      "expected_for_manual_review": "Current Kyoto residence replaces Porto and is valid from 2025-03-01, not the message time.",
+      "answer": "Thanks for the update. I understand that you moved from Porto to Kyoto on 1 March 2025, and that Kyoto is your home now.\n\nEarlier I had a note that you lived in Porto from 1 January 2024 [memory:fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca], which is consistent with your correction. Your move date is the end of that period, so the two fit together.\n\nIs there anything you'd like help with now that you're settled in Kyoto?",
+      "answer_ms": 3378,
+      "answer_and_extraction_ms": 5402,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [
+        {
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "valid_at": 1740787200000,
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca"
+        }
+      ],
+      "extracted_fact_ids": [
+        "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44"
+      ],
+      "facts_after": [
+        {
+          "id": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "source": "episode:memory_5e81c2fba4a42dfee9e3753de7ab3c4cc3bbed55ea04952a9fa86691702d0b3d",
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "valid_at": 1740787200000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": 1740787200000,
+          "expired_at": 1793105031630,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    },
+    {
+      "id": "return",
+      "prompt": "Correction: I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+      "expected_for_manual_review": "New current Porto version replaces Kyoto and is valid from 2026-02-01, including when a separate move-event fact is emitted.",
+      "answer": "Thanks for the correction. I had noted that you lived in Kyoto, but you're now back in Porto as of 1 February 2026, and that's your current home. The Kyoto entry is out of date.",
+      "answer_ms": 2754,
+      "answer_and_extraction_ms": 5622,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [
+        {
+          "content": "User lives in Porto (moved back from Kyoto to Porto on 2026-02-01; Porto is the user's current home).",
+          "evidence": "I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+          "entities": [
+            "user",
+            "Porto",
+            "Kyoto"
+          ],
+          "valid_at": 1769904000000,
+          "replaces": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44"
+        }
+      ],
+      "extracted_fact_ids": [
+        "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae"
+      ],
+      "facts_after": [
+        {
+          "id": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "content": "User lives in Porto (moved back from Kyoto to Porto on 2026-02-01; Porto is the user's current home).",
+          "entities": [
+            "user",
+            "Porto",
+            "Kyoto"
+          ],
+          "source": "episode:memory_1db54d3659bc203bd6f26281ec54433e22ca435a525b2cff4b4cf295bca58bc3",
+          "replaces": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "valid_at": 1769904000000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "source": "episode:memory_5e81c2fba4a42dfee9e3753de7ab3c4cc3bbed55ea04952a9fa86691702d0b3d",
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "valid_at": 1740787200000,
+          "invalid_at": 1769904000000,
+          "expired_at": 1793105037262,
+          "stopped_at": null,
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": 1740787200000,
+          "expired_at": 1793105031630,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    },
+    {
+      "id": "after_return",
+      "prompt": "Where did I live on 2026-03-01? Search saved details for that date, then answer briefly with evidence.",
+      "expected_for_manual_review": "Porto, with the current-state history valid from 2026-02-01. Inspect fact dates as well as the answer.",
+      "answer": "You lived in **Porto** on 2026-03-01.\n\nMy saved notes say you moved back from Kyoto to Porto on 2026-02-01, and that Porto is your current home [memory:fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae]. That record has no end date, so it covers March 1 as well.",
+      "answer_ms": 6134,
+      "answer_and_extraction_ms": 6134,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [],
+      "extracted_fact_ids": [],
+      "facts_after": [
+        {
+          "id": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "content": "User lives in Porto (moved back from Kyoto to Porto on 2026-02-01; Porto is the user's current home).",
+          "entities": [
+            "user",
+            "Porto",
+            "Kyoto"
+          ],
+          "source": "episode:memory_1db54d3659bc203bd6f26281ec54433e22ca435a525b2cff4b4cf295bca58bc3",
+          "replaces": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "valid_at": 1769904000000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "source": "episode:memory_5e81c2fba4a42dfee9e3753de7ab3c4cc3bbed55ea04952a9fa86691702d0b3d",
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "valid_at": 1740787200000,
+          "invalid_at": 1769904000000,
+          "expired_at": 1793105037262,
+          "stopped_at": null,
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": 1740787200000,
+          "expired_at": 1793105031630,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    },
+    {
+      "id": "two_dates",
+      "prompt": "Project Cedar sends a monthly newsletter. Its delivery day has been Friday since 2025-04-01. My colleague Mira joined Cedar on 2025-06-01.",
+      "expected_for_manual_review": "Friday delivery valid from April 1; Mira joining valid from June 1. Undated monthly frequency must not inherit either date.",
+      "answer": "Thanks for sharing that. Here's what I have:\n\n- **Project Cedar** sends a monthly newsletter, and it has gone out on **Fridays since April 1, 2025**.\n- Your colleague **Mira** joined Cedar on **June 1, 2025**.\n\nIs there something you'd like help with? For example, I could draft the next newsletter, set up a reminder for the Friday send-out, or put the details into a document.",
+      "answer_ms": 2849,
+      "answer_and_extraction_ms": 4598,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [
+        {
+          "content": "Project Cedar sends a monthly newsletter.",
+          "evidence": "Project Cedar sends a monthly newsletter.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "valid_at": null,
+          "replaces": null
+        },
+        {
+          "content": "Project Cedar's newsletter delivery day is Friday, since 2025-04-01.",
+          "evidence": "Its delivery day has been Friday since 2025-04-01.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "valid_at": 1743465600000,
+          "replaces": null
+        },
+        {
+          "content": "Mira is the user's colleague and joined Project Cedar on 2025-06-01.",
+          "evidence": "My colleague Mira joined Cedar on 2025-06-01.",
+          "entities": [
+            "user",
+            "Mira",
+            "Project Cedar"
+          ],
+          "valid_at": 1748736000000,
+          "replaces": null
+        }
+      ],
+      "extracted_fact_ids": [
+        "fact:memory_ef6ee40e0ff920f54a5d10c4b6bb88265f4de582c4153af9f82c1d4532c4db12",
+        "fact:memory_3aa4f44a76850385f5b57fd047c1f206c8899ebcb08e816260b9798469c1c82b",
+        "fact:memory_5759551b166175a0a9941496fe0d399c2622bdfbd8eaeedcee42749a7e0c72bf"
+      ],
+      "facts_after": [
+        {
+          "id": "fact:memory_5759551b166175a0a9941496fe0d399c2622bdfbd8eaeedcee42749a7e0c72bf",
+          "content": "Mira is the user's colleague and joined Project Cedar on 2025-06-01.",
+          "entities": [
+            "user",
+            "Mira",
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1748736000000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "My colleague Mira joined Cedar on 2025-06-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_3aa4f44a76850385f5b57fd047c1f206c8899ebcb08e816260b9798469c1c82b",
+          "content": "Project Cedar's newsletter delivery day is Friday, since 2025-04-01.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1743465600000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Its delivery day has been Friday since 2025-04-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_ef6ee40e0ff920f54a5d10c4b6bb88265f4de582c4153af9f82c1d4532c4db12",
+          "content": "Project Cedar sends a monthly newsletter.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1793105048014,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Project Cedar sends a monthly newsletter.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "content": "User lives in Porto (moved back from Kyoto to Porto on 2026-02-01; Porto is the user's current home).",
+          "entities": [
+            "user",
+            "Porto",
+            "Kyoto"
+          ],
+          "source": "episode:memory_1db54d3659bc203bd6f26281ec54433e22ca435a525b2cff4b4cf295bca58bc3",
+          "replaces": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "valid_at": 1769904000000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "source": "episode:memory_5e81c2fba4a42dfee9e3753de7ab3c4cc3bbed55ea04952a9fa86691702d0b3d",
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "valid_at": 1740787200000,
+          "invalid_at": 1769904000000,
+          "expired_at": 1793105037262,
+          "stopped_at": null,
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": 1740787200000,
+          "expired_at": 1793105031630,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    },
+    {
+      "id": "mixed_date",
+      "prompt": "Correction: I moved from Porto to Lyon on 2026-04-01; Lyon is my current home. My favorite breakfast drink is jasmine tea.",
+      "expected_for_manual_review": "Lyon replaces current Porto with April 1 validity. The unrelated undated tea preference must have null candidate valid_at.",
+      "answer": "Thanks for the update! Lyon is your home now, since your move on 2026-04-01, and jasmine tea is your favorite breakfast drink.\n\nEarlier notes I have say you were living in Porto, which fits with your move from there to Lyon. Your correction takes priority.",
+      "answer_ms": 3455,
+      "answer_and_extraction_ms": 6546,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [
+        {
+          "content": "User's current home is Lyon (moved there from Porto on 2026-04-01).",
+          "evidence": "Lyon is my current home.",
+          "entities": [
+            "user",
+            "Lyon",
+            "Porto"
+          ],
+          "valid_at": 1775001600000,
+          "replaces": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae"
+        },
+        {
+          "content": "User's favorite breakfast drink is jasmine tea.",
+          "evidence": "My favorite breakfast drink is jasmine tea.",
+          "entities": [
+            "user"
+          ],
+          "valid_at": null,
+          "replaces": null
+        }
+      ],
+      "extracted_fact_ids": [
+        "fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784",
+        "fact:memory_b48e1556f04a89d51721d024232bcd6925980674ae414a54574f533ef1206c2f"
+      ],
+      "facts_after": [
+        {
+          "id": "fact:memory_b48e1556f04a89d51721d024232bcd6925980674ae414a54574f533ef1206c2f",
+          "content": "User's favorite breakfast drink is jasmine tea.",
+          "entities": [
+            "user"
+          ],
+          "source": "episode:memory_2bf0fad7487b5eea357a0bfa40413f5df7df9bec59b8380ea5afb3c9f7517be1",
+          "replaces": null,
+          "valid_at": 1793105054581,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "My favorite breakfast drink is jasmine tea.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784",
+          "content": "User's current home is Lyon (moved there from Porto on 2026-04-01).",
+          "entities": [
+            "user",
+            "Lyon",
+            "Porto"
+          ],
+          "source": "episode:memory_2bf0fad7487b5eea357a0bfa40413f5df7df9bec59b8380ea5afb3c9f7517be1",
+          "replaces": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "valid_at": 1775001600000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Lyon is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_5759551b166175a0a9941496fe0d399c2622bdfbd8eaeedcee42749a7e0c72bf",
+          "content": "Mira is the user's colleague and joined Project Cedar on 2025-06-01.",
+          "entities": [
+            "user",
+            "Mira",
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1748736000000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "My colleague Mira joined Cedar on 2025-06-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_3aa4f44a76850385f5b57fd047c1f206c8899ebcb08e816260b9798469c1c82b",
+          "content": "Project Cedar's newsletter delivery day is Friday, since 2025-04-01.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1743465600000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Its delivery day has been Friday since 2025-04-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_ef6ee40e0ff920f54a5d10c4b6bb88265f4de582c4153af9f82c1d4532c4db12",
+          "content": "Project Cedar sends a monthly newsletter.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1793105048014,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Project Cedar sends a monthly newsletter.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "content": "User lives in Porto (moved back from Kyoto to Porto on 2026-02-01; Porto is the user's current home).",
+          "entities": [
+            "user",
+            "Porto",
+            "Kyoto"
+          ],
+          "source": "episode:memory_1db54d3659bc203bd6f26281ec54433e22ca435a525b2cff4b4cf295bca58bc3",
+          "replaces": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "valid_at": 1769904000000,
+          "invalid_at": 1775001600000,
+          "expired_at": 1793105054580,
+          "stopped_at": null,
+          "evidence": "I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "source": "episode:memory_5e81c2fba4a42dfee9e3753de7ab3c4cc3bbed55ea04952a9fa86691702d0b3d",
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "valid_at": 1740787200000,
+          "invalid_at": 1769904000000,
+          "expired_at": 1793105037262,
+          "stopped_at": null,
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": 1740787200000,
+          "expired_at": 1793105031630,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    },
+    {
+      "id": "future_plan",
+      "prompt": "I might move to Oslo on 2027-01-01, but I have not decided. Lyon is still my current home.",
+      "expected_for_manual_review": "Do not make Oslo current or future-confirmed residence. Do not move Lyon's start date to 2027; reaffirming Lyon may reuse its existing fact.",
+      "answer": "Thanks for letting me know. I'll keep Lyon as your current home for now, and I'll treat Oslo as a possible move on 2027-01-01 that you haven't decided on yet. My saved notes say you moved to Lyon from Porto on 2026-04-01 [memory:fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784].\n\nIf it would help while you think it over, I can:\n\n- Compare the cost of renting or buying in Oslo with Lyon.\n- Work out what a move would involve, such as timing, paperwork, and budget.\n- Make a checklist for the months before 2027-01-01.\n\nWould any of those be useful?",
+      "answer_ms": 3443,
+      "answer_and_extraction_ms": 5391,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [
+        {
+          "content": "User's current home is Lyon (moved there from Porto on 2026-04-01).",
+          "evidence": "Lyon is still my current home.",
+          "entities": [
+            "user",
+            "Lyon",
+            "Porto"
+          ],
+          "valid_at": 1775001600000,
+          "replaces": null,
+          "same_as": "fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784"
+        }
+      ],
+      "extracted_fact_ids": [
+        "fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784"
+      ],
+      "facts_after": [
+        {
+          "id": "fact:memory_b48e1556f04a89d51721d024232bcd6925980674ae414a54574f533ef1206c2f",
+          "content": "User's favorite breakfast drink is jasmine tea.",
+          "entities": [
+            "user"
+          ],
+          "source": "episode:memory_2bf0fad7487b5eea357a0bfa40413f5df7df9bec59b8380ea5afb3c9f7517be1",
+          "replaces": null,
+          "valid_at": 1793105054581,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "My favorite breakfast drink is jasmine tea.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784",
+          "content": "User's current home is Lyon (moved there from Porto on 2026-04-01).",
+          "entities": [
+            "user",
+            "Lyon",
+            "Porto"
+          ],
+          "source": "episode:memory_2bf0fad7487b5eea357a0bfa40413f5df7df9bec59b8380ea5afb3c9f7517be1",
+          "replaces": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "valid_at": 1775001600000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Lyon is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_5759551b166175a0a9941496fe0d399c2622bdfbd8eaeedcee42749a7e0c72bf",
+          "content": "Mira is the user's colleague and joined Project Cedar on 2025-06-01.",
+          "entities": [
+            "user",
+            "Mira",
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1748736000000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "My colleague Mira joined Cedar on 2025-06-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_3aa4f44a76850385f5b57fd047c1f206c8899ebcb08e816260b9798469c1c82b",
+          "content": "Project Cedar's newsletter delivery day is Friday, since 2025-04-01.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1743465600000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Its delivery day has been Friday since 2025-04-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_ef6ee40e0ff920f54a5d10c4b6bb88265f4de582c4153af9f82c1d4532c4db12",
+          "content": "Project Cedar sends a monthly newsletter.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1793105048014,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Project Cedar sends a monthly newsletter.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "content": "User lives in Porto (moved back from Kyoto to Porto on 2026-02-01; Porto is the user's current home).",
+          "entities": [
+            "user",
+            "Porto",
+            "Kyoto"
+          ],
+          "source": "episode:memory_1db54d3659bc203bd6f26281ec54433e22ca435a525b2cff4b4cf295bca58bc3",
+          "replaces": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "valid_at": 1769904000000,
+          "invalid_at": 1775001600000,
+          "expired_at": 1793105054580,
+          "stopped_at": null,
+          "evidence": "I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "source": "episode:memory_5e81c2fba4a42dfee9e3753de7ab3c4cc3bbed55ea04952a9fa86691702d0b3d",
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "valid_at": 1740787200000,
+          "invalid_at": 1769904000000,
+          "expired_at": 1793105037262,
+          "stopped_at": null,
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": 1740787200000,
+          "expired_at": 1793105031630,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    },
+    {
+      "id": "lyon_history",
+      "prompt": "Where did I live on 2026-05-01? Search saved details for that date, then answer briefly with evidence.",
+      "expected_for_manual_review": "Lyon with supporting history; no Kyoto, Porto or speculative Oslo as residence on that date.",
+      "answer": "Based on your saved details, you were living in **Lyon** on 2026-05-01. Your notes say you moved there from Porto on 2026-04-01, and you once said, \"Lyon is my current home.\" [memory:fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784]\n\nThe saved details don't mention any other home, so I can't say for certain where you were staying if anything changed after that date.",
+      "answer_ms": 5303,
+      "answer_and_extraction_ms": 5304,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [],
+      "extracted_fact_ids": [],
+      "facts_after": [
+        {
+          "id": "fact:memory_b48e1556f04a89d51721d024232bcd6925980674ae414a54574f533ef1206c2f",
+          "content": "User's favorite breakfast drink is jasmine tea.",
+          "entities": [
+            "user"
+          ],
+          "source": "episode:memory_2bf0fad7487b5eea357a0bfa40413f5df7df9bec59b8380ea5afb3c9f7517be1",
+          "replaces": null,
+          "valid_at": 1793105054581,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "My favorite breakfast drink is jasmine tea.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_daef8cc528f2a4544e2f697edb562e6550cb85bf432458fbe5a0c81f8ba2f784",
+          "content": "User's current home is Lyon (moved there from Porto on 2026-04-01).",
+          "entities": [
+            "user",
+            "Lyon",
+            "Porto"
+          ],
+          "source": "episode:memory_2bf0fad7487b5eea357a0bfa40413f5df7df9bec59b8380ea5afb3c9f7517be1",
+          "replaces": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "valid_at": 1775001600000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Lyon is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_5759551b166175a0a9941496fe0d399c2622bdfbd8eaeedcee42749a7e0c72bf",
+          "content": "Mira is the user's colleague and joined Project Cedar on 2025-06-01.",
+          "entities": [
+            "user",
+            "Mira",
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1748736000000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "My colleague Mira joined Cedar on 2025-06-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_3aa4f44a76850385f5b57fd047c1f206c8899ebcb08e816260b9798469c1c82b",
+          "content": "Project Cedar's newsletter delivery day is Friday, since 2025-04-01.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1743465600000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Its delivery day has been Friday since 2025-04-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_ef6ee40e0ff920f54a5d10c4b6bb88265f4de582c4153af9f82c1d4532c4db12",
+          "content": "Project Cedar sends a monthly newsletter.",
+          "entities": [
+            "Project Cedar"
+          ],
+          "source": "episode:memory_58c79651dd4bcc7ffe222a61c5459d7e2ba3495d464b5874e78cdd4930a858cf",
+          "replaces": null,
+          "valid_at": 1793105048014,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "Project Cedar sends a monthly newsletter.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_84f730ef571b2670443254b254ece593868a011c73665901e7292748399058ae",
+          "content": "User lives in Porto (moved back from Kyoto to Porto on 2026-02-01; Porto is the user's current home).",
+          "entities": [
+            "user",
+            "Porto",
+            "Kyoto"
+          ],
+          "source": "episode:memory_1db54d3659bc203bd6f26281ec54433e22ca435a525b2cff4b4cf295bca58bc3",
+          "replaces": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "valid_at": 1769904000000,
+          "invalid_at": 1775001600000,
+          "expired_at": 1793105054580,
+          "stopped_at": null,
+          "evidence": "I moved back from Kyoto to Porto on 2026-02-01; Porto is my current home again.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_20f328755fc442ef30c0e112ba8c1657628f5ae49411d152851c676e32669b44",
+          "content": "User lives in Kyoto (moved there from Porto on 2025-03-01; Kyoto is the user's current home).",
+          "entities": [
+            "user",
+            "Kyoto"
+          ],
+          "source": "episode:memory_5e81c2fba4a42dfee9e3753de7ab3c4cc3bbed55ea04952a9fa86691702d0b3d",
+          "replaces": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "valid_at": 1740787200000,
+          "invalid_at": 1769904000000,
+          "expired_at": 1793105037262,
+          "stopped_at": null,
+          "evidence": "I moved from Porto to Kyoto on 2025-03-01; Kyoto is my current home.",
+          "model": "anthropic/claude-haiku-5.5"
+        },
+        {
+          "id": "fact:memory_cca2f4b5bf86a9fe08d677a9dcbc5caa926a6b8a05c779cf043bd03174bbd0ca",
+          "content": "User lives in Porto (started living there on 2024-01-01).",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_63901696530bf988cb1da0e3b29ca63f9b32e88a3927328cdc6f9824083e0126",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": 1740787200000,
+          "expired_at": 1793105031630,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "anthropic/claude-haiku-5.5"
+        }
+      ]
+    }
+  ]
+}

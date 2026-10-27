@@ -44,6 +44,7 @@ pub struct Shell {
     pub(crate) skill_menu: crate::skill_menu::MenuState,
     pub(crate) skill_library: crate::skill_library::SkillLibrary,
     pub(crate) file_index: crate::file_index_view::FileIndexView,
+    pub(crate) memory_view: Entity<crate::memory_view::MemoryView>,
     search_input: Entity<InputState>,
     history_search_input: Entity<InputState>,
     rename_thread_input: Entity<InputState>,
@@ -157,6 +158,8 @@ impl Shell {
 
         let events = cx.global::<RuntimeClient>().0.events();
         let models = cx.new(|cx| crate::ModelsView::new(window, cx));
+        let memory_view =
+            cx.new(|cx| crate::memory_view::MemoryView::new(models.clone(), window, cx));
         let models_navigation = cx.subscribe_in(
             &models,
             window,
@@ -232,6 +235,21 @@ impl Shell {
                 let applied = this.update(cx, |shell, cx| {
                     let mut should_persist_thread = false;
                     for event in batch {
+                        if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Semantic(
+                            status,
+                        )) = &event
+                        {
+                            shell
+                                .memory_view
+                                .update(cx, |view, cx| view.apply_semantic(status, cx));
+                        }
+                        if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Review(event)) =
+                            &event
+                        {
+                            shell
+                                .memory_view
+                                .update(cx, |view, cx| view.apply(event, cx));
+                        }
                         if let sovra_core::Event::FileIndex(event) = &event {
                             shell.file_index.state.apply(event);
                         }
@@ -259,6 +277,12 @@ impl Shell {
                             shell
                                 .models
                                 .update(cx, |models, cx| models.apply(event, cx));
+                        }
+                        if let sovra_core::Event::Connections(event) = &event {
+                            shell.models.update(cx, |models, cx| {
+                                models.connections.apply(event);
+                                cx.notify();
+                            });
                         }
                         if matches!(
                             event,
@@ -288,6 +312,9 @@ impl Shell {
                                 client.send(Command::Teams(sovra_core::teams::TeamCommand::Load));
                             let _ = client.send(Command::Artifacts(
                                 sovra_core::artifacts::ArtifactCommand::Load,
+                            ));
+                            let _ = client.send(Command::Connections(
+                                sovra_core::connections::ConnectionCommand::Load,
                             ));
                         }
                         if let Some(next_prompt) = shell.state.apply_event(&event) {
@@ -353,6 +380,7 @@ impl Shell {
             skill_menu: crate::skill_menu::MenuState::default(),
             skill_library,
             file_index,
+            memory_view,
             search_input,
             history_search_input,
             rename_thread_input,
@@ -389,9 +417,9 @@ impl Shell {
         match self.state.active_tab {
             NavTab::Team => self.team_view.update(cx, |_, cx| cx.notify()),
             NavTab::Artifacts => self.artifacts_view.update(cx, |_, cx| cx.notify()),
+            NavTab::Knowledge => self.memory_view.update(cx, |_, cx| cx.notify()),
             NavTab::Chat
             | NavTab::MyAis
-            | NavTab::Knowledge
             | NavTab::Models
             | NavTab::Schedules
             | NavTab::Settings
@@ -438,10 +466,21 @@ impl Shell {
         self.refresh(cx);
     }
 
+    pub(crate) fn open_memory_source(&mut self, id: sovra_core::FactId, cx: &mut Context<Self>) {
+        self.select_tab(NavTab::Knowledge, cx);
+        self.memory_view
+            .update(cx, |view, cx| view.open_source(id, cx));
+    }
+
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
         self.state.select_tab(tab);
+        if tab == NavTab::Knowledge {
+            self.memory_view
+                .update(cx, crate::memory_view::MemoryView::load);
+        }
         self.models.update(cx, |models, cx| {
             models.settings_open = tab == NavTab::Settings;
+            models.setup_flow = false;
             if tab == NavTab::Models {
                 models.open_model_home(cx);
             }
@@ -591,6 +630,9 @@ impl Shell {
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.chat.follow_latest();
                 let _ = cx.global::<RuntimeClient>().0.send(Command::RunWithFiles {
+                    context: Some(sovra_core::ConversationContext::before_current_turn(
+                        &self.state.messages,
+                    )),
                     session_id: self.state.session_id.clone(),
                     prompt,
                     attachment_ids: ids,
@@ -958,12 +1000,14 @@ impl Shell {
                 self.select_tab(NavTab::Settings, cx);
                 self.models.update(cx, |models, cx| {
                     models.open_openrouter_key_editor(window, cx);
+                    models.setup_flow = true;
                 });
             }
             "selected-key" => {
                 self.select_tab(NavTab::Settings, cx);
                 self.models.update(cx, |models, cx| {
                     models.open_selected_connection(window, cx);
+                    models.setup_flow = true;
                 });
             }
             "recommended-models" => {
@@ -986,6 +1030,7 @@ impl Shell {
                 self.select_tab(NavTab::Settings, cx);
                 self.models.update(cx, |models, cx| {
                     models.open_openai_compatible_editor(window, cx);
+                    models.setup_flow = true;
                 });
             }
             "choose-model" => {
@@ -1073,10 +1118,16 @@ impl Shell {
             .find(|message| !message.attachments.is_empty())
             .map_or_else(
                 || Command::RunPrompt {
+                    context: Some(sovra_core::ConversationContext::before_current_turn(
+                        &self.state.messages,
+                    )),
                     session_id: session_id.clone(),
                     prompt: prompt.to_owned(),
                 },
                 |message| Command::RunWithFiles {
+                    context: Some(sovra_core::ConversationContext::before_current_turn(
+                        &self.state.messages,
+                    )),
                     session_id: session_id.clone(),
                     prompt: prompt.to_owned(),
                     attachment_ids: message

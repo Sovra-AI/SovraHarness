@@ -1063,6 +1063,39 @@ fn render_assistant_segment(
             content = content.child(live_line(chat, cx));
         }
         if !streaming && (answering || msg.model.is_some()) {
+            let citations = sovra_core::memory_citations(&msg.text);
+            if !citations.is_empty() {
+                content = content.child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_wrap()
+                        .gap(t.space.compact)
+                        .children(citations.into_iter().enumerate().map(|(number, id)| {
+                            design::button(
+                                (
+                                    gpui_kit::SharedString::from(format!(
+                                        "memory-citation-{index}"
+                                    )),
+                                    number,
+                                ),
+                                format!("Saved source {}", number + 1),
+                                cx,
+                            )
+                            .ghost()
+                            .xsmall()
+                            .accessibility_label(format!(
+                                "Open saved source {}: memory:{}",
+                                number + 1,
+                                id.0
+                            ))
+                            .tooltip(format!("memory:{}", id.0))
+                            .on_click(cx.listener(
+                                move |shell, _, _, cx| shell.open_memory_source(id.clone(), cx),
+                            ))
+                        })),
+                );
+            }
             let copy_text = msg.text.clone();
             let saved = state
                 .artifacts

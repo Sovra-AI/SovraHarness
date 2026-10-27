@@ -6,8 +6,6 @@
 )]
 
 use std::collections::BTreeMap;
-use std::io::{Read as _, Write as _};
-use std::net::{TcpListener, TcpStream};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -21,6 +19,9 @@ use sovra_providers::{
     SavedModels,
 };
 use sovra_runtime::{Client, ModelsConfig};
+
+#[path = "models/memory.rs"]
+mod memory;
 
 #[path = "models/semantic.rs"]
 mod semantic;
@@ -44,136 +45,9 @@ impl CredentialStore for TestCredentials {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Request {
-    path: String,
-    headers: String,
-    body: Value,
-}
-struct Reply {
-    status: u16,
-    content_type: &'static str,
-    body: String,
-    tail: Option<(Arc<Mutex<std::sync::mpsc::Receiver<()>>>, String)>,
-}
-impl Reply {
-    fn json(value: &Value) -> Self {
-        Self {
-            status: 200,
-            content_type: "application/json",
-            body: value.to_string(),
-            tail: None,
-        }
-    }
-}
-struct Server {
-    address: std::net::SocketAddr,
-    stop: Arc<AtomicBool>,
-    requests: Arc<Mutex<Vec<Request>>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Server {
-    fn new(handler: impl Fn(&Request) -> Reply + Send + 'static) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let stop = Arc::new(AtomicBool::new(false));
-        let stopping = stop.clone();
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let observed = requests.clone();
-        let thread = std::thread::spawn(move || {
-            for socket in listener.incoming() {
-                if stopping.load(Ordering::SeqCst) {
-                    break;
-                }
-                let mut socket = socket.unwrap();
-                socket
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                let mut bytes = Vec::new();
-                let mut chunk = [0u8; 4096];
-                let header_end = loop {
-                    let count = match socket.read(&mut chunk) {
-                        Ok(0) | Err(_) => break None,
-                        Ok(n) => n,
-                    };
-                    bytes.extend_from_slice(&chunk[..count]);
-                    if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-                        break Some(end + 4);
-                    }
-                    assert!(bytes.len() < 1024 * 1024);
-                };
-                let Some(header_end) = header_end else {
-                    continue;
-                };
-                let headers = String::from_utf8_lossy(&bytes[..header_end]).to_string();
-                let length = headers
-                    .lines()
-                    .filter_map(|line| line.split_once(':'))
-                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                    .map_or(0, |(_, v)| v.trim().parse::<usize>().unwrap());
-                while bytes.len() < header_end + length {
-                    let n = socket.read(&mut chunk).unwrap();
-                    if n == 0 {
-                        break;
-                    }
-                    bytes.extend_from_slice(&chunk[..n]);
-                }
-                let path = headers
-                    .lines()
-                    .next()
-                    .unwrap()
-                    .split_whitespace()
-                    .nth(1)
-                    .unwrap()
-                    .to_owned();
-                let body = serde_json::from_slice(&bytes[header_end..]).unwrap_or(Value::Null);
-                let request = Request {
-                    path,
-                    headers,
-                    body,
-                };
-                let reply = handler(&request);
-                observed.lock().unwrap().push(request);
-                let status = if reply.status == 200 { "OK" } else { "Error" };
-                let response = format!(
-                    "HTTP/1.1 {} {status}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    reply.status,
-                    reply.content_type,
-                    reply.body.len() + reply.tail.as_ref().map_or(0, |(_, tail)| tail.len()),
-                    reply.body
-                );
-                let _ = socket.write_all(response.as_bytes());
-                if let Some((gate, tail)) = reply.tail
-                    && gate
-                        .lock()
-                        .unwrap()
-                        .recv_timeout(Duration::from_secs(10))
-                        .is_ok()
-                {
-                    let _ = socket.write_all(tail.as_bytes());
-                }
-            }
-        });
-        Self {
-            address,
-            stop,
-            requests,
-            thread: Some(thread),
-        }
-    }
-    fn url(&self) -> String {
-        format!("http://{}", self.address)
-    }
-}
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        let _ = TcpStream::connect(self.address);
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
+#[path = "../../../tests/support/model_http.rs"]
+mod http;
+use http::{Reply, Request, Server};
 
 struct Fixture {
     path: std::path::PathBuf,
@@ -410,6 +284,7 @@ async fn custom_chat_with_authentication(authentication: Authentication) {
     event(&client,|e| matches!(e,Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.as_ref()==Some(&key))).await;
     client
         .send(Command::RunPrompt {
+            context: None,
             session_id: "integration".into(),
             prompt: "Hello".into(),
         })
@@ -595,6 +470,7 @@ async fn real_tool_execution_delivers_agui_components_to_client() {
     event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.as_ref() == Some(&key))).await;
     client
         .send(Command::RunPrompt {
+            context: None,
             session_id: "native-ui-session".into(),
             prompt: "Show a report".into(),
         })
@@ -694,6 +570,124 @@ async fn saved_key_metadata_and_secret_survive_restart_replace_and_remove() {
     stop(client).await;
 }
 
+/// Regression: `OpenRouter` lists models without a key, so a mistyped key used to
+/// save as "connected" and only fail on the first message ("User not found").
+#[tokio::test]
+async fn a_key_openrouter_rejects_is_not_saved() {
+    let server = Server::new(|request| {
+        if request.path.ends_with("/auth/key") {
+            return Reply {
+                status: 401,
+                content_type: "application/json",
+                body: json!({"error":{"message":"User not found.","code":401}}).to_string(),
+                tail: None,
+            };
+        }
+        Reply::json(&json!({"data":[]}))
+    });
+    let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/api/v1", server.url());
+    let fixture = Fixture::new(connection.clone(), None);
+    let client = fixture.start();
+    catalog(&client).await;
+    send(
+        &client,
+        ModelCommand::SaveConnection {
+            connection: connection.clone(),
+            credential: CredentialChange::Replace(ModelSecret("sk-or-v1-truncated".into())),
+        },
+    );
+    let failure = event(&client, |e| {
+        matches!(
+            e,
+            Event::Models(ModelEvent::Error(_) | ModelEvent::ConnectionSaved { .. })
+        )
+    })
+    .await;
+    assert!(
+        matches!(&failure, Event::Models(ModelEvent::Error(message)) if message.contains("didn't accept this key")),
+        "{failure:?}"
+    );
+    let saved = fixture.repo.load().unwrap();
+    assert!(saved.connections.iter().all(|c| !c.has_credential));
+    assert_eq!(fixture.repo.credential(&connection).unwrap().0, "");
+    stop(client).await;
+}
+
+/// Regression: a settings file that records a saved key the credential store no longer
+/// holds (a reset keychain, or a dev build reading its own store) used to report
+/// "ready" while every message bounced back to setup.
+#[tokio::test]
+async fn a_saved_key_missing_from_the_store_asks_for_the_key_then_recovers() {
+    let server = Server::new(|_| {
+        Reply::json(&json!({"data":[
+            {"id":"a/chat","architecture":{"output_modalities":["text"]},
+             "pricing":{"prompt":"0","completion":"0"}}
+        ]}))
+    });
+    let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/api/v1", server.url());
+    connection.has_credential = true;
+    let fixture = Fixture::new(connection.clone(), None);
+    let key = ModelKey {
+        connection_id: "openrouter".into(),
+        model_id: "a/chat".into(),
+    };
+    let mut saved = fixture.repo.load().unwrap();
+    saved.preferences.active = Some(key.clone());
+    fixture.repo.save(&saved).unwrap();
+
+    let client = fixture.start();
+    let mut state = ModelsState::default();
+    let loaded = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
+    let Event::Models(loaded) = loaded else {
+        unreachable!()
+    };
+    state.apply(&loaded);
+    assert!(!state.connections[0].has_credential);
+    assert!(matches!(
+        state.setup_stage(),
+        SetupStage::NeedsModelKey { .. }
+    ));
+    catalog(&client).await;
+    // With the catalog in, the runtime retries the chosen model and still has no key.
+    event(&client, |e| {
+        matches!(
+            e,
+            Event::Models(ModelEvent::ActiveModelStatus { problem: Some(_) })
+        )
+    })
+    .await;
+
+    send(
+        &client,
+        ModelCommand::SaveConnection {
+            connection: state.connections[0].clone(),
+            credential: CredentialChange::Replace(ModelSecret("restored-key".into())),
+        },
+    );
+    // The model is ready before the UI hears the key was saved, so a waiting
+    // message sent at that moment reaches it.
+    let ready = event(&client, |e| {
+        matches!(
+            e,
+            Event::Models(ModelEvent::ActiveModelStatus { .. } | ModelEvent::Loaded { .. })
+        )
+    })
+    .await;
+    assert!(
+        matches!(
+            ready,
+            Event::Models(ModelEvent::ActiveModelStatus { problem: None })
+        ),
+        "activation must precede the saved-key announcement: {ready:?}"
+    );
+    stop(client).await;
+}
+
 #[tokio::test]
 async fn conversational_reply_arrives_before_the_server_finishes_without_cards_or_routing() {
     let (release, gate) = std::sync::mpsc::channel();
@@ -757,6 +751,7 @@ async fn conversational_reply_arrives_before_the_server_finishes_without_cards_o
     event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.as_ref() == Some(&key))).await;
     client
         .send(Command::RunPrompt {
+            context: None,
             session_id: "live-stream".into(),
             prompt: "Hi!".into(),
         })
@@ -931,6 +926,7 @@ impl sovra_core::files::FileStore for AttachmentFixture {
                 Vec::new()
             } else {
                 vec![MediaPart {
+                    duration_millis: None,
                     mime_type: mime.into(),
                     data,
                 }]
@@ -1026,6 +1022,7 @@ async fn purpose_assignment_keeps_chat_model_and_sends_real_images_and_document_
     ] {
         client
             .send(Command::RunWithFiles {
+                context: None,
                 session_id: session_id.into(),
                 prompt: "What is the invoice total?".into(),
                 attachment_ids: vec![id.into()],
@@ -1045,6 +1042,7 @@ async fn purpose_assignment_keeps_chat_model_and_sends_real_images_and_document_
     }
     client
         .send(Command::RunPrompt {
+            context: None,
             session_id: "picture-chat".into(),
             prompt: "Explain that again.".into(),
         })

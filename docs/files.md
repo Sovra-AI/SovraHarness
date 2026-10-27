@@ -32,6 +32,15 @@ heuristics. Model/service-specific size and duration limits may be lower than
 Sovra's local limits. The user sees provider failures through the existing chat
 error path. There is no hidden OCR service or automatic model download.
 
+PCM WAV and ordinary, non-fragmented MP4/QuickTime files also supply local duration
+hints to the shared input budget. Longer recordings reserve more room before any
+provider request; reopening an older attachment derives the hint again from its
+stored bytes. Unsupported or malformed timing retains the previous estimate and
+adds a reader note, preserving any other notes. The original media is unchanged.
+These timing fields do not prove that a codec is valid or bound every provider's
+token use; other audio/video formats and live-model calibration remain incomplete.
+No FFmpeg executable or other media service is required by the app.
+
 ## Readers and limits
 
 Every regular file can enter the reader regardless of its name or extension, subject

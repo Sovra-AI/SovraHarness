@@ -225,6 +225,7 @@ impl Default for UserProfile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceState {
     pub runtime_status: RuntimeStatus,
+    pub memory_status: crate::MemoryStatus,
     pub route: ScreenRoute,
     pub active_tab: NavTab,
     pub user: UserProfile,
@@ -269,10 +270,16 @@ pub struct WorkspaceState {
     pub team: crate::teams::TeamRoster,
     /// Saved artifacts, folded from [`Event::Artifacts`].
     pub artifacts: crate::artifacts::ArtifactLibrary,
+    /// Personal channel connections (`WhatsApp` Personal companion state, QR pairing, bridged messages).
+    pub connections: crate::connections::ConnectionsState,
     /// The composer sends prompts to the whole team instead of Sovra alone.
     pub team_mode: bool,
     /// AG-UI `subagentRunId` → the member it belongs to, for attributing messages.
     team_subagents: std::collections::BTreeMap<String, crate::agui::Speaker>,
+    active_model_problem: Option<String>,
+    /// A message sent before setup finished, as `(session_id, prompt)`. It is sent
+    /// automatically once a model is ready, so nobody has to type it twice.
+    prompt_awaiting_setup: Option<(String, String)>,
     next_msg_seq: u64,
     next_thread_seq: u64,
 }
@@ -285,6 +292,7 @@ impl Default for WorkspaceState {
         let initial_thread = ChatThread::new(initial_id.clone(), Timestamp(0));
         Self {
             runtime_status: RuntimeStatus::default(),
+            memory_status: crate::MemoryStatus::Unavailable,
             route: ScreenRoute::MainWorkspace,
             active_tab: NavTab::Chat,
             user: UserProfile::default(),
@@ -321,8 +329,11 @@ impl Default for WorkspaceState {
             model_connections: Vec::new(),
             team: crate::teams::TeamRoster::default(),
             artifacts: crate::artifacts::ArtifactLibrary::default(),
+            connections: crate::connections::ConnectionsState::default(),
             team_mode: false,
             team_subagents: std::collections::BTreeMap::new(),
+            active_model_problem: None,
+            prompt_awaiting_setup: None,
             next_msg_seq: 0,
             next_thread_seq: 1,
         }
@@ -769,6 +780,7 @@ impl WorkspaceState {
                 ..crate::models::ModelPreferences::default()
             },
             loaded: true,
+            active_problem: self.active_model_problem.clone(),
             ..crate::models::ModelsState::default()
         };
         self.has_active_llm = temp.has_active_llm();
@@ -802,6 +814,7 @@ impl WorkspaceState {
         if self.models_loaded && !self.has_active_llm {
             self.append_user_turn(prompt);
             self.is_generating = false;
+            self.prompt_awaiting_setup = Some((self.session_id.clone(), prompt.to_owned()));
             let widget = crate::agui::llm_setup_widget_for_stage(
                 &self.setup_stage,
                 self.llm_setup_hint.as_deref(),
@@ -918,6 +931,10 @@ impl WorkspaceState {
     pub fn apply_event(&mut self, event: &Event) -> Option<String> {
         self.runtime_status.apply(event);
         match event {
+            Event::Memory(crate::MemoryEvent::Status(status)) => {
+                self.memory_status = status.clone();
+                None
+            }
             Event::ChatHistoryLoaded { threads } => {
                 for incoming in threads {
                     if let Some(existing) = self.threads.iter_mut().find(|t| t.id == incoming.id) {
@@ -980,13 +997,18 @@ impl WorkspaceState {
                             .is_some_and(|k| k.connection_id == *id)
                         {
                             self.routing.global_model = None;
+                            self.active_model_problem = None;
                         }
                         self.refresh_llm_readiness();
                         self.sync_model_card_subtitle();
                     }
+                    crate::models::ModelEvent::ActiveModelStatus { problem } => {
+                        self.active_model_problem.clone_from(problem);
+                        self.refresh_llm_readiness();
+                    }
                     _ => {}
                 }
-                None
+                self.take_prompt_awaiting_setup()
             }
             Event::RouteEvaluated { evaluation } => {
                 self.last_route_evaluation = Some((**evaluation).clone());
@@ -996,7 +1018,13 @@ impl WorkspaceState {
                 let _ = self.apply_generated_title(session_id, title);
                 None
             }
-            Event::Skills(_)
+            Event::Memory(
+                crate::MemoryEvent::Queued { .. }
+                | crate::MemoryEvent::Processed(_)
+                | crate::MemoryEvent::Review(_)
+                | crate::MemoryEvent::Semantic(_),
+            )
+            | Event::Skills(_)
             | Event::FileIndex(_)
             | Event::Ready { .. }
             | Event::Pong
@@ -1008,6 +1036,10 @@ impl WorkspaceState {
             }
             Event::Artifacts(artifact_event) => {
                 self.artifacts.apply(artifact_event);
+                None
+            }
+            Event::Connections(connection_event) => {
+                self.connections.apply(connection_event);
                 None
             }
             Event::AgUi { session_id, event } => self.apply_agui(session_id, event),
@@ -1163,20 +1195,20 @@ impl WorkspaceState {
             .then_some(prompt)
     }
 
-    /// The visible conversation as the team sees it, oldest first.
+    /// Earlier visible conversation; the current request travels separately.
     pub fn team_history(&self) -> Vec<crate::teams::TranscriptLine> {
-        self.messages
-            .iter()
-            .filter(|m| !m.text.trim().is_empty())
-            .map(|m| crate::teams::TranscriptLine {
-                speaker: match (&m.role, &m.speaker) {
-                    (crate::agui::MessageRole::User, _) => "User".to_owned(),
-                    (crate::agui::MessageRole::Assistant, Some(speaker)) => speaker.name.clone(),
-                    (crate::agui::MessageRole::Assistant, None) => "Sovra".to_owned(),
+        let context = crate::ConversationContext::before_current_turn(&self.messages);
+        let mut history = context.team_history();
+        if context.shortened() {
+            history.insert(
+                0,
+                crate::teams::TranscriptLine {
+                    speaker: "Sovra".into(),
+                    text: "[Older conversation omitted or shortened.]".into(),
                 },
-                text: m.text.clone(),
-            })
-            .collect()
+            );
+        }
+        history
     }
 
     /// Message ids key per-message UI state, so they must be unique within the
@@ -1231,6 +1263,32 @@ impl WorkspaceState {
                 vec![widget],
             ));
         }
+    }
+
+    /// Once setup completes, resends the message that was waiting for it in the
+    /// same conversation and clears the setup card that asked for it.
+    fn take_prompt_awaiting_setup(&mut self) -> Option<String> {
+        if !self.has_active_llm || self.is_generating {
+            return None;
+        }
+        let (session_id, prompt) = self.prompt_awaiting_setup.take()?;
+        if session_id != self.session_id {
+            return None;
+        }
+        if let Some(last) = self.messages.last_mut()
+            && last.role == crate::agui::MessageRole::Assistant
+        {
+            last.widgets.retain(|widget| {
+                !matches!(widget, AgUiWidget::Components { surface_id, .. } | AgUiWidget::SurfaceCard { surface_id, .. }
+                    if surface_id == crate::agui::LLM_SETUP_SURFACE_ID)
+            });
+            if last.widgets.is_empty() && last.text.is_empty() {
+                self.messages.pop();
+            }
+        }
+        self.is_generating = true;
+        self.sync_active_thread();
+        Some(prompt)
     }
 
     fn dequeue_next_prompt(&mut self) -> Option<String> {
@@ -1588,6 +1646,82 @@ mod tests {
         assert_eq!(state.tour_step, None);
         assert!(state.onboarding_completed);
         assert_eq!(state.active_tab, NavTab::Chat);
+    }
+
+    #[test]
+    fn a_message_sent_before_setup_is_sent_once_a_model_is_chosen() {
+        let mut state = WorkspaceState::default();
+        let mut router =
+            crate::models::ModelConnection::new("router", crate::models::ProviderKind::OpenRouter);
+        router.has_credential = true;
+        state.apply_event(&Event::Models(crate::models::ModelEvent::Loaded {
+            connections: vec![router],
+            preferences: crate::models::ModelPreferences::default(),
+        }));
+        assert!(state.submit_prompt("What's the weather?").is_none());
+        assert_eq!(state.messages.len(), 2, "the message and a setup card");
+
+        let key = ModelKey {
+            connection_id: "router".into(),
+            model_id: "chat".into(),
+        };
+        let preferences = crate::models::ModelPreferences {
+            active: Some(key),
+            ..crate::models::ModelPreferences::default()
+        };
+        let resent = state.apply_event(&Event::Models(
+            crate::models::ModelEvent::PreferencesChanged(preferences.clone()),
+        ));
+        assert_eq!(resent.as_deref(), Some("What's the weather?"));
+        assert!(state.is_generating);
+        assert_eq!(state.messages.len(), 1, "the setup card is gone");
+        assert!(
+            state
+                .apply_event(&Event::Models(
+                    crate::models::ModelEvent::PreferencesChanged(preferences)
+                ))
+                .is_none(),
+            "it is sent only once"
+        );
+    }
+
+    #[test]
+    fn a_chosen_model_the_runtime_cannot_run_is_not_ready() {
+        let mut state = WorkspaceState::default();
+        let mut router =
+            crate::models::ModelConnection::new("router", crate::models::ProviderKind::OpenRouter);
+        router.has_credential = true;
+        state.apply_event(&Event::Models(crate::models::ModelEvent::Loaded {
+            connections: vec![router],
+            preferences: crate::models::ModelPreferences {
+                active: Some(ModelKey {
+                    connection_id: "router".into(),
+                    model_id: "gone".into(),
+                }),
+                ..crate::models::ModelPreferences::default()
+            },
+        }));
+        assert!(state.has_active_llm);
+        state.apply_event(&Event::Models(
+            crate::models::ModelEvent::ActiveModelStatus {
+                problem: Some("it is no longer offered by this service.".into()),
+            },
+        ));
+        assert!(!state.has_active_llm);
+        assert!(matches!(
+            state.setup_stage,
+            crate::models::SetupStage::NeedsModelSelection { .. }
+        ));
+        assert!(
+            state
+                .llm_setup_hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("no longer offered"))
+        );
+        state.apply_event(&Event::Models(
+            crate::models::ModelEvent::ActiveModelStatus { problem: None },
+        ));
+        assert!(state.has_active_llm);
     }
 
     #[test]

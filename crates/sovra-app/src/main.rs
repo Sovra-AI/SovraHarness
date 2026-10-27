@@ -63,7 +63,10 @@ fn main() -> anyhow::Result<()> {
         ))),
     )
     .context("failed to start the runtime")?;
-    sovra_ui::run(client);
+    sovra_ui::run(client.clone());
+    client
+        .shutdown_blocking()
+        .context("runtime did not finish shutting down")?;
 
     tracing::info!("exiting");
     Ok(())

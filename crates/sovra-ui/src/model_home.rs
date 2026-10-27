@@ -8,10 +8,10 @@ use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, div,
 };
-use sovra_core::models::{ModelCommand, ModelKey, RecommendedModelCard, SetupStage};
+use sovra_core::models::{ModelCommand, ModelInfo, ModelKey, RecommendedModelCard, SetupStage};
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
-use crate::models_view::{GoToChat, ModelsView, StartSystemTour, caption, pill, price_summary};
+use crate::models_view::{GoToChat, ModelsView, StartSystemTour, caption, pill};
 
 impl ModelsView {
     pub(crate) fn open_selected_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -65,41 +65,23 @@ impl ModelsView {
         }
     }
 
-    fn render_setup_stepper(
-        connected: bool,
-        has_active_model: bool,
-        cx: &Context<Self>,
-    ) -> impl IntoElement + use<> {
+    fn render_setup_stepper(connected: bool, cx: &Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let step1_label = if connected {
-            "✓ Step 1 · Key Connected"
+        let (step1, step2) = if connected {
+            ("✓ 1 · Connected", "● 2 · Pick your AI")
         } else {
-            "● Step 1 · Connect AI Service"
+            ("● 1 · Connect an AI service", "2 · Pick your AI")
         };
-        let step2_label = if has_active_model {
-            "✓ Step 2 · Model Selected"
-        } else if connected {
-            "● Step 2 · Pick Your Model"
-        } else {
-            "2 · Pick Your Model"
-        };
-        let step3_label = if has_active_model {
-            "● Step 3 · Chat & System Tour"
-        } else {
-            "3 · Chat & System Tour"
-        };
-
         h_flex()
             .id("models-setup-stepper")
             .test_support()
             .flex_wrap()
             .items_center()
             .gap(t.space.compact)
-            .child(pill(step1_label, cx))
+            .child(pill(step1, cx))
             .child(caption("→", cx))
-            .child(pill(step2_label, cx))
-            .child(caption("→", cx))
-            .child(pill(step3_label, cx))
+            .child(pill(step2, cx))
+            .child(caption("→ then you're chatting", cx))
     }
 
     fn render_recommendation_card(
@@ -114,14 +96,20 @@ impl ModelsView {
         let price_text = self
             .state
             .model(&rec.key)
-            .map_or_else(|| "Ready to use".to_owned(), price_summary);
+            .map_or_else(|| "Price not listed".to_owned(), ModelInfo::plain_price);
         let key = rec.key.clone();
         let button_label = if is_active {
             "Active"
         } else if is_activating {
             "Choosing…"
         } else {
-            "Use model"
+            "Use this model"
+        };
+        // During setup the cards are the main action; afterwards they are suggestions.
+        let button = if self.state.has_active_llm() {
+            design::button(("models-home-rec-btn", index), button_label, cx)
+        } else {
+            design::primary_button(("models-home-rec-btn", index), button_label, cx)
         };
 
         v_flex()
@@ -153,7 +141,7 @@ impl ModelsView {
                             .child(div().sovra_text(TextRole::Body, cx).child(rec.name.clone())),
                     )
                     .child(
-                        design::button(("models-home-rec-btn", index), button_label, cx)
+                        button
                             .small()
                             .disabled(is_active || self.pending_activation.is_some())
                             .on_click(cx.listener(move |view, _, _, cx| {
@@ -162,10 +150,15 @@ impl ModelsView {
                     ),
             )
             .child(caption(rec.kind.summary(), cx))
-            .child(caption(
-                format!("{} · Price: {price_text}", rec.connection_name),
-                cx,
-            ))
+            .child(
+                div()
+                    .id(("models-home-rec-price", index))
+                    .test_support()
+                    .aria_label(price_text.clone())
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(cx.theme().foreground)
+                    .child(price_text),
+            )
     }
 
     pub(crate) fn render_model_home(
@@ -179,7 +172,6 @@ impl ModelsView {
         } else {
             t.space.medium
         };
-        let openrouter_conn = self.state.openrouter_connection();
         let stage = self.state.setup_stage();
         let any_connected = matches!(
             stage,
@@ -189,7 +181,6 @@ impl ModelsView {
             SetupStage::Ready { active } => Some(active),
             _ => None,
         };
-        let suggestion = self.state.recommended_chat_model();
         let recommendations = self.state.recommended_model_cards();
 
         let mut content = v_flex()
@@ -227,7 +218,7 @@ impl ModelsView {
             )
             .children(
                 (!narrow && active.is_none())
-                    .then(|| Self::render_setup_stepper(any_connected, false, cx)),
+                    .then(|| Self::render_setup_stepper(any_connected, cx)),
             );
 
         if let Some(error) = &self.state.error {
@@ -282,6 +273,13 @@ impl ModelsView {
             ..
         } = &stage
         {
+            let name = self
+                .state
+                .preferences
+                .active
+                .as_ref()
+                .and_then(|key| self.state.model(key))
+                .map_or_else(|| model_id.clone(), |model| model.name.clone());
             next = next
                 .child(
                     div()
@@ -290,23 +288,40 @@ impl ModelsView {
                 )
                 .child(caption(
                     format!(
-                        "You chose {model_id}. Add the key for {connection_name} to finish setup."
+                        "You chose {name}. Paste your {connection_name} key once and you'll go straight to the chat."
                     ),
                     cx,
                 ))
                 .child(
-                    design::primary_button("models-home-add-key", "Add this service’s key", cx)
-                        .on_click(cx.listener(|view, _, window, cx| {
-                            view.open_selected_connection(window, cx);
-                        })),
+                    h_flex()
+                        .flex_wrap()
+                        .gap(t.space.small)
+                        .child(
+                            design::primary_button(
+                                "models-home-add-key",
+                                format!("Add {connection_name} key"),
+                                cx,
+                            )
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                view.open_selected_connection(window, cx);
+                                view.setup_flow = true;
+                            })),
+                        )
+                        .child(
+                            design::button("models-home-pick-other", "Pick a different AI", cx)
+                                .ghost()
+                                .on_click(cx.listener(|view, _, _, cx| view.open_model_catalog(cx))),
+                        ),
                 );
-        } else if any_connected {
-            let key_summary = openrouter_conn
-                .and_then(|c| self.active_key_preview(c))
-                .map_or_else(
-                    || "✓ Step 1 Complete · AI service connected".to_owned(),
-                    |preview| format!("✓ Step 1 Complete · OpenRouter Key Connected ({preview})"),
-                );
+        } else if let SetupStage::NeedsModelSelection {
+            connected_service,
+            key_preview,
+        } = &stage
+        {
+            let key_summary = key_preview.as_ref().map_or_else(
+                || format!("✓ {connected_service} is connected"),
+                |preview| format!("✓ {connected_service} is connected ({preview})"),
+            );
             next = next
                 .child(
                     h_flex()
@@ -323,7 +338,7 @@ impl ModelsView {
                                 .child(key_summary),
                         )
                         .child(
-                            design::button("models-home-change-key", "Manage connections", cx)
+                            design::button("models-home-change-key", "Change key", cx)
                                 .small()
                                 .ghost()
                                 .on_click(cx.listener(|view, _, _, cx| {
@@ -333,85 +348,55 @@ impl ModelsView {
                                 })),
                         ),
                 )
-                .child(caption("STEP 2 OF 2 · ONLY ONE STEP LEFT", cx))
+                .children(self.state.active_problem.as_ref().map(|problem| {
+                    caption(
+                        format!("The AI you chose before can't answer right now: {problem}"),
+                        cx,
+                    )
+                    .text_color(cx.theme().warning)
+                }))
+                .child(caption("STEP 2 OF 2", cx))
                 .child(
                     div()
                         .sovra_text(TextRole::SectionTitle, cx)
-                        .child("Pick Your AI Model to Start Chatting"),
+                        .child("Pick a chat model"),
                 )
                 .child(caption(
-                    "Your connection is saved. Choose an AI to answer your messages. The price is shown with each choice.",
+                    "Any of these can chat with you. Press “Use this model” to start chatting; you can switch anytime here in Models.",
                     cx,
                 ));
-            if let Some(key) = suggestion.clone() {
-                let name = self
-                    .state
-                    .model(&key)
-                    .map_or_else(|| key.model_id.clone(), |model| model.name.clone());
-                next = next
-                    .child(
-                        h_flex()
-                            .flex_wrap()
-                            .items_center()
-                            .gap(t.space.small)
-                            .child(
-                                design::primary_button(
-                                    "models-home-use-free",
-                                    if self.pending_activation.is_some() {
-                                        "Choosing…"
-                                    } else {
-                                        "Use Recommended Free Model →"
-                                    },
-                                    cx,
-                                )
-                                .disabled(self.pending_activation.is_some())
-                                .on_click(cx.listener(
-                                    move |view, _, _, cx| {
-                                        view.choose_model(&key, cx);
-                                    },
-                                )),
-                            )
-                            .child(div().sovra_text(TextRole::Body, cx).child(name)),
-                    )
-                    .child(caption(
-                        "Listed at $0 by OpenRouter. Usage limits apply.",
-                        cx,
-                    ));
-            }
-            if !recommendations.is_empty() {
+            if recommendations.is_empty() {
+                let loading = self.state.catalogs.values().any(|c| c.loading);
+                next = next.child(caption(
+                    if loading {
+                        "Loading the list of AIs…"
+                    } else {
+                        "No suggestions yet. Every model in the full list can chat, so you can pick from there, or check again."
+                    },
+                    cx,
+                ));
+            } else {
                 next = next.children(
                     recommendations
                         .iter()
                         .enumerate()
                         .map(|(idx, rec)| self.render_recommendation_card(idx, rec, cx)),
                 );
-            } else if suggestion.is_none() {
-                next = next
-                    .child(caption(
-                        "Pick any model from the catalog below, or refresh to load the latest list.",
-                        cx,
-                    ))
-                    .child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap(t.space.small)
-                            .child(
-                                design::primary_button(
-                                    "models-home-choose",
-                                    "Choose from the library",
-                                    cx,
-                                )
-                                .on_click(
-                                    cx.listener(|view, _, _, cx| view.open_model_catalog(cx)),
-                                ),
-                            )
-                            .child(
-                                design::button("models-home-refresh", "Check again", cx).on_click(
-                                    cx.listener(|view, _, _, cx| view.refresh_visible(cx)),
-                                ),
-                            ),
-                    );
             }
+            next = next.child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::button("models-home-choose", "See all chat models", cx)
+                            .on_click(cx.listener(|view, _, _, cx| view.open_model_catalog(cx))),
+                    )
+                    .children(recommendations.is_empty().then(|| {
+                        design::button("models-home-refresh", "Check again", cx)
+                            .ghost()
+                            .on_click(cx.listener(|view, _, _, cx| view.refresh_visible(cx)))
+                    })),
+            );
         } else {
             next = next
                 .child(caption("STEP 1 OF 2 · CONNECT AN AI SERVICE", cx))
@@ -432,6 +417,7 @@ impl ModelsView {
                             )
                             .on_click(cx.listener(|view, _, window, cx| {
                                 view.open_openrouter_key_editor(window, cx);
+                                view.setup_flow = true;
                             })),
                         )
                         .child(
@@ -455,7 +441,8 @@ impl ModelsView {
         }
 
         content = content.child(next);
-        content = content.child(
+        // Per-file AIs only matter once chat works; during setup they are a distraction.
+        content = content.children(active.is_some().then(|| {
             v_flex()
                 .w_full()
                 .gap(t.space.small)
@@ -525,8 +512,8 @@ impl ModelsView {
                                     )),
                                 )
                         }),
-                ),
-        );
+                )
+        }));
         if active.is_some() && !recommendations.is_empty() {
             content = content.child(
                 v_flex()
@@ -534,7 +521,7 @@ impl ModelsView {
                     .child(
                         div()
                             .sovra_text(TextRole::SectionTitle, cx)
-                            .child("Explore other models"),
+                            .child("Other chat models you can switch to"),
                     )
                     .children(
                         recommendations

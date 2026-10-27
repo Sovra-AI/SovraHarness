@@ -175,7 +175,7 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
             .iter()
             .filter(|provider| needs.contains(&provider.capability()))
             .collect();
-        let tools = equipping
+        let mut tools: Vec<Arc<dyn Tool>> = equipping
             .iter()
             .flat_map(|provider| provider.tools())
             .collect();
@@ -190,6 +190,14 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
             Some(rule) => RequiredFirstCall::wrap(Arc::clone(&parts.llm), rule),
             None => Arc::clone(&parts.llm),
         };
+        // Every specialist may also look up the user's saved memories.
+        tools.extend(
+            parts
+                .parent_tools
+                .iter()
+                .filter(|tool| tool.name() == crate::recall::LOOKUP_NAME)
+                .cloned(),
+        );
         delegates.push(child_agent(spec, llm, tools, instruction)?);
     }
 

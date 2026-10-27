@@ -263,7 +263,10 @@ fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut Tes
     .unwrap();
     let dispatched = std::iter::from_fn(|| commands.try_recv().ok())
         .find(|command| matches!(command, Command::RunPrompt { .. }));
-    let Some(Command::RunPrompt { session_id, prompt }) = dispatched else {
+    let Some(Command::RunPrompt {
+        session_id, prompt, ..
+    }) = dispatched
+    else {
         panic!("action must return to agent")
     };
     assert_eq!(session_id, "personal-ai-setup");
@@ -486,8 +489,16 @@ fn interactive_system_tour_walks_through_all_five_tabs_and_state_aware_chat_setu
         assert!(window.find("surface-setup-recommended-models").visible());
         assert!(window.try_find("surface-setup-openrouter-key").is_none());
 
-        // Launch the 5-step Interactive System Tour from the chat card button.
-        window.click("surface-setup-start-tour", cx);
+        // The chat card keeps one job (pick an AI); the tour starts from the setup bar or sidebar.
+        assert!(window.try_find("surface-setup-start-tour").is_none());
+        assert!(window.find("sidebar-tour-btn").visible());
+        assert!(
+            window
+                .find(("nav-context-badge", NavTab::Models as usize))
+                .visible(),
+            "Models tab must show a Setup context badge when no LLM is active yet"
+        );
+        window.click("setup-strip-tour-btn", cx);
         window.render_frame(cx);
         assert!(window.find("sovra-tour-coach-bar").visible());
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
@@ -560,6 +571,9 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
         let history_bounds = window.find("chat-history-rail").bounds();
         let new_chat_bounds = window.find("chat-new-btn").bounds();
         let nav_chat_bounds = window.find("nav-chat").bounds();
+        let nav_schedules_bounds = window.find("nav-schedules").bounds();
+        let group_header_bounds = window.find("sidebar-group-ai-setup").bounds();
+        let nav_models_bounds = window.find("nav-models").bounds();
         let chat_main_bounds = window.find("sovra-chat-main").bounds();
 
         assert!(
@@ -570,6 +584,17 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
         assert!(
             new_chat_bounds.top() < nav_chat_bounds.top(),
             "+ New Chat must be at the top of the sidebar above navigation"
+        );
+        assert!(
+            nav_schedules_bounds.bottom() <= group_header_bounds.top()
+                && group_header_bounds.bottom() <= nav_models_bounds.top(),
+            "Your AI & Setup section header must separate everyday workspace tabs from AI setup tabs"
+        );
+        assert!(
+            window
+                .find(("nav-context-badge", NavTab::Schedules as usize))
+                .visible(),
+            "Schedules tab must display live count badge when schedules exist"
         );
         assert!(
             (chat_main_bounds.left() - sidebar_bounds.right()).abs() < px(4.),
@@ -846,4 +871,205 @@ fn removed_upload_cannot_reappear_after_preparation_finishes(cx: &mut TestAppCon
         assert!(window.try_find("attachment-draft-strip").is_none());
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn reopening_a_saved_chat_sends_bounded_role_preserving_context(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    let mut thread = sovra_core::ChatThread::new("saved-chat", sovra_core::Timestamp(1));
+    thread.title = "Garden app".into();
+    let mut reply = sovra_core::ChatMessage::assistant(
+        "old-assistant",
+        "We chose Rust",
+        "",
+        vec![sovra_core::default_personal_ai_build_widget()],
+    );
+    reply.thinking = "private scratchpad".into();
+    thread.messages = vec![
+        sovra_core::ChatMessage::user("old-user", "I am making a garden app", ""),
+        reply,
+    ];
+    events
+        .send_blocking(Event::ChatHistoryLoaded {
+            threads: vec![thread],
+        })
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.select_thread("saved-chat", cx);
+            shell.send_prompt_text("What did we choose?", window, cx);
+        });
+    })
+    .unwrap();
+    let command = std::iter::from_fn(|| commands.try_recv().ok()).find(|command| matches!(command, Command::RunPrompt { session_id, .. } if session_id == "saved-chat")).unwrap();
+    let Command::RunPrompt {
+        context: Some(context),
+        prompt,
+        ..
+    } = command
+    else {
+        panic!("restored chat needs its visible history")
+    };
+    assert_eq!(prompt, "What did we choose?");
+    assert_eq!(context.messages().len(), 2);
+    assert_eq!(context.messages()[0].role, sovra_core::MessageRole::User);
+    assert_eq!(context.messages()[0].text, "I am making a garden app");
+    assert_eq!(
+        context.messages()[1].role,
+        sovra_core::MessageRole::Assistant
+    );
+    assert_eq!(context.messages()[1].text, "We chose Rust");
+}
+
+#[gpui_kit::test]
+fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut TestAppContext) {
+    use gpui_kit::{ScrollDelta, point};
+    use sovra_core::connections::{
+        CompanionKeyBundle, ConnectionCommand, ConnectionEvent, WhatsAppBridgedMessage,
+        WhatsAppQrTicket,
+    };
+
+    fn reveal(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
+        for _ in 0..40 {
+            window.render_frame(cx);
+            let item = window.find(id);
+            if item.visible() {
+                return;
+            }
+            let delta = if item.bounds().top() < window.find("settings-sections").bounds().top() {
+                80.
+            } else {
+                -80.
+            };
+            window.scroll(
+                "settings-sections",
+                ScrollDelta::Pixels(point(px(0.), px(delta))),
+                cx,
+            );
+        }
+        panic!("{id} must be reachable in Settings");
+    }
+
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Settings);
+        assert!(window.find("sovra-settings-view").visible());
+        assert!(window.find("settings-connections").visible());
+        assert!(window.find("whatsapp-connect-btn").visible());
+
+        // Click Connect WhatsApp -> dispatches StartWhatsAppPairing
+        window.click("whatsapp-connect-btn", cx);
+    })
+    .unwrap();
+
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).any(|cmd| matches!(
+            cmd,
+            Command::Connections(ConnectionCommand::StartWhatsAppPairing)
+        )),
+        "clicking Connect WhatsApp must dispatch StartWhatsAppPairing"
+    );
+
+    // Emit QrGenerated from runtime -> opens QR modal with 29x29 matrix
+    let keys = CompanionKeyBundle::generate(1_793_080_000_000, 1);
+    let ticket = WhatsAppQrTicket::new(&keys, 1_793_080_000_000, 1);
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::QrGenerated(ticket)))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("whatsapp-qr-modal").visible());
+        assert!(window.find("whatsapp-qr-matrix").visible());
+        reveal(window, "whatsapp-confirm-scan-btn", cx);
+        assert!(window.find("whatsapp-confirm-scan-btn").visible());
+
+        // Click "I've scanned the QR code" -> dispatches ConfirmWhatsAppScan
+        window.click("whatsapp-confirm-scan-btn", cx);
+    })
+    .unwrap();
+
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).any(|cmd| matches!(
+            cmd,
+            Command::Connections(ConnectionCommand::ConfirmWhatsAppScan { .. })
+        )),
+        "confirming scan must dispatch ConfirmWhatsAppScan"
+    );
+
+    // Emit Connected + MessageBridged from runtime
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::Connected {
+            phone_display: "+1 555-0142".into(),
+            device_jid: "15550142:1@s.whatsapp.net".into(),
+            companion_name: "Sovra Desktop".into(),
+            linked_at: sovra_core::Timestamp(10_000),
+        }))
+        .unwrap();
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::MessageBridged(
+            WhatsAppBridgedMessage {
+                id: "wa-1".into(),
+                sender_name: "You (WhatsApp · Message Yourself)".into(),
+                sender_jid: "15550142:1@s.whatsapp.net".into(),
+                text: "Summarize my afternoon schedule".into(),
+                reply_text: Some("Sovra received via WhatsApp E2E bridge".into()),
+                received_at: sovra_core::Timestamp(11_000),
+            },
+        )))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("whatsapp-qr-modal").is_none());
+        reveal(window, "whatsapp-connected-details", cx);
+        assert!(window.find("whatsapp-connected-details").visible());
+        reveal(window, "whatsapp-bridged-messages", cx);
+        assert!(window.find("whatsapp-bridged-messages").visible());
+        assert!(
+            window
+                .find(("nav-context-badge", NavTab::Settings as usize))
+                .visible(),
+            "Settings tab in sidebar must display WhatsApp badge when WhatsApp is connected"
+        );
+    })
+    .unwrap();
+}
+#[gpui_kit::test]
+fn quitting_requests_runtime_shutdown(cx: &mut TestAppContext) {
+    let (client, commands, _events) = Client::loopback();
+    cx.update(|cx| {
+        sovra_ui::init(client, cx);
+        cx.shutdown();
+    });
+    assert_eq!(commands.try_recv().unwrap(), Command::Shutdown);
 }

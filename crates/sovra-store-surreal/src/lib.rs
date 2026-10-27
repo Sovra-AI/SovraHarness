@@ -7,12 +7,14 @@
 //! and swapping the whole backend is another `sovra-store-*` crate implementing the
 //! same port.
 //!
-//! Writes that touch several records (fact + entity + edges) run as sequential
-//! statements, not one transaction: this is a single-process local store and the
-//! partial-failure window is acceptable for v1. Revisit with `db.begin()` if a
-//! remote multi-writer deployment ever ships.
+//! Fact writes and their provenance/replacement edges commit together. A failed
+//! correction must never leave a new belief beside an unchanged or missing source.
 
+mod facts;
+mod ingestion;
+mod lifecycle;
 mod schema;
+mod semantic;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,7 +55,7 @@ pub struct StoreConfig {
     pub namespace: String,
     pub database: String,
     /// Embedder identity the HNSW index is built for. `None` means "not yet chosen":
-    /// the first embedding saved pins nothing, but dimension is still enforced.
+    /// the first embedding saved pins its model persistently. Reopening cannot mix models.
     pub embedding_model: Option<String>,
     /// HNSW `DIMENSION`; vectors of any other length are rejected, not padded.
     pub embedding_dimension: usize,
@@ -131,14 +133,126 @@ impl SurrealStore {
     }
 
     async fn apply_schema(&self) -> Result<(), MemoryError> {
+        if self.config.embedding_dimension == 0 || self.config.embedding_dimension > 16_384 {
+            return Err(MemoryError::InvalidInput(
+                "unsupported embedding dimension".into(),
+            ));
+        }
+        let tables: Option<surrealdb::types::Object> = self
+            .query("INFO FOR DB;", surrealdb::types::Object::default())
+            .await?
+            .take("tables")
+            .map_err(|e| backend(&e))?;
+        let has_table = |name: &str| {
+            tables
+                .as_ref()
+                .is_some_and(|tables| tables.contains_key(name))
+        };
+        let version: Option<i64> = if has_table("meta") {
+            self.query(
+                "SELECT VALUE version FROM ONLY meta:schema;",
+                surrealdb::types::Object::default(),
+            )
+            .await?
+            .take(0)
+            .map_err(|e| backend(&e))?
+        } else {
+            None
+        };
+        let stored = match version {
+            None | Some(1) => {
+                if has_table("fact") {
+                    self.legacy_embedding_index().await?
+                } else {
+                    None
+                }
+            }
+            Some(2 | 3 | 4 | 5 | schema::SCHEMA_VERSION) => Some(
+                self.embedding_index()
+                    .await?
+                    .ok_or_else(|| MemoryError::Backend("missing memory index metadata".into()))?,
+            ),
+            Some(other) => {
+                return Err(MemoryError::Backend(format!(
+                    "unsupported memory schema {other}; open it with a compatible Sovra version"
+                )));
+            }
+        };
+        let model = if let Some(index) = stored {
+            if index.dimension != self.config.embedding_dimension
+                || index
+                    .model
+                    .as_ref()
+                    .zip(self.config.embedding_model.as_ref())
+                    .is_some_and(|(a, b)| a != b)
+            {
+                return Err(MemoryError::InvalidInput("memory index configuration changed; reindex before changing embedding models or dimensions".into()));
+            }
+            index.model.or_else(|| self.config.embedding_model.clone())
+        } else {
+            self.config.embedding_model.clone()
+        };
+        let withdrawal_migration = if version.is_none_or(|version| version < 5) && has_table("fact")
+        {
+            schema::MIGRATE_WITHDRAWALS
+        } else {
+            ""
+        };
         let statements = format!(
-            "{}\n{}\nUPSERT meta:schema SET version = $version;",
+            "BEGIN TRANSACTION;\n{}\n{}\nUPSERT meta:embedding SET model = $model, dimension = $dimension;\nUPSERT meta:remembering SET enabled = enabled ?? true, generation = generation ?? 0, revision = revision ?? 0;\nUPSERT meta:memory_semantic SET generation = generation ?? 0, revision = revision ?? 0;\n{withdrawal_migration}\nUPSERT meta:schema SET version = $version;\nCOMMIT TRANSACTION;",
             schema::STATIC_SCHEMA,
             schema::hnsw_index(self.config.embedding_dimension),
         );
-        self.query(&statements, ("version", schema::SCHEMA_VERSION))
-            .await?;
+        self.query(
+            &statements,
+            (
+                "version",
+                schema::SCHEMA_VERSION,
+                "model",
+                model,
+                "dimension",
+                self.config.embedding_dimension,
+            ),
+        )
+        .await?;
+        if let Some(setting) = self.semantic_state().await?.setting {
+            let mut statements = schema::semantic_table(setting.generation);
+            if let Some(dimension) = setting.dimension {
+                statements.push_str(&schema::semantic_index(setting.generation, dimension));
+            }
+            self.query(&statements, surrealdb::types::Object::default())
+                .await?;
+        }
         Ok(())
+    }
+
+    async fn embedding_index(&self) -> Result<Option<EmbeddingIndexRow>, MemoryError> {
+        self.query(
+            "SELECT model, dimension FROM ONLY meta:embedding;",
+            surrealdb::types::Object::default(),
+        )
+        .await?
+        .take(0)
+        .map_err(|e| backend(&e))
+    }
+
+    /// v1 did not persist index identity. Inspect existing vectors once; refusing a
+    /// mixed legacy index is safer than silently accepting meaningless distances.
+    async fn legacy_embedding_index(&self) -> Result<Option<EmbeddingIndexRow>, MemoryError> {
+        let mut rows: Vec<EmbeddingIndexRow> = self.query(
+            "SELECT embed_model AS model, array::len(embedding) AS dimension FROM fact WHERE embedding IS NOT NONE GROUP BY model, dimension LIMIT 2;", surrealdb::types::Object::default(),
+        ).await?.take(0).map_err(|e| backend(&e))?;
+        if rows.len() > 1
+            || rows.first().is_some_and(|index| {
+                index
+                    .model
+                    .as_ref()
+                    .is_none_or(|model| model.trim().is_empty())
+            })
+        {
+            return Err(MemoryError::InvalidInput("legacy memory contains incompatible embeddings; reindex before using semantic search".into()));
+        }
+        Ok(rows.pop())
     }
 
     async fn query(
@@ -155,22 +269,22 @@ impl SurrealStore {
         ensure_ok(response)
     }
 
-    fn check_embedding(&self, embedding: &Embedding) -> Result<(), MemoryError> {
+    async fn check_embedding(&self, embedding: &Embedding) -> Result<(), MemoryError> {
+        embedding.validate()?;
         let dimension_ok = embedding.dimension() == self.config.embedding_dimension;
-        let model_ok = self
-            .config
-            .embedding_model
+        let indexed = self
+            .embedding_index()
+            .await?
+            .and_then(|index| index.model)
+            .or_else(|| self.config.embedding_model.clone());
+        let model_ok = indexed
             .as_ref()
-            .is_none_or(|indexed| *indexed == embedding.model);
+            .is_none_or(|model| *model == embedding.model);
         if dimension_ok && model_ok {
             Ok(())
         } else {
             Err(MemoryError::EmbeddingMismatch {
-                indexed: self
-                    .config
-                    .embedding_model
-                    .clone()
-                    .unwrap_or_else(|| "unspecified".to_owned()),
+                indexed: indexed.unwrap_or_else(|| "unspecified".to_owned()),
                 dimension: self.config.embedding_dimension,
                 got: format!("{} ({} dims)", embedding.model, embedding.dimension()),
             })
@@ -194,6 +308,39 @@ impl SurrealStore {
 
 #[async_trait]
 impl MemoryStore for SurrealStore {
+    async fn memory_semantics(&self) -> Result<sovra_core::MemorySemanticState, MemoryError> {
+        self.semantic_state().await
+    }
+    async fn configure_memory_semantics(
+        &self,
+        target: Option<sovra_core::models::ModelDestination>,
+    ) -> Result<sovra_core::MemorySemanticState, MemoryError> {
+        self.configure_semantics(target).await
+    }
+    async fn memory_embedding_inputs(
+        &self,
+        setting: &sovra_core::MemorySemanticSetting,
+        ids: &[FactId],
+    ) -> Result<Vec<sovra_core::MemoryEmbeddingInput>, MemoryError> {
+        self.embedding_inputs(setting, ids).await
+    }
+    async fn commit_memory_vectors(
+        &self,
+        setting: &sovra_core::MemorySemanticSetting,
+        policy: sovra_core::MemoryPolicy,
+        vectors: Vec<sovra_core::MemoryVector>,
+    ) -> Result<(), MemoryError> {
+        self.save_vectors(setting, policy, vectors).await
+    }
+    async fn semantic_memories(
+        &self,
+        setting: &sovra_core::MemorySemanticSetting,
+        vector: &sovra_core::file_index::semantic::EmbeddingVector,
+        search: sovra_core::MemorySearch,
+        now: Timestamp,
+    ) -> Result<Vec<sovra_core::MemorySemanticHit>, MemoryError> {
+        self.nearest_memories(setting, vector, search, now).await
+    }
     async fn health(&self) -> Result<(), MemoryError> {
         // No .bind(): the unit type is not an object-like variable set.
         let response = self
@@ -204,23 +351,82 @@ impl MemoryStore for SurrealStore {
         ensure_ok(response).map(|_| ())
     }
 
+    async fn memory_policy(&self) -> Result<sovra_core::MemoryPolicy, MemoryError> {
+        self.read_memory_policy().await
+    }
+    async fn set_memory_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<sovra_core::MemoryPolicy, MemoryError> {
+        self.change_memory_policy(enabled).await
+    }
+    async fn enqueue_memory(
+        &self,
+        input: sovra_core::MemoryInput,
+    ) -> Result<EpisodeId, MemoryError> {
+        self.enqueue(input).await
+    }
+    async fn claim_memory(
+        &self,
+        at: Timestamp,
+    ) -> Result<Option<sovra_core::MemoryClaim>, MemoryError> {
+        self.claim(at).await
+    }
+    async fn complete_memory(
+        &self,
+        claim: &sovra_core::MemoryClaim,
+        candidates: Vec<sovra_core::MemoryCandidate>,
+        model: &str,
+        at: Timestamp,
+    ) -> Result<Vec<FactId>, MemoryError> {
+        self.finish(claim, candidates, model, at).await
+    }
+    async fn fail_memory(
+        &self,
+        claim: &sovra_core::MemoryClaim,
+        message: &str,
+        at: Timestamp,
+    ) -> Result<(), MemoryError> {
+        self.fail(claim, message, at).await
+    }
+    async fn memory_job(&self, episode: &EpisodeId) -> Result<sovra_core::MemoryJob, MemoryError> {
+        self.read_job(episode).await
+    }
+
     async fn record_episode(&self, episode: NewEpisode) -> Result<EpisodeId, MemoryError> {
+        episode.validate()?;
         let row = NewEpisodeRow {
             session_id: episode.session_id,
             kind: kind_to_str(episode.kind).to_owned(),
             content: episode.content,
             occurred_at: episode.occurred_at.millis(),
         };
-        let id: Option<RecordId> = self
+        let mut response = self.query(
+            "BEGIN TRANSACTION;
+             IF !(SELECT VALUE enabled FROM ONLY meta:remembering) { THROW 'remembering is paused'; };
+             UPDATE meta:remembering SET revision += 1;
+             LET $created = (CREATE ONLY episode CONTENT $data RETURN VALUE id);
+             RETURN $created;
+             COMMIT TRANSACTION;",
+            ("data", row),
+        ).await?;
+        let index = response.num_statements().saturating_sub(2);
+        let id: Option<RecordId> = response.take(index).map_err(|e| backend(&e))?;
+        id.map(|id| EpisodeId(id.to_sql()))
+            .ok_or_else(|| MemoryError::Backend("CREATE episode returned nothing".to_owned()))
+    }
+
+    async fn episode(&self, id: &EpisodeId) -> Result<Episode, MemoryError> {
+        let row: Option<EpisodeRow> = self
             .query(
-                "CREATE ONLY episode CONTENT $data RETURN VALUE id;",
-                ("data", row),
+                "SELECT id, session_id, kind, content, occurred_at FROM ONLY $episode;",
+                ("episode", parse_id(&id.0, "episode")?),
             )
             .await?
             .take(0)
             .map_err(|e| backend(&e))?;
-        id.map(|id| EpisodeId(id.to_sql()))
-            .ok_or_else(|| MemoryError::Backend("CREATE episode returned nothing".to_owned()))
+        row.ok_or_else(|| MemoryError::NotFound(id.0.clone()))?
+            .into_episode()
     }
 
     async fn recent_episodes(
@@ -228,6 +434,17 @@ impl MemoryStore for SurrealStore {
         session_id: &str,
         limit: usize,
     ) -> Result<Vec<Episode>, MemoryError> {
+        if limit > sovra_core::MAX_RECALL_RESULTS
+            || session_id.trim().is_empty()
+            || session_id.len() > 512
+        {
+            return Err(MemoryError::InvalidInput(
+                "invalid episode history request".into(),
+            ));
+        }
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let rows: Vec<EpisodeRow> = self
             .query(
                 "SELECT id, session_id, kind, content, occurred_at FROM episode \
@@ -246,76 +463,32 @@ impl MemoryStore for SurrealStore {
     }
 
     async fn save_fact(&self, fact: NewFact) -> Result<FactId, MemoryError> {
+        fact.validate()?;
         if let Some(embedding) = &fact.embedding {
-            self.check_embedding(embedding)?;
+            self.check_embedding(embedding).await?;
         }
-        let now = self.next_fact_ms();
-        let row = NewFactRow {
-            content: fact.content,
-            entities: fact.entities.clone(),
-            embedding: fact.embedding.as_ref().map(|e| e.vector.clone()),
-            embed_model: fact.embedding.map(|e| e.model),
-            created_at: now,
-            valid_at: fact.valid_at.map(Timestamp::millis),
-        };
-        let id: Option<RecordId> = self
+        let write = facts::prepare(fact, self.next_fact_ms(), None)?;
+        let mut response = self
             .query(
-                "CREATE ONLY fact CONTENT $data RETURN VALUE id;",
-                ("data", row),
-            )
-            .await?
-            .take(0)
-            .map_err(|e| backend(&e))?;
-        let fact_id =
-            id.ok_or_else(|| MemoryError::Backend("CREATE fact returned nothing".to_owned()))?;
-
-        for name in &fact.entities {
-            // Deterministic record id, built in Rust and bound directly: the same
-            // entity name always upserts the same record.
-            let entity = RecordId::new("entity", entity_key(name));
-            self.query(
-                "UPSERT $entity SET name = $name; RELATE $fact->mentions->$entity;",
-                (
-                    "entity",
-                    entity,
-                    "name",
-                    name.clone(),
-                    "fact",
-                    fact_id.clone(),
+                &format!(
+                    "BEGIN TRANSACTION; {} RETURN $created; COMMIT TRANSACTION;",
+                    facts::WRITE
                 ),
+                ("write", write),
             )
             .await?;
-        }
-        if let Some(source) = &fact.source {
-            self.query(
-                "RELATE $fact->derived_from->$episode;",
-                ("fact", fact_id.clone(), "episode", parse_id(&source.0)?),
-            )
-            .await?;
-        }
-        if let Some(replaced) = &fact.replaces {
-            self.query(
-                "UPDATE $old SET invalid_at = $at, expired_at = $at; \
-                 RELATE $fact->supersedes->$old;",
-                (
-                    "old",
-                    parse_id(&replaced.0)?,
-                    "at",
-                    now,
-                    "fact",
-                    fact_id.clone(),
-                ),
-            )
-            .await?;
-        }
-        Ok(FactId(fact_id.to_sql()))
+        // The SDK includes BEGIN/COMMIT responses; RETURN is immediately before COMMIT.
+        let result_index = response.num_statements().saturating_sub(2);
+        let id: Option<RecordId> = response.take(result_index).map_err(|e| backend(&e))?;
+        id.map(|id| FactId(id.to_sql()))
+            .ok_or_else(|| MemoryError::Backend("CREATE fact returned nothing".to_owned()))
     }
 
     async fn invalidate_fact(&self, id: &FactId, at: Timestamp) -> Result<(), MemoryError> {
         let updated: Vec<RecordId> = self
             .query(
-                "UPDATE $fact SET invalid_at = $at, expired_at = $at RETURN VALUE id;",
-                ("fact", parse_id(&id.0)?, "at", at.millis()),
+                "UPDATE $fact SET invalid_at = invalid_at ?? $at, expired_at = expired_at ?? $at RETURN VALUE id;",
+                ("fact", parse_id(&id.0, "fact")?, "at", at.millis()),
             )
             .await?
             .take(0)
@@ -326,29 +499,50 @@ impl MemoryStore for SurrealStore {
         Ok(())
     }
 
+    async fn stop_memory(&self, id: &FactId, at: Timestamp) -> Result<(), MemoryError> {
+        let updated: Vec<RecordId> = self.query(
+            "UPDATE $fact SET stopped_at = stopped_at ?? $at, invalid_at = invalid_at ?? $at, expired_at = expired_at ?? $at RETURN VALUE id;",
+            ("fact", parse_id(&id.0, "fact")?, "at", at.millis()),
+        ).await?.take(0).map_err(|error| backend(&error))?;
+        if updated.is_empty() {
+            return Err(MemoryError::NotFound(id.0.clone()));
+        }
+        Ok(())
+    }
+
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError> {
-        const FACT_FIELDS: &str =
-            "id, content, entities, created_at, valid_at, invalid_at, expired_at";
+        const FACT_FIELDS: &str = facts::FIELDS;
+        query.validate()?;
+        if query.limit == 0 {
+            return Ok(Vec::new());
+        }
         // Over-fetch each leg: temporal/entity clauses post-filter the KNN operator's
         // K results, and RRF fusion needs depth to be meaningful.
         let fetch = (query.limit * 4).max(10);
         let current = if query.include_expired {
-            ""
+            " AND stopped_at IS NONE"
         } else {
-            " AND invalid_at IS NONE AND expired_at IS NONE"
+            " AND stopped_at IS NONE AND invalid_at IS NONE AND expired_at IS NONE"
         };
         let entity = query
             .entity
             .as_ref()
             .map_or("", |_| " AND $entity IN entities");
         let entity_value = query.entity.clone().unwrap_or_default();
+        let valid = query.valid_at.map_or("", |_| " AND (valid_at IS NONE OR valid_at <= $valid) AND (invalid_at IS NONE OR invalid_at > $valid OR ($has_known AND expired_at > $known))");
+        let known = query.known_at.map_or(
+            "",
+            |_| " AND created_at <= $known AND (expired_at IS NONE OR expired_at > $known)",
+        );
+        let valid_value = query.valid_at.map_or(0, Timestamp::millis);
+        let known_value = query.known_at.map_or(0, Timestamp::millis);
 
         let mut legs = Vec::new();
         if let Some(embedding) = &query.embedding {
-            self.check_embedding(embedding)?;
+            self.check_embedding(embedding).await?;
             let sql = format!(
                 "SELECT {FACT_FIELDS}, vector::distance::knn() AS knn_distance FROM fact \
-                 WHERE embedding <|{fetch},40|> $vector{current}{entity} \
+                 WHERE embedding <|{fetch},40|> $vector{current}{entity}{valid}{known} \
                  ORDER BY knn_distance ASC;"
             );
             legs.push(
@@ -359,6 +553,12 @@ impl MemoryStore for SurrealStore {
                         embedding.vector.clone(),
                         "entity",
                         entity_value.clone(),
+                        "valid",
+                        valid_value,
+                        "known",
+                        known_value,
+                        "has_known",
+                        query.known_at.is_some(),
                     ),
                 )
                 .await?,
@@ -367,22 +567,69 @@ impl MemoryStore for SurrealStore {
         if let Some(text) = &query.text {
             let sql = format!(
                 "SELECT {FACT_FIELDS}, search::score(1) AS text_score FROM fact \
-                 WHERE content @1@ $text{current}{entity} \
+                 WHERE content @1@ $text{current}{entity}{valid}{known} \
                  ORDER BY text_score DESC LIMIT {fetch};"
             );
             legs.push(
-                self.fact_leg(&sql, ("text", text.clone(), "entity", entity_value.clone()))
-                    .await?,
+                self.fact_leg(
+                    &sql,
+                    (
+                        "text",
+                        text.clone(),
+                        "entity",
+                        entity_value.clone(),
+                        "valid",
+                        valid_value,
+                        "known",
+                        known_value,
+                        "has_known",
+                        query.known_at.is_some(),
+                    ),
+                )
+                .await?,
             );
         }
         if legs.is_empty() {
             let sql = format!(
                 "SELECT {FACT_FIELDS} FROM fact \
-                 WHERE true{current}{entity} ORDER BY created_at DESC LIMIT {fetch};"
+                 WHERE true{current}{entity}{valid}{known} ORDER BY created_at DESC LIMIT {fetch};"
             );
-            legs.push(self.fact_leg(&sql, ("entity", entity_value)).await?);
+            legs.push(
+                self.fact_leg(
+                    &sql,
+                    (
+                        "entity",
+                        entity_value,
+                        "valid",
+                        valid_value,
+                        "known",
+                        known_value,
+                        "has_known",
+                        query.known_at.is_some(),
+                    ),
+                )
+                .await?,
+            );
         }
         Ok(fuse_rrf(legs, query.limit))
+    }
+
+    async fn list_memories(
+        &self,
+        query: sovra_core::MemoryListQuery,
+    ) -> Result<sovra_core::MemoryPage, MemoryError> {
+        self.memory_page(query).await
+    }
+
+    async fn memory_fact(&self, id: &FactId) -> Result<Fact, MemoryError> {
+        self.exact_fact(id).await
+    }
+
+    async fn correct_memory(
+        &self,
+        correction: sovra_core::MemoryCorrection,
+    ) -> Result<FactId, MemoryError> {
+        self.user_correction(correction).await
     }
 
     async fn save_chat_thread(&self, thread: &ChatThread) -> Result<(), MemoryError> {
@@ -524,6 +771,45 @@ impl MemoryStore for SurrealStore {
         .await?;
         Ok(())
     }
+
+    async fn load_connections(
+        &self,
+    ) -> Result<Option<sovra_core::connections::ConnectionsState>, MemoryError> {
+        let rows: Vec<TeamRow> = self
+            .query(
+                "SELECT members_json FROM $record;",
+                ("record", RecordId::new("team", "connections")),
+            )
+            .await?
+            .take(0)
+            .map_err(|e| backend(&e))?;
+        rows.into_iter()
+            .next()
+            .map(|row| {
+                serde_json::from_str(&row.members_json)
+                    .map_err(|e| MemoryError::Backend(format!("deserialize connections: {e}")))
+            })
+            .transpose()
+    }
+
+    async fn save_connections(
+        &self,
+        state: &sovra_core::connections::ConnectionsState,
+    ) -> Result<(), MemoryError> {
+        let members_json = serde_json::to_string(state)
+            .map_err(|e| MemoryError::Backend(format!("serialize connections: {e}")))?;
+        self.query(
+            "UPSERT $record CONTENT $data;",
+            (
+                "record",
+                RecordId::new("team", "connections"),
+                "data",
+                TeamRow { members_json },
+            ),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 // --- rows ---------------------------------------------------------------------------
@@ -608,24 +894,25 @@ impl EpisodeRow {
 }
 
 #[derive(Debug, SurrealValue)]
-struct NewFactRow {
-    content: String,
-    entities: Vec<String>,
-    embedding: Option<Vec<f32>>,
-    embed_model: Option<String>,
-    created_at: i64,
-    valid_at: Option<i64>,
+struct EmbeddingIndexRow {
+    model: Option<String>,
+    dimension: usize,
 }
 
 #[derive(Debug, SurrealValue)]
 struct FactRow {
+    evidence: Option<String>,
+    extractor: Option<String>,
     id: RecordId,
     content: String,
     entities: Option<Vec<String>>,
+    source: Option<RecordId>,
+    replaces: Option<RecordId>,
     created_at: i64,
     valid_at: Option<i64>,
     invalid_at: Option<i64>,
     expired_at: Option<i64>,
+    stopped_at: Option<i64>,
 }
 
 impl FactRow {
@@ -634,10 +921,17 @@ impl FactRow {
             id: FactId(self.id.to_sql()),
             content: self.content,
             entities: self.entities.unwrap_or_default(),
+            source: self.source.map(|id| EpisodeId(id.to_sql())),
+            replaces: self.replaces.map(|id| FactId(id.to_sql())),
+            extraction: self
+                .extractor
+                .zip(self.evidence)
+                .map(|(model, evidence)| sovra_core::MemoryExtraction { model, evidence }),
             created_at: Timestamp(self.created_at),
             valid_at: self.valid_at.map(Timestamp),
             invalid_at: self.invalid_at.map(Timestamp),
             expired_at: self.expired_at.map(Timestamp),
+            stopped_at: self.stopped_at.map(Timestamp),
         }
     }
 }
@@ -681,9 +975,13 @@ fn entity_key(name: &str) -> String {
     key
 }
 
-fn parse_id(id: &str) -> Result<RecordId, MemoryError> {
-    RecordId::parse_simple(id)
-        .map_err(|e| MemoryError::Backend(format!("bad record id `{id}`: {e}")))
+fn parse_id(id: &str, table: &str) -> Result<RecordId, MemoryError> {
+    let record = RecordId::parse_simple(id)
+        .map_err(|_| MemoryError::InvalidInput("invalid memory record id".into()))?;
+    if record.table != table.into() {
+        return Err(MemoryError::InvalidInput("wrong memory record type".into()));
+    }
+    Ok(record)
 }
 
 fn now_ms() -> i64 {
@@ -712,6 +1010,350 @@ fn ensure_ok(mut response: IndexedResults) -> Result<IndexedResults, MemoryError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn version_five_keeps_expiration_distinct_from_withdrawal_when_adding_aliases() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        let id = store
+            .save_fact(NewFact {
+                content: "Known expiration".into(),
+                entities: vec![],
+                source: None,
+                embedding: None,
+                valid_at: Some(Timestamp(1)),
+                replaces: None,
+            })
+            .await
+            .unwrap();
+        store.invalidate_fact(&id, Timestamp(2)).await.unwrap();
+        store
+            .db
+            .query("UPDATE meta:schema SET version = 5;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        store.apply_schema().await.unwrap();
+        let fact = store.memory_fact(&id).await.unwrap();
+        assert_eq!(fact.stopped_at, None);
+        assert_eq!(fact.expired_at, Some(Timestamp(2)));
+        let version: Option<i64> = store
+            .db
+            .query("SELECT VALUE version FROM ONLY meta:schema;")
+            .await
+            .unwrap()
+            .take(0)
+            .unwrap();
+        assert_eq!(version, Some(6));
+    }
+
+    #[tokio::test]
+    async fn version_four_migrates_old_stops_without_suppressing_correction_history() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        let old = store
+            .save_fact(NewFact {
+                content: "Old preference".into(),
+                entities: vec![],
+                source: None,
+                embedding: None,
+                valid_at: Some(Timestamp(1)),
+                replaces: None,
+            })
+            .await
+            .unwrap();
+        let new = store
+            .save_fact(NewFact {
+                content: "New preference".into(),
+                entities: vec![],
+                source: None,
+                embedding: None,
+                valid_at: Some(Timestamp(2)),
+                replaces: Some(old.clone()),
+            })
+            .await
+            .unwrap();
+        store.invalidate_fact(&new, Timestamp(3)).await.unwrap();
+        store
+            .db
+            .query("UPDATE meta:schema SET version = 4;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        store.apply_schema().await.unwrap();
+        assert_eq!(
+            store.memory_fact(&new).await.unwrap().stopped_at,
+            Some(Timestamp(3))
+        );
+        assert_eq!(store.memory_fact(&old).await.unwrap().stopped_at, None);
+        let mut query = RecallQuery::recent(10);
+        query.include_expired = true;
+        assert_eq!(
+            store
+                .recall(query)
+                .await
+                .unwrap()
+                .iter()
+                .map(|hit| hit.fact.id.clone())
+                .collect::<Vec<_>>(),
+            vec![old]
+        );
+        store.apply_schema().await.unwrap();
+        assert_eq!(
+            store.memory_fact(&new).await.unwrap().stopped_at,
+            Some(Timestamp(3))
+        );
+    }
+
+    #[tokio::test]
+    async fn version_three_adds_semantic_memory_without_consent_or_policy_changes() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        let id = store
+            .save_fact(NewFact {
+                content: "Existing saved detail".into(),
+                entities: vec![],
+                embedding: None,
+                source: None,
+                valid_at: None,
+                replaces: None,
+            })
+            .await
+            .unwrap();
+        store.set_memory_enabled(false).await.unwrap();
+        let policy = store.memory_policy().await.unwrap();
+        store
+            .db
+            .query("UPDATE meta:schema SET version = 3; DELETE meta:memory_semantic;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        store.apply_schema().await.unwrap();
+        assert_eq!(store.memory_policy().await.unwrap(), policy);
+        assert_eq!(
+            store.memory_semantics().await.unwrap(),
+            sovra_core::MemorySemanticState::default()
+        );
+        assert_eq!(
+            store.memory_fact(&id).await.unwrap().content,
+            "Existing saved detail"
+        );
+        store.apply_schema().await.unwrap();
+        assert_eq!(
+            store.memory_semantics().await.unwrap(),
+            sovra_core::MemorySemanticState::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn version_two_adds_ingestion_without_changing_existing_evidence() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        let source = store
+            .record_episode(NewEpisode {
+                session_id: "legacy".into(),
+                kind: EpisodeKind::UserMessage,
+                content: "Original evidence".into(),
+                occurred_at: Timestamp(1),
+            })
+            .await
+            .unwrap();
+        store.db.query("UPDATE meta:schema SET version = 2; DELETE meta:remembering; REMOVE TABLE memory_job;")
+            .await.unwrap().check().unwrap();
+        store.apply_schema().await.unwrap();
+        assert_eq!(
+            store.episode(&source).await.unwrap().content,
+            "Original evidence"
+        );
+        assert!(store.memory_policy().await.unwrap().enabled);
+        assert!(store.claim_memory(Timestamp(2)).await.unwrap().is_none());
+        store.set_memory_enabled(false).await.unwrap();
+        store.apply_schema().await.unwrap();
+        assert!(!store.memory_policy().await.unwrap().enabled);
+    }
+
+    #[tokio::test]
+    async fn failed_write_rolls_back_entities_edges_and_embedding_pin() {
+        let mut config = StoreConfig::in_memory();
+        config.embedding_dimension = 4;
+        let store = SurrealStore::open(config).await.unwrap();
+        let result = store
+            .save_fact(NewFact {
+                content: "must be rolled back".into(),
+                entities: vec!["Maya".into()],
+                embedding: Some(Embedding {
+                    model: "first-model".into(),
+                    vector: vec![1.0; 4],
+                }),
+                source: Some(EpisodeId("episode:missing".into())),
+                valid_at: None,
+                replaces: None,
+            })
+            .await;
+        assert!(result.is_err());
+        for table in ["fact", "entity", "mentions", "derived_from", "supersedes"] {
+            let count: Option<i64> = store
+                .db
+                .query(format!("SELECT count() AS count FROM {table} GROUP ALL;"))
+                .await
+                .unwrap()
+                .check()
+                .unwrap()
+                .take("count")
+                .unwrap();
+            assert_eq!(count.unwrap_or(0), 0, "partial rows in {table}");
+        }
+        assert!(
+            store
+                .embedding_index()
+                .await
+                .unwrap()
+                .unwrap()
+                .model
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_rejects_mixed_legacy_models_without_changing_schema() {
+        let mut config = StoreConfig::in_memory();
+        config.embedding_dimension = 4;
+        let store = SurrealStore::open(config).await.unwrap();
+        store.db.query(
+            "UPDATE meta:schema SET version = 1; DELETE meta:embedding;
+             CREATE fact:a SET content = 'one', embedding = [1,0,0,0], embed_model = 'a', created_at = 1;
+             CREATE fact:b SET content = 'two', embedding = [0,1,0,0], embed_model = 'b', created_at = 2;"
+        ).await.unwrap().check().unwrap();
+        assert!(matches!(
+            store.apply_schema().await,
+            Err(MemoryError::InvalidInput(_))
+        ));
+        let version: Option<i64> = store
+            .db
+            .query("SELECT VALUE version FROM ONLY meta:schema;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap()
+            .take(0)
+            .unwrap();
+        assert_eq!(version, Some(1));
+        assert_eq!(
+            store.recall(RecallQuery::recent(10)).await.unwrap().len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn entity_edges_preserve_distinct_names_and_legacy_links() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        store
+            .db
+            .query("CREATE entity:maya SET name = 'Maya';")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        let mut expected = vec!["A-B", "A B", "Māya", "李", "王", "Maya"];
+        for name in &expected {
+            store
+                .save_fact(NewFact {
+                    content: format!("about {name}"),
+                    entities: vec![(*name).into()],
+                    source: None,
+                    embedding: None,
+                    valid_at: None,
+                    replaces: None,
+                })
+                .await
+                .unwrap();
+        }
+        let rows: Vec<Vec<String>> = store
+            .db
+            .query("SELECT VALUE ->mentions->entity.name FROM fact;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap()
+            .take(0)
+            .unwrap();
+        let mut actual: Vec<String> = rows.into_iter().flatten().collect();
+        actual.sort();
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
+        let names: Vec<String> = store
+            .db
+            .query("SELECT VALUE name FROM entity;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap()
+            .take(0)
+            .unwrap();
+        assert_eq!(
+            names.len(),
+            expected.len(),
+            "legacy names must be reused, not duplicated"
+        );
+    }
+
+    #[tokio::test]
+    async fn schema_reapplication_rejects_incompatible_indexes_and_newer_versions() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        let mut changed = store.clone();
+        changed.config.embedding_dimension = 4;
+        assert!(
+            changed.apply_schema().await.is_err(),
+            "never rebuild an existing index at another dimension"
+        );
+        store
+            .db
+            .query("UPDATE meta:schema SET version = 999;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        assert!(
+            store.apply_schema().await.is_err(),
+            "never downgrade a newer schema"
+        );
+        let version: Option<i64> = store
+            .db
+            .query("SELECT VALUE version FROM ONLY meta:schema;")
+            .await
+            .unwrap()
+            .take(0)
+            .unwrap();
+        assert_eq!(version, Some(999));
+    }
+
+    #[tokio::test]
+    async fn legacy_index_adopts_its_existing_model_without_rewriting_facts() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        store
+            .db
+            .query("UPDATE meta:schema SET version = 1; DELETE meta:embedding;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        store.db.query("CREATE fact:legacy SET content = 'legacy', embedding = $vector, embed_model = 'old-model', created_at = 1;")
+            .bind(("vector", vec![1.0_f32; 768])).await.unwrap().check().unwrap();
+        store.apply_schema().await.unwrap();
+        let model: Option<String> = store
+            .db
+            .query("SELECT VALUE model FROM ONLY meta:embedding;")
+            .await
+            .unwrap()
+            .take(0)
+            .unwrap();
+        assert_eq!(model.as_deref(), Some("old-model"));
+        assert_eq!(
+            store.recall(RecallQuery::recent(1)).await.unwrap()[0]
+                .fact
+                .content,
+            "legacy"
+        );
+    }
 
     #[test]
     fn entity_keys_are_deterministic_and_safe() {

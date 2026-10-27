@@ -53,12 +53,22 @@ impl AdkHarness {
     pub async fn run_team(&self, turn: &TeamTurn, events: &Sender<Event>) {
         let speakers = teams::first_round_speakers(&turn.prompt, &turn.members);
         let conductor = teams::conductor_for(&turn.members, &speakers).cloned();
+        // Older callers included the current user line in history. Keep it only
+        // in the explicit current-request section, where history limits cannot clip it.
+        let mut history = turn.history.clone();
+        if history.last().is_some_and(|line| {
+            line.speaker == "User"
+                && (line.text.trim() == turn.prompt.trim()
+                    || teams::strip_team_command(&line.text) == Some(turn.prompt.trim()))
+        }) {
+            history.pop();
+        }
         let mut state = TeamRunState {
             harness: self,
             turn,
             events,
             activity: TeamActivity::new(1, &turn.members, &speakers),
-            history: turn.history.clone(),
+            history,
             replies: 0,
             activity_id: format!("{}-team", turn.run_id),
         };
@@ -200,7 +210,8 @@ impl TeamRunState<'_> {
         }
         let instruction =
             teams::member_instruction(member, &self.turn.members, moderated, "the user");
-        let prompt = teams::member_prompt(&self.history, round, member.conductor);
+        let prompt =
+            teams::member_prompt(&self.history, &self.turn.prompt, round, member.conductor);
         let mut visible = VisibleStream::default();
         let outcome = self
             .stream_member(
@@ -332,8 +343,8 @@ impl TeamRunState<'_> {
 impl AdkHarness {
     /// A plain single agent for one member invocation, on the same model, in its
     /// own throwaway session store: the shared history travels in the prompt, so
-    /// nothing outlives the reply. Members get only the artifact tool, saved under
-    /// their own name, so they can keep what they make.
+    /// nothing outlives the reply. Members get scoped memory lookup plus their
+    /// own artifact saver; other parent tools are not inherited.
     async fn member_runner(
         &self,
         member: &TeamMember,
@@ -344,6 +355,13 @@ impl AdkHarness {
             .description(member.role.clone())
             .instruction(instruction)
             .model(Arc::clone(&self.llm));
+        for tool in self
+            .base_tools
+            .iter()
+            .filter(|tool| tool.name() == crate::recall::LOOKUP_NAME)
+        {
+            builder = builder.tool(tool.clone());
+        }
         if let Some(saver) = &self.artifact_saver {
             builder = builder.tool(crate::artifacts::save_artifact_tool(
                 saver.clone(),

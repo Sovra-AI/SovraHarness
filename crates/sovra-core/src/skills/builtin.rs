@@ -81,6 +81,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             SkillAction::Artifacts,
             &["saved-work"],
         ),
+        action(
+            "connections",
+            "Connections",
+            "Link your personal WhatsApp by scanning a QR code with your phone.",
+            SkillAction::Connections,
+            &["whatsapp"],
+        ),
         procedure(
             "save-artifact",
             "Save an artifact",

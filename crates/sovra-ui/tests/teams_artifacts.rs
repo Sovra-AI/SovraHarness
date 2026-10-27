@@ -146,9 +146,9 @@ fn team_page_fits_every_window_and_text_size_and_asks_the_team(cx: &mut TestAppC
             })
             .expect("team mode sends a team run");
         assert_eq!(run.0, "Plan my garden");
-        assert_eq!(
-            run.1.last().map(|line| line.text.as_str()),
-            Some("Plan my garden")
+        assert!(
+            run.1.is_empty(),
+            "the current request is separate from prior history"
         );
         cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
     }

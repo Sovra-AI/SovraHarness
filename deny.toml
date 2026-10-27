@@ -44,6 +44,20 @@ allow = [
   "0BSD",
 ]
 
+# finl_unicode 1.5.0's manifest still names Unicode-DFS-2016, but its bundled
+# LICENSE-UNICODE is exactly SPDX Unicode-3.0 (whitespace normalized). Preserve
+# the MIT/Apache choice and additional Unicode obligation; no allow-list change.
+# Exact version + all three text hashes require review on upstream changes.
+# Evidence and SHA-256 fingerprints: docs/agent-memory.md, License clarification.
+[[licenses.clarify]]
+crate = "finl_unicode@1.5.0"
+expression = "(MIT OR Apache-2.0) AND Unicode-3.0"
+license-files = [
+  { path = "LICENSE-MIT", hash = 0x386ca1bc },
+  { path = "LICENSE-APACHE", hash = 0xb5518783 },
+  { path = "LICENSE-UNICODE", hash = 0x3475d800 },
+]
+
 # SurrealDB v3 ships under BUSL-1.1 (converts to Apache-2.0 on 2030-01-01). Its grant
 # permits embedding here: we use it for the app's own storage and never offer it to
 # third parties as a database service. The crates use a non-SPDX `license-file`, so each

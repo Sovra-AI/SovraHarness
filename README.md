@@ -65,7 +65,8 @@ summary generation, recursive clustering and compiled maps are not available yet
 
 For meaning-based file search, open **Knowledge → Set up semantic search** on a folder.
 Choose an installed Ollama embedding model (inspect it in Models to load its
-capabilities), or an embedding model on an OpenAI-compatible connection. The choice
+capabilities), an OpenRouter search helper, or an embedding model on an
+OpenAI-compatible connection. The choice
 shows which server receives extracted text and future searches; usage may incur
 provider charges. Background indexing resumes while the app is open, and both
 Knowledge search and `/search-files` combine semantic and keyword results. Progress,
@@ -107,12 +108,17 @@ Development builds use a separate plaintext key store in the app data directory
 when `SOVRA_DEV=1` is set by the runner. Release builds always use the OS keychain.
 See the development guide for storage and permission details.
 
-The **Models** tab guides you through connecting a service and choosing a model.
-It shows only the next needed setup action, with recommendations labeled **Free to
-try**, **Everyday chat**, and **Step-by-step reasoning** using the live catalog.
-**Get an API key ↗** opens OpenRouter when a connection is needed. Once setup is
-complete, your active model and other recommendations replace the setup stepper.
-**Browse all models** opens the complete catalog with a direct 1-click **Use Model** / **✓ Active** action button on every row, optional Ollama connections, favorites and comparison; filters stay closed until needed. Setup, authentication and capability details: [Model library](docs/models.md).
+The **Models** tab guides you through two steps: connect a service, then pick a chat
+model. It shows only the next needed setup action, with suggestions labeled **Free**,
+**Everyday**, and **Thinks longer** from the live catalog, each priced in plain words
+("About 1¢ a message"). **Get an API key ↗** opens OpenRouter when a connection is
+needed; Sovra checks the key with OpenRouter before saving it, and saving moves
+straight on to picking a model. **Use this model** takes you straight into the
+chat, and a message you typed before setup finished is sent for you.
+**Browse all models** lists chat models by default, each labelled by what it makes;
+the **Show** picker lists pictures, video, voices and other types. Every row has a
+1-click **Use Model** / **✓ Active** button, plus optional Ollama connections,
+favorites and comparison; filters stay closed until needed. Setup, authentication and capability details: [Model library](docs/models.md).
 
 A single **Unified Left Sidebar** (`sidebar.rs` + `chat_history_view.rs`) houses **New chat** at the top, primary navigation (`Chat`, `My AI's`, `Knowledge`, `Models`, `Schedules`, `Settings`), a **Take a tour** launcher, instant chat search, `Chats | Scheduled` filter pills, and date-grouped conversation history (`Pinned`, `Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`). After the first exchange in any conversation, the active LLM automatically generates a concise 3–6 word title (`Command::GenerateChatTitle` / `Event::ChatTitleGenerated`), and the selected row exposes named icon actions for generating a title, pinning, renaming, and deleting.
 
@@ -135,6 +141,83 @@ The same page names who or what the belief is about, and that finding a memory
 uses both the meaning and the words themselves. It is an explanation, not the
 chat, and it does not need a memory store to be open. The times Sovra keeps are
 under *Show the times Sovra keeps*.
+
+Conversation memory is being built separately from file knowledge. Its embedded
+store preserves source episodes and correction history, commits fact changes
+atomically, and checks embedding compatibility across restarts. Its persistent
+ingestion API supports stable input keys, recoverable leases, bounded retries,
+atomic batches, and cancellation when paused; it retains model/evidence attribution
+and suppresses exact duplicates. The selected model can also recognize different
+wordings of an earlier detail, keeping the original fact and each message's evidence.
+Matching distinguishes people and explicit dates; corrections keep a new version
+even when returning to an earlier value. Previously recognized wordings stay
+suppressed after Stop using, including after restart. New paraphrases may still
+be missed, and matching accuracy remains under evaluation.
+An owned background worker now uses the selected
+chat model to extract supported details from user messages, including team prompts.
+Models advertising structured-output support receive an extraction schema where
+the provider adapter supports it; every result still needs an exact source quote
+and local validation. Useful stated details can concern named people and projects
+as well as the user.
+Extraction guidance keeps a stated change date with the resulting saved state,
+without applying it to unrelated details or treating tentative plans as confirmed
+changes. Date interpretation still depends on the selected model.
+Remember across conversations in Settings or Knowledge pauses new work and cancels pending extraction; saved history
+is kept. Knowledge shows live status and failures. Your selected AI service receives
+the message and up to eight earlier memories; the resulting records stay locally stored.
+Keyword-matched saved details can now inform ordinary, attachment and team replies.
+Matches can include a little related context about the same named person or project,
+such as identifying whose preference was saved. This lookup is bounded and may miss
+older relationships; it still respects dates and Stop using.
+Each request receives bounded quotes and source references, outside saved provider
+history. Completed cited replies offer **Saved source** buttons to inspect the
+original message and whether that saved version is current, previous or stopped.
+Missing references show an error; a reference by itself does not verify the reply.
+Pausing remembering also disables automatic recall. Explicit source review remains
+available. Reopened chats and model
+changes use a bounded excerpt of the visible conversation, preserving user/reply
+roles without replaying earlier tool actions, widgets or reasoning. This same-chat
+context stays available when remembering is off. Knowledge → What I remember lists
+your saved details with search, older pages, retained history and original sources.
+Correct saves a new version and its source note; Stop using asks for confirmation
+and excludes that version from current and historical recall. Both keep previous versions and the
+original conversation, which still supplies its own same-chat context. Reviewing
+and correcting saved details remains available while automatic remembering is off.
+Optional **Find memories by meaning → Choose a search helper** uses an existing
+Ollama, OpenRouter or OpenAI-compatible embedding model. Enabling explicitly permits sending
+saved details, including retained versions, and future questions to the displayed
+service, which may charge. Similarity is a candidate filter rather than proof of
+relevance; remote helpers can exceed the short query deadline and fall back to
+matching words. [Measured examples](docs/agent-memory.md#live-semantic-calibration-2026-10-27)
+cover two models, including these limitations.
+Folder search permission is separate. No model is downloaded automatically. Progress
+and failures stay visible; matching words still work when this option is off or
+unavailable. Switching destinations builds a separate index, and pausing remembering
+also pauses embeddings. Models with tools can request saved details for a date or
+an exact person, using
+separate filters for when a claim applied and when it became known. Ambiguous
+dates need clarification. Models without tools explain that date-specific lookup
+is unavailable. Relevance calibration and broader quality evaluation remain
+unfinished. Opt-in synthetic live-model and disk-growth evaluations now retain
+answers, fact history, failures and timings; results include missed facts and
+inconsistent correction linking, so passing pipeline tests is not a quality guarantee.
+The worked example below the live controls remains an illustration.
+Before each model call, Sovra checks the combined input against a conservative
+budget based on the model's advertised capacity. Older conversation excerpts and
+saved evidence can be omitted to leave room for the answer. The current question
+and live tool results remain intact; if they cannot fit, the request reports an
+error instead of silently cutting them. Your saved conversation stays unchanged.
+Synthetic text/image measurements for the configured model are recorded in the
+implementation contract. Readable PCM WAV and ordinary MP4/QuickTime timing now
+increases the allowance for longer recordings. Other recording formats retain an
+estimate and explain when the length could not be checked. These allowances are
+not guaranteed provider token bounds.
+Chat saves, deletions and reloads run in order; graceful runtime shutdown waits for
+accepted chat saves to finish.
+After workers finish, the runtime allows up to five seconds for storage and other
+adapter cleanup before tearing down its executor.
+Normal desktop quit requests this shutdown and waits after the UI loop exits.
+See the [implementation contract](docs/agent-memory.md) for scope and validation.
 
 **Settings** is the one place to set Sovra up, written for people new to AI:
 **Appearance** (Light or Dark, and **Text size** from 75% to 200%; also

@@ -1,9 +1,12 @@
-//! Knowledge tab: a plain-language picture of how Sovra remembers.
+//! Knowledge tab: saved memory controls, file knowledge, and an illustrative explanation.
 //!
 //! The picture comes from [`sovra_core::memory_explanation`]. Drawing it does
 //! not open a memory store or do any other IO.
 
-use gpui_kit::component::{ActiveTheme as _, button::ButtonVariants as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, button::ButtonVariants as _, checkbox::Checkbox, h_flex,
+    v_flex,
+};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
@@ -17,12 +20,49 @@ pub(crate) fn render_knowledge_view(
     shell: &Shell,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
-    let story = memory_explanation();
     let t = design::tokens(cx);
+    if shell.memory_view.read(cx).source_only() {
+        return v_flex()
+            .id("sovra-memory-source-view").test_support()
+            .flex_1().min_w_0().min_h_0().h_full().items_center().overflow_y_scroll()
+            .p(t.space.medium)
+            .child(v_flex().w_full().min_w_0().flex_shrink_0().max_w(t.layout.reading_width).gap(t.space.small)
+                .child(design::button("memory-back-chat", "Back to conversation", cx)
+                    .on_click(cx.listener(|shell, _, _, cx| shell.select_tab(sovra_core::NavTab::Chat, cx))))
+                .child(div().sovra_text(TextRole::Caption, cx).child("The saved record behind this reference. A reference alone does not prove the reply is correct."))
+                .child(shell.memory_view.clone()))
+            .into_any_element();
+    }
+    let story = memory_explanation();
     let mut column = v_flex()
+        .flex_shrink_0()
         .w_full()
         .max_w(t.layout.reading_width)
         .gap(t.space.medium)
+        .child(
+            v_flex().id("conversation-memory-status").test_support()
+                .aria_label(format!("Conversation memory. {} Messages may be sent to your selected AI service. Saved details are stored on this computer.", shell.workspace().memory_status.label()))
+                .w_full().min_w_0().sovra_surface(Surface::Matte, cx)
+                .p(t.space.medium).gap(t.space.small)
+                .child(div().sovra_text(TextRole::SectionTitle, cx).child("Conversation memory"))
+                .child(div().sovra_text(TextRole::Body, cx).child(shell.workspace().memory_status.label().to_owned()))
+                .child(div().sovra_text(TextRole::Caption, cx).child("Uses the AI selected in Models. Messages may be sent to that service; saved details are stored on this computer."))
+                .child(div().sovra_text(TextRole::Caption, cx).child("Matching saved details can inform answers with source references. Turning remembering off stops new remembering and long-term recall; saved history is kept."))
+                .child(Checkbox::new("knowledge-memory-toggle")
+                    .cursor_pointer()
+                    .disabled(!shell.models().read(cx).state.loaded)
+                    .label("Remember across conversations")
+                    .checked(shell.models().read(cx).state.preferences.agent_settings.memory_enabled)
+                    .on_click(cx.listener(|shell, checked, _, cx| {
+                        shell.models().update(cx, |models, cx| {
+                            let mut settings = models.state.preferences.agent_settings.clone();
+                            settings.memory_enabled = *checked;
+                            models.save_agent_settings(settings, cx);
+                        });
+                        cx.notify();
+                    }))),
+        )
+        .child(shell.memory_view.clone())
         .child(crate::file_index_view::render(shell, cx))
         .child(render_intro(&story, cx))
         .child(render_story(&story, cx))
@@ -37,10 +77,13 @@ pub(crate) fn render_knowledge_view(
         .test_support()
         .flex_1()
         .min_w_0()
+        .min_h_0()
         .h_full()
+        .items_center()
         .overflow_y_scroll()
         .p(t.space.large)
         .child(column)
+        .into_any_element()
 }
 
 fn render_intro(story: &MemoryExplanation, cx: &mut Context<Shell>) -> impl IntoElement + use<> {

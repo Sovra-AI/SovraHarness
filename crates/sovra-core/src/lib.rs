@@ -9,6 +9,9 @@ pub mod artifacts;
 mod capabilities;
 pub mod chat_history;
 mod citations;
+pub mod connections;
+mod context_budget;
+mod conversation_context;
 pub mod file_index;
 pub mod files;
 mod knowledge;
@@ -43,13 +46,35 @@ pub use chat_history::{
     group_threads, infer_topic_icon, recency_bucket, sanitize_generated_title,
 };
 pub use citations::sources_footer;
+pub use connections::{
+    CompanionClientType, CompanionKeyBundle, ConnectionCommand, ConnectionEvent, ConnectionsState,
+    WA_LINKED_DEVICES_PREFIX, WhatsAppBridgedMessage, WhatsAppQrTicket, WhatsAppStatus,
+    build_qr_matrix, generate_pairing_code,
+};
+pub use context_budget::{
+    ContextAllowance, ContextBudget, ContextLimitError, ContextTrim, media_input_units,
+};
+pub use conversation_context::{
+    ContextMessage, ConversationContext, MAX_CONTEXT_MESSAGES, MAX_CONTEXT_TEXT_BYTES,
+};
 pub use knowledge::{
     BeliefPicture, BeliefStanding, MemoryExplanation, SearchPicture, StoryBeat, StoryStep,
     TimeNote, memory_explanation,
 };
 pub use memory::{
-    Embedding, Episode, EpisodeId, EpisodeKind, Fact, FactId, MemoryError, MemoryStore, NewEpisode,
-    NewFact, RRF_K, RecallQuery, RecalledFact, Timestamp, fuse_rrf,
+    Embedding, Episode, EpisodeId, EpisodeKind, Fact, FactId, MAX_MEMORY_ATTEMPTS,
+    MAX_MEMORY_CANDIDATES, MAX_MEMORY_CITATIONS, MAX_MEMORY_CONTEXT_BYTES,
+    MAX_MEMORY_CONTEXT_ITEMS, MAX_MEMORY_INPUT_BYTES, MAX_MEMORY_OUTPUT_BYTES, MAX_MEMORY_PAGE,
+    MAX_MEMORY_PRIMARY_ITEMS, MAX_PENDING_MEMORIES, MAX_RECALL_RESULTS, MEMORY_EMBEDDING_BATCH,
+    MEMORY_LEASE_MILLIS, MEMORY_RETRY_MILLIS, MEMORY_SEMANTIC_CANDIDATES, MEMORY_SIMILARITY_FLOOR,
+    MemoryAction, MemoryCandidate, MemoryClaim, MemoryCommand, MemoryContext, MemoryCorrection,
+    MemoryCursor, MemoryDetail, MemoryEmbeddingInput, MemoryError, MemoryEvent, MemoryEvidence,
+    MemoryExtraction, MemoryInput, MemoryJob, MemoryJobState, MemoryListQuery, MemoryPage,
+    MemoryPolicy, MemoryReader, MemoryReviewEvent, MemoryReviewResult, MemoryReviewState,
+    MemorySearch, MemorySemanticHit, MemorySemanticPhase, MemorySemanticSetting,
+    MemorySemanticState, MemorySemanticStatus, MemoryStatus, MemoryStore, MemoryVector, NewEpisode,
+    NewFact, RRF_K, RecallQuery, RecalledFact, Timestamp, consolidation_context, fuse_rrf,
+    memory_citations, parse_memory_candidates, validate_memory_batch, validate_memory_vectors,
 };
 pub use protocol::{Command, Event};
 pub use providers::{

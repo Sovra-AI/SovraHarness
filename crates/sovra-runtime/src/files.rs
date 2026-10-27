@@ -92,6 +92,8 @@ async fn discard(store: &Arc<dyn FileStore>, id: String) {
 }
 
 pub(crate) struct FilePrompt {
+    pub(crate) context: Option<sovra_core::ConversationContext>,
+    pub(crate) memory_reader: Option<Arc<dyn sovra_core::MemoryReader>>,
     pub(crate) skills: Arc<sovra_core::skills::SkillCatalog>,
     pub(crate) skill_resources: Option<Arc<dyn sovra_core::skills::SkillResources>>,
     pub(crate) indexed_files: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
@@ -209,6 +211,11 @@ async fn run(
         ));
     };
     let tools_enabled = selected.model.supports("tools");
+    let harness = harness
+        .with_working_context(job.context.as_ref())
+        .map_err(|error| FileError(error.to_string()))?
+        .with_conversation_memory(job.memory_reader, &prompt, crate::now())
+        .map_err(|error| FileError(error.to_string()))?;
     // Build the shared prompt/tool index off the executor; large files must not
     // stall other chats or the command loop while their text is case-folded.
     let harness = tokio::task::spawn_blocking(move || {

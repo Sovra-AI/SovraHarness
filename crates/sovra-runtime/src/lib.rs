@@ -5,9 +5,15 @@
 //! The UI never sees tokio, and this crate never sees the UI.
 
 mod artifacts;
+mod chat_history;
+mod connections;
 mod file_index;
 mod files;
+mod memory_review;
+mod memory_semantic;
 mod models;
+mod recalling;
+mod remembering;
 mod skills;
 mod teams;
 pub use models::ModelsConfig;
@@ -44,6 +50,7 @@ pub enum Error {
 pub struct Client {
     commands: Sender<Command>,
     events: Receiver<Event>,
+    completion: Option<Receiver<()>>,
 }
 
 impl Client {
@@ -57,12 +64,30 @@ impl Client {
         self.events.clone()
     }
 
+    /// The composition root calls this once, after the UI event loop has exited.
+    /// Waits for worker draining and executor teardown without competing with the
+    /// UI for `Event::Stopped`. Never call it on an active UI or async thread.
+    pub fn shutdown_blocking(&self) -> Result<(), Error> {
+        let completion = self.completion.as_ref().ok_or(Error::Stopped)?;
+        // The UI quit hook may already have closed the command receiver.
+        let _ = self.send(Command::Shutdown);
+        completion.recv_blocking().map_err(|_| Error::Stopped)
+    }
+
     /// A client wired to in-memory channels instead of a runtime, so UI tests can
     /// script events and observe commands deterministically.
     pub fn loopback() -> (Self, Receiver<Command>, Sender<Event>) {
         let (commands, command_rx) = async_channel::unbounded();
         let (event_tx, events) = async_channel::unbounded();
-        (Self { commands, events }, command_rx, event_tx)
+        (
+            Self {
+                commands,
+                events,
+                completion: None,
+            },
+            command_rx,
+            event_tx,
+        )
     }
 }
 
@@ -125,7 +150,9 @@ pub fn start_with_file_index(
     skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
     index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
 ) -> Result<Client, Error> {
-    let (client, commands, events) = Client::loopback();
+    let (mut client, commands, events) = Client::loopback();
+    let (stopped, completion) = async_channel::bounded(1);
+    client.completion = Some(completion);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("sovra-runtime-worker")
@@ -148,11 +175,32 @@ pub fn start_with_file_index(
                 },
                 handle,
                 commands,
-                events,
+                events.clone(),
             ));
+            // Adapters may schedule asynchronous cleanup when their final handle
+            // drops. Keep the executor alive for that work before cancelling it.
+            runtime.block_on(drain_adapter_tasks(runtime.metrics()));
+            drop(runtime);
+            let _ = events.send_blocking(Event::Stopped);
+            let _ = stopped.send_blocking(());
         })
         .map_err(Error::Start)?;
     Ok(client)
+}
+
+async fn drain_adapter_tasks(metrics: tokio::runtime::RuntimeMetrics) {
+    let drained = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while metrics.num_alive_tasks() != 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    if drained.is_err() {
+        tracing::warn!(
+            remaining_tasks = metrics.num_alive_tasks(),
+            "adapter cleanup exceeded shutdown deadline"
+        );
+    }
 }
 
 struct Services {
@@ -196,12 +244,38 @@ async fn serve(
             tracing::warn!(%error, "web search client unavailable");
             SearchClient::failing(error.to_string())
         });
-    let models = models
-        .map(|config| models::ModelsRuntime::start(config, agent_config.clone(), events.clone()));
+    let memory_control = remembering::MemoryControl::new();
+    let memory_repository = models.as_ref().map(|config| config.repository.clone());
+    if models.is_none() {
+        memory_control.publish(true, harness.clone());
+    }
+    let models = models.map(|config| {
+        models::ModelsRuntime::start(
+            config,
+            agent_config.clone(),
+            events.clone(),
+            memory_control.clone(),
+        )
+    });
     let mut runs = std::collections::BTreeMap::<String, ActiveRun>::new();
+    let mut memory_taps = tokio::task::JoinSet::new();
     let mut routing_config = RoutingConfig::default();
     let mut specialists = default_sovra_srx_agents();
     let memory = open_memory(memory_factory).await;
+    let mut memory_semantic = memory_semantic::SemanticRuntime::start(
+        memory.clone(),
+        memory_repository,
+        memory_control.clone(),
+        events.clone(),
+        &handle,
+    );
+    let mut memory_review = memory_review::MemoryReviewRuntime::start(
+        memory.clone(),
+        memory_control.clone(),
+        memory_semantic.service.clone(),
+        events.clone(),
+        &handle,
+    );
     // Browser views are throwaway copies, so the OS temp directory is the right home.
     let artifact_library = artifacts::ArtifactRuntime::new(
         memory.clone(),
@@ -209,6 +283,7 @@ async fn serve(
         std::env::temp_dir().join("sovra-artifact-views"),
     );
     let team = teams::TeamRuntime::new(memory.clone(), events.clone());
+    let connections = connections::ConnectionsRuntime::new(memory.clone(), events.clone());
     tracing::info!(
         %version,
         adk_configured = harness.is_some(),
@@ -218,15 +293,40 @@ async fn serve(
     if events.send(Event::Ready { version }).await.is_err() {
         return;
     }
+    let mut remembering = memory.as_ref().map(|store| {
+        remembering::RememberingRuntime::start(
+            store.clone(),
+            memory_control.clone(),
+            events.clone(),
+            &handle,
+        )
+    });
     if load_skills {
         skills.send(sovra_core::skills::SkillCommand::Refresh);
     }
-    if let Some(store) = &memory {
-        spawn_load_chat_history(&handle, store.clone(), events.clone());
+    let mut chat_history =
+        chat_history::ChatHistoryRuntime::start(memory.clone(), events.clone(), &handle);
+    if memory.is_some() {
+        chat_history.load();
     }
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");
+        if let Some(worker) = &remembering {
+            match &command {
+                Command::RunPrompt {
+                    session_id, prompt, ..
+                }
+                | Command::RunWithFiles {
+                    session_id, prompt, ..
+                }
+                | Command::Teams(sovra_core::teams::TeamCommand::Run {
+                    session_id, prompt, ..
+                }) => worker.record_user(session_id, prompt),
+                _ => {}
+            }
+        }
         runs.retain(|_, run| !run.task.is_finished());
+        while memory_taps.try_join_next().is_some() {}
         let skill_catalog = skills.catalog.read().await.clone();
         // Files stay on the session. An explicit web-search question is still
         // answered by the orchestrator, which delegates to WebSearchAgent.
@@ -237,29 +337,38 @@ async fn serve(
                 .load(std::sync::atomic::Ordering::Relaxed)
         });
         let command = match command {
-            Command::RunPrompt { session_id, prompt }
-                if session_files.contains_key(&session_id)
-                    && !(web_search_enabled
-                        && skills::web_without_files(&skill_catalog, &prompt)) =>
+            Command::RunPrompt {
+                session_id,
+                prompt,
+                context,
+            } if session_files.contains_key(&session_id)
+                && !(web_search_enabled && skills::web_without_files(&skill_catalog, &prompt)) =>
             {
                 let attachment_ids = session_files.get(&session_id).cloned().unwrap_or_default();
                 Command::RunWithFiles {
+                    context,
                     session_id,
                     prompt,
                     attachment_ids,
                 }
             }
             Command::RunWithFiles {
+                context,
                 session_id,
                 prompt,
                 attachment_ids,
             } if web_search_enabled && skills::web_without_files(&skill_catalog, &prompt) => {
                 session_files.insert(session_id.clone(), attachment_ids);
-                Command::RunPrompt { session_id, prompt }
+                Command::RunPrompt {
+                    session_id,
+                    prompt,
+                    context,
+                }
             }
             other => other,
         };
         match command {
+            Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
             Command::FileIndex(command) => file_index.send(command),
             Command::Teams(sovra_core::teams::TeamCommand::Run {
@@ -299,6 +408,28 @@ async fn serve(
                 let base = base
                     .with_artifact_saver(artifact_library.saver())
                     .unwrap_or(base);
+                let base = match base.with_conversation_memory(
+                    recalling::reader(
+                        memory.as_ref(),
+                        &memory_control,
+                        memory_semantic.service.clone(),
+                    ),
+                    &prompt,
+                    now(),
+                ) {
+                    Ok(base) => base,
+                    Err(error) => {
+                        let _ = events
+                            .send(Event::AgUi {
+                                session_id,
+                                event: sovra_core::AgUiEvent::RunError {
+                                    message: error.to_string(),
+                                },
+                            })
+                            .await;
+                        continue;
+                    }
+                };
                 if let Some(previous) = runs.remove(&session_id) {
                     previous.interrupt(&session_id);
                     previous.task.abort();
@@ -309,6 +440,7 @@ async fn serve(
             }
             Command::Teams(command) => team.handle(&handle, command),
             Command::Artifacts(command) => artifact_library.handle(&handle, command),
+            Command::Connections(command) => connections.handle(&handle, command),
             Command::Files(command) => {
                 if let Some(jobs) = &file_jobs {
                     jobs.send(command);
@@ -327,6 +459,7 @@ async fn serve(
                 }
             }
             Command::RunWithFiles {
+                context,
                 session_id,
                 prompt,
                 attachment_ids,
@@ -348,6 +481,7 @@ async fn serve(
                 let run = files::spawn_prompt(
                     &handle,
                     files::FilePrompt {
+                        context,
                         session_id: session_id.clone(),
                         prompt,
                         ids: attachment_ids,
@@ -355,6 +489,11 @@ async fn serve(
                         skills: skill_catalog.clone(),
                         skill_resources: skills.resources.clone(),
                         indexed_files: file_index.reader.clone(),
+                        memory_reader: recalling::reader(
+                            memory.as_ref(),
+                            &memory_control,
+                            memory_semantic.service.clone(),
+                        ),
                         models: models.file_models.clone(),
                         events: events.clone(),
                         web_search_enabled,
@@ -375,15 +514,7 @@ async fn serve(
                 }
             }
             Command::LoadChatHistory => {
-                if let Some(store) = &memory {
-                    spawn_load_chat_history(&handle, store.clone(), events.clone());
-                } else {
-                    let _ = events
-                        .send(Event::ChatHistoryLoaded {
-                            threads: Vec::new(),
-                        })
-                        .await;
-                }
+                chat_history.load();
             }
             Command::SaveChatThread { thread } => {
                 if let Some(message) = thread
@@ -401,34 +532,11 @@ async fn serve(
                             .collect(),
                     );
                 }
-                if let Some(store) = &memory {
-                    let store = store.clone();
-                    let mut thread = *thread;
-                    if thread.updated_at.millis() <= 1_000_000 {
-                        let current = now();
-                        if thread.created_at.millis() <= 1_000_000 {
-                            thread.created_at = current;
-                        }
-                        thread.updated_at = current;
-                    }
-                    drop(handle.spawn(async move {
-                        if let Err(error) = store.save_chat_thread(&thread).await {
-                            tracing::warn!(%error, "failed to save chat thread");
-                        }
-                    }));
-                }
+                chat_history.save(thread);
             }
             Command::DeleteChatThread { session_id } => {
                 session_files.remove(&session_id);
-                if let Some(store) = &memory {
-                    let store = store.clone();
-                    let at = now();
-                    drop(handle.spawn(async move {
-                        if let Err(error) = store.delete_chat_thread(&session_id, at).await {
-                            tracing::warn!(%error, "failed to delete chat thread");
-                        }
-                    }));
-                }
+                chat_history.delete(session_id);
             }
             Command::UpdateRouting {
                 mode,
@@ -464,7 +572,11 @@ async fn serve(
                     return;
                 }
             }
-            Command::RunPrompt { session_id, prompt } => {
+            Command::RunPrompt {
+                session_id,
+                prompt,
+                context,
+            } => {
                 let (selected, timeout) = if let Some(models) = &models {
                     match models.execution.read().await.clone() {
                         models::ModelExecution::Legacy => (harness.clone(), None),
@@ -492,19 +604,17 @@ async fn serve(
                     m.web_search_enabled
                         .load(std::sync::atomic::Ordering::Relaxed)
                 });
-                if memory_enabled && let Some(store) = &memory {
-                    record_episode(
-                        &handle,
-                        store.clone(),
-                        &session_id,
-                        EpisodeKind::UserMessage,
-                        prompt.clone(),
-                    );
-                }
                 let events = if memory_enabled {
                     memory.as_ref().map_or_else(
                         || events.clone(),
-                        |store| tap_agent_events(&handle, store.clone(), events.clone()),
+                        |store| {
+                            tap_agent_events(
+                                &mut memory_taps,
+                                store.clone(),
+                                events.clone(),
+                                memory_control.clone(),
+                            )
+                        },
                     )
                 } else {
                     events.clone()
@@ -521,6 +631,7 @@ async fn serve(
                 let run = spawn_prompt(
                     &handle,
                     PromptJob {
+                        context,
                         harness: selected,
                         session_id: session_id.clone(),
                         prompt,
@@ -534,6 +645,11 @@ async fn serve(
                         skills: skill_catalog.clone(),
                         skill_resources: skills.resources.clone(),
                         indexed_files: file_index.reader.clone(),
+                        memory_reader: recalling::reader(
+                            memory.as_ref(),
+                            &memory_control,
+                            memory_semantic.service.clone(),
+                        ),
                     },
                 );
                 runs.insert(session_id, run);
@@ -587,25 +703,15 @@ async fn serve(
         run.interrupt(&session);
         run.task.abort();
     }
-    let _ = events.send(Event::Stopped).await;
+    memory_taps.abort_all();
+    while memory_taps.join_next().await.is_some() {}
+    if let Some(worker) = &mut remembering {
+        worker.stop().await;
+    }
+    memory_review.stop().await;
+    memory_semantic.stop().await;
+    chat_history.stop().await;
     tracing::info!("runtime stopped");
-}
-
-fn spawn_load_chat_history(
-    handle: &tokio::runtime::Handle,
-    store: Arc<dyn MemoryStore>,
-    events: Sender<Event>,
-) {
-    drop(handle.spawn(async move {
-        match store.list_chat_threads(50).await {
-            Ok(threads) => {
-                let _ = events.send(Event::ChatHistoryLoaded { threads }).await;
-            }
-            Err(error) => {
-                tracing::warn!(%error, "failed to load chat history");
-            }
-        }
-    }));
 }
 
 fn spawn_route_simulation(
@@ -654,39 +760,20 @@ async fn open_memory(factory: Option<MemoryFactory>) -> Option<Arc<dyn MemorySto
     Some(store)
 }
 
-fn record_episode(
-    handle: &tokio::runtime::Handle,
-    store: Arc<dyn MemoryStore>,
-    session_id: &str,
-    kind: EpisodeKind,
-    content: String,
-) {
-    let episode = NewEpisode {
-        session_id: session_id.to_owned(),
-        kind,
-        content,
-        occurred_at: now(),
-    };
-    drop(handle.spawn(async move {
-        if let Err(error) = store.record_episode(episode).await {
-            tracing::warn!(%error, "failed to record episode");
-        }
-    }));
-}
-
 fn tap_agent_events(
-    handle: &tokio::runtime::Handle,
+    tasks: &mut tokio::task::JoinSet<()>,
     store: Arc<dyn MemoryStore>,
     events: Sender<Event>,
+    memory_control: remembering::MemoryControl,
 ) -> Sender<Event> {
     let (tapped, stream) = async_channel::unbounded::<Event>();
-    drop(handle.spawn(async move {
+    tasks.spawn(async move {
         let mut transcript = String::new();
         while let Ok(event) = stream.recv().await {
             match &event {
                 Event::AgentChunk { text, .. } => transcript.push_str(text),
                 Event::AgentCompleted { session_id } => {
-                    if !transcript.is_empty() {
+                    if !transcript.is_empty() && memory_control.enabled() {
                         let episode = NewEpisode {
                             session_id: session_id.clone(),
                             kind: EpisodeKind::AgentMessage,
@@ -698,10 +785,12 @@ fn tap_agent_events(
                         }
                     }
                 }
-                Event::Models(_)
+                Event::Memory(_)
+                | Event::Models(_)
                 | Event::Skills(_)
                 | Event::Teams(_)
                 | Event::Artifacts(_)
+                | Event::Connections(_)
                 | Event::AgUi { .. }
                 | Event::FilePrepared(_)
                 | Event::FileIndex(_)
@@ -721,7 +810,7 @@ fn tap_agent_events(
                 return;
             }
         }
-    }));
+    });
     tapped
 }
 
@@ -764,6 +853,8 @@ impl ActiveRun {
 }
 
 struct PromptJob {
+    context: Option<sovra_core::ConversationContext>,
+    memory_reader: Option<Arc<dyn sovra_core::MemoryReader>>,
     harness: Option<AdkHarness>,
     session_id: String,
     prompt: String,
@@ -781,6 +872,8 @@ struct PromptJob {
 
 fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
     let PromptJob {
+        context,
+        memory_reader,
         harness,
         session_id,
         prompt,
@@ -865,7 +958,7 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
                 }
             }
         };
-        let adk = match adk.with_indexed_files(indexed_files).and_then(|adk| adk.with_skill_library(skills, skill_resources))
+        let adk = match adk.with_working_context(context.as_ref()).and_then(|adk| adk.with_conversation_memory(memory_reader, &prompt, now())).and_then(|adk| adk.with_indexed_files(indexed_files)).and_then(|adk| adk.with_skill_library(skills, skill_resources))
             .and_then(|adk| skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill))) {
             Ok(adk) => adk,
             Err(error) => {
@@ -934,6 +1027,7 @@ mod tests {
         );
         client
             .send(Command::RunPrompt {
+                context: None,
                 session_id: "s-test".into(),
                 prompt: "Hello".into(),
             })
@@ -967,6 +1061,7 @@ mod tests {
 
         client
             .send(Command::RunPrompt {
+                context: None,
                 session_id: "s-search".into(),
                 prompt: "search the web for rust release notes".into(),
             })
@@ -993,6 +1088,7 @@ mod tests {
 
         client
             .send(Command::RunPrompt {
+                context: None,
                 session_id: "s-hello".into(),
                 prompt: "hello".into(),
             })
@@ -1026,6 +1122,7 @@ mod tests {
 
         client
             .send(Command::RunWithFiles {
+                context: None,
                 session_id: "s-files".into(),
                 prompt: "search the web for rust release notes".into(),
                 attachment_ids: vec!["cargo-deny-gather".into()],
@@ -1053,6 +1150,7 @@ mod tests {
 
         client
             .send(Command::RunPrompt {
+                context: None,
                 session_id: "s-files".into(),
                 prompt: "what does this file say?".into(),
             })

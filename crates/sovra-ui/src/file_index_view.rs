@@ -157,47 +157,29 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             .child(div().sovra_text(TextRole::Caption,cx).child("Enabling sends this folder’s extracted passages and future searches to the named server, including newly indexed files. The service may charge for usage. No model is downloaded automatically. Use a model designed for plain-text embeddings; models requiring task prefixes are not supported yet."))
             .child(Input::new(&shell.file_index.embedding_search).aria_label("Filter embedding models"));
         if candidates.is_empty() {
-            chooser = chooser.child(div().sovra_text(TextRole::Body,cx).child("No matching models. In Models, inspect an installed Ollama embedding model to load its capabilities, or add an embedding model ID to an OpenAI-compatible connection."));
+            chooser = chooser.child(div().sovra_text(TextRole::Body,cx).child("No matching models. In Models, refresh OpenRouter, inspect an installed Ollama embedding model to load its capabilities, or add an embedding model ID to an OpenAI-compatible connection."));
         }
         for (index, target) in candidates.iter().take(20).enumerate() {
             let root_id = root_id.clone();
             let target = target.clone();
-            chooser = chooser.child(
-                v_flex()
-                    .min_w_0()
-                    .gap(t.space.compact)
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .sovra_text(TextRole::Body, cx)
-                            .child(target.key.model_id.clone()),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .sovra_text(TextRole::Caption, cx)
-                            .id(gpui_kit::SharedString::from(format!(
-                                "semantic-destination-{index}"
-                            )))
-                            .test_support()
-                            .aria_label(target.base_url.clone())
-                            .child(target.base_url.clone()),
-                    )
-                    .child(
-                        design::button(("enable-semantic", index), "Enable for this folder", cx)
-                            .on_click(cx.listener(move |shell, _, _, cx| {
-                                shell.index_command(
-                                    IndexCommand::ConfigureSemantic {
-                                        root_id: root_id.clone(),
-                                        target: Some(target.clone()),
-                                    },
-                                    cx,
-                                );
-                                shell.file_index.semantic_root = None;
-                            })),
-                    ),
-            );
+            let selection = target.clone();
+            chooser = chooser.child(crate::widgets::model_destination::choice(
+                &target,
+                gpui_kit::SharedString::from(format!("semantic-destination-{index}")).into(),
+                design::button(("enable-semantic", index), "Enable for this folder", cx).on_click(
+                    cx.listener(move |shell, _, _, cx| {
+                        shell.index_command(
+                            IndexCommand::ConfigureSemantic {
+                                root_id: root_id.clone(),
+                                target: Some(selection.clone()),
+                            },
+                            cx,
+                        );
+                        shell.file_index.semantic_root = None;
+                    }),
+                ),
+                cx,
+            ));
         }
         if candidates.len() > 20 {
             chooser =
@@ -518,6 +500,17 @@ mod tests {
         );
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
+            for _ in 0..30 {
+                let confirm = window.find("confirm-remove-index-chosen");
+                if confirm.visible() && confirm.bounds().bottom() < px(940.) {
+                    break;
+                }
+                window.scroll(
+                    "sovra-knowledge-view",
+                    gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-80.))),
+                    cx,
+                );
+            }
             window.click("confirm-remove-index-chosen", cx);
         })
         .unwrap();
