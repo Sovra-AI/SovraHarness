@@ -13,6 +13,20 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Google in Settings → Connections**: a new **Connections** section in Settings with one **Connect Google** button.
+  - **Sign-in:** Google's own page opens in the browser (single-use `127.0.0.1` listener, PKCE S256, fresh `state`, five-minute timeout, Cancel / Open again / Copy link). The person comes back to their name, email and a switch per service: Email, Calendar, Files, Contacts and To-dos.
+  - **Partial consent:** permissions unticked on Google's consent screen show as off. Turning one on asks Google again; switching one off keeps the sign-in.
+  - **Agent tools:** the agent gets tools only for switched-on services.
+    - Gmail: search, read, and **draft only** (never sends).
+    - Calendar: list, and add events with no guests.
+    - Drive: search and read; Docs, Sheets and Slides as text.
+    - Contacts: search.
+    - Tasks: list and add.
+  - **Safety:** outside text is clipped and marked untrusted, and model-supplied ids and email headers are sanitised.
+  - **Storage:** refresh tokens stay in the OS keychain (dev file store under `SOVRA_DEV=1`). Disconnect revokes them at Google, and an expired sign-in becomes **Sign in again**.
+  - **Implementation:** a new `sovra-google` adapter crate behind the core `GoogleConnector` port, with hand-rolled bounded reqwest/rustls clients (no second HTTP stack).
+  - **Setup:** the Desktop OAuth client is baked in at build time via `SOVRA_GOOGLE_CLIENT_ID`/`_SECRET`; the same variables override it at run time. Scopes, the Google verification and CASA requirements, and setup are in `docs/google.md`.
+
 - **Summary model transport (in progress)**: a single-request adapter supports Ollama, Anthropic, OpenRouter and compatible chat endpoints without tools. It revalidates model destinations when constructed, validates prepared source scope and size, uses conservative context admission, and accepts only completed JSON with valid input citations. Embeddings and summaries share bounded HTTP response handling. Scheduler, consent UI and recursive generation remain pending.
 
 - **RAPTOR clustering engine (in progress)**: global/local UMAP reductions feed full-covariance Gaussian mixtures selected by BIC. Soft assignments retain overlap and source coverage; recursive grouping fits request budgets and identifies fallback partitions explicitly. Computation runs on one CPU worker with cancellation and finite work limits. Background generation and retrieval integration remain pending.

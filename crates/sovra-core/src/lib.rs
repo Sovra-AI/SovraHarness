@@ -9,6 +9,7 @@ pub mod artifacts;
 pub mod chat_history;
 pub mod file_index;
 pub mod files;
+pub mod google;
 mod knowledge;
 mod memory;
 pub mod models;

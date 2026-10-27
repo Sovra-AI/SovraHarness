@@ -199,6 +199,31 @@ scheduling is not active yet.
 Everything streams through AG-UI events. Design, sources and the module layout:
 [teams and artifacts](docs/teams-and-artifacts.md).
 
+## Connections: Google
+
+Open **Settings → Connections** and press **Connect Google**:
+
+- Google's own sign-in page opens in your browser. Sovra never sees your password.
+- Tick what Sovra may use, then come back to the app.
+- Each service has its own switch: **Email**, **Calendar**, **Files**, **Contacts**
+  and **To-dos**. Switch any of them off without signing out.
+
+Once connected, just ask, for example "What's on my calendar this week?" or
+"Add 'buy milk' to my to-dos". Here is what Sovra does with each service:
+
+- **Email:** reads it, but only writes **drafts**. You press Send in Gmail yourself.
+- **Calendar:** adds events without inviting anyone.
+- **Files:** finds and reads your Docs, Sheets and Slides; it never changes them.
+- **Contacts:** finds email addresses and phone numbers.
+- **To-dos:** reads your list and adds to it.
+
+**Disconnect Google** signs out and asks Google to forget Sovra's access.
+
+Release builds bake in the Google client with `SOVRA_GOOGLE_CLIENT_ID` and
+`SOVRA_GOOGLE_CLIENT_SECRET`; the same variables override it at run time. Setup,
+scopes, Google's verification requirements and the safety design are in
+[Google in Sovra](docs/google.md).
+
 ## Files in chat
 
 Use **Add files** (the paperclip beside the message) to attach up to eight files,

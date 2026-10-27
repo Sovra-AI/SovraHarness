@@ -115,11 +115,27 @@ impl ModelsView {
                         .child(Self::render_appearance_section(cx))
                         .child(self.render_ai_connection_section(cx))
                         .child(self.render_other_connections_section(cx))
+                        .children(self.render_connections_section(cx))
                         .child(self.render_always_context_section(cx))
                         .child(self.render_agent_behavior_section(cx)),
                 ),
         )
         .into_any_element()
+    }
+
+    /// The person's own accounts: Google now, and `WhatsApp` joins this section.
+    fn render_connections_section(&self, cx: &App) -> Option<impl IntoElement + use<>> {
+        let card = self.google_card.clone()?;
+        Some(
+            settings_section(
+                "settings-connections",
+                "Connections",
+                "Let Sovra help with your own accounts. You choose what it can use, and you \
+                 can switch anything off at any time.",
+                cx,
+            )
+            .child(card),
+        )
     }
 
     fn render_appearance_section(cx: &mut Context<Self>) -> impl IntoElement + use<> {

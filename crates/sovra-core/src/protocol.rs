@@ -18,6 +18,8 @@ pub enum Command {
     Skills(crate::skills::SkillCommand),
     Teams(crate::teams::TeamCommand),
     Artifacts(crate::artifacts::ArtifactCommand),
+    /// The Google account on the Connections page.
+    Google(crate::google::GoogleCommand),
     RunWithFiles {
         session_id: String,
         prompt: String,
@@ -79,6 +81,7 @@ pub enum Event {
     Skills(crate::skills::SkillEvent),
     Teams(crate::teams::TeamEvent),
     Artifacts(crate::artifacts::ArtifactEvent),
+    Google(crate::google::GoogleEvent),
     /// An AG-UI protocol event for `session_id` (team runs stream through these).
     AgUi {
         session_id: String,

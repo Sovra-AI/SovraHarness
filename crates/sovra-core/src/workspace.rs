@@ -269,6 +269,8 @@ pub struct WorkspaceState {
     pub team: crate::teams::TeamRoster,
     /// Saved artifacts, folded from [`Event::Artifacts`].
     pub artifacts: crate::artifacts::ArtifactLibrary,
+    /// The Google account, folded from [`Event::Google`].
+    pub google: crate::google::GoogleConnection,
     /// The composer sends prompts to the whole team instead of Sovra alone.
     pub team_mode: bool,
     /// AG-UI `subagentRunId` → the member it belongs to, for attributing messages.
@@ -321,6 +323,7 @@ impl Default for WorkspaceState {
             model_connections: Vec::new(),
             team: crate::teams::TeamRoster::default(),
             artifacts: crate::artifacts::ArtifactLibrary::default(),
+            google: crate::google::GoogleConnection::default(),
             team_mode: false,
             team_subagents: std::collections::BTreeMap::new(),
             next_msg_seq: 0,
@@ -1008,6 +1011,10 @@ impl WorkspaceState {
             }
             Event::Artifacts(artifact_event) => {
                 self.artifacts.apply(artifact_event);
+                None
+            }
+            Event::Google(google_event) => {
+                self.google.apply(google_event);
                 None
             }
             Event::AgUi { session_id, event } => self.apply_agui(session_id, event),

@@ -102,6 +102,8 @@ pub struct ModelsView {
     pub(crate) download_connection: Entity<Selector>,
     pub(crate) compare: Vec<ModelKey>,
     pub(crate) compare_open: bool,
+    /// Settings → Connections; set by the shell, which owns the Google state.
+    pub(crate) google_card: Option<Entity<crate::google_card::GoogleCard>>,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -229,6 +231,7 @@ impl ModelsView {
             download_connection,
             compare: Vec::new(),
             compare_open: false,
+            google_card: None,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         }

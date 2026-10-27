@@ -8,6 +8,7 @@ mod artifacts;
 pub mod decision_client;
 mod file_index;
 mod files;
+mod google;
 mod native_ui;
 mod orchestrator;
 mod skills;
@@ -15,6 +16,7 @@ mod team;
 mod web_search;
 
 pub use artifacts::ArtifactSaver;
+pub use google::GoogleTools;
 pub use team::TeamTurn;
 pub use web_search::SearchClient;
 
