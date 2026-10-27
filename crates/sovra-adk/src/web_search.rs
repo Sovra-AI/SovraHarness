@@ -27,6 +27,11 @@ use sources::{HttpSource, SourceKind};
 pub(crate) const SEARCH_REQUEST_CONCURRENCY: usize = 8;
 
 const MAX_QUERIES: usize = 6;
+/// Top results opened automatically by each `web_search` call.
+const AUTO_READ_PAGES: usize = 2;
+/// Opening text kept from each automatically opened page.
+/// Short on purpose: small models lose track of the result list in long payloads.
+const AUTO_READ_CHARS: usize = 1_200;
 const MAX_QUERY_CHARS: usize = 300;
 pub(crate) const WEB_SEARCH_TOOL_NAME: &str = "web_search";
 pub(crate) const READ_WEB_PAGE_TOOL_NAME: &str = "read_web_page";
@@ -34,7 +39,8 @@ pub(crate) const READ_WEB_PAGE_TOOL_NAME: &str = "read_web_page";
 const WEB_SEARCH_DESCRIPTION: &str = "\
 Search the public web with free, open search services. Pass one or more short queries in \
 `queries`; they run together. The result lists `results` (title, url, snippet, and the \
-`sources` that found it), best first, plus `errors` for searches that failed. Cite only those \
+`sources` that found it), best first, `pages` with the opening text of the top results, and \
+`errors` for searches that failed. Prefer facts from `pages` over snippets. Cite only those \
 titles and URLs. Do not invent sources.";
 
 const READ_WEB_PAGE_DESCRIPTION: &str = "\
@@ -159,6 +165,33 @@ impl SearchClient {
         }
     }
 
+    /// Opens the top [`AUTO_READ_PAGES`] hits together and keeps the opening
+    /// text of those that load. Small models often skip `read_web_page`; with
+    /// this, every answer can rest on current page text. A page that fails is
+    /// simply left out.
+    pub(crate) async fn read_top_pages(&self, hits: &[SearchHit]) -> Vec<WebPage> {
+        let Some(read) = &self.pages else {
+            return Vec::new();
+        };
+        let reads = hits
+            .iter()
+            .take(AUTO_READ_PAGES)
+            .map(|hit| read(hit.url.clone()));
+        futures::future::join_all(reads)
+            .await
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|page| !page.text.trim().is_empty())
+            .map(|mut page| {
+                if let Some((cut, _)) = page.text.char_indices().nth(AUTO_READ_CHARS) {
+                    page.text.truncate(cut);
+                    page.truncated = true;
+                }
+                page
+            })
+            .collect()
+    }
+
     /// Runs every query against every source together. Outcomes come back in
     /// query-major, source-minor order, so fusion is deterministic.
     pub(crate) async fn search_many(&self, queries: Vec<String>) -> Vec<EngineOutcome> {
@@ -211,9 +244,10 @@ pub(crate) fn agent_tools(client: &SearchClient) -> Vec<Arc<dyn Tool>> {
 }
 
 pub(crate) fn web_search_instruction(base: &str) -> String {
-    let page_rule = "If the snippets do not answer the question, open the one to three most \
-        relevant results with read_web_page before you answer. You may also open a well-known \
-        official site directly when you know its address.";
+    let page_rule = "The result's `pages` already hold the opening text of the top results: \
+        base your answer on them before snippets. If they do not answer the question, open \
+        other relevant results with read_web_page. You may also open a well-known official \
+        site directly when you know its address, for example a release notes page.";
     format!(
         "{base}\n\nYou can search the web and read pages. Today is {today}. Use this date for \
          \"today\", \"latest\" and \"this week\", and add the year to queries when recency \
@@ -306,9 +340,11 @@ impl Tool for WebSearchTool {
     async fn execute(&self, _ctx: Arc<dyn ToolContext>, args: Value) -> adk_core::Result<Value> {
         let queries = queries_from_args(&args).map_err(adk_core::AdkError::tool)?;
         let outcomes = self.client.search_many(queries).await;
-        let ranked: RankedSearch = fuse_engine_outcomes(&outcomes, MAX_FUSED_HITS);
+        let mut ranked: RankedSearch = fuse_engine_outcomes(&outcomes, MAX_FUSED_HITS);
+        ranked.pages = self.client.read_top_pages(&ranked.hits).await;
         tracing::debug!(
             hits = ranked.hits.len(),
+            pages = ranked.pages.len(),
             errors = ranked.errors.len(),
             "web search finished"
         );
@@ -516,11 +552,24 @@ mod tests {
                     !found.is_empty(),
                     "{prompt}: search never ran or found nothing"
                 );
+                // Same page counts: the model may write https for an http result.
+                let page = |url: &str| {
+                    url.split_once("://")
+                        .map_or(url, |(_, rest)| rest)
+                        .trim_start_matches("www.")
+                        .trim_end_matches('/')
+                        .to_owned()
+                };
+                // URLs may contain parentheses (Wikipedia), so look for each
+                // returned page in the answer rather than splitting it.
                 assert!(
                     found
                         .iter()
-                        .any(|url| answer.contains(url.trim_end_matches('/'))),
-                    "{prompt}: answer cites no URL the search returned:\n{answer}"
+                        .map(|url| page(url))
+                        .any(|page| page.contains('/') && answer.contains(&page)
+                            || answer.contains(&format!("//{page}"))
+                            || answer.contains(&format!("www.{page}"))),
+                    "{prompt}: answer cites no page the search returned:\n{answer}"
                 );
             }
         });
@@ -572,6 +621,53 @@ mod tests {
         let with_own = SearchClient::built_in(Some("https://searx.example/")).expect("searxng");
         assert_eq!(with_own.sources.len(), 3);
         assert!(SearchClient::built_in(Some("ftp://nope")).is_err());
+    }
+
+    #[test]
+    fn web_search_opens_the_top_two_results_and_drops_failed_pages() {
+        drive(async {
+            let body = r#"{"results":[
+                {"title":"Long","url":"https://long.example/a","content":"s"},
+                {"title":"Down","url":"https://down.example/b","content":"s"},
+                {"title":"Third","url":"https://third.example/c","content":"s"}
+            ]}"#;
+            let opened = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let client = SearchClient::from_fn(move |_query| {
+                let body = body.to_owned();
+                async move { Ok(body) }
+            })
+            .with_page_reader({
+                let opened = Arc::clone(&opened);
+                move |url: String| {
+                    opened.lock().expect("opened").push(url.clone());
+                    async move {
+                        if url.contains("down") {
+                            Err("timed out".to_owned())
+                        } else {
+                            Ok(WebPage {
+                                url,
+                                title: "Long".to_owned(),
+                                text: "x".repeat(AUTO_READ_CHARS + 100),
+                                truncated: false,
+                            })
+                        }
+                    }
+                }
+            });
+            let tool = WebSearchTool { client };
+            let ctx: Arc<dyn ToolContext> = Arc::new(adk_tool::SimpleToolContext::new("test"));
+            let value = tool
+                .execute(ctx, json!({ "queries": ["q"] }))
+                .await
+                .expect("search");
+            let ranked: RankedSearch = serde_json::from_value(value).expect("shape");
+            let opened = opened.lock().expect("opened").clone();
+            assert_eq!(opened, ["https://long.example/a", "https://down.example/b"]);
+            assert_eq!(ranked.pages.len(), 1, "failed page is left out");
+            assert_eq!(ranked.pages[0].text.chars().count(), AUTO_READ_CHARS);
+            assert!(ranked.pages[0].truncated);
+            assert_eq!(ranked.hits.len(), 3, "all hits are still listed");
+        });
     }
 
     #[test]
@@ -731,7 +827,8 @@ mod tests {
                 .run_prompt("reading", "search the web for library opening hours", &tx)
                 .await;
             let answer = collect_answer(&rx).await;
-            assert_eq!(reads.load(Ordering::SeqCst), 1, "page was not read");
+            // Once automatically inside web_search, once when the model asks.
+            assert_eq!(reads.load(Ordering::SeqCst), 2, "page was not read");
             assert!(answer.contains("9am to 5pm"), "{answer}");
             assert!(answer.contains("https://library.example/hours"), "{answer}");
         });

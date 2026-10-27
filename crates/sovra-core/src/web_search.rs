@@ -57,6 +57,10 @@ pub struct RankedSearch {
     #[serde(rename = "results")]
     pub hits: Vec<SearchHit>,
     pub errors: Vec<String>,
+    /// Opening text of the top results, read so the answer rests on the pages
+    /// themselves and not on index snippets that may be stale.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<WebPage>,
 }
 
 /// Readable text of one opened web page. `url` is where the page ended up after
@@ -315,6 +319,7 @@ pub fn fuse_engine_outcomes(outcomes: &[EngineOutcome], limit: usize) -> RankedS
     RankedSearch {
         hits: ranked.into_iter().take(limit).map(|(hit, _)| hit).collect(),
         errors,
+        pages: Vec::new(),
     }
 }
 

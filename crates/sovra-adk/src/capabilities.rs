@@ -13,6 +13,7 @@ use std::sync::Arc;
 use adk_core::Tool;
 use sovra_core::{Capability, WEB_SEARCH_AGENT_ID};
 
+use crate::required_delegation::FirstCall;
 use crate::web_search::{self, SearchClient};
 
 pub(crate) trait CapabilityProvider: Send + Sync {
@@ -27,6 +28,13 @@ pub(crate) trait CapabilityProvider: Send + Sync {
     /// When the orchestrator should reach for this capability, in addition to
     /// the specialist descriptions it already reads. `None` when those suffice.
     fn routing_rule(&self) -> Option<String>;
+
+    /// The call an equipped specialist must make before answering, so a model
+    /// that skips its tools still answers from real results. `None` when the
+    /// specialist may answer without calling anything.
+    fn first_call(&self) -> Option<FirstCall> {
+        None
+    }
 }
 
 /// Built-in keyless web search plus page reading.
@@ -51,6 +59,13 @@ impl CapabilityProvider for WebSearchProvider {
 
     fn procedure(&self) -> String {
         web_search::web_search_instruction("")
+    }
+
+    fn first_call(&self) -> Option<FirstCall> {
+        Some(FirstCall::Tool {
+            name: web_search::WEB_SEARCH_TOOL_NAME,
+            args: |request| serde_json::json!({ "queries": [request] }),
+        })
     }
 
     fn routing_rule(&self) -> Option<String> {

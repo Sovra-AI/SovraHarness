@@ -8,6 +8,7 @@ mod agui;
 pub mod artifacts;
 mod capabilities;
 pub mod chat_history;
+mod citations;
 pub mod file_index;
 pub mod files;
 mod knowledge;
@@ -15,6 +16,7 @@ mod memory;
 pub mod models;
 mod protocol;
 pub mod providers;
+mod routing;
 pub mod routing_eval;
 pub mod routing_tree;
 mod schedules;
@@ -40,6 +42,7 @@ pub use chat_history::{
     NEW_CHAT_TITLE, RecencyBucket, derive_chat_title, derive_message_preview, format_relative_time,
     group_threads, infer_topic_icon, recency_bucket, sanitize_generated_title,
 };
+pub use citations::sources_footer;
 pub use knowledge::{
     BeliefPicture, BeliefStanding, MemoryExplanation, SearchPicture, StoryBeat, StoryStep,
     TimeNote, memory_explanation,
@@ -52,6 +55,7 @@ pub use protocol::{Command, Event};
 pub use providers::{
     ModelTier, TierLadderEntry, default_tier_ladder, parse_params_billions, suggest_model_tier,
 };
+pub use routing::required_delegate;
 pub use routing_eval::{evaluate_routing, heuristic_answers, resolve_tier_model};
 pub use routing_tree::{
     BranchOp, DecisionBackend, QuestionKind, RouteEvaluation, RouteTarget, RoutingConfig,

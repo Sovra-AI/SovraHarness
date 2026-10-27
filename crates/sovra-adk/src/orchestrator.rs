@@ -19,6 +19,8 @@ use sovra_core::{
 
 use crate::Error;
 use crate::capabilities::{self, CapabilityProvider};
+use crate::required_delegation::{FirstCall, RequiredFirstCall};
+use crate::sources_footer::SourcesFooter;
 use crate::text_tool_calls::TextToolCalls;
 
 /// Parent agent id. Matches the roster entry the router already uses.
@@ -184,12 +186,11 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
         for provider in &equipping {
             instruction.push_str(&provider.procedure());
         }
-        delegates.push(child_agent(
-            spec,
-            Arc::clone(&parts.llm),
-            tools,
-            instruction,
-        )?);
+        let llm = match equipping.iter().find_map(|provider| provider.first_call()) {
+            Some(rule) => RequiredFirstCall::wrap(Arc::clone(&parts.llm), rule),
+            None => Arc::clone(&parts.llm),
+        };
+        delegates.push(child_agent(spec, llm, tools, instruction)?);
     }
 
     let mut parent_tools = Vec::new();
@@ -215,10 +216,20 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
         &routing_rules,
         available.contains(&Capability::WebSearch),
     );
+    // Explicit intent ("search the web…", a procedure naming a specialist) is
+    // routed deterministically; everything else is the model's judgement.
+    let procedure_requests = selected
+        .iter()
+        .find(|spec| active_skill_requests(&parts.instruction, &spec.id))
+        .map(|spec| spec.id.clone());
+    let parent_llm = RequiredFirstCall::wrap(
+        SourcesFooter::wrap(parts.llm),
+        FirstCall::Delegate { procedure_requests },
+    );
     let mut builder = LlmAgentBuilder::new(ORCHESTRATOR_ID)
         .description(description.clone())
         .instruction(instruction)
-        .model(parts.llm)
+        .model(parent_llm)
         .parallelize_agent_delegations(true);
     for tool in parent_tools {
         builder = builder.tool(tool);
