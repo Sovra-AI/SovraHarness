@@ -53,6 +53,7 @@ pub(crate) struct FileModel {
 
 pub(crate) struct ModelsRuntime {
     commands: Sender<ModelCommand>,
+    memory_control: crate::remembering::MemoryControl,
     pub(crate) execution: Arc<RwLock<ModelExecution>>,
     pub(crate) file_models: Arc<RwLock<BTreeMap<ModelPurpose, FileModel>>>,
     pub(crate) memory_enabled: Arc<std::sync::atomic::AtomicBool>,
@@ -61,15 +62,21 @@ pub(crate) struct ModelsRuntime {
 }
 
 impl ModelsRuntime {
-    pub(crate) fn start(config: ModelsConfig, agent: AgentConfig, events: Sender<Event>) -> Self {
+    pub(crate) fn start(
+        config: ModelsConfig,
+        agent: AgentConfig,
+        events: Sender<Event>,
+        memory_control: crate::remembering::MemoryControl,
+    ) -> Self {
         let (commands, receiver) = async_channel::unbounded();
         let execution = Arc::new(RwLock::new(ModelExecution::Unavailable(
             "Model settings are still loading.".into(),
         )));
         let file_models = Arc::new(RwLock::new(BTreeMap::new()));
-        let memory_enabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let memory_enabled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let web_search_enabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let actor = ModelActor {
+            memory_control: memory_control.clone(),
             repository: config.repository,
             providers: config
                 .providers
@@ -93,6 +100,7 @@ impl ModelsRuntime {
             events,
         };
         Self {
+            memory_control,
             commands,
             execution,
             file_models,
@@ -110,6 +118,13 @@ impl ModelsRuntime {
     }
 
     pub(crate) fn send(&self, command: ModelCommand) {
+        if let ModelCommand::SetAgentSettings { settings } = &command {
+            self.memory_control.request(settings.memory_enabled);
+            if !settings.memory_enabled {
+                self.memory_enabled
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
         let _ = self.commands.try_send(command);
     }
 }
@@ -149,6 +164,7 @@ struct RunningPull {
 type PullProgressChannel = (Sender<(u64, String)>, Receiver<(u64, String)>);
 
 struct ModelActor {
+    memory_control: crate::remembering::MemoryControl,
     repository: ModelRepository,
     providers: BTreeMap<ProviderKind, Arc<dyn ModelProvider>>,
     saved: SavedModels,
@@ -177,6 +193,17 @@ async fn blocking<T: Send + 'static>(
 }
 
 impl ModelActor {
+    async fn publish_memory(&self) {
+        let harness = match self.execution.read().await.clone() {
+            ModelExecution::Legacy => crate::build_harness(&self.agent),
+            ModelExecution::Selected { harness, .. } => Some(*harness),
+            ModelExecution::Unavailable(_) => None,
+        };
+        self.memory_control.publish(
+            self.saved.preferences.agent_settings.memory_enabled,
+            harness,
+        );
+    }
     async fn emit(&self, event: ModelEvent) {
         let _ = self.events.send(Event::Models(event)).await;
     }
@@ -220,8 +247,26 @@ impl ModelActor {
         for index in 0..self.saved.connections.len() {
             let mut connection = validate_connection(&self.saved.connections[index])?;
             connection.environment_credential = self.repository.has_environment_key(&connection);
-            let secret = self.secret(&connection).await?;
-            connection.key_preview = secret.masked_preview();
+            match self.secret(&connection).await {
+                Ok(secret) if connection.has_credential && secret.0.is_empty() => {
+                    // The settings file says a key was saved, but this credential store
+                    // has none (a reset keychain, or a dev build reading its separate
+                    // dev store). Say so, so setup asks for the key instead of claiming
+                    // to be ready and failing on the first message.
+                    tracing::warn!(id = %connection.id, "saved key is missing from the credential store");
+                    connection.has_credential = false;
+                    connection.key_preview = self
+                        .secret(&connection)
+                        .await
+                        .unwrap_or_default()
+                        .masked_preview();
+                }
+                Ok(secret) => connection.key_preview = secret.masked_preview(),
+                // A locked keychain must not block loading every other setting.
+                Err(error) => {
+                    tracing::warn!(id = %connection.id, %error, "could not read saved key");
+                }
+            }
             self.saved.connections[index] = connection;
         }
         self.loaded = true;
@@ -267,12 +312,7 @@ impl ModelActor {
         if let Some(key) = self.saved.preferences.active.clone() {
             // Restore from a cached/manual model while refreshing metadata in the background.
             if let Err(error) = self.activate(&key, false).await {
-                *self.execution.write().await = ModelExecution::Unavailable(error.0.clone());
-                self.emit(ModelEvent::Error(format!(
-                    "Saved model unavailable: {}",
-                    error.0
-                )))
-                .await;
+                self.mark_unavailable(error.0).await;
             }
         } else if self.agent.has_api_key() {
             *self.execution.write().await = ModelExecution::Legacy;
@@ -281,8 +321,20 @@ impl ModelActor {
                 "No AI model is active yet. Add an OpenRouter key in Settings, set up free local Ollama, or connect an OpenAI-compatible URL, then pick a model in Models.".into(),
             );
         }
+        self.publish_memory().await;
         self.rebuild_file_models().await;
         Ok(())
+    }
+
+    /// The chosen model cannot answer: stop using it and tell the UI why, so setup
+    /// asks for a new choice instead of showing "ready".
+    async fn mark_unavailable(&self, message: String) {
+        *self.execution.write().await = ModelExecution::Unavailable(message.clone());
+        self.publish_memory().await;
+        self.emit(ModelEvent::ActiveModelStatus {
+            problem: Some(message),
+        })
+        .await;
     }
 
     async fn publish(&self) {
@@ -494,6 +546,7 @@ impl ModelActor {
                     self.saved.preferences.agent_settings.web_search_enabled,
                     std::sync::atomic::Ordering::Relaxed,
                 );
+                self.publish_memory().await;
                 if let Some(active) = self.saved.preferences.active.clone() {
                     let _ = self.activate(&active, false).await;
                 }
@@ -599,6 +652,7 @@ impl ModelActor {
             }
         }
         if rebuild_files {
+            self.publish_memory().await;
             self.rebuild_file_models().await;
         }
         Ok(())
@@ -661,11 +715,14 @@ impl ModelActor {
             harness: Box::new(harness),
             timeout: Duration::from_secs(connection.timeout_seconds),
         };
+        self.publish_memory().await;
         self.rebuild_file_models().await;
         self.emit(ModelEvent::PreferencesChanged(
             self.saved.preferences.clone(),
         ))
         .await;
+        self.emit(ModelEvent::ActiveModelStatus { problem: None })
+            .await;
         if persist {
             self.emit(ModelEvent::Notice(format!(
                 "{} is now the chat model. New model sessions start with fresh provider history.",
@@ -743,6 +800,7 @@ impl ModelActor {
         }
         self.persist(saved.clone()).await?;
         self.saved = saved;
+        self.publish_memory().await;
         self.rebuild_file_models().await;
         self.emit(ModelEvent::PreferencesChanged(
             self.saved.preferences.clone(),
@@ -798,6 +856,9 @@ impl ModelActor {
     ) -> Result<(), ModelError> {
         let mut connection = validate_connection(&connection)?;
         let secret = self.draft_secret(&connection, change.clone()).await?;
+        if matches!(change, CredentialChange::Replace(_)) {
+            sovra_providers::verify_key(&connection, &secret).await?;
+        }
         let old = self
             .saved
             .connections
@@ -878,6 +939,14 @@ impl ModelActor {
         merge_manual(&mut catalog.snapshot.models, &connection.manual_models);
         let snapshot = catalog.snapshot.clone();
         let cached = catalog.cached;
+        // Re-activate before announcing the saved key: the UI may send a waiting
+        // message the moment it sees the key, and that must reach a ready model.
+        if let Some(active) = self.saved.preferences.active.clone()
+            && active.connection_id == connection.id
+            && let Err(error) = self.activate(&active, false).await
+        {
+            self.mark_unavailable(error.0).await;
+        }
         self.publish().await;
         self.emit(ModelEvent::CatalogLoaded {
             connection_id: connection.id.clone(),
@@ -893,12 +962,6 @@ impl ModelActor {
             "Saved. Any key is kept safely in this computer's keychain.".into(),
         ))
         .await;
-        if let Some(active) = self.saved.preferences.active.clone()
-            && active.connection_id == connection.id
-            && let Err(error) = self.activate(&active, false).await
-        {
-            *self.execution.write().await = ModelExecution::Unavailable(error.0);
-        }
         self.refresh(&connection.id).await
     }
 
@@ -928,6 +991,7 @@ impl ModelActor {
                 "The active connection was removed. Choose another model in Models.".into(),
             );
         }
+        self.publish_memory().await;
         if let Some(job) = self.refreshes.remove(id) {
             job.abort();
         }
@@ -1011,14 +1075,14 @@ impl ModelActor {
                                 ModelExecution::Unavailable(_)
                             );
                             if self.find_model(&active).is_err() {
-                                let message = "The selected model is no longer advertised by this server. Choose another model or add its exact ID manually.".to_owned();
-                                *self.execution.write().await =
-                                    ModelExecution::Unavailable(message.clone());
-                                self.emit(ModelEvent::Error(message)).await;
+                                self.mark_unavailable(
+                                    "it is no longer offered by this service.".to_owned(),
+                                )
+                                .await;
                             } else if unavailable
                                 && let Err(error) = self.activate(&active, false).await
                             {
-                                self.emit(ModelEvent::Error(error.0)).await;
+                                self.mark_unavailable(error.0).await;
                             }
                         }
                     }
@@ -1117,6 +1181,7 @@ impl ModelActor {
                 }
             }
         }
+        self.publish_memory().await;
         self.rebuild_file_models().await;
     }
 }

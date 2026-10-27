@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 sovra-core = { workspace = true }
 surrealdb = { workspace = true }
 

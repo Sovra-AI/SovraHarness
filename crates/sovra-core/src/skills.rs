@@ -26,6 +26,7 @@ pub enum SkillAction {
     Agents,
     TeamChat,
     Artifacts,
+    Connections,
     Settings,
 }
 

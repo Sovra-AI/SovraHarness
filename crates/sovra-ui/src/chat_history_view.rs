@@ -1,22 +1,20 @@
 //! Conversation history section rendered inside the unified left sidebar:
-//! - Search bar (`Search chats...`) filtering by title, subtitle, and message body.
+//! - Search bar (`Search chats…`) filtering by title, subtitle, and message body.
 //! - Segmented `Chats | Scheduled` filter pills (`ChatFilterPills` radio group).
-//! - Scrollable conversation list partitioned into `Pinned` and recency buckets
-//!   (`Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`).
-//! - Per-row topic icon, AI-generated or user title / inline rename input, subtitle preview,
-//!   relative timestamp, and quick actions (`Pin`, `AI Title`, `Rename`, `Delete`).
-//! - Dedicated empty states for `Chats` and `Scheduled`.
+//! - Scrollable conversation list partitioned into `Pinned` and recency buckets.
+//! - Per-row topic icon, title / inline rename input, subtitle preview, relative timestamp,
+//!   and quick actions (`Pin`, `AI Title`, `Rename`, `Delete`).
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Selectable as _, Sizable as _,
-    button::ButtonVariants as _,
+    button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
+    Context, ElementId, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Role,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{
@@ -84,7 +82,7 @@ fn render_rail_search(
         .sovra_surface(Surface::Subtle, cx)
         .child(
             Icon::new(IconName::Search)
-                .small()
+                .xsmall()
                 .text_color(t.text_secondary),
         )
         .child(
@@ -92,6 +90,7 @@ fn render_rail_search(
                 Input::new(history_search_input)
                     .id("chat-history-search")
                     .aria_label("Search chats")
+                    .small()
                     .appearance(false)
                     .bordered(false),
             ),
@@ -103,10 +102,7 @@ fn render_filter_pills(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let theme = cx.theme();
-    let fg_active = theme.foreground;
-    let fg_inactive = t.text_secondary;
-
+    let (fg_active, fg_inactive) = (cx.theme().foreground, t.text_secondary);
     h_flex()
         .id("chat-filter-pills")
         .test_support()
@@ -115,27 +111,29 @@ fn render_filter_pills(
         .w_full()
         .flex_shrink_0()
         .p(t.space.hair)
-        .gap(t.space.compact)
-        .rounded(t.radius.pill)
-        .sovra_surface(Surface::Subtle, cx)
+        .gap(t.space.hair)
+        .rounded(t.radius.input)
+        .bg(t.subtle)
         .children(ChatHistoryFilter::ALL.into_iter().map(|filter| {
             let is_active = filter == active_filter;
-            let id = match filter {
-                ChatHistoryFilter::Chats => "chat-filter-chats",
-                ChatHistoryFilter::Scheduled => "chat-filter-scheduled",
+            let (id, tip) = match filter {
+                ChatHistoryFilter::Chats => ("chat-filter-chats", "Your conversations with Sovra"),
+                ChatHistoryFilter::Scheduled => (
+                    "chat-filter-scheduled",
+                    "Conversations started from Schedules",
+                ),
             };
             design::button(id, filter.label(), cx)
+                .tooltip(tip)
                 .ghost()
                 .selected(is_active)
-                .small()
+                .xsmall()
                 .min_h(t.layout.compact_control_height)
                 .flex_1()
                 .px(t.space.small)
-                .rounded(t.radius.pill)
+                .rounded(t.radius.small)
                 .text_color(if is_active { fg_active } else { fg_inactive })
-                .on_click(cx.listener(move |shell, _, _, cx| {
-                    shell.set_history_filter(filter, cx);
-                }))
+                .on_click(cx.listener(move |shell, _, _, cx| shell.set_history_filter(filter, cx)))
         }))
 }
 
@@ -148,14 +146,13 @@ fn render_thread_list(
 ) -> impl IntoElement + use<> {
     let searching = !state.history_search.trim().is_empty();
     let t = design::tokens(cx);
-
     let mut list = v_flex()
         .id("chat-history-list")
         .test_support()
         .flex_1()
         .min_h_0()
         .w_full()
-        .gap(t.space.compact)
+        .gap(t.space.hair)
         .overflow_y_scroll();
 
     let visible_non_draft: usize = grouped
@@ -170,50 +167,27 @@ fn render_thread_list(
     {
         return list.child(render_empty_rail(state.history_filter, searching, cx));
     }
-    if state.history_filter == ChatHistoryFilter::Scheduled && grouped.is_empty() {
-        return list.child(render_empty_rail(
-            ChatHistoryFilter::Scheduled,
-            searching,
-            cx,
-        ));
-    }
 
     let mut row_idx = 0usize;
-    if grouped
-        .pinned
-        .iter()
-        .any(|thread| !thread.is_untouched_draft())
-    {
-        list = list.child(render_section_label("Pinned", cx));
-        for thread in grouped
-            .pinned
+    let sections = std::iter::once(("Pinned", grouped.pinned.as_slice())).chain(
+        grouped
+            .groups
             .iter()
-            .filter(|thread| !thread.is_untouched_draft())
-        {
-            list = list.child(render_thread_row(
-                thread,
-                row_idx,
-                thread.id == state.session_id,
-                state.renaming_thread_id.as_deref() == Some(&thread.id),
-                reference_now,
-                rename_thread_input,
-                cx,
-            ));
-            row_idx += 1;
-        }
-    }
-
-    for (bucket, items) in &grouped.groups {
-        if items.iter().all(|thread| thread.is_untouched_draft()) {
+            .map(|(bucket, items)| (bucket.label(), items.as_slice())),
+    );
+    for (label, items) in sections {
+        if items.iter().all(|th| th.is_untouched_draft()) {
             continue;
         }
-        list = list.child(render_section_label(bucket.label(), cx));
-        for thread in items.iter().filter(|thread| !thread.is_untouched_draft()) {
+        list = list.child(render_section_label(label, cx));
+        for thread in items.iter().filter(|th| !th.is_untouched_draft()) {
+            let is_active = thread.id == state.session_id;
+            let is_renaming = state.renaming_thread_id.as_deref() == Some(&thread.id);
             list = list.child(render_thread_row(
                 thread,
                 row_idx,
-                thread.id == state.session_id,
-                state.renaming_thread_id.as_deref() == Some(&thread.id),
+                is_active,
+                is_renaming,
                 reference_now,
                 rename_thread_input,
                 cx,
@@ -225,19 +199,60 @@ fn render_thread_list(
     if visible_non_draft == 0 && state.history_filter == ChatHistoryFilter::Chats && !searching {
         list = list.child(render_empty_chats_hint(cx));
     }
-
     list
 }
 
 fn render_section_label(label: &str, cx: &Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     div()
-        .px(t.space.compact)
-        .pt(t.space.small)
-        .pb(t.space.compact)
+        .px(t.space.small)
+        .pt(t.space.snug)
+        .pb(t.space.hair)
         .sovra_text(TextRole::Caption, cx)
-        .text_color(t.text_secondary)
+        .text_color(cx.theme().muted_foreground)
         .child(label.to_owned())
+}
+
+fn topic_icon_name(thread: &ChatThread) -> IconName {
+    match infer_topic_icon(&thread.title, thread.kind) {
+        ConversationTopicIcon::Chat => IconName::MessageCircle,
+        ConversationTopicIcon::Code => IconName::Code,
+        ConversationTopicIcon::Market => IconName::TrendingUp,
+        ConversationTopicIcon::Housing => IconName::House,
+        ConversationTopicIcon::Schedule => IconName::Calendar,
+        ConversationTopicIcon::Search => IconName::Search,
+        ConversationTopicIcon::Document => IconName::FileText,
+    }
+}
+
+fn render_rename_row(
+    thread_id: String,
+    rename_thread_input: &Entity<InputState>,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    h_flex()
+        .w_full()
+        .p(t.space.compact)
+        .items_center()
+        .gap(t.space.compact)
+        .child(
+            div().flex_1().min_w_0().child(
+                Input::new(rename_thread_input)
+                    .id("chat-rename-input")
+                    .aria_label("Rename conversation")
+                    .small(),
+            ),
+        )
+        .child(
+            design::button("chat-rename-save", "Save", cx)
+                .small()
+                .min_h(t.layout.compact_control_height)
+                .px(t.space.compact)
+                .on_click(
+                    cx.listener(move |shell, _, _, cx| shell.commit_rename_thread(&thread_id, cx)),
+                ),
+        )
 }
 
 fn render_thread_row(
@@ -250,210 +265,218 @@ fn render_thread_row(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let theme = cx.theme();
-    let icon = match infer_topic_icon(&thread.title, thread.kind) {
-        ConversationTopicIcon::Chat => IconName::MessageCircle,
-        ConversationTopicIcon::Code => IconName::Code,
-        ConversationTopicIcon::Market => IconName::TrendingUp,
-        ConversationTopicIcon::Housing => IconName::House,
-        ConversationTopicIcon::Schedule => IconName::Calendar,
-        ConversationTopicIcon::Search => IconName::Search,
-        ConversationTopicIcon::Document => IconName::FileText,
-    };
-    let icon_color = if is_active {
-        cx.theme().link
-    } else {
-        t.text_secondary
-    };
+    let (link, muted) = (cx.theme().link, cx.theme().muted_foreground);
+    let icon_color = if is_active { link } else { t.text_secondary };
     let time_label = format_relative_time(thread.updated_at, reference_now);
-    let thread_id_select = thread.id.clone();
-    let thread_id_pin = thread.id.clone();
-    let thread_id_ai_title = thread.id.clone();
-    let thread_id_rename = thread.id.clone();
-    let thread_id_delete = thread.id.clone();
-    let thread_id_commit = thread.id.clone();
-    let is_pinned = thread.pinned;
-    let has_messages = !thread.messages.is_empty();
-
     let surface = if is_active {
         Surface::NavActive
     } else {
         Surface::Chrome
     };
+    let card = v_flex()
+        .id(("chat-thread-card", idx))
+        .w_full()
+        .sovra_surface(surface, cx);
 
-    let body = if is_renaming {
-        h_flex()
+    if is_renaming {
+        return card
+            .child(render_rename_row(
+                thread.id.clone(),
+                rename_thread_input,
+                cx,
+            ))
+            .children(is_active.then(|| render_thread_actions(thread, idx, cx)));
+    }
+
+    let thread_id = thread.id.clone();
+    let title_row = h_flex()
+        .w_full()
+        .items_center()
+        .justify_between()
+        .gap(t.space.compact)
+        .child(
+            div()
+                .id(("chat-thread-title", idx))
+                .aria_label(thread.title.clone())
+                .test_support()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .sovra_text(TextRole::Body, cx)
+                .child(thread.title.clone()),
+        )
+        .child(
+            h_flex()
+                .flex_shrink_0()
+                .items_center()
+                .gap(t.space.hair)
+                .children(
+                    thread
+                        .pinned
+                        .then(|| Icon::new(IconName::Pin).xsmall().text_color(link)),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(muted)
+                        .child(time_label),
+                ),
+        );
+    let preview = (!thread.last_message_preview.is_empty()).then(|| {
+        div()
             .w_full()
-            .items_center()
-            .gap(t.space.compact)
+            .truncate()
+            .sovra_text(TextRole::Caption, cx)
+            .text_color(t.text_secondary)
+            .child(thread.last_message_preview.clone())
+    });
+
+    card.child(
+        design::button(("chat-thread-row", idx), "", cx)
+            .accessibility_label(format!("Open conversation {}", thread.title))
+            .ghost()
+            .h_auto()
+            .min_h(t.layout.control_height)
+            .px(t.space.small)
+            .py(t.space.compact)
+            .w_full()
+            .items_start()
+            .gap(t.space.small)
             .child(
-                div().flex_1().min_w_0().child(
-                    Input::new(rename_thread_input)
-                        .id("chat-rename-input")
-                        .aria_label("Rename conversation")
-                        .small(),
+                div().pt(t.space.hair).flex_shrink_0().child(
+                    Icon::new(topic_icon_name(thread))
+                        .small()
+                        .text_color(icon_color),
                 ),
             )
             .child(
-                design::button("chat-rename-save", "Save", cx)
-                    .small()
-                    .min_h(t.layout.compact_control_height)
-                    .px(t.space.compact)
-                    .on_click(cx.listener(move |shell, _, _, cx| {
-                        shell.commit_rename_thread(&thread_id_commit, cx);
-                    })),
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(t.space.hair)
+                    .child(title_row)
+                    .children(preview),
             )
-            .into_any_element()
+            .on_click(cx.listener(move |shell, _, _, cx| shell.select_thread(&thread_id, cx))),
+    )
+    .children(is_active.then(|| render_thread_actions(thread, idx, cx)))
+}
+
+fn action_btn(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    tip: &'static str,
+    label: &'static str,
+    cx: &Context<Shell>,
+) -> Button {
+    let t = design::tokens(cx);
+    design::button(id, "", cx)
+        .icon(icon)
+        .tooltip(tip)
+        .accessibility_label(label)
+        .ghost()
+        .xsmall()
+        .min_h(t.layout.compact_control_height)
+        .px(t.space.compact)
+}
+
+fn render_thread_actions(
+    thread: &ChatThread,
+    idx: usize,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let (id_pin, id_ai, id_ren, id_del) = (
+        thread.id.clone(),
+        thread.id.clone(),
+        thread.id.clone(),
+        thread.id.clone(),
+    );
+    let (pin_tip, pin_lbl) = if thread.pinned {
+        ("Unpin from top", "Unpin conversation")
     } else {
-        v_flex()
-            .flex_1()
-            .min_w_0()
-            .gap(t.space.hair)
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .gap(t.space.compact)
-                    .child(
-                        div()
-                            .id(("chat-thread-title", idx))
-                            .aria_label(thread.title.clone())
-                            .test_support()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .sovra_text(TextRole::Body, cx)
-                            .child(thread.title.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .sovra_text(TextRole::Caption, cx)
-                            .text_color(theme.muted_foreground)
-                            .child(time_label),
-                    ),
-            )
-            .children((!thread.last_message_preview.is_empty()).then(|| {
-                div()
-                    .w_full()
-                    .truncate()
-                    .sovra_text(TextRole::Caption, cx)
-                    .text_color(t.text_secondary)
-                    .child(thread.last_message_preview.clone())
-            }))
-            .into_any_element()
+        ("Pin to top", "Pin conversation")
     };
 
-    v_flex()
-        .id(("chat-thread-card", idx))
+    h_flex()
         .w_full()
-        .p(t.space.compact)
-        .gap(t.space.compact)
-        .sovra_surface(surface, cx)
-        .child(if is_renaming {
-            body
-        } else {
-            design::button(("chat-thread-row", idx), "", cx)
-                .accessibility_label(format!("Open conversation {}", thread.title))
-                .ghost()
-                .h_auto()
-                .min_h(t.layout.control_height)
-                .p(t.space.compact)
-                .w_full()
-                .items_start()
-                .gap(t.space.compact)
-                .child(
-                    div()
-                        .pt(t.space.hair)
-                        .flex_shrink_0()
-                        .child(Icon::new(icon).small().text_color(icon_color)),
-                )
-                .child(body)
-                .on_click(cx.listener(move |shell, _, _, cx| {
-                    shell.select_thread(&thread_id_select, cx);
-                }))
-                .into_any_element()
-        })
-        .children(is_active.then(|| {
-            h_flex()
-                .w_full()
-                .justify_end()
-                .items_center()
-                .gap(t.space.compact)
-                .child(
-                    design::button(("chat-thread-pin", idx), "", cx)
-                        .icon(IconName::Pin)
-                        .tooltip(if is_pinned { "Unpin" } else { "Pin" })
-                        .accessibility_label(if is_pinned {
-                            "Unpin conversation"
-                        } else {
-                            "Pin conversation"
-                        })
-                        .ghost()
-                        .selected(is_pinned)
-                        .xsmall()
-                        .min_h(t.layout.compact_control_height)
-                        .px(t.space.compact)
-                        .on_click(cx.listener(move |shell, _, _, cx| {
-                            shell.toggle_thread_pin(&thread_id_pin, cx);
-                        })),
-                )
-                .children(has_messages.then(|| {
-                    design::button(("chat-thread-ai-title", idx), "", cx)
-                        .icon(IconName::Sparkles)
-                        .tooltip("Generate a title")
-                        .accessibility_label("Generate conversation title with AI")
-                        .ghost()
-                        .xsmall()
-                        .min_h(t.layout.compact_control_height)
-                        .px(t.space.compact)
-                        .on_click(cx.listener(move |shell, _, _, cx| {
-                            shell.regenerate_thread_title(&thread_id_ai_title, cx);
-                        }))
-                }))
-                .child(
-                    design::button(("chat-thread-rename", idx), "", cx)
-                        .icon(IconName::Pencil)
-                        .tooltip("Rename")
-                        .accessibility_label("Rename conversation")
-                        .ghost()
-                        .xsmall()
-                        .min_h(t.layout.compact_control_height)
-                        .px(t.space.compact)
-                        .on_click(cx.listener(move |shell, _, window, cx| {
-                            shell.begin_rename_thread(&thread_id_rename, window, cx);
-                        })),
-                )
-                .child(
-                    design::button(("chat-thread-delete", idx), "", cx)
-                        .icon(IconName::Trash)
-                        .tooltip("Delete")
-                        .accessibility_label("Delete conversation")
-                        .ghost()
-                        .xsmall()
-                        .min_h(t.layout.compact_control_height)
-                        .px(t.space.compact)
-                        .on_click(cx.listener(move |shell, _, _, cx| {
-                            shell.delete_thread(&thread_id_delete, cx);
-                        })),
-                )
+        .px(t.space.compact)
+        .pb(t.space.hair)
+        .justify_end()
+        .items_center()
+        .gap(t.space.hair)
+        .child(
+            action_btn(
+                ("chat-thread-pin", idx),
+                IconName::Pin,
+                pin_tip,
+                pin_lbl,
+                cx,
+            )
+            .selected(thread.pinned)
+            .on_click(cx.listener(move |shell, _, _, cx| shell.toggle_thread_pin(&id_pin, cx))),
+        )
+        .children((!thread.messages.is_empty()).then(|| {
+            action_btn(
+                ("chat-thread-ai-title", idx),
+                IconName::Sparkles,
+                "Generate a smart title",
+                "Generate conversation title with AI",
+                cx,
+            )
+            .on_click(cx.listener(move |shell, _, _, cx| shell.regenerate_thread_title(&id_ai, cx)))
         }))
+        .child(
+            action_btn(
+                ("chat-thread-rename", idx),
+                IconName::Pencil,
+                "Rename conversation",
+                "Rename conversation",
+                cx,
+            )
+            .on_click(cx.listener(move |shell, _, window, cx| {
+                shell.begin_rename_thread(&id_ren, window, cx);
+            })),
+        )
+        .child(
+            action_btn(
+                ("chat-thread-delete", idx),
+                IconName::Trash,
+                "Delete conversation",
+                "Delete conversation",
+                cx,
+            )
+            .on_click(cx.listener(move |shell, _, _, cx| shell.delete_thread(&id_del, cx))),
+        )
 }
 
 fn render_empty_chats_hint(cx: &Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    v_flex()
+    h_flex()
         .id("chat-history-empty-hint")
         .test_support()
         .w_full()
         .p(t.space.small)
-        .gap(t.space.compact)
-        .sovra_surface(Surface::Subtle, cx)
+        .gap(t.space.small)
+        .items_start()
+        .rounded(t.radius.input)
+        .bg(t.subtle)
+        .child(
+            div().pt(t.space.hair).flex_shrink_0().child(
+                Icon::new(IconName::MessageCircle)
+                    .xsmall()
+                    .text_color(t.text_secondary),
+            ),
+        )
         .child(
             div()
+                .flex_1()
+                .min_w_0()
                 .sovra_text(TextRole::Caption, cx)
-                .child("Start a conversation and it will stay within reach here."),
+                .text_color(t.text_secondary)
+                .child(
+                    "Start a conversation and it will stay saved here so you can return anytime.",
+                ),
         )
 }
 
@@ -481,7 +504,7 @@ fn render_empty_rail(
                 div()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
-                    .child("Try a different search."),
+                    .child("Try a different search word."),
             )
             .into_any_element();
     }
@@ -513,15 +536,15 @@ fn render_empty_rail(
                 div()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
-                    .child("Runs created by the scheduler will appear here."),
+                    .child("Runs started from Schedules will appear here."),
             )
             .child(
                 design::button("chat-scheduled-open-schedules-btn", "Open Schedules", cx)
                     .small()
                     .w_full()
-                    .on_click(cx.listener(|shell, _, _, cx| {
-                        shell.select_tab(NavTab::Schedules, cx);
-                    })),
+                    .on_click(
+                        cx.listener(|shell, _, _, cx| shell.select_tab(NavTab::Schedules, cx)),
+                    ),
             )
             .into_any_element(),
         ChatHistoryFilter::Chats => v_flex()
@@ -546,9 +569,7 @@ fn render_empty_rail(
                 design::primary_button("chat-empty-start-btn", "Start your first chat", cx)
                     .small()
                     .w_full()
-                    .on_click(cx.listener(|shell, _, window, cx| {
-                        shell.start_new_chat(window, cx);
-                    })),
+                    .on_click(cx.listener(|shell, _, window, cx| shell.start_new_chat(window, cx))),
             )
             .into_any_element(),
     }

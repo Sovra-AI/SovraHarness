@@ -99,6 +99,15 @@ impl Shell {
             SkillAction::Agents => self.select_tab(NavTab::MyAis, cx),
             SkillAction::TeamChat => self.ask_team(None, window, cx),
             SkillAction::Artifacts => self.select_tab(NavTab::Artifacts, cx),
+            SkillAction::Connections => {
+                self.select_tab(NavTab::Settings, cx);
+                self.models().update(cx, |models, cx| {
+                    models.send_connection(
+                        sovra_core::connections::ConnectionCommand::StartWhatsAppPairing,
+                        cx,
+                    );
+                });
+            }
             SkillAction::Settings => self.select_tab(NavTab::Settings, cx),
         }
     }
@@ -440,5 +449,69 @@ mod tests {
             })
             .unwrap();
         }
+    }
+
+    #[gpui_kit::test]
+    fn skills_library_filters_categories_shows_examples_and_auto_slugs_custom_skills(
+        cx: &mut TestAppContext,
+    ) {
+        let (client, commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let (shell, window) = open(cx, size(px(1280.), px(820.)));
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
+            assert!(window.find("sovra-skills-view").visible());
+            assert!(window.find("skills-how-it-works").visible());
+            assert!(window.find("skill-category-filters").visible());
+
+            // Filter by Web search category
+            window.click("skill-filter-research", cx);
+            window.render_frame(cx);
+            assert!(window.find(("skill-card", 13usize)).visible());
+
+            // Expand "How it works" instructions on the web-search card
+            window.click(("skill-details", 13usize), cx);
+            window.render_frame(cx);
+            assert!(window.find(("skill-instructions-box", 13usize)).visible());
+
+            // Click "Try in chat" on web-search -> switches to Chat and fills `/web-search `
+            window.click(("skill-use", 13usize), cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                "/web-search "
+            );
+
+            // Return to Skills and create a custom skill without typing a technical command slug
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
+            window.click("skill-create", cx);
+            window.render_frame(cx);
+            assert!(window.find("skill-editor").visible());
+            shell.update(cx, |shell, cx| {
+                shell.skill_library.set_editor_fields_for_test(
+                    "",
+                    "Sunday Family Dinner",
+                    "Plan a cozy 3-course Sunday family meal and grocery list.",
+                    "Ask about dietary needs, suggest 3 seasonal menus, and make a shopping list.",
+                    window,
+                    cx,
+                );
+            });
+            window.render_frame(cx);
+            window.click("skill-save", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+
+        let saved = std::iter::from_fn(|| commands.try_recv().ok()).find_map(|cmd| match cmd {
+            Command::Skills(sovra_core::skills::SkillCommand::Save(skill)) => Some(*skill),
+            _ => None,
+        });
+        let saved = saved.expect("saving a skill dispatches SkillCommand::Save");
+        assert_eq!(saved.name, "sunday-family-dinner");
+        assert_eq!(saved.title, "Sunday Family Dinner");
     }
 }

@@ -1,0 +1,3063 @@
+{
+  "suite": "synthetic-semantic-relevance-v1",
+  "model": "openai/text-embedding-3-small",
+  "status": "observations_complete",
+  "facts": {
+    "mira_tea": "Mira prefers rooibos tea.",
+    "leo_tea": "Leo prefers green tea.",
+    "mira_role": "Mira is the user's colleague on project Cedar.",
+    "cedar_day": "Project Cedar sends its newsletter on Tuesday.",
+    "cedar_frequency": "Project Cedar's newsletter is sent monthly.",
+    "birch_day": "Project Birch sends its newsletter on Friday.",
+    "food": "The user avoids peanuts because of an allergy.",
+    "seat": "The user prefers an aisle seat when flying.",
+    "city": "The user lives in Porto.",
+    "review": "Project Juniper requires two reviewers for changes.",
+    "language": "The user prefers replies in Spanish.",
+    "time": "The user works in the Asia/Dubai time zone.",
+    "dark": "The user prefers a dark interface theme.",
+    "tests": "Project Willow runs cargo nextest before merging changes.",
+    "meeting": "The user keeps Wednesday mornings free of meetings.",
+    "budget": "Project Maple has a monthly hosting budget of forty dollars.",
+    "inventory_0": "Synthetic inventory item 0 is stored on shelf 0.",
+    "inventory_1": "Synthetic inventory item 1 is stored on shelf 1.",
+    "inventory_2": "Synthetic inventory item 2 is stored on shelf 2.",
+    "inventory_3": "Synthetic inventory item 3 is stored on shelf 3.",
+    "inventory_4": "Synthetic inventory item 4 is stored on shelf 4.",
+    "inventory_5": "Synthetic inventory item 5 is stored on shelf 5.",
+    "inventory_6": "Synthetic inventory item 6 is stored on shelf 6.",
+    "inventory_7": "Synthetic inventory item 7 is stored on shelf 0.",
+    "inventory_8": "Synthetic inventory item 8 is stored on shelf 1.",
+    "inventory_9": "Synthetic inventory item 9 is stored on shelf 2.",
+    "inventory_10": "Synthetic inventory item 10 is stored on shelf 3.",
+    "inventory_11": "Synthetic inventory item 11 is stored on shelf 4.",
+    "inventory_12": "Synthetic inventory item 12 is stored on shelf 5.",
+    "inventory_13": "Synthetic inventory item 13 is stored on shelf 6.",
+    "inventory_14": "Synthetic inventory item 14 is stored on shelf 0.",
+    "inventory_15": "Synthetic inventory item 15 is stored on shelf 1.",
+    "inventory_16": "Synthetic inventory item 16 is stored on shelf 2.",
+    "inventory_17": "Synthetic inventory item 17 is stored on shelf 3.",
+    "inventory_18": "Synthetic inventory item 18 is stored on shelf 4.",
+    "inventory_19": "Synthetic inventory item 19 is stored on shelf 5.",
+    "inventory_20": "Synthetic inventory item 20 is stored on shelf 6.",
+    "inventory_21": "Synthetic inventory item 21 is stored on shelf 0.",
+    "inventory_22": "Synthetic inventory item 22 is stored on shelf 1.",
+    "inventory_23": "Synthetic inventory item 23 is stored on shelf 2.",
+    "inventory_24": "Synthetic inventory item 24 is stored on shelf 3.",
+    "inventory_25": "Synthetic inventory item 25 is stored on shelf 4.",
+    "inventory_26": "Synthetic inventory item 26 is stored on shelf 5.",
+    "inventory_27": "Synthetic inventory item 27 is stored on shelf 6.",
+    "inventory_28": "Synthetic inventory item 28 is stored on shelf 0.",
+    "inventory_29": "Synthetic inventory item 29 is stored on shelf 1.",
+    "inventory_30": "Synthetic inventory item 30 is stored on shelf 2.",
+    "inventory_31": "Synthetic inventory item 31 is stored on shelf 3.",
+    "inventory_32": "Synthetic inventory item 32 is stored on shelf 4.",
+    "inventory_33": "Synthetic inventory item 33 is stored on shelf 5.",
+    "inventory_34": "Synthetic inventory item 34 is stored on shelf 6.",
+    "inventory_35": "Synthetic inventory item 35 is stored on shelf 0.",
+    "inventory_36": "Synthetic inventory item 36 is stored on shelf 1.",
+    "inventory_37": "Synthetic inventory item 37 is stored on shelf 2.",
+    "inventory_38": "Synthetic inventory item 38 is stored on shelf 3.",
+    "inventory_39": "Synthetic inventory item 39 is stored on shelf 4.",
+    "inventory_40": "Synthetic inventory item 40 is stored on shelf 5.",
+    "inventory_41": "Synthetic inventory item 41 is stored on shelf 6.",
+    "inventory_42": "Synthetic inventory item 42 is stored on shelf 0.",
+    "inventory_43": "Synthetic inventory item 43 is stored on shelf 1.",
+    "inventory_44": "Synthetic inventory item 44 is stored on shelf 2.",
+    "inventory_45": "Synthetic inventory item 45 is stored on shelf 3.",
+    "inventory_46": "Synthetic inventory item 46 is stored on shelf 4.",
+    "inventory_47": "Synthetic inventory item 47 is stored on shelf 5.",
+    "inventory_48": "Synthetic inventory item 48 is stored on shelf 6.",
+    "inventory_49": "Synthetic inventory item 49 is stored on shelf 0.",
+    "inventory_50": "Synthetic inventory item 50 is stored on shelf 1.",
+    "inventory_51": "Synthetic inventory item 51 is stored on shelf 2.",
+    "inventory_52": "Synthetic inventory item 52 is stored on shelf 3.",
+    "inventory_53": "Synthetic inventory item 53 is stored on shelf 4.",
+    "inventory_54": "Synthetic inventory item 54 is stored on shelf 5.",
+    "inventory_55": "Synthetic inventory item 55 is stored on shelf 6.",
+    "inventory_56": "Synthetic inventory item 56 is stored on shelf 0.",
+    "inventory_57": "Synthetic inventory item 57 is stored on shelf 1.",
+    "inventory_58": "Synthetic inventory item 58 is stored on shelf 2.",
+    "inventory_59": "Synthetic inventory item 59 is stored on shelf 3.",
+    "inventory_60": "Synthetic inventory item 60 is stored on shelf 4.",
+    "inventory_61": "Synthetic inventory item 61 is stored on shelf 5.",
+    "inventory_62": "Synthetic inventory item 62 is stored on shelf 6.",
+    "inventory_63": "Synthetic inventory item 63 is stored on shelf 0.",
+    "inventory_64": "Synthetic inventory item 64 is stored on shelf 1.",
+    "inventory_65": "Synthetic inventory item 65 is stored on shelf 2.",
+    "inventory_66": "Synthetic inventory item 66 is stored on shelf 3.",
+    "inventory_67": "Synthetic inventory item 67 is stored on shelf 4.",
+    "inventory_68": "Synthetic inventory item 68 is stored on shelf 5.",
+    "inventory_69": "Synthetic inventory item 69 is stored on shelf 6.",
+    "inventory_70": "Synthetic inventory item 70 is stored on shelf 0.",
+    "inventory_71": "Synthetic inventory item 71 is stored on shelf 1.",
+    "inventory_72": "Synthetic inventory item 72 is stored on shelf 2.",
+    "inventory_73": "Synthetic inventory item 73 is stored on shelf 3.",
+    "inventory_74": "Synthetic inventory item 74 is stored on shelf 4.",
+    "inventory_75": "Synthetic inventory item 75 is stored on shelf 5.",
+    "inventory_76": "Synthetic inventory item 76 is stored on shelf 6.",
+    "inventory_77": "Synthetic inventory item 77 is stored on shelf 0.",
+    "inventory_78": "Synthetic inventory item 78 is stored on shelf 1.",
+    "inventory_79": "Synthetic inventory item 79 is stored on shelf 2.",
+    "inventory_80": "Synthetic inventory item 80 is stored on shelf 3.",
+    "inventory_81": "Synthetic inventory item 81 is stored on shelf 4.",
+    "inventory_82": "Synthetic inventory item 82 is stored on shelf 5.",
+    "inventory_83": "Synthetic inventory item 83 is stored on shelf 6.",
+    "inventory_84": "Synthetic inventory item 84 is stored on shelf 0.",
+    "inventory_85": "Synthetic inventory item 85 is stored on shelf 1.",
+    "inventory_86": "Synthetic inventory item 86 is stored on shelf 2.",
+    "inventory_87": "Synthetic inventory item 87 is stored on shelf 3.",
+    "inventory_88": "Synthetic inventory item 88 is stored on shelf 4.",
+    "inventory_89": "Synthetic inventory item 89 is stored on shelf 5.",
+    "inventory_90": "Synthetic inventory item 90 is stored on shelf 6.",
+    "inventory_91": "Synthetic inventory item 91 is stored on shelf 0.",
+    "inventory_92": "Synthetic inventory item 92 is stored on shelf 1.",
+    "inventory_93": "Synthetic inventory item 93 is stored on shelf 2.",
+    "inventory_94": "Synthetic inventory item 94 is stored on shelf 3.",
+    "inventory_95": "Synthetic inventory item 95 is stored on shelf 4.",
+    "inventory_96": "Synthetic inventory item 96 is stored on shelf 5.",
+    "inventory_97": "Synthetic inventory item 97 is stored on shelf 6.",
+    "inventory_98": "Synthetic inventory item 98 is stored on shelf 0.",
+    "inventory_99": "Synthetic inventory item 99 is stored on shelf 1."
+  },
+  "requests": [
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 67,
+      "cost": 1.34e-06,
+      "elapsed_ms": 2243
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 72,
+      "cost": 1.44e-06,
+      "elapsed_ms": 2248
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1759
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1816
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1650
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1720
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1753
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 2445
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1676
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1708
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1676
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1964
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1877
+    },
+    {
+      "purpose": "facts",
+      "input_count": 8,
+      "http_status": 200,
+      "prompt_tokens": 104,
+      "cost": 2.08e-06,
+      "elapsed_ms": 1824
+    },
+    {
+      "purpose": "facts",
+      "input_count": 4,
+      "http_status": 200,
+      "prompt_tokens": 52,
+      "cost": 1.04e-06,
+      "elapsed_ms": 1330
+    },
+    {
+      "purpose": "literal_tea",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 7,
+      "cost": 1.4e-07,
+      "elapsed_ms": 1021
+    },
+    {
+      "purpose": "paraphrase_tea",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 11,
+      "cost": 2.2e-07,
+      "elapsed_ms": 1113
+    },
+    {
+      "purpose": "wrong_person",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 7,
+      "cost": 1.4e-07,
+      "elapsed_ms": 915
+    },
+    {
+      "purpose": "literal_schedule",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 8,
+      "cost": 1.6e-07,
+      "elapsed_ms": 1120
+    },
+    {
+      "purpose": "paraphrase_frequency",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 9,
+      "cost": 1.8e-07,
+      "elapsed_ms": 1088
+    },
+    {
+      "purpose": "multi_fact",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 10,
+      "cost": 2e-07,
+      "elapsed_ms": 1957
+    },
+    {
+      "purpose": "wrong_project",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 7,
+      "cost": 1.4e-07,
+      "elapsed_ms": 1113
+    },
+    {
+      "purpose": "negative_attribute",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 8,
+      "cost": 1.6e-07,
+      "elapsed_ms": 1013
+    },
+    {
+      "purpose": "food_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 11,
+      "cost": 2.2e-07,
+      "elapsed_ms": 1183
+    },
+    {
+      "purpose": "seat_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 12,
+      "cost": 2.4e-07,
+      "elapsed_ms": 1143
+    },
+    {
+      "purpose": "city_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 6,
+      "cost": 1.2e-07,
+      "elapsed_ms": 1113
+    },
+    {
+      "purpose": "review_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 10,
+      "cost": 2e-07,
+      "elapsed_ms": 1110
+    },
+    {
+      "purpose": "language_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 9,
+      "cost": 1.8e-07,
+      "elapsed_ms": 988
+    },
+    {
+      "purpose": "time_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 8,
+      "cost": 1.6e-07,
+      "elapsed_ms": 1236
+    },
+    {
+      "purpose": "dark_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 10,
+      "cost": 2e-07,
+      "elapsed_ms": 1140
+    },
+    {
+      "purpose": "tests_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 9,
+      "cost": 1.8e-07,
+      "elapsed_ms": 2524
+    },
+    {
+      "purpose": "meeting_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 11,
+      "cost": 2.2e-07,
+      "elapsed_ms": 1222
+    },
+    {
+      "purpose": "budget_paraphrase",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 10,
+      "cost": 2e-07,
+      "elapsed_ms": 1214
+    },
+    {
+      "purpose": "spanish",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 11,
+      "cost": 2.2e-07,
+      "elapsed_ms": 1628
+    },
+    {
+      "purpose": "japanese",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 16,
+      "cost": 3.2e-07,
+      "elapsed_ms": 1146
+    },
+    {
+      "purpose": "arabic",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 22,
+      "cost": 4.4e-07,
+      "elapsed_ms": 1176
+    },
+    {
+      "purpose": "unrelated",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 6,
+      "cost": 1.2e-07,
+      "elapsed_ms": 1111
+    },
+    {
+      "purpose": "unsupported_history",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 9,
+      "cost": 1.8e-07,
+      "elapsed_ms": 1156
+    },
+    {
+      "purpose": "unsupported_reason",
+      "input_count": 1,
+      "http_status": 200,
+      "prompt_tokens": 10,
+      "cost": 2e-07,
+      "elapsed_ms": 1571
+    }
+  ],
+  "queries": [
+    {
+      "case": "literal_tea",
+      "question": "Which tea does Mira prefer?",
+      "relevant": [
+        "mira_tea"
+      ],
+      "ranking": [
+        {
+          "fact": "mira_tea",
+          "cosine": 0.6742866274425093
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.48273628076948555
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.3357535252933291
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.23011086246312823
+        },
+        {
+          "fact": "language",
+          "cosine": 0.19468203106589022
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.17714978603824227
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.16833682558830848
+        },
+        {
+          "fact": "city",
+          "cosine": 0.15943561820896657
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.15941683346691207
+        },
+        {
+          "fact": "food",
+          "cosine": 0.13142779237268043
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.11128941640659802
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.10460092189986814
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.10366226221314856
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.10230091929256035
+        },
+        {
+          "fact": "review",
+          "cosine": 0.09836762494266693
+        },
+        {
+          "fact": "time",
+          "cosine": 0.09073928467249995
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.05389834981518693
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.03465574874357358
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.032908377457676025
+        },
+        {
+          "fact": "inventory_10",
+          "cosine": 0.0304154909059422
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.02939920907654788
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.0292197277728796
+        },
+        {
+          "fact": "inventory_17",
+          "cosine": 0.02842509826685707
+        },
+        {
+          "fact": "inventory_2",
+          "cosine": 0.026599080770268985
+        }
+      ],
+      "relevant_scores": {
+        "mira_tea": 0.6742866274425093
+      }
+    },
+    {
+      "case": "paraphrase_tea",
+      "question": "What hot drink should I serve my colleague Mira?",
+      "relevant": [
+        "mira_tea",
+        "mira_role"
+      ],
+      "ranking": [
+        {
+          "fact": "mira_tea",
+          "cosine": 0.5210929359466202
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.37379540206732687
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.34323599819813094
+        },
+        {
+          "fact": "language",
+          "cosine": 0.20249123927347956
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.180183664275061
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.18004784417526926
+        },
+        {
+          "fact": "city",
+          "cosine": 0.17646579819694458
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.17029471702426635
+        },
+        {
+          "fact": "time",
+          "cosine": 0.14031614965055103
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.11813695920325105
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.1100819269056516
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.10721492504959801
+        },
+        {
+          "fact": "review",
+          "cosine": 0.10691306045183079
+        },
+        {
+          "fact": "food",
+          "cosine": 0.09982219900423811
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.09223247506091982
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.09202845228409652
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.07280513561849013
+        },
+        {
+          "fact": "inventory_40",
+          "cosine": 0.06218237259392791
+        },
+        {
+          "fact": "inventory_55",
+          "cosine": 0.060804329837485606
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.05981451117350637
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.05957446438870577
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.059529627650317746
+        },
+        {
+          "fact": "inventory_52",
+          "cosine": 0.05946212168609014
+        },
+        {
+          "fact": "inventory_45",
+          "cosine": 0.05936670229519369
+        }
+      ],
+      "relevant_scores": {
+        "mira_tea": 0.5210929359466202,
+        "mira_role": 0.37379540206732687
+      }
+    },
+    {
+      "case": "wrong_person",
+      "question": "What tea does Nadia like?",
+      "relevant": [],
+      "ranking": [
+        {
+          "fact": "mira_tea",
+          "cosine": 0.5450270472995528
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.4401390993172432
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.18183604757569008
+        },
+        {
+          "fact": "food",
+          "cosine": 0.17938047517499928
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.17049502247871787
+        },
+        {
+          "fact": "language",
+          "cosine": 0.16620519826799776
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.16505807787341714
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.13893941380441477
+        },
+        {
+          "fact": "city",
+          "cosine": 0.12881112165225017
+        },
+        {
+          "fact": "time",
+          "cosine": 0.1199710060699978
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.08588726175642777
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.0795149024902084
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.0779877771923525
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.06511075413607506
+        },
+        {
+          "fact": "review",
+          "cosine": 0.05846694775046722
+        },
+        {
+          "fact": "inventory_93",
+          "cosine": 0.05362136500023194
+        },
+        {
+          "fact": "inventory_73",
+          "cosine": 0.05236879730390796
+        },
+        {
+          "fact": "inventory_31",
+          "cosine": 0.04750399138856332
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.04651715505492577
+        },
+        {
+          "fact": "inventory_9",
+          "cosine": 0.04621889980861795
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.0459594008259329
+        },
+        {
+          "fact": "inventory_59",
+          "cosine": 0.043859575184105465
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.043334866764809035
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.04152003986999067
+        }
+      ],
+      "relevant_scores": {}
+    },
+    {
+      "case": "literal_schedule",
+      "question": "Which day does Cedar send its newsletter?",
+      "relevant": [
+        "cedar_day"
+      ],
+      "ranking": [
+        {
+          "fact": "cedar_day",
+          "cosine": 0.8028258112057467
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.795615618701206
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.6240973904605449
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.4085946865494118
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.32202155048900594
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.2845542907781491
+        },
+        {
+          "fact": "review",
+          "cosine": 0.23638294418562286
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.22865996689604826
+        },
+        {
+          "fact": "time",
+          "cosine": 0.1711230814090663
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.13769944221609318
+        },
+        {
+          "fact": "inventory_72",
+          "cosine": 0.13229951588295563
+        },
+        {
+          "fact": "inventory_27",
+          "cosine": 0.12571004752199552
+        },
+        {
+          "fact": "inventory_37",
+          "cosine": 0.1242736667362839
+        },
+        {
+          "fact": "inventory_52",
+          "cosine": 0.12286546173762608
+        },
+        {
+          "fact": "language",
+          "cosine": 0.1227887341412028
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.1220980105963926
+        },
+        {
+          "fact": "inventory_22",
+          "cosine": 0.12207387003911019
+        },
+        {
+          "fact": "inventory_82",
+          "cosine": 0.12164036771648389
+        },
+        {
+          "fact": "inventory_11",
+          "cosine": 0.12123094214692097
+        },
+        {
+          "fact": "inventory_29",
+          "cosine": 0.11978627956286349
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.11911069954863475
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.11862863968785417
+        },
+        {
+          "fact": "inventory_32",
+          "cosine": 0.11799821745642401
+        },
+        {
+          "fact": "inventory_12",
+          "cosine": 0.11745085386270573
+        }
+      ],
+      "relevant_scores": {
+        "cedar_day": 0.8028258112057467
+      }
+    },
+    {
+      "case": "paraphrase_frequency",
+      "question": "How often does the Cedar bulletin go out?",
+      "relevant": [
+        "cedar_frequency"
+      ],
+      "ranking": [
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.6974166080644162
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.6572963336341192
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.5306828873723143
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.32465876994031156
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.2849687753386907
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.27182900740515675
+        },
+        {
+          "fact": "review",
+          "cosine": 0.24256511290263758
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.20153479407976177
+        },
+        {
+          "fact": "inventory_72",
+          "cosine": 0.15439251476683308
+        },
+        {
+          "fact": "inventory_83",
+          "cosine": 0.14528159369087468
+        },
+        {
+          "fact": "inventory_82",
+          "cosine": 0.143264945656544
+        },
+        {
+          "fact": "inventory_37",
+          "cosine": 0.14259649350258893
+        },
+        {
+          "fact": "inventory_73",
+          "cosine": 0.14258973779940348
+        },
+        {
+          "fact": "inventory_87",
+          "cosine": 0.14243171271197858
+        },
+        {
+          "fact": "inventory_32",
+          "cosine": 0.1419968259976787
+        },
+        {
+          "fact": "inventory_86",
+          "cosine": 0.14148164715733852
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.13926431936837802
+        },
+        {
+          "fact": "inventory_27",
+          "cosine": 0.13847080409747659
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.13843349443111563
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.13662433486131942
+        },
+        {
+          "fact": "inventory_74",
+          "cosine": 0.13604257970499758
+        },
+        {
+          "fact": "inventory_67",
+          "cosine": 0.13473515834782707
+        },
+        {
+          "fact": "inventory_71",
+          "cosine": 0.1343286833328485
+        },
+        {
+          "fact": "inventory_78",
+          "cosine": 0.13392840663701194
+        }
+      ],
+      "relevant_scores": {
+        "cedar_frequency": 0.6974166080644162
+      }
+    },
+    {
+      "case": "multi_fact",
+      "question": "When and how frequently is Cedar's newsletter delivered?",
+      "relevant": [
+        "cedar_day",
+        "cedar_frequency"
+      ],
+      "ranking": [
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.8034520421979969
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.7285582066936054
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.5551269424302077
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.3686400349661613
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.2916068857536319
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.27925577247165906
+        },
+        {
+          "fact": "review",
+          "cosine": 0.24116947786624507
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.21788067407764616
+        },
+        {
+          "fact": "time",
+          "cosine": 0.15346782635813003
+        },
+        {
+          "fact": "inventory_72",
+          "cosine": 0.1504323490423064
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.13952044575155206
+        },
+        {
+          "fact": "inventory_52",
+          "cosine": 0.13913159754238535
+        },
+        {
+          "fact": "inventory_37",
+          "cosine": 0.13722052302572818
+        },
+        {
+          "fact": "language",
+          "cosine": 0.1361038574913105
+        },
+        {
+          "fact": "inventory_82",
+          "cosine": 0.13575547666247895
+        },
+        {
+          "fact": "inventory_27",
+          "cosine": 0.13213668732222966
+        },
+        {
+          "fact": "inventory_32",
+          "cosine": 0.1320882388946065
+        },
+        {
+          "fact": "inventory_22",
+          "cosine": 0.13114266481242806
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.1309441633895862
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.12925384245815305
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.12877709298022735
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.12792216437868517
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.1275529866809033
+        },
+        {
+          "fact": "inventory_25",
+          "cosine": 0.1274190043247424
+        }
+      ],
+      "relevant_scores": {
+        "cedar_frequency": 0.8034520421979969,
+        "cedar_day": 0.7285582066936054
+      }
+    },
+    {
+      "case": "wrong_project",
+      "question": "When is Aspen's newsletter sent?",
+      "relevant": [],
+      "ranking": [
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.5926532432962549
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.5605109253151951
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.5568097261099789
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.28659508498204617
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.26618174850540754
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.23963062414330383
+        },
+        {
+          "fact": "review",
+          "cosine": 0.223233392472064
+        },
+        {
+          "fact": "language",
+          "cosine": 0.19393789984751497
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.18508163791251067
+        },
+        {
+          "fact": "time",
+          "cosine": 0.18110147498448345
+        },
+        {
+          "fact": "food",
+          "cosine": 0.13518299165310269
+        },
+        {
+          "fact": "inventory_18",
+          "cosine": 0.12823997001666593
+        },
+        {
+          "fact": "inventory_72",
+          "cosine": 0.12536910909992116
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.12391275143414193
+        },
+        {
+          "fact": "inventory_52",
+          "cosine": 0.1232063021639292
+        },
+        {
+          "fact": "inventory_74",
+          "cosine": 0.12141089628282445
+        },
+        {
+          "fact": "inventory_4",
+          "cosine": 0.12103450034616366
+        },
+        {
+          "fact": "inventory_11",
+          "cosine": 0.12092136941536501
+        },
+        {
+          "fact": "inventory_46",
+          "cosine": 0.12062815933827692
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.12061816639598733
+        },
+        {
+          "fact": "inventory_48",
+          "cosine": 0.12045256377714213
+        },
+        {
+          "fact": "inventory_22",
+          "cosine": 0.11982038175838428
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.11968028557988172
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.11835509494533673
+        }
+      ],
+      "relevant_scores": {}
+    },
+    {
+      "case": "negative_attribute",
+      "question": "What color is Mira's bicycle?",
+      "relevant": [],
+      "ranking": [
+        {
+          "fact": "mira_role",
+          "cosine": 0.3065416462205088
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.28079531104517746
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.24607828156061065
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.2323688329276745
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.18514344710537986
+        },
+        {
+          "fact": "city",
+          "cosine": 0.14384773186300603
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.1377477025963089
+        },
+        {
+          "fact": "language",
+          "cosine": 0.128729576955114
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.11806496228844758
+        },
+        {
+          "fact": "inventory_94",
+          "cosine": 0.10136988477073888
+        },
+        {
+          "fact": "inventory_88",
+          "cosine": 0.10081136033623825
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.1006972203329169
+        },
+        {
+          "fact": "inventory_59",
+          "cosine": 0.09991253307500886
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.09974360127383393
+        },
+        {
+          "fact": "inventory_46",
+          "cosine": 0.09969460720488972
+        },
+        {
+          "fact": "inventory_83",
+          "cosine": 0.09964217523160876
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.09875879645715516
+        },
+        {
+          "fact": "inventory_9",
+          "cosine": 0.09874711480956662
+        },
+        {
+          "fact": "inventory_45",
+          "cosine": 0.09782186910102349
+        },
+        {
+          "fact": "inventory_89",
+          "cosine": 0.09752488552084036
+        },
+        {
+          "fact": "inventory_40",
+          "cosine": 0.09729691300417327
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.0970308011415752
+        },
+        {
+          "fact": "inventory_60",
+          "cosine": 0.0966882300793352
+        },
+        {
+          "fact": "inventory_93",
+          "cosine": 0.09636801941965123
+        }
+      ],
+      "relevant_scores": {}
+    },
+    {
+      "case": "food_paraphrase",
+      "question": "Which ingredient must you leave out when cooking for me?",
+      "relevant": [
+        "food"
+      ],
+      "ranking": [
+        {
+          "fact": "food",
+          "cosine": 0.3422998463238467
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.2672386407410336
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.18183937611209508
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.16424949959779336
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.16181196605790726
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.15727479606747174
+        },
+        {
+          "fact": "inventory_31",
+          "cosine": 0.15557460236787107
+        },
+        {
+          "fact": "inventory_8",
+          "cosine": 0.15417485621016314
+        },
+        {
+          "fact": "inventory_38",
+          "cosine": 0.15364970169503636
+        },
+        {
+          "fact": "inventory_97",
+          "cosine": 0.15303875538339332
+        },
+        {
+          "fact": "inventory_98",
+          "cosine": 0.15262969543136032
+        },
+        {
+          "fact": "inventory_96",
+          "cosine": 0.1523774474792889
+        },
+        {
+          "fact": "inventory_45",
+          "cosine": 0.1523448983042927
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.15200272954228208
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.15091174510800398
+        },
+        {
+          "fact": "inventory_26",
+          "cosine": 0.1508162196269643
+        },
+        {
+          "fact": "inventory_10",
+          "cosine": 0.15003381130617002
+        },
+        {
+          "fact": "inventory_35",
+          "cosine": 0.14951250003928745
+        },
+        {
+          "fact": "inventory_99",
+          "cosine": 0.14922588960299268
+        },
+        {
+          "fact": "inventory_46",
+          "cosine": 0.1487057741030881
+        },
+        {
+          "fact": "inventory_18",
+          "cosine": 0.14842440606274132
+        },
+        {
+          "fact": "inventory_40",
+          "cosine": 0.1483763858256341
+        },
+        {
+          "fact": "inventory_15",
+          "cosine": 0.14606349988041345
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.1459280334841788
+        }
+      ],
+      "relevant_scores": {
+        "food": 0.3422998463238467
+      }
+    },
+    {
+      "case": "seat_paraphrase",
+      "question": "Should you book me a window or aisle on the plane?",
+      "relevant": [
+        "seat"
+      ],
+      "ranking": [
+        {
+          "fact": "seat",
+          "cosine": 0.573556436676031
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.19620743054816964
+        },
+        {
+          "fact": "inventory_8",
+          "cosine": 0.18486204566206596
+        },
+        {
+          "fact": "inventory_22",
+          "cosine": 0.17922050190527153
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.17644658774111513
+        },
+        {
+          "fact": "inventory_51",
+          "cosine": 0.17529415876347224
+        },
+        {
+          "fact": "inventory_78",
+          "cosine": 0.17479337289843955
+        },
+        {
+          "fact": "inventory_58",
+          "cosine": 0.17101356207374283
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.17065306796282806
+        },
+        {
+          "fact": "inventory_2",
+          "cosine": 0.16850663805281582
+        },
+        {
+          "fact": "inventory_85",
+          "cosine": 0.16736879696314125
+        },
+        {
+          "fact": "inventory_72",
+          "cosine": 0.16727624125517518
+        },
+        {
+          "fact": "inventory_81",
+          "cosine": 0.16715351606714174
+        },
+        {
+          "fact": "inventory_43",
+          "cosine": 0.1667424864321272
+        },
+        {
+          "fact": "inventory_32",
+          "cosine": 0.1666604452081711
+        },
+        {
+          "fact": "inventory_92",
+          "cosine": 0.1665240392885079
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.1650649748371746
+        },
+        {
+          "fact": "inventory_18",
+          "cosine": 0.1636567816945049
+        },
+        {
+          "fact": "inventory_44",
+          "cosine": 0.1634948811562974
+        },
+        {
+          "fact": "inventory_57",
+          "cosine": 0.16298753805137897
+        },
+        {
+          "fact": "inventory_1",
+          "cosine": 0.16281879620404294
+        },
+        {
+          "fact": "inventory_16",
+          "cosine": 0.16244153540207884
+        },
+        {
+          "fact": "inventory_79",
+          "cosine": 0.1624071422134427
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.16201792881353183
+        }
+      ],
+      "relevant_scores": {
+        "seat": 0.573556436676031
+      }
+    },
+    {
+      "case": "city_paraphrase",
+      "question": "Which city is my home?",
+      "relevant": [
+        "city"
+      ],
+      "ranking": [
+        {
+          "fact": "city",
+          "cosine": 0.3142346442552615
+        },
+        {
+          "fact": "time",
+          "cosine": 0.2170912047033056
+        },
+        {
+          "fact": "language",
+          "cosine": 0.1597858380895919
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.129471290883026
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.10219598334259551
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.09480870946890739
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.08169451287334757
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.08154485132250186
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.07539075187362494
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.061914902335349326
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.05570729847754351
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.05543870763938996
+        },
+        {
+          "fact": "inventory_15",
+          "cosine": 0.053485229479860764
+        },
+        {
+          "fact": "inventory_19",
+          "cosine": 0.05258886398272143
+        },
+        {
+          "fact": "inventory_5",
+          "cosine": 0.05236381208747395
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.05157142787231256
+        },
+        {
+          "fact": "inventory_1",
+          "cosine": 0.051117629787999073
+        },
+        {
+          "fact": "inventory_29",
+          "cosine": 0.04998558181592896
+        },
+        {
+          "fact": "inventory_71",
+          "cosine": 0.049698022783777863
+        },
+        {
+          "fact": "inventory_12",
+          "cosine": 0.04905123680141372
+        },
+        {
+          "fact": "inventory_89",
+          "cosine": 0.04894111820353755
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.04883214441375647
+        },
+        {
+          "fact": "inventory_8",
+          "cosine": 0.048829158960384825
+        },
+        {
+          "fact": "inventory_56",
+          "cosine": 0.04867910138386001
+        }
+      ],
+      "relevant_scores": {
+        "city": 0.3142346442552615
+      }
+    },
+    {
+      "case": "review_paraphrase",
+      "question": "How many people must approve a Juniper change?",
+      "relevant": [
+        "review"
+      ],
+      "ranking": [
+        {
+          "fact": "review",
+          "cosine": 0.6769455401371087
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.2871658026671828
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.2451257140674662
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.224983302997716
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.22282823329257587
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.21336873685360566
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.18452498753592447
+        },
+        {
+          "fact": "inventory_41",
+          "cosine": 0.1834737387175904
+        },
+        {
+          "fact": "inventory_32",
+          "cosine": 0.1808856428766201
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.1803454281797422
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.17939934417127218
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.1782286763878043
+        },
+        {
+          "fact": "inventory_86",
+          "cosine": 0.1755621478124489
+        },
+        {
+          "fact": "inventory_69",
+          "cosine": 0.17447827299410093
+        },
+        {
+          "fact": "inventory_40",
+          "cosine": 0.17438389619016625
+        },
+        {
+          "fact": "inventory_20",
+          "cosine": 0.17428705784591364
+        },
+        {
+          "fact": "inventory_35",
+          "cosine": 0.17229837366173706
+        },
+        {
+          "fact": "inventory_31",
+          "cosine": 0.1718129395238918
+        },
+        {
+          "fact": "inventory_46",
+          "cosine": 0.17067298654200427
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.17015824211253489
+        },
+        {
+          "fact": "inventory_10",
+          "cosine": 0.17014122747140226
+        },
+        {
+          "fact": "inventory_66",
+          "cosine": 0.1698750275155316
+        },
+        {
+          "fact": "inventory_37",
+          "cosine": 0.16981673089231605
+        },
+        {
+          "fact": "inventory_61",
+          "cosine": 0.1685441489935863
+        }
+      ],
+      "relevant_scores": {
+        "review": 0.6769455401371087
+      }
+    },
+    {
+      "case": "language_paraphrase",
+      "question": "What language should you use when answering me?",
+      "relevant": [
+        "language"
+      ],
+      "ranking": [
+        {
+          "fact": "language",
+          "cosine": 0.4708108446437014
+        },
+        {
+          "fact": "time",
+          "cosine": 0.2659784062564987
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.20021199746156818
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.16541017092035248
+        },
+        {
+          "fact": "city",
+          "cosine": 0.15393853064786506
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.13548054406545296
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.13463321116984336
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.12991332551297569
+        },
+        {
+          "fact": "review",
+          "cosine": 0.12441044932379247
+        },
+        {
+          "fact": "food",
+          "cosine": 0.1178861606055265
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.11222163465840379
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.11125980769817609
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.10626693472991879
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.10178092974168419
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.09232974605139987
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.07219471067091339
+        },
+        {
+          "fact": "inventory_59",
+          "cosine": 0.06144972903003119
+        },
+        {
+          "fact": "inventory_99",
+          "cosine": 0.060678798572293614
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.06028866739243965
+        },
+        {
+          "fact": "inventory_11",
+          "cosine": 0.0584516539051206
+        },
+        {
+          "fact": "inventory_73",
+          "cosine": 0.058067736702967984
+        },
+        {
+          "fact": "inventory_17",
+          "cosine": 0.057709412784154056
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.056232236981704195
+        },
+        {
+          "fact": "inventory_57",
+          "cosine": 0.05608645959784827
+        }
+      ],
+      "relevant_scores": {
+        "language": 0.4708108446437014
+      }
+    },
+    {
+      "case": "time_paraphrase",
+      "question": "What time zone should my calendar use?",
+      "relevant": [
+        "time"
+      ],
+      "ranking": [
+        {
+          "fact": "time",
+          "cosine": 0.47546944169885164
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.35375157752496955
+        },
+        {
+          "fact": "language",
+          "cosine": 0.1925442639563558
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.1904775737032896
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.17815422897849298
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.17043191067737368
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.1482696213984429
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.14747324631226139
+        },
+        {
+          "fact": "city",
+          "cosine": 0.13766857299477628
+        },
+        {
+          "fact": "review",
+          "cosine": 0.13196930765840464
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.12484037396211521
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.12048789860573196
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.1087065812924318
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.0954129438805481
+        },
+        {
+          "fact": "inventory_29",
+          "cosine": 0.09081304346827698
+        },
+        {
+          "fact": "inventory_28",
+          "cosine": 0.08740329134775676
+        },
+        {
+          "fact": "inventory_18",
+          "cosine": 0.08619029488266244
+        },
+        {
+          "fact": "inventory_8",
+          "cosine": 0.08537336474682396
+        },
+        {
+          "fact": "inventory_11",
+          "cosine": 0.08424043647021305
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.0829919751682402
+        },
+        {
+          "fact": "inventory_72",
+          "cosine": 0.08277239248235758
+        },
+        {
+          "fact": "inventory_22",
+          "cosine": 0.08225452888701536
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.08180477965745268
+        },
+        {
+          "fact": "inventory_7",
+          "cosine": 0.08122052318776017
+        }
+      ],
+      "relevant_scores": {
+        "time": 0.47546944169885164
+      }
+    },
+    {
+      "case": "dark_paraphrase",
+      "question": "Would I rather have light or dark app colors?",
+      "relevant": [
+        "dark"
+      ],
+      "ranking": [
+        {
+          "fact": "dark",
+          "cosine": 0.613107916639169
+        },
+        {
+          "fact": "language",
+          "cosine": 0.24690957798902355
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.24276594244407376
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.23086975107099456
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.16707404325173633
+        },
+        {
+          "fact": "time",
+          "cosine": 0.13171368664718935
+        },
+        {
+          "fact": "city",
+          "cosine": 0.1082238598576788
+        },
+        {
+          "fact": "review",
+          "cosine": 0.10578560848674551
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.10292423111391887
+        },
+        {
+          "fact": "food",
+          "cosine": 0.1016937493013195
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.09015279065309033
+        },
+        {
+          "fact": "inventory_1",
+          "cosine": 0.07859136155498748
+        },
+        {
+          "fact": "inventory_16",
+          "cosine": 0.07772336351252321
+        },
+        {
+          "fact": "inventory_2",
+          "cosine": 0.07365545240082225
+        },
+        {
+          "fact": "inventory_22",
+          "cosine": 0.0726433444672541
+        },
+        {
+          "fact": "inventory_15",
+          "cosine": 0.07247445771772715
+        },
+        {
+          "fact": "inventory_92",
+          "cosine": 0.0724287435744156
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.07229964174805936
+        },
+        {
+          "fact": "inventory_50",
+          "cosine": 0.07226653757762397
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.07219454867713976
+        },
+        {
+          "fact": "inventory_96",
+          "cosine": 0.07056780282200138
+        },
+        {
+          "fact": "inventory_20",
+          "cosine": 0.070553498764481
+        },
+        {
+          "fact": "inventory_8",
+          "cosine": 0.06846705457707107
+        },
+        {
+          "fact": "inventory_99",
+          "cosine": 0.06836634665649818
+        }
+      ],
+      "relevant_scores": {
+        "dark": 0.613107916639169
+      }
+    },
+    {
+      "case": "tests_paraphrase",
+      "question": "What check must pass before a Willow merge?",
+      "relevant": [
+        "tests"
+      ],
+      "ranking": [
+        {
+          "fact": "tests",
+          "cosine": 0.5800629004505277
+        },
+        {
+          "fact": "review",
+          "cosine": 0.3796644935526465
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.2917344516392432
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.22771410735579553
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.2174316262735269
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.20096115852991828
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.20086532572498172
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.17137118089694475
+        },
+        {
+          "fact": "inventory_26",
+          "cosine": 0.13350929435874978
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.1295676485037241
+        },
+        {
+          "fact": "inventory_52",
+          "cosine": 0.126940861938545
+        },
+        {
+          "fact": "inventory_66",
+          "cosine": 0.1259483433681453
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.12579333520929398
+        },
+        {
+          "fact": "inventory_65",
+          "cosine": 0.12549490805997476
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.12497351059348541
+        },
+        {
+          "fact": "inventory_31",
+          "cosine": 0.12344517942030604
+        },
+        {
+          "fact": "inventory_50",
+          "cosine": 0.12282070548617514
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.12268198293499931
+        },
+        {
+          "fact": "inventory_27",
+          "cosine": 0.12136345791175089
+        },
+        {
+          "fact": "inventory_37",
+          "cosine": 0.12134844252105172
+        },
+        {
+          "fact": "inventory_51",
+          "cosine": 0.12073856047842373
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.12047277922740278
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.11982130138693534
+        },
+        {
+          "fact": "inventory_25",
+          "cosine": 0.11966924994951006
+        }
+      ],
+      "relevant_scores": {
+        "tests": 0.5800629004505277
+      }
+    },
+    {
+      "case": "meeting_paraphrase",
+      "question": "When should you avoid scheduling a morning call for me?",
+      "relevant": [
+        "meeting"
+      ],
+      "ranking": [
+        {
+          "fact": "meeting",
+          "cosine": 0.42788496617170424
+        },
+        {
+          "fact": "time",
+          "cosine": 0.24630404176879428
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.1864031454970894
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.18137283155315234
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.16809184846238157
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.15296932092709803
+        },
+        {
+          "fact": "review",
+          "cosine": 0.13719101107094323
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.1289551608027596
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.12767340507991798
+        },
+        {
+          "fact": "food",
+          "cosine": 0.12095191429612558
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.11843538318443651
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.11625134958801578
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.10331700637881297
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.09529307709097953
+        },
+        {
+          "fact": "language",
+          "cosine": 0.0926730770064314
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.08710180048932176
+        },
+        {
+          "fact": "inventory_60",
+          "cosine": 0.08312834518003441
+        },
+        {
+          "fact": "inventory_31",
+          "cosine": 0.08279196484671035
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.07838146443008444
+        },
+        {
+          "fact": "inventory_90",
+          "cosine": 0.07615357162179637
+        },
+        {
+          "fact": "inventory_78",
+          "cosine": 0.07471054774876336
+        },
+        {
+          "fact": "inventory_8",
+          "cosine": 0.07405838881945127
+        },
+        {
+          "fact": "inventory_80",
+          "cosine": 0.07398488442532145
+        },
+        {
+          "fact": "inventory_10",
+          "cosine": 0.07268164255531394
+        }
+      ],
+      "relevant_scores": {
+        "meeting": 0.42788496617170424
+      }
+    },
+    {
+      "case": "budget_paraphrase",
+      "question": "What's Maple's monthly limit for server costs?",
+      "relevant": [
+        "budget"
+      ],
+      "ranking": [
+        {
+          "fact": "budget",
+          "cosine": 0.7354367107885917
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.3099469810861767
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.23138616242885146
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.22249686778172
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.2216465436149634
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.21350195633198063
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.19915863226955474
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.19863523019339263
+        },
+        {
+          "fact": "inventory_32",
+          "cosine": 0.18761115505450449
+        },
+        {
+          "fact": "inventory_50",
+          "cosine": 0.18521753075092953
+        },
+        {
+          "fact": "inventory_29",
+          "cosine": 0.18055943237105437
+        },
+        {
+          "fact": "inventory_40",
+          "cosine": 0.17081061537062256
+        },
+        {
+          "fact": "inventory_60",
+          "cosine": 0.17078633101942778
+        },
+        {
+          "fact": "inventory_96",
+          "cosine": 0.17054433559651436
+        },
+        {
+          "fact": "inventory_25",
+          "cosine": 0.16916830191811946
+        },
+        {
+          "fact": "inventory_72",
+          "cosine": 0.16836210980517713
+        },
+        {
+          "fact": "inventory_80",
+          "cosine": 0.16594110996857372
+        },
+        {
+          "fact": "inventory_22",
+          "cosine": 0.1656007147844988
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.16519137086736335
+        },
+        {
+          "fact": "inventory_75",
+          "cosine": 0.164923050428004
+        },
+        {
+          "fact": "inventory_26",
+          "cosine": 0.16460281304735108
+        },
+        {
+          "fact": "inventory_99",
+          "cosine": 0.16415312733878754
+        },
+        {
+          "fact": "inventory_64",
+          "cosine": 0.16414286977194012
+        },
+        {
+          "fact": "inventory_19",
+          "cosine": 0.1622688080296414
+        }
+      ],
+      "relevant_scores": {
+        "budget": 0.7354367107885917
+      }
+    },
+    {
+      "case": "spanish",
+      "question": "¿Qué infusión prefiere Mira?",
+      "relevant": [
+        "mira_tea"
+      ],
+      "ranking": [
+        {
+          "fact": "mira_tea",
+          "cosine": 0.5871464057122081
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.3288098131927965
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.3277191871648825
+        },
+        {
+          "fact": "language",
+          "cosine": 0.27587437584257324
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.20324625564845564
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.15979108533632094
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.13112734474946688
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.11749998648912627
+        },
+        {
+          "fact": "food",
+          "cosine": 0.11263580815606497
+        },
+        {
+          "fact": "city",
+          "cosine": 0.1060543736137941
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.07104145488163402
+        },
+        {
+          "fact": "inventory_59",
+          "cosine": 0.061557823561463346
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.05900968564494114
+        },
+        {
+          "fact": "inventory_94",
+          "cosine": 0.05850759142974981
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.055061642852796265
+        },
+        {
+          "fact": "inventory_24",
+          "cosine": 0.05468309267252573
+        },
+        {
+          "fact": "inventory_39",
+          "cosine": 0.05354412303460387
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.052213062559940716
+        },
+        {
+          "fact": "inventory_45",
+          "cosine": 0.05072320771854893
+        },
+        {
+          "fact": "inventory_73",
+          "cosine": 0.048351143226423414
+        },
+        {
+          "fact": "inventory_40",
+          "cosine": 0.04711144697825579
+        },
+        {
+          "fact": "inventory_31",
+          "cosine": 0.04529028218324626
+        },
+        {
+          "fact": "inventory_17",
+          "cosine": 0.0441014921630117
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.04386835386255579
+        }
+      ],
+      "relevant_scores": {
+        "mira_tea": 0.5871464057122081
+      }
+    },
+    {
+      "case": "japanese",
+      "question": "私が住んでいる都市はどこですか？",
+      "relevant": [
+        "city"
+      ],
+      "ranking": [
+        {
+          "fact": "city",
+          "cosine": 0.31956995528160803
+        },
+        {
+          "fact": "time",
+          "cosine": 0.12424950113490181
+        },
+        {
+          "fact": "language",
+          "cosine": 0.1043347012990387
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.09314120149996559
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.07718048912002397
+        },
+        {
+          "fact": "inventory_80",
+          "cosine": 0.06861887802451694
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.06794467934805276
+        },
+        {
+          "fact": "inventory_17",
+          "cosine": 0.06625214585666016
+        },
+        {
+          "fact": "inventory_10",
+          "cosine": 0.06267938848311622
+        },
+        {
+          "fact": "inventory_94",
+          "cosine": 0.06135051097975218
+        },
+        {
+          "fact": "inventory_87",
+          "cosine": 0.06060962470008731
+        },
+        {
+          "fact": "inventory_79",
+          "cosine": 0.06008712115072572
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.05990811719446613
+        },
+        {
+          "fact": "food",
+          "cosine": 0.05970951339294844
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.059014966778017756
+        },
+        {
+          "fact": "inventory_89",
+          "cosine": 0.058681201839348565
+        },
+        {
+          "fact": "inventory_59",
+          "cosine": 0.05836389291515329
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.05801435780095697
+        },
+        {
+          "fact": "inventory_9",
+          "cosine": 0.057422983843591825
+        },
+        {
+          "fact": "inventory_73",
+          "cosine": 0.0572982434019729
+        },
+        {
+          "fact": "inventory_55",
+          "cosine": 0.05683072554025622
+        },
+        {
+          "fact": "inventory_18",
+          "cosine": 0.056667519680302106
+        },
+        {
+          "fact": "inventory_54",
+          "cosine": 0.056649326320152786
+        },
+        {
+          "fact": "inventory_2",
+          "cosine": 0.05627214680463135
+        }
+      ],
+      "relevant_scores": {
+        "city": 0.31956995528160803
+      }
+    },
+    {
+      "case": "arabic",
+      "question": "ما المنطقة الزمنية التي أعمل بها؟",
+      "relevant": [
+        "time"
+      ],
+      "ranking": [
+        {
+          "fact": "time",
+          "cosine": 0.4228525663742231
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.22079600832460697
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.2085839036618942
+        },
+        {
+          "fact": "city",
+          "cosine": 0.13560148823351392
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.11109756653526126
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.09763523424782546
+        },
+        {
+          "fact": "language",
+          "cosine": 0.08269123883438353
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.08027893102302723
+        },
+        {
+          "fact": "inventory_60",
+          "cosine": 0.07609284745586958
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.07143493003838915
+        },
+        {
+          "fact": "review",
+          "cosine": 0.06950543032766955
+        },
+        {
+          "fact": "inventory_28",
+          "cosine": 0.06930220247896271
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.06753334246569763
+        },
+        {
+          "fact": "inventory_35",
+          "cosine": 0.06596832581599883
+        },
+        {
+          "fact": "inventory_84",
+          "cosine": 0.0654519058083035
+        },
+        {
+          "fact": "inventory_40",
+          "cosine": 0.06413874337026367
+        },
+        {
+          "fact": "inventory_70",
+          "cosine": 0.06303507978273855
+        },
+        {
+          "fact": "inventory_90",
+          "cosine": 0.06301788930917343
+        },
+        {
+          "fact": "inventory_7",
+          "cosine": 0.06164522707109779
+        },
+        {
+          "fact": "inventory_38",
+          "cosine": 0.06143402076101518
+        },
+        {
+          "fact": "inventory_37",
+          "cosine": 0.06113985214502822
+        },
+        {
+          "fact": "inventory_98",
+          "cosine": 0.060505555070581335
+        },
+        {
+          "fact": "inventory_96",
+          "cosine": 0.06035805079536823
+        },
+        {
+          "fact": "inventory_80",
+          "cosine": 0.06003887253395502
+        }
+      ],
+      "relevant_scores": {
+        "time": 0.4228525663742231
+      }
+    },
+    {
+      "case": "unrelated",
+      "question": "How tall is Mount Everest?",
+      "relevant": [],
+      "ranking": [
+        {
+          "fact": "inventory_18",
+          "cosine": 0.09180597973643072
+        },
+        {
+          "fact": "inventory_12",
+          "cosine": 0.08638789705365887
+        },
+        {
+          "fact": "inventory_13",
+          "cosine": 0.08614139275347221
+        },
+        {
+          "fact": "inventory_74",
+          "cosine": 0.08496950146826673
+        },
+        {
+          "fact": "inventory_81",
+          "cosine": 0.08259466451226383
+        },
+        {
+          "fact": "inventory_17",
+          "cosine": 0.07964238233007578
+        },
+        {
+          "fact": "inventory_75",
+          "cosine": 0.07639244190124188
+        },
+        {
+          "fact": "inventory_67",
+          "cosine": 0.07560799050002702
+        },
+        {
+          "fact": "inventory_33",
+          "cosine": 0.07431676367413638
+        },
+        {
+          "fact": "inventory_83",
+          "cosine": 0.07396625030409322
+        },
+        {
+          "fact": "inventory_97",
+          "cosine": 0.07391493613980862
+        },
+        {
+          "fact": "inventory_54",
+          "cosine": 0.07378688871247566
+        },
+        {
+          "fact": "food",
+          "cosine": 0.07371698794930417
+        },
+        {
+          "fact": "inventory_32",
+          "cosine": 0.07317384505471451
+        },
+        {
+          "fact": "inventory_82",
+          "cosine": 0.0725990593236373
+        },
+        {
+          "fact": "inventory_53",
+          "cosine": 0.07224574744799792
+        },
+        {
+          "fact": "inventory_68",
+          "cosine": 0.07201838998985087
+        },
+        {
+          "fact": "inventory_19",
+          "cosine": 0.07179474119305082
+        },
+        {
+          "fact": "inventory_26",
+          "cosine": 0.07162909163385595
+        },
+        {
+          "fact": "inventory_73",
+          "cosine": 0.07113065505918621
+        },
+        {
+          "fact": "inventory_95",
+          "cosine": 0.07070612416450511
+        },
+        {
+          "fact": "inventory_25",
+          "cosine": 0.07044761285819397
+        },
+        {
+          "fact": "inventory_48",
+          "cosine": 0.06996666492344573
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.06933669295712451
+        }
+      ],
+      "relevant_scores": {}
+    },
+    {
+      "case": "unsupported_history",
+      "question": "What city did I live in before Porto?",
+      "relevant": [],
+      "ranking": [
+        {
+          "fact": "city",
+          "cosine": 0.7119809460944757
+        },
+        {
+          "fact": "language",
+          "cosine": 0.17807391497910238
+        },
+        {
+          "fact": "time",
+          "cosine": 0.16724257257542885
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.1376856651879671
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.1370803122733398
+        },
+        {
+          "fact": "food",
+          "cosine": 0.11370142744778716
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.10462391286413776
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.10075571381320823
+        },
+        {
+          "fact": "mira_tea",
+          "cosine": 0.09649935416211021
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.07013160495922943
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.0694387199509231
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.05754227138066962
+        },
+        {
+          "fact": "review",
+          "cosine": 0.05569990943981572
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.04784065570012153
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.0353834423677678
+        },
+        {
+          "fact": "inventory_2",
+          "cosine": 0.025197413056400067
+        },
+        {
+          "fact": "inventory_23",
+          "cosine": 0.02471107511836938
+        },
+        {
+          "fact": "inventory_16",
+          "cosine": 0.024689328380935745
+        },
+        {
+          "fact": "inventory_21",
+          "cosine": 0.024164608918045588
+        },
+        {
+          "fact": "inventory_15",
+          "cosine": 0.024152912873000965
+        },
+        {
+          "fact": "inventory_10",
+          "cosine": 0.023622254778017358
+        },
+        {
+          "fact": "inventory_11",
+          "cosine": 0.023110956358430915
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.0209293415515579
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.01937805365924858
+        }
+      ],
+      "relevant_scores": {}
+    },
+    {
+      "case": "unsupported_reason",
+      "question": "Why does Mira prefer rooibos?",
+      "relevant": [],
+      "ranking": [
+        {
+          "fact": "mira_tea",
+          "cosine": 0.7922271306119488
+        },
+        {
+          "fact": "leo_tea",
+          "cosine": 0.37225100084063717
+        },
+        {
+          "fact": "mira_role",
+          "cosine": 0.28257073077555594
+        },
+        {
+          "fact": "dark",
+          "cosine": 0.23513540390163037
+        },
+        {
+          "fact": "food",
+          "cosine": 0.21564170088867893
+        },
+        {
+          "fact": "language",
+          "cosine": 0.18706096544119938
+        },
+        {
+          "fact": "city",
+          "cosine": 0.1864847035271586
+        },
+        {
+          "fact": "seat",
+          "cosine": 0.17461291421885927
+        },
+        {
+          "fact": "meeting",
+          "cosine": 0.14486215052542056
+        },
+        {
+          "fact": "birch_day",
+          "cosine": 0.13346274296645988
+        },
+        {
+          "fact": "cedar_frequency",
+          "cosine": 0.08158362374852093
+        },
+        {
+          "fact": "review",
+          "cosine": 0.08017565585345267
+        },
+        {
+          "fact": "tests",
+          "cosine": 0.07950120294759334
+        },
+        {
+          "fact": "cedar_day",
+          "cosine": 0.07182246007352942
+        },
+        {
+          "fact": "budget",
+          "cosine": 0.07050806500851806
+        },
+        {
+          "fact": "time",
+          "cosine": 0.06085804713283128
+        },
+        {
+          "fact": "inventory_30",
+          "cosine": 0.053255205317971684
+        },
+        {
+          "fact": "inventory_34",
+          "cosine": 0.03571159279587533
+        },
+        {
+          "fact": "inventory_94",
+          "cosine": 0.028698833420181313
+        },
+        {
+          "fact": "inventory_36",
+          "cosine": 0.024978898097168616
+        },
+        {
+          "fact": "inventory_31",
+          "cosine": 0.023262821517215745
+        },
+        {
+          "fact": "inventory_8",
+          "cosine": 0.021530622036112404
+        },
+        {
+          "fact": "inventory_9",
+          "cosine": 0.020032589870330825
+        },
+        {
+          "fact": "inventory_3",
+          "cosine": 0.019197496062605793
+        }
+      ],
+      "relevant_scores": {}
+    }
+  ],
+  "notes": "Direct embeddings, normalized exact cosine ranking over synthetic facts. No HNSW, lexical fusion, temporal/source validation, extraction or reader. Query requests are sequential; latency includes HTTP connection setup. Scores do not establish entailment.",
+  "dimension": 1536,
+  "thresholds": [
+    {
+      "floor": 0.3,
+      "relevant_retrieved": 20,
+      "relevant_total": 20,
+      "admitted": 46,
+      "negative_queries_abstained": 1,
+      "negative_queries_total": 6
+    },
+    {
+      "floor": 0.4,
+      "relevant_retrieved": 16,
+      "relevant_total": 20,
+      "admitted": 30,
+      "negative_queries_abstained": 2,
+      "negative_queries_total": 6
+    },
+    {
+      "floor": 0.5,
+      "relevant_retrieved": 12,
+      "relevant_total": 20,
+      "admitted": 23,
+      "negative_queries_abstained": 2,
+      "negative_queries_total": 6
+    },
+    {
+      "floor": 0.6,
+      "relevant_retrieved": 8,
+      "relevant_total": 20,
+      "admitted": 13,
+      "negative_queries_abstained": 4,
+      "negative_queries_total": 6
+    },
+    {
+      "floor": 0.7,
+      "relevant_retrieved": 4,
+      "relevant_total": 20,
+      "admitted": 7,
+      "negative_queries_abstained": 4,
+      "negative_queries_total": 6
+    },
+    {
+      "floor": 0.8,
+      "relevant_retrieved": 2,
+      "relevant_total": 20,
+      "admitted": 2,
+      "negative_queries_abstained": 6,
+      "negative_queries_total": 6
+    }
+  ]
+}

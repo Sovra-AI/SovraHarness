@@ -8,6 +8,88 @@ use sovra_runtime::Client;
 use sovra_ui::Shell;
 
 #[gpui_kit::test]
+fn memory_search_consent_discloses_destination_and_fits_each_layout(cx: &mut TestAppContext) {
+    use gpui_kit::component::{Theme, ThemeMode};
+    use gpui_kit::{ScrollDelta, point};
+    use sovra_core::{
+        Command, Event, MemoryAction, MemoryEvent, MemoryReviewEvent, MemoryReviewResult, models::*,
+    };
+    for mode in [ThemeMode::Dark, ThemeMode::Light] {
+        for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            });
+            let mut shell = None;
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let view = cx.new(|cx| Shell::new(window, cx));
+                shell = Some(view.clone());
+                Root::new(view, window, cx)
+            });
+            let shell = shell.unwrap();
+            let mut connection = ModelConnection::new("search", ProviderKind::OpenAiCompatible);
+            connection.base_url = "https://embedding.example/v1".into();
+            connection.manual_models.push(ModelInfo {
+                id: "embed-v1".into(),
+                output_modalities: vec!["embeddings".into()],
+                ..Default::default()
+            });
+            let target =
+                ModelDestination::for_embeddings(&connection, &connection.manual_models[0])
+                    .unwrap();
+            events
+                .send_blocking(Event::Models(ModelEvent::Loaded {
+                    connections: vec![connection],
+                    preferences: ModelPreferences::default(),
+                }))
+                .unwrap();
+            cx.update(|cx| shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx)));
+            while let Ok(command) = commands.try_recv() {
+                if let Command::Memory(command) = command {
+                    assert!(matches!(command.action, MemoryAction::List(_)));
+                    events
+                        .send_blocking(Event::Memory(MemoryEvent::Review(MemoryReviewEvent {
+                            request_id: command.request_id,
+                            result: Ok(MemoryReviewResult::Page(sovra_core::MemoryPage::default())),
+                        })))
+                        .unwrap();
+                }
+            }
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                for id in [gpui_kit::ElementId::from("memory-choose-semantic"), ("memory-enable-semantic", 0usize).into()] {
+                    for _ in 0..100 {
+                        let choice = window.find(id.clone());
+                        if choice.visible() && choice.bounds().top() > px(60.) && choice.bounds().bottom() < px(height - 60.) { break; }
+                        let dy = if choice.bounds().top() <= px(60.) { 80. } else { -80. };
+                        window.scroll("sovra-knowledge-view", ScrollDelta::Pixels(point(px(0.), px(dy))), cx);
+                    }
+                    let choice = window.find(id.clone());
+                    assert!(choice.visible(), "{width}@{scale}: {choice:?}");
+                    let page = window.find("memory-browser").bounds();
+                    assert!(choice.bounds().right() <= page.right());
+                    if id == gpui_kit::ElementId::from(("memory-enable-semantic", 0usize)) {
+                        let destination = window.find("memory-semantic-destination-0");
+                        assert_eq!(destination.label(), Some(target.base_url.as_str()));
+                        assert!(destination.bounds().right() <= page.right());
+                        assert!(!std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Memory(command) if matches!(command.action, MemoryAction::ConfigureSemantic(_)))));
+                    }
+                    window.click(id, cx);
+                    window.render_frame(cx);
+                }
+                let command = std::iter::from_fn(|| commands.try_recv().ok()).find_map(|command| match command { Command::Memory(command) => Some(command), _ => None }).unwrap();
+                assert_eq!(command.action, MemoryAction::ConfigureSemantic(Some(target.clone())));
+            }).unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
     let (client, _commands, _events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
@@ -207,6 +289,50 @@ fn semantic_folder_choice_discloses_the_destination_and_fits_each_layout(cx: &mu
                 );
             })
             .unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn live_memory_status_and_service_disclosure_fit_all_layouts(cx: &mut TestAppContext) {
+    use gpui_kit::component::{Theme, ThemeMode};
+    use sovra_core::{Event, MemoryEvent, MemoryStatus, models::InterfaceScale};
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+        let (client, _, events) = Client::loopback();
+        cx.update(|cx| sovra_ui::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            cx.update(|cx| {
+                Theme::change(mode, None, cx);
+                sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            });
+            for status in [
+                MemoryStatus::Working,
+                MemoryStatus::Paused,
+                MemoryStatus::Failed("Remembering could not save this result.".into()),
+            ] {
+                events
+                    .send_blocking(Event::Memory(MemoryEvent::Status(status.clone())))
+                    .unwrap();
+                cx.run_until_parked();
+                cx.update_window(window.into(), |_, window, cx| {
+                    shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx));
+                    window.render_frame(cx);
+                    let card = window.find("conversation-memory-status");
+                    assert!(card.visible());
+                    assert!(card.label().unwrap().contains(status.label()));
+                    assert!(card.label().unwrap().contains("selected AI service"));
+                    assert!(card.bounds().right() <= px(width));
+                    assert_eq!(shell.read(cx).workspace().memory_status, status);
+                })
+                .unwrap();
+            }
         }
     }
 }

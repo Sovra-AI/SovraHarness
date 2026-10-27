@@ -3,6 +3,50 @@ use super::*;
 use sovra_core::file_index::semantic::*;
 use sovra_core::file_index::*;
 
+#[tokio::test]
+async fn router_embedding_transport_preserves_order_and_revalidates_consent() {
+    let server = Server::new(|request| {
+        assert_eq!(request.path, "/v1/embeddings");
+        assert!(
+            request
+                .headers
+                .to_ascii_lowercase()
+                .contains("authorization: bearer fake-test-key")
+        );
+        assert_eq!(
+            request.body,
+            json!({"model":"search-helper", "input":["A jet crosses the ocean.", "A train crosses the valley."], "encoding_format":"float"})
+        );
+        Reply::json(&json!({"data":[{"index":1,"embedding":[0,3]},{"index":0,"embedding":[2,0]}]}))
+    });
+    let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/v1", server.url());
+    connection.has_credential = true;
+    let model = ModelInfo {
+        id: "search-helper".into(),
+        output_modalities: vec!["embeddings".into()],
+        ..Default::default()
+    };
+    let target = EmbeddingTarget::for_embeddings(&connection, &model).unwrap();
+    connection.manual_models.push(model);
+    let fixture = Fixture::new(connection, Some("fake-test-key"));
+    let embedder = sovra_providers::HttpEmbedder::from_repository(&fixture.repo, &target).unwrap();
+    let vectors = embedder
+        .embed(&[
+            "A jet crosses the ocean.".into(),
+            "A train crosses the valley.".into(),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(vectors[0].values(), &[1., 0.]);
+    assert_eq!(vectors[1].values(), &[0., 1.]);
+    let mut saved = fixture.repo.load().unwrap();
+    saved.connections[0].base_url.push_str("/changed");
+    fixture.repo.save(&saved).unwrap();
+    assert!(sovra_providers::HttpEmbedder::from_repository(&fixture.repo, &target).is_err());
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
 #[derive(Debug, Default)]
 struct SemanticState {
     generation: u64,
@@ -333,6 +377,12 @@ async fn disabling_during_an_embedding_request_discards_the_response() {
     let index = Arc::new(Index::default());
     let client = start(&fixture, index.clone());
     configure(&client, Some(target));
+    // Drain the initial empty status before waiting for the disable acknowledgement.
+    // Otherwise a startup event can masquerade as completion of the later change.
+    event(&client, |event| {
+        matches!(event, Event::FileIndex(IndexEvent::Semantic(status)) if !status.is_empty())
+    })
+    .await;
     tokio::task::spawn_blocking(move || received.recv_timeout(Duration::from_secs(10)).unwrap())
         .await
         .unwrap();

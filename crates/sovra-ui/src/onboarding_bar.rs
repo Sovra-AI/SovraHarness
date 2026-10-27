@@ -32,7 +32,10 @@ pub(crate) fn render_onboarding_bar(
         return None;
     }
     if state.models_loaded && !state.has_active_llm {
-        return Some(render_setup_coach_strip(&state.setup_stage, cx).into_any_element());
+        return Some(
+            render_setup_coach_strip(&state.setup_stage, state.llm_setup_hint.as_deref(), cx)
+                .into_any_element(),
+        );
     }
     None
 }
@@ -145,46 +148,45 @@ fn render_tour_coach_bar(
 
 fn render_setup_coach_strip(
     stage: &SetupStage,
+    hint: Option<&str>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let (badge, message, cta_id, cta_label, target) = match stage {
         SetupStage::NeedsModelSelection {
-            connected_service,
-            key_preview,
-        } => {
-            let key_info = key_preview
-                .as_deref()
-                .map_or_else(String::new, |p| format!(" ({p})"));
-            (
-                "✓ STEP 1 DONE · STEP 2 OF 2",
-                format!(
-                    "{connected_service}{key_info} is connected! Pick a recommended AI model to start chatting."
-                ),
-                "setup-strip-pick-model",
-                "Step 2: Pick Your AI Model →",
-                "recommended-models",
-            )
-        }
-        SetupStage::NeedsModelKey {
-            model_id,
-            connection_name,
-            ..
+            connected_service, ..
         } => (
-            "ALMOST READY · ADD API KEY",
-            format!(
-                "You picked “{model_id}”. Add your {connection_name} API key to start chatting."
+            "STEP 2 OF 2",
+            hint.map_or_else(
+                || {
+                    format!(
+                        "{connected_service} is connected. Now pick the AI you want to talk to."
+                    )
+                },
+                str::to_owned,
+            ),
+            "setup-strip-pick-model",
+            "Pick your AI →",
+            "recommended-models",
+        ),
+        SetupStage::NeedsModelKey {
+            connection_name, ..
+        } => (
+            "ALMOST READY",
+            hint.map_or_else(
+                || format!("Your AI is chosen. Add your {connection_name} key to start chatting."),
+                str::to_owned,
             ),
             "setup-strip-add-key",
-            "Add API Key →",
+            "Add your key →",
             "selected-key",
         ),
         SetupStage::Loading | SetupStage::NeedsConnection | SetupStage::Ready { .. } => (
-            "WELCOME · STEP 1 OF 2",
-            "Connect an AI service (like a free OpenRouter key or local Ollama) to start chatting."
+            "STEP 1 OF 2",
+            "Connect an AI service to start chatting. A free OpenRouter key is the easiest."
                 .to_owned(),
             "setup-strip-connect",
-            "Step 1: Connect AI Service →",
+            "Connect an AI service →",
             "openrouter-key",
         ),
     };

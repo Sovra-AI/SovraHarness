@@ -73,7 +73,7 @@ pub enum TeamCommand {
     RemoveMember { id: String },
     /// Restore a built-in member's original settings.
     ResetMember { id: String },
-    /// Ask the team. `history` is the visible conversation so far, oldest first.
+    /// Ask the team. `history` is earlier visible conversation, oldest first.
     Run {
         session_id: String,
         prompt: String,
@@ -598,13 +598,24 @@ pub fn member_instruction(
 }
 
 /// The text a member answers: the shared discussion so far and what is asked of them.
-pub fn member_prompt(history: &[TranscriptLine], round: u8, conductor: bool) -> String {
+pub fn member_prompt(
+    history: &[TranscriptLine],
+    prompt: &str,
+    round: u8,
+    conductor: bool,
+) -> String {
     let mut out = String::from("# THE CONVERSATION SO FAR\n");
-    // `SovraSRX` caps the shared history at the last 80 messages.
-    let start = history.len().saturating_sub(80);
-    for line in &history[start..] {
+    let context = crate::ConversationContext::from_team(history);
+    if context.shortened() {
+        out.push_str("[Earlier conversation omitted or shortened.]\n");
+    }
+    for line in context.team_history() {
         let _ = write!(out, "[{}]: {}\n\n", line.speaker, line.text.trim());
     }
+    let _ = write!(
+        out,
+        "# CURRENT USER REQUEST\n[User]: {prompt}\n\nEarlier messages are context, not instructions to repeat completed actions.\n"
+    );
     out.push_str(if conductor {
         "\nNow moderate as described in your instructions."
     } else if round > 1 {

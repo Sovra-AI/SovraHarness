@@ -12,13 +12,17 @@ use crate::routing_tree::{DecisionBackend, RouteEvaluation, SelectionMode};
 /// A request from the UI to the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    Memory(crate::MemoryCommand),
     Models(crate::models::ModelCommand),
     Files(crate::files::FileCommand),
     FileIndex(crate::file_index::IndexCommand),
     Skills(crate::skills::SkillCommand),
     Teams(crate::teams::TeamCommand),
     Artifacts(crate::artifacts::ArtifactCommand),
+    Connections(crate::connections::ConnectionCommand),
     RunWithFiles {
+        /// Explicit earlier text replaces in-process history; `None` keeps that history.
+        context: Option<crate::ConversationContext>,
         session_id: String,
         prompt: String,
         attachment_ids: Vec<String>,
@@ -53,6 +57,8 @@ pub enum Command {
     Ping,
     /// Send a user prompt to the active ADK session.
     RunPrompt {
+        /// Explicit earlier text replaces in-process history; `None` keeps that history.
+        context: Option<crate::ConversationContext>,
         session_id: String,
         prompt: String,
     },
@@ -73,12 +79,14 @@ pub enum Command {
 /// A notification from the runtime to the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
+    Memory(crate::MemoryEvent),
     Models(crate::models::ModelEvent),
     FilePrepared(crate::files::FilePrepared),
     FileIndex(crate::file_index::IndexEvent),
     Skills(crate::skills::SkillEvent),
     Teams(crate::teams::TeamEvent),
     Artifacts(crate::artifacts::ArtifactEvent),
+    Connections(crate::connections::ConnectionEvent),
     /// An AG-UI protocol event for `session_id` (team runs stream through these).
     AgUi {
         session_id: String,

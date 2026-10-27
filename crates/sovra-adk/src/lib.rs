@@ -4,15 +4,19 @@
 //! `adk-tool`, and `adk-ui` (native AG-UI / A2UI surfaces) behind a pure `sovra-core`
 //! boundary so upstream crates never depend on ADK types directly.
 
+mod admission;
 mod artifacts;
 pub mod decision_client;
 mod file_index;
 mod files;
+mod memory;
 mod native_ui;
 mod orchestrator;
+mod recall;
 mod skills;
 mod team;
 mod web_search;
+mod working_context;
 
 pub use artifacts::ArtifactSaver;
 pub use team::TeamTurn;
@@ -53,6 +57,8 @@ pub enum Error {
     SearchClient(String),
     #[error("{0}")]
     Skill(String),
+    #[error("{0}")]
+    Memory(String),
 }
 
 /// High-level ADK-Rust harness managing sessions, AG-UI tools, and agent execution.
@@ -72,6 +78,7 @@ pub struct AdkHarness {
     search: Option<SearchClient>,
     web_search_enabled: bool,
     tools_enabled: bool,
+    memory_output: memory::OutputMode,
     /// Set by [`AdkHarness::with_artifact_saver`]; team members inherit it.
     artifact_saver: Option<ArtifactSaver>,
 }
@@ -271,6 +278,13 @@ impl AdkHarness {
             }
         };
         let tools = web_search::chat_tools(model.supports("tools"), None);
+        let llm = admission::wrap(
+            llm,
+            sovra_core::ContextBudget {
+                context_tokens: model.context_length,
+                max_output_tokens: model.max_output_tokens,
+            },
+        );
         let mut harness = Self::assemble(
             config,
             llm,
@@ -285,6 +299,7 @@ impl AdkHarness {
             name: model.name.clone(),
             provider: connection.name.clone(),
         };
+        harness.memory_output = memory::OutputMode::for_selected(connection.kind, model);
         if !secret.0.is_empty() {
             harness.secrets.push(secret.clone());
         }
@@ -314,7 +329,15 @@ impl AdkHarness {
         llm: Arc<dyn Llm>,
         tools: Vec<Arc<dyn Tool>>,
     ) -> Result<Self, Error> {
-        Self::assemble(config, llm, tools, None, None, false, true)
+        Self::assemble(
+            config,
+            admission::wrap(llm, sovra_core::ContextBudget::default()),
+            tools,
+            None,
+            None,
+            false,
+            true,
+        )
     }
 
     /// Same chat model and session. The parent stays the orchestrator and gains
@@ -439,6 +462,7 @@ impl AdkHarness {
         built.secrets.clone_from(&self.secrets);
         built.artifact_saver.clone_from(&self.artifact_saver);
         built.file_reader.clone_from(&self.file_reader);
+        built.memory_output = self.memory_output;
         Ok(built)
     }
 
@@ -499,6 +523,7 @@ impl AdkHarness {
             base_tools: stored_tools,
             base_instruction,
             file_reader: None,
+            memory_output: memory::OutputMode::Prompt,
             artifact_saver: None,
             root,
             search,
@@ -592,6 +617,11 @@ impl AdkHarness {
                 Err(err) => {
                     let message = self.safe_error(&err);
                     tracing::warn!(%session_id, %message, "ADK stream error");
+                    let message = if err.is_model() && err.is_unauthorized() {
+                        rejected_key_message(&self.response_model.provider)
+                    } else {
+                        message
+                    };
                     let _ = events
                         .send(Event::AgentError {
                             session_id: session_id.to_owned(),
@@ -723,6 +753,19 @@ async fn forward_adk_event(
     true
 }
 
+/// Says what to do instead of showing the raw `model.unauthorized` code: the reply
+/// failed because the service refused the saved key, which only a new key fixes.
+fn rejected_key_message(provider: &str) -> String {
+    let provider = if provider.is_empty() {
+        "Your AI service"
+    } else {
+        provider
+    };
+    format!(
+        "{provider} didn't accept your key, so I couldn't answer. Open Models, choose Change key, and paste a fresh key."
+    )
+}
+
 /// Splits model output into (reasoning, answer) text; either may be absent.
 fn extract_output(event: &adk_core::Event) -> (Option<String>, Option<String>) {
     let Some(content) = event.llm_response.content.as_ref() else {
@@ -823,6 +866,55 @@ mod tests {
             );
         });
     }
+    struct RejectedKeyLlm;
+
+    #[async_trait::async_trait]
+    impl Llm for RejectedKeyLlm {
+        fn name(&self) -> &'static str {
+            "rejected-key"
+        }
+
+        async fn generate_content(
+            &self,
+            _request: LlmRequest,
+            _stream: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            Err(adk_core::AdkError::unauthorized(
+                adk_core::ErrorComponent::Model,
+                "model.openrouter.unauthorized",
+                "User not found.",
+            ))
+        }
+    }
+
+    /// Regression: a refused key surfaced as "Note: model.unauthorized: User not found."
+    #[test]
+    fn a_refused_key_says_how_to_fix_it() {
+        futures::executor::block_on(async {
+            let mut harness = AdkHarness::with_llm_and_tools(
+                &AgentConfig::default(),
+                Arc::new(RejectedKeyLlm),
+                vec![],
+            )
+            .unwrap();
+            harness.response_model.provider = "OpenRouter".into();
+            let (tx, rx) = async_channel::unbounded();
+            harness.run_prompt("refused", "Hi", &tx).await;
+            let mut error = None;
+            while let Ok(event) = rx.try_recv() {
+                if let Event::AgentError { message, .. } = event {
+                    error = Some(message);
+                }
+            }
+            let error = error.expect("a refused key ends the turn with an error");
+            assert!(
+                error.starts_with("OpenRouter didn't accept your key"),
+                "{error}"
+            );
+            assert!(!error.contains("unauthorized"), "{error}");
+        });
+    }
+
     struct StreamingLlm;
 
     #[async_trait::async_trait]

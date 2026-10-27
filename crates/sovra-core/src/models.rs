@@ -90,6 +90,13 @@ impl ModelConnection {
         }
     }
 
+    /// Whether this connection can be used now: it needs no key, or one is available.
+    pub fn is_ready(&self) -> bool {
+        self.authentication == Authentication::None
+            || self.has_credential
+            || self.environment_credential
+    }
+
     /// Returns a human-readable masked representation of the active API key when one is present.
     pub fn active_key_display(&self) -> Option<String> {
         if !self.key_preview.is_empty() {
@@ -163,6 +170,73 @@ pub struct ModelKey {
     pub model_id: String,
 }
 
+/// What a model produces, in the words a non-technical user would use. Only `Chat`
+/// models can answer messages; the rest are listed so the catalog stays complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ModelKind {
+    Chat,
+    Image,
+    Video,
+    Speech,
+    Transcription,
+    Embeddings,
+    Other,
+}
+
+impl ModelKind {
+    pub const ALL: [Self; 7] = [
+        Self::Chat,
+        Self::Image,
+        Self::Video,
+        Self::Speech,
+        Self::Transcription,
+        Self::Embeddings,
+        Self::Other,
+    ];
+
+    /// Plural name for a "Show:" picker.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Chat => "Chat models",
+            Self::Image => "Picture makers",
+            Self::Video => "Video makers",
+            Self::Speech => "Voices (text to speech)",
+            Self::Transcription => "Speech to text",
+            Self::Embeddings => "Search helpers",
+            Self::Other => "Other specialist tools",
+        }
+    }
+
+    /// Short tag shown on each model.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Chat => "Chat",
+            Self::Image => "Makes pictures",
+            Self::Video => "Makes video",
+            Self::Speech => "Speaks aloud",
+            Self::Transcription => "Speech to text",
+            Self::Embeddings => "Search helper",
+            Self::Other => "Specialist tool",
+        }
+    }
+
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Image => "image",
+            Self::Video => "video",
+            Self::Speech => "speech",
+            Self::Transcription => "transcription",
+            Self::Embeddings => "embeddings",
+            Self::Other => "other",
+        }
+    }
+
+    pub fn from_value(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.value() == value)
+    }
+}
+
 /// Prices retain the provider's exact decimal strings. Unknown prices stay unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ModelInfo {
@@ -207,6 +281,30 @@ impl ModelInfo {
         self.output_modalities.is_empty() || self.output_modalities.iter().any(|m| m == "text")
     }
 
+    pub fn kind(&self) -> ModelKind {
+        if self.can_chat() {
+            return ModelKind::Chat;
+        }
+        let makes = |names: &[&str]| {
+            self.output_modalities
+                .iter()
+                .any(|m| names.contains(&m.as_str()))
+        };
+        if makes(&["image"]) {
+            ModelKind::Image
+        } else if makes(&["video"]) {
+            ModelKind::Video
+        } else if makes(&["speech", "audio"]) {
+            ModelKind::Speech
+        } else if makes(&["transcription"]) {
+            ModelKind::Transcription
+        } else if makes(&["embeddings", "embedding"]) {
+            ModelKind::Embeddings
+        } else {
+            ModelKind::Other
+        }
+    }
+
     pub fn token_price(&self, name: &str) -> Option<f64> {
         self.pricing
             .get(name)?
@@ -222,6 +320,28 @@ impl ModelInfo {
                 .pricing
                 .values()
                 .all(|v| v.parse::<f64>().is_ok_and(|n| n == 0.))
+    }
+
+    /// Estimated dollars for one ordinary chat message: a short question with some
+    /// conversation history (~1,500 tokens read) and a medium reply (~500 written).
+    /// People compare "about 1¢ a message"; per-million-token rates mean nothing to them.
+    pub fn typical_message_cost(&self) -> Option<f64> {
+        let cost = self.token_price("prompt")? * 1_500.0 + self.token_price("completion")? * 500.0;
+        cost.is_finite().then_some(cost)
+    }
+
+    /// Price in plain words, for choosing a model without knowing what a token is.
+    pub fn plain_price(&self) -> String {
+        if self.is_free() {
+            return "Free".into();
+        }
+        match self.typical_message_cost() {
+            Some(cost) if cost < 0.001 => "Less than 0.1¢ a message".into(),
+            Some(cost) if cost < 0.01 => format!("About {:.1}¢ a message", cost * 100.0),
+            Some(cost) if cost < 1.0 => format!("About {:.0}¢ a message", cost * 100.0),
+            Some(cost) => format!("About ${cost:.2} a message"),
+            None => "Price not listed".into(),
+        }
     }
 }
 
@@ -474,33 +594,38 @@ pub enum SetupStage {
 pub enum RecommendationKind {
     /// Zero-cost starter model to try Sovra immediately.
     FreeStarter,
-    /// Fast, balanced everyday chat model for writing, email, and general questions.
+    /// Recent, tool-capable, moderately priced model for everyday conversation.
     EverydaySmart,
-    /// Step-by-step reasoning model for hard coding, math, and deep analysis.
+    /// Model that thinks before answering, for hard coding, maths and analysis.
     DeepReasoning,
 }
 
 impl RecommendationKind {
     pub fn badge(self) -> &'static str {
         match self {
-            Self::FreeStarter => "FREE TO TRY",
-            Self::EverydaySmart => "EVERYDAY CHAT",
-            Self::DeepReasoning => "STEP-BY-STEP REASONING",
+            Self::FreeStarter => "FREE",
+            Self::EverydaySmart => "EVERYDAY",
+            Self::DeepReasoning => "THINKS LONGER",
         }
     }
 
     pub fn summary(self) -> &'static str {
         match self {
-            Self::FreeStarter => "Listed as free. Usage limits apply; availability can change.",
-            Self::EverydaySmart => {
-                "A chat model for writing and questions. Check its price before choosing."
+            Self::FreeStarter => {
+                "Costs nothing. Good for trying Sovra; it can be slower and has daily limits."
             }
+            Self::EverydaySmart => "A recent all-rounder for everyday chat, writing and questions.",
             Self::DeepReasoning => {
-                "The service lists support for reasoning. Replies may take longer."
+                "Thinks before it answers. Slower, but better for hard problems, maths and code."
             }
         }
     }
 }
+
+/// Typical-message ceilings that keep a suggestion affordable for daily use; the
+/// newest qualifying model wins, so suggestions follow the catalog, not model names.
+const EVERYDAY_MAX_MESSAGE_COST: f64 = 0.03;
+const REASONING_MAX_MESSAGE_COST: f64 = 0.06;
 
 /// A highlighted model recommendation card shown on the setup home screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -560,6 +685,8 @@ pub struct ModelFilter {
     pub scope: CatalogScope,
     pub connection_id: Option<String>,
     pub author: Option<String>,
+    /// `None` shows every kind. The library defaults to `Chat`.
+    pub kind: Option<ModelKind>,
     pub input_modality: Option<String>,
     pub output_modality: Option<String>,
     pub min_context: u64,
@@ -587,6 +714,8 @@ pub struct ModelsState {
     pub notice: Option<String>,
     pub error: Option<String>,
     pub pull_progress: Option<String>,
+    /// Why the chosen model cannot answer right now, as reported by the runtime.
+    pub active_problem: Option<String>,
 }
 
 impl ModelsState {
@@ -655,6 +784,7 @@ impl ModelsState {
                     .is_some_and(|k| k.connection_id == *id)
                 {
                     self.preferences.active = None;
+                    self.active_problem = None;
                 }
             }
             ModelEvent::ConnectionSaved { .. } => self.busy = false,
@@ -674,6 +804,7 @@ impl ModelsState {
                 self.error = Some(message.clone());
             }
             ModelEvent::PullProgress(message) => self.pull_progress.clone_from(message),
+            ModelEvent::ActiveModelStatus { problem } => self.active_problem.clone_from(problem),
         }
     }
 
@@ -757,21 +888,10 @@ impl ModelsState {
         Ok(key.clone())
     }
 
-    /// Returns `true` when a chat model is selected and its connection has any required key.
+    /// Returns `true` when a chat model is selected, its connection has any required key,
+    /// and the runtime has not reported that the model cannot answer.
     pub fn has_active_llm(&self) -> bool {
-        let Some(active) = &self.preferences.active else {
-            return false;
-        };
-        let Some(connection) = self
-            .connections
-            .iter()
-            .find(|c| c.id == active.connection_id)
-        else {
-            return false;
-        };
-        connection.authentication == Authentication::None
-            || connection.has_credential
-            || connection.environment_credential
+        matches!(self.setup_stage(), SetupStage::Ready { .. })
     }
 
     /// Returns the `OpenRouter` connection if one is configured.
@@ -792,18 +912,23 @@ impl ModelsState {
                 .iter()
                 .find(|c| c.id == active.connection_id)
         {
-            if conn.authentication == Authentication::None
-                || conn.has_credential
-                || conn.environment_credential
-            {
+            if !conn.is_ready() {
+                return SetupStage::NeedsModelKey {
+                    model_id: active.model_id.clone(),
+                    connection_id: conn.id.clone(),
+                    connection_name: conn.name.clone(),
+                };
+            }
+            // A saved choice the runtime cannot run is no choice at all: ask for a new
+            // model rather than claiming setup is complete.
+            if self.active_problem.is_none() {
                 return SetupStage::Ready {
                     active: active.clone(),
                 };
             }
-            return SetupStage::NeedsModelKey {
-                model_id: active.model_id.clone(),
-                connection_id: conn.id.clone(),
-                connection_name: conn.name.clone(),
+            return SetupStage::NeedsModelSelection {
+                connected_service: conn.name.clone(),
+                key_preview: conn.active_key_display(),
             };
         }
         if let Some(router) = self
@@ -837,24 +962,18 @@ impl ModelsState {
         match self.setup_stage() {
             SetupStage::Loading | SetupStage::Ready { .. } => None,
             SetupStage::NeedsModelKey {
-                model_id,
-                connection_name,
-                ..
+                connection_name, ..
             } => Some(format!(
-                "You chose model “{model_id}”, but {connection_name} still needs an API key before it can reply."
+                "Your AI is chosen. {connection_name} just needs your key again so it can reply."
             )),
             SetupStage::NeedsModelSelection {
-                connected_service,
-                key_preview,
-            } => {
-                let key_note = key_preview
-                    .map_or_else(String::new, |preview| format!(" ({preview})"));
-                Some(format!(
-                    "Step 1 complete: {connected_service}{key_note} is connected! Now complete Step 2: click a recommended AI model below (or open Models) to start chatting."
-                ))
-            }
+                connected_service, ..
+            } => Some(self.active_problem.as_ref().map_or_else(
+                || format!("{connected_service} is connected. Now pick the AI you want to talk to."),
+                |problem| format!("The AI you chose can't answer right now: {problem} Please pick another one."),
+            )),
             SetupStage::NeedsConnection => Some(
-                "Step 1 of 2: Connect your AI service. The easiest way is a free OpenRouter key (unlocks 300+ models), or use free local Ollama.".to_owned(),
+                "To start, connect an AI service. The easiest is a free OpenRouter key, or Ollama on this computer.".to_owned(),
             ),
         }
     }
@@ -888,42 +1007,46 @@ impl ModelsState {
         let ready_models: Vec<(&ModelConnection, &ModelInfo)> = self
             .connections
             .iter()
-            .filter(|c| {
-                c.has_credential
-                    || c.environment_credential
-                    || c.authentication == Authentication::None
-            })
+            .filter(|c| c.is_ready())
             .filter_map(|c| self.catalogs.get(&c.id).map(|cat| (c, cat)))
             .flat_map(|(c, cat)| {
                 cat.snapshot
                     .models
                     .iter()
-                    .filter(|m| m.output_modalities.iter().any(|output| output == "text"))
+                    .filter(|m| m.kind() == ModelKind::Chat && !m.output_modalities.is_empty())
                     .map(move |m| (c, m))
             })
             .collect();
 
-        // Use live catalog costs, not provider names or an unverified quality ranking.
-        let cost = |model: &ModelInfo| {
-            model
-                .token_price("prompt")
-                .zip(model.token_price("completion"))
-                .map(|(input, output)| input + output)
-                .filter(|total| total.is_finite())
-                .unwrap_or(f64::INFINITY)
+        // Live catalog data only: paid (the free pick is above), priced, tool-capable
+        // (Sovra's chat features need tools), affordable, then newest first.
+        let suggest = |used: &BTreeSet<ModelKey>, reasoning: bool, max_cost: f64| {
+            ready_models
+                .iter()
+                .copied()
+                .filter(|(c, m)| !used.contains(&m.key(&c.id)) && !m.is_free())
+                .filter(|(_, m)| m.supports("tools"))
+                .filter(|(_, m)| {
+                    (m.supports("reasoning") || m.supports("include_reasoning")) == reasoning
+                })
+                .filter(|(_, m)| {
+                    m.typical_message_cost()
+                        .is_some_and(|cost| cost <= max_cost)
+                })
+                .max_by(|(left_connection, left), (right_connection, right)| {
+                    left.created
+                        .cmp(&right.created)
+                        .then_with(|| {
+                            right
+                                .typical_message_cost()
+                                .unwrap_or(f64::INFINITY)
+                                .total_cmp(&left.typical_message_cost().unwrap_or(f64::INFINITY))
+                        })
+                        .then_with(|| right.id.cmp(&left.id))
+                        .then_with(|| right_connection.id.cmp(&left_connection.id))
+                })
         };
-        let everyday = ready_models
-            .iter()
-            .copied()
-            .filter(|(c, m)| !used_keys.contains(&m.key(&c.id)))
-            .filter(|(_, m)| !m.supports("reasoning") && !m.supports("include_reasoning"))
-            .min_by(|(left_connection, left), (right_connection, right)| {
-                cost(left)
-                    .total_cmp(&cost(right))
-                    .then_with(|| left.id.cmp(&right.id))
-                    .then_with(|| left_connection.id.cmp(&right_connection.id))
-            });
-        if let Some((conn, model)) = everyday {
+        if let Some((conn, model)) = suggest(&used_keys, false, EVERYDAY_MAX_MESSAGE_COST) {
             let key = model.key(&conn.id);
             used_keys.insert(key.clone());
             cards.push(RecommendedModelCard {
@@ -935,20 +1058,7 @@ impl ModelsState {
             });
         }
 
-        // Reasoning is an advertised capability, not a claim about answer quality.
-        let reasoning = ready_models
-            .iter()
-            .copied()
-            .filter(|(c, m)| {
-                !used_keys.contains(&m.key(&c.id))
-                    && (m.supports("reasoning") || m.supports("include_reasoning"))
-            })
-            .min_by(|(left_connection, left), (right_connection, right)| {
-                cost(left)
-                    .total_cmp(&cost(right))
-                    .then_with(|| left.id.cmp(&right.id))
-                    .then_with(|| left_connection.id.cmp(&right_connection.id))
-            });
+        let reasoning = suggest(&used_keys, true, REASONING_MAX_MESSAGE_COST);
         if let Some((conn, model)) = reasoning {
             let key = model.key(&conn.id);
             used_keys.insert(key.clone());
@@ -1047,6 +1157,7 @@ impl ModelsState {
                 .to_lowercase();
                 if !words.iter().all(|word| searchable.contains(word))
                     || filter.author.as_ref().is_some_and(|a| &model.author != a)
+                    || filter.kind.is_some_and(|kind| model.kind() != kind)
                     || filter
                         .input_modality
                         .as_ref()
@@ -1222,6 +1333,11 @@ pub enum ModelEvent {
     Notice(String),
     Error(String),
     PullProgress(Option<String>),
+    /// The runtime's verdict on the chosen model: `None` once it can answer, or a
+    /// plain-language reason it cannot (for example, it left the catalog).
+    ActiveModelStatus {
+        problem: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

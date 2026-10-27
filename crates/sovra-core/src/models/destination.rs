@@ -32,7 +32,9 @@ impl ModelDestination {
             ModelWork::Embeddings => {
                 matches!(
                     connection.kind,
-                    ProviderKind::Ollama | ProviderKind::OpenAiCompatible
+                    ProviderKind::Ollama
+                        | ProviderKind::OpenAiCompatible
+                        | ProviderKind::OpenRouter
                 ) && (model.output_modalities.iter().any(|m| m == "embeddings")
                     || (connection.kind == ProviderKind::OpenAiCompatible
                         && model.output_modalities.is_empty()))
@@ -91,6 +93,23 @@ pub fn model_destinations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn router_embeddings_require_explicit_catalogue_capability() {
+        let connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+        let mut model = ModelInfo {
+            id: "search-helper".into(),
+            ..ModelInfo::default()
+        };
+        assert!(ModelDestination::for_embeddings(&connection, &model).is_none());
+        model.output_modalities = vec!["text".into()];
+        assert!(ModelDestination::for_embeddings(&connection, &model).is_none());
+        model.output_modalities = vec!["embeddings".into()];
+        let target = ModelDestination::for_embeddings(&connection, &model).unwrap();
+        assert_eq!(target.provider, ProviderKind::OpenRouter);
+        assert_eq!(target.base_url, connection.base_url);
+        assert!(ModelDestination::for_work(&connection, &model, ModelWork::Summaries).is_none());
+    }
+
     #[test]
     fn summary_destinations_require_text_and_preserve_the_approved_endpoint() {
         let mut connection = ModelConnection::new("chosen", ProviderKind::Anthropic);

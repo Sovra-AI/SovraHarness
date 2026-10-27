@@ -154,6 +154,8 @@ pub struct FileContent {
 pub struct MediaPart {
     pub mime_type: String,
     pub data: Vec<u8>,
+    /// Local container duration hint for admission, not a proof of codec validity.
+    pub duration_millis: Option<u64>,
 }
 
 impl std::fmt::Debug for MediaPart {
@@ -161,6 +163,7 @@ impl std::fmt::Debug for MediaPart {
         f.debug_struct("MediaPart")
             .field("mime_type", &self.mime_type)
             .field("bytes", &self.data.len())
+            .field("duration_millis", &self.duration_millis)
             .finish()
     }
 }

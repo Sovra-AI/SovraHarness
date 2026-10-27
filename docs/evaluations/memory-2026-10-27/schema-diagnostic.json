@@ -1,0 +1,15 @@
+{
+  "source": "Direct synthetic request to the configured OpenRouter model; no credentials or provider request IDs retained.",
+  "model": "anthropic/claude-haiku-5.5",
+  "original": {
+    "status": 400,
+    "provider_error": "Enum value None does not match declared type '['string', 'null']'"
+  },
+  "corrected": {
+    "status": 200,
+    "format": "anyOf with a string enum and a separate null branch",
+    "output": {
+      "memories": []
+    }
+  }
+}

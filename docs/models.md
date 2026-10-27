@@ -1,10 +1,12 @@
 # Model library
 
-Start in **Models**. The setup screen uses a state-aware 3-step stepper (`Step 1 · Connect AI Service` → `Step 2 · Pick Your Model` → `Step 3 · Chat & System Tour`) that only shows what is still needed for your saved setup:
+Start in **Models**. The setup screen uses a state-aware 2-step stepper (`1 · Connect an AI service` → `2 · Pick your AI` → chat) that only shows what is still needed for your saved setup:
 
 1. **Connect OpenRouter** opens the guided account-key form (with a 1-click **Get Free Key at openrouter.ai ↗** browser button). Paste and save your connection key; release builds store it in the OS credential store (`keyring`), and a masked preview (`sk-or-••••1234`) stays visible so you can verify, test, replace, or remove it anytime.
-2. **Step 2 · Pick Your AI Model**: Once a key is connected, Step 1 collapses into a confirmation badge (`✓ Step 1 Complete`) and the setup screen highlights up to three recommendation cards derived from live catalog prices and capabilities (**Best Free Starter**, **Best Everyday All-Rounder**, and **Best Step-by-Step Thinker**). Unknown prices and capabilities never qualify for the free starter choice.
-3. **Go to Chat & Interactive System Tour**: After the runtime confirms your choice, **Go to Chat →** opens the conversation, and **Take 1-Minute System Tour** launches the 5-step interactive walkthrough across `Chat`, `My AI's`, `Knowledge`, `Schedules`, and `Settings`.
+   Sovra checks a new OpenRouter key against `auth/key` before saving it (the model list itself is public, so it cannot prove a key works); a refused key is not saved. Saving the key from setup moves straight on to step 2 (or to Chat, when a model was already chosen).
+2. **Pick your AI**: Once a key is connected, step 1 collapses into a confirmation line (`✓ OpenRouter is connected`) and the setup screen, titled **Pick a chat model**, shows up to three suggestions derived from live catalog data: **Free** (a zero-price chat model), **Everyday** (the newest paid model that supports tools and costs at most about 3¢ per typical message) and **Thinks longer** (the same for reasoning models, up to about 6¢). Each shows an estimated cost per message (~1,500 tokens read, ~500 written). Unknown prices and capabilities never qualify. **Use this model** opens the conversation as soon as the runtime confirms the choice; a message typed before setup finished is sent automatically.
+
+If the saved key is missing from this computer's credential store, or the chosen model can no longer run (for example, it left the catalog), setup says so and asks for the key or a new model. It never reports "ready" for a choice that cannot answer. The **Take a tour** button starts the 5-step walkthrough at any time.
 
 **Browse all models** opens the full library. Every row in the catalog includes a direct **Use Model** / **✓ Active** / **Add Key** button on the right for 1-click activation, while clicking the row title opens the inspection panel. Filters start closed; open them when
 you need specific capabilities. **Setup** returns to the guided screen. A saved
@@ -32,13 +34,19 @@ the complete public catalog, including non-chat outputs; the default API respons
 would omit those. No account preference or hand-maintained model list narrows it.
 The public catalog can be browsed without an API key.
 
+The library lists **chat models** by default and labels every model by what it makes:
+chat, pictures, video, voices (text to speech), speech to text, search helpers
+(embeddings) or other specialist tools. The **Show** picker beside the search box lists
+any other type, or every type at once.
+
 Search names, exact IDs, creators, descriptions and connection names. Combine
-provider tabs, a connection, creator, input/output modality, minimum context,
+provider tabs, a connection, creator, input modality, minimum context,
 free/paid usage, tool calling, reasoning and structured output. Modality options
 come from the catalog, including future values. Sort by name, release time,
 context or reported token price. Unknown prices remain unknown; they are never
-treated as free. Token prices display per million tokens; other pricing dimensions
-retain their provider labels and units in details.
+treated as free. Lists show an estimated cost per typical message; details show
+exact per-million-token prices, and other pricing dimensions retain their provider
+labels and units.
 
 Favorites persist across launches. Open a row for its description, context/output
 limits, modalities, capabilities, pricing and available provider metadata. Copy

@@ -150,7 +150,7 @@ pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
 
     let mut delegates = Vec::with_capacity(selected.len());
     for spec in &selected {
-        let tools = if spec.id == WEB_SEARCH_AGENT_ID {
+        let mut tools = if spec.id == WEB_SEARCH_AGENT_ID {
             let client = parts
                 .search
                 .clone()
@@ -159,6 +159,13 @@ pub(crate) fn build(parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
         } else {
             Vec::new()
         };
+        tools.extend(
+            parts
+                .parent_tools
+                .iter()
+                .filter(|tool| tool.name() == crate::recall::LOOKUP_NAME)
+                .cloned(),
+        );
         let instruction = if spec.id == WEB_SEARCH_AGENT_ID {
             web_search::web_search_instruction("")
         } else {

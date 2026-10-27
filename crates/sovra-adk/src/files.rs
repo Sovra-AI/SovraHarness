@@ -68,6 +68,9 @@ pub(crate) fn content(prompt: &str, reader: &ReadAttachment, char_budget: usize)
             content = content
                 .with_text(format!("{} — media item/page {}", info.name, index + 1))
                 .with_inline_data(&part.mime_type, part.data.clone());
+            if let Some(adk_core::Part::InlineData { annotations, .. }) = content.parts.last_mut() {
+                *annotations = crate::admission::media_annotations(part.duration_millis);
+            }
         }
     }
     content
@@ -301,6 +304,7 @@ mod tests {
             },
             text: "The invoice total is 93.".into(),
             media: vec![MediaPart {
+                duration_millis: None,
                 mime_type: "image/png".into(),
                 data: vec![137, 80, 78, 71],
             }],
@@ -329,6 +333,29 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(evidence.contains("93 dirhams"), "{evidence}");
+    }
+
+    #[test]
+    fn recording_duration_travels_with_the_actual_media_part() {
+        let mut file = fixture();
+        file.media[0].mime_type = "video/mp4".into();
+        file.media[0].duration_millis = Some(600_000);
+        let input = content(
+            "Describe it",
+            &ReadAttachment::new(Arc::new(vec![file])),
+            100,
+        );
+        let adk_core::Part::InlineData {
+            annotations, data, ..
+        } = input.parts.last().unwrap()
+        else {
+            panic!("expected media part");
+        };
+        assert_eq!(data, &[137, 80, 78, 71]);
+        assert_eq!(
+            annotations.as_ref().unwrap()["sovra_media_duration_millis"],
+            600_000
+        );
     }
 
     #[test]

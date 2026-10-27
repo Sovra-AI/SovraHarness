@@ -91,7 +91,16 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
         window.click("nav-models", cx);
         window.click("models-browse-all", cx);
         assert!(window.find("sovra-models-view").visible());
+        // Only models that can chat are listed until the user asks for other types.
+        assert_eq!(shell.read(cx).models().read(cx).visible_models().len(), 2);
+        assert!(window.find(("catalog-row", 0usize)).visible());
+        shell.read(cx).models().update(cx, |view, cx| {
+            view.show_kind(None, window, cx);
+        });
         assert_eq!(shell.read(cx).models().read(cx).visible_models().len(), 4);
+        shell.read(cx).models().update(cx, |view, cx| {
+            view.show_kind(Some(sovra_core::models::ModelKind::Chat), window, cx);
+        });
         window.click("models-search", cx);
         window.input("BETA", cx);
     })
@@ -149,10 +158,10 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
         window.click(("model-scope", 4usize), cx);
         assert_eq!(shell.read(cx).models().read(cx).visible_models(), &[alpha]);
         window.click(("model-scope", 1usize), cx);
-        shell
-            .read(cx)
-            .models()
-            .update(cx, |view, cx| view.set_search("video", window, cx));
+        shell.read(cx).models().update(cx, |view, cx| {
+            view.set_search("video", window, cx);
+            view.show_kind(Some(sovra_core::models::ModelKind::Video), window, cx);
+        });
         window.render_frame(cx);
         window.click(("model-row", 0usize), cx);
         assert!(window.find("model-details").visible());
@@ -188,7 +197,7 @@ fn setup_starts_with_one_connection_action_and_no_catalog_controls(cx: &mut Test
 }
 
 #[gpui_kit::test]
-fn free_model_choice_waits_for_runtime_confirmation_before_chat(cx: &mut TestAppContext) {
+fn choosing_a_model_waits_for_confirmation_then_goes_straight_to_chat(cx: &mut TestAppContext) {
     let (client, commands, events) = Client::loopback();
     let (window, shell) = open_shell(cx, client, 1280., 820.);
     let mut free = model("example/free", "Free conversation", "text", true);
@@ -220,9 +229,10 @@ fn free_model_choice_waits_for_runtime_confirmation_before_chat(cx: &mut TestApp
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("nav-models", cx);
-        assert!(window.find("models-home-use-free").visible());
-        window.click("models-home-use-free", cx);
-        assert_eq!(window.find("models-home-use-free").disabled(), Some(true));
+        let choose = ("models-home-rec-btn", 0usize);
+        assert_eq!(window.find(choose).label(), Some("Use this model"));
+        window.click(choose, cx);
+        assert_eq!(window.find(choose).disabled(), Some(true));
         assert!(window.try_find("models-home-chat").is_none());
     })
     .expect("window exists");
@@ -239,13 +249,13 @@ fn free_model_choice_waits_for_runtime_confirmation_before_chat(cx: &mut TestApp
             },
         )))
         .expect("activation confirmed");
-    cx.run_until_parked();
-    cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
-        assert!(window.find("models-home-chat").visible());
-        window.click("models-home-chat", cx);
-    })
-    .expect("window exists");
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).workspace().active_tab,
+            sovra_core::NavTab::Models,
+            "nothing moves until the runtime confirms the choice"
+        );
+    });
     cx.run_until_parked();
     cx.update(|cx| {
         assert_eq!(
@@ -360,8 +370,14 @@ fn next_setup_actions_fit_minimum_window_in_both_themes(cx: &mut TestAppContext)
     for theme in [ThemeMode::Dark, ThemeMode::Light] {
         cx.update(|cx| Theme::change(theme, None, cx));
         for (active, action) in [
-            (None, "models-home-use-free"),
-            (Some(key.clone()), "models-home-chat"),
+            (
+                None,
+                gpui_kit::ElementId::from(("models-home-rec-btn", 0usize)),
+            ),
+            (
+                Some(key.clone()),
+                gpui_kit::ElementId::from("models-home-chat"),
+            ),
         ] {
             let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
             connection.has_credential = true;
@@ -389,7 +405,7 @@ fn next_setup_actions_fit_minimum_window_in_both_themes(cx: &mut TestAppContext)
                 window.render_frame(cx);
                 window.click("nav-models", cx);
                 let home = window.find("models-setup-home").bounds();
-                let button = window.find(action);
+                let button = window.find(action.clone());
                 assert!(button.visible(), "next action must be visible: {button:?}");
                 assert!(
                     button.bounds().bottom() <= home.bottom(),
@@ -825,6 +841,31 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
 
 #[gpui_kit::test]
 fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestAppContext) {
+    fn reveal(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
+        for _ in 0..100 {
+            window.render_frame(cx);
+            let item = window.find(id);
+            let bounds = item.bounds();
+            let viewport = window.find("settings-sections").bounds();
+            if item.visible()
+                && bounds.top() >= viewport.top()
+                && bounds.bottom() <= viewport.bottom()
+            {
+                return;
+            }
+            let delta = if bounds.top() < viewport.top() {
+                60.
+            } else {
+                -60.
+            };
+            window.scroll(
+                "settings-sections",
+                ScrollDelta::Pixels(point(px(0.), px(delta))),
+                cx,
+            );
+        }
+        panic!("{id} must be reachable in Settings");
+    }
     let (client, _commands, events) = Client::loopback();
     let (window, _) = open_shell(cx, client, 1000., 760.);
     events
@@ -847,8 +888,10 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
             window.try_find("connection-add").is_none(),
             "advanced connections stay folded away until asked for"
         );
+        reveal(window, "settings-advanced-toggle", cx);
         window.click("settings-advanced-toggle", cx);
         window.render_frame(cx);
+        reveal(window, "connection-add", cx);
         assert!(window.find("connection-add").visible());
         window.click("connection-add", cx);
         window.render_frame(cx);
@@ -930,8 +973,8 @@ fn setup_with_saved_key_only_shows_step_two_and_curated_recommendations(cx: &mut
     let mut thinker = model("deepseek/deepseek-r1", "DeepSeek R1", "text", true);
     thinker.supported_parameters.push("reasoning".into());
     thinker.pricing = [
-        ("prompt".into(), "0.000001".into()),
-        ("completion".into(), "0.000002".into()),
+        ("prompt".into(), "0.000002".into()),
+        ("completion".into(), "0.000004".into()),
     ]
     .into();
 
@@ -970,6 +1013,23 @@ fn setup_with_saved_key_only_shows_step_two_and_curated_recommendations(cx: &mut
         assert!(window.find(("models-home-rec", 0usize)).visible());
         assert!(window.find(("models-home-rec", 1usize)).visible());
         assert!(window.find(("models-home-rec", 2usize)).visible());
+        // Prices read as cost per message, never per-million-token rates.
+        let prices: Vec<_> = (0..3usize)
+            .map(|index| {
+                window
+                    .find(("models-home-rec-price", index))
+                    .label()
+                    .map(str::to_owned)
+            })
+            .collect();
+        assert_eq!(
+            prices.iter().map(Option::as_deref).collect::<Vec<_>>(),
+            [
+                Some("Free"),
+                Some("About 1¢ a message"),
+                Some("About 0.5¢ a message")
+            ]
+        );
 
         // Also verify direct 1-click model activation in the full catalog row.
         window.click("models-browse-all", cx);
@@ -989,4 +1049,91 @@ fn setup_with_saved_key_only_shows_step_two_and_curated_recommendations(cx: &mut
         activated,
         "clicking Use Model on a catalog row must dispatch Activate"
     );
+}
+
+/// Saving a key during setup leads straight on: to the chat when a model was already
+/// chosen, or to picking one otherwise. Nobody is left on a settings form.
+#[gpui_kit::test]
+fn saving_a_key_during_setup_continues_to_the_next_step(cx: &mut TestAppContext) {
+    for chosen in [true, false] {
+        let (client, commands, events) = Client::loopback();
+        let (window, shell) = open_shell(cx, client, 1280., 1000.);
+        let chat = model("example/chat", "Chat", "text", false);
+        let key = chat.key("openrouter");
+        let connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+        let preferences = ModelPreferences {
+            active: chosen.then(|| key.clone()),
+            ..ModelPreferences::default()
+        };
+        for event in [
+            ModelEvent::Loaded {
+                connections: vec![connection.clone()],
+                preferences: preferences.clone(),
+            },
+            ModelEvent::CatalogLoaded {
+                connection_id: "openrouter".into(),
+                snapshot: CatalogSnapshot {
+                    models: vec![chat],
+                    fetched_at: 1,
+                },
+                cached: false,
+            },
+        ] {
+            events.send_blocking(Event::Models(event)).unwrap();
+        }
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("nav-models", cx);
+            window.click(
+                if chosen {
+                    "models-home-add-key"
+                } else {
+                    "models-home-connect"
+                },
+                cx,
+            );
+            window.render_frame(cx);
+            window.click("connection-key", cx);
+            window.input("sk-or-test-key", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("connection-save", cx);
+        })
+        .unwrap();
+        assert!(
+            std::iter::from_fn(|| commands.try_recv().ok())
+                .any(|c| matches!(c, Command::Models(ModelCommand::SaveConnection { .. }))),
+            "the key is saved"
+        );
+        let mut saved = connection.clone();
+        saved.has_credential = true;
+        for event in [
+            ModelEvent::Loaded {
+                connections: vec![saved],
+                preferences,
+            },
+            ModelEvent::ConnectionSaved {
+                id: "openrouter".into(),
+            },
+        ] {
+            events.send_blocking(Event::Models(event)).unwrap();
+        }
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let tab = shell.read(cx).workspace().active_tab;
+            if chosen {
+                assert_eq!(tab, sovra_core::NavTab::Chat);
+            } else {
+                assert_eq!(tab, sovra_core::NavTab::Models);
+                assert!(window.find("models-setup-home").visible());
+                assert!(window.find("models-home-step1-done").visible());
+            }
+        })
+        .unwrap();
+    }
 }

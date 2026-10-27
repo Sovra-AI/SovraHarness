@@ -87,6 +87,16 @@ impl ModelsView {
         } else if let Some(notice) = &self.state.notice {
             page = page.child(caption(notice.clone(), cx));
         }
+        if self.connections.qr_modal_open {
+            return page
+                .child(self.render_whatsapp_qr_modal(&self.connections, cx))
+                .into_any_element();
+        }
+        if self.connections.qr_modal_open {
+            return page
+                .child(self.render_whatsapp_qr_modal(&self.connections, cx))
+                .into_any_element();
+        }
         if self.manual_form.is_some() {
             return page.child(self.render_manual_form(cx)).into_any_element();
         }
@@ -104,6 +114,7 @@ impl ModelsView {
         page.child(
             v_flex()
                 .id("settings-sections")
+                .test_support()
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -114,6 +125,7 @@ impl ModelsView {
                         .gap(t.space.small)
                         .child(Self::render_appearance_section(cx))
                         .child(self.render_ai_connection_section(cx))
+                        .child(self.render_connections_section(cx))
                         .child(self.render_other_connections_section(cx))
                         .child(self.render_always_context_section(cx))
                         .child(self.render_agent_behavior_section(cx)),
@@ -404,7 +416,7 @@ impl ModelsView {
                         })),
                 )
                 .child(caption(
-                    "When on, Sovra saves your conversations on this computer so it remembers details you shared earlier. Turn off if you want every chat to start fresh.",
+                    "Your selected AI checks your messages for useful details, which are saved on this computer. Messages and earlier memories may be sent to that AI service. Turning this off stops new remembering and cancels pending work; saved history is kept.",
                     cx,
                 )),
         )
@@ -569,7 +581,7 @@ impl ModelsView {
                     cx,
                 ))
                 .child(caption(
-                    "4. Save your key, then choose “Next: choose an AI”. We will help you find a free model to try.",
+                    "4. Save your key, then choose “Next: pick a chat model”. Free and paid models are shown with their price.",
                     cx,
                 ));
         }
@@ -607,6 +619,13 @@ impl ModelsView {
                     .aria_label(active_preview.clone())
                     .child(pill(active_preview, cx)),
             )
+            .children((saved && self.state.preferences.active.is_none()).then(|| {
+                div()
+                    .id("settings-key-next-step")
+                    .test_support()
+                    .sovra_text(TextRole::Body, cx)
+                    .child("Key saved. Now pick the model you want to chat with — free ones are listed first.")
+            }))
             .child(steps)
             .child(field(
                 "connection-key",
@@ -671,7 +690,7 @@ impl ModelsView {
                     .child(if saved && self.state.preferences.active.is_none() {
                         design::primary_button(
                             "settings-key-choose-model",
-                            "Next: choose an AI →",
+                            "Next: pick a chat model →",
                             cx,
                         )
                         .on_click(cx.listener(|view, _, _, cx| {
@@ -680,7 +699,7 @@ impl ModelsView {
                     } else {
                         design::button(
                             "settings-key-choose-model",
-                            "Next: choose an AI",
+                            "Pick a chat model",
                             cx,
                         )
                         .on_click(cx.listener(|view, _, _, cx| {

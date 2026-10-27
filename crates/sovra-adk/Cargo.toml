@@ -17,6 +17,8 @@ adk-session = { workspace = true }
 adk-tool = { workspace = true }
 adk-ui = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
+time = { workspace = true, features = ["parsing"] }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }

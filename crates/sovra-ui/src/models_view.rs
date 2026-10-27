@@ -20,7 +20,7 @@ use sovra_core::{
     Command,
     models::{
         Appearance, CatalogFacets, CatalogScope, ModelCommand, ModelEvent, ModelFilter, ModelKey,
-        ModelSort, ModelsState, PriceFilter, ProviderKind,
+        ModelKind, ModelSort, ModelsState, PriceFilter, ProviderKind, SetupStage,
     },
 };
 
@@ -54,6 +54,9 @@ impl SearchableListItem for Choice {
 }
 pub(crate) type Selector = SelectState<SearchableVec<Choice>>;
 
+/// "Show" picker value for every model type at once.
+const ALL_KINDS: &str = "all";
+
 pub(crate) struct GoToChat;
 impl gpui_kit::EventEmitter<GoToChat> for ModelsView {}
 
@@ -70,6 +73,9 @@ pub struct ModelsView {
     /// Measured from this pane by `design::width_probe`; starts single-pane.
     width_class: design::WidthClass,
     pub(crate) pending_activation: Option<ModelKey>,
+    /// The open key form was reached from a setup step, so saving it moves the user
+    /// on to the next step. Keys managed from Settings stay on their form.
+    pub(crate) setup_flow: bool,
     pub(crate) choosing_purpose: Option<sovra_core::files::ModelPurpose>,
     pub(crate) filter: ModelFilter,
     rows: Vec<ModelKey>,
@@ -78,7 +84,7 @@ pub struct ModelsView {
     author: Entity<Selector>,
     connection: Entity<Selector>,
     input_modality: Entity<Selector>,
-    output_modality: Entity<Selector>,
+    kind: Entity<Selector>,
     context: Entity<Selector>,
     price: Entity<Selector>,
     sort: Entity<Selector>,
@@ -102,6 +108,8 @@ pub struct ModelsView {
     pub(crate) download_connection: Entity<Selector>,
     pub(crate) compare: Vec<ModelKey>,
     pub(crate) compare_open: bool,
+    pub(crate) connections: sovra_core::connections::ConnectionsState,
+    pub(crate) whatsapp_form: crate::connections_view::WhatsAppForm,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -129,7 +137,15 @@ impl ModelsView {
         let author = selector(vec![Choice::new("", "Any maker")], window, cx);
         let connection = selector(vec![Choice::new("", "Any service")], window, cx);
         let input_modality = selector(vec![Choice::new("", "Reads anything")], window, cx);
-        let output_modality = selector(vec![Choice::new("", "Creates anything")], window, cx);
+        let mut kinds: Vec<_> = ModelKind::ALL
+            .into_iter()
+            .map(|kind| Choice::new(kind.value(), kind.label()))
+            .collect();
+        kinds.push(Choice::new(ALL_KINDS, "Every type"));
+        let kind = selector(kinds, window, cx);
+        kind.update(cx, |select, cx| {
+            select.set_selected_value(&ModelKind::Chat.value().to_owned(), window, cx);
+        });
         let context = selector(
             choices(&[
                 ("0", "Any memory size"),
@@ -166,6 +182,7 @@ impl ModelsView {
                 "e.g. Explain things simply without technical jargon. Use short bullet points.",
             )
         });
+        let whatsapp_form = crate::connections_view::WhatsAppForm::new(window, cx);
         let mut subscriptions =
             vec![
                 cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
@@ -178,7 +195,7 @@ impl ModelsView {
             &author,
             &connection,
             &input_modality,
-            &output_modality,
+            &kind,
             &context,
             &price,
             &sort,
@@ -194,8 +211,10 @@ impl ModelsView {
             home_open: true,
             width_class: design::WidthClass::Compact,
             pending_activation: None,
+            setup_flow: false,
             choosing_purpose: None,
             filter: ModelFilter {
+                kind: Some(ModelKind::Chat),
                 sort: ModelSort::Newest,
                 ..ModelFilter::default()
             },
@@ -205,7 +224,7 @@ impl ModelsView {
             author,
             connection,
             input_modality,
-            output_modality,
+            kind,
             context,
             price,
             sort,
@@ -229,6 +248,8 @@ impl ModelsView {
             download_connection,
             compare: Vec::new(),
             compare_open: false,
+            connections: sovra_core::connections::ConnectionsState::default(),
+            whatsapp_form,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         }
@@ -272,21 +293,46 @@ impl ModelsView {
             cx.emit(GoToChat);
         }
 
-        if matches!(event, ModelEvent::Error(_))
-            || matches!(event, ModelEvent::PreferencesChanged(preferences)
+        if self.choosing_purpose.is_none()
+            && self.pending_activation.is_some()
+            && matches!(event, ModelEvent::PreferencesChanged(preferences)
                 if preferences.active.as_ref() == self.pending_activation.as_ref())
         {
+            // Choosing a model is the last setup step: go straight to the conversation.
+            self.pending_activation = None;
+            self.home_open = true;
+            self.selected = None;
+            cx.emit(GoToChat);
+        }
+        if matches!(event, ModelEvent::Error(_)) {
             self.pending_activation = None;
         }
         if let ModelEvent::ConnectionSaved { id } = event
             && self.pending_save.as_ref() == Some(id)
         {
+            let stage = self.state.setup_stage();
             if self.choosing_purpose.is_some() {
                 self.settings_open = false;
                 self.connections_open = false;
                 self.connection_form = None;
                 self.form_subscriptions.clear();
                 self.saved_form_refresh = None;
+            } else if self.setup_flow
+                && matches!(
+                    stage,
+                    SetupStage::Ready { .. } | SetupStage::NeedsModelSelection { .. }
+                )
+            {
+                // A key saved during setup leads straight on: to the chat when a model
+                // was already chosen, otherwise to picking one.
+                self.connection_form = None;
+                self.form_subscriptions.clear();
+                self.saved_form_refresh = None;
+                self.setup_flow = false;
+                self.open_model_home(cx);
+                if matches!(stage, SetupStage::Ready { .. }) {
+                    cx.emit(GoToChat);
+                }
             } else if self.settings_open && self.connection_form.is_some() {
                 self.saved_form_refresh = Some(id.clone());
             } else {
@@ -391,9 +437,29 @@ impl ModelsView {
         self.connections_open = false;
         self.selected = None;
         self.compare_open = false;
-        self.filter = ModelFilter::default();
+        self.filter = ModelFilter {
+            kind: Some(ModelKind::Chat),
+            ..ModelFilter::default()
+        };
         self.set_search("", window, cx);
         self.controls_dirty = true;
+        cx.notify();
+    }
+
+    /// Shows one type of model (`None` shows every type), as the "Show" picker does.
+    pub fn show_kind(
+        &mut self,
+        kind: Option<ModelKind>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = kind.map_or(ALL_KINDS, ModelKind::value).to_owned();
+        self.kind.update(cx, |select, cx| {
+            select.set_selected_value(&value, window, cx);
+        });
+        self.filter.kind = kind;
+        self.rebuild_rows();
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
 
@@ -419,7 +485,10 @@ impl ModelsView {
         self.filter.author = nonempty(value(&self.author));
         self.filter.connection_id = nonempty(value(&self.connection));
         self.filter.input_modality = nonempty(value(&self.input_modality));
-        self.filter.output_modality = nonempty(value(&self.output_modality));
+        self.filter.kind = match value(&self.kind).as_str() {
+            ALL_KINDS => None,
+            other => Some(ModelKind::from_value(other).unwrap_or(ModelKind::Chat)),
+        };
         self.filter.min_context = value(&self.context).parse().unwrap_or(0);
         self.filter.price = match value(&self.price).as_str() {
             "free" => PriceFilter::Free,
@@ -455,12 +524,6 @@ impl ModelsView {
                 &self.facets.input_modalities,
                 &facets.input_modalities,
                 "Reads anything",
-            ),
-            (
-                &self.output_modality,
-                &self.facets.output_modalities,
-                &facets.output_modalities,
-                "Creates anything",
             ),
         ] {
             if before != after {
@@ -503,6 +566,7 @@ impl ModelsView {
     fn reset_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.filter = ModelFilter {
             scope: self.filter.scope,
+            kind: Some(ModelKind::Chat),
             sort: ModelSort::Newest,
             ..ModelFilter::default()
         };
@@ -512,13 +576,15 @@ impl ModelsView {
             &self.author,
             &self.connection,
             &self.input_modality,
-            &self.output_modality,
             &self.context,
             &self.price,
             &self.sort,
         ] {
             control.update(cx, |select, cx| select.set_selected_index(None, window, cx));
         }
+        self.kind.update(cx, |select, cx| {
+            select.set_selected_value(&ModelKind::Chat.value().to_owned(), window, cx);
+        });
         self.rebuild_rows();
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
@@ -555,7 +621,7 @@ impl ModelsView {
             + usize::from(self.filter.author.is_some())
             + usize::from(self.filter.connection_id.is_some())
             + usize::from(self.filter.input_modality.is_some())
-            + usize::from(self.filter.output_modality.is_some())
+            + usize::from(self.filter.kind != Some(ModelKind::Chat))
             + usize::from(self.filter.min_context > 0)
             + usize::from(self.filter.price != PriceFilter::Any)
             + usize::from(self.filter.tools)
@@ -758,7 +824,13 @@ impl ModelsView {
             .state
             .catalogs
             .values()
-            .map(|c| c.snapshot.models.len())
+            .map(|c| {
+                c.snapshot
+                    .models
+                    .iter()
+                    .filter(|m| m.kind() == ModelKind::Chat)
+                    .count()
+            })
             .sum();
         let loading = self.state.catalogs.values().any(|c| c.loading);
         let (scope_title, scope_desc) = self.scope_guide();
@@ -782,7 +854,7 @@ impl ModelsView {
                                     .child(
                                         div().sovra_text(TextRole::PageTitle, cx).child("Models"),
                                     )
-                                    .child(pill(format!("{total} available"), cx)),
+                                    .child(pill(format!("{total} chat models"), cx)),
                             )
                             .children((!narrow).then(|| {
                                 caption(
@@ -901,6 +973,7 @@ impl ModelsView {
                         .cleanable(true)
                         .flex_1(),
                 )
+                .child(filter_select(&self.kind, "Show", "Chat models", cx))
                 .child(
                     design::button("models-toggle-filters", filters_label, cx)
                         .selected(self.filters_open || active_filters > 0)
@@ -927,12 +1000,6 @@ impl ModelsView {
                             &self.input_modality,
                             "What it understands",
                             "Reads anything",
-                            cx,
-                        ))
-                        .child(filter_select(
-                            &self.output_modality,
-                            "What it creates",
-                            "Creates anything",
                             cx,
                         ))
                         .child(filter_select(
@@ -1056,17 +1123,20 @@ impl ModelsView {
         } else {
             format!("   ·   {}", capability_tags.join(" · "))
         };
-        let metrics = format!(
-            "Memory {}   ·   Creates {}   ·   {}{}",
-            compact_count(model.context_length),
-            model.output_modalities.join(" / "),
-            price_summary(model),
-            capabilities_str,
-        );
-        let metrics = if model.can_chat() {
-            metrics
+        let kind = model.kind();
+        let metrics = if kind == ModelKind::Chat {
+            format!(
+                "Chat   ·   Memory {}   ·   {}{}",
+                compact_count(model.context_length),
+                price_summary(model),
+                capabilities_str,
+            )
         } else {
-            format!("{metrics}   ·   Not for chat")
+            format!(
+                "{}   ·   Not for chat   ·   {}",
+                kind.tag(),
+                price_summary(model)
+            )
         };
         let badge_text = if active {
             "✓ Using Now".to_owned()
@@ -1491,13 +1561,10 @@ pub(crate) fn price_summary(model: &sovra_core::models::ModelInfo) -> String {
     if model.is_free() {
         "Free".into()
     } else if model.output_modalities.iter().any(|m| m == "text")
-        && model.token_price("prompt").is_some()
+        && model.typical_message_cost().is_some()
     {
-        format!(
-            "{} read / {} write per million tokens",
-            token_price(model, "prompt"),
-            token_price(model, "completion")
-        )
+        // Lists compare cost per message; exact token rates live in the details panel.
+        model.plain_price()
     } else if model.pricing.is_empty() {
         "Price unknown".into()
     } else {

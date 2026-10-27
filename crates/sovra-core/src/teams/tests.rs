@@ -139,7 +139,7 @@ fn instructions_include_protocols_only_where_they_apply() {
         speaker: "User".into(),
         text: "Hi".into(),
     }];
-    assert!(member_prompt(&history, 1, false).contains("[User]: Hi"));
+    assert!(member_prompt(&history, "Continue", 1, false).contains("[User]: Hi"));
 }
 
 #[test]
@@ -166,4 +166,21 @@ fn roster_and_activity_track_changes() {
     activity.finish("Your team is done");
     assert!(activity.finished);
     assert_eq!(activity.speakers[1].state, SpeakerState::Passed);
+}
+
+#[test]
+fn team_prompt_preserves_the_current_request_while_bounding_earlier_text() {
+    let current = format!(
+        "Long current request {} END OF CURRENT REQUEST",
+        "茶".repeat(9000)
+    );
+    let history = vec![TranscriptLine {
+        speaker: "User".into(),
+        text: "Old context".repeat(10000),
+    }];
+    let prompt = member_prompt(&history, &current, 1, false);
+    assert!(prompt.contains(&current));
+    assert!(prompt.contains("Earlier conversation omitted or shortened"));
+    assert!(prompt.len() < current.len() + crate::MAX_CONTEXT_TEXT_BYTES + 1024);
+    assert!(member_prompt(&[], "What shall we build?", 1, false).contains("What shall we build?"));
 }

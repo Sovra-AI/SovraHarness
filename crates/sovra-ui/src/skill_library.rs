@@ -1,31 +1,94 @@
-//! Native skill catalogue, editor and package import. All persistence goes through
+//! Native skill catalogue, guided explainer, category explorer, 1-click starter prompts,
+//! plain-language custom skill creator, and package import. All persistence goes through
 //! the runtime protocol; this view never opens or executes a package itself.
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _,
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Task, TestSupportExt as _, Window,
-    div,
+    AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
+    TestSupportExt as _, Window, div,
 };
 use sovra_core::{
     Command, NavTab,
-    skills::{Skill, SkillCommand, SkillKind},
+    skills::{Skill, SkillCommand, SkillKind, valid_name},
 };
 
 use crate::{
     RuntimeClient,
-    design::{self, SovraStyled as _, TextRole},
+    design::{self, SovraStyled as _, Surface, TextRole},
     shell::Shell,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SkillCategoryFilter {
+    #[default]
+    All,
+    Workspace,
+    Files,
+    Research,
+    Specialists,
+    Presentation,
+    Custom,
+}
+
+impl SkillCategoryFilter {
+    const ALL: [Self; 7] = [
+        Self::All,
+        Self::Workspace,
+        Self::Files,
+        Self::Research,
+        Self::Specialists,
+        Self::Presentation,
+        Self::Custom,
+    ];
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::All => "skill-filter-all",
+            Self::Workspace => "skill-filter-workspace",
+            Self::Files => "skill-filter-files",
+            Self::Research => "skill-filter-research",
+            Self::Specialists => "skill-filter-specialists",
+            Self::Presentation => "skill-filter-presentation",
+            Self::Custom => "skill-filter-custom",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "All skills",
+            Self::Workspace => "Quick actions",
+            Self::Files => "Files & folders",
+            Self::Research => "Web search",
+            Self::Specialists => "AI helpers",
+            Self::Presentation => "Tables & cards",
+            Self::Custom => "Made by you",
+        }
+    }
+
+    fn matches(self, skill: &Skill) -> bool {
+        match self {
+            Self::All => true,
+            Self::Workspace => skill.category == "Workspace",
+            Self::Files => skill.category == "Files",
+            Self::Research => skill.category == "Research",
+            Self::Specialists => skill.category == "Specialists",
+            Self::Presentation => skill.category == "Presentation",
+            Self::Custom => !skill.builtin || skill.category == "Your skills",
+        }
+    }
+}
+
 pub(crate) struct SkillLibrary {
     search: Entity<InputState>,
+    category: SkillCategoryFilter,
     name: Entity<InputState>,
     title: Entity<InputState>,
     description: Entity<InputState>,
@@ -33,6 +96,7 @@ pub(crate) struct SkillLibrary {
     body: Entity<TextareaState>,
     editing: Option<Skill>,
     creating: bool,
+    advanced_open: bool,
     details: Option<String>,
     deleting: Option<String>,
     pub(crate) notice: String,
@@ -50,21 +114,24 @@ impl SkillLibrary {
         });
         Self {
             search,
-            name: cx.new(|cx| InputState::new(window, cx).placeholder("weekly-review")),
-            title: cx.new(|cx| InputState::new(window, cx).placeholder("Weekly review")),
+            category: SkillCategoryFilter::All,
+            name: cx.new(|cx| InputState::new(window, cx).placeholder("e.g. weekly-check-in")),
+            title: cx.new(|cx| InputState::new(window, cx).placeholder("e.g. Weekly check-in")),
             description: cx.new(|cx| {
-                InputState::new(window, cx).placeholder("What this skill does and when to use it")
+                InputState::new(window, cx)
+                    .placeholder("e.g. Summarize my week and suggest 3 priorities")
             }),
             tools: cx.new(|cx| {
                 InputState::new(window, cx).placeholder("Optional tool names, separated by spaces")
             }),
             body: cx.new(|cx| {
                 TextareaState::new(window, cx)
-                    .placeholder("Write the procedure and expected result…")
-                    .auto_grow(6, 16)
+                    .placeholder("Write step-by-step instructions in your own words…")
+                    .auto_grow(3, 8)
             }),
             editing: None,
             creating: false,
+            advanced_open: false,
             details: None,
             deleting: None,
             notice: String::new(),
@@ -75,6 +142,7 @@ impl SkillLibrary {
 
     fn edit(&mut self, skill: Option<Skill>, window: &mut Window, cx: &mut Context<Shell>) {
         self.creating = skill.is_none();
+        self.advanced_open = skill.as_ref().is_some_and(|s| !s.tools.is_empty());
         for (input, value) in [
             (&self.name, skill.as_ref().map_or("", |skill| &skill.name)),
             (&self.title, skill.as_ref().map_or("", |skill| &skill.title)),
@@ -101,6 +169,47 @@ impl SkillLibrary {
         self.notice.clear();
         cx.notify();
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_editor_fields_for_test(
+        &mut self,
+        name: &str,
+        title: &str,
+        description: &str,
+        body: &str,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) {
+        self.name
+            .update(cx, |input, cx| input.set_value(name, window, cx));
+        self.title
+            .update(cx, |input, cx| input.set_value(title, window, cx));
+        self.description
+            .update(cx, |input, cx| input.set_value(description, window, cx));
+        self.body
+            .update(cx, |input, cx| input.set_value(body, window, cx));
+    }
+}
+
+fn slugify_command_name(title: &str) -> String {
+    let mut out = String::new();
+    let mut prev_hyphen = false;
+    for ch in title.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_hyphen = false;
+        } else if !out.is_empty() && !prev_hyphen {
+            out.push('-');
+            prev_hyphen = true;
+        }
+        if out.len() >= 64 {
+            break;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
 }
 
 impl Shell {
@@ -123,8 +232,16 @@ impl Shell {
             compatibility: None,
             metadata: std::collections::BTreeMap::new(),
         });
-        skill.name = view.name.read(cx).value().trim().into();
-        skill.title = view.title.read(cx).value().trim().into();
+        let raw_title = view.title.read(cx).value().trim().to_owned();
+        let raw_name = view.name.read(cx).value().trim().to_owned();
+        skill.title = raw_title;
+        skill.name = if raw_name.is_empty() {
+            slugify_command_name(&skill.title)
+        } else if valid_name(&raw_name) {
+            raw_name
+        } else {
+            slugify_command_name(&raw_name)
+        };
         skill.description = view.description.read(cx).value().trim().into();
         skill.tools = view
             .tools
@@ -184,30 +301,9 @@ impl Shell {
 pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let view = &shell.skill_library;
-    let query = view.search.read(cx).value();
+    let query = view.search.read(cx).value().to_string();
     let editing = view.creating || view.editing.is_some();
-    let mut content = v_flex().w_full().max_w(t.layout.reading_width).min_w_0().gap(t.space.medium)
-        .child(div().sovra_text(TextRole::PageTitle, cx).child("Skills"))
-        .child(div().sovra_text(TextRole::Body, cx).child("Type / in chat to use a skill. Skills guide your AI through a procedure using the tools already available."))
-        .child(h_flex().flex_wrap().gap(t.space.small)
-            .child(design::primary_button("skill-create", "New skill", cx).on_click(cx.listener(|shell, _, window, cx| shell.skill_library.edit(None, window, cx))))
-            .child(design::button("skill-import", "Import folder", cx).on_click(cx.listener(|shell, _, _, cx| shell.import_skill(cx))))
-            .child(design::button("skill-refresh", "Refresh", cx).ghost().on_click(cx.listener(|shell, _, _, cx| shell.skill_command(SkillCommand::Refresh, cx)))))
-        .children((!view.notice.is_empty()).then(|| div().id("skill-library-notice").test_support().sovra_text(TextRole::Caption, cx).child(view.notice.clone())));
-    if editing {
-        content = content.child(editor(view, cx));
-    } else {
-        content = content
-            .child(Input::new(&view.search).aria_label("Search skills"))
-            .children(
-                shell
-                    .skills
-                    .search_all(&query)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, skill)| card(skill, index, view, cx)),
-            );
-    }
+
     v_flex()
         .id("sovra-skills-view")
         .test_support()
@@ -218,24 +314,542 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .overflow_y_scroll()
         .items_center()
         .p(t.space.large)
-        .child(content)
+        .child(
+            v_flex()
+                .w_full()
+                .max_w(t.layout.page_width)
+                .min_w_0()
+                .flex_shrink_0()
+                .gap(t.space.large)
+                .child(render_header(cx))
+                .children((!view.notice.is_empty()).then(|| {
+                    div()
+                        .id("skill-library-notice")
+                        .test_support()
+                        .w_full()
+                        .p(t.space.small)
+                        .sovra_surface(Surface::Subtle, cx)
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(view.notice.clone())
+                }))
+                .children(editing.then(|| editor(view, cx)))
+                .children((!editing).then(|| how_it_works(cx)))
+                .children((!editing).then(|| render_search_and_categories(shell, view, &query, cx)))
+                .children((!editing).then(|| render_skills_catalog(shell, view, &query, cx))),
+        )
+}
+
+fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex()
+        .w_full()
+        .gap(t.space.small)
+        .child(design::page_header(
+            "Skills & Shortcuts",
+            "Everything Sovra knows how to do. Click Try in chat on any card below, or type / in the chat box to use a shortcut anytime.",
+            cx,
+        ))
+        .child(
+            h_flex()
+                .flex_wrap()
+                .gap(t.space.small)
+                .child(
+                    design::primary_button("skill-create", "New skill", cx)
+                        .icon(IconName::Plus)
+                        .tooltip("Teach Sovra a reusable step-by-step recipe in your own words")
+                        .on_click(cx.listener(|shell, _, window, cx| {
+                            shell.skill_library.edit(None, window, cx);
+                        })),
+                )
+                .child(
+                    design::button("skill-import", "Import folder", cx)
+                        .tooltip("Add a saved skill folder from your computer")
+                        .on_click(cx.listener(|shell, _, _, cx| shell.import_skill(cx))),
+                )
+                .child(
+                    design::button("skill-refresh", "Refresh", cx)
+                        .ghost()
+                        .tooltip("Reload skills from disk")
+                        .on_click(cx.listener(|shell, _, _, cx| {
+                            shell.skill_command(SkillCommand::Refresh, cx);
+                        })),
+                ),
+        )
+}
+
+fn how_it_works(cx: &Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let step = |n: &'static str, text: &'static str| {
+        h_flex()
+            .flex_1()
+            .min_w(t.layout.card_min_width)
+            .gap(t.space.small)
+            .items_center()
+            .p(t.space.small)
+            .sovra_surface(Surface::Subtle, cx)
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .size(t.layout.icon_medium)
+                    .rounded_full()
+                    .bg(cx.theme().primary)
+                    .text_color(cx.theme().primary_foreground)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .sovra_text(TextRole::Caption, cx)
+                    .child(n),
+            )
+            .child(div().min_w_0().sovra_text(TextRole::Body, cx).child(text))
+    };
+    h_flex()
+        .id("skills-how-it-works")
+        .test_support()
+        .w_full()
+        .flex_wrap()
+        .gap(t.space.small)
+        .child(step(
+            "1",
+            "Pick any card below — from web search and reading files to asking an expert.",
+        ))
+        .child(step(
+            "2",
+            "Press “Try in chat” and Sovra fills in the /shortcut for you.",
+        ))
+        .child(step(
+            "3",
+            "Press “New skill” to save your own repeatable recipe in plain English.",
+        ))
+}
+
+fn render_search_and_categories(
+    shell: &Shell,
+    view: &SkillLibrary,
+    query: &str,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let all_matches = shell.skills.search_all(query);
+
+    v_flex()
+        .w_full()
+        .gap(t.space.small)
+        .child(
+            div()
+                .w_full()
+                .max_w(t.layout.reading_width)
+                .child(Input::new(&view.search).aria_label("Search skills")),
+        )
+        .child(
+            h_flex()
+                .id("skill-category-filters")
+                .test_support()
+                .w_full()
+                .flex_wrap()
+                .gap(t.space.compact)
+                .children(SkillCategoryFilter::ALL.into_iter().filter_map(|cat| {
+                    let count = all_matches.iter().filter(|s| cat.matches(s)).count();
+                    if cat == SkillCategoryFilter::Custom && count == 0 && view.category != cat {
+                        return None;
+                    }
+                    Some(
+                        design::button(cat.id(), format!("{} ({count})", cat.label()), cx)
+                            .small()
+                            .ghost()
+                            .selected(view.category == cat)
+                            .on_click(cx.listener(move |shell, _, _, cx| {
+                                shell.skill_library.category = cat;
+                                cx.notify();
+                            })),
+                    )
+                })),
+        )
+}
+
+fn category_explanation(category: &str) -> (&'static str, &'static str, IconName) {
+    match category {
+        "Workspace" => (
+            "Quick actions & navigation",
+            "One-click shortcuts that open files, folders, or pages inside Sovra right away.",
+            IconName::Sparkles,
+        ),
+        "Research" => (
+            "Search the live web",
+            "Look up current facts, news, and cited links from the web with no setup needed.",
+            IconName::Globe,
+        ),
+        "Files" => (
+            "Read your files & folders",
+            "Attach documents, search indexed folders, inspect file history, and save work to your library.",
+            IconName::FileText,
+        ),
+        "Presentation" => (
+            "Visual cards, tables & checklists",
+            "Ask Sovra to present answers as clean tables, interactive cards, choices, or progress trackers.",
+            IconName::Table,
+        ),
+        "Specialists" => (
+            "Specialist AI helpers",
+            "Send your question straight to a dedicated specialist — coding, stocks, housing, research, or docs.",
+            IconName::Users,
+        ),
+        _ => (
+            "Your custom skills",
+            "Personal recipes you created or imported so Sovra follows your exact steps.",
+            IconName::BookOpen,
+        ),
+    }
+}
+
+fn render_skills_catalog(
+    shell: &Shell,
+    view: &SkillLibrary,
+    query: &str,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let matches: Vec<(usize, &Skill)> = shell
+        .skills
+        .search_all(query)
+        .into_iter()
+        .enumerate()
+        .filter(|(_, skill)| view.category.matches(skill))
+        .collect();
+
+    if matches.is_empty() {
+        return v_flex()
+            .id("skills-empty-state")
+            .test_support()
+            .w_full()
+            .p(t.space.large)
+            .gap(t.space.small)
+            .sovra_surface(Surface::Subtle, cx)
+            .child(
+                div()
+                    .sovra_text(TextRole::SectionTitle, cx)
+                    .child("No matching skills"),
+            )
+            .child(
+                div()
+                    .sovra_text(TextRole::Body, cx)
+                    .text_color(t.text_secondary)
+                    .child("Try a different search word, or choose “All skills” above."),
+            )
+            .into_any_element();
+    }
+
+    let ordered_categories = [
+        "Your skills",
+        "Workspace",
+        "Research",
+        "Files",
+        "Presentation",
+        "Specialists",
+    ];
+
+    let mut sections = v_flex().w_full().gap(t.space.large);
+    for cat_key in ordered_categories {
+        let group: Vec<(usize, &Skill)> = matches
+            .iter()
+            .copied()
+            .filter(|(_, skill)| {
+                if cat_key == "Your skills" {
+                    !skill.builtin || skill.category == "Your skills"
+                } else {
+                    skill.builtin && skill.category == cat_key
+                }
+            })
+            .collect();
+        if group.is_empty() {
+            continue;
+        }
+        let (heading, subtitle, icon) = category_explanation(cat_key);
+        sections = sections.child(
+            v_flex()
+                .w_full()
+                .gap(t.space.medium)
+                .child(
+                    v_flex()
+                        .gap(t.space.hair)
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap(t.space.small)
+                                .child(Icon::new(icon).small().text_color(cx.theme().link))
+                                .child(div().sovra_text(TextRole::SectionTitle, cx).child(heading)),
+                        )
+                        .child(
+                            div()
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(t.text_secondary)
+                                .child(subtitle),
+                        ),
+                )
+                .child(
+                    h_flex().w_full().flex_wrap().gap(t.space.medium).children(
+                        group
+                            .into_iter()
+                            .map(|(index, skill)| card(skill, index, view, cx)),
+                    ),
+                ),
+        );
+    }
+    sections.into_any_element()
+}
+
+fn friendly_card_copy(skill: &Skill) -> (String, String) {
+    let summary = skill
+        .description
+        .strip_prefix("Consult this specialist when you need help with: ")
+        .or_else(|| skill.description.strip_prefix("Use when "))
+        .map_or_else(
+            || skill.description.clone(),
+            |rest| {
+                let mut chars = rest.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => skill.description.clone(),
+                }
+            },
+        );
+
+    let example = match skill.name.as_str() {
+        "files" => "Opens your file picker to attach documents or pictures".to_owned(),
+        "index-folder" => "Lets you pick a folder on your computer for Sovra to search".to_owned(),
+        "help" => "Opens this Skills & Shortcuts guide".to_owned(),
+        "new" => "Starts a fresh, clean conversation right away".to_owned(),
+        "models" => "Opens Models so you can pick or connect an AI".to_owned(),
+        "knowledge" => "Opens Knowledge to view saved memories and indexed folders".to_owned(),
+        "schedules" => "Opens Schedules to run or set up recurring briefings".to_owned(),
+        "agents" => "Opens My AI's to see how Sovra routes tasks to specialists".to_owned(),
+        "settings" => "Opens Settings for light/dark appearance, text size, and keys".to_owned(),
+        "team" => "Switches chat so your whole team of AI helpers answers together".to_owned(),
+        "artifacts" => "Opens your library of saved documents, tables, and code".to_owned(),
+        "connections" => {
+            "Opens Connections so you can link your personal WhatsApp via QR code".to_owned()
+        }
+        "web-search" => {
+            "Try: /web-search What are the healthiest Mediterranean dinner ideas?".to_owned()
+        }
+        "save-artifact" => "Try: /save-artifact Our family trip packing list".to_owned(),
+        "read-files" => "Try: /read-files Summarize the main points of this contract".to_owned(),
+        "search-files" => {
+            "Try: /search-files Where did we mention the kitchen renovation budget?".to_owned()
+        }
+        "map-files" => {
+            "Try: /map-files Connect the people and deadlines across these project notes".to_owned()
+        }
+        "file-knowledge" => {
+            "Try: /file-knowledge What have we reviewed about our project timeline?".to_owned()
+        }
+        "file-catalog" => {
+            "Try: /file-catalog Show all PDFs and spreadsheets in my indexed folders".to_owned()
+        }
+        "file-history" => {
+            "Try: /file-history What changed in our budget notes recently?".to_owned()
+        }
+        "card" => "Try: /card Key facts and emergency numbers for our trip".to_owned(),
+        "table" => "Try: /table Compare three beginner-friendly indoor plants".to_owned(),
+        "confirm" => "Try: /confirm Should we send the formal or friendly version?".to_owned(),
+        "alert" => "Try: /alert Reminder to check passport renewal dates".to_owned(),
+        "progress" => "Try: /progress Show our 4-step moving checklist progress".to_owned(),
+        "coding" => "Try: /coding Explain what this error message means in simple terms".to_owned(),
+        "deep-research" => {
+            "Try: /deep-research Compare heat pumps vs gas boilers for a small home".to_owned()
+        }
+        "stock-market" => {
+            "Try: /stock-market How did major tech stocks perform this week?".to_owned()
+        }
+        "housing-market" => {
+            "Try: /housing-market What should I look for when viewing a house?".to_owned()
+        }
+        "housing-advisor" => {
+            "Try: /housing-advisor How does a 15-year vs 30-year mortgage compare?".to_owned()
+        }
+        "scholar" => {
+            "Try: /scholar What does recent research say about daily walking and sleep?".to_owned()
+        }
+        "image-search" => "Try: /image-search Cozy Scandinavian living room ideas".to_owned(),
+        "image-generation" => {
+            "Try: /image-generation A watercolor illustration of a sunlit garden".to_owned()
+        }
+        "execution" => {
+            "Try: /execution Calculate compound interest on $5,000 over 10 years at 5%".to_owned()
+        }
+        "documentation" => {
+            "Try: /documentation Write a simple step-by-step guide for our home Wi-Fi".to_owned()
+        }
+        "project" => "Try: /project Break our garage cleanout into 5 easy weekend tasks".to_owned(),
+        "document-reader" => {
+            "Try: /document-reader Find the warranty coverage in this manual".to_owned()
+        }
+        "presentation" => {
+            "Try: /presentation Outline a 5-slide family reunion presentation".to_owned()
+        }
+        "document-author" => {
+            "Try: /document-author Write a polite letter to our landlord about a repair".to_owned()
+        }
+        "spreadsheet" => {
+            "Try: /spreadsheet Create a simple monthly household budget table".to_owned()
+        }
+        "google-workspace" => {
+            "Try: /google-workspace Draft an email reply thanking everyone for coming".to_owned()
+        }
+        "microsoft-workspace" => {
+            "Try: /microsoft-workspace Summarize action items for our Word handout".to_owned()
+        }
+        "scheduler" => {
+            "Try: /scheduler Plan a recurring Monday morning week-ahead briefing".to_owned()
+        }
+        "todos" => "Try: /todos Organize my errands by priority for tomorrow morning".to_owned(),
+        "github" => {
+            "Try: /github Summarize the latest changes and open issues in this repo".to_owned()
+        }
+        _ => {
+            if skill.argument_hint.is_empty() {
+                format!("Type /{} in chat", skill.name)
+            } else {
+                format!("Type: /{} {}", skill.name, skill.argument_hint)
+            }
+        }
+    };
+    (summary, example)
 }
 
 fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    v_flex().id("skill-editor").test_support().w_full().min_w_0().gap(t.space.small)
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child(if view.creating { "Create a skill" } else { "Edit skill" }))
-        .child(Input::new(&view.name).aria_label("Skill command name").readonly(!view.creating))
-        .child(Input::new(&view.title).aria_label("Skill title"))
-        .child(Input::new(&view.description).aria_label("When to use this skill"))
-        .child(Input::new(&view.tools).aria_label("Required tools"))
-        .child(Textarea::new(&view.body).aria_label("Skill instructions"))
-        .child(div().sovra_text(TextRole::Caption, cx).child("Keep credentials out of skills. Required tools must already be enabled; importing a skill does not run its scripts."))
-        .child(h_flex().flex_wrap().gap(t.space.small)
-            .child(design::primary_button("skill-save", "Save skill", cx).on_click(cx.listener(|shell, _, _, cx| shell.save_skill(cx))))
-            .child(design::button("skill-editor-back", "Back to skills", cx).ghost().on_click(cx.listener(|shell, _, _, cx| {
-                shell.skill_library.creating = false; shell.skill_library.editing = None; cx.notify();
-            }))))
+    let field =
+        |label: &'static str, hint: &'static str, control: AnyElement, cx: &Context<Shell>| {
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(t.space.hair)
+                .child(div().sovra_text(TextRole::SectionTitle, cx).child(label))
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(hint),
+                )
+                .child(control)
+        };
+
+    let mut form = v_flex()
+        .id("skill-editor")
+        .test_support()
+        .w_full()
+        .max_w(t.layout.reading_width)
+        .min_w_0()
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .sovra_surface(Surface::Elevated, cx)
+        .child(
+            div()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child(if view.creating {
+                    "Create a skill"
+                } else {
+                    "Edit skill"
+                }),
+        )
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .gap(t.space.medium)
+                .child(
+                    div().flex_1().min_w(t.layout.filter_width).child(field(
+                        "1. Skill title",
+                        "Shown on the card (for example: “Weekly family meal planner”).",
+                        Input::new(&view.title)
+                            .aria_label("Skill title")
+                            .into_any_element(),
+                        cx,
+                    )),
+                )
+                .child(
+                    div().flex_1().min_w(t.layout.filter_width).child(field(
+                        "2. Shortcut word (optional)",
+                        "Leave blank and Sovra will make one from your title.",
+                        Input::new(&view.name)
+                            .aria_label("Skill command name")
+                            .readonly(!view.creating)
+                            .into_any_element(),
+                        cx,
+                    )),
+                ),
+        )
+        .child(field(
+            "3. When should you use it?",
+            "One short sentence explaining what this skill helps with.",
+            Input::new(&view.description)
+                .aria_label("When to use this skill")
+                .into_any_element(),
+            cx,
+        ))
+        .child(field(
+            "4. Step-by-step instructions for Sovra",
+            "Write naturally, just like explaining a task to a helpful friend.",
+            Textarea::new(&view.body)
+                .aria_label("Skill instructions")
+                .into_any_element(),
+            cx,
+        ))
+        .child(
+            h_flex().child(
+                design::button(
+                    "skill-editor-advanced-toggle",
+                    if view.advanced_open {
+                        "Hide optional tool settings"
+                    } else {
+                        "Show optional tool settings"
+                    },
+                    cx,
+                )
+                .small()
+                .ghost()
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    shell.skill_library.advanced_open = !shell.skill_library.advanced_open;
+                    cx.notify();
+                })),
+            ),
+        );
+
+    if view.advanced_open {
+        form = form.child(field(
+            "Optional: specific tools this skill may use",
+            "Most people can leave this blank. Keep passwords or API keys out of skills.",
+            Input::new(&view.tools)
+                .aria_label("Required tools")
+                .into_any_element(),
+            cx,
+        ));
+    }
+
+    form.child(
+        div()
+            .sovra_text(TextRole::Caption, cx)
+            .text_color(t.text_secondary)
+            .child("Keep credentials out of skills. Required tools must already be enabled; importing a skill does not run its scripts."),
+    )
+    .child(
+        h_flex()
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(
+                design::primary_button("skill-save", "Save skill", cx)
+                    .on_click(cx.listener(|shell, _, _, cx| shell.save_skill(cx))),
+            )
+            .child(
+                design::button("skill-editor-back", "Back to skills", cx)
+                    .ghost()
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.skill_library.creating = false;
+                        shell.skill_library.editing = None;
+                        cx.notify();
+                    })),
+            ),
+    )
 }
 
 fn card(
@@ -253,61 +867,124 @@ fn card(
     let confirm_name = name.clone();
     let editing = skill.clone();
     let enabled = skill.enabled;
+    let is_action = matches!(skill.kind, SkillKind::Action(_));
+    let (summary, example) = friendly_card_copy(skill);
+    let showing_details = view.details.as_ref() == Some(&name);
+
+    let badge_label = if !skill.builtin {
+        if enabled {
+            "Made by you"
+        } else {
+            "Made by you · Off"
+        }
+    } else if is_action {
+        "Instant action"
+    } else {
+        "Guided recipe"
+    };
+
+    let primary_cta_label = if is_action { "Run now" } else { "Try in chat" };
+
     let mut card = v_flex()
-        .w_full()
-        .min_w_0()
+        .id(("skill-card", index))
+        .test_support()
+        .flex_1()
+        .min_w(t.layout.card_min_width)
+        .max_w(t.layout.card_max_width)
         .gap(t.space.small)
         .p(t.space.medium)
-        .sovra_surface(design::Surface::Matte, cx)
+        .sovra_surface(Surface::Glass, cx)
         .child(
-            div()
-                .sovra_text(TextRole::SectionTitle, cx)
-                .child(format!("/{} · {}", skill.name, skill.title)),
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap(t.space.compact)
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child(skill.title.clone()),
+                )
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap(t.space.hair)
+                        .child(
+                            div()
+                                .px(t.space.compact)
+                                .py(t.space.hair)
+                                .rounded(t.radius.pill)
+                                .bg(t.nav_active_background)
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(cx.theme().link)
+                                .child(format!("/{}", skill.name)),
+                        )
+                        .child(
+                            div()
+                                .px(t.space.compact)
+                                .py(t.space.hair)
+                                .rounded(t.radius.pill)
+                                .bg(t.subtle)
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(t.text_secondary)
+                                .child(badge_label),
+                        ),
+                ),
         )
+        .child(div().sovra_text(TextRole::Body, cx).child(summary))
         .child(
             div()
-                .sovra_text(TextRole::Body, cx)
-                .child(skill.description.clone()),
-        )
-        .child(
-            div()
+                .w_full()
+                .p(t.space.small)
+                .rounded(t.radius.input)
+                .bg(t.subtle)
                 .sovra_text(TextRole::Caption, cx)
-                .text_color(cx.theme().muted_foreground)
-                .child(format!(
-                    "{} · {}",
-                    if skill.builtin {
-                        "Built-in"
-                    } else {
-                        "Your skill"
-                    },
-                    if skill.enabled { "Enabled" } else { "Disabled" }
-                )),
+                .text_color(t.text_secondary)
+                .child(example),
         );
+
     let mut actions = h_flex()
         .flex_wrap()
+        .items_center()
         .gap(t.space.small)
         .child(
-            design::button(("skill-use", index), "Use in chat", cx)
+            design::primary_button(("skill-use", index), primary_cta_label, cx)
+                .small()
                 .disabled(!enabled)
+                .accessibility_label(format!("Use {} in chat", skill.title))
                 .on_click(cx.listener(move |shell, _, window, cx| {
                     shell.select_tab(NavTab::Chat, cx);
                     shell.fill_composer_draft(&format!("/{run_name} "), window, cx);
                 })),
         )
         .child(
-            design::button(("skill-details", index), "Instructions", cx)
-                .ghost()
-                .on_click(cx.listener(move |shell, _, _, cx| {
-                    shell.skill_library.details = (shell.skill_library.details.as_ref()
-                        != Some(&details_name))
-                    .then(|| details_name.clone());
-                    cx.notify();
-                })),
+            design::button(
+                ("skill-details", index),
+                if showing_details {
+                    "Hide steps"
+                } else {
+                    "How it works"
+                },
+                cx,
+            )
+            .small()
+            .ghost()
+            .on_click(cx.listener(move |shell, _, _, cx| {
+                shell.skill_library.details = (shell.skill_library.details.as_ref()
+                    != Some(&details_name))
+                .then(|| details_name.clone());
+                cx.notify();
+            })),
         );
+
     if !skill.builtin {
         actions = actions
             .child(
                 design::button(("skill-edit", index), "Edit", cx)
+                    .small()
                     .ghost()
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         shell.skill_library.edit(Some(editing.clone()), window, cx);
@@ -316,9 +993,10 @@ fn card(
             .child(
                 design::button(
                     ("skill-toggle", index),
-                    if enabled { "Disable" } else { "Enable" },
+                    if enabled { "Turn off" } else { "Turn on" },
                     cx,
                 )
+                .small()
                 .ghost()
                 .on_click(cx.listener(move |shell, _, _, cx| {
                     shell.skill_command(
@@ -332,6 +1010,7 @@ fn card(
             )
             .child(
                 design::button(("skill-remove", index), "Remove", cx)
+                    .small()
                     .ghost()
                     .on_click(cx.listener(move |shell, _, _, cx| {
                         shell.skill_library.deleting = Some(delete_name.clone());
@@ -339,21 +1018,66 @@ fn card(
                     })),
             );
     }
+
     card = card.child(actions);
-    if view.details.as_ref() == Some(&name) {
+
+    if showing_details {
         card = card.child(
-            div()
-                .sovra_text(TextRole::Body, cx)
-                .child(skill.instructions.clone()),
+            v_flex()
+                .id(("skill-instructions-box", index))
+                .test_support()
+                .w_full()
+                .p(t.space.small)
+                .gap(t.space.hair)
+                .sovra_surface(Surface::Subtle, cx)
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(cx.theme().link)
+                        .child("Full instructions Sovra follows:"),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(skill.instructions.clone()),
+                ),
         );
     }
+
     if view.deleting.as_ref() == Some(&name) {
-        card = card.child(div().sovra_text(TextRole::Body, cx).child("Remove this installed skill and its bundled resources? The original import folder will remain."))
-            .child(h_flex().flex_wrap().gap(t.space.small)
-                .child(design::button("skill-confirm-remove", "Remove skill", cx).danger().on_click(cx.listener(move |shell, _, _, cx| {
-                    shell.skill_command(SkillCommand::Remove { name: confirm_name.clone() }, cx); shell.skill_library.deleting = None;
-                })))
-                .child(design::button("skill-cancel-remove", "Keep skill", cx).on_click(cx.listener(|shell, _, _, cx| { shell.skill_library.deleting = None; cx.notify(); }))));
+        card = card
+            .child(
+                div()
+                    .sovra_text(TextRole::Body, cx)
+                    .child("Remove this installed skill and its bundled resources? The original import folder will remain."),
+            )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::button("skill-confirm-remove", "Remove skill", cx)
+                            .danger()
+                            .small()
+                            .on_click(cx.listener(move |shell, _, _, cx| {
+                                shell.skill_command(
+                                    SkillCommand::Remove {
+                                        name: confirm_name.clone(),
+                                    },
+                                    cx,
+                                );
+                                shell.skill_library.deleting = None;
+                            })),
+                    )
+                    .child(
+                        design::button("skill-cancel-remove", "Keep skill", cx)
+                            .small()
+                            .on_click(cx.listener(|shell, _, _, cx| {
+                                shell.skill_library.deleting = None;
+                                cx.notify();
+                            })),
+                    ),
+            );
     }
     card
 }

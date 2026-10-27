@@ -1,5 +1,8 @@
 //! Check the design contract where failures affect readability or real UI behaviour.
 
+#[path = "styling/memory_citations.rs"]
+mod memory_citations;
+
 use gpui_kit::component::{ActiveTheme as _, Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Hsla, Rgba, TestAppContext, px, size};
@@ -228,6 +231,7 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
                 ("nav-my-ais", "sovra-my-ais-view"),
                 ("nav-knowledge", "sovra-knowledge-view"),
                 ("nav-schedules", "sovra-schedules-view"),
+                ("nav-skills", "sovra-skills-view"),
                 ("nav-settings", "sovra-settings-view"),
                 ("nav-models", "models-setup-home"),
             ] {
@@ -381,6 +385,7 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
             ("nav-my-ais", "sovra-my-ais-view"),
             ("nav-knowledge", "sovra-knowledge-view"),
             ("nav-schedules", "sovra-schedules-view"),
+            ("nav-skills", "sovra-skills-view"),
             ("nav-settings", "sovra-settings-view"),
             ("nav-models", "models-setup-home"),
         ] {

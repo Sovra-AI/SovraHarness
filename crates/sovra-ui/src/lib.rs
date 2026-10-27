@@ -10,6 +10,7 @@ mod assets;
 mod chat_history_view;
 mod chat_view;
 mod composer;
+mod connections_view;
 pub mod design;
 mod file_index_view;
 mod inspector;
@@ -17,6 +18,7 @@ mod knowledge_review;
 mod knowledge_view;
 mod login;
 mod markdown_segments;
+mod memory_view;
 mod model_connection_editor;
 mod model_details;
 mod model_home;
@@ -65,6 +67,14 @@ pub fn init(client: Client, cx: &mut App) {
     gpui_kit::init(cx);
     design::init(cx);
     cx.set_global(RuntimeClient(client));
+    cx.on_app_quit(|cx| {
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(sovra_core::Command::Shutdown);
+        async {}
+    })
+    .detach();
     app_menu::init(PRODUCT_NAME, cx);
 }
 

@@ -82,24 +82,35 @@ fn starter_recommendation_is_stable_across_catalog_order() {
 }
 
 #[test]
-fn everyday_choices_follow_current_prices_without_model_name_bias() {
+fn everyday_choice_is_the_newest_affordable_tool_capable_paid_model() {
     let mut state = fixture();
     state.connections[0].has_credential = true;
     let mut old_name = state.catalogs["router"].snapshot.models[0].clone();
     old_name.id = "anthropic/claude-3.5-sonnet".into();
-    old_name.supported_parameters.clear();
+    old_name.supported_parameters = vec!["tools".into()];
+    old_name.created = Some(1);
     let mut newer = old_name.clone();
     newer.id = "example/current-choice".into();
-    newer.pricing = [
-        ("prompt".into(), "0.0000001".into()),
-        ("completion".into(), "0.0000001".into()),
+    newer.created = Some(50);
+    let mut too_expensive = newer.clone();
+    too_expensive.id = "example/too-expensive".into();
+    too_expensive.created = Some(99);
+    too_expensive.pricing = [
+        ("prompt".into(), "0.0001".into()),
+        ("completion".into(), "0.0001".into()),
     ]
     .into();
+    let mut no_tools = newer.clone();
+    no_tools.id = "example/no-tools".into();
+    no_tools.created = Some(98);
+    no_tools.supported_parameters.clear();
     let mut unknown = newer.clone();
     unknown.id = "aaa/unknown-price".into();
+    unknown.created = Some(97);
     unknown.pricing.clear();
     let mut no_capabilities = newer.clone();
     no_capabilities.id = "aaa/unknown-capabilities".into();
+    no_capabilities.created = Some(96);
     no_capabilities.output_modalities.clear();
     state
         .catalogs
@@ -107,13 +118,56 @@ fn everyday_choices_follow_current_prices_without_model_name_bias() {
         .expect("catalog")
         .snapshot
         .models
-        .extend([old_name, newer, unknown, no_capabilities]);
+        .extend([
+            old_name,
+            newer,
+            too_expensive,
+            no_tools,
+            unknown,
+            no_capabilities,
+        ]);
     let choice = state
         .recommended_model_cards()
         .into_iter()
         .find(|card| card.kind == RecommendationKind::EverydaySmart)
         .expect("known text model");
     assert_eq!(choice.key.model_id, "example/current-choice");
+}
+
+#[test]
+fn prices_read_as_cost_per_message() {
+    let priced = |prompt: &str, completion: &str| ModelInfo {
+        output_modalities: vec!["text".into()],
+        pricing: [
+            ("prompt".into(), prompt.into()),
+            ("completion".into(), completion.into()),
+        ]
+        .into(),
+        ..ModelInfo::default()
+    };
+    assert_eq!(priced("0", "0").plain_price(), "Free");
+    // $3 / $15 per million tokens: 0.45¢ + 0.75¢.
+    assert_eq!(
+        priced("0.000003", "0.000015").plain_price(),
+        "About 1¢ a message"
+    );
+    assert_eq!(
+        priced("0.000002", "0.000004").plain_price(),
+        "About 0.5¢ a message"
+    );
+    assert_eq!(
+        priced("0.0000001", "0.0000001").plain_price(),
+        "Less than 0.1¢ a message"
+    );
+    assert_eq!(
+        priced("0.00002", "0.00004").plain_price(),
+        "About 5¢ a message"
+    );
+    assert_eq!(
+        priced("0.001", "0.001").plain_price(),
+        "About $2.00 a message"
+    );
+    assert_eq!(ModelInfo::default().plain_price(), "Price not listed");
 }
 
 fn fixture() -> ModelsState {
@@ -445,7 +499,7 @@ fn setup_stage_and_curated_recommendations_progress_deterministically() {
         author: "DeepSeek".into(),
         context_length: Some(128_000),
         output_modalities: vec!["text".into()],
-        supported_parameters: vec!["reasoning".into()],
+        supported_parameters: vec!["tools".into(), "reasoning".into()],
         pricing: [
             ("prompt".into(), "0.000001".into()),
             ("completion".into(), "0.000002".into()),
@@ -520,4 +574,63 @@ fn interface_scale_snaps_unknown_saved_values_to_the_nearest_level() {
     let older: ModelPreferences = serde_json::from_str("{\"favorites\":[],\"active\":null}")
         .expect("preferences saved before interface scale existed");
     assert_eq!(older.interface_scale, InterfaceScale::default());
+}
+
+#[test]
+fn models_are_grouped_by_what_they_make_and_the_library_can_show_only_chat() {
+    let model = |id: &str, outputs: &[&str]| ModelInfo {
+        id: id.into(),
+        name: id.into(),
+        output_modalities: outputs.iter().map(|&o| o.to_owned()).collect(),
+        ..ModelInfo::default()
+    };
+    let models = vec![
+        model("chat", &["text"]),
+        model("chat-and-pictures", &["image", "text"]),
+        model("unknown", &[]),
+        model("pictures", &["image"]),
+        model("video", &["video"]),
+        model("voice", &["speech"]),
+        model("listen", &["transcription"]),
+        model("search", &["embeddings"]),
+        model("rerank", &["rerank"]),
+    ];
+    let kinds: Vec<_> = models.iter().map(ModelInfo::kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            ModelKind::Chat,
+            ModelKind::Chat,
+            ModelKind::Chat,
+            ModelKind::Image,
+            ModelKind::Video,
+            ModelKind::Speech,
+            ModelKind::Transcription,
+            ModelKind::Embeddings,
+            ModelKind::Other,
+        ]
+    );
+    for kind in ModelKind::ALL {
+        assert_eq!(ModelKind::from_value(kind.value()), Some(kind));
+    }
+
+    let mut state = ModelsState::default();
+    state.apply(&ModelEvent::Loaded {
+        connections: vec![ModelConnection::new("router", ProviderKind::OpenRouter)],
+        preferences: ModelPreferences::default(),
+    });
+    state.apply(&ModelEvent::CatalogLoaded {
+        connection_id: "router".into(),
+        snapshot: CatalogSnapshot {
+            models,
+            fetched_at: 1,
+        },
+        cached: false,
+    });
+    let chat = state.filtered(&ModelFilter {
+        kind: Some(ModelKind::Chat),
+        ..ModelFilter::default()
+    });
+    assert_eq!(chat.len(), 3);
+    assert_eq!(state.filtered(&ModelFilter::default()).len(), 9);
 }

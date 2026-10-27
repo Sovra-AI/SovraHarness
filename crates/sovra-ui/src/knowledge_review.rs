@@ -226,6 +226,29 @@ mod tests {
     };
     use sovra_runtime::Client;
 
+    fn reveal_review_button(
+        window: &mut gpui_kit::Window,
+        id: &'static str,
+        height: f32,
+        cx: &mut gpui_kit::App,
+    ) {
+        for _ in 0..100 {
+            window.render_frame(cx);
+            let item = window.find(id);
+            let bounds = item.bounds();
+            if item.visible() && bounds.bottom() <= px(height - 60.) && bounds.top() >= px(60.) {
+                return;
+            }
+            let delta = if bounds.top() < px(60.) { 80. } else { -80. };
+            window.scroll(
+                "sovra-knowledge-view",
+                ScrollDelta::Pixels(point(px(0.), px(delta))),
+                cx,
+            );
+        }
+        panic!("{id} must remain reachable by scrolling");
+    }
+
     fn proposal() -> KnowledgeProposal {
         serde_json::from_value(serde_json::json!({
             "id":1,"state":"pending","created_at":100,"origin":{"session_id":"s","invocation_id":"i","agent":"File helper"},
@@ -302,18 +325,7 @@ mod tests {
                 } else {
                     "reject-knowledge-1"
                 };
-                for _ in 0..50 {
-                    let bounds = window.find(button).bounds();
-                    if bounds.bottom() <= px(height - 60.) && bounds.top() >= px(60.) {
-                        break;
-                    }
-                    window.scroll(
-                        "sovra-knowledge-view",
-                        ScrollDelta::Pixels(point(px(0.), px(-80.))),
-                        cx,
-                    );
-                    window.render_frame(cx);
-                }
+                reveal_review_button(window, button, height, cx);
                 window.click(button, cx);
                 assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|c| c
                     == Command::FileIndex(IndexCommand::ReviewKnowledge {
@@ -329,6 +341,7 @@ mod tests {
                         .contains(&1)
                 );
                 window.render_frame(cx);
+                reveal_review_button(window, "reject-knowledge-1", height, cx);
                 window.click("reject-knowledge-1", cx);
                 assert!(
                     !std::iter::from_fn(|| commands.try_recv().ok()).any(|c| matches!(

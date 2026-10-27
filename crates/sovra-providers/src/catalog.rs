@@ -27,6 +27,30 @@ pub async fn test_connection(
     Ok(provider.list(connection, secret).await?.len())
 }
 
+/// Rejects a key the service refuses before it is saved.
+///
+/// `OpenRouter` lists its models without authentication, so a mistyped or deleted
+/// key still loads a full catalog and would only fail on the first chat message.
+/// Network failures are not a verdict on the key: saving still works offline.
+pub async fn verify_key(
+    connection: &ModelConnection,
+    secret: &ModelSecret,
+) -> Result<(), ModelError> {
+    if connection.kind != ProviderKind::OpenRouter || secret.0.is_empty() {
+        return Ok(());
+    }
+    let request = client(connection)?.get(endpoint(connection, "auth/key"));
+    match authorize(request, connection, secret).send().await {
+        Ok(response) if matches!(response.status().as_u16(), 401 | 403) => {
+            Err(ModelError(format!(
+                "{} didn't accept this key. It may be incomplete or deleted. Copy it again from openrouter.ai/keys — it starts with sk-or-v1-.",
+                connection.name
+            )))
+        }
+        Ok(_) | Err(_) => Ok(()),
+    }
+}
+
 async fn read_json(request: reqwest::RequestBuilder) -> Result<Value, ModelError> {
     let response = request.send().await.map_err(|e| transport_error(&e))?;
     if !response.status().is_success() {

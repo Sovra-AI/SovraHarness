@@ -57,11 +57,11 @@ impl TextEmbedder for HttpEmbedder {
                 "api/embed",
                 json!({"model": self.target.key.model_id, "input": input, "truncate": false}),
             ),
-            ProviderKind::OpenAiCompatible => (
+            ProviderKind::OpenAiCompatible | ProviderKind::OpenRouter => (
                 "embeddings",
                 json!({"model": self.target.key.model_id, "input": input, "encoding_format": "float"}),
             ),
-            ProviderKind::Anthropic | ProviderKind::OpenRouter => {
+            ProviderKind::Anthropic => {
                 return Err(IndexError(
                     "This connection has no supported embedding transport.".into(),
                 ));

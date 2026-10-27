@@ -282,45 +282,32 @@ pub fn llm_setup_widget_for_stage(
 ) -> AgUiWidget {
     match stage {
         crate::models::SetupStage::NeedsModelSelection {
-            connected_service,
-            key_preview,
+            connected_service, ..
         } => {
-            let key_badge = key_preview
-                .as_deref()
-                .map_or_else(String::new, |p| format!(" · Active key: {p}"));
             let hint = custom_hint.map_or_else(
-                || {
-                    format!(
-                        "✓ Step 1 Complete: {connected_service} is connected{key_badge}. You only have 1 step left!"
-                    )
-                },
+                || format!("✓ {connected_service} is connected. One step left."),
                 str::to_owned,
             );
             AgUiWidget::Components {
                 surface_id: LLM_SETUP_SURFACE_ID.to_owned(),
                 version: 2,
                 components: vec![UiComponent::Card {
-                    title: "Step 2 of 2 · Pick Your AI Model to Start Chatting".to_owned(),
-                    description: "Your connection is saved. Choose an AI to answer your messages. You'll see its price before choosing; a free option appears when the service lists one.".to_owned(),
+                    title: "Step 2 of 2 · Pick the AI you want to talk to".to_owned(),
+                    description: "Choose one of our suggestions. You'll come straight back here to chat, and your message will be ready to send again.".to_owned(),
                     children: vec![
                         UiComponent::Alert {
-                            title: "✓ Step 1 Complete — API Key Connected".to_owned(),
+                            title: "Almost there".to_owned(),
                             description: hint,
                         },
                         UiComponent::Row(vec![
                             UiComponent::Button {
-                                label: "Step 2: Pick a Recommended Model →".to_owned(),
+                                label: "Pick an AI →".to_owned(),
                                 action_id: "setup:recommended-models".to_owned(),
                                 disabled: false,
                             },
                             UiComponent::Button {
-                                label: "Browse All Models".to_owned(),
+                                label: "See all chat models".to_owned(),
                                 action_id: "setup:choose-model".to_owned(),
-                                disabled: false,
-                            },
-                            UiComponent::Button {
-                                label: "Take Interactive System Tour".to_owned(),
-                                action_id: "setup:start-tour".to_owned(),
                                 disabled: false,
                             },
                         ]),
@@ -336,7 +323,7 @@ pub fn llm_setup_widget_for_stage(
             let hint = custom_hint.map_or_else(
                 || {
                     format!(
-                        "You selected “{model_id}”, which runs on {connection_name}. Add your API key to finish setup."
+                        "You chose “{model_id}”. {connection_name} needs your key so it can reply."
                     )
                 },
                 str::to_owned,
@@ -345,20 +332,19 @@ pub fn llm_setup_widget_for_stage(
                 surface_id: LLM_SETUP_SURFACE_ID.to_owned(),
                 version: 2,
                 components: vec![UiComponent::Card {
-                    title: format!("Almost Ready · Add Key for {connection_name}"),
-                    description: "Your model is already chosen! Just paste your API key so Sovra can talk to it.".to_owned(),
+                    title: format!("Almost ready · Add your {connection_name} key"),
+                    description: "Paste your key once and you can start chatting straight away."
+                        .to_owned(),
                     children: vec![
                         UiComponent::Alert {
-                            title: "Model Selected — Waiting for API Key".to_owned(),
+                            title: "Your AI is chosen — it just needs your key".to_owned(),
                             description: hint,
                         },
-                        UiComponent::Row(vec![
-                            UiComponent::Button {
-                                label: format!("Add {connection_name} key →"),
-                                action_id: "setup:selected-key".to_owned(),
-                                disabled: false,
-                            },
-                        ]),
+                        UiComponent::Row(vec![UiComponent::Button {
+                            label: format!("Add {connection_name} key →"),
+                            action_id: "setup:selected-key".to_owned(),
+                            disabled: false,
+                        }]),
                     ],
                 }],
             }

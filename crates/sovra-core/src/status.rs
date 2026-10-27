@@ -20,7 +20,9 @@ impl RuntimeStatus {
                     version: version.clone(),
                 };
             }
-            Event::Models(_)
+            Event::Memory(_)
+            | Event::Connections(_)
+            | Event::Models(_)
             | Event::Skills(_)
             | Event::FileIndex(_)
             | Event::Teams(_)

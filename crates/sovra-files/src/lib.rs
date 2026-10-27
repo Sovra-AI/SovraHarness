@@ -7,6 +7,7 @@ mod database;
 mod detection;
 mod index;
 mod inspection;
+mod media_duration;
 mod property_list;
 mod text;
 mod vector;
@@ -154,7 +155,12 @@ impl FileStore for LocalFileStore {
                 remaining,
             )?;
             remaining = remaining.saturating_sub(data.len() as u64);
-            media.push(MediaPart { mime_type, data });
+            let duration_millis = media_duration::milliseconds(&mime_type, &data);
+            media.push(MediaPart {
+                mime_type,
+                data,
+                duration_millis,
+            });
         }
         let raw = if manifest.has_raw {
             Some(
@@ -167,9 +173,11 @@ impl FileStore for LocalFileStore {
         } else {
             None
         };
+        let mut attachment = manifest.attachment;
+        note_recording_duration(&mut attachment, &media);
         Ok(FileContent {
             raw,
-            attachment: manifest.attachment,
+            attachment,
             text,
             media,
         })
@@ -242,6 +250,7 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
         media.push(MediaPart {
             mime_type: "image/png".into(),
             data,
+            duration_millis: None,
         });
         if mime == "image/gif" || mime == "image/tiff" {
             attachment.note =
@@ -254,7 +263,9 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
         } else {
             ModelPurpose::Video
         };
+        let duration_millis = media_duration::milliseconds(&mime, bytes);
         media.push(MediaPart {
+            duration_millis,
             mime_type: mime,
             data: bytes.to_vec(),
         });
@@ -284,6 +295,7 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
                 media.push(MediaPart {
                     mime_type: "image/png".into(),
                     data,
+                    duration_millis: None,
                 });
             }
         } else if mime == "application/pdf"
@@ -305,12 +317,30 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
             Some("This file contains only whitespace; there is no visible text to read.".into());
     }
     attachment.sections = file_sections(&text).len().max(media.len());
+    note_recording_duration(&mut attachment, &media);
     Ok(FileContent {
         raw: None,
         attachment,
         text,
         media,
     })
+}
+
+fn note_recording_duration(attachment: &mut Attachment, media: &[MediaPart]) {
+    const NOTE: &str = "The recording length could not be checked locally. The AI service may reject a long recording even when its file is small.";
+    if media.iter().any(|part| {
+        part.duration_millis.is_none()
+            && (part.mime_type.starts_with("audio/") || part.mime_type.starts_with("video/"))
+    }) {
+        match &mut attachment.note {
+            Some(note) if !note.contains(NOTE) => {
+                note.push(' ');
+                note.push_str(NOTE);
+            }
+            Some(_) => {}
+            None => attachment.note = Some(NOTE.into()),
+        }
+    }
 }
 
 fn detected_mime(name: &str, bytes: &[u8]) -> String {

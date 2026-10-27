@@ -8,6 +8,189 @@ use sovra_store_surreal::{StoreConfig, SurrealStore};
 
 const DIM: usize = 4;
 
+#[cfg(test)]
+#[path = "store/semantic.rs"]
+mod semantic;
+
+#[cfg(test)]
+#[path = "store/consolidation.rs"]
+mod consolidation;
+
+#[cfg(test)]
+#[path = "store/growth.rs"]
+mod growth;
+
+#[tokio::test]
+async fn memory_browsing_pages_without_duplicates_and_filters_before_limiting() {
+    use sovra_core::MemoryListQuery;
+    let store = open_store().await;
+    let mut ids = Vec::new();
+    for i in 0..7 {
+        ids.push(
+            store
+                .save_fact(fact(&format!("Tea preference {i}"), &[], None))
+                .await
+                .unwrap(),
+        );
+    }
+    store.invalidate_fact(&ids[3], Timestamp(10)).await.unwrap();
+    let mut query = MemoryListQuery {
+        search: "TEA".into(),
+        limit: 2,
+        ..Default::default()
+    };
+    let first = store.list_memories(query.clone()).await.unwrap();
+    assert_eq!(first.facts.len(), 2);
+    assert_eq!(first.facts[0].id, ids[6]);
+    assert!(first.next.is_some());
+    // Newer writes cannot shift the keyset boundary and repeat the previous page.
+    store
+        .save_fact(fact("Tea added after page one", &[], None))
+        .await
+        .unwrap();
+    let mut found = first.facts;
+    query.before = first.next;
+    loop {
+        let page = store.list_memories(query.clone()).await.unwrap();
+        found.extend(page.facts);
+        query.before = page.next;
+        if query.before.is_none() {
+            break;
+        }
+    }
+    let expected: Vec<_> = ids
+        .iter()
+        .rev()
+        .filter(|id| *id != &ids[3])
+        .cloned()
+        .collect();
+    assert_eq!(
+        found.into_iter().map(|fact| fact.id).collect::<Vec<_>>(),
+        expected
+    );
+    let history = store
+        .list_memories(MemoryListQuery {
+            include_history: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(history.facts.len(), 8);
+    assert!(history.next.is_none());
+    assert_eq!(
+        store
+            .list_memories(MemoryListQuery {
+                search: "coffee".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .facts,
+        Vec::<sovra_core::Fact>::new()
+    );
+    assert!(
+        store
+            .list_memories(MemoryListQuery {
+                limit: 51,
+                ..Default::default()
+            })
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .memory_fact(&sovra_core::FactId("episode:wrong-table".into()))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn explicit_memory_corrections_keep_sources_and_roll_back_stale_edits_while_paused() {
+    use sovra_core::{MemoryCorrection, MemoryListQuery};
+    let store = open_store().await;
+    let original = store
+        .save_fact(fact("I prefer black tea", &["Tea"], None))
+        .await
+        .unwrap();
+    store.set_memory_enabled(false).await.unwrap();
+    let edit = MemoryCorrection {
+        target: original.clone(),
+        text: "I prefer jasmine tea".into(),
+    };
+    let corrected = store.correct_memory(edit.clone()).await.unwrap();
+    let current = store.memory_fact(&corrected).await.unwrap();
+    assert!(current.is_current());
+    assert_eq!(current.replaces, Some(original.clone()));
+    assert_eq!(current.entities, Vec::<String>::new());
+    assert!(current.extraction.is_none());
+    let source = store
+        .episode(current.source.as_ref().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(source.kind, EpisodeKind::Note);
+    assert_eq!(source.content, "I prefer jasmine tea");
+    let mut context = sovra_core::MemoryContext::default();
+    assert!(
+        context.push(&current, &source),
+        "an explicit correction is supported recall evidence"
+    );
+    assert!(!context.memories[0].interpretation);
+    assert!(!store.memory_fact(&original).await.unwrap().is_current());
+    assert!(store.correct_memory(edit).await.is_err());
+    assert_eq!(
+        store
+            .recent_episodes("memory-review", 50)
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "failed edits must not orphan source notes"
+    );
+    store
+        .invalidate_fact(&corrected, Timestamp(current.created_at.0 + 1))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .correct_memory(MemoryCorrection {
+                target: corrected,
+                text: "Do not revive this".into()
+            })
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .list_memories(MemoryListQuery::default())
+            .await
+            .unwrap()
+            .facts,
+        Vec::<sovra_core::Fact>::new()
+    );
+    assert_eq!(
+        store
+            .list_memories(MemoryListQuery {
+                include_history: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .facts
+            .len(),
+        2
+    );
+    assert!(!store.memory_policy().await.unwrap().enabled);
+    assert_eq!(
+        store
+            .recent_episodes("memory-review", 50)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
 async fn open_store() -> SurrealStore {
     let mut config = StoreConfig::in_memory();
     config.embedding_dimension = DIM;
@@ -44,12 +227,358 @@ fn fact(content: &str, entities: &[&str], vector: Option<[f32; DIM]>) -> NewFact
 }
 
 #[tokio::test]
-async fn schema_is_idempotent_across_reopens() {
+async fn failed_fact_write_leaves_no_partial_fact() {
     let store = open_store().await;
-    store.health().await.expect("healthy");
-    // Second open against a fresh mem engine re-applies the same OVERWRITE schema.
-    let again = open_store().await;
-    again.health().await.expect("still healthy");
+    let mut candidate = fact("must not survive", &["Maya"], None);
+    candidate.source = Some(sovra_core::EpisodeId("episode:missing".into()));
+    assert!(store.save_fact(candidate).await.is_err());
+    assert_eq!(
+        store.recall(RecallQuery::recent(10)).await.unwrap(),
+        Vec::new()
+    );
+}
+
+#[tokio::test]
+async fn correction_requires_a_current_existing_fact() {
+    let store = open_store().await;
+    let original = store
+        .save_fact(fact("Maya lives in Rome", &[], None))
+        .await
+        .unwrap();
+    let mut correction = fact("Maya lives in Lisbon", &[], None);
+    correction.replaces = Some(original.clone());
+    store.save_fact(correction.clone()).await.unwrap();
+    assert!(
+        store.save_fact(correction).await.is_err(),
+        "stale correction must be rejected"
+    );
+    let mut missing = fact("orphan correction", &[], None);
+    missing.replaces = Some(sovra_core::FactId("fact:missing".into()));
+    assert!(store.save_fact(missing).await.is_err());
+    let mut query = RecallQuery::recent(10);
+    query.include_expired = true;
+    assert_eq!(store.recall(query).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn concurrent_corrections_cannot_create_two_current_replacements() {
+    let store = open_store().await;
+    let old = store
+        .save_fact(fact("Maya lives in Rome", &[], None))
+        .await
+        .unwrap();
+    let mut first = fact("Maya lives in Lisbon", &[], None);
+    first.replaces = Some(old.clone());
+    let mut second = fact("Maya lives in Paris", &[], None);
+    second.replaces = Some(old);
+    let (a, b) = tokio::join!(store.save_fact(first), store.save_fact(second));
+    assert_ne!(a.is_ok(), b.is_ok(), "exactly one correction may commit");
+    assert_eq!(
+        store.recall(RecallQuery::recent(10)).await.unwrap().len(),
+        1
+    );
+    let mut query = RecallQuery::recent(10);
+    query.include_expired = true;
+    assert_eq!(
+        store.recall(query).await.unwrap().len(),
+        2,
+        "loser's partial fact rolled back"
+    );
+}
+
+#[tokio::test]
+async fn correction_keeps_world_time_separate_from_recording_time() {
+    let store = open_store().await;
+    let original = store
+        .save_fact(fact("Maya lives in Rome", &[], None))
+        .await
+        .unwrap();
+    let mut correction = fact("Maya lives in Lisbon", &[], None);
+    correction.valid_at = Some(Timestamp(2_000));
+    correction.replaces = Some(original.clone());
+    store.save_fact(correction).await.unwrap();
+    let mut query = RecallQuery::recent(10);
+    query.include_expired = true;
+    let facts = store.recall(query).await.unwrap();
+    let old = &facts.iter().find(|f| f.fact.id == original).unwrap().fact;
+    assert_eq!(old.invalid_at, Some(Timestamp(2_000)));
+    assert!(old.expired_at.unwrap() > Timestamp(2_000));
+}
+
+#[tokio::test]
+async fn invalidating_twice_preserves_the_first_history_boundary() {
+    let store = open_store().await;
+    let id = store
+        .save_fact(fact("earlier belief", &[], None))
+        .await
+        .unwrap();
+    store.invalidate_fact(&id, Timestamp(2_000)).await.unwrap();
+    store.invalidate_fact(&id, Timestamp(3_000)).await.unwrap();
+    let mut query = RecallQuery::recent(10);
+    query.include_expired = true;
+    let old = store.recall(query).await.unwrap().remove(0).fact;
+    assert_eq!(old.invalid_at, Some(Timestamp(2_000)));
+    assert_eq!(old.expired_at, Some(Timestamp(2_000)));
+}
+
+#[tokio::test]
+async fn record_ids_cannot_target_another_table() {
+    let store = open_store().await;
+    let id = store
+        .record_episode(episode("s1", "source", 1_000))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .invalidate_fact(&sovra_core::FactId(id.0), Timestamp(2_000))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn oversized_recall_does_not_overflow_or_scan_without_a_bound() {
+    let store = open_store().await;
+    assert!(store.recall(RecallQuery::recent(usize::MAX)).await.is_err());
+    assert_eq!(
+        store.recall(RecallQuery::recent(0)).await.unwrap(),
+        Vec::new()
+    );
+}
+
+#[tokio::test]
+async fn zero_length_and_non_finite_vectors_are_rejected() {
+    let store = open_store().await;
+    for vector in [[0.0; DIM], [f32::NAN; DIM], [f32::INFINITY; DIM]] {
+        assert!(
+            store
+                .save_fact(fact("invalid vector", &[], Some(vector)))
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_first_embedding_pins_the_model_for_writes_and_queries() {
+    let store = open_store().await;
+    store
+        .save_fact(fact("first", &[], Some([1.0, 0.0, 0.0, 0.0])))
+        .await
+        .unwrap();
+    let mut other = fact("mixed model", &[], Some([1.0, 0.0, 0.0, 0.0]));
+    other.embedding.as_mut().unwrap().model = "incompatible".into();
+    assert!(store.save_fact(other).await.is_err());
+    let mut query = RecallQuery::recent(10);
+    query.embedding = Some(Embedding {
+        model: "incompatible".into(),
+        vector: vec![1.0; DIM],
+    });
+    assert!(store.recall(query).await.is_err());
+    assert_eq!(
+        store.recall(RecallQuery::recent(10)).await.unwrap().len(),
+        1
+    );
+}
+
+/// Embedded engines release their file handles asynchronously when the client drops.
+async fn reopen(config: StoreConfig) -> SurrealStore {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match SurrealStore::open(config.clone()).await {
+                Ok(store) => return store,
+                Err(MemoryError::Unavailable(_)) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("reopen: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("embedded engine releases its directory")
+}
+
+#[tokio::test]
+async fn disk_reopen_preserves_history_sources_and_embedding_identity() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("sovra-memory-{}-{unique}", std::process::id()));
+    let mut config = StoreConfig::on_disk(&dir);
+    config.embedding_dimension = DIM;
+    let store = SurrealStore::open(config.clone()).await.unwrap();
+    let source = store
+        .record_episode(episode("s1", "I live in Rome", 1))
+        .await
+        .unwrap();
+    let mut original = fact("Maya lives in Rome", &["Maya"], Some([1.0, 0.0, 0.0, 0.0]));
+    original.source = Some(source.clone());
+    let old = store.save_fact(original).await.unwrap();
+    let mut correction = fact("Maya lives in Lisbon", &["Maya"], None);
+    correction.replaces = Some(old.clone());
+    correction.source = Some(source.clone());
+    let new = store.save_fact(correction).await.unwrap();
+    store.invalidate_fact(&new, Timestamp(3)).await.unwrap();
+    let job_id = store
+        .enqueue_memory(memory_input("recover", "m1"))
+        .await
+        .unwrap();
+    let lease = store.claim_memory(Timestamp(4_000)).await.unwrap().unwrap();
+    let mut thread = sovra_core::ChatThread::new("restored-chat", Timestamp(1));
+    thread.messages = vec![
+        sovra_core::ChatMessage::user("user", "Our garden app uses Rust", ""),
+        sovra_core::ChatMessage::assistant("reply", "We chose an offline design", "", vec![]),
+    ];
+    store.save_chat_thread(&thread).await.unwrap();
+    drop(store);
+
+    let store = reopen(config.clone()).await;
+    let saved_thread = store.list_chat_threads(1).await.unwrap().remove(0);
+    assert_eq!(saved_thread.id, "restored-chat");
+    let context = sovra_core::ConversationContext::from_messages(&saved_thread.messages);
+    assert_eq!(context.messages()[0].role, sovra_core::MessageRole::User);
+    assert_eq!(context.messages()[1].text, "We chose an offline design");
+    assert_eq!(
+        store.memory_job(&job_id).await.unwrap().state,
+        sovra_core::MemoryJobState::Processing
+    );
+    let recovered = store
+        .claim_memory(lease.lease_until)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(recovered.attempt, 2);
+    store
+        .complete_memory(&recovered, Vec::new(), "test-model", lease.lease_until)
+        .await
+        .unwrap();
+    store.set_memory_enabled(false).await.unwrap();
+    assert_eq!(store.recent_episodes("s1", 10).await.unwrap()[0].id, source);
+    assert_eq!(
+        store.recall(RecallQuery::recent(10)).await.unwrap(),
+        Vec::new()
+    );
+    let mut history = RecallQuery::recent(10);
+    history.include_expired = true;
+    let saved = store.recall(history).await.unwrap();
+    assert_eq!(saved.len(), 2);
+    assert!(
+        saved
+            .iter()
+            .all(|hit| hit.fact.source == Some(source.clone()))
+    );
+    assert_eq!(
+        saved
+            .iter()
+            .find(|hit| hit.fact.id == new)
+            .unwrap()
+            .fact
+            .replaces,
+        Some(old.clone())
+    );
+    assert!(
+        saved
+            .iter()
+            .any(|hit| hit.fact.id == old && !hit.fact.is_current())
+    );
+    assert!(
+        saved
+            .iter()
+            .any(|hit| hit.fact.id == new && hit.fact.invalid_at == Some(Timestamp(3)))
+    );
+    let mut wrong = embedding([1.0, 0.0, 0.0, 0.0]);
+    wrong.model = "different-model".into();
+    assert!(matches!(
+        store.recall(RecallQuery::semantic(wrong, "Maya", 10)).await,
+        Err(MemoryError::EmbeddingMismatch { .. })
+    ));
+    let editable = store
+        .save_fact(fact("I drink black tea", &[], None))
+        .await
+        .unwrap();
+    let reviewed = store
+        .correct_memory(sovra_core::MemoryCorrection {
+            target: editable.clone(),
+            text: "I drink jasmine tea".into(),
+        })
+        .await
+        .unwrap();
+    store
+        .invalidate_fact(&reviewed, Timestamp(i64::MAX))
+        .await
+        .unwrap();
+    drop(store);
+    let mut isolated_config = config.clone();
+    isolated_config.database = "other_workspace".into();
+    let isolated = reopen(isolated_config).await;
+    assert!(matches!(
+        isolated.episode(&source).await,
+        Err(MemoryError::NotFound(_))
+    ));
+    assert!(matches!(
+        isolated.memory_job(&job_id).await,
+        Err(MemoryError::NotFound(_))
+    ));
+    assert_eq!(
+        isolated.recall(RecallQuery::recent(10)).await.unwrap(),
+        Vec::new()
+    );
+    drop(isolated);
+    let store = reopen(config).await;
+    store.health().await.unwrap();
+    let reviewed_fact = store.memory_fact(&reviewed).await.unwrap();
+    assert!(!reviewed_fact.is_current());
+    assert_eq!(reviewed_fact.replaces, Some(editable));
+    assert_eq!(
+        store
+            .episode(reviewed_fact.source.as_ref().unwrap())
+            .await
+            .unwrap()
+            .content,
+        "I drink jasmine tea"
+    );
+    let reviewed_history = store
+        .list_memories(sovra_core::MemoryListQuery {
+            search: "tea".into(),
+            include_history: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(reviewed_history.facts.len(), 2);
+    assert_eq!(
+        store
+            .list_memories(sovra_core::MemoryListQuery::default())
+            .await
+            .unwrap()
+            .facts,
+        Vec::<sovra_core::Fact>::new()
+    );
+    assert!(!store.memory_policy().await.unwrap().enabled);
+    assert_eq!(
+        store.memory_job(&job_id).await.unwrap().state,
+        sovra_core::MemoryJobState::Complete
+    );
+    assert!(
+        store
+            .enqueue_memory(memory_input("recover", "new"))
+            .await
+            .is_err()
+    );
+    drop(store);
+    // Windows also needs the engine's asynchronous shutdown to release its handles.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        }
+    })
+    .await
+    .expect("remove the test database after the engine releases its handles");
 }
 
 #[tokio::test]
@@ -72,6 +601,40 @@ async fn episodes_round_trip_newest_first() {
     assert_eq!(recent[1].content, "second");
     assert_eq!(recent[0].kind, EpisodeKind::UserMessage);
     assert_eq!(recent[0].session_id, "s1");
+    assert_eq!(store.episode(&recent[0].id).await.unwrap(), recent[0]);
+    assert!(matches!(
+        store
+            .episode(&sovra_core::EpisodeId("episode:absent".into()))
+            .await,
+        Err(MemoryError::NotFound(_))
+    ));
+    assert!(matches!(
+        store
+            .episode(&sovra_core::EpisodeId("fact:absent".into()))
+            .await,
+        Err(MemoryError::InvalidInput(_))
+    ));
+}
+
+#[tokio::test]
+async fn episode_writes_and_reads_are_bounded() {
+    let store = open_store().await;
+    assert!(
+        store
+            .record_episode(episode("", "no owner", 1))
+            .await
+            .is_err()
+    );
+    assert!(store.record_episode(episode("s1", " ", 1)).await.is_err());
+    assert!(
+        store
+            .record_episode(episode("s1", &"x".repeat(128 * 1024 + 1), 1))
+            .await
+            .is_err()
+    );
+    assert!(store.recent_episodes("s1", usize::MAX).await.is_err());
+    assert!(store.recent_episodes("", 10).await.is_err());
+    assert_eq!(store.recent_episodes("s1", 0).await.unwrap(), Vec::new());
 }
 
 #[tokio::test]
@@ -195,7 +758,7 @@ async fn wrong_dimension_embeddings_are_rejected() {
     let bad = NewFact {
         embedding: Some(Embedding {
             model: "test-embedder".into(),
-            vector: vec![0.0; DIM + 1],
+            vector: vec![1.0; DIM + 1],
         }),
         ..fact("bad", &[], None)
     };
@@ -304,4 +867,501 @@ async fn team_roster_and_artifacts_survive_and_soft_delete() {
         .await
         .expect("delete");
     assert_eq!(store.list_artifacts().await.expect("list"), [first]);
+}
+
+fn memory_input(session: &str, key: &str) -> sovra_core::MemoryInput {
+    sovra_core::MemoryInput {
+        key: key.into(),
+        episode: episode(session, "I live in Lisbon and I prefer tea", 1_000),
+    }
+}
+
+fn candidate(content: &str) -> sovra_core::MemoryCandidate {
+    sovra_core::MemoryCandidate {
+        content: content.into(),
+        evidence: "I live in Lisbon".into(),
+        entities: vec!["Lisbon".into()],
+        valid_at: None,
+        replaces: None,
+        same_as: None,
+    }
+}
+
+#[tokio::test]
+async fn memory_inputs_are_immutable_idempotent_and_scoped_to_the_conversation() {
+    let store = open_store().await;
+    let input = memory_input("s1", "message-1");
+    let id = store.enqueue_memory(input.clone()).await.unwrap();
+    assert_eq!(store.enqueue_memory(input.clone()).await.unwrap(), id);
+    assert_eq!(store.recent_episodes("s1", 10).await.unwrap().len(), 1);
+    assert_eq!(
+        store.memory_job(&id).await.unwrap().state,
+        sovra_core::MemoryJobState::Pending
+    );
+    let mut changed = input.clone();
+    changed.episode.content = "different evidence".into();
+    assert!(store.enqueue_memory(changed).await.is_err());
+    let mut other = input.clone();
+    other.episode.session_id = "s2".into();
+    assert_ne!(store.enqueue_memory(other).await.unwrap(), id);
+    let mut generated = input;
+    generated.key = "generated".into();
+    generated.episode.kind = EpisodeKind::ToolResult;
+    assert!(store.enqueue_memory(generated).await.is_err());
+    assert_eq!(store.recent_episodes("s1", 10).await.unwrap().len(), 1);
+    assert!(matches!(
+        store
+            .memory_job(&sovra_core::EpisodeId("episode:missing".into()))
+            .await,
+        Err(MemoryError::NotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn ingestion_batch_is_atomic_idempotent_and_preserves_evidence() {
+    let store = open_store().await;
+    let id = store
+        .enqueue_memory(memory_input("s1", "m1"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    assert_eq!(claim.episode.id, id);
+    assert_eq!(claim.attempt, 1);
+    assert!(
+        store
+            .claim_memory(Timestamp(2_001))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let candidates = vec![candidate("User lives in Lisbon")];
+    let ids = store
+        .complete_memory(&claim, candidates.clone(), "test-model", Timestamp(2_010))
+        .await
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(
+        store
+            .complete_memory(&claim, candidates, "test-model", Timestamp(2_020))
+            .await
+            .unwrap(),
+        ids
+    );
+    assert!(
+        store
+            .complete_memory(
+                &claim,
+                vec![candidate("different output")],
+                "test-model",
+                Timestamp(2_020)
+            )
+            .await
+            .is_err()
+    );
+    let job = store.memory_job(&id).await.unwrap();
+    assert_eq!(job.state, sovra_core::MemoryJobState::Complete);
+    assert_eq!(job.fact_ids, ids);
+    let fact = store
+        .recall(RecallQuery::recent(1))
+        .await
+        .unwrap()
+        .remove(0)
+        .fact;
+    assert_eq!(fact.source, Some(id));
+    assert_eq!(
+        fact.extraction,
+        Some(sovra_core::MemoryExtraction {
+            model: "test-model".into(),
+            evidence: "I live in Lisbon".into(),
+        })
+    );
+}
+
+#[tokio::test]
+async fn ingestion_rejects_fabricated_evidence_and_rolls_back_the_entire_batch() {
+    let store = open_store().await;
+    let id = store
+        .enqueue_memory(memory_input("s1", "m1"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    let mut fabricated = candidate("User lives in Rome");
+    fabricated.evidence = "I live in Rome".into();
+    let mut forged = claim.clone();
+    forged.episode.content = fabricated.evidence.clone();
+    assert!(
+        store
+            .complete_memory(&forged, vec![fabricated], "test-model", Timestamp(2_010))
+            .await
+            .is_err()
+    );
+    let mut stale = candidate("User prefers tea");
+    stale.evidence = "I prefer tea".into();
+    stale.replaces = Some(sovra_core::FactId("fact:missing".into()));
+    assert!(
+        store
+            .complete_memory(
+                &claim,
+                vec![candidate("User lives in Lisbon"), stale],
+                "test-model",
+                Timestamp(2_010)
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store.recall(RecallQuery::recent(10)).await.unwrap(),
+        Vec::new()
+    );
+    let job = store.memory_job(&id).await.unwrap();
+    assert_eq!(job.state, sovra_core::MemoryJobState::Processing);
+    assert_eq!(job.fact_ids, Vec::new());
+    store
+        .complete_memory(
+            &claim,
+            vec![candidate("User lives in Lisbon")],
+            "test-model",
+            Timestamp(2_020),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn expired_leases_recover_and_old_workers_cannot_write() {
+    let store = open_store().await;
+    let id = store
+        .enqueue_memory(memory_input("s1", "m1"))
+        .await
+        .unwrap();
+    let first = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    let second = store
+        .claim_memory(first.lease_until)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(first.token, second.token);
+    assert_eq!(second.attempt, 2);
+    assert!(
+        store
+            .complete_memory(
+                &first,
+                vec![candidate("old worker")],
+                "test-model",
+                first.lease_until
+            )
+            .await
+            .is_err()
+    );
+    let third = store
+        .claim_memory(second.lease_until)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(third.attempt, sovra_core::MAX_MEMORY_ATTEMPTS);
+    assert!(
+        store
+            .claim_memory(third.lease_until)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store.memory_job(&id).await.unwrap().state,
+        sovra_core::MemoryJobState::Failed
+    );
+}
+
+#[tokio::test]
+async fn failed_extraction_backs_off_then_stops_with_an_inspectable_error() {
+    let store = open_store().await;
+    let id = store
+        .enqueue_memory(memory_input("s1", "m1"))
+        .await
+        .unwrap();
+    let mut now = Timestamp(2_000);
+    for attempt in 1..=sovra_core::MAX_MEMORY_ATTEMPTS {
+        let claim = store.claim_memory(now).await.unwrap().unwrap();
+        assert_eq!(claim.attempt, attempt);
+        store
+            .fail_memory(&claim, "The model returned incomplete data.", now)
+            .await
+            .unwrap();
+        assert!(store.claim_memory(now).await.unwrap().is_none());
+        now = Timestamp(now.millis() + sovra_core::MEMORY_RETRY_MILLIS);
+    }
+    assert!(store.claim_memory(now).await.unwrap().is_none());
+    let job = store.memory_job(&id).await.unwrap();
+    assert_eq!(job.state, sovra_core::MemoryJobState::Failed);
+    assert_eq!(
+        job.error.as_deref(),
+        Some("The model returned incomplete data.")
+    );
+}
+
+#[tokio::test]
+async fn pausing_memory_revokes_pending_and_inflight_work_even_after_resuming() {
+    let store = open_store().await;
+    let id = store
+        .enqueue_memory(memory_input("s1", "m1"))
+        .await
+        .unwrap();
+    let pending = store
+        .enqueue_memory(memory_input("s2", "m1"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    let before = store.memory_policy().await.unwrap();
+    assert!(before.enabled);
+    let paused = store.set_memory_enabled(false).await.unwrap();
+    assert!(!paused.enabled);
+    assert!(paused.generation > before.generation);
+    assert_eq!(store.set_memory_enabled(false).await.unwrap(), paused);
+    assert!(
+        store
+            .enqueue_memory(memory_input("s3", "m1"))
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .claim_memory(Timestamp(2_001))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    store.set_memory_enabled(true).await.unwrap();
+    assert!(
+        store
+            .complete_memory(
+                &claim,
+                vec![candidate("too late")],
+                "test-model",
+                Timestamp(2_010)
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .fail_memory(&claim, "late failure", Timestamp(2_010))
+            .await
+            .is_err()
+    );
+    for id in [&id, &pending] {
+        assert_eq!(
+            store.memory_job(id).await.unwrap().state,
+            sovra_core::MemoryJobState::Cancelled
+        );
+    }
+    assert_eq!(
+        store
+            .enqueue_memory(memory_input("s1", "m1"))
+            .await
+            .unwrap(),
+        id
+    );
+    assert!(
+        store
+            .claim_memory(Timestamp(2_020))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn repeated_evidence_does_not_duplicate_or_reactivate_a_stopped_memory() {
+    let store = open_store().await;
+    store
+        .enqueue_memory(memory_input("s1", "m1"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    let ids = store
+        .complete_memory(
+            &claim,
+            vec![candidate("User lives in Lisbon")],
+            "test-model",
+            Timestamp(2_010),
+        )
+        .await
+        .unwrap();
+    store
+        .invalidate_fact(&ids[0], Timestamp(3_000))
+        .await
+        .unwrap();
+    store
+        .enqueue_memory(memory_input("s2", "m1"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(Timestamp(4_000)).await.unwrap().unwrap();
+    assert_eq!(
+        store
+            .complete_memory(
+                &claim,
+                vec![candidate("User lives in Lisbon")],
+                "test-model",
+                Timestamp(4_010)
+            )
+            .await
+            .unwrap(),
+        ids
+    );
+    assert_eq!(
+        store.recall(RecallQuery::recent(10)).await.unwrap(),
+        Vec::new()
+    );
+    let mut history = RecallQuery::recent(10);
+    history.include_expired = true;
+    assert_eq!(store.recall(history).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn queue_limit_rejects_new_work_without_leaving_an_episode() {
+    let store = open_store().await;
+    for index in 0..sovra_core::MAX_PENDING_MEMORIES {
+        store
+            .enqueue_memory(memory_input("s1", &format!("m{index}")))
+            .await
+            .unwrap();
+    }
+    assert!(
+        store
+            .enqueue_memory(memory_input("overflow", "m1"))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store.recent_episodes("overflow", 10).await.unwrap(),
+        Vec::new()
+    );
+    store.set_memory_enabled(false).await.unwrap();
+    store.set_memory_enabled(true).await.unwrap();
+    store
+        .enqueue_memory(memory_input("overflow", "m1"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn competing_workers_cannot_claim_the_same_input() {
+    let store = open_store().await;
+    store
+        .enqueue_memory(memory_input("s1", "m1"))
+        .await
+        .unwrap();
+    let (first, second) = tokio::join!(
+        store.claim_memory(Timestamp(2_000)),
+        store.claim_memory(Timestamp(2_000))
+    );
+    let claims: Vec<_> = [first, second]
+        .into_iter()
+        .filter_map(Result::ok)
+        .flatten()
+        .collect();
+    assert_eq!(claims.len(), 1);
+    assert!(
+        store
+            .claim_memory(Timestamp(2_001))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    store
+        .complete_memory(&claims[0], Vec::new(), "test-model", Timestamp(2_010))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn duplicate_candidates_keep_one_fact_and_each_jobs_extraction_evidence() {
+    let store = open_store().await;
+    for (session, at) in [("s1", 2_000), ("s2", 3_000)] {
+        let id = store
+            .enqueue_memory(memory_input(session, "m1"))
+            .await
+            .unwrap();
+        let claim = store.claim_memory(Timestamp(at)).await.unwrap().unwrap();
+        let candidates = vec![
+            candidate("User lives in Lisbon"),
+            candidate("User lives in Lisbon"),
+        ];
+        let ids = store
+            .complete_memory(&claim, candidates.clone(), "test-model", Timestamp(at + 1))
+            .await
+            .unwrap();
+        assert_eq!(ids.len(), 1);
+        let job = store.memory_job(&id).await.unwrap();
+        assert_eq!(job.extraction_model.as_deref(), Some("test-model"));
+        assert_eq!(job.candidates, candidates);
+    }
+    assert_eq!(
+        store.recall(RecallQuery::recent(10)).await.unwrap().len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn pausing_rejects_late_raw_episode_writes_as_well_as_extraction() {
+    let store = open_store().await;
+    store.set_memory_enabled(false).await.unwrap();
+    let mut reply = episode("s1", "late reply", 1);
+    reply.kind = EpisodeKind::AgentMessage;
+    assert!(store.record_episode(reply).await.is_err());
+    assert_eq!(store.recent_episodes("s1", 10).await.unwrap(), Vec::new());
+    store.set_memory_enabled(true).await.unwrap();
+    store
+        .record_episode(episode("s1", "new evidence", 2))
+        .await
+        .unwrap();
+    assert_eq!(store.recent_episodes("s1", 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn recall_applies_valid_and_known_times_before_limiting() {
+    let store = open_store().await;
+    let mut original = fact("Maya prefers tea", &["Maya"], None);
+    original.valid_at = Some(Timestamp(100));
+    let old_id = store.save_fact(original).await.unwrap();
+    let old = store
+        .recall(RecallQuery::recent(1))
+        .await
+        .unwrap()
+        .remove(0)
+        .fact;
+    let mut replacement = fact("Maya prefers coffee", &["Maya"], None);
+    replacement.valid_at = Some(Timestamp(200));
+    replacement.replaces = Some(old_id.clone());
+    let new_id = store.save_fact(replacement).await.unwrap();
+    let mut query = RecallQuery::recent(1);
+    query.include_expired = true;
+    query.valid_at = Some(Timestamp(150));
+    query.text = Some("prefers".into());
+    query.entity = Some("Maya".into());
+    let found = store.recall(query.clone()).await.unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].fact.id, old_id);
+    query.valid_at = Some(Timestamp(250));
+    assert_eq!(
+        store.recall(query.clone()).await.unwrap()[0].fact.id,
+        new_id
+    );
+    query.known_at = Some(old.created_at);
+    query.valid_at = Some(Timestamp(250));
+    assert_eq!(
+        store.recall(query.clone()).await.unwrap()[0].fact.id,
+        old_id,
+        "a later correction must not rewrite what was known earlier"
+    );
+    query.valid_at = Some(Timestamp(150));
+    assert_eq!(
+        store.recall(query.clone()).await.unwrap()[0].fact.id,
+        old_id
+    );
+    query.known_at = Some(Timestamp(old.created_at.millis() - 1));
+    assert_eq!(store.recall(query.clone()).await.unwrap(), Vec::new());
+    query.known_at = None;
+    query.valid_at = Some(Timestamp(50));
+    assert_eq!(store.recall(query).await.unwrap(), Vec::new());
 }

@@ -14,7 +14,7 @@ pub use summaries::HttpSummarizer;
 
 pub use catalog::{
     AnthropicProvider, CompatibleProvider, OllamaProvider, OpenRouterProvider, pull_ollama,
-    test_connection,
+    test_connection, verify_key,
 };
 pub use connection::{endpoint, validate_connection};
 pub use storage::{

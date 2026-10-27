@@ -13,6 +13,159 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Semantic recall measurements:** an opt-in diagnostic retains live rankings and
+  latency for 116 synthetic facts and 24 queries with two embedding models. Results
+  expose missed paraphrases, unsupported high-similarity matches and remote latency;
+  the provisional cutoff and fallback deadline remain unchanged.
+- **Verified license metadata:** the exact `finl_unicode 1.5.0` dependency is clarified
+  against all three bundled license hashes. Its Unicode file matches SPDX Unicode
+  3.0 despite the older manifest identifier; the permitted-license list is unchanged.
+
+- **OpenRouter search helpers:** meaning-based memory and folder search can use
+  explicitly advertised OpenRouter embedding models through the existing bounded
+  transport. Choosing a helper still requires separate destination consent; chat
+  models and unknown capabilities are not treated as embedding models.
+
+- **Duration-aware recording admission:** PCM WAV and ordinary MP4/QuickTime timing
+  headers now increase the input allowance for long recordings, including reopened
+  attachments. Duration hints are removed before provider requests. Unsupported,
+  fragmented or malformed timing keeps the existing fallback and explains that the
+  recording length could not be checked. No external media process or dependency
+  was added; container hints and reserve rates are not exact provider token counts.
+
+- **Context-budget calibration:** a repeatable, opt-in diagnostic records native
+  token usage for synthetic text and images through the selected OpenRouter model.
+  Offline tests compare the admission estimate with the retained nine measurements.
+  A local long-video fixture documents why compressed size and fixed media allowances
+  do not bound duration-dependent usage; audio/video calibration remains incomplete.
+
+- **Temporal memory evaluation:** the opt-in synthetic suite now has a focused
+  date mode covering dated state changes, unrelated dates, undated preferences,
+  tentative plans and historical answers. Extraction guidance explicitly carries
+  a transition date onto its resulting state while keeping unrelated claims
+  separate. Both baseline and revised live observations are retained; they do not
+  establish that intermittent model date errors are eliminated.
+
+- **Open saved reply sources:** completed ordinary and team replies expose bounded,
+  deduplicated source buttons for memory references. They open the original saved
+  evidence and current/previous/stopped status, with a way back to the conversation.
+  Missing sources show an error without retaining the previously opened source;
+  viewing retained history does not reactivate it for recall.
+
+- **Related memory context:** a matched detail can bring up to two supported details
+  about the same named person or project into the reply context, helping distinguish
+  a colleague's preference from the user's. Extra reads have a 200 ms limit within
+  the existing recall deadline and preserve direct matches on failure. Source,
+  date, pause and withdrawal checks also apply to this context.
+
+- **Structured remembering output:** models advertising schema support receive a
+  constrained extraction format through OpenRouter and compatible transports.
+  Unknown capabilities retain the strict local JSON parser; ordinary chat is
+  unaffected. Source validation remains local, and schema bytes count toward the
+  extraction input limit. Guidance now explicitly includes useful details about
+  named people and projects, separates independently changeable attributes and
+  preserves source-supported unchanged details during partial corrections. Live
+  evaluation also checks separate people's preferences and project schedule changes.
+  OpenRouter requests require compatible endpoints; nullable reference schemas
+  were checked against the configured live model as well as pinned transports.
+
+- **Bounded memory consolidation:** extraction can reuse a supplied current detail
+  expressed in different words while retaining each message's evidence. Related
+  keyword matches precede recent details, so relevant older facts can be considered.
+  Transactional checks reject stale references, incompatible people/dates and
+  conflicting reuse/correction batches. Recognized wordings remain suppressed after
+  stopping use and reopening storage. Exact matching now distinguishes people and
+  explicit dates; returning to an earlier value creates a new correction version.
+  Live-model matching accuracy remains under evaluation.
+
+- **Repeatable memory evaluation:** an opt-in debug test records synthetic live-model
+  answers, extraction retries, version history and timings in an isolated database
+  with 100 distractors. Normal tests remain offline. Live findings prompted clearer
+  background-saving and correction guidance; validation failures now identify the
+  failed rule without displaying model response text. Extraction and linking errors
+  found during evaluation remain documented rather than counted as quality passes.
+
+- **Connections tab & embedded WhatsApp Personal QR linking (`sovra-core`, `sovra-runtime`, `sovra-store-surreal`, `sovra-ui`)**:
+  - Added a dedicated **Connections** section (`NavTab::Connections`, `/connections`, `/whatsapp`) built directly into the single Rust binary with no external server, Node/Go sidecar, or WhatsApp Business API account required.
+  - Implements the WhatsApp Web Multi-Device companion pairing protocol (`CompanionKeyBundle` with 32-byte `Curve25519` Noise static key, `Signal` identity key, `ADV` HMAC-SHA256 secret, 5-field `ref,noise_pub,identity_pub,adv_secret,client_type` QR payload, 6-ref rotation window, and 8-character Crockford Base32 phone-linking code).
+  - Clicking **Connect WhatsApp** opens an interactive native GPUI 29×29 QR code modal (`#whatsapp-qr-modal`) to scan from *WhatsApp → Linked Devices → Link a Device*, with an optional 8-digit phone-number pairing fallback, live `Connected` sidebar badge, *"Only reply in Message Yourself"* privacy toggle, and end-to-end message bridge into Chat.
+
+- **Restored conversation context:** new ordinary and attachment turns carry a
+  bounded text excerpt from the visible saved chat, preserving user/reply roles
+  after restart and model changes. Fresh per-turn sessions prevent duplicated
+  provider history and replay of earlier tools, widgets or reasoning. Team prompts
+  also bound earlier text and always include the complete current request, even
+  when no history is supplied. Same-chat context remains available with cross-chat
+  remembering off; omitted/shortened history is identified to the model.
+
+- **Ordered chat persistence:** chat snapshots, soft deletions and reloads now run
+  in command order on one owned background worker. A slow older save cannot
+  overwrite a newer snapshot or resurrect a subsequently deleted thread. Graceful
+  runtime shutdown drains accepted chat operations before reporting completion.
+
+- **Saved memory controls:** Knowledge now lists current memories with search,
+  bounded pages, retained history and original sources. Corrections atomically
+  save a user-authored note and replacement while retaining the previous version.
+  Stop using asks for confirmation and excludes that version from current and historical recall
+  without deleting its history or original chat. Explicit review remains available
+  while automatic remembering is paused; Knowledge also has the remembering toggle.
+
+- **Shared context budget:** model requests now account for instructions, tool
+  schemas/results, restored conversation, recalled evidence and media reservations
+  together, with room reserved for the reply. Older optional context yields first;
+  the current question and live tool exchanges are never silently cut. Requests
+  that still cannot fit fail before contacting the chat model, while saved history
+  remains intact. Admission uses conservative estimates; provider-tokenizer and
+  media calibration remain unfinished.
+
+- **Historical conversation queries:** ordinary and team helpers can request
+  date/entity-scoped evidence, distinguishing when a claim applied from what was
+  known by a date. Four query receipts per turn contain no remembered facts;
+  evidence is refreshed at each model request and remains revocable. ISO dates
+  and offset-bearing date-times are validated, and ambiguous dates require
+  clarification. Explicit Stop using now records a withdrawal separate from
+  temporal correction history, excluding that version even from past queries.
+  Schema v5 conservatively migrates earlier stops without erasing records.
+
+- **Optional semantic memory recall:** Knowledge can use an explicitly chosen
+  embedding destination for saved details and future questions, independently of
+  folder permissions. Incremental batches reuse existing provider transports;
+  dimensions are pinned per selection and old indexes never mix with a new model.
+  Pausing, disabling or changing destinations cancels outstanding work. Keyword
+  recall remains available on semantic failure or timeout. Migration/reopen,
+  consent, cancellation and responsive controls have deterministic tests;
+  relevance calibration and broader quality evaluation remain unfinished.
+
+- **Conversation recall (in progress):** ordinary, attachment and team model
+  requests receive bounded keyword-matched evidence with original user quotes,
+  conversation IDs, dates and citation identifiers. Retrieved evidence stays out
+  of saved provider sessions; pausing revokes in-flight reads. Unsupported,
+  assistant-authored, future and superseded evidence is excluded from current
+  recall. Storage supports explicit valid-time and known-time filters.
+  Models with tools can now request explicit dates and entities through bounded
+  per-turn queries; models without tools disclose that limitation.
+
+- **Automatic remembering (in progress):** an owned background worker extracts
+  supported details from user messages with the selected AI, without tools or
+  assistant history. Complete structured responses must cite exact source text;
+  bounded jobs retain provenance and report failures. Turning remembering off
+  cancels pending work and model requests, and storage rejects late writes. Model
+  changes cancel old extraction for retry. Knowledge shows live status and explains
+  which data reaches the selected AI service.
+
+- **Recoverable memory ingestion (storage API, in progress):** user evidence and
+  its pending job are recorded together under a stable conversation/message key.
+  Expiring leases recover interrupted work with bounded retries; a whole validated
+  extraction commits atomically with its job. Exact duplicates retain one fact and
+  every job's evidence, and do not reactivate a stopped fact. Pausing cancels pending
+  and leased work across restarts.
+
+- **Conversation-memory storage foundation (in progress):** fact, source, entity and
+  replacement writes commit atomically; stale corrections fail without partial
+  records. Recall exposes source and replacement references, episode reads are
+  bounded, and embedding identity persists across disk reopens. Schema migration
+  rejects incompatible vectors and newer schemas.
+
 - **Summary model transport (in progress)**: a single-request adapter supports Ollama, Anthropic, OpenRouter and compatible chat endpoints without tools. It revalidates model destinations when constructed, validates prepared source scope and size, uses conservative context admission, and accepts only completed JSON with valid input citations. Embeddings and summaries share bounded HTTP response handling. Scheduler, consent UI and recursive generation remain pending.
 
 - **RAPTOR clustering engine (in progress)**: global/local UMAP reductions feed full-covariance Gaussian mixtures selected by BIC. Soft assignments retain overlap and source coverage; recursive grouping fits request budgets and identifies fallback partitions explicitly. Computation runs on one CPU worker with cancellation and finite work limits. Background generation and retrieval integration remain pending.
@@ -119,6 +272,32 @@ move them under a version heading when the tag is cut.
 
 ### Changed
 
+- **Plain-language Skills & Shortcuts explorer (`sovra-ui`)**:
+  - Replaced the flat vertical dump on the **Skills** page (`skill_library.rs`) with a 3-step *"How it works"* banner, category filter pills (`All skills`, `Quick actions`, `Files & folders`, `Web search`, `AI helpers`, `Tables & cards`, `Made by you`) with live counts, and categorized responsive glass cards (`Surface::Glass`) across `t.layout.page_width`.
+  - Every skill card now leads with its human title, `/shortcut` pill, plain-English kind badge (`Instant action`, `Guided recipe`, `Made by you`), stripped of internal agent boilerplate, plus a concrete real-world example prompt and a primary **`Try in chat`** / **`Run now`** CTA.
+  - Simplified the **Create a skill** form with numbered plain-English prompts, automatic `/shortcut` slug generation from the title when left blank, and progressive disclosure (`Show optional tool settings`) for technical tool names.
+- **Grouped, plain-language sidebar & streamlined conversation history (`sovra-ui`)**:
+  - Primary navigation is now chunked into everyday workspace destinations (`Chat`, `Team`, `Artifacts`, `Schedules`) and a labeled **Your AI & Setup** section (`Models`, `My AI's`, `Knowledge`, `Skills`, `Settings`) to reduce cognitive load.
+  - Promoted **`+ New Chat`** to a primary brand-gradient CTA, added plain-English tooltips to every sidebar tab and collapsed rail button, surfaced live context badges (`Setup` on `Models` when unconfigured, saved item counts on `Artifacts` and `Schedules`), and anchored **`Take a guided tour`** in the sidebar footer above the account switcher.
+  - Eliminated double-padded nested borders in conversation history rows, added pin badges and compact icon quick-actions (`Pin`, `AI Title`, `Rename`, `Delete`) with tooltips, and upgraded empty states with direct action buttons.
+- **Setup is two steps and ends in the chat.** Models shows *1 · Connect* → *2 · Pick
+  your AI*. **Use this model** goes straight to the conversation once the runtime
+  confirms the choice, and saving a key from a setup step continues to the next step
+  (to Chat when a model is already chosen). A message typed before setup finished is
+  sent automatically as soon as a model is ready. Chat setup cards and the top setup
+  bar carry one action each, in plain words. Per-file-type AI choices appear once
+  setup is complete.
+- **Picking a chat model is plain.** After the key is saved, step 2 reads *Pick a chat
+  model* and every suggestion shows its price as an estimated cost per message ("Free",
+  "About 1¢ a message") instead of per-million-token rates; the model list does the
+  same, with exact rates kept in model details. The everyday suggestion is now the
+  newest affordable paid model that supports Sovra's tools, rather than the cheapest
+  model listed, and Settings points straight to *Next: pick a chat model* once a key is
+  saved.
+- **The model library shows chat models by default.** Every model is labelled by what
+  it makes (chat, pictures, video, voices, speech to text, search helpers, other tools).
+  A **Show** picker beside the search box lists the other types; it replaces the
+  "What it creates" filter.
 - Refine the native UI throughout: neutral charcoal/paper palettes, restrained
   violet accents, consistent typography and spacing, flatter cards, quieter chat
   bubbles and a more comfortable composer. Unify page headers and simplify setup
@@ -197,6 +376,28 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- **Release storage during shutdown:** keep the background executor alive for up
+  to five seconds of adapter cleanup after owned workers finish, then emit
+  `Stopped` after executor teardown. This lets the embedded database finish its
+  asynchronous close instead of leaving its directory locked on an immediate
+  runtime restart. A combined real-disk/runtime/HTTP regression covers remembering,
+  recall, corrections, withdrawal, paused restart and restored chat context.
+  The desktop quit hook now requests shutdown, and the composition root waits for
+  a dedicated completion signal after the UI loop exits, so accepted saves are
+  drained before normal process exit without competing for UI events.
+
+- **A key OpenRouter rejects is no longer saved as "connected".** OpenRouter lists its
+  models without a key, so a mistyped or deleted key used to look ready and then fail
+  the first message with `model.unauthorized: User not found.` Saving a new OpenRouter
+  key now checks it first and explains how to copy it again; a key refused later shows
+  "OpenRouter didn't accept your key…" with the fix instead of the raw error code.
+- **Chat no longer asks you to set up again after setup said "ready".** If the
+  settings file records a saved key the credential store does not hold (a reset
+  keychain, or a `SOVRA_DEV` build reading its separate dev store), the app now asks
+  for the key instead of claiming setup is complete. The runtime also reports when
+  the chosen model cannot run (`ModelEvent::ActiveModelStatus`), so Models and Chat
+  agree and ask for another model. A locked keychain no longer stops other settings
+  loading, and the chosen model is re-activated before a saved key is announced.
 - Embedding model choices now use catalogue metadata before incomplete manual
   entries, matching execution and excluding models known to produce only chat text.
 
