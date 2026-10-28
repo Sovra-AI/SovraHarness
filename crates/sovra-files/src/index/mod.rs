@@ -5,6 +5,7 @@ mod catalogue;
 mod derived;
 mod graph;
 mod history;
+mod matching;
 mod report;
 mod scan;
 mod semantic;
@@ -73,6 +74,7 @@ impl LocalFileIndex {
             Ok(_) => {}
         }
         let mut db = Connection::open(path).map_err(|error| db_error(&error))?;
+        matching::register(&db).map_err(|error| db_error(&error))?;
         db.busy_timeout(Duration::from_secs(5))
             .map_err(|error| db_error(&error))?;
         let version: i64 = db

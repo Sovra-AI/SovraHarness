@@ -146,6 +146,9 @@ fn knowledge_review_flows_through_client_and_duplicate_review_reports_an_error()
 #[path = "file_index/monitoring.rs"]
 mod monitoring;
 
+#[path = "file_index/batch.rs"]
+mod batch;
+
 use sovra_core::file_index::graph::*;
 use sovra_core::{
     AgentConfig, Command, Event,
@@ -396,6 +399,7 @@ fn scans_leave_ping_and_search_responsive_and_cancel_reaches_the_blocking_worker
                     root_id: "root".into(),
                     kind: None,
                     contains: None,
+                    match_case: false,
                     cursor: None,
                     limit,
                 },

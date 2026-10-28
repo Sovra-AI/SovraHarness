@@ -2,6 +2,156 @@ use super::*;
 use sovra_core::file_index::{CatalogFilter, CatalogGroupBy, CatalogQuery, ExtractionState};
 
 #[test]
+fn filename_filters_ignore_unicode_casing_and_normalization_by_default() {
+    let fixture = Fixture::new();
+    for path in ["Straße.Café.txt", "STRASSE.cafe\u{301}.txt", "other.txt"] {
+        fixture.write(path, "orchid source");
+    }
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let mut query = CatalogQuery {
+        filter: CatalogFilter {
+            name_contains: Some("STRASSE.CAFÉ".into()),
+            ..CatalogFilter::default()
+        },
+        limit: 1,
+        ..CatalogQuery::default()
+    };
+    let first = store.catalogue(&query).unwrap();
+    assert_eq!(first.total_files, 2);
+    assert!(first.files[0].path.contains("STRASSE") || first.files[0].path.contains("Straße"));
+    query.cursor = first.next_cursor;
+    assert!(query.cursor.is_some());
+    let next = store.catalogue(&query).unwrap();
+    assert_eq!(next.total_files, 2);
+    assert_eq!(next.files.len(), 1);
+    assert_ne!(first.files[0].path, next.files[0].path);
+    query.filter.match_case = true;
+    assert!(
+        store.catalogue(&query).is_err(),
+        "Changing matching mode invalidates the cursor"
+    );
+    query.cursor = None;
+    assert_eq!(store.catalogue(&query).unwrap().total_files, 0);
+    query.filter.name_contains = Some("Straße.Café".into());
+    let exact = store.catalogue(&query).unwrap();
+    assert_eq!(exact.total_files, 1);
+    assert_eq!(exact.files[0].path, "Straße.Café.txt");
+    query.filter.name_contains = Some("' OR 1=1 --".into());
+    query.filter.match_case = false;
+    assert_eq!(store.catalogue(&query).unwrap().total_files, 0);
+}
+
+#[test]
+fn explicit_catalogue_and_text_search_scopes_can_include_more_than_sixteen_folders() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let mut roots = vec![];
+    for n in 0..25 {
+        let path = fixture.0.join(format!("scope-{n}"));
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(
+            path.join("notes.txt"),
+            format!("orchid source from folder {n}"),
+        )
+        .unwrap();
+        let root = store.add_root(&path).unwrap();
+        store.scan(&root.id, &Observer::default()).unwrap();
+        if n < 24 {
+            roots.push(root.id);
+        }
+    }
+    let query = CatalogQuery {
+        filter: CatalogFilter {
+            roots: roots.clone(),
+            ..CatalogFilter::default()
+        },
+        limit: 40,
+        ..CatalogQuery::default()
+    };
+    let page = store.catalogue(&query).unwrap();
+    assert_eq!(page.total_files, 24);
+    assert_eq!(page.coverage.len(), 24);
+    assert!(page.files.iter().all(|file| roots.contains(&file.root_id)));
+    let passages = store
+        .search(&IndexQuery {
+            roots: roots.clone(),
+            text: "orchid".into(),
+            path_prefix: None,
+            limit: 40,
+        })
+        .unwrap();
+    assert_eq!(passages.len(), 24);
+    assert!(
+        passages
+            .iter()
+            .all(|passage| roots.contains(&passage.reference.root_id))
+    );
+}
+
+#[test]
+fn inventory_exposes_every_saved_text_part_without_mixing_replaced_or_revoked_versions() {
+    use std::fmt::Write as _;
+    let fixture = Fixture::new();
+    let mut text = String::new();
+    for n in 0..4_000 {
+        writeln!(
+            text,
+            "Line {n}: flowering cây 🌳 and the complete project notes."
+        )
+        .unwrap();
+    }
+    text.push_str("Final saved marker: orchid deadline Friday.\n");
+    fixture.write("notes.txt", &text);
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let entry = store
+        .catalogue(&CatalogQuery::default())
+        .unwrap()
+        .files
+        .remove(0);
+    assert!(entry.passage_count > 3);
+    let count = u32::try_from(entry.passage_count).unwrap();
+    let mut recovered = String::new();
+    for ordinal in 0..count {
+        let passage = store.read(&entry.passage_at(ordinal).unwrap()).unwrap();
+        assert!(passage.text.len() <= 8192);
+        recovered.push_str(&passage.text);
+    }
+    assert_eq!(recovered, text);
+    let last = entry.passage_at(count - 1).unwrap();
+    assert!(
+        store
+            .read(&last)
+            .unwrap()
+            .text
+            .ends_with("orchid deadline Friday.\n")
+    );
+    assert!(entry.passage_at(count).is_none());
+    drop(store);
+    let store = fixture.store();
+    assert_eq!(
+        store.catalogue(&CatalogQuery::default()).unwrap().files[0].passage_count,
+        entry.passage_count
+    );
+    assert!(store.read(&last).is_ok());
+    fixture.write("notes.txt", "Replacement saved version.\n");
+    store.scan(&root.id, &Observer::default()).unwrap();
+    assert!(store.read(&last).is_err());
+    let replacement = store
+        .catalogue(&CatalogQuery::default())
+        .unwrap()
+        .files
+        .remove(0);
+    assert_eq!(replacement.passage_count, 1);
+    assert_ne!(replacement.first_passage, entry.first_passage);
+    store.remove(&root.id).unwrap();
+    assert!(store.read(&replacement.passage_at(0).unwrap()).is_err());
+}
+
+#[test]
 fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
     let fixture = Fixture::new();
     fixture.write("reports/100%_budget.txt", "orchid budget is 420\n");
@@ -38,6 +188,7 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
         Some(sovra_core::file_index::DocumentBudget::default().source_bytes() + 1)
     );
     assert!(unread.first_passage.is_none() && unread.content_digest.is_none());
+    assert_eq!(unread.passage_count, 0);
     assert!(
         unread
             .note
@@ -46,7 +197,7 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
             .contains("document reading budget")
     );
 
-    query.filter.name_contains = Some("100%_budget".into());
+    query.filter.name_contains = Some("100%_BUDGET".into());
     query.filter.mime_prefix = Some("text/".into());
     query.filter.keywords = Some("orchid budget".into());
     query.filter.modified_after = Some(1_700_000_000);
@@ -192,6 +343,7 @@ fn failed_and_blank_extractions_keep_metadata_and_never_become_readable_on_refre
             let unread = inventory.files.iter().find(|f| f.path == path).unwrap();
             assert_eq!(unread.extraction, ExtractionState::MetadataOnly, "{path}");
             assert_eq!(unread.first_passage, None);
+            assert_eq!(unread.passage_count, 0);
         }
         let failed = store
             .catalogue(&CatalogQuery {
@@ -205,6 +357,7 @@ fn failed_and_blank_extractions_keep_metadata_and_never_become_readable_on_refre
         assert_eq!(failed.total_files, 1);
         assert_eq!(failed.files[0].path, "overexpanded.zip");
         assert_eq!(failed.files[0].first_passage, None);
+        assert_eq!(failed.files[0].passage_count, 0);
         assert!(failed.files[0].note.is_some());
     }
 }

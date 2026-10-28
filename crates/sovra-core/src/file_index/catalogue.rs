@@ -1,7 +1,7 @@
 //! Structured file inventory queries. Filesystem dates describe observations,
 //! not the dates of real-world events mentioned inside a document.
 
-use super::{IndexError, IndexStatus, MAX_INDEX_ROOTS, PassageRef, validate_relative_path};
+use super::{IndexError, IndexStatus, PassageRef, validate_relative_path};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,8 +11,10 @@ pub struct CatalogFilter {
     pub path_prefix: Option<String>,
     /// Exact relative parent directory; an empty string selects top-level files.
     pub directory: Option<String>,
-    /// Literal, case-sensitive filename substring; never a regex or shell glob.
+    /// Literal filename substring; never a regex or shell glob.
     pub name_contains: Option<String>,
+    /// Match filename capitalization exactly instead of canonical Unicode case folding.
+    pub match_case: bool,
     pub mime_prefix: Option<String>,
     pub keywords: Option<String>,
     pub modified_after: Option<u64>,
@@ -25,11 +27,9 @@ pub struct CatalogFilter {
 
 impl CatalogFilter {
     pub fn validate(&self) -> Result<(), IndexError> {
-        if self.roots.len() > MAX_INDEX_ROOTS
-            || self.roots.iter().any(|id| id.is_empty() || id.len() > 120)
-        {
+        if self.roots.iter().any(|id| id.is_empty() || id.len() > 120) {
             return Err(IndexError(
-                "Use at most 16 folder IDs returned by list_indexed_folders.".into(),
+                "Use folder IDs returned by list_indexed_folders.".into(),
             ));
         }
         if let Some(path) = &self.path_prefix {
@@ -179,6 +179,20 @@ pub struct CatalogEntry {
     pub extraction: ExtractionState,
     pub note: Option<String>,
     pub first_passage: Option<PassageRef>,
+    /// Number of saved text parts in this exact current version; zero without readable text.
+    pub passage_count: u64,
+}
+
+impl CatalogEntry {
+    /// Keep navigation within the version and folder grant shown in the inventory.
+    pub fn passage_at(&self, ordinal: u32) -> Option<PassageRef> {
+        if u64::from(ordinal) >= self.passage_count {
+            return None;
+        }
+        let mut reference = self.first_passage.clone()?;
+        reference.ordinal = ordinal;
+        Some(reference)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +245,47 @@ impl From<&super::IndexedRoot> for CatalogCoverage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_navigation_keeps_the_inventory_version_and_rejects_missing_parts() {
+        let first = PassageRef {
+            root_id: "r".into(),
+            file_id: "f".into(),
+            version_id: "v".into(),
+            ordinal: 0,
+        };
+        let mut entry = CatalogEntry {
+            root_id: "r".into(),
+            root_path: "/chosen".into(),
+            file_id: "f".into(),
+            path: "notes.txt".into(),
+            byte_size: None,
+            mime_type: None,
+            content_digest: None,
+            observed_at: None,
+            modified_at: None,
+            created_at: None,
+            extraction: ExtractionState::PartialText,
+            note: Some("Some content was not read".into()),
+            first_passage: Some(first.clone()),
+            passage_count: 3,
+        };
+        assert_eq!(entry.passage_at(0), Some(first.clone()));
+        assert_eq!(
+            entry.passage_at(2),
+            Some(PassageRef {
+                ordinal: 2,
+                ..first
+            })
+        );
+        assert_eq!(entry.passage_at(3), None);
+        assert_eq!(entry.passage_at(u32::MAX), None);
+        entry.passage_count = 0;
+        assert_eq!(entry.passage_at(0), None);
+        entry.passage_count = 3;
+        entry.first_passage = None;
+        assert_eq!(entry.passage_at(0), None);
+    }
 
     #[test]
     fn structured_queries_accept_literal_filters_and_reject_escapes_and_inverted_ranges() {

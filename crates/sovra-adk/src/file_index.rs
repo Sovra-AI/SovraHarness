@@ -117,7 +117,7 @@ impl Tool for IndexTool {
             Operation::Catalogue => catalogue_schema(),
             Operation::Search => json!({"type":"object","properties":{
                 "query":{"type":"string","maxLength":2048,"description":"Up to 32 literal keywords. Refine or split a question into focused searches."},
-                "roots":{"type":"array","maxItems":16,"items":{"type":"string"},"description":"Folder IDs returned by list_indexed_folders; omit for all granted folders."},
+                "roots":{"type":"array","items":{"type":"string"},"description":"Folder IDs returned by list_indexed_folders; omit for all granted folders."},
                 "path_prefix":{"type":"string","description":"Optional relative folder or filename prefix."},
                 "limit":{"type":"integer","minimum":1,"maximum":8}
             },"required":["query"],"additionalProperties":false}),
@@ -228,17 +228,18 @@ fn catalogue_query(args: Value) -> Result<CatalogQuery, IndexError> {
 fn catalogue_schema() -> Value {
     json!({"type":"object","properties":{
         "filter":{"type":"object","properties":{
-            "roots":{"type":"array","maxItems":16,"items":{"type":"string"}},
+            "roots":{"type":"array","items":{"type":"string"}},
             "path_prefix":{"type":"string","description":"Relative path prefix within the selected scopes."},
             "directory":{"type":"string","description":"Exact relative parent directory; an empty string selects files directly inside the indexed root."},
-            "name_contains":{"type":"string","description":"Literal case-sensitive filename fragment."},
+            "name_contains":{"type":"string","description":"Literal filename fragment; ignores letter case by default."},
+            "match_case":{"type":"boolean","description":"Match filename capitalization exactly. Default false."},
             "mime_prefix":{"type":"string","description":"Detected MIME prefix, e.g. application/pdf or image/. Unknown formats do not match."},
             "keywords":{"type":"string","maxLength":2048,"description":"Up to 32 literal keywords in extracted text, combined with AND."},
             "modified_after":{"type":"integer","minimum":0,"description":"Inclusive filesystem modification time, Unix seconds."},
             "modified_before":{"type":"integer","minimum":0,"description":"Inclusive filesystem modification time, Unix seconds."},
             "min_bytes":{"type":"integer","minimum":0},"max_bytes":{"type":"integer","minimum":0},
             "has_text":{"type":"boolean"},
-            "extraction":{"type":"string","enum":["text","metadata_only","failed"]}
+            "extraction":{"type":"string","enum":["text","partial_text","metadata_only","failed"]}
         },"additionalProperties":false},
         "group_by":{"type":"string","enum":["root","directory","mime_type","extension"]},
         "limit":{"type":"integer","minimum":1,"maximum":40},
@@ -252,7 +253,7 @@ fn query(args: &Value) -> Result<IndexQuery, IndexError> {
     };
     let roots = match args.get("roots") {
         None => vec![],
-        Some(Value::Array(values)) if values.len() <= 16 => values
+        Some(Value::Array(values)) => values
             .iter()
             .map(|value| {
                 value
@@ -266,7 +267,7 @@ fn query(args: &Value) -> Result<IndexQuery, IndexError> {
             .collect::<Result<_, _>>()?,
         Some(_) => {
             return Err(IndexError(
-                "roots must be an array of at most 16 folder IDs.".into(),
+                "roots must be an array of granted folder IDs.".into(),
             ));
         }
     };
@@ -353,6 +354,13 @@ mod tests {
             assert!(query(&value).is_err(), "{value}");
         }
         assert_eq!(query(&json!({"query":"orchid"})).unwrap().limit, 4);
+        let roots: Vec<_> = (0..24).map(|n| format!("root-{n}")).collect();
+        assert_eq!(
+            query(&json!({"query":"orchid", "roots": roots}))
+                .unwrap()
+                .roots,
+            roots
+        );
         assert!(reference(&json!({"reference":{"root_id":"x"}})).is_err());
     }
 
@@ -373,6 +381,27 @@ mod tests {
             assert!(catalogue_query(value.clone()).is_err(), "{value}");
         }
         assert_eq!(catalogue_query(json!({})).unwrap().limit, 20);
+        assert!(!catalogue_query(json!({})).unwrap().filter.match_case);
+        let roots: Vec<_> = (0..24).map(|n| format!("root-{n}")).collect();
+        let query = catalogue_query(json!({"filter":{"roots":roots,"name_contains":"Résumé","match_case":true,"extraction":"partial_text"}})).unwrap();
+        assert!(query.filter.match_case);
+        assert_eq!(query.filter.roots, roots);
+        let schema = catalogue_schema();
+        assert!(
+            schema["properties"]["filter"]["properties"]["roots"]
+                .get("maxItems")
+                .is_none()
+        );
+        assert_eq!(
+            schema["properties"]["filter"]["properties"]["match_case"]["type"],
+            "boolean"
+        );
+        assert!(
+            schema["properties"]["filter"]["properties"]["extraction"]["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("partial_text"))
+        );
         assert!(
             catalogue_query(json!({"filter":{"directory":"","extraction":"metadata_only"}}))
                 .is_ok()

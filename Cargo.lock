@@ -10831,6 +10831,7 @@ dependencies = [
  "bzip2-rs",
  "cap-fs-ext",
  "cap-std",
+ "caseless",
  "chardetng",
  "encoding_rs",
  "fastcdc",
@@ -10855,6 +10856,7 @@ dependencies = [
  "sovra-core",
  "tar",
  "umap-rs",
+ "unicode-normalization",
  "xberg",
  "zip 9.1.3",
 ]

@@ -6,9 +6,43 @@ fn query(root_id: &str) -> NoticeQuery {
         root_id: root_id.into(),
         kind: None,
         contains: None,
+        match_case: false,
         cursor: None,
         limit: 17,
     }
+}
+
+#[test]
+fn report_filters_ignore_unicode_casing_and_normalization_by_default() {
+    let fixture = Fixture::new();
+    fixture.write(".Straße.Café", "hidden");
+    fixture.write(".STRASSE.cafe\u{301}", "hidden");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let mut query = query(&root.id);
+    query.contains = Some("STRASSE.CAFÉ".into());
+    query.limit = 1;
+    let first = store.report(&query).unwrap();
+    assert_eq!(first.total, 2);
+    query.cursor = first.next_cursor;
+    assert!(query.cursor.is_some());
+    let second = store.report(&query).unwrap();
+    assert_eq!(second.total, 2);
+    assert_ne!(first.notices[0].path, second.notices[0].path);
+    query.match_case = true;
+    assert!(store.report(&query).is_err());
+    query.cursor = None;
+    assert_eq!(store.report(&query).unwrap().total, 0);
+    query.contains = Some("Straße.Café".into());
+    assert_eq!(store.report(&query).unwrap().total, 1);
+    // The same matching mode applies to reasons, not just filenames.
+    query.contains = Some(first.notices[0].message.to_uppercase());
+    assert_eq!(store.report(&query).unwrap().total, 0);
+    query.match_case = false;
+    assert_eq!(store.report(&query).unwrap().total, 2);
+    query.contains = Some("%_".into());
+    assert_eq!(store.report(&query).unwrap().total, 0);
 }
 
 #[cfg(unix)]

@@ -65,6 +65,7 @@ fn inaccessible_subfolders_do_not_stop_siblings_or_retire_unvisited_sources() {
             root_id: root.id.clone(),
             kind: Some(sovra_core::file_index::NoticeKind::Failed),
             contains: None,
+            match_case: false,
             cursor: None,
             limit: 40,
         })

@@ -29,7 +29,6 @@ pub use catalogue::{
 };
 pub use report::{NoticeCursor, NoticeKind, NoticePage, NoticeQuery, ReportState, ScanNotice};
 
-pub const MAX_INDEX_ROOTS: usize = 16;
 pub const MAX_INDEX_ENTRIES: u64 = 100_000;
 pub const MAX_INDEX_ISSUES: usize = 50;
 pub const MAX_SEARCH_RESULTS: usize = 40;
@@ -86,10 +85,9 @@ pub struct IndexQuery {
 impl IndexQuery {
     pub fn validate(&self) -> Result<(), IndexError> {
         validate_search_text(&self.text)?;
-        if self.limit == 0 || self.limit > MAX_SEARCH_RESULTS || self.roots.len() > MAX_INDEX_ROOTS
-        {
+        if self.limit == 0 || self.limit > MAX_SEARCH_RESULTS {
             return Err(IndexError(
-                "This search requests too many results or folders.".into(),
+                "Choose between 1 and 40 results per search.".into(),
             ));
         }
         if let Some(prefix) = &self.path_prefix {
@@ -148,6 +146,10 @@ pub enum IndexCommand {
     AddRoot {
         path: PathBuf,
     },
+    /// One picker selection is one queued operation, regardless of folder count.
+    AddRoots {
+        paths: Vec<PathBuf>,
+    },
     Refresh {
         root_id: String,
     },
@@ -177,6 +179,7 @@ pub enum IndexCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexEvent {
+    FoldersAdded(FolderAddition),
     Reported {
         request_id: u64,
         result: Result<NoticePage, IndexError>,
@@ -212,6 +215,18 @@ pub enum IndexEvent {
     Error(String),
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FolderAddition {
+    pub added: Vec<PathBuf>,
+    pub failed: Vec<FolderAddFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderAddFailure {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MonitorMode {
     Paused,
@@ -227,6 +242,7 @@ pub struct MonitorStatus {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexState {
+    pub folder_addition: Option<FolderAddition>,
     pub report: ReportState,
     pub browser: BrowserState,
     pub roots: Vec<IndexedRoot>,
@@ -256,6 +272,9 @@ impl IndexState {
 
     pub fn apply(&mut self, event: &IndexEvent) {
         match event {
+            IndexEvent::FoldersAdded(result) => {
+                self.folder_addition = Some(result.clone());
+            }
             IndexEvent::KnowledgePending(proposals) => {
                 self.knowledge_pending = proposals
                     .iter()
@@ -519,6 +538,25 @@ pub fn excluded_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_addition_failures_survive_scan_and_search_updates() {
+        let mut state = IndexState::default();
+        let result = FolderAddition {
+            added: vec!["/chosen".into()],
+            failed: vec![FolderAddFailure {
+                path: "/unavailable".into(),
+                reason: "Permission denied".into(),
+            }],
+        };
+        state.apply(&IndexEvent::FoldersAdded(result.clone()));
+        state.apply(&IndexEvent::Roots(vec![]));
+        state.begin_search();
+        state.apply(&IndexEvent::Error("Unrelated search error".into()));
+        assert_eq!(state.folder_addition, Some(result));
+        state.apply(&IndexEvent::FoldersAdded(FolderAddition::default()));
+        assert_eq!(state.folder_addition, Some(FolderAddition::default()));
+    }
 
     #[test]
     fn synchronous_cancellation_watch_signals_only_a_cancelled_scan() {

@@ -27,6 +27,7 @@ use crate::{
 
 mod browser;
 mod report;
+mod selection;
 
 pub(crate) struct FileIndexView {
     browser: browser::BrowserView,
@@ -45,6 +46,9 @@ pub(crate) struct FileIndexView {
 impl FileIndexView {
     pub(crate) fn apply(&mut self, event: &sovra_core::file_index::IndexEvent) {
         self.state.apply(event);
+        if matches!(event, sovra_core::file_index::IndexEvent::FoldersAdded(_)) {
+            self.state.notice = None;
+        }
         if matches!(event, sovra_core::file_index::IndexEvent::Error(_)) {
             self.options.clear();
         } else {
@@ -99,34 +103,28 @@ impl Shell {
         let selection = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: false,
             directories: true,
-            multiple: false,
-            prompt: Some("Index this folder".into()),
+            multiple: true,
+            prompt: Some("Add selected folders".into()),
         });
         self.file_index.picker = Some(cx.spawn_in(window, async move |this, cx| {
             let result = selection.await;
             let _ = this.update_in(cx, |shell, window, cx| {
                 match result {
                     Ok(Ok(Some(paths))) => {
-                        if let Some(path) = paths.into_iter().next() {
+                        if !paths.is_empty() {
                             if shell.state.session_id == session
                                 && shell.composer_input.read(cx).value().as_ref() == original
                                 && let Some(remaining) = remaining
                             {
                                 shell.fill_composer_draft(&remaining, window, cx);
                             }
-                            shell.index_command(IndexCommand::AddRoot { path }, cx);
-                            shell.select_tab(NavTab::Knowledge, cx);
-                            shell.select_knowledge_section(
-                                crate::knowledge_view::KnowledgeSection::Files,
-                                cx,
-                            );
+                            shell.add_index_folders(paths, cx);
                         }
                     }
                     Ok(Ok(None)) => {}
                     _ => {
-                        shell.file_index.state.notice = Some(
-                            "The folder picker could not open. Try Add a folder again.".into(),
-                        );
+                        shell.file_index.state.notice =
+                            Some("The folder picker could not open. Try Add folders again.".into());
                     }
                 }
                 cx.notify();
@@ -247,8 +245,10 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     let mut panel = v_flex().id("file-index-panel").test_support().min_w_0().w_full().gap(t.space.small)
         .sovra_surface(Surface::Matte, cx).p(t.space.medium)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Your folders"))
-        .child(design::button("index-folder", "Add a folder", cx).on_click(cx.listener(|shell, _, window, cx| shell.choose_index_folder(window, cx))))
-        .child(div().sovra_text(TextRole::Caption, cx).child("Choose folders to search on this computer. Chat sends requested file details and saved passages to your selected AI service. Files stay in their original folders."))
+        .child(design::button("index-folder", "Add folders", cx).on_click(cx.listener(|shell, _, window, cx| shell.choose_index_folder(window, cx))))
+        .child(div().sovra_text(TextRole::Caption, cx).child("Choose one or more folders to search on this computer. Chat sends requested file details and saved passages to your selected AI service. Files stay in their original folders."))
+        .children(state.notice.as_ref().map(|notice| div().sovra_text(TextRole::Body, cx).child(notice.clone())))
+        .children(selection::render(shell, cx))
         .children((!state.roots.is_empty()).then(|| browser::render(shell, cx)))
         .children((!state.roots.is_empty()).then(|| render_search(shell, cx)))
         .children(state.roots.iter().map(|root| root_row(root, state.monitors.get(&root.id), state.semantic.iter().find(|s| s.setting.root_id == root.id), shell.file_index.removing.as_deref() == Some(root.id.as_str()), shell.file_index.detailed_roots.contains(&root.id), shell.file_index.options.get(&root.id).copied(), cx)));
@@ -306,9 +306,6 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             )),
         ));
     }
-    if let Some(notice) = &state.notice {
-        panel = panel.child(div().sovra_text(TextRole::Body, cx).child(notice.clone()));
-    }
     panel
         .child(crate::knowledge_review::render(state, cx))
         .into_any_element()
@@ -365,7 +362,13 @@ fn root_row(
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let status = match root.status {
-        IndexStatus::Pending => "Waiting to scan",
+        IndexStatus::Pending => {
+            if root.auto_refresh {
+                "Waiting to scan"
+            } else {
+                "Paused — resume updates to scan"
+            }
+        }
         IndexStatus::Scanning => "Indexing",
         IndexStatus::Ready => "Scan complete",
         IndexStatus::Cancelled => "Cancelled — refresh to continue",

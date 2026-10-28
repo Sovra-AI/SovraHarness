@@ -187,6 +187,7 @@ impl IndexedFiles for Reader {
                 extraction: ExtractionState::Text,
                 note: None,
                 first_passage: Some(passage().reference),
+                passage_count: 1,
             }],
             groups: Vec::new(),
             next_cursor: None,

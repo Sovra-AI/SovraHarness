@@ -22,7 +22,7 @@ impl Skill {
     pub fn friendly_card_copy(&self) -> SkillCardCopy {
         let friendly_title = match self.name.as_str() {
             "files" => "Attach files or photos",
-            "index-folder" => "Connect a folder on your computer",
+            "index-folder" => "Connect folders on your computer",
             "help" => "Browse all skills & shortcuts",
             "new" => "Start a fresh chat",
             "models" => "Choose or connect your AI",
@@ -92,7 +92,7 @@ impl Skill {
                 "/files ".to_owned(),
             ),
             "index-folder" => (
-                "Open Knowledge → Files to add a folder, browse saved text, find partial reads or skipped content in Scan report, and adjust document reading budgets."
+                "Open Knowledge → Files to add folders together, retry failed additions, read saved text part by part, find partial reads or skipped content in Scan report, and adjust document reading budgets."
                     .to_owned(),
                 "/index-folder ".to_owned(),
             ),
@@ -290,8 +290,8 @@ pub fn builtin_skills() -> Vec<Skill> {
         ),
         action(
             "index-folder",
-            "Index a folder",
-            "Choose a folder to search locally, browse files, review full scan reports, preview saved text, and include hidden or generated content when needed.",
+            "Index folders",
+            "Choose one or more folders to search locally, retry failed additions, browse files, review full scan reports, read saved text in parts, and include hidden or generated content when needed.",
             SkillAction::IndexFolder,
             &["index-file-system", "index-files"],
         ),
@@ -448,11 +448,11 @@ pub fn builtin_skills() -> Vec<Skill> {
             ..procedure(
                 "file-catalog",
                 "Explore indexed files",
-                "List, filter and group file metadata in explicitly indexed folders.",
+                "List, count and filter files across your connected folders without needing exact capitalization.",
                 "Files",
                 &["query-files", "list-files"],
                 &["list_indexed_folders", "query_indexed_files"],
-                "Start with list_indexed_folders and use the user's requested scope IDs. Use query_indexed_files for filename, MIME, size, filesystem modification-date and keyword constraints; all filters combine with AND. Group by root, directory, MIME type or extension to summarize observed files. With no extra request, show indexed folders and their grouped file counts. Report scan coverage, unknown sizes, metadata-only entries, extraction failures and truncated groups. Follow next_cursor with the same filters for file listings. Never infer document contents or real-world event dates from filenames or filesystem timestamps. This skill reads the catalogue; grouping does not move files or create folders.",
+                "Start with list_indexed_folders and use the user's requested scope IDs. Use query_indexed_files for filename, MIME, size, filesystem modification-date and keyword constraints; all filters combine with AND. Filename fragments ignore Unicode letter case by default; set match_case only when exact capitalization is requested. Use all requested granted folder IDs without splitting the scope at sixteen. Group by root, directory, MIME type or extension to summarize observed files. With no extra request, show indexed folders and their grouped file counts. Report scan coverage, unknown sizes, metadata-only entries, extraction failures and truncated groups. Follow next_cursor with the same filters for file listings. Never infer document contents or real-world event dates from filenames or filesystem timestamps. This skill reads the catalogue; grouping does not move files or create folders.",
                 "[what to list, filter or group]",
             )
         },

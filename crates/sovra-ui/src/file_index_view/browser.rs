@@ -5,13 +5,17 @@ use sovra_core::file_index::{
     CatalogCursor, CatalogEntry, CatalogFilter, CatalogQuery, ExtractionState,
 };
 
+mod preview;
+
 pub(super) struct BrowserView {
     open: bool,
     root: Option<String>,
     name: Entity<InputState>,
     extraction: Option<ExtractionState>,
+    match_case: bool,
     cursors: Vec<Option<CatalogCursor>>,
     selected: Option<CatalogEntry>,
+    preview_scroll: gpui_kit::ScrollHandle,
     _input: gpui_kit::Subscription,
 }
 
@@ -28,8 +32,10 @@ impl BrowserView {
             root: None,
             name,
             extraction: None,
+            match_case: false,
             cursors: vec![None],
             selected: None,
+            preview_scroll: gpui_kit::ScrollHandle::new(),
             _input: subscription,
         }
     }
@@ -60,6 +66,7 @@ impl Shell {
         self.file_index.browser.open = true;
         self.file_index.browser.root = root;
         self.file_index.browser.extraction = None;
+        self.file_index.browser.match_case = false;
         self.file_index
             .browser
             .name
@@ -83,6 +90,7 @@ impl Shell {
             filter: CatalogFilter {
                 roots: view.root.clone().into_iter().collect(),
                 name_contains: (!name.is_empty()).then_some(name),
+                match_case: view.match_case,
                 extraction: view.extraction,
                 ..CatalogFilter::default()
             },
@@ -121,12 +129,37 @@ impl Shell {
 
     fn inspect_index_file(&mut self, entry: CatalogEntry, cx: &mut Context<Self>) {
         self.file_index.state.browser.close_preview();
+        self.file_index
+            .browser
+            .preview_scroll
+            .set_offset(gpui_kit::Point::default());
         if let Some(reference) = entry.first_passage.clone() {
             let command = self.file_index.state.browser.preview(reference);
             self.index_command(command, cx);
         }
         self.file_index.browser.selected = Some(entry);
         cx.notify();
+    }
+
+    fn preview_index_part(&mut self, ordinal: u32, cx: &mut Context<Self>) {
+        if self.file_index.state.browser.previewing {
+            return;
+        }
+        let Some(reference) = self
+            .file_index
+            .browser
+            .selected
+            .as_ref()
+            .and_then(|entry| entry.passage_at(ordinal))
+        else {
+            return;
+        };
+        self.file_index
+            .browser
+            .preview_scroll
+            .set_offset(gpui_kit::Point::default());
+        let command = self.file_index.state.browser.preview(reference);
+        self.index_command(command, cx);
     }
 }
 
@@ -166,8 +199,13 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         );
     panel = panel
         .child(div().w_full().min_w_0().text_ellipsis().sovra_text(TextRole::SectionTitle, cx).child(scope))
-        .child(div().sovra_text(TextRole::Caption, cx).child("Observed files, including files whose contents could not be read. Excluded folders and links appear in folder notices below. Filename filters match exact casing."))
+        .child(div().sovra_text(TextRole::Caption, cx).child("Observed files, including files whose contents could not be read. Excluded folders and links appear in the folder’s Scan report. Filename filters ignore capitalization unless Match case is selected."))
         .child(Input::new(&view.name).aria_label("Filter indexed filenames"))
+        .child(Checkbox::new("inventory-match-case").cursor_pointer().label("Match case").checked(view.match_case)
+            .on_click(cx.listener(|shell, checked, _, cx| {
+                shell.file_index.browser.match_case = *checked;
+                shell.reload_index_inventory(cx);
+            })))
         .child(design::button("reload-index-inventory", "Apply filters / Reload list", cx).on_click(cx.listener(|shell, _, _, cx| shell.reload_index_inventory(cx))));
     let mut filters = h_flex().flex_wrap().gap(t.space.small);
     for (id, label, extraction) in [
@@ -250,23 +288,7 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         if let Some(note) = &entry.note {
             details = details.child(div().sovra_text(TextRole::Body, cx).child(note.clone()));
         }
-        if state.previewing {
-            details = details.child(
-                div()
-                    .sovra_text(TextRole::Body, cx)
-                    .child("Loading saved text…"),
-            );
-        }
-        if let Some(error) = &state.preview_error {
-            details = details.child(div().sovra_text(TextRole::Body, cx).child(error.clone()));
-        }
-        if let Some(passage) = &state.preview {
-            details = details
-                .child(div().sovra_text(TextRole::Caption, cx).child(format!("Saved excerpt · lines {}–{} · not the whole file. Refresh the folder to capture source changes.", passage.start_line, passage.end_line)))
-                .child(div().id("index-preview-text").test_support().w_full().min_w_0().max_h(t.layout.index_preview_height).overflow_y_scroll().overflow_x_scroll().sovra_text(TextRole::Body, cx).child(passage.text.clone()));
-        } else if entry.first_passage.is_none() {
-            details = details.child(div().sovra_text(TextRole::Body, cx).child("No searchable text was saved. Read the explanation above; after correcting the source, refresh its folder to retry."));
-        }
+        details = details.child(preview::render(entry, state, &view.preview_scroll, cx));
         selected_details = Some(details);
     }
     if let Some(page) = &state.page {
@@ -427,6 +449,7 @@ mod tests {
                 created_at: None,
                 extraction: ExtractionState::PartialText,
                 note: Some("Some content was not read. The second slide could not be decoded; check the original presentation.".into()),
+                passage_count: 3,
                 first_passage: Some(PassageRef {
                     root_id: "r".into(),
                     file_id: "f".into(),
@@ -460,11 +483,19 @@ mod tests {
             window.render_frame(cx);
             let target = window.find(id.clone());
             let bounds = target.bounds();
-            if target.visible() && bounds.top() >= px(0.) && bounds.bottom() < px(920.) {
+            let viewport = window.find("sovra-knowledge-view").bounds();
+            if target.visible()
+                && bounds.top() >= viewport.top()
+                && bounds.bottom() < viewport.bottom()
+            {
                 window.click(id, cx);
                 return;
             }
-            let delta = if bounds.top() < px(0.) { 100. } else { -100. };
+            let delta = if bounds.top() < viewport.top() {
+                100.
+            } else {
+                -100.
+            };
             window.scroll(
                 "sovra-knowledge-view",
                 gpui_kit::ScrollDelta::Pixels(point(px(0.), px(delta))),
@@ -504,6 +535,7 @@ mod tests {
             })
             .unwrap();
         assert!(query.filter.roots.is_empty() && query.cursor.is_none());
+        assert!(!query.filter.match_case);
         events
             .send_blocking(Event::FileIndex(IndexEvent::Browsed {
                 request_id,
@@ -539,6 +571,10 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(window.try_find("index-details-r").is_none());
+            assert!(
+                window.try_find("index-preview-next").is_some(),
+                "Saved text must be navigable beyond its first part"
+            );
             window.click("knowledge-memories", cx);
             window.render_frame(cx);
             assert!(window.try_find("index-inventory").is_none());
@@ -556,6 +592,96 @@ mod tests {
                     .text,
                 passage().text
             );
+        })
+        .unwrap();
+        for (control, ordinal) in [
+            ("index-preview-next", 1),
+            ("index-preview-last", 2),
+            ("index-preview-previous", 1),
+            ("index-preview-first", 0),
+        ] {
+            cx.update_window(window.into(), |_, window, cx| {
+                click(window, cx, control);
+                window.render_frame(cx);
+                assert_eq!(window.find("index-preview-next").disabled(), Some(true));
+            })
+            .unwrap();
+            let (mut request_id, reference) = std::iter::from_fn(|| commands.try_recv().ok())
+                .find_map(|command| match command {
+                    Command::FileIndex(IndexCommand::Preview {
+                        request_id,
+                        reference,
+                    }) => Some((request_id, reference)),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                reference,
+                PassageRef {
+                    ordinal,
+                    ..passage().reference
+                }
+            );
+            if ordinal == 2 {
+                events
+                    .send_blocking(Event::FileIndex(IndexEvent::Previewed {
+                        request_id,
+                        result: Err(sovra_core::file_index::IndexError("Reader is busy".into())),
+                    }))
+                    .unwrap();
+                cx.run_until_parked();
+                cx.update_window(window.into(), |_, window, cx| {
+                    click(window, cx, "index-preview-retry");
+                })
+                .unwrap();
+                let retry = std::iter::from_fn(|| commands.try_recv().ok())
+                    .find_map(|command| match command {
+                        Command::FileIndex(IndexCommand::Preview {
+                            request_id,
+                            reference,
+                        }) => Some((request_id, reference)),
+                        _ => None,
+                    })
+                    .unwrap();
+                assert!(retry.0 > request_id);
+                assert_eq!(retry.1, reference);
+                request_id = retry.0;
+            }
+            let current = IndexPassage {
+                reference,
+                text: format!("Saved source part {ordinal}"),
+                ..passage()
+            };
+            events
+                .send_blocking(Event::FileIndex(IndexEvent::Previewed {
+                    request_id,
+                    result: Ok(current.clone()),
+                }))
+                .unwrap();
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert_eq!(
+                    shell.read(cx).file_index.state.browser.preview.as_ref(),
+                    Some(&current)
+                );
+                let position = format!("Saved text · part {} of 3", ordinal + 1);
+                assert_eq!(
+                    window.find("index-preview-position").label(),
+                    Some(position.as_str())
+                );
+                assert_eq!(
+                    window.find("index-preview-next").disabled() == Some(true),
+                    ordinal == 2
+                );
+                assert_eq!(
+                    window.find("index-preview-previous").disabled() == Some(true),
+                    ordinal == 0
+                );
+            })
+            .unwrap();
+        }
+        cx.update_window(window.into(), |_, window, cx| {
             click(window, cx, "close-index-preview");
             click(window, cx, "inventory-next");
         })
@@ -597,6 +723,18 @@ mod tests {
             assert_eq!(query.filter.extraction, Some(extraction));
             assert_eq!(query.cursor, None);
         }
+        cx.update_window(window.into(), |_, window, cx| {
+            click(window, cx, "inventory-match-case");
+        })
+        .unwrap();
+        let query = std::iter::from_fn(|| commands.try_recv().ok())
+            .find_map(|command| match command {
+                Command::FileIndex(IndexCommand::Browse { query, .. }) => Some(query),
+                _ => None,
+            })
+            .unwrap();
+        assert!(query.filter.match_case && query.cursor.is_none());
+        assert_eq!(query.filter.extraction, Some(ExtractionState::Failed));
         cx.update_window(window.into(), |_, _, cx| {
             assert!(shell.read(cx).file_index.state.browser.preview.is_none());
             assert_eq!(shell.read(cx).file_index.browser.cursors.len(), 1);
@@ -627,6 +765,7 @@ mod tests {
                     shell.file_index.state.browser.page = Some(page());
                     shell.file_index.state.browser.loading = false;
                     shell.file_index.browser.selected = Some(page().files[0].clone());
+                    shell.file_index.state.browser.preview_reference = Some(passage().reference);
                     shell.file_index.state.browser.preview = Some(passage());
                 });
                 for mode in [ThemeMode::Dark, ThemeMode::Light] {
@@ -636,11 +775,17 @@ mod tests {
                     for id in [
                         "index-inventory",
                         "reload-index-inventory",
+                        "inventory-match-case",
                         "inventory-metadata",
                         "inventory-failed",
                         "inventory-partial",
                         "index-file-details",
                         "index-preview-text",
+                        "index-preview-position",
+                        "index-preview-first",
+                        "index-preview-previous",
+                        "index-preview-next",
+                        "index-preview-last",
                         "inventory-next",
                     ] {
                         let bounds = window.find(id).bounds();

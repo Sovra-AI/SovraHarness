@@ -151,11 +151,42 @@ and report unsupported or oversized content explicitly. Folder inclusion control
 inventory filters and saved-text previews are available in Knowledge → Files; further
 indexing work remains active. See [folder indexing](skills-and-file-knowledge.md).
 
-Knowledge opens to Files. Use Add a folder, Browse all files, or a folder's Browse
+Knowledge opens to Files. Use Add folders, Browse all files, or a folder's Browse
 files and Scan report actions. Browsing and reports each open a focused view;
 Back to folders returns to the folder controls. Folder settings show three notice
 examples with a direct link to the full report. Memories and How it works remain
 available in the navigation above the scrolling content.
+
+The native picker accepts one or more folders. A selection is a single runtime
+request, so selecting more than 16 folders does not overflow the mutation queue.
+Every accessible folder is registered before background scanning starts. Failed
+additions retain the exact path and reason with Retry failed folders. Re-selecting
+connected folders preserves their options and paused state. Pending folders can
+be paused or removed while a different folder is being read; the remaining
+automatic scans continue independently.
+
+View details includes a paged reader for all text saved from the selected version.
+First/Previous/Next/Last part controls read one bounded part at a time, with a
+part count and saved-text line range. These parts are not original document pages.
+Partial extraction warnings remain visible; browsing every saved part does not
+imply that every original page, image or archive member was read. A failed request
+can be retried. Refreshing or revoking the selected version rejects its old
+references instead of joining text from different versions; reload the list to
+select the replacement. File contents remain literal text and are never executed.
+
+Filename fragments and report path/reason filters ignore capitalization by default.
+They use Unicode case folding with canonical normalization, so `STRASSE` matches
+`Straße` and equivalent composed/decomposed accents match. Match case uses the
+original exact text. `%`, `_` and quote characters remain literal; these controls
+do not accept SQL, regular expressions or shell globs. Switching the mode resets
+pagination, and cursors from a different matching mode are rejected. Exact directory
+and path-prefix constraints retain their filesystem spelling. Source paths are
+never rewritten to perform matching.
+
+Text, catalogue, reviewed-knowledge and summary queries accept any number of valid
+granted folder IDs. Their result-page, graph-depth and user-selected summary call
+budgets remain independent. This removes the old 16-folder selection ceiling
+without expanding a query beyond the user's selected grants.
 
 Document indexing now has its own text-only preparation mode. It does not inherit
 the attachment reader's 500-page/slide cutoff or rasterize a no-text PDF for a

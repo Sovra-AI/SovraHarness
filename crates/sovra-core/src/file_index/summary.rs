@@ -1,7 +1,7 @@
 //! Derived summaries retain their exact inputs. They are navigation aids with
 //! model provenance, never replacements for source evidence or reviewed facts.
 
-use super::{EvidenceBasis, IndexError, MAX_INDEX_ROOTS, PassageRef};
+use super::{EvidenceBasis, IndexError, PassageRef};
 use crate::models::ModelDestination;
 use serde::{Deserialize, Serialize};
 
@@ -35,10 +35,7 @@ pub struct SummaryPlan {
 impl SummaryPlan {
     pub fn validate(&self) -> Result<(), IndexError> {
         text(&self.name, 240)?;
-        if self.roots.is_empty()
-            || self.roots.len() > MAX_INDEX_ROOTS
-            || !(1..=10_000).contains(&self.max_calls)
-        {
+        if self.roots.is_empty() || !(1..=10_000).contains(&self.max_calls) {
             return Err(IndexError(
                 "Choose granted folders and a summary request budget from 1 to 10,000.".into(),
             ));
@@ -343,7 +340,6 @@ impl SummaryQuery {
             || self.min_level > self.max_level
             || self.max_level > MAX_SUMMARY_LEVEL
             || !(1..=20).contains(&self.limit)
-            || self.roots.len() > MAX_INDEX_ROOTS
             || self.configuration_ids.len() > 16
             || self.configuration_ids.contains(&0)
             || self.before_id == Some(0)
@@ -550,5 +546,25 @@ mod tests {
         assert!(plan.validate().is_ok());
         plan.roots.push("root".into());
         assert!(plan.validate().is_err());
+        plan.roots = (0..24).map(|n| format!("root-{n}")).collect();
+        assert!(plan.validate().is_ok());
+        assert!(
+            SummaryQuery {
+                roots: plan.roots.clone(),
+                ..SummaryQuery::default()
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            super::super::graph::GraphQuery {
+                roots: plan.roots.clone(),
+                ..super::super::graph::GraphQuery::default()
+            }
+            .validate()
+            .is_ok()
+        );
+        plan.max_calls = 0;
+        assert!(plan.validate().is_err(), "Request budgets remain explicit");
     }
 }

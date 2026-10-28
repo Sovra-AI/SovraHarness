@@ -13,6 +13,28 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Find files without exact capitalization:** filename and scan-report filters
+  now use Unicode case folding and canonical normalization by default. Match case
+  restores exact matching. Filter changes restart pagination; literal `%` and `_`
+  remain literal characters. Model catalogue queries expose the same option and
+  the Partial text extraction filter.
+- **Search more than 16 selected folders:** text, catalogue, reviewed-knowledge
+  and summary scopes no longer reject larger granted-folder selections. Result
+  pages, graph traversal depth and explicit summary request budgets still apply.
+
+- **Read beyond the first saved excerpt:** file details offer First, Previous,
+  Next and Last part controls, a saved-part count, and retry after a read fails.
+  Each request loads one bounded text part from the selected version. Changed
+  or revoked versions cannot be mixed into the preview, and partial-read warnings
+  remain visible. Catalogue results expose the number of saved text parts too.
+
+- **Add several folders together:** the native picker accepts multiple folders as
+  one queued request, including selections larger than the 16-operation queue.
+  Folders are registered before background scans start; a failed addition does
+  not discard the rest. A persistent result lists failed paths and offers Retry
+  failed folders. Existing folders keep their settings, and waiting folders can
+  be paused or removed while another scan runs.
+
 - **Files-first Knowledge navigation:** Knowledge opens to folders, with separate
   Memories and How it works sections that stay reachable while scrolling. Browse
   files and Scan report open focused views with Back to folders. Folder settings

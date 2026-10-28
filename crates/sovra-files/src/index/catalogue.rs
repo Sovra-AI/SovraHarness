@@ -115,7 +115,7 @@ pub(super) fn query(db: &mut Connection, query: &CatalogQuery) -> Result<Catalog
             Value::Integer(i64::try_from(query.limit + 1).expect("bounded query limit")),
         );
         let sql = format!(
-            "SELECT f.root_id,r.path,f.id,f.path,f.byte_size,v.mime,v.digest,f.observed,f.modified,f.created,f.extraction,f.detail,f.current_version {filtered} ORDER BY f.root_id,f.path,f.id LIMIT {limit}"
+            "SELECT f.root_id,r.path,f.id,f.path,f.byte_size,v.mime,v.digest,f.observed,f.modified,f.created,f.extraction,f.detail,f.current_version,CASE WHEN f.extraction IN ('text','partial_text') THEN (SELECT count(*) FROM index_version_chunks vc WHERE vc.version_id=f.current_version) ELSE 0 END {filtered} ORDER BY f.root_id,f.path,f.id LIMIT {limit}"
         );
         let mut statement = tx.prepare(&sql).map_err(|e| db_error(&e))?;
         page.files = statement
@@ -180,13 +180,9 @@ fn entry(row: &Row<'_>) -> rusqlite::Result<CatalogEntry> {
     let root_id: String = row.get(0)?;
     let file_id: String = row.get(2)?;
     let version: Option<String> = row.get(12)?;
+    let passage_count = counted(row, 13)?;
     let first_passage = version
-        .filter(|_| {
-            matches!(
-                extraction,
-                ExtractionState::Text | ExtractionState::PartialText
-            )
-        })
+        .filter(|_| passage_count > 0)
         .map(|version_id| PassageRef {
             root_id: root_id.clone(),
             file_id: file_id.clone(),
@@ -207,6 +203,7 @@ fn entry(row: &Row<'_>) -> rusqlite::Result<CatalogEntry> {
         extraction,
         note: row.get(11)?,
         first_passage,
+        passage_count,
     })
 }
 
@@ -249,9 +246,19 @@ fn filter(filter: &CatalogFilter) -> Result<(String, Vec<Value>), IndexError> {
         (&filter.mime_prefix, "v.mime", false),
     ] {
         if let Some(value) = value {
-            let parameter = bind(&mut values, value.clone().into());
+            let value = if substring && !filter.match_case {
+                super::matching::fold(value)
+            } else {
+                value.clone()
+            };
+            let parameter = bind(&mut values, value.into());
             if substring {
-                write!(sql, " AND instr({column},{parameter})>0").expect("SQL fragment");
+                if filter.match_case {
+                    write!(sql, " AND instr({column},{parameter})>0").expect("SQL fragment");
+                } else {
+                    write!(sql, " AND instr(sovra_fold({column}),{parameter})>0")
+                        .expect("SQL fragment");
+                }
             } else {
                 write!(
                     sql,

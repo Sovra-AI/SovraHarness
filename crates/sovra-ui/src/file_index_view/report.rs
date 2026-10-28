@@ -7,6 +7,7 @@ pub(super) struct ReportView {
     root: Option<String>,
     filter: Entity<InputState>,
     kind: Option<NoticeKind>,
+    match_case: bool,
     cursors: Vec<Option<NoticeCursor>>,
     _filter: gpui_kit::Subscription,
 }
@@ -25,6 +26,7 @@ impl ReportView {
             root: None,
             filter,
             kind: None,
+            match_case: false,
             cursors: vec![None],
             _filter: subscription,
         }
@@ -62,6 +64,7 @@ impl Shell {
         self.file_index.detailed_roots.remove(id);
         self.file_index.report.root = Some(id.into());
         self.file_index.report.kind = None;
+        self.file_index.report.match_case = false;
         self.file_index
             .report
             .filter
@@ -80,6 +83,7 @@ impl Shell {
             root_id,
             kind: view.kind,
             contains: (!text.is_empty()).then_some(text),
+            match_case: view.match_case,
             cursor: None,
             limit: 40,
         };
@@ -120,8 +124,13 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     let mut panel = v_flex().id("index-scan-report").test_support().w_full().min_w_0().gap(t.space.small).p(t.space.small).sovra_surface(Surface::Subtle, cx)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Full scan report"))
         .children(active_root(shell).and_then(|id| shell.file_index.state.roots.iter().find(|root| root.id == id)).map(|root| div().min_w_0().w_full().text_ellipsis().sovra_text(TextRole::Body,cx).child(root.path.display().to_string())))
-        .child(div().sovra_text(TextRole::Caption, cx).child("Every recorded skip or reading problem from the latest scan. Excluded folders appear once; their contents were not visited. Press Enter or Reload report to apply filters and include newer entries. Filters match exact casing."))
+        .child(div().sovra_text(TextRole::Caption, cx).child("Every recorded skip or reading problem from the latest scan. Excluded folders appear once; their contents were not visited. Press Enter or Reload report to apply filters and include newer entries. Filters ignore capitalization unless Match case is selected."))
         .child(Input::new(&view.filter).aria_label("Filter scan report paths or reasons"))
+        .child(Checkbox::new("report-match-case").cursor_pointer().label("Match case").checked(view.match_case)
+            .on_click(cx.listener(|shell, checked, _, cx| {
+                shell.file_index.report.match_case = *checked;
+                shell.reload_scan_report(cx);
+            })))
         .child(h_flex().flex_wrap().gap(t.space.small)
             .child(design::button("reload-scan-report", "Reload report", cx).on_click(cx.listener(|shell,_,_,cx| shell.reload_scan_report(cx))))
             .child(design::button("refresh-report-folder", "Refresh folder", cx).on_click(cx.listener(move |shell,_,_,cx| { if let Some(root_id) = &root_id { shell.index_command(IndexCommand::Refresh { root_id: root_id.clone() }, cx); } })))
@@ -283,6 +292,7 @@ mod tests {
         let (id, query) = request();
         assert_eq!(query.root_id, "chosen");
         assert!(query.kind.is_none() && query.cursor.is_none());
+        assert!(!query.match_case);
         events
             .send_blocking(Event::FileIndex(IndexEvent::Reported {
                 request_id: id,
@@ -319,6 +329,13 @@ mod tests {
         let (old, query) = request();
         assert_eq!(query.kind, Some(NoticeKind::Unreadable));
         assert!(query.cursor.is_none());
+        cx.update_window(window.into(), |_, window, cx| {
+            click_control(window, cx, "report-match-case");
+        })
+        .unwrap();
+        let (_, query) = request();
+        assert!(query.match_case && query.cursor.is_none());
+        assert_eq!(query.kind, Some(NoticeKind::Unreadable));
         cx.update_window(window.into(), |_, window, cx| {
             shell.update(cx, |shell, cx| {
                 shell
@@ -390,6 +407,7 @@ mod tests {
                     for id in [
                         "index-scan-report",
                         "reload-scan-report",
+                        "report-match-case",
                         "refresh-report-folder",
                         "close-scan-report",
                         "report-unreadable",

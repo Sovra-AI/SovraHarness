@@ -80,8 +80,13 @@ pub(super) fn query(db: &mut Connection, query: &NoticeQuery) -> Result<NoticePa
             IndexError("The saved scan status could not be read. Refresh the folder.".into())
         })?;
     let key = digest(
-        &serde_json::to_vec(&(&query.root_id, query.kind, &query.contains))
-            .map_err(|_| IndexError("Invalid report filter.".into()))?,
+        &serde_json::to_vec(&(
+            &query.root_id,
+            query.kind,
+            &query.contains,
+            query.match_case,
+        ))
+        .map_err(|_| IndexError("Invalid report filter.".into()))?,
     );
     if query
         .cursor
@@ -119,9 +124,21 @@ pub(super) fn query(db: &mut Connection, query: &NoticeQuery) -> Result<NoticePa
             .map_err(|e| db_error(&e))?
     };
     let kind = query.kind.map(kind_key);
-    let total = tx.query_row("SELECT count(*) FROM index_scan_notices WHERE root_id=?1 AND sequence<=?2 AND (?3 IS NULL OR kind=?3) AND (?4 IS NULL OR instr(path,?4)>0 OR instr(message,?4)>0)", params![query.root_id,through_sql,kind,query.contains], |r| counted(r,0)).map_err(|e| db_error(&e))?;
+    let contains = query.contains.as_ref().map(|text| {
+        if query.match_case {
+            text.clone()
+        } else {
+            super::matching::fold(text)
+        }
+    });
+    let (path, message) = if query.match_case {
+        ("path", "message")
+    } else {
+        ("sovra_fold(path)", "sovra_fold(message)")
+    };
+    let total = tx.query_row(&format!("SELECT count(*) FROM index_scan_notices WHERE root_id=?1 AND sequence<=?2 AND (?3 IS NULL OR kind=?3) AND (?4 IS NULL OR instr({path},?4)>0 OR instr({message},?4)>0)"), params![query.root_id,through_sql,kind,contains], |r| counted(r,0)).map_err(|e| db_error(&e))?;
     let mut notices = {
-        let mut statement = tx.prepare("SELECT sequence,kind,path,message FROM index_scan_notices WHERE root_id=?1 AND sequence>?2 AND sequence<=?3 AND (?4 IS NULL OR kind=?4) AND (?5 IS NULL OR instr(path,?5)>0 OR instr(message,?5)>0) ORDER BY sequence LIMIT ?6").map_err(|e| db_error(&e))?;
+        let mut statement = tx.prepare(&format!("SELECT sequence,kind,path,message FROM index_scan_notices WHERE root_id=?1 AND sequence>?2 AND sequence<=?3 AND (?4 IS NULL OR kind=?4) AND (?5 IS NULL OR instr({path},?5)>0 OR instr({message},?5)>0) ORDER BY sequence LIMIT ?6")).map_err(|e| db_error(&e))?;
         statement
             .query_map(
                 params![
@@ -129,7 +146,7 @@ pub(super) fn query(db: &mut Connection, query: &NoticeQuery) -> Result<NoticePa
                     after_sql,
                     through_sql,
                     kind,
-                    query.contains,
+                    contains,
                     i64::try_from(query.limit + 1).expect("bounded page")
                 ],
                 |r| {

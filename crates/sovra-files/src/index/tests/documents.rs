@@ -66,6 +66,7 @@ fn partial_presentation_keeps_readable_slides_and_explains_the_missing_slide() {
             root_id: root.id.clone(),
             kind: Some(NoticeKind::Partial),
             contains: None,
+            match_case: false,
             cursor: None,
             limit: 40,
         };

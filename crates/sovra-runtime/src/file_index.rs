@@ -252,6 +252,7 @@ impl IndexRuntime {
                                 accepted: approve,
                             }),
                         IndexCommand::AddRoot { .. }
+                        | IndexCommand::AddRoots { .. }
                         | IndexCommand::SetScanOptions { .. }
                         | IndexCommand::Refresh { .. }
                         | IndexCommand::Cancel { .. }
@@ -282,7 +283,7 @@ impl IndexRuntime {
                 }));
                 return;
             }
-            IndexCommand::AddRoot { .. } => {}
+            IndexCommand::AddRoot { .. } | IndexCommand::AddRoots { .. } => {}
         }
         if let Err(error) = self.commands.try_send(command) {
             if let IndexCommand::Refresh { root_id } = error.into_inner() {
@@ -372,6 +373,7 @@ async fn run_actor(
                 result => report(result.map(|r| r.map(IndexEvent::Roots)), &events),
             }
         }
+        let due = monitors.due();
         let command = tokio::select! {
             biased;
             // Preference edits are stored beside the queue. A stored permit
@@ -381,15 +383,16 @@ async fn run_actor(
                 Ok(command) => command,
                 Err(_) => break,
             },
-            _ = interval.tick() => {
-                let Some(root_id) = monitors.due() else { continue; };
+            () = std::future::ready(()), if due.is_some() => {
+                let root_id = due.expect("ready scan branch requires a due folder");
                 let mut control = controls.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if control.preferences.get(&root_id) == Some(&false) || control.cancellations.contains_key(&root_id) {
                     continue;
                 }
                 control.cancellations.insert(root_id.clone(), Arc::new(AtomicBool::new(false)));
                 IndexCommand::Refresh { root_id }
-            }
+            },
+            _ = interval.tick() => continue,
         };
         if let IndexCommand::Refresh { root_id } = &command {
             monitors.started(root_id);
@@ -439,6 +442,12 @@ fn mutate(
             Some(root_id)
         }
         IndexCommand::AddRoot { path } => Some(store.add_root(&path)?.id),
+        IndexCommand::AddRoots { paths } => {
+            add_folders(store.as_ref(), paths, &stopped, &events);
+            // Register the whole selection before scans start. Monitor scheduling
+            // owns the work and honours Pause/Remove between individual scans.
+            None
+        }
         IndexCommand::Refresh { root_id } => Some(root_id),
         IndexCommand::Remove { root_id } => {
             store.remove(&root_id)?;
@@ -504,6 +513,7 @@ fn read_failure(command: &IndexCommand, message: String) -> IndexEvent {
         | IndexCommand::ListKnowledge
         | IndexCommand::ReviewKnowledge { .. }
         | IndexCommand::AddRoot { .. }
+        | IndexCommand::AddRoots { .. }
         | IndexCommand::Refresh { .. }
         | IndexCommand::Cancel { .. }
         | IndexCommand::SetAutoRefresh { .. }
@@ -512,6 +522,39 @@ fn read_failure(command: &IndexCommand, message: String) -> IndexEvent {
         | IndexCommand::Remove { .. }
         | IndexCommand::Search { .. } => IndexEvent::Error(message),
     }
+}
+
+fn add_folders(
+    store: &dyn FileIndex,
+    paths: Vec<std::path::PathBuf>,
+    stopped: &AtomicBool,
+    events: &Sender<Event>,
+) {
+    use sovra_core::file_index::{FolderAddFailure, FolderAddition};
+    let mut result = FolderAddition::default();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut connected = std::collections::BTreeSet::new();
+    for path in paths {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        if stopped.load(Ordering::Relaxed) {
+            break;
+        }
+        match store.add_root(&path) {
+            Ok(root) => {
+                if connected.insert(root.id.clone()) {
+                    result.added.push(root.path.clone());
+                    let _ = events.try_send(Event::FileIndex(IndexEvent::Progress(root)));
+                }
+            }
+            Err(error) => result.failed.push(FolderAddFailure {
+                path,
+                reason: error.to_string(),
+            }),
+        }
+    }
+    let _ = events.try_send(Event::FileIndex(IndexEvent::FoldersAdded(result)));
 }
 
 #[derive(Debug)]

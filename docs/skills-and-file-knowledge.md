@@ -233,6 +233,63 @@ in both themes. The minimum-window test caught a clipped Add a folder action at
 gate: 623 tests passed, 5 opt-in tests skipped. This navigation change has headless
 layout coverage; a fresh native visual check of these sections remains outstanding.
 
+Folder setup now accepts multiple folders in the native picker. One selection
+travels as one queued command, so it is not split across the 16-operation mutation
+queue. Registration completes for the selection before automatic scans start;
+individual failures retain their paths/reasons and do not discard successes.
+Duplicate paths/scopes are counted once. Existing scopes preserve their settings,
+including paused updates. The Files page reports the result and offers Retry
+failed folders; the draft remains intact when the picker is cancelled. Due scans
+now run immediately between queued commands rather than waiting a second per
+folder. Pause and Remove are still handled before the next automatic scan.
+
+The picker regression reproduced the former single-selection restriction.
+The real Client regression adds 24 folders plus an unavailable path and duplicate,
+holds the first scan, checks Ping responsiveness, cancels/removes waiting folders,
+then verifies every remaining folder scans and re-selection preserves pause.
+Reducer coverage keeps addition failures separate from unrelated search messages;
+headless checks exercise retry and layout at minimum/wide windows and 200% text
+in both themes. `cargo xtask ci` passes every gate: 633 tests passed, 6 opt-in tests
+skipped, including the concurrently integrated workspace changes. Native picker
+selection is verified through GPUI's simulator and the pinned Linux portal code;
+a fresh visual inspection of the resulting Files page remains outstanding.
+
+Saved-text inspection no longer stops at the first passage. Catalogue rows report
+the number of readable parts in their current version. The reader provides First,
+Previous, Next and Last part controls, a saved-part position and line range, and
+Retry this part after a failed read. Each request remains bounded to one stored
+part. Source/partial-read caveats remain visible, text is literal, and parts are
+explicitly distinguished from original document pages. Navigation preserves the
+selected root/file/version reference; replaced or revoked versions fail instead
+of mixing text. Late replies and replies for a different part are rejected.
+
+The first regression reproduced the missing navigation. Storage checks rebuild a
+multi-part Unicode document exactly through its catalogue references, reach its
+last marker, reopen it, and reject old references after replacement/removal.
+Core checks cover bounds, stale/mismatched results and retry targets. UI checks
+exercise Next/Last/Previous/First, busy-reader retry, boundary/loading disabled
+states, and control bounds at minimum/wide windows and 200% text in both themes.
+`cargo xtask ci` passes every gate: 636 tests passed, 6 opt-in tests skipped.
+The native app remains supervised by the existing watcher; fresh GPU inspection
+of the saved-text reader is still outstanding.
+
+Filename and scan-report filters now ignore capitalization by default, using
+canonical Unicode normalization and case folding while preserving original paths.
+Match case restores exact matching. Literal punctuation stays literal, and changing
+the matching mode resets pagination. The model-facing catalogue schema exposes
+the same choice and the existing Partial text state. The implementation uses the
+pinned caseless 0.2.2, unicode-normalization and rusqlite 0.39 scalar-function APIs.
+
+Text, catalogue, reviewed-knowledge and summary queries no longer reject more
+than 16 explicitly selected folder IDs. Folder grants and ID validation still
+apply, as do independent page, traversal and model-request budgets. Regression
+tests first reproduced the Unicode filtering failures and the 16-folder rejection;
+real storage tests now search 24 selected folders while excluding a 25th. Tests
+also cover canonical-equivalent accents, case folding, exact matching, literal
+punctuation, pagination and mismatched cursors. UI checks exercise both matching
+controls at minimum/wide windows and 200% text in both themes. `cargo xtask ci`
+passes every gate: 639 tests passed, 6 opt-in tests skipped.
+
 Next work retains the full requested scope: richer coverage information,
 simpler folder setup and recovery, and handling more large-document formats
 without silently omitting content. Native notification resource budgets and codec expansion protections are

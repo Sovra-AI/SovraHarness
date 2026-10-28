@@ -58,7 +58,7 @@ impl Tool for GraphTool {
         Some(match self.operation {
             Operation::Propose => draft_schema(),
             Operation::Query => json!({"type":"object","properties":{
-            "roots":{"type":"array","maxItems":16,"items":{"type":"string"}},
+            "roots":{"type":"array","items":{"type":"string"}},
             "text":{"type":"string","maxLength":240},"entity_id":{"type":"string","maxLength":120},
             "hops":{"type":"integer","minimum":1,"maximum":3},"limit":{"type":"integer","minimum":1,"maximum":40},
             "include_stale":{"type":"boolean"},"include_superseded":{"type":"boolean"},
@@ -135,6 +135,8 @@ mod tests {
         assert!(query(json!({"hops":4})).is_err());
         assert!(query(json!({"sql":"SELECT *"})).is_err());
         assert!(query(json!({"include_stale":true,"roots":["root"]})).is_ok());
+        let roots: Vec<_> = (0..24).map(|n| format!("root-{n}")).collect();
+        assert_eq!(query(json!({"roots":roots})).unwrap().roots, roots);
         assert!(
             draft(json!({"title":"x","evidence":[],"entities":[],"relations":[],"approve":true}))
                 .is_err()

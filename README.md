@@ -28,7 +28,11 @@ That's it — no Node, no Python, no system packages on macOS/Windows.
 
 ### Skills in chat
 
-Use `/index-folder` to select a folder for local indexing. **Knowledge** shows scan
+Use `/index-folder` or **Knowledge → Files → Add folders** to select one or more
+folders for local indexing. The selection is registered together, then scanned in
+the background. Failed additions show their paths and reasons with **Retry failed
+folders**; successful folders stay connected. Existing folders keep their settings.
+**Knowledge** shows scan
 progress and provides Cancel, Refresh, Pause/Resume updates, Remove, and text search.
 While Sovra is open, native folder notifications trigger updates and a full check
 every 15 minutes catches missed changes. Large scopes or unavailable notifications
@@ -68,9 +72,18 @@ removes matching files from current search while preserving saved history.
 Credential folders and symlinks stay excluded.
 Use **Browse all files** or a folder's **Browse files** in Knowledge to inspect the
 saved inventory without a keyword search. Filter by filename or reading status,
-page through results, and use **View details** for extraction explanations and a
-literal saved-text excerpt. Excluded folders and links are explained in folder
+page through results, and use **View details** for extraction explanations and
+the saved text. **First part**, **Previous part**, **Next part** and **Last part**
+let you read every saved part without loading the whole document. Parts are
+sections of extracted text, not original document pages; partial-read warnings
+still apply. A changed source version requires reloading the list before reading
+its replacement. Excluded folders and links are explained in folder
 notices; they are not inventoried as readable files.
+Filename and scan-report filters ignore capitalization by default, including
+Unicode letters and equivalent accented spellings. Select **Match case** for
+exact capitalization. Filters use literal text, so `%` and `_` are not wildcards.
+Searches and catalogue queries can include more than 16 connected folders; result
+pages remain bounded and retain the selected scope.
 See [scope and current limits](docs/skills-and-file-knowledge.md).
 
 Type `/` to browse skills. Arrow keys select, Tab or Enter chooses, and Escape
@@ -170,7 +183,7 @@ The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
 The engine choice, routing tree and prompt tester are folded under
 *How automatic choice works → Show details*.
 
-The **Knowledge** tab opens to **Files**, with **Add a folder**, local search,
+The **Knowledge** tab opens to **Files**, with **Add folders**, local search,
 folder controls, and focused file browsing and scan reports. **Memories** holds
 saved-memory controls. **How it works** explains how Sovra remembers, with one worked example a
 new reader can follow: something happens, a record is kept, a current belief is

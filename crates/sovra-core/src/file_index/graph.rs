@@ -449,10 +449,7 @@ impl GraphQuery {
         for value in [self.recorded_at, self.valid_at].into_iter().flatten() {
             calendar_time(value)?;
         }
-        if !(1..=3).contains(&self.hops)
-            || !(1..=40).contains(&self.limit)
-            || self.roots.len() > super::MAX_INDEX_ROOTS
-        {
+        if !(1..=3).contains(&self.hops) || !(1..=40).contains(&self.limit) {
             return Err(IndexError(
                 "Query 1–3 graph hops and 1–40 relationships within granted folders.".into(),
             ));

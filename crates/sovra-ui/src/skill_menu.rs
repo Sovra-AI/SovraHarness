@@ -378,7 +378,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn index_skill_uses_a_single_folder_picker_and_cancellation_keeps_the_draft(
+    fn index_skill_accepts_multiple_folders_and_cancellation_keeps_the_draft(
         cx: &mut TestAppContext,
     ) {
         let (client, commands, _events) = Client::loopback();
@@ -390,7 +390,7 @@ mod tests {
         })
         .unwrap();
         cx.simulate_path_prompt_response(|options| {
-            assert!(options.directories && !options.files && !options.multiple);
+            assert!(options.directories && !options.files && options.multiple);
             None
         });
         cx.run_until_parked();
@@ -402,7 +402,9 @@ mod tests {
             shell.update(cx, |shell, cx| shell.submit_composer(window, cx));
         })
         .unwrap();
-        cx.simulate_path_prompt_response(|_| Some(vec!["/chosen/project".into()]));
+        cx.simulate_path_prompt_response(|_| {
+            Some(vec!["/chosen/project".into(), "/chosen/notes".into()])
+        });
         cx.run_until_parked();
         shell.read_with(cx, |shell, cx| {
             assert_eq!(shell.state.active_tab, NavTab::Knowledge);
@@ -411,8 +413,25 @@ mod tests {
                 "project notes"
             );
         });
-        assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command,
-            Command::FileIndex(sovra_core::file_index::IndexCommand::AddRoot { path }) if path == std::path::Path::new("/chosen/project"))));
+        let additions: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+            .filter_map(|command| {
+                if let Command::FileIndex(sovra_core::file_index::IndexCommand::AddRoots {
+                    paths,
+                }) = command
+                {
+                    Some(paths)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            additions,
+            vec![vec![
+                std::path::PathBuf::from("/chosen/project"),
+                std::path::PathBuf::from("/chosen/notes")
+            ]]
+        );
     }
 
     #[gpui_kit::test]

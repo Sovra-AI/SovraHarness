@@ -24,6 +24,8 @@ pub struct NoticeQuery {
     pub root_id: String,
     pub kind: Option<NoticeKind>,
     pub contains: Option<String>,
+    #[serde(default)]
+    pub match_case: bool,
     pub cursor: Option<NoticeCursor>,
     pub limit: usize,
 }
@@ -130,6 +132,7 @@ mod tests {
             root_id: "r".into(),
             kind: None,
             contains: None,
+            match_case: false,
             cursor: None,
             limit: 40,
         }

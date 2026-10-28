@@ -9,6 +9,7 @@ pub struct BrowserState {
     pub loading: bool,
     pub error: Option<String>,
     pub preview: Option<IndexPassage>,
+    pub preview_reference: Option<PassageRef>,
     pub previewing: bool,
     pub preview_error: Option<String>,
     request_id: u64,
@@ -32,6 +33,7 @@ impl BrowserState {
     pub fn preview(&mut self, reference: PassageRef) -> IndexCommand {
         self.close_preview();
         self.previewing = true;
+        self.preview_reference = Some(reference.clone());
         IndexCommand::Preview {
             request_id: self.preview_id,
             reference,
@@ -41,6 +43,7 @@ impl BrowserState {
     pub fn close_preview(&mut self) {
         self.preview_id = self.preview_id.saturating_add(1);
         self.preview = None;
+        self.preview_reference = None;
         self.preview_error = None;
         self.previewing = false;
     }
@@ -71,7 +74,10 @@ impl BrowserState {
         }
         self.previewing = false;
         match result {
-            Ok(passage) => self.preview = Some(passage.clone()),
+            Ok(passage) if self.preview_reference.as_ref() == Some(&passage.reference) => {
+                self.preview = Some(passage.clone());
+            }
+            Ok(_) => self.preview_error = Some("The reply did not match the requested saved text. Reload the file list and try again.".into()),
             Err(error) => {
                 self.preview_error = Some(format!(
                     "{error} The saved file may have changed. Reload the list and try again."
@@ -84,6 +90,75 @@ impl BrowserState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_navigation_rejects_late_or_mismatched_parts_and_keeps_failed_target_for_retry() {
+        let mut state = BrowserState::default();
+        let mut passage = IndexPassage {
+            reference: PassageRef {
+                root_id: "r".into(),
+                file_id: "f".into(),
+                version_id: "v".into(),
+                ordinal: 0,
+            },
+            path: "notes.txt".into(),
+            text: "first".into(),
+            start_line: 1,
+            end_line: 1,
+            mime_type: "text/plain".into(),
+            note: None,
+            observed_at: 1,
+            modified_at: None,
+        };
+        let IndexCommand::Preview {
+            request_id: first, ..
+        } = state.preview(passage.reference.clone())
+        else {
+            panic!()
+        };
+        state.finish_preview(first, &Ok(passage.clone()));
+        let next = PassageRef {
+            ordinal: 1,
+            ..passage.reference.clone()
+        };
+        let IndexCommand::Preview {
+            request_id: second, ..
+        } = state.preview(next.clone())
+        else {
+            panic!()
+        };
+        state.finish_preview(first, &Ok(passage.clone()));
+        assert!(state.previewing && state.preview.is_none());
+        state.finish_preview(second, &Err(IndexError("Reader is busy".into())));
+        assert_eq!(state.preview_reference, Some(next.clone()));
+        let IndexCommand::Preview {
+            request_id: retry, ..
+        } = state.preview(next.clone())
+        else {
+            panic!()
+        };
+        state.finish_preview(retry, &Ok(passage.clone()));
+        assert!(state.preview.is_none());
+        assert!(
+            state
+                .preview_error
+                .as_deref()
+                .unwrap()
+                .contains("did not match")
+        );
+        let IndexCommand::Preview {
+            request_id: retry, ..
+        } = state.preview(next.clone())
+        else {
+            panic!()
+        };
+        passage.reference = next;
+        passage.text = "last".into();
+        state.finish_preview(retry, &Ok(passage.clone()));
+        assert_eq!(state.preview, Some(passage));
+        state.close_preview();
+        assert!(state.preview_reference.is_none());
+    }
 
     #[test]
     fn removing_or_reconfiguring_a_root_rejects_its_inflight_listing() {
