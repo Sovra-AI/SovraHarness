@@ -16,6 +16,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Cursor, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
+use sovra_core::file_index::DocumentBudget;
+
 use image::{ImageDecoder as _, ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
 use sovra_core::files::{
@@ -194,7 +196,92 @@ impl FileStore for LocalFileStore {
 }
 
 fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, FileError> {
+    prepare_for(id, name, bytes, ReadMode::Attachment, None).map(|prepared| prepared.content)
+}
+
+fn prepare_indexed_bytes(
+    id: &str,
+    name: &str,
+    bytes: &[u8],
+    budget: DocumentBudget,
+    observer: Option<&dyn sovra_core::file_index::ScanObserver>,
+) -> Result<PreparedFile, FileError> {
+    prepare_for(id, name, bytes, ReadMode::Index(budget), observer)
+}
+
+struct PreparedFile {
+    content: FileContent,
+    partial: bool,
+}
+
+fn prepared(mut content: FileContent, mut warnings: Vec<String>) -> PreparedFile {
+    warnings.sort();
+    warnings.dedup();
+    let partial = !warnings.is_empty();
+    if partial {
+        let note = content.attachment.note.get_or_insert_with(String::new);
+        if !note.is_empty() {
+            note.push('\n');
+        }
+        note.push_str("Reading may be incomplete. Check the original before relying on this file. Reader details:\n");
+        note.push_str(&warnings.join("\n"));
+    }
+    PreparedFile { content, partial }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReadMode {
+    Attachment,
+    Index(DocumentBudget),
+}
+
+impl ReadMode {
+    fn budget_error(self) -> FileError {
+        FileError(match self {
+            Self::Attachment => {
+                "Reading this file exceeded the safety limits. Split it into smaller parts.".into()
+            }
+            Self::Index(budget) => format!(
+                "Reading this document exceeded its decoding or expansion budget. {} Choose a larger Document reading budget in Folder settings, or split the document. Format nesting and decompression protections still apply.",
+                budget.details()
+            ),
+        })
+    }
+    fn indexed(self) -> bool {
+        matches!(self, Self::Index(_))
+    }
+    fn source_bytes(self) -> u64 {
+        match self {
+            Self::Attachment => MAX_FILE_BYTES,
+            Self::Index(budget) => budget.source_bytes(),
+        }
+    }
+    fn text_bytes(self) -> usize {
+        match self {
+            Self::Attachment => MAX_DOCUMENT_BYTES,
+            Self::Index(budget) => budget.text_bytes(),
+        }
+    }
+    fn expanded_bytes(self) -> u64 {
+        match self {
+            Self::Attachment => MAX_DECODED_BYTES,
+            Self::Index(budget) => budget.expanded_bytes(),
+        }
+    }
+}
+
+fn prepare_for(
+    id: &str,
+    name: &str,
+    bytes: &[u8],
+    mode: ReadMode,
+    observer: Option<&dyn sovra_core::file_index::ScanObserver>,
+) -> Result<PreparedFile, FileError> {
+    let mut warnings = Vec::new();
     let mime = detected_mime(name, bytes);
+    let index_pdf = mode.indexed() && mime == "application/pdf";
+    let index_media = mode.indexed()
+        && (mime.starts_with("image/") || mime.starts_with("audio/") || mime.starts_with("video/"));
     let mut attachment = Attachment {
         id: id.into(),
         name: name.into(),
@@ -207,7 +294,7 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
     };
     let mut media = Vec::new();
     if bytes.is_empty() {
-        return Ok(inspected(attachment, bytes));
+        return Ok(prepared(inspected(attachment, bytes), warnings));
     }
     let plain = if mime == "application/pdf"
         || mime == "image/svg+xml"
@@ -215,7 +302,7 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
     {
         None
     } else {
-        text::decode(bytes)?
+        text::decode_with_limit(bytes, mode.text_bytes())?
     };
     let text = if let Some(decoded) = plain {
         if decoded.encoding != "UTF-8" {
@@ -233,6 +320,11 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
             attachment.mime_type = "text/plain".into();
         }
         decoded.content.into_owned()
+    } else if index_media {
+        // The index stores searchable text, never model media payloads. Avoid
+        // decoding pictures or copying recordings that would be discarded.
+        attachment.note = Some("No searchable text was extracted from this media file. Its filename is searchable. Attach it in chat to use a suitable picture, audio or video model.".into());
+        String::new()
     } else if mime.starts_with("image/") {
         let decoded = if mime == "image/svg+xml" {
             vector::render(bytes).and_then(|png| normalize_image(&png))
@@ -240,7 +332,7 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
             normalize_image(bytes)
         };
         let Ok((data, thumbnail)) = decoded else {
-            return Ok(inspected(attachment, bytes));
+            return Ok(prepared(inspected(attachment, bytes), warnings));
         };
         if mime == "image/svg+xml" {
             attachment.note = Some("Drawing rendered as a picture. External resources and nested SVG images are excluded.".into());
@@ -271,12 +363,19 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
         });
         String::new()
     } else {
-        let Some(document) = extract_document(name, &mime, bytes)? else {
-            return Ok(inspected(attachment, bytes));
+        let Some(document) = extract_document(name, &mime, bytes, mode, observer, &mut warnings)?
+        else {
+            return Ok(prepared(inspected(attachment, bytes), warnings));
         };
-        if mime == "application/pdf" && document.trim().chars().count() < 40 {
+        if index_pdf {
+            attachment.note = Some(if document.trim().is_empty() {
+                "No searchable text layer was found. This PDF may be scanned or empty. Use text recognition (OCR) to save a searchable copy, then refresh the folder. Picture content has not been read.".into()
+            } else {
+                "PDF text layer indexed. Pictures and scanned pages without text are not read; text recognition (OCR) is needed for their contents.".into()
+            });
+        } else if mime == "application/pdf" && document.trim().chars().count() < 40 {
             let Ok(pdf) = xberg::pdf::PdfRenderSession::open(bytes, None) else {
-                return Ok(inspected(attachment, bytes));
+                return Ok(prepared(inspected(attachment, bytes), warnings));
             };
             let pages = pdf.page_count();
             if pages == 0 || pages > MAX_MEDIA_PARTS {
@@ -302,28 +401,33 @@ fn prepare_bytes(id: &str, name: &str, bytes: &[u8]) -> Result<FileContent, File
             || mime.contains("officedocument")
             || mime.contains("opendocument")
         {
-            attachment.note =
-                Some("Text and tables are ready. Embedded pictures are not included.".into());
+            attachment.note = Some(
+                "Readable text and tables are available. Embedded pictures are not included."
+                    .into(),
+            );
         }
         document
     };
-    if text.len() > MAX_DOCUMENT_BYTES
+    if text.len() > mode.text_bytes()
         || media.iter().map(|p| p.data.len() as u64).sum::<u64>() > MAX_FILE_BYTES
     {
-        return Err(FileError("This file expands into too much content. Please split it into smaller files and try again.".into()));
+        return Err(mode.budget_error());
     }
-    if text.trim().is_empty() && media.is_empty() {
+    if text.trim().is_empty() && media.is_empty() && !(index_pdf || index_media) {
         attachment.note =
             Some("This file contains only whitespace; there is no visible text to read.".into());
     }
     attachment.sections = file_sections(&text).len().max(media.len());
     note_recording_duration(&mut attachment, &media);
-    Ok(FileContent {
-        raw: None,
-        attachment,
-        text,
-        media,
-    })
+    Ok(prepared(
+        FileContent {
+            raw: None,
+            attachment,
+            text,
+            media,
+        },
+        warnings,
+    ))
 }
 
 fn note_recording_duration(attachment: &mut Attachment, media: &[MediaPart]) {
@@ -347,9 +451,16 @@ fn detected_mime(name: &str, bytes: &[u8]) -> String {
     detection::mime(name, bytes)
 }
 
-fn extract_document(name: &str, mime: &str, bytes: &[u8]) -> Result<Option<String>, FileError> {
+fn extract_document(
+    name: &str,
+    mime: &str,
+    bytes: &[u8],
+    mode: ReadMode,
+    observer: Option<&dyn sovra_core::file_index::ScanObserver>,
+    warnings: &mut Vec<String>,
+) -> Result<Option<String>, FileError> {
     if archives::is_archive(mime) {
-        return archives::extract(name, mime, bytes);
+        return archives::extract(name, mime, bytes, mode, observer, warnings);
     }
     if bytes.starts_with(b"PK\x03\x04")
         && !mime.contains("officedocument")
@@ -358,15 +469,18 @@ fn extract_document(name: &str, mime: &str, bytes: &[u8]) -> Result<Option<Strin
         && !mime.contains("iwork")
         && !mime.contains("hwp")
     {
-        return archives::extract(name, "application/zip", bytes);
+        return archives::extract(name, "application/zip", bytes, mode, observer, warnings);
     }
-    extract_single_document(name, mime, bytes)
+    extract_single_document(name, mime, bytes, mode, observer, warnings)
 }
 
 fn extract_single_document(
     name: &str,
     mime: &str,
     bytes: &[u8],
+    mode: ReadMode,
+    observer: Option<&dyn sovra_core::file_index::ScanObserver>,
+    warnings: &mut Vec<String>,
 ) -> Result<Option<String>, FileError> {
     if bytes.starts_with(b"bplist00") {
         return property_list::extract(bytes);
@@ -376,21 +490,48 @@ fn extract_single_document(
     }
     if mime != "application/pdf"
         && !detection::formatted_text(mime, bytes)
-        && let Some(text) = text::decode(bytes)?
+        && let Some(text) = text::decode_with_limit(bytes, mode.text_bytes())?
     {
         return Ok(Some(text.content.into_owned()));
     }
+    let cancel_token = observer.map(|_| xberg::cancellation::CancellationToken::new());
+    // Runtime owns the watcher; its guard limits registration to this decode.
+    let _cancellation = observer
+        .zip(cancel_token.as_ref())
+        .and_then(|(observer, token)| {
+            let token = token.clone();
+            observer.watch_cancellation(std::sync::Arc::new(move || token.cancel()))
+        });
     let config = xberg::ExtractionConfig {
+        cancel_token,
         use_cache: false,
         disable_ocr: true,
         enable_quality_processing: false,
         max_archive_depth: 2,
-        max_embedded_file_bytes: Some(MAX_FILE_BYTES),
+        max_embedded_file_bytes: Some(mode.source_bytes()),
         security_limits: Some(xberg::SecurityLimits {
-            max_archive_size: usize::try_from(MAX_DECODED_BYTES).unwrap_or(usize::MAX),
-            max_content_size: MAX_DOCUMENT_BYTES,
-            max_files_in_archive: 100,
-            max_pages: Some(500),
+            max_archive_size: usize::try_from(mode.expanded_bytes()).unwrap_or(usize::MAX),
+            max_content_size: mode.text_bytes(),
+            // Office/ODF/EPUB parts are a document's internal structure. Bound
+            // their count by the already-bounded input (each ZIP central record
+            // needs at least 46 bytes), not the generic archive's 100-file cap.
+            // Expanded bytes, compression ratios, pages and XML depth still
+            // have independent checks in the pinned decoder.
+            max_files_in_archive: if mime.contains("officedocument")
+                || mime.contains("opendocument")
+                || mime == "application/epub+zip"
+            {
+                (bytes.len() / 46).max(1)
+            } else {
+                100
+            },
+            // Indexing extracts text without OCR, layout detection or page
+            // rasterization. Source, expansion and extracted-text byte budgets
+            // still apply; the attachment page count is a separate restriction.
+            max_pages: match mode {
+                ReadMode::Attachment => Some(500),
+                ReadMode::Index(_) => None,
+            },
             max_nesting_depth: 64,
             max_xml_depth: 64,
             ..xberg::SecurityLimits::default()
@@ -402,33 +543,44 @@ fn extract_single_document(
     // work. The caller already owns a runtime blocking task; no second runtime.
     let result = match futures::executor::block_on(xberg::extract(input, &config)) {
         Ok(result) => result,
-        Err(
-            xberg::XbergError::Security { .. }
-            | xberg::XbergError::Timeout { .. }
-            | xberg::XbergError::Cancelled,
-        ) => {
-            return Err(FileError(
-                "Reading this file exceeded the safety limits. Split it into smaller parts.".into(),
-            ));
+        Err(xberg::XbergError::Security { .. } | xberg::XbergError::Timeout { .. }) => {
+            return Err(mode.budget_error());
         }
-        Err(_) => {
+        Err(xberg::XbergError::Cancelled) => {
+            return Err(FileError("Reading was cancelled.".into()));
+        }
+        Err(error) => {
+            warnings.push(format!("{name}: The document reader could not finish: {error}. Any retained text is the original source, not a rendered document."));
+            if mode.indexed() {
+                warnings.push("If the reader reports a size limit, choose a larger Document reading budget in Folder settings. Other reading problems may require repairing or converting the original file.".into());
+            }
             if mime == "application/pdf" {
                 return Ok(None);
             }
-            return text::decode(bytes).map(|text| text.map(|text| {
-                format!("[Formatted extraction failed. The original text source follows; this is not a rendered document.]\n{}", text.content)
-            }));
+            return text::decode_with_limit(bytes, mode.text_bytes())
+                .map(|text| text.map(|text| text.content.into_owned()));
         }
     };
-    let mut text = result
+    let text = result
         .results
         .into_iter()
-        .map(|document| document.content)
+        .map(|document| {
+            warnings.extend(
+                document
+                    .processing_warnings
+                    .into_iter()
+                    .map(|warning| format!("{name}: {}", warning.message)),
+            );
+            document.content
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
-    if !result.errors.is_empty() {
-        text.insert_str(0, "[Partial extraction: some content could not be decoded. Do not treat this as a complete document.]\n");
-    }
+    warnings.extend(
+        result
+            .errors
+            .into_iter()
+            .map(|error| format!("{name}: {}", error.message)),
+    );
     Ok((mime == "application/pdf" || !text.trim().is_empty()).then_some(text))
 }
 

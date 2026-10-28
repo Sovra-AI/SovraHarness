@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 pub mod clustering;
 mod options;
-pub use options::ScanOptions;
+pub use options::{DocumentBudget, ScanOptions};
 
 pub mod graph;
 mod history;
@@ -19,11 +19,15 @@ pub use history::{
     WorldValidity,
 };
 pub use refresh::RefreshSchedule;
+mod browser;
 mod catalogue;
+pub use browser::BrowserState;
+mod report;
 pub use catalogue::{
     CatalogCoverage, CatalogCursor, CatalogEntry, CatalogFilter, CatalogGroup, CatalogGroupBy,
     CatalogPage, CatalogQuery, ExtractionState,
 };
+pub use report::{NoticeCursor, NoticeKind, NoticePage, NoticeQuery, ReportState, ScanNotice};
 
 pub const MAX_INDEX_ROOTS: usize = 16;
 pub const MAX_INDEX_ENTRIES: u64 = 100_000;
@@ -123,6 +127,18 @@ pub struct IndexPassage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexCommand {
+    Report {
+        request_id: u64,
+        query: NoticeQuery,
+    },
+    Browse {
+        request_id: u64,
+        query: CatalogQuery,
+    },
+    Preview {
+        request_id: u64,
+        reference: PassageRef,
+    },
     ListKnowledge,
     ReviewKnowledge {
         proposal_id: u64,
@@ -161,6 +177,18 @@ pub enum IndexCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexEvent {
+    Reported {
+        request_id: u64,
+        result: Result<NoticePage, IndexError>,
+    },
+    Browsed {
+        request_id: u64,
+        result: Result<CatalogPage, IndexError>,
+    },
+    Previewed {
+        request_id: u64,
+        result: Result<IndexPassage, IndexError>,
+    },
     KnowledgePending(Vec<graph::KnowledgeProposal>),
     KnowledgeReviewed {
         proposal_id: u64,
@@ -199,6 +227,8 @@ pub struct MonitorStatus {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexState {
+    pub report: ReportState,
+    pub browser: BrowserState,
     pub roots: Vec<IndexedRoot>,
     pub passages: Vec<IndexPassage>,
     pub request_id: u64,
@@ -258,6 +288,15 @@ impl IndexState {
                 }
             }
             IndexEvent::Roots(roots) => {
+                if self.roots.iter().any(|old| {
+                    !roots
+                        .iter()
+                        .any(|new| new.id == old.id && new.scan_options == old.scan_options)
+                }) {
+                    self.browser.invalidate();
+                    self.report.invalidate();
+                    self.passages.clear();
+                }
                 self.roots.clone_from(roots);
                 self.monitors
                     .retain(|id, _| roots.iter().any(|root| root.id == *id));
@@ -275,6 +314,11 @@ impl IndexState {
             }
             IndexEvent::Progress(root) => {
                 if let Some(current) = self.roots.iter_mut().find(|r| r.id == root.id) {
+                    if current.scan_options != root.scan_options {
+                        self.browser.invalidate();
+                        self.report.invalidate();
+                        self.passages.retain(|p| p.reference.root_id != root.id);
+                    }
                     current.clone_from(root);
                 } else {
                     self.roots.push(root.clone());
@@ -306,6 +350,13 @@ impl IndexState {
                 self.notice = Some(message.clone());
                 self.searching = false;
             }
+            IndexEvent::Browsed { request_id, result } => {
+                self.browser.finish_browse(*request_id, result);
+            }
+            IndexEvent::Reported { request_id, result } => self.report.finish(*request_id, result),
+            IndexEvent::Previewed { request_id, result } => {
+                self.browser.finish_preview(*request_id, result);
+            }
         }
     }
 }
@@ -318,7 +369,24 @@ pub trait ScanObserver: Send + Sync {
         self.cancellation().is_some()
     }
     fn progress(&self, root: &IndexedRoot);
+
+    /// Register a decoder's cooperative cancellation signal. The owner invokes
+    /// it when this scan is cancelled/interrupted; dropping the returned guard
+    /// releases the registration. The signal must be nonblocking. Synchronous
+    /// observers may have no watcher.
+    fn watch_cancellation(
+        &self,
+        signal: std::sync::Arc<dyn Fn() + Send + Sync>,
+    ) -> Option<Box<dyn ScanCancellationWatch>> {
+        if self.cancelled() {
+            signal();
+        }
+        None
+    }
 }
+
+/// Owned cancellation registration; releasing it must not block the UI/runtime.
+pub trait ScanCancellationWatch: Send {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanCancellation {
@@ -328,6 +396,11 @@ pub enum ScanCancellation {
 }
 
 pub trait FileIndex: Send + Sync + std::fmt::Debug {
+    fn report(&self, _: &NoticeQuery) -> Result<NoticePage, IndexError> {
+        Err(IndexError(
+            "Full scan reports are unavailable in this session.".into(),
+        ))
+    }
     fn summaries(&self) -> Option<&dyn summary::SummaryIndex> {
         None
     }
@@ -446,6 +519,37 @@ pub fn excluded_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synchronous_cancellation_watch_signals_only_a_cancelled_scan() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        struct Observer(Option<ScanCancellation>);
+        impl ScanObserver for Observer {
+            fn cancellation(&self) -> Option<ScanCancellation> {
+                self.0
+            }
+            fn progress(&self, _: &IndexedRoot) {}
+        }
+        for cancellation in [
+            None,
+            Some(ScanCancellation::Requested),
+            Some(ScanCancellation::Interrupted),
+        ] {
+            let called = Arc::new(AtomicBool::new(false));
+            let signal = called.clone();
+            let observer = Observer(cancellation);
+            assert!(
+                observer
+                    .watch_cancellation(Arc::new(move || signal.store(true, Ordering::Relaxed)))
+                    .is_none()
+            );
+            assert_eq!(called.load(Ordering::Relaxed), cancellation.is_some());
+            assert_eq!(observer.cancelled(), cancellation.is_some());
+        }
+    }
 
     #[test]
     fn queries_and_paths_are_bounded_and_cannot_escape_a_scope() {

@@ -65,6 +65,7 @@ fn knowledge_review_flows_through_client_and_duplicate_review_reports_an_error()
     let mut p2 = p.clone();
     p2.id = 2;
     let store = Arc::new(Store {
+        decoder: false,
         release: Mutex::new(receiver),
         proposals: Mutex::new(vec![p, p2]),
         root: Mutex::new(IndexedRoot {
@@ -158,12 +159,29 @@ use std::sync::{Arc, Mutex, mpsc};
 
 #[derive(Debug)]
 struct Store {
+    decoder: bool,
     proposals: Mutex<Vec<KnowledgeProposal>>,
     release: Mutex<mpsc::Receiver<()>>,
     root: Mutex<IndexedRoot>,
 }
 
 impl FileIndex for Store {
+    fn report(
+        &self,
+        query: &sovra_core::file_index::NoticeQuery,
+    ) -> Result<sovra_core::file_index::NoticePage, IndexError> {
+        query.validate()?;
+        Ok(sovra_core::file_index::NoticePage {
+            root_id: query.root_id.clone(),
+            scan_id: Some(1),
+            status: IndexStatus::Scanning,
+            total: 0,
+            has_newer: false,
+            counts: vec![],
+            notices: vec![],
+            next_cursor: None,
+        })
+    }
     fn knowledge(&self) -> Option<&dyn FileKnowledge> {
         Some(self)
     }
@@ -204,14 +222,35 @@ impl FileIndex for Store {
     fn scan(&self, _: &str, observer: &dyn ScanObserver) -> Result<IndexedRoot, IndexError> {
         let mut root = self.root.lock().expect("index root lock").clone();
         root.status = IndexStatus::Scanning;
-        observer.progress(&root);
-        self.release
-            .lock()
-            .expect("scan release lock")
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("scan release");
+        if self.decoder {
+            let (obsolete, obsolete_events) = mpsc::channel();
+            let watch = observer.watch_cancellation(Arc::new(move || {
+                let _ = obsolete.send(());
+            }));
+            assert!(watch.is_some());
+            drop(watch);
+            let (cancel, cancelled) = mpsc::channel();
+            let _watch = observer.watch_cancellation(Arc::new(move || {
+                let _ = cancel.send(());
+            }));
+            observer.progress(&root);
+            cancelled
+                .recv_timeout(std::time::Duration::from_secs(3))
+                .expect("decoder receives cancellation without returning to the scan loop");
+            assert!(obsolete_events.try_recv().is_err());
+        } else {
+            observer.progress(&root);
+            self.release
+                .lock()
+                .expect("scan release lock")
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("scan release");
+        }
         assert!(observer.cancelled());
-        root.status = IndexStatus::Cancelled;
+        root.status = match observer.cancellation().expect("scan is cancelled") {
+            sovra_core::file_index::ScanCancellation::Requested => IndexStatus::Cancelled,
+            sovra_core::file_index::ScanCancellation::Interrupted => IndexStatus::Interrupted,
+        };
         *self.root.lock().expect("index root lock") = root.clone();
         observer.progress(&root);
         Ok(root)
@@ -245,6 +284,7 @@ impl FileIndex for Store {
 fn scans_leave_ping_and_search_responsive_and_cancel_reaches_the_blocking_worker() {
     let (release, receiver) = mpsc::channel();
     let store = Arc::new(Store {
+        decoder: false,
         proposals: Mutex::new(vec![]),
         release: Mutex::new(receiver),
         root: Mutex::new(IndexedRoot {
@@ -305,6 +345,72 @@ fn scans_leave_ping_and_search_responsive_and_cancel_reaches_the_blocking_worker
             break;
         }
     }
+    // Inventory and saved-file reads remain responsive while scanning is held.
+    for (request_id, limit) in [(81, 20), (82, 0)] {
+        client
+            .send(Command::FileIndex(IndexCommand::Browse {
+                request_id,
+                query: CatalogQuery {
+                    limit,
+                    ..CatalogQuery::default()
+                },
+            }))
+            .unwrap();
+        loop {
+            if let Event::FileIndex(IndexEvent::Browsed {
+                request_id: received,
+                result,
+            }) = events.recv_blocking().unwrap()
+            {
+                assert_eq!(received, request_id);
+                assert_eq!(result.is_ok(), limit > 0);
+                break;
+            }
+        }
+    }
+    client
+        .send(Command::FileIndex(IndexCommand::Preview {
+            request_id: 83,
+            reference: PassageRef {
+                root_id: "root".into(),
+                file_id: "missing".into(),
+                version_id: "missing".into(),
+                ordinal: 0,
+            },
+        }))
+        .unwrap();
+    loop {
+        if let Event::FileIndex(IndexEvent::Previewed { request_id, result }) =
+            events.recv_blocking().unwrap()
+        {
+            assert_eq!(request_id, 83);
+            assert_eq!(result.unwrap_err().0, "Not found");
+            break;
+        }
+    }
+    for (id, limit) in [(85, 40), (86, 0)] {
+        client
+            .send(Command::FileIndex(IndexCommand::Report {
+                request_id: id,
+                query: sovra_core::file_index::NoticeQuery {
+                    root_id: "root".into(),
+                    kind: None,
+                    contains: None,
+                    cursor: None,
+                    limit,
+                },
+            }))
+            .unwrap();
+        loop {
+            if let Event::FileIndex(IndexEvent::Reported { request_id, result }) =
+                events.recv_blocking().unwrap()
+            {
+                assert_eq!(request_id, id);
+                assert_eq!(result.is_ok(), limit > 0);
+                break;
+            }
+        }
+    }
     client
         .send(Command::FileIndex(IndexCommand::Cancel {
             root_id: "root".into(),
@@ -325,3 +431,6 @@ fn scans_leave_ping_and_search_responsive_and_cancel_reaches_the_blocking_worker
     }
     client.send(Command::Shutdown).unwrap();
 }
+
+#[path = "file_index/cancellation.rs"]
+mod cancellation;

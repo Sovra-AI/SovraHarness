@@ -10,7 +10,7 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
     let large = fixture.source().join("archive.bin");
     std::fs::File::create(&large)
         .unwrap()
-        .set_len(sovra_core::files::MAX_FILE_BYTES + 1)
+        .set_len(sovra_core::file_index::DocumentBudget::default().source_bytes() + 1)
         .unwrap();
     let dated = fixture.source().join("reports/100%_budget.txt");
     let file = std::fs::OpenOptions::new()
@@ -35,7 +35,7 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
     assert_eq!(unread.extraction, ExtractionState::MetadataOnly);
     assert_eq!(
         unread.byte_size,
-        Some(sovra_core::files::MAX_FILE_BYTES + 1)
+        Some(sovra_core::file_index::DocumentBudget::default().source_bytes() + 1)
     );
     assert!(unread.first_passage.is_none() && unread.content_digest.is_none());
     assert!(
@@ -43,7 +43,7 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
             .note
             .as_ref()
             .unwrap()
-            .contains("document-decoder budget")
+            .contains("document reading budget")
     );
 
     query.filter.name_contains = Some("100%_budget".into());
@@ -171,11 +171,13 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
 #[test]
 fn failed_and_blank_extractions_keep_metadata_and_never_become_readable_on_refresh() {
     let fixture = Fixture::new();
-    // This non-streaming decoder still reports expansion failures; large UTF-8
-    // sources use a separate complete-text path and must no longer fail here.
-    let mut wide = vec![0xff, 0xfe];
-    wide.extend([b'x', 0].repeat(sovra_core::files::MAX_DOCUMENT_BYTES + 1));
-    std::fs::write(fixture.source().join("too-much-text.txt"), wide).unwrap();
+    // Text sources stream completely; use a genuinely over-expanded archive
+    // to exercise failed-file metadata and refresh behavior.
+    std::fs::write(
+        fixture.source().join("overexpanded.zip"),
+        include_bytes!("../../../tests/fixtures/oversized.zip"),
+    )
+    .unwrap();
     fixture.write("blank.txt", " \t\n\u{2003}\n");
     fixture.write("empty.txt", "");
     std::fs::write(fixture.source().join("unknown.bin"), [0, 255, 128]).unwrap();
@@ -201,7 +203,7 @@ fn failed_and_blank_extractions_keep_metadata_and_never_become_readable_on_refre
             })
             .unwrap();
         assert_eq!(failed.total_files, 1);
-        assert_eq!(failed.files[0].path, "too-much-text.txt");
+        assert_eq!(failed.files[0].path, "overexpanded.zip");
         assert_eq!(failed.files[0].first_passage, None);
         assert!(failed.files[0].note.is_some());
     }
@@ -219,7 +221,7 @@ fn metadata_only_replacement_revokes_the_previous_text_version() {
         .write(true)
         .open(fixture.source().join("notes.txt"))
         .unwrap()
-        .set_len(sovra_core::files::MAX_FILE_BYTES + 1)
+        .set_len(sovra_core::file_index::DocumentBudget::default().source_bytes() + 1)
         .unwrap();
     store.scan(&root.id, &Observer::default()).unwrap();
     let inventory = store.catalogue(&CatalogQuery::default()).unwrap();

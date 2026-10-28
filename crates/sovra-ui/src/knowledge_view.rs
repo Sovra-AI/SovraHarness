@@ -4,8 +4,8 @@
 //! not open a memory store or do any other IO.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, button::ButtonVariants as _, checkbox::Checkbox, h_flex,
-    v_flex,
+    ActiveTheme as _, Disableable as _, Selectable as _, button::ButtonVariants as _,
+    checkbox::Checkbox, h_flex, v_flex,
 };
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -15,6 +15,26 @@ use sovra_core::{BeliefPicture, BeliefStanding, MemoryExplanation, StoryStep, me
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum KnowledgeSection {
+    #[default]
+    Files,
+    Memories,
+    Help,
+}
+
+impl Shell {
+    pub(crate) fn select_knowledge_section(
+        &mut self,
+        section: KnowledgeSection,
+        cx: &mut Context<Self>,
+    ) {
+        self.knowledge_section = section;
+        self.knowledge_scroll.set_offset(gpui_kit::Point::default());
+        cx.notify();
+    }
+}
 
 pub(crate) fn render_knowledge_view(
     shell: &Shell,
@@ -33,14 +53,90 @@ pub(crate) fn render_knowledge_view(
                 .child(shell.memory_view.clone()))
             .into_any_element();
     }
-    let story = memory_explanation();
-    let mut column = v_flex()
+    let column = v_flex()
         .flex_shrink_0()
         .w_full()
+        .min_w_0()
         .max_w(t.layout.reading_width)
-        .gap(t.space.medium)
+        .gap(t.space.medium);
+    let column = match shell.knowledge_section {
+        KnowledgeSection::Files => column.child(crate::file_index_view::render(shell, cx)),
+        KnowledgeSection::Memories => column
+            .child(render_memory_status(shell, cx))
+            .child(shell.memory_view.clone()),
+        KnowledgeSection::Help => {
+            let story = memory_explanation();
+            let column = column
+                .child(render_intro(&story, cx))
+                .child(render_story(&story, cx))
+                .child(render_about(&story, cx))
+                .child(render_search(&story, cx))
+                .child(render_times_toggle(shell.knowledge_times_open, cx));
+            if shell.knowledge_times_open {
+                column.child(render_times(&story, cx))
+            } else {
+                column
+            }
+        }
+    };
+    let mut navigation = h_flex()
+        .id("knowledge-navigation")
+        .test_support()
+        .w_full()
+        .max_w(t.layout.reading_width)
+        .flex_wrap()
+        .gap(t.space.small);
+    for (id, label, section) in [
+        ("knowledge-files", "Files", KnowledgeSection::Files),
+        ("knowledge-memories", "Memories", KnowledgeSection::Memories),
+        ("knowledge-help", "How it works", KnowledgeSection::Help),
+    ] {
+        navigation = navigation.child(
+            design::button(id, label, cx)
+                .selected(shell.knowledge_section == section)
+                .on_click(
+                    cx.listener(move |shell, _, _, cx| shell.select_knowledge_section(section, cx)),
+                ),
+        );
+    }
+    v_flex()
+        .id("knowledge-page")
+        .test_support()
+        .flex_1()
+        .min_w_0()
+        .min_h_0()
+        .h_full()
         .child(
-            v_flex().id("conversation-memory-status").test_support()
+            v_flex()
+                .w_full()
+                .flex_shrink_0()
+                .items_center()
+                .px(t.space.medium)
+                .py(t.space.small)
+                .child(navigation),
+        )
+        .child(
+            v_flex()
+                .id("sovra-knowledge-view")
+                .test_support()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .w_full()
+                .items_center()
+                .overflow_y_scroll()
+                .track_scroll(&shell.knowledge_scroll)
+                .px(t.space.medium)
+                .pt(t.space.small)
+                .pb(t.space.medium)
+                .child(column),
+        )
+        .into_any_element()
+}
+
+fn render_memory_status(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex().id("conversation-memory-status").test_support()
                 .aria_label(format!("Conversation memory. {} Messages may be sent to your selected AI service. Saved details are stored on this computer.", shell.workspace().memory_status.label()))
                 .w_full().min_w_0().sovra_surface(Surface::Matte, cx)
                 .p(t.space.medium).gap(t.space.small)
@@ -60,30 +156,7 @@ pub(crate) fn render_knowledge_view(
                             models.save_agent_settings(settings, cx);
                         });
                         cx.notify();
-                    }))),
-        )
-        .child(shell.memory_view.clone())
-        .child(crate::file_index_view::render(shell, cx))
-        .child(render_intro(&story, cx))
-        .child(render_story(&story, cx))
-        .child(render_about(&story, cx))
-        .child(render_search(&story, cx))
-        .child(render_times_toggle(shell.knowledge_times_open, cx));
-    if shell.knowledge_times_open {
-        column = column.child(render_times(&story, cx));
-    }
-    v_flex()
-        .id("sovra-knowledge-view")
-        .test_support()
-        .flex_1()
-        .min_w_0()
-        .min_h_0()
-        .h_full()
-        .items_center()
-        .overflow_y_scroll()
-        .p(t.space.large)
-        .child(column)
-        .into_any_element()
+                    })))
 }
 
 fn render_intro(story: &MemoryExplanation, cx: &mut Context<Shell>) -> impl IntoElement + use<> {

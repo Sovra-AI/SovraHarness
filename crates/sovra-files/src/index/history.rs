@@ -9,7 +9,7 @@ use sovra_core::file_index::{
     ObservedPresence, ScanActivity, SourceRepresentation,
 };
 
-pub(super) const EXTRACTOR_REVISION: &str = "extract-v2";
+pub(super) const EXTRACTOR_REVISION: &str = "extract-v6";
 
 pub(super) fn migrate(db: &Connection) -> Result<(), IndexError> {
     db.execute_batch(include_str!("history_v4.sql"))
@@ -225,6 +225,7 @@ fn observation(row: &Row<'_>) -> rusqlite::Result<FileObservation> {
     let extraction: String = row.get(7)?;
     let extraction = match extraction.as_str() {
         "text" => ExtractionState::Text,
+        "partial_text" => ExtractionState::PartialText,
         "metadata_only" => ExtractionState::MetadataOnly,
         "failed" => ExtractionState::Failed,
         _ => return Err(rusqlite::Error::InvalidQuery),

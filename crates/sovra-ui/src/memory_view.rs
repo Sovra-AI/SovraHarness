@@ -570,7 +570,13 @@ mod tests {
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
                 design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
-                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx));
+                shell.update(cx, |shell, cx| {
+                    shell.select_tab(NavTab::Knowledge, cx);
+                    shell.select_knowledge_section(
+                        crate::knowledge_view::KnowledgeSection::Memories,
+                        cx,
+                    );
+                });
                 window.render_frame(cx);
             })
             .unwrap();

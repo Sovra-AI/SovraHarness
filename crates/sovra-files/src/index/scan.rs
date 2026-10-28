@@ -7,13 +7,18 @@ use cap_fs_ext::{DirExt as _, FollowSymlinks, OpenOptionsFollowExt as _, OpenOpt
 use cap_std::fs::{Dir, Metadata, OpenOptions};
 use rusqlite::{Connection, OptionalExtension as _, params};
 use sovra_core::file_index::{
-    ExtractionState, IndexError, IndexedRoot, MAX_INDEX_ISSUES, ScanObserver,
+    ExtractionState, IndexError, IndexedRoot, MAX_INDEX_ISSUES, NoticeKind, ScanObserver,
 };
-use sovra_core::files::MAX_FILE_BYTES;
 
 use super::{db_error, digest, io_error, now, save_root};
 
 mod stream_text;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Completion {
+    Complete,
+    Incomplete,
+}
 
 pub(super) fn run(
     db: &mut Connection,
@@ -21,7 +26,7 @@ pub(super) fn run(
     storage: &Path,
     observer: &dyn ScanObserver,
     activity: i64,
-) -> Result<(), IndexError> {
+) -> Result<Completion, IndexError> {
     let dir = Dir::open_ambient_dir(&root.path, cap_std::ambient_authority())
         .map_err(|e| io_error(&e))?;
     let expected: String = db
@@ -59,10 +64,13 @@ pub(super) fn run(
         observer,
         generation,
         excluded,
+        notices: Vec::new(),
     };
-    scan.walk(dir)?;
-    if observer.cancelled() {
-        return Ok(());
+    let walked = scan.walk(dir);
+    scan.flush_notices()?;
+    let completion = walked?;
+    if observer.cancelled() || completion == Completion::Incomplete {
+        return Ok(completion);
     }
     // Failed files retain observed metadata but revoke readable text. A traversal
     // error returns before this point, preserving the unvisited subtree.
@@ -81,7 +89,7 @@ pub(super) fn run(
     };
     for id in &missing {
         if observer.cancelled() {
-            return Ok(());
+            return Ok(Completion::Incomplete);
         }
         tx.execute(
             "UPDATE index_files SET available=0,observed=?2 WHERE id=?1",
@@ -92,7 +100,7 @@ pub(super) fn run(
     }
     tx.commit().map_err(|e| db_error(&e))?;
     scan.root.progress.removed = missing.len() as u64;
-    Ok(())
+    Ok(Completion::Complete)
 }
 
 struct Scan<'a> {
@@ -102,10 +110,30 @@ struct Scan<'a> {
     observer: &'a dyn ScanObserver,
     generation: i64,
     excluded: Option<PathBuf>,
+    notices: Vec<super::report::PendingNotice>,
 }
 
 impl Scan<'_> {
-    fn walk(&mut self, dir: Dir) -> Result<(), IndexError> {
+    fn notice(&mut self, kind: NoticeKind, path: &str, message: &str) -> Result<(), IndexError> {
+        issue(self.root, format!("{path}: {message}"));
+        self.notices.push(super::report::PendingNotice {
+            kind,
+            path: path.into(),
+            message: message.into(),
+        });
+        if self.notices.len() >= 64 {
+            self.flush_notices()?;
+        }
+        Ok(())
+    }
+
+    fn flush_notices(&mut self) -> Result<(), IndexError> {
+        super::report::append(self.db, &self.root.id, &self.notices)?;
+        self.notices.clear();
+        Ok(())
+    }
+
+    fn walk(&mut self, dir: Dir) -> Result<Completion, IndexError> {
         // An explicit stack avoids a call-stack depth cutoff. Each directory is
         // held as a capability; only the current branch has open handles.
         let mut stack = vec![(
@@ -113,23 +141,46 @@ impl Scan<'_> {
             dir,
             PathBuf::new(),
         )];
+        let mut unread_entries = 0_u64;
         while let Some((entries, dir, relative)) = stack.last_mut() {
             let Some(entry) = entries.next() else {
                 stack.pop();
                 continue;
             };
+            if self.root.progress.visited > 0 && self.root.progress.visited.is_multiple_of(32) {
+                self.flush_notices()?;
+                save_root(self.db, self.root)?;
+                self.observer.progress(self.root);
+            }
             if self.observer.cancelled() {
-                return Ok(());
+                return Ok(Completion::Incomplete);
             }
             self.root.progress.visited += 1;
-            let entry = entry.map_err(|e| io_error(&e))?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    self.traversal_issue(relative, &error)?;
+                    unread_entries += 1;
+                    // An iterator error leaves the rest of this directory
+                    // uncertain. Continue from its parent rather than polling
+                    // a broken iterator or abandoning other branches.
+                    stack.pop();
+                    continue;
+                }
+            };
             let name = entry.file_name();
             let Some(name) = name.to_str() else {
                 self.root.progress.skipped += 1;
-                issue(
-                    self.root,
-                    "A filename is not valid Unicode and was skipped.".into(),
-                );
+                let escaped: String = relative
+                    .join(&name)
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .iter()
+                    .copied()
+                    .flat_map(std::ascii::escape_default)
+                    .map(char::from)
+                    .collect();
+                self.notice(NoticeKind::Skipped, &escaped, "Filename is not valid Unicode; its path is shown with escapes. Rename it to include it in the index.")?;
                 continue;
             };
             let path = relative.join(name);
@@ -140,32 +191,50 @@ impl Scan<'_> {
             };
             if let Some(reason) = excluded {
                 self.root.progress.skipped += 1;
-                issue(self.root, format!("{}: {reason}.", path.display()));
+                self.notice(NoticeKind::Skipped, &path.to_string_lossy(), reason)?;
                 continue;
             }
-            let metadata = dir.symlink_metadata(name).map_err(|e| io_error(&e))?;
+            let metadata = match dir.symlink_metadata(name) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    self.traversal_issue(&path, &error)?;
+                    unread_entries += 1;
+                    continue;
+                }
+            };
             if metadata.is_symlink() {
                 self.root.progress.skipped += 1;
-                issue(
-                    self.root,
-                    format!(
-                        "{}: symbolic link; add its destination folder directly to include it.",
-                        path.display()
-                    ),
-                );
+                self.notice(
+                    NoticeKind::Skipped,
+                    &path.to_string_lossy(),
+                    "Symbolic link; add its destination folder directly to include it.",
+                )?;
             } else if metadata.is_dir() {
                 // Every component is opened relative to a held capability and
                 // rejects symlinks, including a link swapped in during traversal.
-                let child = dir.open_dir_nofollow(name).map_err(|e| io_error(&e))?;
-                stack.push((child.entries().map_err(|e| io_error(&e))?, child, path));
+                match dir
+                    .open_dir_nofollow(name)
+                    .and_then(|child| child.entries().map(|entries| (entries, child)))
+                {
+                    Ok((entries, child)) => stack.push((entries, child, path)),
+                    Err(error) => {
+                        self.traversal_issue(&path, &error)?;
+                        unread_entries += 1;
+                    }
+                }
             } else if metadata.is_file() {
                 let relative = path
                     .to_str()
                     .ok_or_else(|| IndexError("Invalid filename.".into()))?
                     .replace(std::path::MAIN_SEPARATOR, "/");
                 if let Err(error) = self.file(dir, name, &relative) {
+                    // Cancellation is not a failed replacement: retain the
+                    // previous version and never retire the unvisited remainder.
+                    if self.observer.cancelled() {
+                        return Ok(Completion::Incomplete);
+                    }
                     self.root.progress.failed += 1;
-                    issue(self.root, format!("{relative}: {error}"));
+                    self.notice(NoticeKind::Failed, &relative, &error.to_string())?;
                     self.metadata_only(
                         &relative,
                         &metadata,
@@ -175,17 +244,42 @@ impl Scan<'_> {
                 }
             } else {
                 self.root.progress.skipped += 1;
-                issue(
-                    self.root,
-                    format!("{}: not a regular file or folder.", path.display()),
-                );
-            }
-            if self.root.progress.visited.is_multiple_of(32) {
-                save_root(self.db, self.root)?;
-                self.observer.progress(self.root);
+                self.notice(
+                    NoticeKind::Skipped,
+                    &path.to_string_lossy(),
+                    "Not a regular file or folder.",
+                )?;
             }
         }
-        Ok(())
+        if unread_entries == 0 {
+            Ok(Completion::Complete)
+        } else {
+            // A partial walk cannot prove a previously indexed path is gone.
+            // Keep the aggregate guidance out of the persisted failure rows:
+            // each affected location has already been counted and reported.
+            issue(
+                self.root,
+                format!(
+                    "Scan incomplete: {unread_entries} folders or entries could not be read. Accessible files were updated. Older entries were kept because this scan cannot confirm which files are missing. Check the scan report, fix access, then refresh to retry."
+                ),
+            );
+            Ok(Completion::Incomplete)
+        }
+    }
+
+    fn traversal_issue(&mut self, path: &Path, error: &std::io::Error) -> Result<(), IndexError> {
+        let reason = match error.kind() {
+            std::io::ErrorKind::PermissionDenied => "Access denied. Check folder permissions and allow Sovra to read it, then refresh to retry.".into(),
+            std::io::ErrorKind::NotFound => "This entry disappeared while scanning. Refresh to check the folder again.".into(),
+            kind => format!("This folder or entry could not be read ({kind}). Check access and availability, then refresh to retry."),
+        };
+        self.root.progress.failed += 1;
+        let label = if path.as_os_str().is_empty() {
+            ".".into()
+        } else {
+            path.to_string_lossy()
+        };
+        self.notice(NoticeKind::Failed, &label, &reason)
     }
 
     fn metadata_only(
@@ -213,26 +307,48 @@ impl Scan<'_> {
         if !before.is_file() {
             return Err(IndexError("Only regular files can be indexed.".into()));
         }
-        if before.len() >= sovra_core::files::MAX_DOCUMENT_BYTES as u64
+        // Legacy single-byte text can triple when decoded to UTF-8. Enter the bounded reader
+        // before the attachment decoder's output budget could reject it.
+        if before.len() >= (sovra_core::files::MAX_DOCUMENT_BYTES / 3) as u64
             && self.stream_text(&mut file, path, &before)?
         {
             return Ok(());
         }
-        if before.len() > MAX_FILE_BYTES {
-            let note = "This file is not streamable UTF-8 text and exceeds the 20 MB document-decoder budget. Its filename and size are searchable; its contents have not been read into the index.";
-            self.metadata_only(path, &before, ExtractionState::MetadataOnly, note)?;
+        let budget = self.root.scan_options.documents;
+        let source_limit = budget.source_bytes();
+        if before.len() > source_limit {
+            let note = format!(
+                "This file exceeds the folder's {} MiB document reading budget. Its filename and size are searchable; its contents have not been read. Open Folder settings → Document reading to choose a larger budget, or split the document. Streaming source text has no file-size cutoff.",
+                source_limit / (1024 * 1024)
+            );
+            self.metadata_only(path, &before, ExtractionState::MetadataOnly, &note)?;
             self.root.progress.skipped += 1;
-            issue(self.root, format!("{path}: {note}"));
+            self.notice(NoticeKind::Unreadable, path, &note)?;
             return Ok(());
         }
         let mut bytes = Vec::new();
-        file.by_ref()
-            .take(MAX_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| io_error(&e))?;
-        self.root.progress.bytes_read += bytes.len() as u64;
+        let mut buffer = vec![0_u8; 64 * 1024];
+        let mut reader = file.by_ref().take(source_limit + 1);
+        let mut since_progress = 0;
+        loop {
+            if self.observer.cancelled() {
+                return Ok(());
+            }
+            let count = reader.read(&mut buffer).map_err(|e| io_error(&e))?;
+            if count == 0 {
+                break;
+            }
+            bytes.try_reserve(count).map_err(|_| IndexError("Not enough memory to read this document. Choose a lower document budget or retry after closing other apps.".into()))?;
+            bytes.extend_from_slice(&buffer[..count]);
+            self.root.progress.bytes_read += count as u64;
+            since_progress += count;
+            if since_progress >= 4 * 1024 * 1024 {
+                self.observer.progress(self.root);
+                since_progress = 0;
+            }
+        }
         let after = file.metadata().map_err(|e| io_error(&e))?;
-        if bytes.len() as u64 > MAX_FILE_BYTES
+        if bytes.len() as u64 > source_limit
             || before.len() != after.len()
             || before.modified().ok() != after.modified().ok()
         {
@@ -246,11 +362,11 @@ impl Scan<'_> {
         let content_hash = digest(&bytes);
         let physical = identity(&before);
         let file_id = self.file_id(path, &physical)?;
-        // v2 excludes byte-inspection descriptions and whitespace from source
-        // passages. Older snapshots are re-extracted on refresh, never relabelled.
+        // Decoder changes create new snapshots on refresh, never relabel old
+        // citations or reuse text produced with outdated format/size handling.
         let version = digest(
             format!(
-                "{}\0{file_id}\0{content_hash}",
+                "{}\0{budget:?}\0{file_id}\0{content_hash}",
                 super::history::EXTRACTOR_REVISION
             )
             .as_bytes(),
@@ -267,7 +383,7 @@ impl Scan<'_> {
             None
         } else {
             Some(
-                crate::prepare_bytes(&file_id, name, &bytes)
+                crate::prepare_indexed_bytes(&file_id, name, &bytes, budget, Some(self.observer))
                     .map_err(|e| IndexError(e.to_string()))?,
             )
         };
@@ -283,8 +399,12 @@ impl Scan<'_> {
         tx.execute("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
             params![file_id, self.root.id, path, physical, version, self.generation]).map_err(|error| db_error(&error))?;
         let (state, detail) = if let Some(prepared) = prepared {
+            let partial = prepared.partial;
+            let prepared = prepared.content;
             let state = if prepared.raw.is_some() || prepared.text.trim().is_empty() {
                 ExtractionState::MetadataOnly
+            } else if partial {
+                ExtractionState::PartialText
             } else {
                 ExtractionState::Text
             };
@@ -293,13 +413,14 @@ impl Scan<'_> {
             } else {
                 prepared.attachment.note
             };
-            tx.execute("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-                params![version, file_id, content_hash, prepared.attachment.mime_type, note, i64::try_from(now()).expect("current Unix time fits i64"), modified.and_then(|v| i64::try_from(v).ok()),super::history::EXTRACTOR_REVISION,self.activity]).map_err(|error| db_error(&error))?;
-            let source_text = if state == ExtractionState::Text {
-                prepared.text.as_str()
-            } else {
-                ""
-            };
+            tx.execute("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by,partial) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                params![version, file_id, content_hash, prepared.attachment.mime_type, note, i64::try_from(now()).expect("current Unix time fits i64"), modified.and_then(|v| i64::try_from(v).ok()),super::history::EXTRACTOR_REVISION,self.activity,partial]).map_err(|error| db_error(&error))?;
+            let source_text =
+                if matches!(state, ExtractionState::Text | ExtractionState::PartialText) {
+                    prepared.text.as_str()
+                } else {
+                    ""
+                };
             for (ordinal, chunk) in chunks(source_text).into_iter().enumerate() {
                 let chunk_id = digest(chunk.body.as_bytes());
                 tx.execute(
@@ -312,9 +433,11 @@ impl Scan<'_> {
             }
             (state, note)
         } else {
-            let (has_text,note): (bool,Option<String>) = tx.query_row("SELECT EXISTS(SELECT 1 FROM index_version_chunks WHERE version_id=?1),note FROM index_versions WHERE id=?1", [&version], |r| Ok((r.get(0)?,r.get(1)?))).map_err(|e| db_error(&e))?;
+            let (has_text,note,partial): (bool,Option<String>,bool) = tx.query_row("SELECT EXISTS(SELECT 1 FROM index_version_chunks WHERE version_id=?1),note,partial FROM index_versions WHERE id=?1", [&version], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|e| db_error(&e))?;
             (
-                if has_text {
+                if has_text && partial {
+                    ExtractionState::PartialText
+                } else if has_text {
                     ExtractionState::Text
                 } else {
                     ExtractionState::MetadataOnly
@@ -325,6 +448,24 @@ impl Scan<'_> {
         save_metadata(&tx, &file_id, path, &before, state, detail.as_deref())?;
         super::history::observe(&tx, &file_id, self.activity)?;
         tx.commit().map_err(|error| db_error(&error))?;
+        if state == ExtractionState::MetadataOnly {
+            self.notice(
+                NoticeKind::Unreadable,
+                path,
+                detail
+                    .as_deref()
+                    .unwrap_or("No searchable text was extracted."),
+            )?;
+        }
+        if state == ExtractionState::PartialText {
+            self.notice(
+                NoticeKind::Partial,
+                path,
+                detail
+                    .as_deref()
+                    .unwrap_or("Some content could not be read. Check the original file."),
+            )?;
+        }
         if known {
             self.root.progress.reused += 1;
         } else {
@@ -393,6 +534,7 @@ fn save_metadata(
     };
     let state = match state {
         ExtractionState::Text => "text",
+        ExtractionState::PartialText => "partial_text",
         ExtractionState::MetadataOnly => "metadata_only",
         ExtractionState::Failed => "failed",
     };

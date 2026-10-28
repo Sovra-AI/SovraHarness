@@ -58,9 +58,8 @@ pub(super) fn formatted_text(mime: &str, bytes: &[u8]) -> bool {
 // gigabytes during detection, before extraction's expansion budget applies.
 fn zip_mime(bytes: &[u8]) -> Option<&'static str> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
-    if archive.len() > 100 {
-        return None;
-    }
+    // These are package part names, not expanded contents. A normal slide deck
+    // easily exceeds 100 parts; counting them must not change its format.
     for name in archive.file_names().filter_map(Result::ok) {
         if name.starts_with("word/") {
             return Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document");

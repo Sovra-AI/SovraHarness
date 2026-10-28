@@ -8,6 +8,105 @@ use sovra_runtime::Client;
 use sovra_ui::Shell;
 
 #[gpui_kit::test]
+fn knowledge_opens_to_files_and_keeps_memory_and_help_reachable(cx: &mut TestAppContext) {
+    let (client, _commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(window, cx));
+        Root::new(shell, window, cx)
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("nav-knowledge", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("memory-browser").is_none());
+        assert!(window.find("index-folder").visible());
+        window.click("knowledge-memories", cx);
+        window.render_frame(cx);
+        assert!(window.find("memory-browser").visible());
+        assert!(window.try_find("file-index-panel").is_none());
+        window.click("knowledge-help", cx);
+        window.render_frame(cx);
+        assert!(window.find("knowledge-intro").visible());
+        assert!(window.try_find("memory-browser").is_none());
+        window.click("knowledge-files", cx);
+        window.render_frame(cx);
+        assert!(window.find("index-folder").visible());
+        assert!(window.try_find("knowledge-intro").is_none());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::component::{Theme, ThemeMode};
+    use gpui_kit::{ScrollDelta, point};
+    use sovra_core::models::InterfaceScale;
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        let (client, _commands, _events) = Client::loopback();
+        cx.update(|cx| {
+            sovra_ui::init(client, cx);
+            sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+        });
+        let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+            let shell = cx.new(|cx| {
+                let mut shell = Shell::new(window, cx);
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell
+            });
+            Root::new(shell, window, cx)
+        });
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            for mode in [ThemeMode::Dark, ThemeMode::Light] {
+                Theme::change(mode, Some(window), cx);
+                window.render_frame(cx);
+                for (tab, content) in [
+                    ("knowledge-files", "file-index-panel"),
+                    ("knowledge-memories", "conversation-memory-status"),
+                    ("knowledge-help", "knowledge-intro"),
+                ] {
+                    window.click(tab, cx);
+                    window.render_frame(cx);
+                    let bounds = window.find(content).bounds();
+                    assert!(
+                        bounds.left() >= px(0.) && bounds.right() <= px(width),
+                        "{content}@{scale}: {bounds:?}"
+                    );
+                    assert!(window.find(content).visible());
+                    window.scroll(
+                        "sovra-knowledge-view",
+                        ScrollDelta::Pixels(point(px(0.), px(-2000.))),
+                        cx,
+                    );
+                    window.render_frame(cx);
+                    for id in ["knowledge-files", "knowledge-memories", "knowledge-help"] {
+                        let control = window.find(id);
+                        assert!(control.visible());
+                        assert!(
+                            control.bounds().left() >= px(0.)
+                                && control.bounds().right() <= px(width)
+                        );
+                        assert!(control.bounds().bottom() < px(height));
+                    }
+                }
+                window.click("knowledge-files", cx);
+                window.render_frame(cx);
+                let add = window.find("index-folder");
+                assert!(add.visible());
+                assert!(
+                    add.bounds().bottom() <= px(height),
+                    "Add a folder at {scale}%: {:?}",
+                    add.bounds()
+                );
+            }
+        })
+        .unwrap();
+    }
+}
+
+#[gpui_kit::test]
 fn memory_search_consent_discloses_destination_and_fits_each_layout(cx: &mut TestAppContext) {
     use gpui_kit::component::{Theme, ThemeMode};
     use gpui_kit::{ScrollDelta, point};
@@ -62,6 +161,8 @@ fn memory_search_consent_discloses_destination_and_fits_each_layout(cx: &mut Tes
             cx.run_until_parked();
             cx.update_window(window.into(), |_, window, cx| {
                 window.render_frame(cx);
+                window.click("knowledge-memories", cx);
+                window.render_frame(cx);
                 for id in [gpui_kit::ElementId::from("memory-choose-semantic"), ("memory-enable-semantic", 0usize).into()] {
                     for _ in 0..100 {
                         let choice = window.find(id.clone());
@@ -107,6 +208,8 @@ fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click("nav-knowledge", cx);
+        window.render_frame(cx);
+        window.click("knowledge-help", cx);
         window.render_frame(cx);
 
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Knowledge);
@@ -324,6 +427,8 @@ fn live_memory_status_and_service_disclosure_fit_all_layouts(cx: &mut TestAppCon
                 cx.run_until_parked();
                 cx.update_window(window.into(), |_, window, cx| {
                     shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx));
+                    window.render_frame(cx);
+                    window.click("knowledge-memories", cx);
                     window.render_frame(cx);
                     let card = window.find("conversation-memory-status");
                     assert!(card.visible());

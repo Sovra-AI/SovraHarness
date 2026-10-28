@@ -67,9 +67,12 @@ unsupported binary format is **inspectable**, not automatically understood.
 - At most eight attachments per turn; each source is at most 20 MiB. Source files
   exceeding that limit still require splitting; an arbitrary extension is not a
   reason for rejection.
-- Documents retain at most 4 MiB of extracted text. Archive expansion is at most
-  64 MiB across nested members, at most 100 entries and two nested archive levels.
+- Documents retain at most 4 MiB of extracted text. Generic archive expansion is at
+  most 64 MiB across nested members, at most 100 entries and two nested archive levels.
   Expansion is charged during reads, not merely trusted from archive headers.
+  Office/OpenDocument/EPUB packages are not subject to the 100-entry cutoff:
+  their part count is bounded by the input bytes (a ZIP central record needs at
+  least 46 bytes). The 64 MiB expansion and 4 MiB text budgets still apply.
   XML/property-list nesting is at most 64. Xberg fixed-layout page count is capped
   at 500 where the selected parser enforces it.
 - XZ/LZMA decoder memory and Zstandard windows are capped at 64 MiB. Unsupported or
@@ -132,13 +135,68 @@ binary fragments. File contents remain untrusted evidence, never instructions.
 ## Folder indexing versus attachments
 
 The limits above apply to chat attachments. Folder indexing now streams complete
-large UTF-8 text/source files with fixed-size buffers, including files beyond
-20 MiB and text beyond 4 MiB. Its two-pass hash check and transaction prevent
+large text/source files with fixed-size buffers: UTF-8, BOM-marked
+UTF-16/32 in either byte order, conservatively inferred BOM-less UTF-16, and
+detected legacy encodings such as Windows-1252/874, Shift-JIS, ISO-2022-JP and GBK.
+This includes files beyond 20 MiB and text beyond 4 MiB. Its two-pass hash check and transaction prevent
 partial or changing sources from becoming current citations. Refresh reuses an
-unchanged version; cancellation retains the prior version. Binary documents and
-non-UTF-8 decoding still use the bounded document readers and report unsupported
-or oversized content explicitly. The broader indexing UI and exclusion controls
-remain under active development; see [folder indexing](skills-and-file-knowledge.md).
+unchanged version; cancellation retains the prior version. The decoder carries
+incomplete characters, surrogate pairs and encoding escape state across read
+boundaries, rejects malformed input for the selected encoding without inventing
+replacement characters, and labels inferred encodings. Legacy inference examines
+the whole source in fixed buffers after the Unicode attempt fails; a long ASCII
+header is not taken as proof of UTF-8. Inference can be ambiguous, so check the
+saved-text preview when characters look wrong. Rich-document formats still use the bounded document readers
+and report unsupported or oversized content explicitly. Folder inclusion controls,
+inventory filters and saved-text previews are available in Knowledge → Files; further
+indexing work remains active. See [folder indexing](skills-and-file-knowledge.md).
+
+Knowledge opens to Files. Use Add a folder, Browse all files, or a folder's Browse
+files and Scan report actions. Browsing and reports each open a focused view;
+Back to folders returns to the folder controls. Folder settings show three notice
+examples with a direct link to the full report. Memories and How it works remain
+available in the navigation above the scrolling content.
+
+Document indexing now has its own text-only preparation mode. It does not inherit
+the attachment reader's 500-page/slide cutoff or rasterize a no-text PDF for a
+picture model. Short PDF text layers remain searchable; no-text PDFs retain
+metadata with OCR guidance. Media files retain metadata without allocating picture
+or recording payloads for the index. Its document budgets are independent of chat
+attachments and are selectable per folder in **Folder settings → Document reading**:
+
+| Choice | Source file | Extracted text | Total unpacked content |
+| --- | --- | --- | --- |
+| Lower memory | 64 MiB | 16 MiB | 64 MiB |
+| Standard (default) | 256 MiB | 64 MiB | 256 MiB |
+| Large documents | 1 GiB | 256 MiB | 1 GiB |
+
+These are working budgets, not a promise that every codec accepts every document
+under those sizes. Codec-specific part limits, nesting, decompression ratios and
+window limits still apply. Peak memory can be several times source size. Existing
+folders without a saved choice get Standard. Changing the budget refreshes that
+folder, and representation keys include the chosen budget so a more restrictive
+read cannot silently reuse a representation produced under a larger budget.
+Indexed archives have no fixed entry-count ceiling; expansion and output are
+charged across all members. Chat attachments retain their 100-entry limit.
+Large input/expansion reads use blocks and observe cancellation. Source reads also
+publish progress during a long file. Cancel, Pause and shutdown now
+signal the document decoder while it runs, including documents inside archives.
+Cancellation takes effect at the decoder's cooperative checkpoints; formats without
+internal checkpoints may still finish their current decode first. Cancelled reads
+preserve the previous searchable version and do not count as failed files. Runtime
+owns the signal watcher and releases it when the decode finishes. The configured
+decoder timeout is still not enforced without Xberg's tokio-runtime feature; a hard
+parser deadline remains open work. Text-stream cancellation is checked between blocks.
+
+Decoder processing warnings and per-input errors are retained as reader notes,
+separate from source text. Indexed documents with usable text and a reported
+problem have **Partial text** status. Documents inside archives share this path;
+unread archive media, inspection-only members and first-stream-only BZip2 reads
+also disclose the limitation. The full scan report includes a partial-read category.
+Warnings survive reopening and version reuse; a repaired source becomes a new
+representation, retaining the old observation in history. This does not detect
+omissions a codec fails to report, nor does absence of warnings prove that images,
+scanned pages or every formatting detail were read.
 
 ## Storage and ownership
 
