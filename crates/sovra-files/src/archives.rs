@@ -1,7 +1,7 @@
 //! Bounded archive traversal in memory. Members never become filesystem paths.
 
-use crate::{MAX_DECODED_BYTES, detected_mime, extract_single_document};
-use sovra_core::files::{FileError, MAX_DOCUMENT_BYTES};
+use crate::{ReadMode, detected_mime, extract_single_document};
+use sovra_core::files::FileError;
 use std::io::{Cursor, Read};
 
 pub(super) fn is_archive(mime: &str) -> bool {
@@ -19,11 +19,21 @@ pub(super) fn is_archive(mime: &str) -> bool {
     )
 }
 
-pub(super) fn extract(name: &str, mime: &str, bytes: &[u8]) -> Result<Option<String>, FileError> {
+pub(super) fn extract(
+    name: &str,
+    mime: &str,
+    bytes: &[u8],
+    mode: ReadMode,
+    observer: Option<&dyn sovra_core::file_index::ScanObserver>,
+    warnings: &mut Vec<String>,
+) -> Result<Option<String>, FileError> {
     let mut budget = Budget {
-        remaining: MAX_DECODED_BYTES,
+        remaining: mode.expanded_bytes(),
         entries: 0,
         output: String::new(),
+        mode,
+        observer,
+        warnings,
     };
     match visit(name, mime, bytes, 0, &mut budget) {
         Ok(()) => {
@@ -45,25 +55,40 @@ enum Failure {
     Limit(FileError),
 }
 
-struct Budget {
+struct Budget<'a> {
+    warnings: &'a mut Vec<String>,
+    observer: Option<&'a dyn sovra_core::file_index::ScanObserver>,
+    mode: ReadMode,
     remaining: u64,
     entries: usize,
     output: String,
 }
 
-impl Budget {
+impl Budget<'_> {
     fn read(&mut self, reader: impl Read) -> Result<Vec<u8>, Failure> {
         self.entries += 1;
-        if self.entries > 100 {
-            return Err(too_large());
+        if !self.mode.indexed() && self.entries > 100 {
+            return Err(too_large(self.mode));
         }
         let mut bytes = Vec::new();
-        reader
-            .take(self.remaining + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| unreadable())?;
+        let mut reader = reader.take(self.remaining + 1);
+        let mut buffer = vec![0_u8; 64 * 1024];
+        loop {
+            if self
+                .observer
+                .is_some_and(sovra_core::file_index::ScanObserver::cancelled)
+            {
+                return Err(Failure::Limit(FileError("Reading was cancelled.".into())));
+            }
+            let count = reader.read(&mut buffer).map_err(|_| unreadable())?;
+            if count == 0 {
+                break;
+            }
+            bytes.try_reserve(count).map_err(|_| Failure::Limit(FileError("Not enough memory to unpack this document. Choose a lower document budget or retry after closing other apps.".into())))?;
+            bytes.extend_from_slice(&buffer[..count]);
+        }
         if bytes.len() as u64 > self.remaining {
-            return Err(too_large());
+            return Err(too_large(self.mode));
         }
         self.remaining -= bytes.len() as u64;
         Ok(bytes)
@@ -76,9 +101,9 @@ impl Budget {
             .saturating_add(text.len())
             .saturating_add(name.len())
             .saturating_add(20)
-            > MAX_DOCUMENT_BYTES
+            > self.mode.text_bytes()
         {
-            return Err(too_large());
+            return Err(too_large(self.mode));
         }
         self.output.push_str("\n\nFile inside archive: ");
         self.output.push_str(name);
@@ -93,8 +118,14 @@ fn visit(
     mime: &str,
     bytes: &[u8],
     depth: usize,
-    budget: &mut Budget,
+    budget: &mut Budget<'_>,
 ) -> Result<(), Failure> {
+    if budget
+        .observer
+        .is_some_and(sovra_core::file_index::ScanObserver::cancelled)
+    {
+        return Err(Failure::Limit(FileError("Reading was cancelled.".into())));
+    }
     if depth > 2 {
         return Err(Failure::Limit(FileError("This archive contains too many layers of archives. Unpack it and add the documents directly.".into())));
     }
@@ -104,11 +135,12 @@ fn visit(
                 budget.append(name, "HWPX package: XML source and readable members follow. This is not rendered page layout; embedded media is not decoded.")?;
             }
             let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| unreadable())?;
-            if archive.len().saturating_add(budget.entries) > 100 {
-                return Err(too_large());
+            if !budget.mode.indexed() && archive.len().saturating_add(budget.entries) > 100 {
+                return Err(too_large(budget.mode));
             }
             for index in 0..archive.len() {
                 let Ok(entry) = archive.by_index(index) else {
+                    budget.warnings.push(format!("{name}: Archive entry {} is encrypted, damaged, or uses an unsupported compression method; it was not read.", index + 1));
                     budget.append(&format!("Archive entry {}", index + 1), "[This entry is encrypted, damaged, or uses a compression method that could not be decoded. Other readable entries are included.]")?;
                     continue;
                 };
@@ -116,7 +148,7 @@ fn visit(
                     continue;
                 }
                 if entry.size() > budget.remaining {
-                    return Err(too_large());
+                    return Err(too_large(budget.mode));
                 }
                 let name = entry.name().map_err(|_| unreadable())?.into_owned();
                 let content = budget.read(entry)?;
@@ -132,7 +164,7 @@ fn visit(
                     continue;
                 }
                 if entry.size() > budget.remaining {
-                    return Err(too_large());
+                    return Err(too_large(budget.mode));
                 }
                 let name = entry
                     .path()
@@ -159,6 +191,7 @@ fn visit(
             compressed_member(name, &[".lzma"], reader, depth, budget)
         }
         "application/x-bzip2" => {
+            budget.warnings.push(format!("{name}: Only the first BZip2 stream was read. Any later concatenated streams are not included."));
             budget.append(name, "[BZip2: only the first compressed stream is decoded. If this file contains concatenated streams, later streams are not included.]")?;
             compressed_member(
                 name,
@@ -180,20 +213,35 @@ fn visit(
     }
 }
 
-fn member(name: &str, bytes: &[u8], depth: usize, budget: &mut Budget) -> Result<(), Failure> {
+fn member(name: &str, bytes: &[u8], depth: usize, budget: &mut Budget<'_>) -> Result<(), Failure> {
     let mime = detected_mime(name, bytes);
     if is_archive(&mime) {
         return visit(name, &mime, bytes, depth + 1, budget);
     }
     if mime.starts_with("image/") || mime.starts_with("audio/") || mime.starts_with("video/") {
-        if let Some(text) = crate::text::decode(bytes).map_err(Failure::Limit)? {
+        if let Some(text) = crate::text::decode_with_limit(bytes, budget.mode.text_bytes())
+            .map_err(Failure::Limit)?
+        {
             return budget.append(name, &text.content);
         }
+        budget.warnings.push(format!("{name}: Picture, audio or video content was not read. Attach it in chat to use a suitable model."));
         return budget.append(name, "[Media was not read. Attach this file separately to use its picture, audio, or video model.]");
     }
-    match extract_single_document(name, &mime, bytes) {
+    match extract_single_document(
+        name,
+        &mime,
+        bytes,
+        budget.mode,
+        budget.observer,
+        budget.warnings,
+    ) {
         Ok(Some(text)) if !text.trim().is_empty() => budget.append(name, &text),
-        Ok(_) => budget.append(name, &crate::inspection::describe(bytes, &mime)),
+        Ok(_) => {
+            budget.warnings.push(format!(
+                "{name}: No searchable text was decoded. Only a file inspection is included."
+            ));
+            budget.append(name, &crate::inspection::describe(bytes, &mime))
+        }
         Err(error) => Err(Failure::Limit(error)),
     }
 }
@@ -203,7 +251,7 @@ fn compressed_member(
     suffixes: &[&str],
     reader: impl Read,
     depth: usize,
-    budget: &mut Budget,
+    budget: &mut Budget<'_>,
 ) -> Result<(), Failure> {
     let bytes = budget.read(reader)?;
     let inner = suffixes
@@ -213,7 +261,7 @@ fn compressed_member(
     member(inner, &bytes, depth, budget)
 }
 
-fn zstandard(mut bytes: &[u8], budget: &mut Budget) -> Result<Vec<u8>, Failure> {
+fn zstandard(mut bytes: &[u8], budget: &mut Budget<'_>) -> Result<Vec<u8>, Failure> {
     let mut output = Vec::new();
     while !bytes.is_empty() {
         // Skippable frames carry metadata, not decoded bytes. Validate their size
@@ -223,8 +271,8 @@ fn zstandard(mut bytes: &[u8], budget: &mut Budget) -> Result<Vec<u8>, Failure> 
             && (0x50..=0x5f).contains(&bytes[0])
         {
             budget.entries += 1;
-            if budget.entries > 100 {
-                return Err(too_large());
+            if !budget.mode.indexed() && budget.entries > 100 {
+                return Err(too_large(budget.mode));
             }
             let length =
                 u32::from_le_bytes(bytes[4..8].try_into().map_err(|_| unreadable())?) as usize;
@@ -234,9 +282,11 @@ fn zstandard(mut bytes: &[u8], budget: &mut Budget) -> Result<Vec<u8>, Failure> 
                 .ok_or_else(unreadable)?;
             continue;
         }
-        let mut reader =
-            ruzstd::decoding::StreamingDecoder::new_with_max_window_size(bytes, MAX_DECODED_BYTES)
-                .map_err(|_| unreadable())?;
+        let mut reader = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(
+            bytes,
+            budget.mode.expanded_bytes(),
+        )
+        .map_err(|_| unreadable())?;
         output.extend(budget.read(&mut reader)?);
         let remaining = reader.into_inner();
         if remaining.len() >= bytes.len() {
@@ -250,6 +300,9 @@ fn zstandard(mut bytes: &[u8], budget: &mut Budget) -> Result<Vec<u8>, Failure> 
 fn unreadable() -> Failure {
     Failure::Unreadable
 }
-fn too_large() -> Failure {
+fn too_large(mode: ReadMode) -> Failure {
+    if mode.indexed() {
+        return Failure::Limit(mode.budget_error());
+    }
     Failure::Limit(FileError("This archive expands into too much content. Try adding fewer than 100 files, under 64 MB unpacked.".into()))
 }

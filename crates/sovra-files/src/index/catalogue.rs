@@ -42,7 +42,7 @@ pub(super) fn query(db: &mut Connection, query: &CatalogQuery) -> Result<Catalog
         && (cursor.revision != revision || cursor.filter_key != key)
     {
         return Err(IndexError(
-            "The catalogue or filters changed between pages. Restart the listing without cursor."
+            "The file list or filters changed between pages. Reload the list to see the latest files."
                 .into(),
         ));
     }
@@ -79,7 +79,7 @@ pub(super) fn query(db: &mut Connection, query: &CatalogQuery) -> Result<Catalog
             Value::Integer(i64::try_from(query.limit + 1).expect("bounded query limit")),
         );
         let sql = format!(
-            "SELECT {scope} AS scope,{field} AS group_key,count(*) AS n,coalesce(sum(f.byte_size),0),sum(f.byte_size IS NULL),sum(f.extraction='text') {filtered} GROUP BY scope,group_key ORDER BY n DESC,scope,group_key LIMIT {limit}"
+            "SELECT {scope} AS scope,{field} AS group_key,count(*) AS n,coalesce(sum(f.byte_size),0),sum(f.byte_size IS NULL),sum(f.extraction IN ('text','partial_text')) {filtered} GROUP BY scope,group_key ORDER BY n DESC,scope,group_key LIMIT {limit}"
         );
         let mut statement = tx.prepare(&sql).map_err(|e| db_error(&e))?;
         page.groups = statement
@@ -172,6 +172,7 @@ fn entry(row: &Row<'_>) -> rusqlite::Result<CatalogEntry> {
     let state: String = row.get(10)?;
     let extraction = match state.as_str() {
         "text" => ExtractionState::Text,
+        "partial_text" => ExtractionState::PartialText,
         "metadata_only" => ExtractionState::MetadataOnly,
         "failed" => ExtractionState::Failed,
         _ => return Err(rusqlite::Error::InvalidQuery),
@@ -180,7 +181,12 @@ fn entry(row: &Row<'_>) -> rusqlite::Result<CatalogEntry> {
     let file_id: String = row.get(2)?;
     let version: Option<String> = row.get(12)?;
     let first_passage = version
-        .filter(|_| extraction == ExtractionState::Text)
+        .filter(|_| {
+            matches!(
+                extraction,
+                ExtractionState::Text | ExtractionState::PartialText
+            )
+        })
         .map(|version_id| PassageRef {
             root_id: root_id.clone(),
             file_id: file_id.clone(),
@@ -273,9 +279,9 @@ fn filter(filter: &CatalogFilter) -> Result<(String, Vec<Value>), IndexError> {
     }
     if let Some(has_text) = filter.has_text {
         sql.push_str(if has_text {
-            " AND f.extraction='text'"
+            " AND f.extraction IN ('text','partial_text')"
         } else {
-            " AND f.extraction<>'text'"
+            " AND f.extraction NOT IN ('text','partial_text')"
         });
     }
     if let Some(directory) = &filter.directory {
@@ -285,6 +291,7 @@ fn filter(filter: &CatalogFilter) -> Result<(String, Vec<Value>), IndexError> {
     if let Some(extraction) = filter.extraction {
         let state = match extraction {
             ExtractionState::Text => "text",
+            ExtractionState::PartialText => "partial_text",
             ExtractionState::MetadataOnly => "metadata_only",
             ExtractionState::Failed => "failed",
         };

@@ -84,10 +84,158 @@ settings. Changes refresh the folder; newly excluded files leave current search
 immediately while saved history remains available. Credential folders and Sovra's
 own index storage stay excluded.
 
-Next work retains the full requested scope: useful coverage information,
-direct file browsing/filtering/preview, simpler folder setup
-and recovery, and handling more large-document formats without silently omitting
-content. Native notification resource budgets and codec expansion protections are
+The inventory is now exposed directly in Knowledge: browse all folders or one
+folder, filter filename fragments and extraction status, follow cursor pages,
+inspect extraction caveats, and read a literal saved-text excerpt. Metadata-only
+and failed files remain visible without matching a content keyword. Listing and
+preview requests run independently of scans, carry correlated success/error
+responses, and discard stale results after filter changes or scope revocation.
+The preview is explicitly an excerpt of saved text, not a whole-file or live view.
+This browser checkpoint passes `cargo xtask ci`: 586 tests passed, 5 opt-in tests
+skipped. Tests cover stale responses, scope removal/reconfiguration, inventory
+and preview errors during a held scan, native paging/filter/preview actions, and
+minimum/wide/200% layouts in both themes. Native GPU pixel fidelity has not yet
+been checked for the new browser.
+
+Large-text follow-up: UTF-16/32 now use the bounded streaming path too, with
+strict decoding and explicit encoding notes. The regression first reproduced
+metadata-only treatment above 20 MiB, then verified both byte orders, BOM-less
+UTF-16 inference, end-of-file retrieval, reopen/reuse, one-byte reads, split
+surrogate pairs, malformed sequences and cancellation during replacement.
+Decoding expansion is covered with a source below 4 MiB whose decoded text exceeds
+4 MiB. All 82 file-adapter tests and `cargo xtask ci` pass at this checkpoint:
+590 tests passed, 5 opt-in tests skipped. Legacy encodings and rich-document decoder
+budgets remain open work.
+
+Full scan reporting now persists every recorded skip, metadata-only extraction
+and read failure, replacing the previous latest-report rows on a new scan.
+Knowledge exposes path/reason filters, category filters and paging beyond the
+50-example summary. Cancelled/interrupted/failed scans remain explicitly incomplete;
+pre-upgrade folders are asked to refresh before a complete report is available.
+Pages capture a scan and an upper sequence bound, reject new-scan/filter mismatch,
+and flag newly recorded entries when navigating an older snapshot. Excluded-only
+walks now publish progress and observe cancellation between batches too.
+This checkpoint passes `cargo xtask ci`: 599 tests passed, 5 opt-in tests skipped.
+Coverage includes 94 notices across pages/reopen, filtering and stale-page rejection,
+partial and failed scans, live-scan snapshots with newer-entry flags, schema 8/7
+migration without losing citations, distinct escaped non-Unicode filenames,
+Client responsiveness, native report controls and both themes at minimum, wide
+and 200% layouts. The native light-theme report was also inspected in the running
+development app: paging/filter controls, live-scan labels and actual failure
+messages are readable at the desktop window size. Native dark/minimum/200% GPU
+checks remain unverified; those layouts are covered by headless tests.
+
+The native report exposed an ordinary PowerPoint package being misidentified as a
+generic ZIP above 100 internal parts. A synthetic 120-slide regression reproduced
+the rejection before the fix. Container detection now reads package part names
+without that cutoff, and Office/OpenDocument/EPUB extraction bounds the part count
+by the already-bounded input size instead of 100. Expansion bytes, compression
+ratios, text, page and nesting budgets remain enforced. Decoder revision `extract-v3`
+causes older snapshots to be re-extracted on refresh while preserving historical
+citations. Regression coverage includes Word/Excel packages over 100 parts, the
+last presentation slide through index/reopen/reuse, and oversized declared expansion.
+All 90 file-adapter tests pass; `cargo xtask ci` passes all gates with 602 tests
+passed and 5 opt-in tests skipped. The native development watcher remains running.
+
+Legacy text now uses the same atomic streaming path, with `stream-text-v3` snapshots.
+A bounded full-source detection pass follows a failed Unicode attempt, handling
+long ASCII headers and ISO-2022-JP escapes across read boundaries. Strict decoding
+never substitutes characters for malformed sequences in the selected encoding.
+Guesses remain explicitly labelled; encoding inference is not certainty.
+Regression coverage includes Windows-1252 beyond 20 MiB, Japanese/Chinese text,
+threefold Thai expansion below 2 MiB of source, one-byte reads, incomplete final
+characters, and cancellation during inference, validation and transaction writes.
+`cargo xtask ci` passes every gate: 608 tests passed, 5 opt-in tests skipped.
+The development app remains supervised by the existing xtask/Watchexec session.
+
+Traversal recovery now continues through accessible sibling folders after metadata,
+directory-open or directory-iteration errors. Each failed location receives a
+persisted report entry and increments the failure count once. Partial walks finish
+as Failed/incomplete, preserve the last completed time and skip missing-file
+retirement; only a later complete scan can confirm removals. Knowledge explains
+the possibility of older results and offers Retry scan. A Unix permission regression
+checks two inaccessible subfolders, 24 updated siblings, preserved unvisited/deleted
+snapshots, reopen and recovery; headless controls and both-theme minimum/wide/200%
+layouts exercise the incomplete-state guidance.
+`cargo xtask ci` passes every gate: 609 tests passed, 5 opt-in tests skipped.
+
+Document preparation now distinguishes folder indexing from chat attachments.
+The index's text-only mode removes the 500-page/slide cutoff, preserves short PDF
+text layers, and records no-text PDF metadata with OCR guidance instead of the
+12-picture attachment error. It avoids unused page rasterization and media payload
+allocation. `extract-v4` refreshes prior representations without relabelling history.
+Regressions cover first/last text in 601-page PDFs and 601-slide presentations,
+reopen/reuse, a 20-page no-text PDF, short text and actual scanned-PDF media handling.
+Attachment limits and document byte/expansion budgets remain enforced. The no-tokio
+Xberg build does not enforce its configured timeout; a hard parser deadline remains
+open work.
+All 99 file-adapter tests pass. `cargo xtask ci` passes every gate: 611 tests passed,
+5 opt-in tests skipped. The existing development watcher remains running.
+
+Document reads now register a cooperative cancellation signal with the runtime.
+Cancel, Pause and shutdown reach a busy decoder; reconfiguration uses the same
+interruption path. A registration belongs to one decode and is released afterward.
+Documents inside archives receive the same signal. Cancelled extraction keeps the
+previous searchable version, without a failed-file report or partial replacement.
+Checks inside individual decoder formats determine how quickly they stop; this is
+not a forced termination guarantee. Regressions cover PDF replacement/retry,
+archived PDFs, dropped registrations, and real Client Cancel/Pause/shutdown handling.
+`cargo xtask ci` passes every gate: 614 tests passed, 5 opt-in tests skipped.
+
+Reader warnings now survive the complete extraction/index/UI path. A synthetic
+presentation with a missing second slide reproduced the old false assurance;
+readable first/last slides now retain a **Partial text** status and a note naming
+the missing slide. The same works inside an archive. Knowledge offers matching
+file/report filters, while preview text stays separate from diagnostic messages.
+Archive media/inspection-only entries and BZip2's first-stream restriction also
+mark partial coverage. This reflects known reader limitations, not a guarantee
+that a reader detects every omission. PDF image/OCR limitations remain explicit.
+Schema 10 retains old report records and adds per-representation partial status;
+`extract-v5` regenerates earlier representations without changing saved history.
+Regressions cover filters, text counts, citations, restart/reuse, repaired sources,
+version history, migrations from schemas 7/8/9, and UI controls/layouts in both themes
+at minimum/wide windows and 200% interface size.
+`cargo xtask ci` passes every gate: 616 tests passed, 5 opt-in tests skipped.
+The running native light-theme app also shows the new filter, partial rows and
+reader explanations against its real catalogue. Native dark/minimum/200% rendering
+remains covered by headless checks rather than a fresh GPU inspection.
+
+Document reading budgets now belong to folder options, independent of chat's
+20 MiB source and 4 MiB text ceilings. The UI exposes three memory choices and
+explains source, text and unpacked-byte limits; existing folder JSON defaults to
+Standard. `extract-v6` and budget-aware version identities prevent cross-budget
+reuse. Changing only a budget avoids the unrelated inclusion-policy inventory
+walk. A valid 65 MiB PDF is searchable; Lower memory keeps metadata with a clear
+limit explanation, and restoring Standard reuses the complete saved version.
+A DOCX with over 16 MiB of text retains its last passage under Standard, while the
+lower budget discloses the reader's limit instead of presenting a complete read.
+The library can wrap its own resource errors in a generic parsing error, so those
+reader details are preserved too. Indexed archives accept more than 100 members
+within their total-byte budgets. Large source and archive reads check cancellation
+between blocks; source reads publish progress. Tests cover source/text budgets,
+reopen, restrictive transitions, recovery, archive end markers and cancellation
+preserving prior text, alongside real controls and responsive layouts.
+The 200% layout check caught an overflowing budget label; shortening it kept the
+full limits available in the explanatory text. `cargo xtask ci` passes every gate:
+621 tests passed, 5 opt-in tests skipped. The running native light-theme app
+also shows the three choices, selected Standard budget, and full per-document
+limits in Folder settings.
+
+Knowledge now opens directly to Files, with separate Memories and How it works
+sections. Navigation stays above the scrolling content. Browsing saved files and
+reading a scan report each open a focused view with Back to folders; switching
+sections retains browser selections. Folder settings show three saved notice
+examples and link to the full report. Add a folder and local search precede folder
+details. Regression checks cover section switching, preserved previews, closing
+reports with late responses, and navigation at minimum/wide windows and 200% text
+in both themes. The minimum-window test caught a clipped Add a folder action at
+200%; reducing the content's top spacing fixed it. `cargo xtask ci` passes every
+gate: 623 tests passed, 5 opt-in tests skipped. This navigation change has headless
+layout coverage; a fresh native visual check of these sections remains outstanding.
+
+Next work retains the full requested scope: richer coverage information,
+simpler folder setup and recovery, and handling more large-document formats
+without silently omitting content. Native notification resource budgets and codec expansion protections are
 distinct from the arbitrary collection cutoffs removed here.
 
 ### Implementation checkpoint: local folder index
@@ -184,23 +332,39 @@ entries. OS descriptor/path limits, SQLite's limits and available disk still app
 this is not an arbitrary-scale performance guarantee. Native notification discovery
 retains its own resource budget and falls back to periodic scanning.
 
-Large UTF-8 files use two streaming passes with 64 KiB buffers and immutable source
-chunks. The first validates the entire text and hashes its bytes; a new version's
+Large text files use two streaming passes and immutable source chunks. Input
+buffers are 64 KiB plus a three-byte carry; decoded output is bounded independently
+of source size. UTF-8, BOM-marked UTF-16/32 in either byte order, and conservatively
+inferred UTF-16 are supported, along with legacy encodings detected by chardetng.
+Inferred encodings are labelled. Malformed sequences in the selected encoding
+are rejected, never replaced silently; surrogate pairs and stateful encoding
+escapes can cross input boundaries.
+The first pass validates the entire text and hashes its original bytes; a new version's
 second pass writes chunks in a transaction and verifies the same hash and file
-metadata before publishing. A known version needs only the validation/hash pass.
+metadata before publishing. A known Unicode version needs only the validation/hash
+pass. Legacy text first makes a Unicode attempt and a bounded full-source inference
+pass; inferred input is then validated/hashed and written through the same path.
 Cancellation rolls back partial chunks and keeps the prior snapshot. Source text,
 including markup, stays literal and is neither rendered nor executed. These files
 are no longer subject to the 4 MiB attachment-text or 20 MiB attachment-file limits.
-Non-UTF-8 and rich-document codecs currently retain those limits; oversized
-non-streamable files keep metadata and an explicit explanation. Chat attachment
-limits are separate and unchanged.
+Rich-document codecs now use per-folder budgets: Standard defaults to 256 MiB
+source and unpacked content / 64 MiB text, with Lower memory (64/16 MiB) and Large
+(1 GiB/256 MiB) alternatives. Codec-specific protections remain. Oversized
+non-streamable files keep metadata and an explicit explanation with a Folder
+settings action. Chat attachment limits are separate and unchanged.
 
 Scans run on an owned blocking worker; cancellation bypasses its queue and search
-runs independently. The UI exposes all recorded scan notices (up to 50 examples),
-including hidden/generated/credential exclusions and symbolic links; totals still
-count every skipped entry. Selecting a directory does not count all children of
-an excluded subtree as visited. Folder details expose inclusion options; a richer
-browsable inventory remains part of the indexing UX task.
+runs independently. The settings summary retains up to 50 notice examples; the
+full Scan report persists and pages through all recorded notices, including
+hidden/generated/credential exclusions, symbolic links, metadata-only files and
+read failures. Reports use bounded write batches and display pages without a
+total-entry cutoff. Migration to schema 9 preserves source citations and old
+summary examples; complete reports start with the next scan. Selecting a directory does not count all children of
+an excluded subtree as visited. Folder details expose inclusion options. The file
+browser lists observed files, including partial-text, metadata-only and failed rows;
+excluded subtrees and symlinks remain scan notices. Filename filters currently
+match literal case-sensitive substrings. Pagination keeps one bounded page in
+the UI; if the catalogue changes between pages, the user reloads the list.
 
 Automatic monitoring uses notify's native backend while the app is open. It
 registers non-recursive watches on at most 2,048 eligible directories per scope,

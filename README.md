@@ -33,16 +33,44 @@ progress and provides Cancel, Refresh, Pause/Resume updates, Remove, and text se
 While Sovra is open, native folder notifications trigger updates and a full check
 every 15 minutes catches missed changes. Large scopes or unavailable notifications
 fall back to periodic checks, shown in Knowledge. Cancel pauses automatic updates;
-Refresh performs a manual scan. Removing an index
-leaves the original files intact. Scan notices expand to show every recorded example
-of skipped or failed content. Large UTF-8 text/source files are indexed completely
-with fixed-size buffers, including beyond the attachment limits. Folder indexing
+Refresh performs a manual scan. Cancel and Pause also signal a document being read;
+it stops at the reader's cancellation checkpoints and keeps the previous indexed
+version. Removing an index
+leaves the original files intact. Each folder's **Scan report** pages through every
+recorded skip, unreadable file and failure from its latest scan, with path/reason
+filters and incomplete-scan labels. The compact settings summary shows at most 50
+examples; older indexes need a refresh to create a full report.
+**Partial text** in Browse files or Scan report finds files with known reading
+problems, such as a missing presentation slide. Usable text stays searchable;
+reader details explain the gap in previews and citations. Repair the original and
+refresh to replace the partial version.
+Unreadable subfolders do not stop accessible folders from updating. An incomplete
+scan keeps older entries because it cannot confirm removals. Check its report,
+restore access, then use **Retry scan**; a successful retry reconciles missing files.
+Large UTF-8, BOM-marked UTF-16/32 and detected legacy text/source files
+are indexed completely with fixed-size buffers, including beyond the attachment
+limits. UTF-16 without a BOM is inferred conservatively. Inferred encodings are
+labelled; the saved-text preview lets you check the decoded characters. Folder indexing
 has no fixed 16-folder, 100,000-entry, 1 GB scan/database or 64-level traversal cap;
-available storage and OS resources still apply. Other document decoders currently
-retain their per-file limits. Folder details let you include hidden files and
+available storage and OS resources still apply. Office documents can contain more
+than 100 internal package parts; their format is recognized regardless of extension.
+Indexed PDFs and presentations have no fixed 500-page/slide cutoff. Indexing reads
+their text layer; scanned pages need text recognition (OCR). Files without text
+remain in Browse files with an explanation. **Folder settings → Document reading**
+lets you choose a memory budget: 64 MiB, 256 MiB (default), or 1 GiB per source
+file, with extracted-text budgets of 16, 64, or 256 MiB. Larger choices use more
+memory and refresh the folder. Indexed archives have no fixed 100-entry cutoff;
+total unpacked bytes, nesting and codec-specific protections still apply. Chat
+attachments keep their separate limits.
+Folder details let you include hidden files and
 generated folders, which are excluded by default. Switching these options off
 removes matching files from current search while preserving saved history.
 Credential folders and symlinks stay excluded.
+Use **Browse all files** or a folder's **Browse files** in Knowledge to inspect the
+saved inventory without a keyword search. Filter by filename or reading status,
+page through results, and use **View details** for extraction explanations and a
+literal saved-text excerpt. Excluded folders and links are explained in folder
+notices; they are not inventoried as readable files.
 See [scope and current limits](docs/skills-and-file-knowledge.md).
 
 Type `/` to browse skills. Arrow keys select, Tab or Enter chooses, and Escape
@@ -142,10 +170,12 @@ The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
 The engine choice, routing tree and prompt tester are folded under
 *How automatic choice works → Show details*.
 
-The **Knowledge** tab explains how Sovra remembers, with one worked example a
+The **Knowledge** tab opens to **Files**, with **Add a folder**, local search,
+folder controls, and focused file browsing and scan reports. **Memories** holds
+saved-memory controls. **How it works** explains how Sovra remembers, with one worked example a
 new reader can follow: something happens, a record is kept, a current belief is
 formed, a later belief replaces it, and the earlier belief stays as history.
-The same page names who or what the belief is about, and that finding a memory
+The explanation names who or what the belief is about, and that finding a memory
 uses both the meaning and the words themselves. It is an explanation, not the
 chat, and it does not need a memory store to be open. The times Sovra keeps are
 under *Show the times Sovra keeps*.

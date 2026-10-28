@@ -1,7 +1,12 @@
 use super::*;
 mod catalogue;
+mod documents;
 mod graph;
 mod history;
+mod legacy_text;
+#[cfg(unix)]
+mod recovery;
+mod report;
 mod semantic;
 mod summary;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -62,6 +67,28 @@ impl ScanObserver for Observer {
 }
 
 #[test]
+fn presentations_over_one_hundred_parts_are_searchable_through_the_last_slide() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.source().join("slides.pptx"),
+        crate::format_tests::packages::presentation(),
+    )
+    .unwrap();
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    let scanned = store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(scanned.progress.failed, 0);
+    assert_eq!(scanned.progress.indexed, 1);
+    let last = search(&store, "marker120needle");
+    assert_eq!(last.len(), 1);
+    assert!(last[0].text.contains("marker120needle"));
+    let reopened = fixture.store();
+    assert_eq!(search(&reopened, "marker120needle").len(), 1);
+    let refreshed = reopened.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(refreshed.progress.reused, 1);
+}
+
+#[test]
 fn index_storage_does_not_reinstate_the_former_one_gib_page_cap() {
     let fixture = Fixture::new();
     let store = fixture.store();
@@ -111,37 +138,47 @@ fn cancelling_a_large_source_transaction_preserves_its_previous_snapshot() {
             }
         }
     }
-    let fixture = Fixture::new();
-    fixture.write(
-        "notes.txt",
-        "Originalneedle stays available until a complete replacement.",
-    );
-    let store = fixture.store();
-    let root = store.add_root(&fixture.source()).unwrap();
-    store.scan(&root.id, &Observer::default()).unwrap();
-    let text = format!(
-        "{}\nReplacementneedle is new.",
-        "Large source 京都.\n".repeat(400_000)
-    );
-    fixture.write("notes.txt", &text);
-    let cancelled = store
-        .scan(
-            &root.id,
-            &DuringWrite(AtomicBool::new(false), text.len() as u64),
-        )
-        .unwrap();
-    assert_eq!(cancelled.status, IndexStatus::Cancelled);
-    assert_eq!(search(&store, "Originalneedle").len(), 1);
-    assert_eq!(search(&store, "Replacementneedle"), [] as [IndexPassage; 0]);
-    let db = store.connect().unwrap();
-    let versions: i64 = db
-        .query_row("SELECT count(*) FROM index_versions", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(versions, 1, "cancelled chunks and versions must roll back");
-    drop(db);
-    store.scan(&root.id, &Observer::default()).unwrap();
-    assert_eq!(search(&store, "Replacementneedle").len(), 1);
-    assert_eq!(search(&store, "Originalneedle"), [] as [IndexPassage; 0]);
+    for wide in [false, true] {
+        let fixture = Fixture::new();
+        fixture.write(
+            "notes.txt",
+            "Originalneedle stays available until a complete replacement.",
+        );
+        let store = fixture.store();
+        let root = store.add_root(&fixture.source()).unwrap();
+        store.scan(&root.id, &Observer::default()).unwrap();
+        let text = format!(
+            "{}\nReplacementneedle is new.",
+            "Large source 京都.\n".repeat(400_000)
+        );
+        let bytes = if wide {
+            format!("\u{feff}{text}")
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>()
+        } else {
+            text.into_bytes()
+        };
+        std::fs::write(fixture.source().join("notes.txt"), &bytes).unwrap();
+        let cancelled = store
+            .scan(
+                &root.id,
+                &DuringWrite(AtomicBool::new(false), bytes.len() as u64),
+            )
+            .unwrap();
+        assert_eq!(cancelled.status, IndexStatus::Cancelled);
+        assert_eq!(search(&store, "Originalneedle").len(), 1);
+        assert_eq!(search(&store, "Replacementneedle"), [] as [IndexPassage; 0]);
+        let db = store.connect().unwrap();
+        let versions: i64 = db
+            .query_row("SELECT count(*) FROM index_versions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(versions, 1, "cancelled chunks and versions must roll back");
+        drop(db);
+        store.scan(&root.id, &Observer::default()).unwrap();
+        assert_eq!(search(&store, "Replacementneedle").len(), 1);
+        assert_eq!(search(&store, "Originalneedle"), [] as [IndexPassage; 0]);
+    }
 }
 
 #[test]
@@ -154,6 +191,110 @@ fn deep_folder_sources_do_not_require_manual_subfolder_grants() {
     let scanned = store.scan(&root.id, &Observer::default()).unwrap();
     assert_eq!(scanned.status, IndexStatus::Ready);
     assert_eq!(scanned.progress.indexed, 1);
+}
+
+#[test]
+fn large_unicode_sources_keep_the_last_passage_and_reuse_saved_versions() {
+    use std::io::Write as _;
+    for (width, little, bom) in [
+        (2, true, true),
+        (2, false, true),
+        (4, true, true),
+        (4, false, true),
+        (2, true, false),
+        (2, false, false),
+    ] {
+        let fixture = Fixture::new();
+        let encode = |text: &str| -> Vec<u8> {
+            if width == 2 {
+                text.encode_utf16()
+                    .flat_map(|unit| {
+                        if little {
+                            unit.to_le_bytes()
+                        } else {
+                            unit.to_be_bytes()
+                        }
+                    })
+                    .collect()
+            } else {
+                text.chars()
+                    .flat_map(|ch| {
+                        if little {
+                            u32::from(ch).to_le_bytes()
+                        } else {
+                            u32::from(ch).to_be_bytes()
+                        }
+                    })
+                    .collect()
+            }
+        };
+        let path = fixture.source().join("wide-source.unknown");
+        let mut file = std::fs::File::create(path).unwrap();
+        if bom {
+            file.write_all(&encode("\u{feff}")).unwrap();
+        }
+        let block = encode(&"ordinary source line 京都 🌍\n".repeat(1024));
+        let mut written = 0_u64;
+        while written <= sovra_core::files::MAX_FILE_BYTES {
+            file.write_all(&block).unwrap();
+            written += block.len() as u64;
+        }
+        file.write_all(&encode("\nwideendingmarker café 🦀\n"))
+            .unwrap();
+        drop(file);
+        let store = fixture.store();
+        let root = store.add_root(&fixture.source()).unwrap();
+        let scanned = store.scan(&root.id, &Observer::default()).unwrap();
+        assert_eq!(
+            scanned.progress.indexed, 1,
+            "width={width}, little={little}, bom={bom}: {:?}",
+            scanned.issues
+        );
+        let hits = search(&store, "wideendingmarker");
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].text.contains("café 🦀"));
+        assert!(hits[0].note.as_deref().unwrap().contains(if width == 2 {
+            "UTF-16"
+        } else {
+            "UTF-32"
+        }));
+        let reference = hits[0].reference.clone();
+        drop(store);
+        let reopened = fixture.store();
+        assert!(
+            reopened
+                .read(&reference)
+                .unwrap()
+                .text
+                .contains("wideendingmarker")
+        );
+        assert_eq!(
+            reopened
+                .scan(&root.id, &Observer::default())
+                .unwrap()
+                .progress
+                .reused,
+            1
+        );
+    }
+}
+
+#[test]
+fn unicode_expansion_streams_before_reaching_the_attachment_output_budget() {
+    let fixture = Fixture::new();
+    let text = format!(
+        "\u{feff}{}\nexpansionendingmarker",
+        "京".repeat(sovra_core::files::MAX_DOCUMENT_BYTES * 3 / 8)
+    );
+    let bytes: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+    assert!(bytes.len() < sovra_core::files::MAX_DOCUMENT_BYTES);
+    assert!(text.len() > sovra_core::files::MAX_DOCUMENT_BYTES);
+    std::fs::write(fixture.source().join("expanded.txt"), bytes).unwrap();
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    let scanned = store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(scanned.progress.indexed, 1, "{:?}", scanned.issues);
+    assert_eq!(search(&store, "expansionendingmarker").len(), 1);
 }
 
 #[test]
@@ -455,6 +596,7 @@ fn inclusion_options_persist_and_excluded_files_leave_current_search_before_resc
     let all = ScanOptions {
         include_hidden: true,
         include_generated: true,
+        ..ScanOptions::default()
     };
     store.set_scan_options(&root.id, all).unwrap();
     store.scan(&root.id, &Observer::default()).unwrap();

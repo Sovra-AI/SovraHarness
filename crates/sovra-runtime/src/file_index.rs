@@ -94,7 +94,10 @@ impl IndexRuntime {
 
     pub(crate) fn send(&mut self, command: IndexCommand) {
         let Some(store) = self.store.clone() else {
-            self.error("Folder indexing is unavailable in this session.");
+            let _ = self.events.try_send(Event::FileIndex(read_failure(
+                &command,
+                "Folder indexing is unavailable in this session.".into(),
+            )));
             return;
         };
         match &command {
@@ -168,12 +171,18 @@ impl IndexRuntime {
                 tokens.insert(root_id.clone(), Arc::new(AtomicBool::new(false)));
             }
             IndexCommand::List
+            | IndexCommand::Report { .. }
+            | IndexCommand::Browse { .. }
+            | IndexCommand::Preview { .. }
             | IndexCommand::Search { .. }
             | IndexCommand::ListKnowledge
             | IndexCommand::ReviewKnowledge { .. } => {
                 self.readers.retain(|task| !task.is_finished());
                 if self.readers.len() >= 4 {
-                    self.error("Wait for the current file search to finish, then try again.");
+                    let _ = self.events.try_send(Event::FileIndex(read_failure(
+                        &command,
+                        "Wait for the current file requests to finish, then try again.".into(),
+                    )));
                     return;
                 }
                 let events = self.events.clone();
@@ -206,7 +215,23 @@ impl IndexRuntime {
                         }
                         return;
                     }
+                    let pending = command.clone();
                     let result = tokio::task::spawn_blocking(move || match command {
+                        IndexCommand::Report { request_id, query } => Ok(IndexEvent::Reported {
+                            request_id,
+                            result: store.report(&query),
+                        }),
+                        IndexCommand::Browse { request_id, query } => Ok(IndexEvent::Browsed {
+                            request_id,
+                            result: store.catalogue(&query),
+                        }),
+                        IndexCommand::Preview {
+                            request_id,
+                            reference,
+                        } => Ok(IndexEvent::Previewed {
+                            request_id,
+                            result: store.read(&reference),
+                        }),
                         IndexCommand::Search { request_id, query } => {
                             store.search(&query).map(|passages| IndexEvent::Results {
                                 request_id,
@@ -237,7 +262,23 @@ impl IndexRuntime {
                         }
                     })
                     .await;
-                    report(result, &events);
+                    match result {
+                        Ok(Ok(event)) => {
+                            let _ = events.try_send(Event::FileIndex(event));
+                        }
+                        Ok(Err(error)) => {
+                            let _ = events.try_send(Event::FileIndex(read_failure(
+                                &pending,
+                                error.to_string(),
+                            )));
+                        }
+                        Err(error) => {
+                            let _ = events.try_send(Event::FileIndex(read_failure(
+                                &pending,
+                                error.to_string(),
+                            )));
+                        }
+                    }
                 }));
                 return;
             }
@@ -404,6 +445,9 @@ fn mutate(
             None
         }
         IndexCommand::List
+        | IndexCommand::Report { .. }
+        | IndexCommand::Browse { .. }
+        | IndexCommand::Preview { .. }
         | IndexCommand::Cancel { .. }
         | IndexCommand::SetAutoRefresh { .. }
         | IndexCommand::Search { .. }
@@ -440,6 +484,34 @@ fn mutate(
         result?;
     }
     Ok((store.list()?, root_id))
+}
+
+fn read_failure(command: &IndexCommand, message: String) -> IndexEvent {
+    match command {
+        IndexCommand::Report { request_id, .. } => IndexEvent::Reported {
+            request_id: *request_id,
+            result: Err(IndexError(message)),
+        },
+        IndexCommand::Browse { request_id, .. } => IndexEvent::Browsed {
+            request_id: *request_id,
+            result: Err(IndexError(message)),
+        },
+        IndexCommand::Preview { request_id, .. } => IndexEvent::Previewed {
+            request_id: *request_id,
+            result: Err(IndexError(message)),
+        },
+        IndexCommand::List
+        | IndexCommand::ListKnowledge
+        | IndexCommand::ReviewKnowledge { .. }
+        | IndexCommand::AddRoot { .. }
+        | IndexCommand::Refresh { .. }
+        | IndexCommand::Cancel { .. }
+        | IndexCommand::SetAutoRefresh { .. }
+        | IndexCommand::SetScanOptions { .. }
+        | IndexCommand::ConfigureSemantic { .. }
+        | IndexCommand::Remove { .. }
+        | IndexCommand::Search { .. } => IndexEvent::Error(message),
+    }
 }
 
 #[derive(Debug)]
@@ -571,6 +643,7 @@ impl Drop for IndexRuntime {
     }
 }
 
+#[derive(Clone)]
 struct Observer {
     root_id: String,
     controls: SharedControls,
@@ -579,6 +652,27 @@ struct Observer {
     events: Sender<Event>,
 }
 impl ScanObserver for Observer {
+    fn watch_cancellation(
+        &self,
+        signal: Arc<dyn Fn() + Send + Sync>,
+    ) -> Option<Box<dyn sovra_core::file_index::ScanCancellationWatch>> {
+        if self.cancelled() {
+            signal();
+            return None;
+        }
+        let observer = self.clone();
+        let task = tokio::runtime::Handle::current().spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(25));
+            loop {
+                interval.tick().await;
+                if observer.cancelled() {
+                    signal();
+                    break;
+                }
+            }
+        });
+        Some(Box::new(DecoderCancellation(task)))
+    }
     fn cancellation(&self) -> Option<sovra_core::file_index::ScanCancellation> {
         use sovra_core::file_index::ScanCancellation;
         if self.token.load(Ordering::Relaxed) {
@@ -601,6 +695,14 @@ impl ScanObserver for Observer {
         let _ = self
             .events
             .try_send(Event::FileIndex(IndexEvent::Progress(root.clone())));
+    }
+}
+
+struct DecoderCancellation(tokio::task::JoinHandle<()>);
+impl sovra_core::file_index::ScanCancellationWatch for DecoderCancellation {}
+impl Drop for DecoderCancellation {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 

@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::{Encoding, ISO_2022_JP, UTF_16BE, UTF_16LE};
-use sovra_core::files::{FileError, MAX_DOCUMENT_BYTES};
+use sovra_core::files::FileError;
 
 pub(super) struct Text<'a> {
     pub(super) content: Cow<'a, str>,
@@ -12,7 +12,7 @@ pub(super) struct Text<'a> {
     pub(super) guessed: bool,
 }
 
-pub(super) fn decode(bytes: &[u8]) -> Result<Option<Text<'_>>, FileError> {
+pub(super) fn decode_with_limit(bytes: &[u8], limit: usize) -> Result<Option<Text<'_>>, FileError> {
     let decoded = if bytes.starts_with(&[0xff, 0xfe, 0, 0]) {
         utf32(&bytes[4..], true).map(|text| Text {
             content: Cow::Owned(text),
@@ -55,9 +55,12 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Option<Text<'_>>, FileError> {
     };
     if decoded
         .as_ref()
-        .is_some_and(|text| text.content.len() > MAX_DOCUMENT_BYTES)
+        .is_some_and(|text| text.content.len() > limit)
     {
-        return Err(FileError("This file contains more than 4 MB of text. Split it into smaller parts so I can keep all of it.".into()));
+        return Err(FileError(format!(
+            "This file contains more than {} MiB of text. The decoded text exceeds the reading budget.",
+            limit / (1024 * 1024)
+        )));
     }
     Ok(decoded.filter(|text| printable(&text.content)))
 }
@@ -74,6 +77,13 @@ fn transcode<'a>(bytes: &'a [u8], encoding: &'static Encoding, guessed: bool) ->
 }
 
 fn wide_text(bytes: &[u8]) -> Option<Text<'_>> {
+    let little = wide_little_endian(bytes)?;
+    transcode(bytes, if little { UTF_16LE } else { UTF_16BE }, true)
+}
+
+/// Shared conservative hint for whole-file and streaming readers. The complete
+/// source still has to decode strictly and contain only permitted text controls.
+pub(super) fn wide_little_endian(bytes: &[u8]) -> Option<bool> {
     if bytes.len() < 8 || !bytes.len().is_multiple_of(2) {
         return None;
     }
@@ -85,9 +95,9 @@ fn wide_text(bytes: &[u8]) -> Option<Text<'_>> {
     // BOM-less UTF-16 is only inferred when one byte lane supplies strong evidence.
     // Arbitrary binary and ambiguous non-Latin text are not silently reinterpreted.
     if odd * 3 > count && even * 20 < count {
-        transcode(bytes, UTF_16LE, true)
+        Some(true)
     } else if even * 3 > count && odd * 20 < count {
-        transcode(bytes, UTF_16BE, true)
+        Some(false)
     } else {
         None
     }
@@ -111,11 +121,11 @@ fn utf32(bytes: &[u8], little: bool) -> Option<String> {
         .collect()
 }
 
-fn forbidden_byte(byte: u8) -> bool {
+pub(super) fn forbidden_byte(byte: u8) -> bool {
     byte < 0x20 && !matches!(byte, b'\n' | b'\r' | b'\t' | 0x0c | 0x1b | 0x08)
 }
 
-fn printable(text: &str) -> bool {
+pub(super) fn printable(text: &str) -> bool {
     !text.chars().any(|ch| {
         ch.is_control()
             && !matches!(
@@ -128,6 +138,9 @@ fn printable(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn decode(bytes: &[u8]) -> Result<Option<Text<'_>>, FileError> {
+        decode_with_limit(bytes, sovra_core::files::MAX_DOCUMENT_BYTES)
+    }
 
     #[test]
     fn iso_2022_jp_is_not_mistaken_for_ascii_source() {

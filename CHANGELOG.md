@@ -13,6 +13,70 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Files-first Knowledge navigation:** Knowledge opens to folders, with separate
+  Memories and How it works sections that stay reachable while scrolling. Browse
+  files and Scan report open focused views with Back to folders. Folder settings
+  show three notice examples and link directly to the complete scan report.
+
+- **Folder-specific large-document budgets:** indexing no longer inherits chat's
+  20 MiB input or 4 MiB text limits. Folder settings offer Lower memory
+  (64/16 MiB input/text), Standard (256/64 MiB, the default) and Large documents
+  (1 GiB/256 MiB), with matching unpacked-byte budgets. Scans report the selected
+  limit and recovery action, and changing it refreshes the folder. Budget-aware
+  version keys prevent reuse across different limits. Input reads report progress
+  and check cancellation in blocks. Indexed archives no longer have a 100-entry
+  cutoff; cumulative bytes, nesting and codec protections remain bounded.
+
+- **Visible partial reads:** Knowledge's file browser and scan report now have a
+  **Partial text** filter. Decoder warnings, missing slides, unread archive media
+  and other known omissions remain visible beside usable searchable text. Notes
+  stay separate from source passages and survive restart and unchanged-file reuse;
+  repairing a source clears the warning after refresh. Schema 10 preserves older
+  reports/history, and `extract-v5` refreshes old representations.
+
+- **Cancel during document reading:** Cancel, Pause and shutdown now reach the
+  decoder's cooperative checkpoints, including documents inside archives.
+  Interrupted replacements preserve previous searchable text instead of reporting
+  a failed file. Each decoder registration is released when its read finishes.
+
+- **Document indexing independent of attachment page limits:** local text
+  extraction accepts PDFs and presentations beyond 500 pages/slides. Indexing
+  no longer rasterizes scanned PDFs or prepares unused media payloads; files
+  without a searchable text layer keep metadata and explain how to use OCR.
+  Short text layers stay searchable. Attachment limits and document byte/expansion
+  budgets remain separate; older index snapshots refresh with `extract-v4`.
+- **Recoverable folder scans:** inaccessible subfolders or directory entries no
+  longer stop readable sibling folders from updating. Each failure has its own
+  path and recovery guidance. Partial walks remain visibly incomplete and keep
+  older entries until a complete scan can confirm removals. Knowledge explains
+  older results and offers **Retry scan**; failure counts exclude duplicate summaries.
+- **Large legacy text without attachment limits:** folder indexing streams detected
+  Windows code pages and multibyte encodings as well as Unicode. Full-source
+  inference handles long ASCII headers and Japanese escape sequences; encoding
+  guesses are labelled. Strict decoding, bounded buffers and transactional writes
+  preserve full text without replacement characters or partial current versions.
+  Streaming starts before single-byte text can exceed the decoded-text budget.
+- **Office packages no longer fail at 100 internal parts:** format detection
+  recognizes large Word, Excel and PowerPoint packages even with a misleading
+  extension. Office/OpenDocument/EPUB package part counts follow the bounded input
+  size; expanded-byte, text, page and nesting budgets still apply. Refreshed
+  indexes re-extract older snapshots with the corrected decoder revision.
+- **Full scan reports without the 50-example ceiling:** each folder has a paged,
+  filterable report of every recorded skip, unreadable file and failure from its
+  latest scan. Reports survive reopening, distinguish incomplete scans and older
+  indexes that need a refresh, and announce entries added after a page snapshot.
+  The compact folder summary still shows at most 50 examples. Latest reports
+  replace older diagnostic rows; source history remains intact.
+- **Complete large Unicode sources:** folder indexing now streams BOM-marked
+  UTF-16/32 and conservatively inferred UTF-16 as well as UTF-8, including beyond
+  the 20 MB source and 4 MB decoded-text attachment budgets. Decoding is strict,
+  preserves split Unicode sequences and labels inferred encodings. Cancellation
+  rolls back new chunks while retaining the previous saved version.
+- **Browse indexed files in Knowledge:** list all observed files or one folder,
+  filter filenames and reading status, move through pages, and inspect extraction
+  explanations and literal saved-text excerpts. Browsing works during scans.
+  Request-specific failures and stale-response checks keep old results from
+  replacing a new filter or reopening files after folder access changes.
 - **Per-folder inclusion settings:** folder details can include hidden files and
   generated folders. Choices persist and refresh the index; switching them off
   removes matching files from current search immediately while keeping saved

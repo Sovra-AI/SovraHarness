@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(crate) mod packages;
+
 #[test]
 fn source_and_text_content_is_read_without_an_extension_allowlist() {
     let source = "// Rust source — 你好\nfn main() { let total = 93; }\n";
@@ -96,7 +98,7 @@ fn archive_expansion_limit_rejects_a_small_compressed_bomb() {
     assert!(prepare_bytes("bomb", "large.zip", bytes).is_err());
 }
 
-fn pdf(objects: &[Vec<u8>]) -> Vec<u8> {
+pub(crate) fn pdf(objects: &[Vec<u8>]) -> Vec<u8> {
     let mut bytes = b"%PDF-1.4\n".to_vec();
     let mut offsets = vec![0];
     for (index, object) in objects.iter().enumerate() {
@@ -120,7 +122,7 @@ fn pdf(objects: &[Vec<u8>]) -> Vec<u8> {
     bytes
 }
 
-fn stream(data: &[u8], attributes: &str) -> Vec<u8> {
+pub(crate) fn stream(data: &[u8], attributes: &str) -> Vec<u8> {
     let mut bytes = format!("<< /Length {} {attributes} >>\nstream\n", data.len()).into_bytes();
     bytes.extend_from_slice(data);
     bytes.extend_from_slice(b"\nendstream");
@@ -155,6 +157,26 @@ fn extracts_pdf_text_and_turns_scanned_pages_into_real_picture_inputs() {
     assert_eq!(content.attachment.purpose, ModelPurpose::Images);
     assert_eq!(content.media.len(), 1);
     assert_eq!(content.media[0].mime_type, "image/png");
+    let indexed = prepare_indexed_bytes(
+        "pdf-index",
+        "scan.pdf",
+        &scan,
+        DocumentBudget::default(),
+        None,
+    )
+    .unwrap()
+    .content;
+    assert_eq!(indexed.media.len(), 0);
+    assert_eq!(indexed.attachment.thumbnail, [] as [u8; 0]);
+    assert_eq!(indexed.text.trim(), "");
+    assert!(
+        indexed
+            .attachment
+            .note
+            .as_ref()
+            .unwrap()
+            .contains("text layer")
+    );
 }
 
 #[test]

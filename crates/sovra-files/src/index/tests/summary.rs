@@ -503,7 +503,7 @@ fn schema_seven_upgrade_preserves_existing_source_citations() {
     // Reconstruct the prior schema in this private fixture, retaining its source tables.
     let db = store.connect().unwrap();
     db.execute_batch(
-        "DROP TRIGGER summary_changed_source; DROP TRIGGER summary_deleted_source;
+        "ALTER TABLE index_versions DROP COLUMN partial; DROP TABLE index_scan_notices; DROP TABLE index_scan_reports; DROP TRIGGER summary_changed_source; DROP TRIGGER summary_deleted_source;
         DROP TRIGGER summary_revoked_scope; DROP TABLE index_summary_sources;
         DROP TABLE index_summary_edges; DROP TABLE index_summary_attempts;
         DROP TABLE index_summaries; DROP TABLE index_summary_scopes;
@@ -524,5 +524,5 @@ fn schema_seven_upgrade_preserves_existing_source_citations() {
         .unwrap()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, SCHEMA_VERSION);
 }

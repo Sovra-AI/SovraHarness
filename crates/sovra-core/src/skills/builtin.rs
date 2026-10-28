@@ -92,7 +92,7 @@ impl Skill {
                 "/files ".to_owned(),
             ),
             "index-folder" => (
-                "Lets you choose a folder on your computer for Sovra to search privately."
+                "Open Knowledge → Files to add a folder, browse saved text, find partial reads or skipped content in Scan report, and adjust document reading budgets."
                     .to_owned(),
                 "/index-folder ".to_owned(),
             ),
@@ -291,7 +291,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "index-folder",
             "Index a folder",
-            "Choose a folder to search locally, see unreadable files, and choose whether to include hidden or generated content.",
+            "Choose a folder to search locally, browse files, review full scan reports, preview saved text, and include hidden or generated content when needed.",
             SkillAction::IndexFolder,
             &["index-file-system", "index-files"],
         ),

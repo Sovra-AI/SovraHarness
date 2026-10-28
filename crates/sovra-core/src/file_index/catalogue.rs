@@ -158,6 +158,8 @@ impl CatalogQuery {
 #[serde(rename_all = "snake_case")]
 pub enum ExtractionState {
     Text,
+    /// Readable text is retained, but the reader reported omitted/degraded content.
+    PartialText,
     MetadataOnly,
     Failed,
 }

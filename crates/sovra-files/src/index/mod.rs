@@ -5,6 +5,7 @@ mod catalogue;
 mod derived;
 mod graph;
 mod history;
+mod report;
 mod scan;
 mod semantic;
 mod summary;
@@ -24,7 +25,7 @@ use sovra_core::file_index::{
     IndexStatus, IndexedRoot, PassageRef, ScanCancellation, ScanObserver,
 };
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 10;
 
 #[derive(Debug)]
 pub struct LocalFileIndex {
@@ -147,6 +148,14 @@ impl LocalFileIndex {
                 tx.execute_batch(include_str!("summary_v8.sql"))
                     .map_err(|e| db_error(&e))?;
             }
+            if current < 9 {
+                tx.execute_batch(include_str!("report_v9.sql"))
+                    .map_err(|e| db_error(&e))?;
+            }
+            if current < 10 {
+                tx.execute_batch(include_str!("partial_v10.sql"))
+                    .map_err(|e| db_error(&e))?;
+            }
             tx.commit().map_err(|e| db_error(&e))?;
         }
         Ok(db)
@@ -154,6 +163,12 @@ impl LocalFileIndex {
 }
 
 impl FileIndex for LocalFileIndex {
+    fn report(
+        &self,
+        query: &sovra_core::file_index::NoticeQuery,
+    ) -> Result<sovra_core::file_index::NoticePage, IndexError> {
+        report::query(&mut self.connect()?, query)
+    }
     fn summaries(&self) -> Option<&dyn sovra_core::file_index::summary::SummaryIndex> {
         Some(self)
     }
@@ -262,6 +277,7 @@ impl FileIndex for LocalFileIndex {
         let tx = db.transaction().map_err(|e| db_error(&e))?;
         save_root(&tx, &root)?;
         let activity = history::begin(&tx, root_id)?;
+        report::begin(&tx, root_id, activity)?;
         tx.commit().map_err(|e| db_error(&e))?;
         observer.progress(&root);
         let result = scan::run(&mut db, &mut root, &self.directory, observer, activity);
@@ -271,12 +287,23 @@ impl FileIndex for LocalFileIndex {
                 root.auto_refresh = false;
             }
             (Some(ScanCancellation::Interrupted), _) => root.status = IndexStatus::Interrupted,
-            (None, Ok(())) => {
+            (None, Ok(scan::Completion::Complete)) => {
                 root.status = IndexStatus::Ready;
                 root.completed_at = Some(now());
             }
+            (None, Ok(scan::Completion::Incomplete)) => root.status = IndexStatus::Failed,
             (None, Err(error)) => {
                 root.status = IndexStatus::Failed;
+                root.progress.failed += 1;
+                report::append(
+                    &mut db,
+                    root_id,
+                    &[report::PendingNotice {
+                        kind: sovra_core::file_index::NoticeKind::Failed,
+                        path: ".".into(),
+                        message: error.to_string(),
+                    }],
+                )?;
                 scan::issue(&mut root, error.to_string());
             }
         }
@@ -316,30 +343,34 @@ impl FileIndex for LocalFileIndex {
         }
         // Publish the new policy and remove excluded files from current retrieval
         // together; cancellation of the following scan cannot restore them.
-        let mut after = String::new();
-        loop {
-            let rows = {
-                let mut statement = tx.prepare("SELECT id,path FROM index_files WHERE root_id=?1 AND path>?2 AND available=1 ORDER BY path LIMIT 256").map_err(|e| db_error(&e))?;
-                statement
-                    .query_map(params![root_id, after], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })
-                    .map_err(|e| db_error(&e))?
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .map_err(|e| db_error(&e))?
-            };
-            if rows.is_empty() {
-                break;
-            }
-            for (id, path) in rows {
-                if path
-                    .split('/')
-                    .any(|name| options.exclusion_reason(name).is_some())
-                {
-                    tx.execute("UPDATE index_files SET available=0 WHERE id=?1", [&id])
-                        .map_err(|e| db_error(&e))?;
+        if root.scan_options.include_hidden != options.include_hidden
+            || root.scan_options.include_generated != options.include_generated
+        {
+            let mut after = String::new();
+            loop {
+                let rows = {
+                    let mut statement = tx.prepare("SELECT id,path FROM index_files WHERE root_id=?1 AND path>?2 AND available=1 ORDER BY path LIMIT 256").map_err(|e| db_error(&e))?;
+                    statement
+                        .query_map(params![root_id, after], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })
+                        .map_err(|e| db_error(&e))?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(|e| db_error(&e))?
+                };
+                if rows.is_empty() {
+                    break;
                 }
-                after = path;
+                for (id, path) in rows {
+                    if path
+                        .split('/')
+                        .any(|name| options.exclusion_reason(name).is_some())
+                    {
+                        tx.execute("UPDATE index_files SET available=0 WHERE id=?1", [&id])
+                            .map_err(|e| db_error(&e))?;
+                    }
+                    after = path;
+                }
             }
         }
         root.scan_options = options;
