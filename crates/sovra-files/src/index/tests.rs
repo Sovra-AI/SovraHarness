@@ -8,6 +8,7 @@ mod legacy_text;
 mod recovery;
 mod report;
 mod semantic;
+mod structured;
 mod summary;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

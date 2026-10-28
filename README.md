@@ -84,6 +84,18 @@ Unicode letters and equivalent accented spellings. Select **Match case** for
 exact capitalization. Filters use literal text, so `%` and `_` are not wildcards.
 Searches and catalogue queries can include more than 16 connected folders; result
 pages remain bounded and retain the selected scope.
+Binary files that cannot be decoded keep their filename and size in the inventory,
+with guidance in View details and Scan report. A text-like extension does not make
+binary fragments searchable document text. Attach the file in chat for byte
+inspection, or export a readable copy and refresh the folder.
+SQLite databases and binary property lists use the folder's document reading
+budget too. Database indexing can read beyond 100 tables and 10,000 rows; if it
+stops at a budget, saved rows remain available with **Partial text** status and a
+scan-report explanation. Increasing the document budget and refreshing can read
+more; database work time and native format limits still apply.
+Folder summaries flag notices even when Folder settings is closed, so a completed
+scan does not hide skipped or unread content. Open **Scan report** for the reasons
+and recovery steps.
 See [scope and current limits](docs/skills-and-file-knowledge.md).
 
 Type `/` to browse skills. Arrow keys select, Tab or Enter chooses, and Escape

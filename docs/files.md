@@ -81,8 +81,9 @@ unsupported binary format is **inspectable**, not automatically understood.
   identified as unread; attach it separately to use a media model.
 - SQLite runs on an in-memory, read-only copy with defensive mode, untrusted schema,
   extension loading unavailable, SQL limits and a five-second progress deadline.
-  Extraction caps ordinary tables at 100, rows at 10,000 per table, columns at 256,
-  and output at 4 MiB; reached caps are labelled. No database is modified.
+  Chat attachment extraction caps ordinary tables at 100, rows at 10,000 per table,
+  columns at 256, and output at 4 MiB; reached caps are labelled in reader notes.
+  Folder indexing uses its own budgets as described below. No database is modified.
 - Raster decoding limits allocation to 64 MiB and dimensions to 16,384 per side;
   normalization applies orientation and caps the longest output side at 2048.
   Thumbnails are 160 pixels. Animated GIF and multi-frame TIFF use the first frame
@@ -156,6 +157,10 @@ files and Scan report actions. Browsing and reports each open a focused view;
 Back to folders returns to the folder controls. Folder settings show three notice
 examples with a direct link to the full report. Memories and How it works remain
 available in the navigation above the scrolling content.
+Folder summaries also flag notices while settings are closed. A completed scan
+with saved notices, skips or failures says to review notices and points to Scan
+report. This uses the presence of notices rather than treating the capped example
+list as a total count; full counts remain in the report.
 
 The native picker accepts one or more folders. A selection is a single runtime
 request, so selecting more than 16 folders does not overflow the mutation queue.
@@ -228,6 +233,31 @@ Warnings survive reopening and version reuse; a repaired source becomes a new
 representation, retaining the old observation in history. This does not detect
 omissions a codec fails to report, nor does absence of warnings prove that images,
 scanned pages or every formatting detail were read.
+
+Plain-text fallback from the document decoder must pass the same strict source
+decoding as ordinary text. Binary bytes cannot become searchable partial text just
+because the file is named `.txt` or another text-like extension. Such files retain
+metadata, an unreadable notice, and guidance to attach them in chat for byte
+inspection or export a readable copy. Index preparation does not allocate a byte
+inspection report or duplicate the raw payload for these files. Chat attachments
+still preserve the original bytes and label inspection fragments. The `extract-v7`
+revision replaces affected prior representations on refresh without editing history.
+
+SQLite/GeoPackage indexing removes the attachment row/table caps and uses SQLite's
+native column ceiling. Its record-length and extracted-text budgets follow the
+selected folder budget. Text-budget, work-time or read failures retain rows already
+decoded and produce Partial text status with a scan-report explanation. The five-second
+SQLite progress deadline, SQL complexity limits, read-only copy and unevaluated
+views/triggers/generated columns still apply. Binary cells and malformed UTF-8
+are explicitly reported as partial reads. A larger text budget cannot repair a
+damaged database or remove the work deadline; export required tables as CSV/text
+when those restrictions apply.
+
+Binary property-list indexing uses the selected extracted-text budget and has no
+fixed event-count cap. The 64-level nesting protection remains. Both local readers
+check cancellation while decoding; SQLite also receives the runtime-owned signal
+through its progress handler. Cancellation preserves the previous indexed version.
+The `extract-v8` revision re-reads older capped representations on refresh.
 
 ## Storage and ownership
 

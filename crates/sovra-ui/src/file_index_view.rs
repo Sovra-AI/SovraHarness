@@ -361,6 +361,8 @@ fn root_row(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    let has_notices =
+        !root.issues.is_empty() || root.progress.skipped > 0 || root.progress.failed > 0;
     let status = match root.status {
         IndexStatus::Pending => {
             if root.auto_refresh {
@@ -370,6 +372,7 @@ fn root_row(
             }
         }
         IndexStatus::Scanning => "Indexing",
+        IndexStatus::Ready if has_notices => "Scan complete — review notices",
         IndexStatus::Ready => "Scan complete",
         IndexStatus::Cancelled => "Cancelled — refresh to continue",
         IndexStatus::Interrupted => "Interrupted — refresh to recover",
@@ -400,6 +403,13 @@ fn root_row(
             root.progress.skipped,
             root.progress.failed
         )));
+    if has_notices {
+        row = row.child(div()
+            .id(gpui_kit::SharedString::from(format!("index-attention-{}", root.id)))
+            .test_support().min_w_0()
+            .sovra_text(TextRole::Body, cx)
+            .child("Some items were skipped or could not be fully read. Open Scan report for details and recovery steps."));
+    }
     if root.status == IndexStatus::Failed {
         row = row.child(div()
             .id(gpui_kit::SharedString::from(format!("index-recovery-{}", root.id)))
@@ -802,6 +812,42 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn completed_scans_surface_notices_before_opening_folder_settings(cx: &mut TestAppContext) {
+        let (client, commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1280.), px(1000.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let with_notes = root();
+        let mut clean = root();
+        clean.issues.clear();
+        let mut skipped = clean.clone();
+        skipped.progress.skipped = 1;
+        cx.update_window(window.into(), |_, window, cx| {
+            for (root, visible) in [(with_notes, true), (clean, false), (skipped, true)] {
+                shell.update(cx, |shell, cx| {
+                    shell.file_index.apply(&IndexEvent::Roots(vec![root]));
+                    shell.select_tab(NavTab::Knowledge, cx);
+                });
+                window.render_frame(cx);
+                window.render_frame(cx);
+                assert_eq!(window.try_find("index-attention-chosen").is_some(), visible);
+                assert!(shell.read(cx).file_index.detailed_roots.is_empty());
+            }
+            click_control(window, cx, "scan-report-chosen");
+        })
+        .unwrap();
+        assert!(
+            std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command,
+            Command::FileIndex(IndexCommand::Report { query, .. }) if query.root_id == "chosen"))
+        );
+    }
+
+    #[gpui_kit::test]
     fn long_folder_paths_and_controls_fit_minimum_wide_and_double_text_sizes(
         cx: &mut TestAppContext,
     ) {
@@ -834,6 +880,7 @@ mod tests {
                     assert!(window.try_find("index-issue-chosen-3").is_none());
                     for id in [
                         "file-index-panel",
+                        "index-attention-chosen",
                         "index-recovery-chosen",
                         "automatic-index-chosen",
                         "refresh-index-chosen",

@@ -1,17 +1,25 @@
 //! Stream property lists with explicit nesting and output budgets.
 
+use crate::ReadMode;
 use plist::stream::{Event, Reader};
-use sovra_core::files::{FileError, MAX_DOCUMENT_BYTES};
+use sovra_core::{file_index::ScanObserver, files::FileError};
 use std::fmt::Write as _;
 use std::io::Cursor;
 
-pub(super) fn extract(bytes: &[u8]) -> Result<Option<String>, FileError> {
+pub(super) fn extract(
+    bytes: &[u8],
+    mode: ReadMode,
+    observer: Option<&dyn ScanObserver>,
+) -> Result<Option<String>, FileError> {
     let mut output =
         String::from("Property list. Dictionaries contain alternating keys and values.\n");
     let mut depth = 0usize;
     for (count, event) in Reader::new(Cursor::new(bytes)).enumerate() {
-        if count >= 100_000 {
-            return Err(limit());
+        if observer.is_some_and(ScanObserver::cancelled) {
+            return Err(FileError("Reading was cancelled.".into()));
+        }
+        if !mode.indexed() && count >= 100_000 {
+            return Err(limit(mode));
         }
         let Ok(event) = event else {
             return Ok(None);
@@ -42,22 +50,25 @@ pub(super) fn extract(bytes: &[u8]) -> Result<Option<String>, FileError> {
             .len()
             .saturating_add(line.len())
             .saturating_add(depth * 2 + 1)
-            > MAX_DOCUMENT_BYTES
+            > mode.text_bytes()
         {
-            return Err(limit());
+            return Err(limit(mode));
         }
         let _ = writeln!(output, "{}{}", "  ".repeat(depth), line);
         if line.ends_with('[') || line.ends_with('{') {
             depth += 1;
         }
         if depth > 64 {
-            return Err(limit());
+            return Err(FileError("This property list has more than 64 nested levels. Export a flatter representation as text, then refresh the folder.".into()));
         }
     }
     Ok(Some(output))
 }
 
-fn limit() -> FileError {
+fn limit(mode: ReadMode) -> FileError {
+    if mode.indexed() {
+        return mode.budget_error();
+    }
     FileError(
         "This property list exceeds the nesting or text limits. Split it into smaller files."
             .into(),
@@ -75,8 +86,12 @@ mod tests {
         }
         let mut bytes = Vec::new();
         value.to_writer_binary(&mut bytes).unwrap();
-        assert!(extract(&bytes).is_err());
-        assert!(extract(b"bplist00\xff\xff\xff").unwrap().is_none());
+        assert!(extract(&bytes, ReadMode::Attachment, None).is_err());
+        assert!(
+            extract(b"bplist00\xff\xff\xff", ReadMode::Attachment, None)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -87,7 +102,9 @@ mod tests {
         plist::Value::Dictionary(dictionary)
             .to_writer_binary(&mut bytes)
             .unwrap();
-        let text = extract(&bytes).unwrap().unwrap();
+        let text = extract(&bytes, ReadMode::Attachment, None)
+            .unwrap()
+            .unwrap();
         assert!(text.contains("Total") && text.contains("93"));
     }
 }

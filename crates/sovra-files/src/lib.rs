@@ -294,7 +294,7 @@ fn prepare_for(
     };
     let mut media = Vec::new();
     if bytes.is_empty() {
-        return Ok(prepared(inspected(attachment, bytes), warnings));
+        return Ok(prepared(inspected(attachment, bytes, mode), warnings));
     }
     let plain = if mime == "application/pdf"
         || mime == "image/svg+xml"
@@ -332,7 +332,7 @@ fn prepare_for(
             normalize_image(bytes)
         };
         let Ok((data, thumbnail)) = decoded else {
-            return Ok(prepared(inspected(attachment, bytes), warnings));
+            return Ok(prepared(inspected(attachment, bytes, mode), warnings));
         };
         if mime == "image/svg+xml" {
             attachment.note = Some("Drawing rendered as a picture. External resources and nested SVG images are excluded.".into());
@@ -365,7 +365,7 @@ fn prepare_for(
     } else {
         let Some(document) = extract_document(name, &mime, bytes, mode, observer, &mut warnings)?
         else {
-            return Ok(prepared(inspected(attachment, bytes), warnings));
+            return Ok(prepared(inspected(attachment, bytes, mode), warnings));
         };
         if index_pdf {
             attachment.note = Some(if document.trim().is_empty() {
@@ -375,7 +375,7 @@ fn prepare_for(
             });
         } else if mime == "application/pdf" && document.trim().chars().count() < 40 {
             let Ok(pdf) = xberg::pdf::PdfRenderSession::open(bytes, None) else {
-                return Ok(prepared(inspected(attachment, bytes), warnings));
+                return Ok(prepared(inspected(attachment, bytes, mode), warnings));
             };
             let pages = pdf.page_count();
             if pages == 0 || pages > MAX_MEDIA_PARTS {
@@ -483,10 +483,26 @@ fn extract_single_document(
     warnings: &mut Vec<String>,
 ) -> Result<Option<String>, FileError> {
     if bytes.starts_with(b"bplist00") {
-        return property_list::extract(bytes);
+        return property_list::extract(bytes, mode, observer);
     }
     if bytes.starts_with(b"SQLite format 3\0") {
-        return Ok(database::extract(bytes).ok());
+        let mut details = Vec::new();
+        let result = database::extract(bytes, mode, observer, &mut details);
+        warnings.extend(
+            details
+                .into_iter()
+                .map(|detail| format!("{name}: {detail}")),
+        );
+        if observer.is_some_and(sovra_core::file_index::ScanObserver::cancelled) {
+            return Err(FileError("Reading was cancelled.".into()));
+        }
+        return Ok(match result {
+            Ok(text) => Some(text),
+            Err(error) => {
+                warnings.push(format!("{name}: The database could not be read: {error}. Repair it or export the required tables as CSV or text."));
+                None
+            }
+        });
     }
     if mime != "application/pdf"
         && !detection::formatted_text(mime, bytes)
@@ -561,20 +577,27 @@ fn extract_single_document(
                 .map(|text| text.map(|text| text.content.into_owned()));
         }
     };
-    let text = result
-        .results
-        .into_iter()
-        .map(|document| {
-            warnings.extend(
-                document
-                    .processing_warnings
-                    .into_iter()
-                    .map(|warning| format!("{name}: {}", warning.message)),
-            );
-            document.content
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let mut parts = Vec::new();
+    for document in result.results {
+        // The plain-text extractor also accepts binary bytes and replaces invalid
+        // UTF-8. It must not bypass our strict decoder just because of a filename.
+        if matches!(
+            document.metadata.format,
+            Some(xberg::types::FormatMetadata::Text(_))
+        ) && text::decode_with_limit(bytes, mode.text_bytes())?.is_none()
+        {
+            warnings.push(format!("{name}: The file could not be decoded as text. Readable byte fragments are not treated as document content."));
+            continue;
+        }
+        warnings.extend(
+            document
+                .processing_warnings
+                .into_iter()
+                .map(|warning| format!("{name}: {}", warning.message)),
+        );
+        parts.push(document.content);
+    }
+    let text = parts.join("\n\n");
     warnings.extend(
         result
             .errors
@@ -584,13 +607,24 @@ fn extract_single_document(
     Ok((mime == "application/pdf" || !text.trim().is_empty()).then_some(text))
 }
 
-fn inspected(mut attachment: Attachment, bytes: &[u8]) -> FileContent {
+fn inspected(mut attachment: Attachment, bytes: &[u8], mode: ReadMode) -> FileContent {
     attachment.note = Some(if bytes.is_empty() {
         "This file is empty. There is no content to read.".into()
+    } else if mode.indexed() {
+        "No readable document text was decoded. Its filename and size remain in the file list. Attach it in chat for format and byte inspection, or export a readable copy from its original app and refresh the folder.".into()
     } else {
         "File inspection available. Its contents have not been fully decoded; I can examine its format, readable fragments, and bytes.".into()
     });
     attachment.purpose = ModelPurpose::Documents;
+    if mode.indexed() {
+        // The index keeps metadata only; byte inspection is an attachment action.
+        return FileContent {
+            attachment,
+            text: String::new(),
+            media: Vec::new(),
+            raw: None,
+        };
+    }
     let text = inspection::describe(bytes, &attachment.mime_type);
     attachment.sections = file_sections(&text).len();
     FileContent {

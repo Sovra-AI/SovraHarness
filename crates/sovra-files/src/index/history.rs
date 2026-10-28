@@ -9,7 +9,7 @@ use sovra_core::file_index::{
     ObservedPresence, ScanActivity, SourceRepresentation,
 };
 
-pub(super) const EXTRACTOR_REVISION: &str = "extract-v6";
+pub(super) const EXTRACTOR_REVISION: &str = "extract-v8";
 
 pub(super) fn migrate(db: &Connection) -> Result<(), IndexError> {
     db.execute_batch(include_str!("history_v4.sql"))

@@ -290,10 +290,64 @@ punctuation, pagination and mismatched cursors. UI checks exercise both matching
 controls at minimum/wide windows and 200% text in both themes. `cargo xtask ci`
 passes every gate: 639 tests passed, 6 opt-in tests skipped.
 
-Next work retains the full requested scope: richer coverage information,
-simpler folder setup and recovery, and handling more large-document formats
-without silently omitting content. Native notification resource budgets and codec expansion protections are
-distinct from the arbitrary collection cutoffs removed here.
+A further regression reproduced binary bytes named `notes.txt` being classified
+as Partial text. Xberg 1.3.10's plain-text extractor accepts bytes rejected by our
+strict decoder, replacing invalid UTF-8. Its typed Text format result now requires
+strict source decoding too. Unsupported binary files retain metadata with explicit
+inspection/conversion guidance; index preparation avoids building a discarded byte
+inspection payload. Chat attachments retain labelled inspection and original bytes.
+The `extract-v7` representation revision corrects cached results on refresh while
+preserving history. Tests cover text-like, database-style and unknown filenames,
+absence of binary fragments from search, report notices, reopening, reuse and
+conversion to readable Unicode. All 111 file-adapter tests pass. Full
+`cargo xtask ci` passes every gate: 640 tests passed, 6 opt-in tests skipped.
+
+SQLite and binary property-list indexing now use folder document budgets rather
+than attachment limits. SQLite indexing removes the 100-table, 10,000-row and
+256-column overrides and its fixed 4 MiB output cap; native SQLite column/SQL
+limits and the five-second progress deadline remain. Table enumeration and rows
+are consumed incrementally. Reading-budget or query failures retain decoded rows
+with Partial text status and recovery notes, separately from source text. Binary
+cells and malformed UTF-8 are also disclosed. Property lists remove the indexing
+event-count cap and use the chosen text budget while keeping 64-level nesting.
+Both adapters observe cancellation during decoding; SQLite registers the runtime's
+cancellation signal with its progress handler. No source database is modified.
+
+Three regressions first reproduced the old cutoffs and truncated databases being
+labelled Text. Checks now reach late rows/tables and a 300th column, read beyond
+4 MiB and 100,000 property-list values, reopen partial results, increase the budget
+to reach omitted rows, and preserve prior versions on cancellation. Attachment
+row limits remain separately labelled; unread cells produce explicit warnings.
+Pinned rusqlite 0.39 limits and progress-handler APIs were verified in local source.
+The `extract-v8` revision refreshes older capped representations. Full
+`cargo xtask ci` passes every gate: 645 tests passed, 6 opt-in tests skipped.
+
+The folder overview now surfaces notices before Folder settings is opened. A
+completed scan with notices says to review them and explains the Scan report
+action. The prompt disappears when a later scan clears the notices; capped saved
+examples are not presented as a total issue count. A regression reproduced the
+missing prompt, then checked completed scans with unread notices, skips without
+examples, clean scans and the report action through Client. Minimum/wide/200%
+checks cover the callout in both themes. Full `cargo xtask ci` passes every gate:
+646 tests passed, 6 opt-in tests skipped.
+
+Current goal audit against the indexing UX request and the stated priority of
+file limits and skipped content:
+
+| Requirement | Current evidence |
+| --- | --- |
+| Discover folders and add several without queue-size surprises | Files-first Knowledge navigation, native multi-folder picker, failed-path retry, and the 24-folder runtime regression in `sovra-runtime/tests/file_index/batch.rs`. |
+| Remove arbitrary collection and attachment limits from indexing | Storage/scan regressions in `sovra-files/src/index/tests.rs`, late-content tests in `documents.rs`, `legacy_text.rs` and `structured.rs`, plus selected-scope tests in `catalogue.rs`. Per-folder document budgets remain explicit. |
+| Explain skipped, unread and partial content and how to recover | Complete report pagination/reopen/filter tests in `index/tests/report.rs`, partial and repaired-source tests in `documents.rs`/`structured.rs`, and the visible folder notice/report action in `file_index_view.rs`. |
+| Find files and inspect all saved text | Literal Unicode filename/report filters, paging, extraction filters and version-bound text navigation; storage tests plus real control tests in `file_index_view/browser.rs` and `report.rs`. |
+| Stay responsive and preserve work | Client tests keep Ping/search/pause/remove responsive during scans; cancellation and inaccessible-subfolder tests retain previous or unvisited versions. |
+| Work across window sizes and themes | Headless controls/layout checks cover 640×420, 2560×1440 and 200% interface size in both themes. |
+| Verify native pixels and navigation | Pending: the supervised native app is running, but XInput events go to the `i3lock` window rather than Sovra. The desktop owner was asked to unlock it; the lock was left intact. |
+
+The live visual check remains outstanding. Native notification resource budgets,
+codec expansion/nesting protections and documented parser limitations are distinct
+from the arbitrary collection cutoffs removed here; this work does not promise
+unlimited decoding or support for every file format.
 
 ### Implementation checkpoint: local folder index
 

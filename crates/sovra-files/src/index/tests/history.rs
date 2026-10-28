@@ -42,7 +42,7 @@ fn history_preserves_renames_versions_absence_and_scoped_historical_reads() {
     let representation = original.representation.as_ref().unwrap();
     assert_eq!(
         representation.extractor_revision.as_deref(),
-        Some("extract-v6")
+        Some("extract-v8")
     );
     assert_eq!(representation.generated_by, original.basis.activity_id);
     let reference = representation.first_passage.clone().unwrap();

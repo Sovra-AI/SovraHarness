@@ -513,6 +513,22 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- Folder summaries now show skipped or unread-content notices without opening
+  Folder settings. A completed scan with notices says to review them and points
+  directly to Scan report; clearing the notices removes the prompt.
+
+- SQLite and binary property-list indexing now use the folder's Document reading
+  budget. Indexing removes SQLite's attachment caps of 100 tables, 10,000 rows,
+  256 columns and 4 MiB of output, and the property-list attachment event cap.
+  SQLite keeps readable rows when a budget is reached and reports Partial text
+  with recovery guidance. Unread binary cells and invalid text are also disclosed.
+  Both readers observe cancellation; refresh replaces older capped representations.
+
+- Binary files with text-like names no longer become searchable partial text
+  through the document decoder's permissive text fallback. The inventory keeps
+  their metadata and explains how to inspect or convert them. Refresh replaces
+  affected old representations; chat attachments retain labelled byte inspection.
+
 - **Release storage during shutdown:** keep the background executor alive for up
   to five seconds of adapter cleanup after owned workers finish, then emit
   `Stopped` after executor teardown. This lets the embedded database finish its

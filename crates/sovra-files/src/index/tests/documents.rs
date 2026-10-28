@@ -5,6 +5,60 @@ use sovra_core::file_index::ExtractionState;
 use std::io::Write as _;
 use std::sync::Arc;
 
+#[test]
+fn binary_fragments_are_not_indexed_as_document_text() {
+    use sovra_core::file_index::{NoticeKind, NoticeQuery};
+    let bytes = b"Binaryfragmentneedle\0\xff\x01\x02";
+    for name in ["notes.txt", "pg_filenode.map", "unknown.custom"] {
+        let fixture = Fixture::new();
+        std::fs::write(fixture.source().join(name), bytes).unwrap();
+        let store = fixture.store();
+        let root = store.add_root(&fixture.source()).unwrap();
+        store.scan(&root.id, &Observer::default()).unwrap();
+        for store in [&store, &fixture.store()] {
+            let page = store.catalogue(&CatalogQuery::default()).unwrap();
+            assert_eq!(page.total_files, 1);
+            let entry = &page.files[0];
+            assert_eq!(entry.extraction, ExtractionState::MetadataOnly, "{name}");
+            assert_eq!(entry.passage_count, 0);
+            assert!(entry.first_passage.is_none());
+            assert!(entry.note.as_deref().unwrap().contains("Attach it in chat"));
+            assert_eq!(search(store, "Binaryfragmentneedle"), []);
+            let report = store
+                .report(&NoticeQuery {
+                    root_id: root.id.clone(),
+                    kind: Some(NoticeKind::Unreadable),
+                    contains: None,
+                    match_case: false,
+                    cursor: None,
+                    limit: 40,
+                })
+                .unwrap();
+            assert_eq!(report.total, 1);
+            assert_eq!(report.notices[0].path, name);
+        }
+        let attached = crate::prepare_bytes("binary", name, bytes).unwrap();
+        assert_eq!(attached.raw.as_deref(), Some(bytes.as_slice()));
+        assert!(attached.text.contains("CONTENT NOT FULLY DECODED"));
+        assert_eq!(
+            store
+                .scan(&root.id, &Observer::default())
+                .unwrap()
+                .progress
+                .reused,
+            1
+        );
+        fixture.write(
+            name,
+            "Convertedtextneedle has readable Unicode: café and �.",
+        );
+        store.scan(&root.id, &Observer::default()).unwrap();
+        let readable = store.catalogue(&CatalogQuery::default()).unwrap();
+        assert_eq!(readable.files[0].extraction, ExtractionState::Text);
+        assert_eq!(search(&store, "Convertedtextneedle").len(), 1);
+    }
+}
+
 fn partial_presentation() -> Vec<u8> {
     use std::io::{Cursor, Read as _};
     let original = crate::format_tests::packages::presentation_with_slides(3);
