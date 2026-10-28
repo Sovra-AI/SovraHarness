@@ -47,7 +47,9 @@ fn main() -> anyhow::Result<()> {
             Arc::new(sovra_providers::AnthropicProvider),
         ],
     };
-    let client = sovra_runtime::start_with_file_index(
+    // WhatsApp credentials (Signal keys) live in one SQLite file in the app data directory.
+    let whatsapp = sovra_whatsapp::WhatsAppChannel::new(dirs.data_local_dir().join("whatsapp"));
+    let client = sovra_runtime::start_with_channels(
         VERSION,
         agent_config,
         Some(memory),
@@ -61,6 +63,7 @@ fn main() -> anyhow::Result<()> {
         Some(Arc::new(sovra_files::LocalFileIndex::new(
             dirs.data_local_dir().join("file-index"),
         ))),
+        Some(Arc::new(whatsapp)),
     )
     .context("failed to start the runtime")?;
     sovra_ui::run(client.clone());

@@ -102,6 +102,8 @@ pub struct LayoutTokens {
     /// Side panes yield (undock, rail) before the main pane drops below this.
     pub content_min_width: Rems,
     pub card_min_width: Rems,
+    /// Side of a QR code shown for a phone to scan; large enough for a camera at arm's length.
+    pub scan_code: Rems,
     pub card_max_width: Rems,
     pub dialog_width: Rems,
     pub side_panel_width: Rems,
@@ -170,6 +172,9 @@ pub struct SovraTokens {
     pub nav_active_background: Hsla,
     pub status_pill_background: Hsla,
     pub code_background: Hsla,
+    /// QR codes stay black on white in both themes: phone cameras read that reliably.
+    pub scan_code_dark: Hsla,
+    pub scan_code_light: Hsla,
 }
 
 /// Authored in the 16px reference pixels of the source design, stored as rems.
@@ -241,6 +246,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
             reading_width: rem(768.),
             content_min_width: rem(400.),
             card_min_width: rem(224.),
+            scan_code: rem(272.),
             card_max_width: rem(560.),
             dialog_width: rem(432.),
             side_panel_width: rem(260.),
@@ -379,5 +385,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
             colour(0xdc_fc_e7)
         },
         code_background: if dark { layer(0.05) } else { colour(p.hover) },
+        scan_code_dark: colour(0x00_00_00),
+        scan_code_light: colour(WHITE),
     }
 }

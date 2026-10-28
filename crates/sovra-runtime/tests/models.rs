@@ -32,6 +32,9 @@ mod semantic;
 #[path = "models/summaries.rs"]
 mod summaries;
 
+#[path = "models/whatsapp.rs"]
+mod whatsapp;
+
 #[derive(Default)]
 struct TestCredentials(Mutex<BTreeMap<String, ModelSecret>>);
 impl CredentialStore for TestCredentials {

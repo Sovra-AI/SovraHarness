@@ -348,7 +348,7 @@ impl FileIndex for LocalFileIndex {
             .replace('%', "\\%")
             .replace('_', "\\_")
             + "%";
-        let mut db = self.connect()?;
+        let db = self.connect()?;
         let started = std::time::Instant::now();
         db.progress_handler(
             1000,

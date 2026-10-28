@@ -91,10 +91,34 @@ move them under a version heading when the tag is cut.
   failed rule without displaying model response text. Extraction and linking errors
   found during evaluation remain documented rather than counted as quality passes.
 
-- **Connections tab & embedded WhatsApp Personal QR linking (`sovra-core`, `sovra-runtime`, `sovra-store-surreal`, `sovra-ui`)**:
-  - Added a dedicated **Connections** section (`NavTab::Connections`, `/connections`, `/whatsapp`) built directly into the single Rust binary with no external server, Node/Go sidecar, or WhatsApp Business API account required.
-  - Implements the WhatsApp Web Multi-Device companion pairing protocol (`CompanionKeyBundle` with 32-byte `Curve25519` Noise static key, `Signal` identity key, `ADV` HMAC-SHA256 secret, 5-field `ref,noise_pub,identity_pub,adv_secret,client_type` QR payload, 6-ref rotation window, and 8-character Crockford Base32 phone-linking code).
-  - Clicking **Connect WhatsApp** opens an interactive native GPUI 29×29 QR code modal (`#whatsapp-qr-modal`) to scan from *WhatsApp → Linked Devices → Link a Device*, with an optional 8-digit phone-number pairing fallback, live `Connected` sidebar badge, *"Only reply in Message Yourself"* privacy toggle, and end-to-end message bridge into Chat.
+- **WhatsApp really links now (`sovra-whatsapp` new, `sovra-core`, `sovra-runtime`, `sovra-ui`, `sovra-app`)**:
+  - The earlier Connect WhatsApp screen was a mock: it drew a locally invented code that
+    no phone could accept and needed a manual "I've scanned" click. It is replaced by a
+    real WhatsApp Web multi-device client, the open-source MIT `whatsapp-rust` 0.7, compiled
+    into the single binary (pure Rust, rustls; no Node sidecar, server or business account).
+  - **Settings → WhatsApp → Connect WhatsApp** opens a window with the QR code WhatsApp's
+    servers issue, painted black on white at a size a phone camera reads. Scan it from
+    *WhatsApp → Linked devices → Link a device*; the link completes on its own, the window
+    closes, and the Settings badge shows **Connected**. "Can't scan?" asks WhatsApp for a
+    real 8-character code for your phone number. Codes rotate automatically; **New code**
+    starts over. Errors (expired code, outdated client, link removed on the phone) are
+    shown in plain words with a **Try again** button.
+  - The link survives restarts: credentials and Signal keys live in one SQLite file under
+    the app data directory (`whatsapp/session.sqlite`) and reconnect in the background.
+    **Unlink WhatsApp** removes the link on the phone and deletes that file.
+  - Messages you send yourself on WhatsApp ("Message yourself") are answered by Sovra's
+    helpers through the same prompt path as the chat window, with the same model, memory
+    and web search, and the answer is sent back to the phone. Two switches: *Only answer
+    in my own chat* (on by default; off answers other people's direct messages too) and
+    *Answer WhatsApp messages automatically*. Groups, broadcasts, channels, your own
+    outgoing messages mirrored from the phone, and messages that queued while the app was
+    closed are never answered. **Send to my WhatsApp** sends a test message to your own chat.
+  - Pure policy and the `MessagingChannel`/`ChannelSession` ports live in
+    `sovra-core::connections` (unit-tested); `sovra-runtime` drives the link in one task and
+    diverts `whatsapp:` sessions' events from the chat window back to the phone.
+  - `rusqlite` moves to 0.39 so the whole binary links one SQLite (the WhatsApp store pins
+    libsqlite3-sys 0.37); `xtask/src/deps.rs` gains `sovra-whatsapp` and confines
+    `whatsapp-rust` and `qrcode` to it.
 
 - **Restored conversation context:** new ordinary and attachment turns carry a
   bounded text excerpt from the visible saved chat, preserving user/reply roles

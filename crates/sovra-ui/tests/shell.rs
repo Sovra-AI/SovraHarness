@@ -936,8 +936,8 @@ fn reopening_a_saved_chat_sends_bounded_role_preserving_context(cx: &mut TestApp
 fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut TestAppContext) {
     use gpui_kit::{ScrollDelta, point};
     use sovra_core::connections::{
-        CompanionKeyBundle, ConnectionCommand, ConnectionEvent, WhatsAppBridgedMessage,
-        WhatsAppQrTicket,
+        ConnectionCommand, ConnectionEvent, LinkedDevice, WhatsAppBridgedMessage, WhatsAppQrTicket,
+        WhatsAppStatus,
     };
 
     fn reveal(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
@@ -993,11 +993,19 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
         "clicking Connect WhatsApp must dispatch StartWhatsAppPairing"
     );
 
-    // Emit QrGenerated from runtime -> opens QR modal with 29x29 matrix
-    let keys = CompanionKeyBundle::generate(1_793_080_000_000, 1);
-    let ticket = WhatsAppQrTicket::new(&keys, 1_793_080_000_000, 1);
+    // WhatsApp issues a code -> the QR window opens and paints the grid
+    let ticket = WhatsAppQrTicket {
+        qr_payload: "2@ref,noise,identity,adv,7".into(),
+        qr_matrix: (0..29)
+            .map(|row| (0..29).map(|col| (row + col) % 3 == 0).collect())
+            .collect(),
+        expires_in_secs: 60,
+        pairing_code: None,
+    };
     events
-        .send_blocking(Event::Connections(ConnectionEvent::QrGenerated(ticket)))
+        .send_blocking(Event::Connections(ConnectionEvent::StatusChanged(
+            WhatsAppStatus::AwaitingQrScan { ticket },
+        )))
         .unwrap();
     cx.executor()
         .advance_clock(std::time::Duration::from_millis(16));
@@ -1007,42 +1015,55 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
         window.render_frame(cx);
         assert!(window.find("whatsapp-qr-modal").visible());
         assert!(window.find("whatsapp-qr-matrix").visible());
-        reveal(window, "whatsapp-confirm-scan-btn", cx);
-        assert!(window.find("whatsapp-confirm-scan-btn").visible());
-
-        // Click "I've scanned the QR code" -> dispatches ConfirmWhatsAppScan
-        window.click("whatsapp-confirm-scan-btn", cx);
+        assert!(
+            window.try_find("whatsapp-confirm-scan-btn").is_none(),
+            "linking completes when the phone scans; there is nothing to confirm by hand"
+        );
+        reveal(window, "whatsapp-refresh-qr-btn", cx);
+        window.click("whatsapp-refresh-qr-btn", cx);
     })
     .unwrap();
 
     assert!(
         std::iter::from_fn(|| commands.try_recv().ok()).any(|cmd| matches!(
             cmd,
-            Command::Connections(ConnectionCommand::ConfirmWhatsAppScan { .. })
+            Command::Connections(ConnectionCommand::RefreshWhatsAppQr)
         )),
-        "confirming scan must dispatch ConfirmWhatsAppScan"
+        "asking for a new code must dispatch RefreshWhatsAppQr"
     );
 
-    // Emit Connected + MessageBridged from runtime
+    // The phone scans, the link completes, and a message arrives with Sovra's answer
     events
-        .send_blocking(Event::Connections(ConnectionEvent::Connected {
-            phone_display: "+1 555-0142".into(),
-            device_jid: "15550142:1@s.whatsapp.net".into(),
-            companion_name: "Sovra Desktop".into(),
-            linked_at: sovra_core::Timestamp(10_000),
-        }))
+        .send_blocking(Event::Connections(ConnectionEvent::StatusChanged(
+            WhatsAppStatus::Connected {
+                device: LinkedDevice {
+                    phone_display: "+1 555-0142".into(),
+                    device_jid: "15550142:1@s.whatsapp.net".into(),
+                    companion_name: "Sovra".into(),
+                    linked_at: sovra_core::Timestamp(10_000),
+                },
+                online: true,
+            },
+        )))
         .unwrap();
     events
         .send_blocking(Event::Connections(ConnectionEvent::MessageBridged(
             WhatsAppBridgedMessage {
                 id: "wa-1".into(),
-                sender_name: "You (WhatsApp · Message Yourself)".into(),
-                sender_jid: "15550142:1@s.whatsapp.net".into(),
+                chat_jid: "15550142@s.whatsapp.net".into(),
+                sender_name: "You (WhatsApp)".into(),
+                sender_jid: "15550142@s.whatsapp.net".into(),
                 text: "Summarize my afternoon schedule".into(),
-                reply_text: Some("Sovra received via WhatsApp E2E bridge".into()),
+                reply_text: None,
                 received_at: sovra_core::Timestamp(11_000),
             },
         )))
+        .unwrap();
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::ReplySent {
+            message_id: "wa-1".into(),
+            reply: "Two meetings and a dentist appointment.".into(),
+        }))
         .unwrap();
     cx.executor()
         .advance_clock(std::time::Duration::from_millis(16));

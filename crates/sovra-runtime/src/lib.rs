@@ -150,7 +150,35 @@ pub fn start_with_file_index(
     skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
     index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
 ) -> Result<Client, Error> {
+    start_with_channels(
+        version,
+        agent_config,
+        memory,
+        models,
+        files,
+        skills,
+        index,
+        None,
+    )
+}
+
+/// Starts with a personal messaging link (`WhatsApp`) supplied by the composition root.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the composition root hands over every adapter in one call"
+)]
+pub fn start_with_channels(
+    version: &str,
+    agent_config: AgentConfig,
+    memory: Option<MemoryFactory>,
+    models: Option<ModelsConfig>,
+    files: Option<Arc<dyn sovra_core::files::FileStore>>,
+    skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+    index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+    channel: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
+) -> Result<Client, Error> {
     let (mut client, commands, events) = Client::loopback();
+    let commands_tx = client.commands.clone();
     let (stopped, completion) = async_channel::bounded(1);
     client.completion = Some(completion);
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -172,6 +200,8 @@ pub fn start_with_file_index(
                     files,
                     skills,
                     index,
+                    channel,
+                    commands_tx,
                 },
                 handle,
                 commands,
@@ -209,6 +239,9 @@ struct Services {
     files: Option<Arc<dyn sovra_core::files::FileStore>>,
     skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
     index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+    channel: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
+    /// Lets the messaging link run prompts through the same path as the UI.
+    commands_tx: Sender<Command>,
 }
 
 async fn serve(
@@ -217,7 +250,7 @@ async fn serve(
     services: Services,
     handle: tokio::runtime::Handle,
     commands: Receiver<Command>,
-    events: Sender<Event>,
+    ui_events: Sender<Event>,
 ) {
     let Services {
         memory: memory_factory,
@@ -225,7 +258,14 @@ async fn serve(
         files,
         skills: skill_store,
         index,
+        channel,
+        commands_tx,
     } = services;
+    // Every event passes the connections task first: answers for WhatsApp sessions go
+    // back to the phone instead of the chat window.
+    let connections =
+        connections::ConnectionsRuntime::start(channel, ui_events.clone(), commands_tx, &handle);
+    let events = connections.route_events(ui_events, &handle);
     let mut file_index = file_index::IndexRuntime::start(
         index,
         events.clone(),
@@ -283,7 +323,7 @@ async fn serve(
         std::env::temp_dir().join("sovra-artifact-views"),
     );
     let team = teams::TeamRuntime::new(memory.clone(), events.clone());
-    let connections = connections::ConnectionsRuntime::new(memory.clone(), events.clone());
+    connections.attach_store(memory.clone());
     tracing::info!(
         %version,
         adk_configured = harness.is_some(),
@@ -440,7 +480,7 @@ async fn serve(
             }
             Command::Teams(command) => team.handle(&handle, command),
             Command::Artifacts(command) => artifact_library.handle(&handle, command),
-            Command::Connections(command) => connections.handle(&handle, command),
+            Command::Connections(command) => connections.handle(command),
             Command::Files(command) => {
                 if let Some(jobs) = &file_jobs {
                     jobs.send(command);

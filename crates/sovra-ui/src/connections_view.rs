@@ -1,8 +1,7 @@
-//! Personal channel connections (`Connections` section inside Settings, plus the
-//! interactive `WhatsApp` Personal QR code pairing modal): link your personal `WhatsApp`
-//! directly inside the single Sovra Rust desktop binary using the Multi-Device companion
-//! protocol (`Noise_XX_25519_AESGCM_SHA256`, `Curve25519` keys, `ADV` HMAC-SHA256, and
-//! a native GPUI QR code matrix / 8-character Crockford Base32 phone pairing code).
+//! Personal connections inside Settings: link your own `WhatsApp` to this app. Click
+//! Connect, scan the code `WhatsApp` issues with your phone, and messages you send
+//! yourself on `WhatsApp` are answered by Sovra. The real client runs in the runtime;
+//! this view only shows its state and sends plain commands.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -14,12 +13,13 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Styled as _, TestSupportExt as _, Window, div,
+    AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, Styled as _, TestSupportExt as _, Window, canvas, div, fill, point,
+    size,
 };
 use sovra_core::Command;
 use sovra_core::connections::{
-    ConnectionCommand, ConnectionsState, WhatsAppQrTicket, WhatsAppStatus,
+    ConnectionCommand, ConnectionsState, WhatsAppQrTicket, WhatsAppSettings, WhatsAppStatus,
 };
 
 use crate::RuntimeClient;
@@ -30,20 +30,16 @@ use crate::settings_view::settings_section;
 pub(crate) struct WhatsAppForm {
     pub(crate) phone_input: Entity<InputState>,
     pub(crate) test_msg_input: Entity<InputState>,
-    pub(crate) arch_open: bool,
 }
 
 impl WhatsAppForm {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<ModelsView>) -> Self {
         Self {
             phone_input: cx.new(|cx| {
-                InputState::new(window, cx).placeholder("e.g. +1 555 234 5678 (optional)")
+                InputState::new(window, cx).placeholder("Phone number with country code")
             }),
-            test_msg_input: cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder("e.g. Summarize my schedule for this afternoon")
-            }),
-            arch_open: false,
+            test_msg_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder("Hello from my computer")),
         }
     }
 }
@@ -64,12 +60,12 @@ impl ModelsView {
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let state = &self.connections;
-        let is_connected = state.whatsapp.is_connected();
+        let linked = state.whatsapp.is_linked();
 
         let mut section = settings_section(
             "settings-connections",
-            "Connections · WhatsApp Personal",
-            "Link your personal WhatsApp directly inside this app — click Connect, scan the QR code with your phone, and chat with Sovra from WhatsApp.",
+            "WhatsApp",
+            "Link your own WhatsApp to this app. Click Connect, scan the code with your phone, then message yourself on WhatsApp to talk to Sovra from anywhere.",
             cx,
         )
         .child(
@@ -89,11 +85,7 @@ impl ModelsView {
                                 .small()
                                 .text_color(cx.theme().link),
                         )
-                        .child(
-                            div()
-                                .sovra_text(TextRole::Body, cx)
-                                .child("WhatsApp Personal (Multi-Device Companion)"),
-                        )
+                        .child(div().sovra_text(TextRole::Body, cx).child("WhatsApp"))
                         .child(
                             div()
                                 .id("whatsapp-status-badge")
@@ -101,8 +93,8 @@ impl ModelsView {
                                 .child(pill(state.whatsapp.badge_label().to_owned(), cx)),
                         ),
                 )
-                .child(if is_connected {
-                    design::button("whatsapp-disconnect-top", "Disconnect WhatsApp", cx)
+                .child(if linked {
+                    design::button("whatsapp-disconnect-top", "Unlink WhatsApp", cx)
                         .small()
                         .ghost()
                         .on_click(cx.listener(|view, _, _, cx| {
@@ -112,7 +104,7 @@ impl ModelsView {
                     design::primary_button("whatsapp-connect-btn", "Connect WhatsApp", cx)
                         .small()
                         .icon(IconName::MessageCircle)
-                        .tooltip("Open a QR code to scan with your phone's WhatsApp app")
+                        .tooltip("Show a code to scan with WhatsApp on your phone")
                         .on_click(cx.listener(|view, _, _, cx| {
                             view.send_connection(ConnectionCommand::StartWhatsAppPairing, cx);
                         }))
@@ -132,18 +124,8 @@ impl ModelsView {
             );
         }
 
-        if let WhatsAppStatus::Connected {
-            phone_display,
-            device_jid,
-            companion_name,
-            auto_reply_enabled,
-            only_self_chat,
-            ..
-        } = &state.whatsapp
-        {
-            let current_auto = *auto_reply_enabled;
-            let current_self = *only_self_chat;
-
+        if let WhatsAppStatus::Connected { device, online } = &state.whatsapp {
+            let settings = state.settings;
             section = section
                 .child(
                     v_flex()
@@ -156,12 +138,17 @@ impl ModelsView {
                         .child(
                             div()
                                 .sovra_text(TextRole::SectionTitle, cx)
-                                .child(format!("✓ Linked to {phone_display}")),
+                                .child(format!("Linked to {}", device.phone_display)),
                         )
                         .child(caption(
-                            format!(
-                                "Companion: {companion_name} · JID: {device_jid} · Signal E2E active"
-                            ),
+                            if *online {
+                                format!(
+                                    "Shows as “{}” under Linked devices on your phone. Messages are end-to-end encrypted.",
+                                    device.companion_name
+                                )
+                            } else {
+                                "Reconnecting to WhatsApp…".to_owned()
+                            },
                             cx,
                         ))
                         .child(
@@ -171,14 +158,16 @@ impl ModelsView {
                                 .gap(t.space.medium)
                                 .child(
                                     Switch::new("whatsapp-toggle-self-only")
-                                        .checked(current_self)
-                                        .label("Only reply in “Message Yourself” (safe default)")
+                                        .checked(settings.only_self_chat)
+                                        .label("Only answer in my own chat (“Message yourself”)")
                                         .on_click(cx.listener(
                                             move |view, checked: &bool, _, cx| {
                                                 view.send_connection(
                                                     ConnectionCommand::UpdateWhatsAppSettings {
-                                                        auto_reply_enabled: current_auto,
-                                                        only_self_chat: *checked,
+                                                        settings: WhatsAppSettings {
+                                                            only_self_chat: *checked,
+                                                            ..settings
+                                                        },
                                                     },
                                                     cx,
                                                 );
@@ -187,14 +176,16 @@ impl ModelsView {
                                 )
                                 .child(
                                     Switch::new("whatsapp-toggle-auto-reply")
-                                        .checked(current_auto)
-                                        .label("Automatically answer my WhatsApp messages")
+                                        .checked(settings.auto_reply_enabled)
+                                        .label("Answer WhatsApp messages automatically")
                                         .on_click(cx.listener(
                                             move |view, checked: &bool, _, cx| {
                                                 view.send_connection(
                                                     ConnectionCommand::UpdateWhatsAppSettings {
-                                                        auto_reply_enabled: *checked,
-                                                        only_self_chat: current_self,
+                                                        settings: WhatsAppSettings {
+                                                            auto_reply_enabled: *checked,
+                                                            ..settings
+                                                        },
                                                     },
                                                     cx,
                                                 );
@@ -212,14 +203,14 @@ impl ModelsView {
                             div().flex_1().min_w(t.layout.filter_width).child(
                                 Input::new(&self.whatsapp_form.test_msg_input)
                                     .id("whatsapp-test-msg-input")
-                                    .aria_label("Test WhatsApp message")
+                                    .aria_label("Message to send to your own WhatsApp")
                                     .small(),
                             ),
                         )
                         .child(
                             design::primary_button(
                                 "whatsapp-send-test-btn",
-                                "Send via WhatsApp bridge",
+                                "Send to my WhatsApp",
                                 cx,
                             )
                             .small()
@@ -230,13 +221,13 @@ impl ModelsView {
                                     .read(cx)
                                     .value()
                                     .to_string();
-                                let trimmed = if text.trim().is_empty() {
-                                    "What's on my schedule today?".to_owned()
+                                let text = if text.trim().is_empty() {
+                                    "Hello from Sovra on my computer.".to_owned()
                                 } else {
                                     text
                                 };
                                 view.send_connection(
-                                    ConnectionCommand::SendTestWhatsAppMessage { text: trimmed },
+                                    ConnectionCommand::SendTestWhatsAppMessage { text },
                                     cx,
                                 );
                                 view.whatsapp_form.test_msg_input.update(cx, |input, cx| {
@@ -245,36 +236,41 @@ impl ModelsView {
                             })),
                         ),
                 );
-
-            if !state.recent_messages.is_empty() {
-                section = section.child(
-                    v_flex()
-                        .id("whatsapp-bridged-messages")
-                        .test_support()
-                        .w_full()
-                        .gap(t.space.small)
-                        .children(state.recent_messages.iter().enumerate().map(|(idx, msg)| {
-                            v_flex()
-                                .id(("whatsapp-msg-row", idx))
-                                .test_support()
-                                .w_full()
-                                .p(t.space.small)
-                                .gap(t.space.hair)
-                                .sovra_surface(Surface::Subtle, cx)
-                                .child(
-                                    div()
-                                        .sovra_text(TextRole::Caption, cx)
-                                        .text_color(cx.theme().link)
-                                        .child(msg.sender_name.clone()),
-                                )
-                                .child(div().sovra_text(TextRole::Body, cx).child(msg.text.clone()))
-                                .children(msg.reply_text.clone().map(|reply| caption(reply, cx)))
-                        })),
-                );
-            }
         }
 
-        section.child(self.render_whatsapp_architecture(state, cx))
+        if !state.recent_messages.is_empty() {
+            section = section.child(
+                v_flex()
+                    .id("whatsapp-bridged-messages")
+                    .test_support()
+                    .w_full()
+                    .gap(t.space.small)
+                    .child(caption("Recent messages from WhatsApp", cx))
+                    .children(state.recent_messages.iter().enumerate().map(|(idx, msg)| {
+                        v_flex()
+                            .id(("whatsapp-msg-row", idx))
+                            .test_support()
+                            .w_full()
+                            .p(t.space.small)
+                            .gap(t.space.hair)
+                            .sovra_surface(Surface::Subtle, cx)
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::Caption, cx)
+                                    .text_color(cx.theme().link)
+                                    .child(msg.sender_name.clone()),
+                            )
+                            .child(div().sovra_text(TextRole::Body, cx).child(msg.text.clone()))
+                            .children(
+                                msg.reply_text
+                                    .clone()
+                                    .map(|reply| caption(format!("Sovra: {reply}"), cx)),
+                            )
+                    })),
+            );
+        }
+
+        section
     }
 
     pub(crate) fn render_whatsapp_qr_modal(
@@ -283,11 +279,38 @@ impl ModelsView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let ticket = match &state.whatsapp {
-            WhatsAppStatus::AwaitingQrScan { ticket } => ticket.clone(),
-            _ => WhatsAppQrTicket::new(&state.keys, 1_793_080_000_000, 1),
+
+        let body: gpui_kit::AnyElement = match &state.whatsapp {
+            WhatsAppStatus::AwaitingQrScan { ticket } => {
+                self.render_scan_step(ticket, cx).into_any_element()
+            }
+            WhatsAppStatus::VerifyingHandshake { device_label } => caption(
+                format!("{device_label} accepted the link. Finishing up…"),
+                cx,
+            )
+            .id("whatsapp-finishing")
+            .test_support()
+            .into_any_element(),
+            WhatsAppStatus::Error { message } => v_flex()
+                .id("whatsapp-pairing-error")
+                .test_support()
+                .gap(t.space.small)
+                .child(caption(message.clone(), cx).text_color(cx.theme().danger))
+                .child(
+                    design::primary_button("whatsapp-retry-btn", "Try again", cx)
+                        .small()
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.send_connection(ConnectionCommand::StartWhatsAppPairing, cx);
+                        })),
+                )
+                .into_any_element(),
+            WhatsAppStatus::Disconnected
+            | WhatsAppStatus::Connecting { .. }
+            | WhatsAppStatus::Connected { .. } => caption("Contacting WhatsApp…", cx)
+                .id("whatsapp-contacting")
+                .test_support()
+                .into_any_element(),
         };
-        let qr_payload_copy = ticket.qr_payload.clone();
 
         v_flex()
             .id("whatsapp-qr-modal")
@@ -309,10 +332,10 @@ impl ModelsView {
                             .child(
                                 div()
                                     .sovra_text(TextRole::SectionTitle, cx)
-                                    .child("Scan with your phone to link WhatsApp"),
+                                    .child("Link WhatsApp to this computer"),
                             )
                             .child(caption(
-                                "Open WhatsApp on your phone → Settings (or ⋮) → Linked Devices → Link a Device.",
+                                "On your phone, open WhatsApp → Settings (or ⋮) → Linked devices → Link a device, then point the camera at the code.",
                                 cx,
                             )),
                     )
@@ -325,216 +348,172 @@ impl ModelsView {
                             })),
                     ),
             )
-            .child(
-                h_flex()
-                    .w_full()
-                    .flex_wrap()
-                    .items_start()
-                    .gap(t.space.medium)
-                    .child(render_qr_matrix_card(&ticket, cx))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w(t.layout.card_min_width)
-                            .gap(t.space.small)
-                            .child(
-                                v_flex()
-                                    .gap(t.space.small)
-                                    .p(t.space.small)
-                                    .sovra_surface(Surface::Subtle, cx)
-                                    .child(
-                                        div()
-                                            .sovra_text(TextRole::SectionTitle, cx)
-                                            .child("Or link with your phone number"),
-                                    )
-                                    .child(
-                                        h_flex()
-                                            .w_full()
-                                            .flex_wrap()
-                                            .gap(t.space.small)
-                                            .child(
-                                                div().flex_1().min_w(t.layout.filter_width).child(
-                                                    Input::new(&self.whatsapp_form.phone_input)
-                                                        .id("whatsapp-phone-input")
-                                                        .aria_label("Phone number for pairing code")
-                                                        .small(),
-                                                ),
-                                            )
-                                            .child(
-                                                design::button(
-                                                    "whatsapp-get-pair-code",
-                                                    "Get 8-digit code",
-                                                    cx,
-                                                )
-                                                .small()
-                                                .on_click(cx.listener(|view, _, _, cx| {
-                                                    let phone_number = view
-                                                        .whatsapp_form
-                                                        .phone_input
-                                                        .read(cx)
-                                                        .value()
-                                                        .to_string();
-                                                    view.send_connection(
-                                                        ConnectionCommand::RequestPairingCode {
-                                                            phone_number,
-                                                        },
-                                                        cx,
-                                                    );
-                                                })),
-                                            ),
-                                    )
-                                    .children(ticket.pairing_code.clone().map(|code| {
-                                        div()
-                                            .id("whatsapp-pairing-code-display")
-                                            .test_support()
-                                            .px(t.space.small)
-                                            .py(t.space.hair)
-                                            .rounded(t.radius.input)
-                                            .bg(t.nav_active_background)
-                                            .sovra_text(TextRole::SectionTitle, cx)
-                                            .text_color(cx.theme().link)
-                                            .child(format!("Your phone linking code: {code}"))
-                                    })),
-                            )
-                            .child(
-                                h_flex()
-                                    .flex_wrap()
-                                    .gap(t.space.small)
-                                    .child(
-                                        design::primary_button(
-                                            "whatsapp-confirm-scan-btn",
-                                            "I've scanned the QR code",
-                                            cx,
-                                        )
-                                        .small()
-                                        .icon(IconName::Check)
-                                        .on_click(cx.listener(|view, _, _, cx| {
-                                            let phone_display = view
-                                                .whatsapp_form
-                                                .phone_input
-                                                .read(cx)
-                                                .value()
-                                                .to_string();
-                                            view.send_connection(
-                                                ConnectionCommand::ConfirmWhatsAppScan {
-                                                    phone_display,
-                                                },
-                                                cx,
-                                            );
-                                        })),
-                                    )
-                                    .child(
-                                        design::button("whatsapp-refresh-qr-btn", "New QR code", cx)
-                                            .small()
-                                            .ghost()
-                                            .on_click(cx.listener(|view, _, _, cx| {
-                                                view.send_connection(
-                                                    ConnectionCommand::RefreshWhatsAppQr,
-                                                    cx,
-                                                );
-                                            })),
-                                    )
-                                    .child(
-                                        design::button(
-                                            "whatsapp-copy-qr-payload",
-                                            "Copy QR payload",
-                                            cx,
-                                        )
-                                        .small()
-                                        .ghost()
-                                        .on_click(move |_, _, cx| {
-                                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                                qr_payload_copy.clone(),
-                                            ));
-                                        }),
-                                    ),
-                            ),
-                    ),
-            )
+            .child(body)
     }
 
-    fn render_whatsapp_architecture(
+    fn render_scan_step(
         &self,
-        state: &ConnectionsState,
+        ticket: &WhatsAppQrTicket,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let open = self.whatsapp_form.arch_open;
-        let mut col = v_flex().w_full().gap(t.space.hair).child(
-            h_flex().child(
-                design::button(
-                    "whatsapp-arch-toggle",
-                    if open {
-                        "Hide how WhatsApp companion works"
-                    } else {
-                        "How in-binary WhatsApp Personal works"
-                    },
-                    cx,
-                )
-                .xsmall()
-                .ghost()
-                .on_click(cx.listener(|view, _, _, cx| {
-                    view.whatsapp_form.arch_open = !view.whatsapp_form.arch_open;
-                    cx.notify();
-                })),
-            ),
-        );
-        if open {
-            col = col
-                .child(caption(
-                    "Embedded Multi-Device Companion (Noise_XX_25519_AESGCM_SHA256 + Curve25519 Signal Identity + ADV HMAC-SHA256). 5-field QR payload (ref,noise_pub,identity_pub,adv_secret,7) runs inside the native Rust binary with no external sidecar.",
-                    cx,
-                ))
-                .child(caption(
-                    format!(
-                        "Companion Noise pubkey: {} · Identity pubkey: {}",
-                        state.keys.noise_pub_b64, state.keys.identity_pub_b64
+        let code_card: gpui_kit::AnyElement = if ticket.has_qr() {
+            render_qr_card(ticket, cx).into_any_element()
+        } else {
+            caption("Waiting for WhatsApp to issue a code…", cx)
+                .id("whatsapp-qr-pending")
+                .test_support()
+                .into_any_element()
+        };
+        h_flex()
+            .w_full()
+            .flex_wrap()
+            .items_start()
+            .gap(t.space.medium)
+            .child(code_card)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w(t.layout.card_min_width)
+                    .gap(t.space.small)
+                    .child(
+                        v_flex()
+                            .gap(t.space.small)
+                            .p(t.space.small)
+                            .sovra_surface(Surface::Subtle, cx)
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::SectionTitle, cx)
+                                    .child("Can't scan? Link with your phone number"),
+                            )
+                            .child(caption(
+                                "Enter your WhatsApp number. Then on the phone choose “Link with phone number instead” and type the code shown here.",
+                                cx,
+                            ))
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .flex_wrap()
+                                    .gap(t.space.small)
+                                    .child(
+                                        div().flex_1().min_w(t.layout.filter_width).child(
+                                            Input::new(&self.whatsapp_form.phone_input)
+                                                .id("whatsapp-phone-input")
+                                                .aria_label("Phone number for the linking code")
+                                                .small(),
+                                        ),
+                                    )
+                                    .child(
+                                        design::button("whatsapp-get-pair-code", "Get a code", cx)
+                                            .small()
+                                            .on_click(cx.listener(|view, _, _, cx| {
+                                                let phone_number = view
+                                                    .whatsapp_form
+                                                    .phone_input
+                                                    .read(cx)
+                                                    .value()
+                                                    .to_string();
+                                                view.send_connection(
+                                                    ConnectionCommand::RequestPairingCode {
+                                                        phone_number,
+                                                    },
+                                                    cx,
+                                                );
+                                            })),
+                                    ),
+                            )
+                            .children(ticket.pairing_code.clone().map(|code| {
+                                div()
+                                    .id("whatsapp-pairing-code-display")
+                                    .test_support()
+                                    .px(t.space.small)
+                                    .py(t.space.hair)
+                                    .rounded(t.radius.input)
+                                    .bg(t.nav_active_background)
+                                    .sovra_text(TextRole::SectionTitle, cx)
+                                    .text_color(cx.theme().link)
+                                    .child(format!("Type this code on your phone: {code}"))
+                            })),
+                    )
+                    .child(
+                        design::button("whatsapp-refresh-qr-btn", "New code", cx)
+                            .small()
+                            .ghost()
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.send_connection(ConnectionCommand::RefreshWhatsAppQr, cx);
+                            })),
                     ),
-                    cx,
-                ));
-        }
-        col
+            )
     }
 }
 
-fn render_qr_matrix_card(
-    ticket: &WhatsAppQrTicket,
-    cx: &Context<ModelsView>,
-) -> impl IntoElement + use<> {
+/// QR codes have at most 177 modules a side, so the count always fits exactly.
+fn cells_f32(count: usize) -> f32 {
+    u16::try_from(count).map_or(f32::MAX, f32::from)
+}
+
+/// Paints the QR module grid on a canvas: one quad per run of dark modules, black on
+/// white in both themes so phone cameras read it.
+fn render_qr_card(ticket: &WhatsAppQrTicket, cx: &Context<ModelsView>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let dark_module = cx.theme().foreground;
-    let light_module = t.canvas;
+    let matrix = ticket.qr_matrix.clone();
+    let dark = t.scan_code_dark;
+    let light = t.scan_code_light;
+    let side = t.layout.scan_code;
 
-    let mut grid = v_flex()
-        .id("whatsapp-qr-matrix")
-        .test_support()
-        .p(t.space.small)
-        .gap(t.space.hair)
-        .rounded(t.radius.card)
-        .bg(light_module)
-        .border_1()
-        .border_color(cx.theme().border);
-
-    for row in &ticket.qr_matrix {
-        let mut line = h_flex().gap(t.space.hair);
-        for &is_dark in row {
-            line = line.child(div().size(t.space.compact).bg(if is_dark {
-                dark_module
-            } else {
-                light_module
-            }));
-        }
-        grid = grid.child(line);
-    }
+    let grid = canvas(
+        |_, _, _| (),
+        move |bounds: Bounds<Pixels>, (), window, _| {
+            window.paint_quad(fill(bounds, light));
+            let modules = matrix.len();
+            if modules == 0 {
+                return;
+            }
+            // Leave one module of quiet zone on every side, as the QR standard asks.
+            let module = bounds.size.width / (cells_f32(modules) + 2.);
+            let origin = bounds.origin + point(module, module);
+            for (row, cells) in matrix.iter().enumerate() {
+                let mut col = 0;
+                while col < cells.len() {
+                    if !cells[col] {
+                        col += 1;
+                        continue;
+                    }
+                    let start = col;
+                    while col < cells.len() && cells[col] {
+                        col += 1;
+                    }
+                    let run = cells_f32(col - start);
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            origin + point(module * cells_f32(start), module * cells_f32(row)),
+                            size(module * run, module),
+                        ),
+                        dark,
+                    ));
+                }
+            }
+        },
+    )
+    .size(side)
+    .flex_shrink_0();
 
     v_flex()
         .items_center()
         .gap(t.space.hair)
-        .child(grid)
+        .child(
+            div()
+                .id("whatsapp-qr-matrix")
+                .test_support()
+                .rounded(t.radius.card)
+                .border_1()
+                .border_color(cx.theme().border)
+                .child(grid),
+        )
         .child(caption(
             format!(
-                "Ref #{}/6 · {}s · Noise_XX_25519",
-                ticket.rotation_index, ticket.expires_in_secs
+                "The code changes every {} seconds while this window is open.",
+                ticket.expires_in_secs
             ),
             cx,
         ))

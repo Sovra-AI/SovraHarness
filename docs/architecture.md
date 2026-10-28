@@ -141,6 +141,24 @@ users, get legal review or a commercial licence first.
 format is not frozen; back up via `db.export()` before upgrades (future `cargo xtask`
 concern).
 
+### WhatsApp: a real client behind a core port (decided 2026-10-28)
+
+`sovra-core::connections` owns the `MessagingChannel`/`ChannelSession` ports, the link's
+state machine, and the policy that decides which incoming messages Sovra records and
+answers. `sovra-whatsapp` is the only crate naming `whatsapp-rust` (MIT, pure Rust, rustls;
+Noise handshake, Signal encryption, QR and phone-number linking, SQLite credential store)
+and `qrcode`. `sovra-runtime` runs the link in one task: adapter events become
+`ConnectionEvent`s for the UI, incoming messages become ordinary `Command::RunPrompt`s on a
+`whatsapp:<chat>` session, and the runtime's event stream is routed so those sessions'
+answers go back to the phone rather than the chat window. Another messaging service is a
+new `sovra-<service>` adapter plus one line in `sovra-app`. `rusqlite` is pinned to the
+libsqlite3-sys line the WhatsApp store uses because a binary links one SQLite.
+
+Alternatives considered: the Baileys (TypeScript) sidecar used by SovraSRXProduction needs
+Node and a second process; `wa-rs` is an older fork of the same client; writing the
+protocol ourselves duplicates a maintained library. WhatsApp does not officially support
+third-party clients; the UI says so and only personal accounts are linked.
+
 ### Planned (create the crate when the first feature needs it)
 
 - Secrets: `keyring` v4 (`keyring-core` + native stores) — API keys in the OS keychain.

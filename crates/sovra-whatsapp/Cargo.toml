@@ -1,0 +1,18 @@
+[package]
+name = "sovra-whatsapp"
+description = "WhatsApp adapter: links a personal WhatsApp account inside the app with the open-source whatsapp-rust client."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+qrcode = { workspace = true }
+sovra-core = { workspace = true }
+tracing = { workspace = true }
+whatsapp-rust = { workspace = true }
+
+[lints]
+workspace = true

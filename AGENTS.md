@@ -66,6 +66,8 @@ crates/
   sovra-providers  HTTP catalogs, connection validation, OS credentials and model metadata.
   sovra-runtime   tokio on a background thread; serves the UI over channels (Client).
   sovra-store-surreal  SurrealDB adapter for MemoryStore. The only crate naming surrealdb.
+  sovra-whatsapp  WhatsApp Web client adapter for the core MessagingChannel port. The only
+                  crate naming whatsapp-rust and qrcode.
   sovra-ui        GPUI views. The only crate allowed to use gpui-kit.
   sovra-app       binary + composition root: velopack hook, paths, logging, wiring. No logic.
 xtask/            automation: ci, hooks, layering rules (xtask/src/deps.rs)

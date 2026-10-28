@@ -107,7 +107,7 @@ mod tests {
     use super::*;
     #[test]
     fn reads_values_and_quoted_identifiers_without_evaluating_views_or_generated_columns() {
-        let mut db = Connection::open_in_memory().unwrap();
+        let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE \"invoice\"\"lines\" (item TEXT, total INTEGER, calc INTEGER GENERATED ALWAYS AS (total * 2)); INSERT INTO \"invoice\"\"lines\" (item,total) VALUES ('Rose bushes',93); CREATE VIEW risky AS SELECT load_extension('/not/a/library');").unwrap();
         let data = db.serialize(MAIN_DB).unwrap();
         let before = data.to_vec();

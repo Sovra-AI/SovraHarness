@@ -21,6 +21,7 @@ sovra-runtime = { workspace = true }
 sovra-skills = { workspace = true }
 sovra-store-surreal = { workspace = true }
 sovra-ui = { workspace = true }
+sovra-whatsapp = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }

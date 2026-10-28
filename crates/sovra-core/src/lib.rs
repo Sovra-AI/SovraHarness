@@ -47,9 +47,10 @@ pub use chat_history::{
 };
 pub use citations::sources_footer;
 pub use connections::{
-    CompanionClientType, CompanionKeyBundle, ConnectionCommand, ConnectionEvent, ConnectionsState,
-    WA_LINKED_DEVICES_PREFIX, WhatsAppBridgedMessage, WhatsAppQrTicket, WhatsAppStatus,
-    build_qr_matrix, generate_pairing_code,
+    ChannelError, ChannelEvent, ChannelSession, ChannelSink, ChannelStartOptions, ChatKind,
+    ConnectionCommand, ConnectionEvent, ConnectionsState, IncomingMessage, LinkedDevice,
+    MessagingChannel, WhatsAppBridgedMessage, WhatsAppQrTicket, WhatsAppSettings, WhatsAppStatus,
+    is_whatsapp_session, whatsapp_session_id,
 };
 pub use context_budget::{
     ContextAllowance, ContextBudget, ContextLimitError, ContextTrim, media_input_units,

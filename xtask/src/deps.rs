@@ -26,6 +26,9 @@ const LAYERS: &[(&str, &[&str])] = &[
         &["sovra-core", "sovra-adk", "sovra-providers"],
     ),
     ("sovra-store-surreal", &["sovra-core"]),
+    // The WhatsApp Web client (its own crypto, protobuf and credential-store dependency
+    // set) implements the core `MessagingChannel` port; runtime only sees the port.
+    ("sovra-whatsapp", &["sovra-core"]),
     ("sovra-ui", &["sovra-core", "sovra-runtime"]),
     (
         "sovra-app",
@@ -37,6 +40,7 @@ const LAYERS: &[(&str, &[&str])] = &[
             "sovra-skills",
             "sovra-store-surreal",
             "sovra-ui",
+            "sovra-whatsapp",
         ],
     ),
     ("xtask", &[]),
@@ -50,6 +54,16 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
         "async lives in sovra-runtime; the UI talks to it over channels",
     ),
     ("gpui-kit", "sovra-ui", "GPUI is confined to sovra-ui"),
+    (
+        "whatsapp-rust",
+        "sovra-whatsapp",
+        "the WhatsApp Web client is confined to the sovra-whatsapp adapter crate",
+    ),
+    (
+        "qrcode",
+        "sovra-whatsapp",
+        "QR grids are produced by the WhatsApp adapter; the UI only paints the matrix",
+    ),
     (
         "surrealdb",
         "sovra-store-surreal",

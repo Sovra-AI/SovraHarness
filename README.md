@@ -313,6 +313,25 @@ for coverage, extraction limitations, model compatibility, and research sources.
 The file agent selects relevant passages from long files, cites extracted-text line
 ranges, and can page through further text or binary search results when tools are enabled.
 
+## WhatsApp on your phone
+
+**Settings → WhatsApp → Connect WhatsApp** shows a code. On your phone open WhatsApp →
+Settings (or ⋮) → **Linked devices** → **Link a device** and point the camera at it. The
+link completes by itself and the badge turns **Connected**. If you can't scan, type your
+number under "Can't scan?" and WhatsApp gives you an 8-character code to enter on the phone.
+
+Then message yourself on WhatsApp (the chat with your own number, "Message yourself").
+Sovra answers there with the same helpers, memory and web search as the chat window.
+By default it only answers your own chat; a switch in Settings lets it answer other
+people's direct messages too, and another turns automatic answers off. Groups, channels
+and messages that queued while Sovra was closed are never answered. **Unlink WhatsApp**
+removes the link on the phone and deletes the saved credentials.
+
+The client is compiled into the single binary (the open-source `whatsapp-rust` crate,
+WhatsApp Web multi-device protocol); nothing else runs and no business account is needed.
+Credentials and encryption keys are stored only in the app data directory under `whatsapp/`.
+WhatsApp does not officially support third-party clients, so use it with your own account.
+
 ## Shipping
 
 For a local installer, install the build tool with

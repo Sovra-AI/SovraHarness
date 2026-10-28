@@ -1,214 +1,176 @@
-//! Personal messaging & companion channel connections (`Connections`), led by embedded
-//! **`WhatsApp` Personal** (Multi-Device companion protocol: `Noise_XX_25519_AESGCM_SHA256`,
-//! `Curve25519` identity/ephemeral keys, `ADV` HMAC-SHA256 device signature, and QR / 8-char
-//! Crockford Base32 pairing code) directly inside the native Rust binary.
+//! Personal messaging connections ("Connections" in Settings), starting with `WhatsApp`.
 //!
-//! No external server, Node/Go sidecar, or business API account is needed.
-//! Pure domain types, QR matrix encoder, protocol commands/events, and reducer live here.
+//! Pure domain: the link's status, the settings people can change, the reducer the UI
+//! folds events with, the port a messaging adapter implements, and the rule that decides
+//! which incoming messages Sovra may answer. The real `WhatsApp` Web client lives in
+//! `sovra-whatsapp`; `sovra-runtime` drives it and runs the answers through the same
+//! helpers as the chat window.
 
+use std::sync::Arc;
+
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::memory::Timestamp;
 
-/// Canonical `WhatsApp` Web / iOS camera deep-link prefix for companion QR codes.
-pub const WA_LINKED_DEVICES_PREFIX: &str = "https://wa.me/settings/linked_devices#";
+/// Chat sessions that answer `WhatsApp` messages carry this prefix, so the runtime can keep
+/// their replies off the chat window and send them back to the phone instead.
+pub const WHATSAPP_SESSION_PREFIX: &str = "whatsapp:";
 
-/// Crockford Base32 alphabet used by `WhatsApp` 8-character phone pairing codes.
-const CROCKFORD_BASE32: &[u8; 32] = b"123456789ABCDEFGHJKLMNPQRSTVWXYZ";
+/// How many bridged messages the Connections page keeps.
+pub const MAX_RECENT_MESSAGES: usize = 20;
 
-/// Companion web client wire identifier (`WAWebCompanionRegClientUtils.DEVICE_PLATFORM`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum CompanionClientType {
-    Chrome,
-    Safari,
-    #[default]
-    DesktopElectron,
-    OtherWebClient,
+/// The chat session that answers messages from one `WhatsApp` chat.
+pub fn whatsapp_session_id(chat_jid: &str) -> String {
+    format!("{WHATSAPP_SESSION_PREFIX}{chat_jid}")
 }
 
-impl CompanionClientType {
-    pub const fn wire_code(self) -> &'static str {
-        match self {
-            Self::Chrome => "1",
-            Self::Safari => "6",
-            Self::DesktopElectron => "7",
-            Self::OtherWebClient => "9",
-        }
-    }
-
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::Chrome => "Sovra Desktop (Chrome)",
-            Self::Safari => "Sovra Desktop (Safari)",
-            Self::DesktopElectron => "Sovra Desktop",
-            Self::OtherWebClient => "Sovra Personal AI",
-        }
-    }
+/// True for sessions created by [`whatsapp_session_id`].
+pub fn is_whatsapp_session(session_id: &str) -> bool {
+    session_id.starts_with(WHATSAPP_SESSION_PREFIX)
 }
 
-/// Companion key bundle persisted locally so reconnects use `Noise_IK_25519_AESGCM_SHA256`.
+/// Digits only, with the country code and no leading zeros, as `WhatsApp` expects for
+/// phone-number linking. Rejects anything that cannot be a phone number.
+pub fn normalize_phone_number(input: &str) -> Result<String, String> {
+    let digits: String = input.chars().filter(char::is_ascii_digit).collect();
+    let digits = digits.trim_start_matches('0').to_owned();
+    if digits.len() < 7 || digits.len() > 15 {
+        return Err(
+            "Enter your phone number with the country code, for example +44 7700 900123.".into(),
+        );
+    }
+    Ok(digits)
+}
+
+/// The `WhatsApp` account this computer is linked to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CompanionKeyBundle {
-    /// Base64-encoded 32-byte Curve25519 static Noise public key.
-    pub noise_pub_b64: String,
-    /// Base64-encoded 32-byte Curve25519 Signal identity public key.
-    pub identity_pub_b64: String,
-    /// Base64-encoded 32-byte ADV (Account Device Verification) HMAC secret.
-    pub adv_secret_b64: String,
-    /// Companion platform wire type (`"7"` for Desktop).
-    pub client_type: CompanionClientType,
+pub struct LinkedDevice {
+    /// Human-readable phone number, such as `+44 7700 900123`.
+    pub phone_display: String,
+    /// This computer's `WhatsApp` address (`<number>:<device>@s.whatsapp.net`).
+    pub device_jid: String,
+    /// The name `WhatsApp` shows for this link under Linked Devices.
+    pub companion_name: String,
+    pub linked_at: Timestamp,
 }
 
-impl CompanionKeyBundle {
-    /// Deterministic key bundle seeded from a timestamp/nonce (pure, no OS RNG in `sovra-core`).
-    pub fn generate(seed_ms: i64, rotation: u32) -> Self {
-        let noise = derive_32_bytes(seed_ms, rotation, b"SOVRA_WA_NOISE_PUB_25519");
-        let identity = derive_32_bytes(seed_ms, rotation, b"SOVRA_WA_SIGNAL_ID_25519");
-        let adv = derive_32_bytes(seed_ms, rotation, b"SOVRA_WA_ADV_SECRET_HMAC");
-        Self {
-            noise_pub_b64: base64_encode(&noise),
-            identity_pub_b64: base64_encode(&identity),
-            adv_secret_b64: base64_encode(&adv),
-            client_type: CompanionClientType::DesktopElectron,
-        }
-    }
-
-    /// Formats the 5-field `WhatsApp` Web Multi-Device QR payload:
-    /// `ref,noise_pub,identity_pub,adv_secret,client_type`.
-    pub fn format_qr_payload(&self, server_ref: &str) -> String {
-        format!(
-            "{},{},{},{},{}",
-            server_ref,
-            self.noise_pub_b64,
-            self.identity_pub_b64,
-            self.adv_secret_b64,
-            self.client_type.wire_code()
-        )
-    }
-
-    /// Formats the native camera deep-link URL (`https://wa.me/settings/linked_devices#...`).
-    pub fn format_deep_link(&self, server_ref: &str) -> String {
-        format!(
-            "{WA_LINKED_DEVICES_PREFIX}{}",
-            self.format_qr_payload(server_ref)
-        )
-    }
-}
-
-/// Active QR / phone-code pairing session awaiting scan on the user's phone.
+/// A QR code `WhatsApp` issued for this pairing attempt. The payload comes from `WhatsApp`'s
+/// servers and is valid for a short time; the client asks for a new one when it expires.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhatsAppQrTicket {
-    /// Server pairing reference (e.g. `"2@SovraCompanionRef..."`).
-    pub server_ref: String,
-    /// Full 5-field `WhatsApp` Multi-Device QR payload (`ref,noise,identity,adv,7`).
+    /// The text encoded in the QR code.
     pub qr_payload: String,
-    /// Optional 8-character Crockford Base32 phone-linking code (`ABCD-1234`).
-    pub pairing_code: Option<String>,
-    /// Seconds until this QR ref rotates (60s for the first ref, 20s for subsequent refs).
-    pub expires_in_secs: u16,
-    /// Which ref index (`1..=6`) is currently displayed.
-    pub rotation_index: u8,
-    /// Deterministic 29×29 Version-3 QR code module matrix (`true` = dark module).
+    /// Square module grid (`true` = dark). Empty while waiting for the first code.
     pub qr_matrix: Vec<Vec<bool>>,
+    /// Seconds this code stays valid.
+    pub expires_in_secs: u16,
+    /// 8-character code to type on the phone instead of scanning, when requested.
+    pub pairing_code: Option<String>,
 }
 
 impl WhatsAppQrTicket {
-    pub fn new(keys: &CompanionKeyBundle, seed_ms: i64, rotation_index: u8) -> Self {
-        let ref_bytes = derive_32_bytes(seed_ms, u32::from(rotation_index), b"WA_PAIR_DEVICE_REF");
-        let server_ref = format!("2@{}", &base64_encode(&ref_bytes)[..24]);
-        let qr_payload = keys.format_qr_payload(&server_ref);
-        let qr_matrix = build_qr_matrix(&qr_payload);
-        let expires_in_secs = if rotation_index <= 1 { 60 } else { 20 };
+    /// A ticket with no code yet (the link is being set up).
+    pub fn pending() -> Self {
         Self {
-            server_ref,
-            qr_payload,
+            qr_payload: String::new(),
+            qr_matrix: Vec::new(),
+            expires_in_secs: 0,
             pairing_code: None,
-            expires_in_secs,
-            rotation_index: rotation_index.max(1),
-            qr_matrix,
+        }
+    }
+
+    pub fn has_qr(&self) -> bool {
+        !self.qr_matrix.is_empty()
+    }
+}
+
+/// What Sovra does with messages that arrive on the link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WhatsAppSettings {
+    /// Answer messages automatically through the helpers.
+    pub auto_reply_enabled: bool,
+    /// Only answer in the "Message yourself" chat, never other people.
+    pub only_self_chat: bool,
+}
+
+impl Default for WhatsAppSettings {
+    fn default() -> Self {
+        Self {
+            auto_reply_enabled: true,
+            only_self_chat: true,
         }
     }
 }
 
-/// Generates an 8-character Crockford Base32 pairing code (`XXXX-XXXX`) for phone-number linking.
-pub fn generate_pairing_code(phone_number: &str, seed_ms: i64) -> Result<String, String> {
-    let digits: String = phone_number.chars().filter(char::is_ascii_digit).collect();
-    if digits.len() < 7 || digits.len() > 15 {
-        return Err(
-            "Enter your phone number with country code (for example +1 555 234 5678).".into(),
-        );
-    }
-    let raw = derive_32_bytes(
-        seed_ms,
-        u32::try_from(digits.len()).expect("validated phone numbers have at most 15 digits"),
-        digits.as_bytes(),
-    );
-    let mut chars = String::with_capacity(9);
-    for (idx, byte) in raw.iter().take(8).enumerate() {
-        if idx == 4 {
-            chars.push('-');
-        }
-        chars.push(char::from(CROCKFORD_BASE32[usize::from(*byte & 31)]));
-    }
-    Ok(chars)
-}
-
-/// Connection lifecycle state for `WhatsApp` Personal.
+/// Connection lifecycle state for `WhatsApp`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum WhatsAppStatus {
     #[default]
     Disconnected,
-    /// Opening WebSocket & running `Noise_XX_25519_AESGCM_SHA256` handshake + QR rotation.
-    AwaitingQrScan {
-        ticket: WhatsAppQrTicket,
-    },
-    /// Phone scanned the QR code; verifying `AdvSignedDeviceIdentityHmac` and syncing keys.
-    VerifyingHandshake {
-        device_label: String,
-    },
-    /// Linked as an official `WhatsApp` Multi-Device companion (`s.whatsapp.net`).
-    Connected {
-        phone_display: String,
-        device_jid: String,
-        companion_name: String,
-        linked_at: Timestamp,
-        auto_reply_enabled: bool,
-        only_self_chat: bool,
-    },
-    Error {
-        message: String,
-    },
+    /// Opening the connection to `WhatsApp`. `pairing` is true for a new link (the QR
+    /// window is open) and false when resuming a saved one in the background.
+    Connecting { pairing: bool },
+    /// `WhatsApp` issued a code; waiting for the phone to scan or type it.
+    AwaitingQrScan { ticket: WhatsAppQrTicket },
+    /// The phone accepted the link; keys are being exchanged.
+    VerifyingHandshake { device_label: String },
+    /// Linked. `online` is false while the connection is being re-established.
+    Connected { device: LinkedDevice, online: bool },
+    /// The last attempt failed; the message says what to do.
+    Error { message: String },
 }
 
 impl WhatsAppStatus {
+    /// Linked and online.
     pub const fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected { online: true, .. })
+    }
+
+    /// Linked, whether or not the connection is up right now.
+    pub const fn is_linked(&self) -> bool {
         matches!(self, Self::Connected { .. })
     }
 
     pub const fn is_pairing(&self) -> bool {
         matches!(
             self,
-            Self::AwaitingQrScan { .. } | Self::VerifyingHandshake { .. }
+            Self::Connecting { pairing: true }
+                | Self::AwaitingQrScan { .. }
+                | Self::VerifyingHandshake { .. }
         )
+    }
+
+    pub fn linked_device(&self) -> Option<&LinkedDevice> {
+        match self {
+            Self::Connected { device, .. } => Some(device),
+            Self::Disconnected
+            | Self::Connecting { .. }
+            | Self::AwaitingQrScan { .. }
+            | Self::VerifyingHandshake { .. }
+            | Self::Error { .. } => None,
+        }
     }
 
     pub fn badge_label(&self) -> &'static str {
         match self {
             Self::Disconnected => "Not connected",
-            Self::AwaitingQrScan { .. } => "Scan QR code on phone",
-            Self::VerifyingHandshake { .. } => "Securing link…",
-            Self::Connected { .. } => "Connected · Live",
+            Self::Connecting { .. } => "Connecting…",
+            Self::AwaitingQrScan { .. } => "Scan the code on your phone",
+            Self::VerifyingHandshake { .. } => "Finishing the link…",
+            Self::Connected { online: true, .. } => "Connected",
+            Self::Connected { online: false, .. } => "Reconnecting…",
             Self::Error { .. } => "Needs attention",
         }
     }
 }
 
-/// A message bridged between `WhatsApp` Personal and Sovra.
+/// A message that came in over `WhatsApp` and what Sovra answered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhatsAppBridgedMessage {
     pub id: String,
+    pub chat_jid: String,
     pub sender_name: String,
     pub sender_jid: String,
     pub text: String,
@@ -216,51 +178,42 @@ pub struct WhatsAppBridgedMessage {
     pub received_at: Timestamp,
 }
 
-/// Complete persisted & live state for the `Connections` workspace tab.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Complete persisted and live state for Connections.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ConnectionsState {
     pub whatsapp: WhatsAppStatus,
-    pub keys: CompanionKeyBundle,
+    pub settings: WhatsAppSettings,
+    #[serde(default)]
     pub qr_modal_open: bool,
+    #[serde(default)]
     pub recent_messages: Vec<WhatsAppBridgedMessage>,
+    #[serde(default)]
     pub notice: Option<String>,
 }
 
-impl Default for ConnectionsState {
-    fn default() -> Self {
-        Self {
-            whatsapp: WhatsAppStatus::Disconnected,
-            keys: CompanionKeyBundle::generate(1_793_080_000_000, 1),
-            qr_modal_open: false,
-            recent_messages: Vec::new(),
-            notice: None,
-        }
-    }
-}
-
-/// Commands sent from UI to `sovra-runtime` for personal channel connections.
+/// Commands sent from the UI to `sovra-runtime` for personal connections.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionCommand {
-    /// Load saved companion session from the store on startup.
+    /// Ask for the current state (sent once the UI is ready).
     Load,
-    /// Start the embedded `Noise_XX_25519` pairing session and open the QR code modal.
+    /// Start a new link: open the QR window and ask `WhatsApp` for a code.
     StartWhatsAppPairing,
-    /// Rotate to the next `pair-device` QR code reference (`1..=6`).
+    /// Start over with a fresh code.
     RefreshWhatsAppQr,
-    /// Request an 8-character Crockford Base32 code for phone-number linking.
-    RequestPairingCode { phone_number: String },
-    /// Complete the QR scan handshake (either from phone scan frame or test/demo confirmation).
-    ConfirmWhatsAppScan { phone_display: String },
-    /// Update auto-reply or "Message Yourself only" guardrail on a linked `WhatsApp` session.
-    UpdateWhatsAppSettings {
-        auto_reply_enabled: bool,
-        only_self_chat: bool,
+    /// Link by typing a code on the phone instead of scanning.
+    RequestPairingCode {
+        phone_number: String,
     },
-    /// Send a test message or bridge an incoming `WhatsApp` message into Sovra.
-    SendTestWhatsAppMessage { text: String },
-    /// Cancel an in-progress QR pairing modal.
+    /// Close the QR window and stop the attempt.
     CancelPairing,
-    /// Unlink the companion device and clear its active session.
+    UpdateWhatsAppSettings {
+        settings: WhatsAppSettings,
+    },
+    /// Send a message to your own `WhatsApp` chat to check the link works.
+    SendTestWhatsAppMessage {
+        text: String,
+    },
+    /// Unlink this computer from the phone and forget the saved link.
     DisconnectWhatsApp,
 }
 
@@ -268,287 +221,424 @@ pub enum ConnectionCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionEvent {
     Loaded(Box<ConnectionsState>),
-    QrGenerated(WhatsAppQrTicket),
-    PairingCodeGenerated {
-        code: String,
-    },
-    Connected {
-        phone_display: String,
-        device_jid: String,
-        companion_name: String,
-        linked_at: Timestamp,
-    },
-    SettingsUpdated {
-        auto_reply_enabled: bool,
-        only_self_chat: bool,
-    },
+    StatusChanged(WhatsAppStatus),
+    SettingsUpdated(WhatsAppSettings),
     MessageBridged(WhatsAppBridgedMessage),
-    Disconnected,
-    Error(String),
+    /// Sovra's answer to the bridged message `message_id` was sent to the phone.
+    ReplySent {
+        message_id: String,
+        reply: String,
+    },
+    /// A short message for the Connections page (confirmation or problem).
+    Notice(String),
 }
 
 impl ConnectionsState {
     pub fn apply(&mut self, event: &ConnectionEvent) {
         match event {
             ConnectionEvent::Loaded(saved) => {
-                let modal = self.qr_modal_open;
                 *self = (**saved).clone();
-                if self.whatsapp.is_pairing() {
-                    self.qr_modal_open = modal;
-                }
             }
-            ConnectionEvent::QrGenerated(ticket) => {
-                self.whatsapp = WhatsAppStatus::AwaitingQrScan {
-                    ticket: ticket.clone(),
+            ConnectionEvent::StatusChanged(status) => {
+                self.qr_modal_open = match status {
+                    WhatsAppStatus::Connecting { pairing: true }
+                    | WhatsAppStatus::AwaitingQrScan { .. }
+                    | WhatsAppStatus::VerifyingHandshake { .. } => true,
+                    WhatsAppStatus::Connected { .. } | WhatsAppStatus::Disconnected => false,
+                    WhatsAppStatus::Connecting { pairing: false }
+                    | WhatsAppStatus::Error { .. } => self.qr_modal_open,
                 };
-                self.qr_modal_open = true;
-                self.notice = None;
-            }
-            ConnectionEvent::PairingCodeGenerated { code } => {
-                if let WhatsAppStatus::AwaitingQrScan { ticket } = &mut self.whatsapp {
-                    ticket.pairing_code = Some(code.clone());
+                if status.is_pairing() {
+                    self.notice = None;
                 }
-                self.notice = Some(format!(
-                    "Enter code {code} on your phone under WhatsApp → Linked Devices → Link with phone number."
-                ));
+                self.whatsapp = status.clone();
             }
-            ConnectionEvent::Connected {
-                phone_display,
-                device_jid,
-                companion_name,
-                linked_at,
-            } => {
-                self.whatsapp = WhatsAppStatus::Connected {
-                    phone_display: phone_display.clone(),
-                    device_jid: device_jid.clone(),
-                    companion_name: companion_name.clone(),
-                    linked_at: *linked_at,
-                    auto_reply_enabled: true,
-                    only_self_chat: true,
-                };
-                self.qr_modal_open = false;
-                self.notice = Some(
-                    "WhatsApp Personal is now linked! Message yourself on WhatsApp to chat with Sovra from your phone."
-                        .into(),
-                );
+            ConnectionEvent::SettingsUpdated(settings) => {
+                self.settings = *settings;
             }
-            ConnectionEvent::SettingsUpdated {
-                auto_reply_enabled,
-                only_self_chat,
-            } => {
-                if let WhatsAppStatus::Connected {
-                    auto_reply_enabled: auto_reply,
-                    only_self_chat: self_only,
-                    ..
-                } = &mut self.whatsapp
+            ConnectionEvent::MessageBridged(message) => {
+                self.recent_messages.insert(0, message.clone());
+                self.recent_messages.truncate(MAX_RECENT_MESSAGES);
+            }
+            ConnectionEvent::ReplySent { message_id, reply } => {
+                if let Some(message) = self
+                    .recent_messages
+                    .iter_mut()
+                    .find(|message| message.id == *message_id)
                 {
-                    *auto_reply = *auto_reply_enabled;
-                    *self_only = *only_self_chat;
+                    message.reply_text = Some(reply.clone());
                 }
             }
-            ConnectionEvent::MessageBridged(msg) => {
-                self.recent_messages.insert(0, msg.clone());
-                self.recent_messages.truncate(20);
-            }
-            ConnectionEvent::Disconnected => {
-                self.whatsapp = WhatsAppStatus::Disconnected;
-                self.qr_modal_open = false;
-                self.notice = Some("WhatsApp companion device unlinked.".into());
-            }
-            ConnectionEvent::Error(message) => {
-                self.notice = Some(message.clone());
+            ConnectionEvent::Notice(notice) => {
+                self.notice = Some(notice.clone());
             }
         }
     }
 }
 
-/// Builds a valid, scannable-style 29×29 QR code module grid (ISO/IEC 18004 Version 3
-/// geometry: three 7×7 finder patterns, quiet separators, timing patterns, dark module,
-/// alignment pattern at (20,20), and payload bit encoding with mask 0).
-pub fn build_qr_matrix(payload: &str) -> Vec<Vec<bool>> {
-    const SIZE: usize = 29;
-    let mut grid = vec![vec![false; SIZE]; SIZE];
-    let mut reserved = vec![vec![false; SIZE]; SIZE];
+// ---------------------------------------------------------------------------
+// Port: the messaging channel an adapter implements.
+// ---------------------------------------------------------------------------
 
-    let mut place_finder = |row0: usize, col0: usize| {
-        for r in 0..7 {
-            for c in 0..7 {
-                let border = r == 0 || r == 6 || c == 0 || c == 6;
-                let inner = (2..=4).contains(&r) && (2..=4).contains(&c);
-                grid[row0 + r][col0 + c] = border || inner;
-                reserved[row0 + r][col0 + c] = true;
-            }
-        }
-        // White separator around finder pattern
-        for r in row0.saturating_sub(1)..=(row0 + 7).min(SIZE - 1) {
-            for c in col0.saturating_sub(1)..=(col0 + 7).min(SIZE - 1) {
-                if !reserved[r][c] {
-                    grid[r][c] = false;
-                    reserved[r][c] = true;
-                }
-            }
-        }
-    };
-
-    place_finder(0, 0);
-    place_finder(0, SIZE - 7);
-    place_finder(SIZE - 7, 0);
-
-    // Timing patterns on row 6 and col 6
-    for i in 8..(SIZE - 8) {
-        grid[6][i] = i % 2 == 0;
-        reserved[6][i] = true;
-        grid[i][6] = i % 2 == 0;
-        reserved[i][6] = true;
-    }
-
-    // Version 3 alignment pattern (5x5 centered at 22, 22 -> top-left 20, 20)
-    for r in 20..25 {
-        for c in 20..25 {
-            let border = r == 20 || r == 24 || c == 20 || c == 24;
-            let center = r == 22 && c == 22;
-            grid[r][c] = border || center;
-            reserved[r][c] = true;
-        }
-    }
-
-    // Dark module
-    grid[SIZE - 8][8] = true;
-    reserved[SIZE - 8][8] = true;
-
-    // Fill unreserved data modules deterministically from the WhatsApp payload bytes
-    let bytes = payload.as_bytes();
-    let mut bit_idx = 0usize;
-    for r in 0..SIZE {
-        for c in 0..SIZE {
-            if reserved[r][c] {
-                continue;
-            }
-            let b = bytes[bit_idx / 8 % bytes.len()];
-            let shift = 7 - (bit_idx % 8);
-            let bit = ((b >> shift) & 1) == 1;
-            let mask = (r + c) % 2 == 0;
-            grid[r][c] = bit ^ mask;
-            bit_idx += 1;
-        }
-    }
-    grid
+/// How to open the link.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChannelStartOptions {
+    /// Also ask for an 8-character code for this phone number (digits only).
+    pub phone_number: Option<String>,
 }
 
-fn derive_32_bytes(seed_ms: i64, counter: u32, domain: &[u8]) -> [u8; 32] {
-    let mut state = [0u8; 32];
-    let seed_bytes = seed_ms.to_le_bytes();
-    let counter_bytes = counter.to_le_bytes();
-    for (byte_index, slot) in (0_u8..32).zip(state.iter_mut()) {
-        let i = usize::from(byte_index);
-        let d = domain[i % domain.len()];
-        let s = seed_bytes[i % seed_bytes.len()];
-        let c = counter_bytes[i % counter_bytes.len()];
-        let mix = byte_index
-            .wrapping_mul(37)
-            .wrapping_add(d)
-            .wrapping_add(s.rotate_left(u32::from(byte_index % 7)))
-            ^ c.wrapping_mul(53);
-        *slot = if mix == 0 { 0x42 } else { mix };
-    }
-    state
+/// A message received on the channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncomingMessage {
+    pub id: String,
+    /// The chat it arrived in (a person, or your own "Message yourself" chat).
+    pub chat_jid: String,
+    pub sender_jid: String,
+    pub sender_name: String,
+    pub text: String,
+    /// Sent from this account (from the phone, or mirrored from another device).
+    pub from_me: bool,
+    pub chat: ChatKind,
+    /// Delivered from the queue of messages that arrived while the link was offline.
+    pub backlog: bool,
 }
 
-fn base64_encode(input: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let b0 = u32::from(chunk[0]);
-        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
-        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(char::from(TABLE[((triple >> 18) & 0x3F) as usize]));
-        out.push(char::from(TABLE[((triple >> 12) & 0x3F) as usize]));
-        if chunk.len() > 1 {
-            out.push(char::from(TABLE[((triple >> 6) & 0x3F) as usize]));
-        } else {
-            out.push('=');
-        }
-        if chunk.len() > 2 {
-            out.push(char::from(TABLE[(triple & 0x3F) as usize]));
-        } else {
-            out.push('=');
-        }
-    }
-    out
+/// What kind of chat a message arrived in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatKind {
+    /// A one-to-one chat with another person.
+    Direct,
+    /// This account's own "Message yourself" chat.
+    SelfChat,
+    Group,
 }
+
+impl IncomingMessage {
+    pub const fn is_self_chat(&self) -> bool {
+        matches!(self.chat, ChatKind::SelfChat)
+    }
+}
+
+/// What the channel adapter reports while a link is open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelEvent {
+    Connecting,
+    QrCode {
+        payload: String,
+        matrix: Vec<Vec<bool>>,
+        expires_in_secs: u16,
+    },
+    PairingCode {
+        code: String,
+        expires_in_secs: u16,
+    },
+    PairingCodeFailed {
+        message: String,
+    },
+    /// The phone accepted the code; the link is being finished.
+    Scanned {
+        device_label: String,
+    },
+    Connected {
+        device: LinkedDevice,
+    },
+    /// The connection dropped; the adapter reconnects on its own.
+    Offline {
+        reason: String,
+    },
+    /// The phone removed this link (or `WhatsApp` ended it). The saved link is useless now.
+    LoggedOut {
+        reason: String,
+    },
+    /// The attempt is over and needs the person to act.
+    Failed {
+        message: String,
+    },
+    Message(IncomingMessage),
+}
+
+/// Receives [`ChannelEvent`]s; adapters call it from their own tasks.
+pub type ChannelSink = Arc<dyn Fn(ChannelEvent) + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ChannelError {
+    /// The adapter is not available in this build or configuration.
+    #[error("{0}")]
+    Unavailable(String),
+    #[error("{0}")]
+    Failed(String),
+}
+
+/// A personal messaging service the app can link (`WhatsApp` today).
+#[async_trait]
+pub trait MessagingChannel: Send + Sync {
+    /// Opens a link, resuming saved credentials when there are any; otherwise `WhatsApp`
+    /// issues QR codes through `events`.
+    async fn start(
+        &self,
+        options: ChannelStartOptions,
+        events: ChannelSink,
+    ) -> Result<Arc<dyn ChannelSession>, ChannelError>;
+
+    /// Whether credentials from an earlier link are saved on this computer.
+    fn has_saved_link(&self) -> bool;
+
+    /// Deletes saved credentials so the next start pairs afresh.
+    fn forget(&self) -> Result<(), ChannelError>;
+}
+
+/// One open link.
+#[async_trait]
+pub trait ChannelSession: Send + Sync {
+    /// Sends plain text and returns the message id `WhatsApp` assigned.
+    async fn send_text(&self, chat_jid: &str, text: &str) -> Result<String, ChannelError>;
+
+    /// Removes this link from the phone and closes the connection.
+    async fn logout(&self);
+
+    /// Closes the connection, keeping saved credentials.
+    async fn stop(&self);
+
+    /// This account's own "Message yourself" chat, once linked.
+    fn own_chat_jid(&self) -> Option<String>;
+}
+
+// ---------------------------------------------------------------------------
+// Policy: which messages Sovra records and answers.
+// ---------------------------------------------------------------------------
+
+/// True when a message is something a person wrote in a chat Sovra may take part in:
+/// not a group, broadcast, channel or server notice, not empty, and not our own
+/// outgoing message mirrored from the phone (unless it is the "Message yourself" chat,
+/// where everything is from this account by definition).
+pub fn should_record(message: &IncomingMessage) -> bool {
+    if message.text.trim().is_empty() || message.chat == ChatKind::Group {
+        return false;
+    }
+    let chat = message.chat_jid.as_str();
+    if chat.ends_with("@broadcast") || chat.ends_with("@newsletter") || chat.starts_with("0@") {
+        return false;
+    }
+    !message.from_me || message.is_self_chat()
+}
+
+/// True when Sovra should answer the message through the helpers. Messages that waited in
+/// the offline queue are recorded but not answered: answering a day-old message surprises
+/// people.
+pub fn should_answer(message: &IncomingMessage, settings: &WhatsAppSettings) -> bool {
+    should_record(message)
+        && !message.backlog
+        && settings.auto_reply_enabled
+        && (message.is_self_chat() || !settings.only_self_chat)
+}
+
+/// What the phone shows when Sovra cannot answer because no model is connected yet.
+pub const NO_MODEL_REPLY: &str =
+    "Sovra isn't connected to an AI yet. Open Sovra on your computer and connect one in Models.";
+
+/// What the phone shows when answering failed. Never includes the error: it may contain
+/// addresses or settings that do not belong in a chat.
+pub const ANSWER_FAILED_REPLY: &str =
+    "Sorry, I couldn't answer that right now. Open Sovra on your computer to see what went wrong.";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn qr_payload_matches_whatsapp_web_five_field_multi_device_spec() {
-        let keys = CompanionKeyBundle::generate(1_793_080_000_000, 1);
-        let ticket = WhatsAppQrTicket::new(&keys, 1_793_080_000_000, 1);
-        let parts: Vec<&str> = ticket.qr_payload.split(',').collect();
-        assert_eq!(
-            parts.len(),
-            5,
-            "WA Web MD QR requires 5 comma-separated fields"
-        );
-        assert!(parts[0].starts_with("2@"));
-        assert_eq!(
-            parts[1].len(),
-            44,
-            "32-byte Curve25519 Noise pubkey in base64"
-        );
-        assert_eq!(
-            parts[2].len(),
-            44,
-            "32-byte Signal identity pubkey in base64"
-        );
-        assert_eq!(parts[3].len(), 44, "32-byte ADV HMAC secret in base64");
-        assert_eq!(parts[4], "7", "Desktop companion client type wire ID");
-        assert_eq!(ticket.expires_in_secs, 60);
-        assert_eq!(ticket.qr_matrix.len(), 29);
-        assert!(ticket.qr_matrix.iter().all(|row| row.len() == 29));
-    }
-
-    #[test]
-    fn pairing_code_uses_crockford_base32_and_validates_phone_numbers() {
-        assert!(generate_pairing_code("123", 100).is_err());
-        let code = generate_pairing_code("+1 (555) 234-5678", 1_793_080_000_000).unwrap();
-        assert_eq!(code.len(), 9);
-        assert_eq!(&code[4..5], "-");
-        for ch in code.chars().filter(|c| *c != '-') {
-            assert!(
-                CROCKFORD_BASE32.contains(&(ch as u8)),
-                "character {ch} must be in Crockford Base32"
-            );
+    fn message(chat: &str, from_me: bool, is_self_chat: bool) -> IncomingMessage {
+        IncomingMessage {
+            id: "m1".into(),
+            chat_jid: chat.into(),
+            sender_jid: "447700900123@s.whatsapp.net".into(),
+            sender_name: "Sam".into(),
+            text: "hello".into(),
+            from_me,
+            chat: if is_self_chat {
+                ChatKind::SelfChat
+            } else {
+                ChatKind::Direct
+            },
+            backlog: false,
         }
     }
 
     #[test]
-    fn reducer_transitions_from_qr_to_connected_and_bridges_messages() {
+    fn session_ids_are_prefixed_and_recognised() {
+        let id = whatsapp_session_id("447700900123@s.whatsapp.net");
+        assert_eq!(id, "whatsapp:447700900123@s.whatsapp.net");
+        assert!(is_whatsapp_session(&id));
+        assert!(!is_whatsapp_session("chat-1"));
+    }
+
+    #[test]
+    fn phone_numbers_become_digits_with_country_code() {
+        assert_eq!(
+            normalize_phone_number("+44 (0)7700 900123"),
+            Ok("4407700900123".into())
+        );
+        assert_eq!(
+            normalize_phone_number("1 555 234 5678"),
+            Ok("15552345678".into())
+        );
+        assert!(normalize_phone_number("hello").is_err());
+        assert!(normalize_phone_number("12345").is_err());
+    }
+
+    #[test]
+    fn self_chat_and_other_people_are_recorded_but_echoes_and_groups_are_not() {
+        assert!(should_record(&message(
+            "447700900123@s.whatsapp.net",
+            true,
+            true
+        )));
+        assert!(should_record(&message(
+            "447700900999@s.whatsapp.net",
+            false,
+            false
+        )));
+        // Our own message to someone else, mirrored from the phone.
+        assert!(!should_record(&message(
+            "447700900999@s.whatsapp.net",
+            true,
+            false
+        )));
+        let mut group = message("1234-5678@g.us", false, false);
+        group.chat = ChatKind::Group;
+        assert!(!should_record(&group));
+        assert!(!should_record(&message("status@broadcast", false, false)));
+        assert!(!should_record(&message("123@newsletter", false, false)));
+        let mut empty = message("447700900999@s.whatsapp.net", false, false);
+        empty.text = "  ".into();
+        assert!(!should_record(&empty));
+    }
+
+    #[test]
+    fn answering_follows_the_settings_and_skips_the_backlog() {
+        let safe = WhatsAppSettings::default();
+        assert!(should_answer(
+            &message("447700900123@s.whatsapp.net", true, true),
+            &safe
+        ));
+        assert!(!should_answer(
+            &message("447700900999@s.whatsapp.net", false, false),
+            &safe
+        ));
+        let everyone = WhatsAppSettings {
+            only_self_chat: false,
+            ..safe
+        };
+        assert!(should_answer(
+            &message("447700900999@s.whatsapp.net", false, false),
+            &everyone
+        ));
+        let off = WhatsAppSettings {
+            auto_reply_enabled: false,
+            ..safe
+        };
+        assert!(!should_answer(
+            &message("447700900123@s.whatsapp.net", true, true),
+            &off
+        ));
+        let mut old = message("447700900123@s.whatsapp.net", true, true);
+        old.backlog = true;
+        assert!(!should_answer(&old, &safe));
+    }
+
+    #[test]
+    fn reducer_opens_the_qr_window_while_pairing_and_closes_it_when_linked() {
         let mut state = ConnectionsState::default();
-        let ticket = WhatsAppQrTicket::new(&state.keys, 1_000, 1);
-        state.apply(&ConnectionEvent::QrGenerated(ticket));
+        state.apply(&ConnectionEvent::StatusChanged(
+            WhatsAppStatus::Connecting { pairing: true },
+        ));
+        assert!(state.qr_modal_open);
+        state.apply(&ConnectionEvent::StatusChanged(
+            WhatsAppStatus::AwaitingQrScan {
+                ticket: WhatsAppQrTicket {
+                    qr_payload: "2@abc".into(),
+                    qr_matrix: vec![vec![true]],
+                    expires_in_secs: 60,
+                    pairing_code: None,
+                },
+            },
+        ));
         assert!(state.qr_modal_open);
         assert!(state.whatsapp.is_pairing());
-
-        state.apply(&ConnectionEvent::Connected {
-            phone_display: "+1 555-0199".into(),
-            device_jid: "15550199:42@s.whatsapp.net".into(),
-            companion_name: "Sovra Desktop".into(),
-            linked_at: Timestamp(2_000),
-        });
+        state.apply(&ConnectionEvent::StatusChanged(WhatsAppStatus::Error {
+            message: "The code expired.".into(),
+        }));
+        assert!(
+            state.qr_modal_open,
+            "an error keeps the window so people can retry"
+        );
+        let device = LinkedDevice {
+            phone_display: "+44 7700 900123".into(),
+            device_jid: "447700900123:7@s.whatsapp.net".into(),
+            companion_name: "Sovra".into(),
+            linked_at: Timestamp(1),
+        };
+        state.apply(&ConnectionEvent::StatusChanged(WhatsAppStatus::Connected {
+            device,
+            online: true,
+        }));
         assert!(!state.qr_modal_open);
         assert!(state.whatsapp.is_connected());
+        // Resuming in the background never pops the window.
+        state.apply(&ConnectionEvent::StatusChanged(
+            WhatsAppStatus::Connecting { pairing: false },
+        ));
+        assert!(!state.qr_modal_open);
+    }
 
-        state.apply(&ConnectionEvent::MessageBridged(WhatsAppBridgedMessage {
-            id: "wa-1".into(),
-            sender_name: "You (Note to Self)".into(),
-            sender_jid: "15550199@s.whatsapp.net".into(),
-            text: "Summarize my afternoon schedule".into(),
-            reply_text: Some("You have 2 meetings this afternoon.".into()),
-            received_at: Timestamp(3_000),
-        }));
-        assert_eq!(state.recent_messages.len(), 1);
+    #[test]
+    fn messages_are_kept_newest_first_with_their_replies() {
+        let mut state = ConnectionsState::default();
+        for n in 0..(MAX_RECENT_MESSAGES + 3) {
+            state.apply(&ConnectionEvent::MessageBridged(WhatsAppBridgedMessage {
+                id: format!("m{n}"),
+                chat_jid: "447700900123@s.whatsapp.net".into(),
+                sender_name: "You".into(),
+                sender_jid: "447700900123@s.whatsapp.net".into(),
+                text: format!("message {n}"),
+                reply_text: None,
+                received_at: Timestamp(i64::try_from(n).unwrap()),
+            }));
+        }
+        assert_eq!(state.recent_messages.len(), MAX_RECENT_MESSAGES);
+        assert_eq!(state.recent_messages[0].id, "m22");
+        state.apply(&ConnectionEvent::ReplySent {
+            message_id: "m22".into(),
+            reply: "Here you go".into(),
+        });
+        assert_eq!(
+            state.recent_messages[0].reply_text.as_deref(),
+            Some("Here you go")
+        );
+        state.apply(&ConnectionEvent::Notice("Sent.".into()));
+        assert_eq!(state.notice.as_deref(), Some("Sent."));
+    }
+
+    #[test]
+    fn saved_state_round_trips_through_json() {
+        let state = ConnectionsState {
+            whatsapp: WhatsAppStatus::Connected {
+                device: LinkedDevice {
+                    phone_display: "+44 7700 900123".into(),
+                    device_jid: "447700900123:7@s.whatsapp.net".into(),
+                    companion_name: "Sovra".into(),
+                    linked_at: Timestamp(5),
+                },
+                online: true,
+            },
+            settings: WhatsAppSettings {
+                auto_reply_enabled: false,
+                only_self_chat: true,
+            },
+            qr_modal_open: false,
+            recent_messages: Vec::new(),
+            notice: None,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: ConnectionsState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, state);
     }
 }

@@ -145,3 +145,34 @@ pub enum Event {
     /// The runtime has stopped; no further events follow.
     Stopped,
 }
+
+impl Event {
+    /// The chat session this event belongs to, when it belongs to one. The runtime uses
+    /// it to keep events for sessions that answer other channels (`WhatsApp`) off the
+    /// chat window.
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            Self::AgUi { session_id, .. }
+            | Self::AgentResponseStarted { session_id, .. }
+            | Self::AgentChunk { session_id, .. }
+            | Self::AgentThinkingChunk { session_id, .. }
+            | Self::AgUiSurface { session_id, .. }
+            | Self::AgentCompleted { session_id }
+            | Self::AgentError { session_id, .. }
+            | Self::ChatTitleGenerated { session_id, .. } => Some(session_id),
+            Self::FilePrepared(prepared) => Some(&prepared.session_id),
+            Self::Memory(_)
+            | Self::Models(_)
+            | Self::FileIndex(_)
+            | Self::Skills(_)
+            | Self::Teams(_)
+            | Self::Artifacts(_)
+            | Self::Connections(_)
+            | Self::ChatHistoryLoaded { .. }
+            | Self::Ready { .. }
+            | Self::Pong
+            | Self::RouteEvaluated { .. }
+            | Self::Stopped => None,
+        }
+    }
+}
