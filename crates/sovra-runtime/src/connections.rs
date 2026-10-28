@@ -153,7 +153,12 @@ impl Actor {
                 }
             }
             Ok(None) => {}
-            Err(error) => tracing::warn!(%error, "failed to load connections state"),
+            Err(error) => {
+                // A record from an older shape (the mock pairing screen) cannot be read;
+                // replace it once so the warning does not repeat on every launch.
+                tracing::warn!(%error, "saved connections state unreadable; starting over");
+                self.save().await;
+            }
         }
     }
 
