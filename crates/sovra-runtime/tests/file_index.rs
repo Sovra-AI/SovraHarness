@@ -75,6 +75,7 @@ fn knowledge_review_flows_through_client_and_duplicate_review_reports_an_error()
             issues: vec![],
             completed_at: Some(1),
             auto_refresh: false,
+            scan_options: sovra_core::file_index::ScanOptions::default(),
         }),
     });
     let client = sovra_runtime::start_with_file_index(
@@ -254,6 +255,7 @@ fn scans_leave_ping_and_search_responsive_and_cancel_reaches_the_blocking_worker
             issues: vec![],
             completed_at: None,
             auto_refresh: false,
+            scan_options: sovra_core::file_index::ScanOptions::default(),
         }),
     });
     let client = sovra_runtime::start_with_file_index(

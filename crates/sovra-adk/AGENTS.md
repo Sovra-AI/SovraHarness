@@ -11,3 +11,7 @@ protocol events with the Agent Development Kit execution engine.
   constructed once in `sovra-app`.
 - Never depend on `tokio` directly (`sovra-runtime` owns the `tokio` runtime).
 - Unit-test agent execution offline with fake `adk_core::Llm` implementations.
+- **Skills page registration:** Whenever a new specialist agent or tool is wired into
+  `sovra-adk`, register it in `sovra_core::skills::builtin_skills()` with plain-English
+  grandma-friendly copy and an example prompt so users can discover and run it from the
+  Skills page.

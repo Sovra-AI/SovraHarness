@@ -475,7 +475,18 @@ mod tests {
             window.render_frame(cx);
             assert!(window.find(("skill-instructions-box", 13usize)).visible());
 
-            // Click "Try in chat" on web-search -> switches to Chat and fills `/web-search `
+            // Click "Try example" on web-search -> switches to Chat and fills the full example question
+            window.click(("skill-try-example", 13usize), cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                "/web-search What are three easy, healthy Mediterranean dinner ideas?"
+            );
+
+            // Return to Skills, filter by Web search, and click "Try in chat" -> fills `/web-search `
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
             window.click(("skill-use", 13usize), cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);

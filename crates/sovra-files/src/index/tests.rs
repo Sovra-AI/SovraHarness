@@ -62,6 +62,165 @@ impl ScanObserver for Observer {
 }
 
 #[test]
+fn index_storage_does_not_reinstate_the_former_one_gib_page_cap() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    for _ in 0..2 {
+        let db = store.connect().unwrap();
+        let max_pages: i64 = db
+            .query_row("PRAGMA max_page_count", [], |row| row.get(0))
+            .unwrap();
+        assert!(max_pages > 262_144);
+    }
+}
+
+#[test]
+fn former_scan_budget_thresholds_do_not_prevent_the_next_file() {
+    let fixture = Fixture::new();
+    fixture.write("next.txt", "Nextneedle is included.");
+    let store = fixture.store();
+    let mut root = store.add_root(&fixture.source()).unwrap();
+    root.progress.visited = 100_000;
+    root.progress.bytes_read = 1024 * 1024 * 1024;
+    let mut db = store.connect().unwrap();
+    let activity = super::history::begin(&db, &root.id).unwrap();
+    scan::run(
+        &mut db,
+        &mut root,
+        &store.directory,
+        &Observer::default(),
+        activity,
+    )
+    .unwrap();
+    assert_eq!(root.progress.indexed, 1);
+    assert!(root.progress.bytes_read > 1024 * 1024 * 1024);
+}
+
+#[test]
+fn cancelling_a_large_source_transaction_preserves_its_previous_snapshot() {
+    struct DuringWrite(AtomicBool, u64);
+    impl ScanObserver for DuringWrite {
+        fn cancellation(&self) -> Option<ScanCancellation> {
+            self.0
+                .load(Ordering::Relaxed)
+                .then_some(ScanCancellation::Requested)
+        }
+        fn progress(&self, root: &IndexedRoot) {
+            if root.progress.bytes_read > self.1 {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let fixture = Fixture::new();
+    fixture.write(
+        "notes.txt",
+        "Originalneedle stays available until a complete replacement.",
+    );
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let text = format!(
+        "{}\nReplacementneedle is new.",
+        "Large source 京都.\n".repeat(400_000)
+    );
+    fixture.write("notes.txt", &text);
+    let cancelled = store
+        .scan(
+            &root.id,
+            &DuringWrite(AtomicBool::new(false), text.len() as u64),
+        )
+        .unwrap();
+    assert_eq!(cancelled.status, IndexStatus::Cancelled);
+    assert_eq!(search(&store, "Originalneedle").len(), 1);
+    assert_eq!(search(&store, "Replacementneedle"), [] as [IndexPassage; 0]);
+    let db = store.connect().unwrap();
+    let versions: i64 = db
+        .query_row("SELECT count(*) FROM index_versions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(versions, 1, "cancelled chunks and versions must roll back");
+    drop(db);
+    store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(search(&store, "Replacementneedle").len(), 1);
+    assert_eq!(search(&store, "Originalneedle"), [] as [IndexPassage; 0]);
+}
+
+#[test]
+fn deep_folder_sources_do_not_require_manual_subfolder_grants() {
+    let fixture = Fixture::new();
+    let path = format!("{}deep.txt", "folder/".repeat(70));
+    fixture.write(&path, "Deepneedle stays searchable.");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    let scanned = store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(scanned.status, IndexStatus::Ready);
+    assert_eq!(scanned.progress.indexed, 1);
+}
+
+#[test]
+fn large_utf8_files_keep_searchable_content_beyond_attachment_limits() {
+    use std::io::Write as _;
+    let fixture = Fixture::new();
+    let path = fixture.source().join("large.unfamiliar");
+    let mut file = std::fs::File::create(&path).unwrap();
+    let block = "A plain source line with Unicode 京都.\n".repeat(2048);
+    while file.metadata().unwrap().len() <= sovra_core::files::MAX_FILE_BYTES {
+        file.write_all(block.as_bytes()).unwrap();
+    }
+    file.write_all("Laterneedle: the complete source remains searchable.\n".as_bytes())
+        .unwrap();
+    drop(file);
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    let scan = store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(scan.status, IndexStatus::Ready);
+    assert_eq!(scan.progress.indexed, 1);
+    let hits = store
+        .search(&IndexQuery {
+            text: "Laterneedle".into(),
+            roots: vec![root.id.clone()],
+            path_prefix: None,
+            limit: 10,
+        })
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert!(
+        store
+            .read(&hits[0].reference)
+            .unwrap()
+            .text
+            .contains("Laterneedle")
+    );
+    let refreshed = store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(refreshed.progress.reused, 1);
+    drop(store);
+    assert_eq!(
+        fixture
+            .store()
+            .search(&IndexQuery {
+                text: "Laterneedle".into(),
+                roots: vec![],
+                path_prefix: None,
+                limit: 10
+            })
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn adding_folders_does_not_require_removing_an_existing_grant_at_sixteen() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    for n in 0..18 {
+        let path = fixture.source().join(format!("folder-{n}"));
+        std::fs::create_dir(&path).unwrap();
+        store.add_root(&path).unwrap();
+    }
+    assert_eq!(store.list().unwrap().len(), 18);
+}
+
+#[test]
 fn shutting_down_during_a_scan_preserves_automatic_updates_for_reopening() {
     let fixture = Fixture::new();
     fixture.write("notes.txt", "source retained across restarts");
@@ -276,4 +435,42 @@ fn symlinks_cannot_expand_scope_and_renames_keep_the_file_identity() {
             & 0o777,
         0o600
     );
+}
+
+#[test]
+fn inclusion_options_persist_and_excluded_files_leave_current_search_before_rescan() {
+    use sovra_core::file_index::ScanOptions;
+    let fixture = Fixture::new();
+    fixture.write(".notes/hidden.txt", "Hiddenneedle is explicitly included.");
+    fixture.write("target/generated.txt", "Generatedneedle can be useful too.");
+    fixture.write("normal.txt", "Normalneedle is always included.");
+    fixture.write(
+        "dev-credentials/key",
+        "Protectedneedle must not be collected.",
+    );
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(search(&store, "Hiddenneedle"), [] as [IndexPassage; 0]);
+    let all = ScanOptions {
+        include_hidden: true,
+        include_generated: true,
+    };
+    store.set_scan_options(&root.id, all).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let old = search(&store, "Hiddenneedle").remove(0);
+    assert_eq!(search(&store, "Generatedneedle").len(), 1);
+    assert_eq!(search(&store, "Protectedneedle"), [] as [IndexPassage; 0]);
+    drop(store);
+    let store = fixture.store();
+    assert_eq!(store.list().unwrap()[0].scan_options, all);
+    store
+        .set_scan_options(&root.id, ScanOptions::default())
+        .unwrap();
+    assert_eq!(search(&store, "Hiddenneedle"), [] as [IndexPassage; 0]);
+    assert_eq!(search(&store, "Generatedneedle"), [] as [IndexPassage; 0]);
+    assert!(store.read(&old.reference).is_err());
+    assert_eq!(search(&store, "Normalneedle").len(), 1);
+    store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!(search(&store, "Hiddenneedle"), [] as [IndexPassage; 0]);
 }

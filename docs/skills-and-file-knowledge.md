@@ -60,6 +60,36 @@ unimplemented integrations as working native tools.
 
 ## Research and design constraints
 
+### Indexing UX work (2026-10-28)
+
+The current request is to make indexing intuitive and powerful, prioritizing file
+limits and skipped content. This goal remains active. The first change removes
+fixed collection/scan limits and adds complete large UTF-8 indexing plus expandable
+scan notices. It does not complete the broader browser/setup experience or remove
+rich-document decoder limits.
+
+Verification of the initial limits/scan-notice checkpoint: `cargo xtask ci` passed:
+**578 tests passed, 5 opt-in tests skipped**. New regression tests first reproduced
+the large UTF-8, seventeenth-folder, deep-folder and database-page restrictions.
+Coverage now includes a source beyond 20 MiB, a match at its end, refresh/reopen,
+cancellation inside the replacement transaction, split Unicode and long lines,
+invalid/truncated input, crossing the former scan counters, and 70 directory levels.
+The scan-notice controls are tested at 640×420, 2560×1440 and 200% interface size
+in both themes. Counter-boundary tests establish removed cutoffs, not a performance
+benchmark over 100,000 real files or a gigabyte database. The existing dev watcher
+remains running; no alternate application process was started manually.
+
+Folder details now offer persisted hidden-file and generated-folder inclusion
+settings. Changes refresh the folder; newly excluded files leave current search
+immediately while saved history remains available. Credential folders and Sovra's
+own index storage stay excluded.
+
+Next work retains the full requested scope: useful coverage information,
+direct file browsing/filtering/preview, simpler folder setup
+and recovery, and handling more large-document formats without silently omitting
+content. Native notification resource budgets and codec expansion protections are
+distinct from the arbitrary collection cutoffs removed here.
+
 ### Implementation checkpoint: local folder index
 
 `/index-folder` (aliases `/index-file-system` and `/index-files`) opens a native,
@@ -74,7 +104,7 @@ The `sovra-files` adapter now uses SQLite FTS5 for lexical retrieval and immutab
 source versions, with SHA-256 content IDs and FastCDC text chunks. It reuses existing
 versions after hashing unchanged files and preserves unambiguous Unix file identity
 across renames. Every complete refresh reconciles missing paths. Cancellation,
-failed traversal and scan limits retain unvisited records; interrupted scans can be
+failed traversal retain unvisited records; interrupted scans can be
 refreshed after reopening. Indexed text is a snapshot, not a claim of live freshness.
 Search and citation reads exclude superseded versions and revoked roots.
 
@@ -146,16 +176,36 @@ retrieval sends requested file metadata and matching passages to the user's sele
 
 Source access uses capability directory handles, no-follow opens at each traversed
 component, and bounded reads. Defaults exclude hidden files, generated folders,
-credential folders, symlinks and non-regular files. Limits are 16 roots, 100,000
-entries, a 1 GB scan read budget (the last bounded file may cross this threshold),
-64 directory levels, and 20 MB of source content per file for extraction. Larger
-regular files retain filesystem metadata without reading their contents. The derived
-database has a page budget of approximately 1 GB. Scans run on an owned blocking
-worker; cancellation bypasses its queue and search runs independently.
+credential folders, symlinks and non-regular files. As of 2026-10-28, folder
+registration and scans no longer impose the former 16-root, 100,000-entry, 1 GB
+read/storage or 64-level traversal ceilings. An iterative depth-first walk holds
+only the current branch's directory capabilities and checks cancellation between
+entries. OS descriptor/path limits, SQLite's limits and available disk still apply;
+this is not an arbitrary-scale performance guarantee. Native notification discovery
+retains its own resource budget and falls back to periodic scanning.
+
+Large UTF-8 files use two streaming passes with 64 KiB buffers and immutable source
+chunks. The first validates the entire text and hashes its bytes; a new version's
+second pass writes chunks in a transaction and verifies the same hash and file
+metadata before publishing. A known version needs only the validation/hash pass.
+Cancellation rolls back partial chunks and keeps the prior snapshot. Source text,
+including markup, stays literal and is neither rendered nor executed. These files
+are no longer subject to the 4 MiB attachment-text or 20 MiB attachment-file limits.
+Non-UTF-8 and rich-document codecs currently retain those limits; oversized
+non-streamable files keep metadata and an explicit explanation. Chat attachment
+limits are separate and unchanged.
+
+Scans run on an owned blocking worker; cancellation bypasses its queue and search
+runs independently. The UI exposes all recorded scan notices (up to 50 examples),
+including hidden/generated/credential exclusions and symbolic links; totals still
+count every skipped entry. Selecting a directory does not count all children of
+an excluded subtree as visited. Folder details expose inclusion options; a richer
+browsable inventory remains part of the indexing UX task.
 
 Automatic monitoring uses notify's native backend while the app is open. It
 registers non-recursive watches on at most 2,048 eligible directories per scope,
-skipping hidden/generated paths and symlinks. Notification callbacks only set a
+following each folder's hidden/generated inclusion choices and skipping symlinks.
+Notification callbacks only set a
 bounded dirty flag. Runtime coalesces bursts (1.5-second quiet period, 10-second
 maximum delay), limits repeated scans to one per 30 seconds, and reconciles every
 15 minutes even when no events arrive. Reopening/resuming reconciles immediately.
@@ -229,7 +279,7 @@ evidence, not factual confidence. Disabling a folder cancels its active request 
 deletes its derived vectors; text already delivered to a server cannot be recalled.
 
 Current limits: 4,096 dimensions, 20,000 unique embedded passages per folder, the
-existing approximate 1 GB database budget, and exact linear ranking rather than an
+available local disk, and exact linear ranking rather than an
 ANN index. Server-side replacement of a model under an unchanged name/revision
 cannot be detected reliably; use immutable model identifiers and rebuild after such
 a change. Tests use deterministic synthetic vectors and local HTTP servers. They

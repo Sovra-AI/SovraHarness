@@ -1,6 +1,6 @@
 # SovraHarnessRust — agent rules
 
-Canonical rules for every coding agent (Codex, Cursor, Claude Code, …). Nested `AGENTS.md`
+Canonical rules for every coding agent (Claude Code, Codex, Grok, Cursor, …). Nested `AGENTS.md`
 files in each crate add crate-specific rules; the closest file wins. Reasoning and sources:
 `docs/architecture.md`.
 
@@ -87,6 +87,13 @@ architecture. Changing it requires a stated reason in the same change.
 - **New capability end-to-end:** add `Command`/`Event` variants in `sovra-core` (exhaustive
   enums — the compiler lists every `match` to update), handle in `sovra-runtime`, fold state
   with a pure reducer in `sovra-core`, render in `sovra-ui`.
+- **New specialist agent, helper, or capability → MUST register on the Skills page:**
+  Every coding agent (Claude, Codex, Grok, Cursor, …) that adds a new specialist agent
+  (`crates/sovra-core/src/specialists.rs`), `AdkHarness` tool/capability, or workspace
+  action **must** register it in `crates/sovra-core/src/skills/builtin.rs` with a
+  grandma-friendly plain-English title, one-sentence description, and concrete
+  `example_prompt` (`Skill::friendly_card_copy`) so it appears on the **Skills** page
+  (`crates/sovra-ui/src/skill_library.rs`). Enforced by unit test in `sovra-core`.
 - **Open-ended plugin sets** (LLM providers, tools, MCP servers, storage backends): one trait
   in `sovra-core`, one impl per adapter, registered once in the composition root. Adding one =
   one struct + one `impl`. Never copy-paste a sibling implementation; extract the shared part
@@ -189,6 +196,24 @@ Design and sources: `docs/teams-and-artifacts.md`.
 - **Plain words for non-technical people.** Say "helper", "Save", "Open in browser" —
   never "persona", "agent" or "export". Never lose work: edits keep versions, deletes
   are soft and ask twice, built-in helpers switch off instead of being deleted.
+
+## Skills page & new agent registration (all agents: Claude, Codex, Grok, Cursor)
+
+- **The Skills page is the user's capability directory.** A complete beginner ("a grandma
+  with zero technical knowledge") must be able to open **Skills** (`NavTab::Skills`,
+  `crates/sovra-ui/src/skill_library.rs`) and immediately understand everything Sovra can
+  do, click **Try an example** or **Try in chat**, and use it without knowing slash commands
+  or technical jargon.
+- **Mandatory registration rule when adding any new agent or capability:**
+  1. Whenever you add a specialist in `crates/sovra-core/src/specialists.rs`, a new tool in
+     `sovra-adk`, or a new user-facing capability/channel, you **must** add or update its
+     entry in `crates/sovra-core/src/skills/builtin.rs`.
+  2. Give it a plain-English human title (e.g. `"Write a document or letter"`, `"Coding & software helper"`),
+     a jargon-free description of what it helps with, and a relatable everyday example prompt
+     in `Skill::friendly_card_copy` (`crates/sovra-core/src/skills/builtin.rs`).
+  3. Keep `crates/sovra-core/src/skills/tests.rs::every_specialist_and_builtin_skill_has_grandma_friendly_skills_page_copy`
+     passing — it fails CI if any specialist agent or built-in skill is missing from the
+     Skills catalogue or lacks a concrete example prompt.
 
 ## Responsive layout (all agents, every UI change)
 

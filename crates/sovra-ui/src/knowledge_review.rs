@@ -288,6 +288,7 @@ mod tests {
                             issues: vec![],
                             completed_at: Some(100),
                             auto_refresh: false,
+                            scan_options: sovra_core::file_index::ScanOptions::default(),
                         }]));
                     shell
                         .file_index

@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-pub use builtin::builtin_skills;
+pub use builtin::{SkillCardCopy, builtin_skills};
 
 pub const MAX_SKILL_BYTES: usize = 64 * 1024;
 pub const MAX_SKILLS: usize = 256;

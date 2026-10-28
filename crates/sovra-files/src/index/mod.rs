@@ -21,7 +21,7 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 use sha2::{Digest as _, Sha256};
 use sovra_core::file_index::{
     CatalogPage, CatalogQuery, FileIndex, IndexError, IndexPassage, IndexProgress, IndexQuery,
-    IndexStatus, IndexedRoot, MAX_INDEX_ROOTS, PassageRef, ScanCancellation, ScanObserver,
+    IndexStatus, IndexedRoot, PassageRef, ScanCancellation, ScanObserver,
 };
 
 const SCHEMA_VERSION: i64 = 8;
@@ -82,10 +82,8 @@ impl LocalFileIndex {
                 "This file index was created by a newer Sovra version.".into(),
             ));
         }
-        db.execute_batch(
-            "PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA max_page_count=262144;",
-        )
-        .map_err(|error| db_error(&error))?;
+        db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;")
+            .map_err(|error| db_error(&error))?;
         if version < SCHEMA_VERSION {
             if version == 0 {
                 db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
@@ -233,14 +231,6 @@ impl FileIndex for LocalFileIndex {
         {
             return decode(&details);
         }
-        let count: i64 = db
-            .query_row("SELECT count(*) FROM index_roots", [], |r| r.get(0))
-            .map_err(|error| db_error(&error))?;
-        if count >= i64::try_from(MAX_INDEX_ROOTS).expect("root limit fits i64") {
-            return Err(IndexError(format!(
-                "You can index up to {MAX_INDEX_ROOTS} folders. Remove one before adding another."
-            )));
-        }
         let root = IndexedRoot {
             id: digest(display.as_bytes()),
             path: path.clone(),
@@ -249,6 +239,7 @@ impl FileIndex for LocalFileIndex {
             issues: vec![],
             completed_at: None,
             auto_refresh: true,
+            scan_options: sovra_core::file_index::ScanOptions::default(),
         };
         db.execute(
             "INSERT INTO index_roots(id,path,identity,details) VALUES(?1,?2,?3,?4)",
@@ -306,6 +297,55 @@ impl FileIndex for LocalFileIndex {
         let mut root = get_root(&db, root_id)?;
         root.auto_refresh = enabled;
         save_root(&db, &root)
+    }
+
+    fn set_scan_options(
+        &self,
+        root_id: &str,
+        options: sovra_core::file_index::ScanOptions,
+    ) -> Result<(), IndexError> {
+        let _guard = self
+            .writes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut db = self.connect()?;
+        let tx = db.transaction().map_err(|e| db_error(&e))?;
+        let mut root = get_root(&tx, root_id)?;
+        if root.scan_options == options {
+            return Ok(());
+        }
+        // Publish the new policy and remove excluded files from current retrieval
+        // together; cancellation of the following scan cannot restore them.
+        let mut after = String::new();
+        loop {
+            let rows = {
+                let mut statement = tx.prepare("SELECT id,path FROM index_files WHERE root_id=?1 AND path>?2 AND available=1 ORDER BY path LIMIT 256").map_err(|e| db_error(&e))?;
+                statement
+                    .query_map(params![root_id, after], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(|e| db_error(&e))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(|e| db_error(&e))?
+            };
+            if rows.is_empty() {
+                break;
+            }
+            for (id, path) in rows {
+                if path
+                    .split('/')
+                    .any(|name| options.exclusion_reason(name).is_some())
+                {
+                    tx.execute("UPDATE index_files SET available=0 WHERE id=?1", [&id])
+                        .map_err(|e| db_error(&e))?;
+                }
+                after = path;
+            }
+        }
+        root.scan_options = options;
+        root.status = IndexStatus::Pending;
+        save_root(&tx, &root)?;
+        tx.commit().map_err(|e| db_error(&e))
     }
 
     fn watch(

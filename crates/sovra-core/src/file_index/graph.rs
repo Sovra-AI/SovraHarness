@@ -560,6 +560,7 @@ mod tests {
             issues: vec![],
             completed_at: Some(1),
             auto_refresh: false,
+            scan_options: crate::file_index::ScanOptions::default(),
         }]));
         let proposal = KnowledgeProposal {
             id: 1,

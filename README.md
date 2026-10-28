@@ -34,8 +34,16 @@ While Sovra is open, native folder notifications trigger updates and a full chec
 every 15 minutes catches missed changes. Large scopes or unavailable notifications
 fall back to periodic checks, shown in Knowledge. Cancel pauses automatic updates;
 Refresh performs a manual scan. Removing an index
-leaves the original files intact. Hidden files, symlinks and generated folders are
-excluded. See [scope and current limits](docs/skills-and-file-knowledge.md).
+leaves the original files intact. Scan notices expand to show every recorded example
+of skipped or failed content. Large UTF-8 text/source files are indexed completely
+with fixed-size buffers, including beyond the attachment limits. Folder indexing
+has no fixed 16-folder, 100,000-entry, 1 GB scan/database or 64-level traversal cap;
+available storage and OS resources still apply. Other document decoders currently
+retain their per-file limits. Folder details let you include hidden files and
+generated folders, which are excluded by default. Switching these options off
+removes matching files from current search while preserving saved history.
+Credential folders and symlinks stay excluded.
+See [scope and current limits](docs/skills-and-file-knowledge.md).
 
 Type `/` to browse skills. Arrow keys select, Tab or Enter chooses, and Escape
 closes suggestions. Choosing a model procedure fills the draft so you can add a

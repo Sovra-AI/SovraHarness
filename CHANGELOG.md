@@ -13,6 +13,20 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Per-folder inclusion settings:** folder details can include hidden files and
+  generated folders. Choices persist and refresh the index; switching them off
+  removes matching files from current search immediately while keeping saved
+  history. Credential folders, symbolic links and Sovra's index data stay excluded.
+- **Large indexed text and clearer scan notices:** UTF-8 text/source files are
+  indexed completely in bounded buffers instead of failing at the attachment
+  text/file limits. Validation, content hashing and atomic replacement preserve
+  earlier snapshots on cancellation and prevent partial new versions. Scan
+  details expand all recorded notices, including exclusion and symlink reasons.
+- **Folder indexing without fixed collection caps:** removed the 16-folder,
+  100,000-entry, 1 GB scan/database and 64-level traversal ceilings. The walk is
+  iterative and cancellable; per-codec limits, OS resources and available disk
+  still apply. No source files are changed.
+
 - **Built-in web search, no setup**: the search helper asks free, open services directly from the app (Mwmbl's open web index and Wikipedia's MediaWiki API) with no key, account or server, and merges their results by reciprocal rank with tracking parameters removed. A new read-only `read_web_page` tool opens chosen results and returns their readable text (scripts, menus and page chrome dropped, 2 MB and 12,000-character limits). It refuses addresses on this computer or a private network before the request, on every redirect, and after connecting. Sources that answer "busy" rest for a minute. The helper is told today's date, answers in plain words and lists only sources it actually found. `SOVRA_SEARXNG_URL` now optionally adds a self-hosted SearXNG beside the built-in sources.
 - **Capability-aware orchestrator**: specialists declare the capabilities they need (`sovra_core::Capability`), and `available_specialists` offers only those whose needs are met. Capability providers in `sovra-adk` supply the tools, procedure and routing rule; web search is the first. Research, stock market, housing market and scholar specialists now get real web search.
 - **Tool calls written as text now run**: small local models (for example Qwen 2.5 Coder on Ollama) often print a tool call as JSON instead of making it, so nothing ran and the chat showed raw JSON. Every orchestrated agent's model is wrapped once: a reply that ends with one JSON call to a tool actually offered, after at most a short lead-in sentence, becomes a real call. Prose, inline braces, code blocks and calls to tools that were not offered stay text and keep streaming. An opt-in live test (`live_orchestrator`) drives the real orchestrator, a local Ollama model and live search end to end.
@@ -281,10 +295,11 @@ move them under a version heading when the tag is cut.
 - **Web search fixed**: it used to rely on a public SearXNG server (`searx.be`) that answers in HTML, not JSON, so every search returned no results. It now uses the built-in sources above. The orchestrator also asks the search helper whenever an answer depends on current facts, not only when the user typed an exact phrase. More plain phrases ("search online", "look it up online", "google it") count as an explicit request.
 - **Orchestrator offers only working specialists**: it no longer offers itself, or specialists whose integrations do not exist yet (email, calendars, GitHub, to-dos, running code), so it cannot hand a question to a helper that would only guess. A missing ability is now reported plainly.
 
-- **Plain-language Skills & Shortcuts explorer (`sovra-ui`)**:
-  - Replaced the flat vertical dump on the **Skills** page (`skill_library.rs`) with a 3-step *"How it works"* banner, category filter pills (`All skills`, `Quick actions`, `Files & folders`, `Web search`, `AI helpers`, `Tables & cards`, `Made by you`) with live counts, and categorized responsive glass cards (`Surface::Glass`) across `t.layout.page_width`.
-  - Every skill card now leads with its human title, `/shortcut` pill, plain-English kind badge (`Instant action`, `Guided recipe`, `Made by you`), stripped of internal agent boilerplate, plus a concrete real-world example prompt and a primary **`Try in chat`** / **`Run now`** CTA.
+- **Plain-language Skills & Shortcuts explorer & mandatory agent registration rule (`sovra-core`, `sovra-ui`, `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`)**:
+  - Replaced the flat vertical dump on the **Skills** page (`skill_library.rs`) with a *"What Sovra Can Do for You"* header, 3-step *"How it works"* banner, category filter pills (`All skills`, `Quick actions`, `Files & folders`, `Web search`, `AI helpers`, `Tables & cards`, `Made by you`) with live counts, and categorized responsive glass cards (`Surface::Glass`) across `t.layout.page_width`.
+  - Moved `Skill::friendly_card_copy` (`SkillCardCopy`) into `sovra-core::skills::builtin`: every skill and specialist card now leads with an icon, a warm grandma-friendly title (e.g., *"Polite letter & report writer"*, *"Household budget & table builder"*), `/shortcut` pill, plain-English kind badge (`Instant action`, `Guided helper`, `Made by you`), a relatable example box, a 1-click **`Try example`** button (which fills the complete example prompt in Chat), and a **`Try in chat`** / **`Open now`** primary CTA.
   - Simplified the **Create a skill** form with numbered plain-English prompts, automatic `/shortcut` slug generation from the title when left blank, and progressive disclosure (`Show optional tool settings`) for technical tool names.
+  - Added mandatory instructions across `AGENTS.md`, `CLAUDE.md`, `crates/sovra-core/AGENTS.md`, `crates/sovra-ui/AGENTS.md`, `crates/sovra-adk/AGENTS.md`, and `.cursor/rules/skills-page-agents.mdc` so Claude, Codex, Grok, and Cursor always register new agents/capabilities on the Skills page, enforced by `every_specialist_and_builtin_skill_has_grandma_friendly_skills_page_copy`.
 - **Grouped, plain-language sidebar & streamlined conversation history (`sovra-ui`)**:
   - Primary navigation is now chunked into everyday workspace destinations (`Chat`, `Team`, `Artifacts`, `Schedules`) and a labeled **Your AI & Setup** section (`Models`, `My AI's`, `Knowledge`, `Skills`, `Settings`) to reduce cognitive load.
   - Promoted **`+ New Chat`** to a primary brand-gradient CTA, added plain-English tooltips to every sidebar tab and collapsed rail button, surfaced live context badges (`Setup` on `Models` when unconfigured, saved item counts on `Artifacts` and `Schedules`), and anchored **`Take a guided tour`** in the sidebar footer above the account switcher.

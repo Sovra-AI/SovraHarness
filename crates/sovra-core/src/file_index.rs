@@ -5,6 +5,8 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 pub mod clustering;
+mod options;
+pub use options::ScanOptions;
 
 pub mod graph;
 mod history;
@@ -64,6 +66,8 @@ pub struct IndexedRoot {
     /// A persisted user preference, independent of the latest scan outcome.
     #[serde(default)]
     pub auto_refresh: bool,
+    #[serde(default)]
+    pub scan_options: ScanOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +141,10 @@ pub enum IndexCommand {
     SetAutoRefresh {
         root_id: String,
         enabled: bool,
+    },
+    SetScanOptions {
+        root_id: String,
+        options: ScanOptions,
     },
     ConfigureSemantic {
         root_id: String,
@@ -315,7 +323,7 @@ pub trait ScanObserver: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanCancellation {
     Requested,
-    /// Runtime shutdown preserves the user's automatic-update preference.
+    /// Shutdown or reconfiguration preserves the automatic-update preference.
     Interrupted,
 }
 
@@ -334,6 +342,11 @@ pub trait FileIndex: Send + Sync + std::fmt::Debug {
     fn add_root(&self, path: &Path) -> Result<IndexedRoot, IndexError>;
     fn scan(&self, root_id: &str, observer: &dyn ScanObserver) -> Result<IndexedRoot, IndexError>;
     fn set_auto_refresh(&self, root_id: &str, enabled: bool) -> Result<(), IndexError>;
+    fn set_scan_options(&self, _: &str, _: ScanOptions) -> Result<(), IndexError> {
+        Err(IndexError(
+            "Folder inclusion settings are unavailable in this session.".into(),
+        ))
+    }
     /// Installs bounded native watches. Runtime performs periodic reconciliation
     /// even when this succeeds; callbacks may only mark a scope dirty.
     fn watch(
@@ -427,21 +440,7 @@ pub fn validate_relative_path(path: &str) -> Result<(), IndexError> {
 /// Deliberately conservative defaults: generated content and hidden credentials
 /// are never traversed just because their parent directory was selected.
 pub fn excluded_name(name: &str) -> bool {
-    name.starts_with('.')
-        || matches!(
-            name.to_ascii_lowercase().as_str(),
-            "target"
-                | "node_modules"
-                | "vendor"
-                | "dist"
-                | "build"
-                | "__pycache__"
-                | "dev-credentials"
-                | "credentials"
-                | "secrets"
-                | "$recycle.bin"
-                | "system volume information"
-        )
+    ScanOptions::default().exclusion_reason(name).is_some()
 }
 
 #[cfg(test)]
@@ -514,6 +513,7 @@ mod tests {
             issues: vec![],
             completed_at: None,
             auto_refresh: false,
+            scan_options: ScanOptions::default(),
         }]));
         let request_id = state.begin_search();
         let passage = IndexPassage {

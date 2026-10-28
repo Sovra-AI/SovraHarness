@@ -13,3 +13,7 @@ and the port traits adapters implement.
   (`fuse_rrf`, validity rules) stays here where it is unit-tested; adapters only do IO.
 - Facts are bi-temporal (`created/valid/invalid/expired_at`); "current" means both
   `invalid_at` and `expired_at` are `None`. Never add a hard-delete to the port.
+- **New agents & capabilities → Skills catalogue:** Any new specialist added to
+  `specialists.rs` or new capability added to the protocol must be registered in
+  `src/skills/builtin.rs` with a plain-English title, description, and example prompt
+  for the Skills page (enforced by `skills::tests`).

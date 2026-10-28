@@ -65,6 +65,7 @@ fn root() -> IndexedRoot {
         issues: vec![],
         completed_at: Some(1),
         auto_refresh: false,
+        scan_options: ScanOptions::default(),
     }
 }
 fn passage() -> IndexPassage {

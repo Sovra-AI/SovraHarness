@@ -156,6 +156,7 @@ fn resume_reconciles_and_native_failure_falls_back_then_pause_and_remove_revoke_
             issues: vec![],
             completed_at: None,
             auto_refresh: false,
+            scan_options: sovra_core::file_index::ScanOptions::default(),
         })),
         ..MonitorStore::default()
     });

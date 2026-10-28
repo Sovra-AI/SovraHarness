@@ -161,3 +161,50 @@ fn catalogue_refresh_is_atomic_and_preserves_the_last_valid_snapshot_on_error() 
         ["Skipped a malformed package"]
     );
 }
+
+#[test]
+fn every_specialist_and_builtin_skill_has_grandma_friendly_skills_page_copy() {
+    let catalog = SkillCatalog::default();
+    for specialist in crate::default_sovra_srx_agents() {
+        if specialist.id == "OrchestratorAgent" {
+            continue;
+        }
+        let slug = specialist.route_key.replace('_', "-");
+        let skill = catalog.find(&slug).unwrap_or_else(|| {
+            panic!(
+                "specialist {} ({}) must be registered on the Skills page in builtin_skills()",
+                specialist.id, slug
+            )
+        });
+        let copy = skill.friendly_card_copy();
+        assert_ne!(copy.friendly_title.trim(), "");
+        assert_ne!(copy.summary.trim(), "");
+        assert!(
+            !copy.summary.starts_with("Consult this specialist"),
+            "specialist {} must have plain-English summary without boilerplate",
+            specialist.id
+        );
+        assert!(
+            !copy.sample_draft.contains("<request>") && !copy.sample_draft.contains("<question>"),
+            "specialist {} must have a concrete example prompt on the Skills page, got: {}",
+            specialist.id,
+            copy.sample_draft
+        );
+    }
+
+    for skill in catalog.skills() {
+        let copy = skill.friendly_card_copy();
+        assert_ne!(copy.friendly_title.trim(), "");
+        assert_ne!(copy.summary.trim(), "");
+        assert_ne!(copy.example_display.trim(), "");
+        assert!(copy.sample_draft.starts_with('/'));
+        if matches!(skill.kind, SkillKind::Procedure) {
+            assert!(
+                !copy.sample_draft.contains('<') && !copy.sample_draft.contains('['),
+                "built-in procedure /{} must have a concrete grandma-friendly example prompt, got: {}",
+                skill.name,
+                copy.sample_draft
+            );
+        }
+    }
+}

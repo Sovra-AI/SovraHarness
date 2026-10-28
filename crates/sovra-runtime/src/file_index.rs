@@ -21,6 +21,7 @@ mod semantic;
 struct Controls {
     cancellations: BTreeMap<String, Arc<AtomicBool>>,
     preferences: BTreeMap<String, bool>,
+    reconfiguring: std::collections::BTreeSet<String>,
 }
 type SharedControls = Arc<Mutex<Controls>>;
 
@@ -97,6 +98,16 @@ impl IndexRuntime {
             return;
         };
         match &command {
+            IndexCommand::SetScanOptions { root_id, .. } => {
+                let mut controls = self
+                    .controls
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                controls.reconfiguring.insert(root_id.clone());
+                if let Some(token) = controls.cancellations.get(root_id) {
+                    token.store(true, Ordering::Relaxed);
+                }
+            }
             IndexCommand::ConfigureSemantic { root_id, target } => {
                 let result = self
                     .semantic
@@ -120,6 +131,7 @@ impl IndexRuntime {
                     .controls
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                controls.reconfiguring.remove(root_id);
                 controls.preferences.insert(root_id.clone(), false);
                 if let Some(token) = controls.cancellations.get(root_id) {
                     token.store(true, Ordering::Relaxed);
@@ -136,6 +148,7 @@ impl IndexRuntime {
                     .controls
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                controls.reconfiguring.remove(root_id);
                 controls.preferences.insert(root_id.clone(), *enabled);
                 if !enabled && let Some(token) = controls.cancellations.get(root_id) {
                     token.store(true, Ordering::Relaxed);
@@ -214,6 +227,7 @@ impl IndexRuntime {
                                 accepted: approve,
                             }),
                         IndexCommand::AddRoot { .. }
+                        | IndexCommand::SetScanOptions { .. }
                         | IndexCommand::Refresh { .. }
                         | IndexCommand::Cancel { .. }
                         | IndexCommand::Remove { .. }
@@ -374,6 +388,15 @@ fn mutate(
     events: Sender<Event>,
 ) -> Result<(Vec<IndexedRoot>, Option<String>), IndexError> {
     let root_id = match command {
+        IndexCommand::SetScanOptions { root_id, options } => {
+            controls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .reconfiguring
+                .remove(&root_id);
+            store.set_scan_options(&root_id, options)?;
+            Some(root_id)
+        }
         IndexCommand::AddRoot { path } => Some(store.add_root(&path)?.id),
         IndexCommand::Refresh { root_id } => Some(root_id),
         IndexCommand::Remove { root_id } => {
@@ -402,6 +425,8 @@ fn mutate(
                 .clone()
         };
         let observer = Observer {
+            root_id: id.clone(),
+            controls: controls.clone(),
             token,
             stopped,
             events,
@@ -547,6 +572,8 @@ impl Drop for IndexRuntime {
 }
 
 struct Observer {
+    root_id: String,
+    controls: SharedControls,
     token: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
     events: Sender<Event>,
@@ -555,7 +582,15 @@ impl ScanObserver for Observer {
     fn cancellation(&self) -> Option<sovra_core::file_index::ScanCancellation> {
         use sovra_core::file_index::ScanCancellation;
         if self.token.load(Ordering::Relaxed) {
-            Some(ScanCancellation::Requested)
+            let controls = self
+                .controls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Some(if controls.reconfiguring.contains(&self.root_id) {
+                ScanCancellation::Interrupted
+            } else {
+                ScanCancellation::Requested
+            })
         } else if self.stopped.load(Ordering::Relaxed) {
             Some(ScanCancellation::Interrupted)
         } else {

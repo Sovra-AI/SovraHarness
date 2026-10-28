@@ -251,7 +251,7 @@ impl Shell {
                                 .update(cx, |view, cx| view.apply(event, cx));
                         }
                         if let sovra_core::Event::FileIndex(event) = &event {
-                            shell.file_index.state.apply(event);
+                            shell.file_index.apply(event);
                         }
                         if let sovra_core::Event::Skills(event) = &event {
                             shell.skill_library.notice = match shell.skills.apply(event) {

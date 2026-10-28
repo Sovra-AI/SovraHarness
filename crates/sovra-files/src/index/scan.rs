@@ -1,4 +1,4 @@
-//! Reconcile a complete bounded walk; only a completed walk can retire missing paths.
+//! Reconcile a cancellable walk with bounded per-file work; only a completed walk can retire missing paths.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -7,14 +7,13 @@ use cap_fs_ext::{DirExt as _, FollowSymlinks, OpenOptionsFollowExt as _, OpenOpt
 use cap_std::fs::{Dir, Metadata, OpenOptions};
 use rusqlite::{Connection, OptionalExtension as _, params};
 use sovra_core::file_index::{
-    ExtractionState, IndexError, IndexedRoot, MAX_INDEX_ENTRIES, MAX_INDEX_ISSUES, ScanObserver,
-    excluded_name,
+    ExtractionState, IndexError, IndexedRoot, MAX_INDEX_ISSUES, ScanObserver,
 };
 use sovra_core::files::MAX_FILE_BYTES;
 
 use super::{db_error, digest, io_error, now, save_root};
 
-const MAX_SCAN_BYTES: u64 = 1024 * 1024 * 1024;
+mod stream_text;
 
 pub(super) fn run(
     db: &mut Connection,
@@ -61,7 +60,7 @@ pub(super) fn run(
         generation,
         excluded,
     };
-    scan.walk(&dir, Path::new(""), 0)?;
+    scan.walk(dir)?;
     if observer.cancelled() {
         return Ok(());
     }
@@ -106,21 +105,21 @@ struct Scan<'a> {
 }
 
 impl Scan<'_> {
-    fn walk(&mut self, dir: &Dir, relative: &Path, depth: usize) -> Result<(), IndexError> {
-        if depth > 64 {
-            return Err(IndexError(
-                "This folder exceeds the 64-level scan depth limit. Choose a smaller subfolder."
-                    .into(),
-            ));
-        }
-        for entry in dir.entries().map_err(|e| io_error(&e))? {
+    fn walk(&mut self, dir: Dir) -> Result<(), IndexError> {
+        // An explicit stack avoids a call-stack depth cutoff. Each directory is
+        // held as a capability; only the current branch has open handles.
+        let mut stack = vec![(
+            dir.entries().map_err(|e| io_error(&e))?,
+            dir,
+            PathBuf::new(),
+        )];
+        while let Some((entries, dir, relative)) = stack.last_mut() {
+            let Some(entry) = entries.next() else {
+                stack.pop();
+                continue;
+            };
             if self.observer.cancelled() {
                 return Ok(());
-            }
-            if self.root.progress.visited >= MAX_INDEX_ENTRIES {
-                return Err(IndexError(format!(
-                    "This scan reached the {MAX_INDEX_ENTRIES} entry limit. Choose smaller folders; unvisited files were retained."
-                )));
             }
             self.root.progress.visited += 1;
             let entry = entry.map_err(|e| io_error(&e))?;
@@ -134,27 +133,37 @@ impl Scan<'_> {
                 continue;
             };
             let path = relative.join(name);
-            if excluded_name(name) || self.excluded.as_ref().is_some_and(|p| path == *p) {
+            let excluded = if self.excluded.as_ref().is_some_and(|p| path == *p) {
+                Some("Sovra's own index data")
+            } else {
+                self.root.scan_options.exclusion_reason(name)
+            };
+            if let Some(reason) = excluded {
                 self.root.progress.skipped += 1;
+                issue(self.root, format!("{}: {reason}.", path.display()));
                 continue;
             }
             let metadata = dir.symlink_metadata(name).map_err(|e| io_error(&e))?;
             if metadata.is_symlink() {
                 self.root.progress.skipped += 1;
+                issue(
+                    self.root,
+                    format!(
+                        "{}: symbolic link; add its destination folder directly to include it.",
+                        path.display()
+                    ),
+                );
             } else if metadata.is_dir() {
                 // Every component is opened relative to a held capability and
                 // rejects symlinks, including a link swapped in during traversal.
                 let child = dir.open_dir_nofollow(name).map_err(|e| io_error(&e))?;
-                self.walk(&child, &path, depth + 1)?;
+                stack.push((child.entries().map_err(|e| io_error(&e))?, child, path));
             } else if metadata.is_file() {
                 let relative = path
                     .to_str()
                     .ok_or_else(|| IndexError("Invalid filename.".into()))?
                     .replace(std::path::MAIN_SEPARATOR, "/");
-                if metadata.len() > MAX_FILE_BYTES {
-                    self.metadata_only(&relative, &metadata, ExtractionState::MetadataOnly, "Contents exceed the 20 MB extraction limit. Only filesystem metadata was indexed.")?;
-                    self.root.progress.skipped += 1;
-                } else if let Err(error) = self.file(dir, name, &relative) {
+                if let Err(error) = self.file(dir, name, &relative) {
                     self.root.progress.failed += 1;
                     issue(self.root, format!("{relative}: {error}"));
                     self.metadata_only(
@@ -164,11 +173,12 @@ impl Scan<'_> {
                         &error.to_string(),
                     )?;
                 }
-                if self.root.progress.bytes_read >= MAX_SCAN_BYTES {
-                    return Err(IndexError("This scan reached its 1 GB read budget. Choose a smaller folder; unvisited files were retained.".into()));
-                }
             } else {
                 self.root.progress.skipped += 1;
+                issue(
+                    self.root,
+                    format!("{}: not a regular file or folder.", path.display()),
+                );
             }
             if self.root.progress.visited.is_multiple_of(32) {
                 save_root(self.db, self.root)?;
@@ -200,10 +210,20 @@ impl Scan<'_> {
         options.read(true).follow(FollowSymlinks::No).nonblock(true);
         let mut file = dir.open_with(name, &options).map_err(|e| io_error(&e))?;
         let before = file.metadata().map_err(|e| io_error(&e))?;
-        if !before.is_file() || before.len() > MAX_FILE_BYTES {
-            return Err(IndexError(
-                "Only regular files up to 20 MB can be indexed.".into(),
-            ));
+        if !before.is_file() {
+            return Err(IndexError("Only regular files can be indexed.".into()));
+        }
+        if before.len() >= sovra_core::files::MAX_DOCUMENT_BYTES as u64
+            && self.stream_text(&mut file, path, &before)?
+        {
+            return Ok(());
+        }
+        if before.len() > MAX_FILE_BYTES {
+            let note = "This file is not streamable UTF-8 text and exceeds the 20 MB document-decoder budget. Its filename and size are searchable; its contents have not been read into the index.";
+            self.metadata_only(path, &before, ExtractionState::MetadataOnly, note)?;
+            self.root.progress.skipped += 1;
+            issue(self.root, format!("{path}: {note}"));
+            return Ok(());
         }
         let mut bytes = Vec::new();
         file.by_ref()
