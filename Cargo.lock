@@ -10926,9 +10926,11 @@ dependencies = [
 name = "sovra-whatsapp"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "async-trait",
  "qrcode",
  "sovra-core",
+ "tokio",
  "tracing",
  "whatsapp-rust",
 ]

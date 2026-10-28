@@ -127,6 +127,9 @@ move them under a version heading when the tag is cut.
     *Answer WhatsApp messages automatically*. Groups, broadcasts, channels, your own
     outgoing messages mirrored from the phone, and messages that queued while the app was
     closed are never answered. **Send to my WhatsApp** sends a test message to your own chat.
+  - Verified against WhatsApp's servers: the opt-in test
+    `cargo test -p sovra-whatsapp --test live -- --ignored` completes the handshake and
+    receives genuine rotating pairing codes (61×61 modules, 60 s then 20 s).
   - Pure policy and the `MessagingChannel`/`ChannelSession` ports live in
     `sovra-core::connections` (unit-tested); `sovra-runtime` drives the link in one task and
     diverts `whatsapp:` sessions' events from the chat window back to the phone.

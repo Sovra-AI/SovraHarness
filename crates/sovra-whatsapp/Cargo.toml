@@ -14,5 +14,10 @@ sovra-core = { workspace = true }
 tracing = { workspace = true }
 whatsapp-rust = { workspace = true }
 
+[dev-dependencies]
+# The live check needs a reactor; library code never names tokio.
+async-channel = { workspace = true }
+tokio = { workspace = true }
+
 [lints]
 workspace = true
