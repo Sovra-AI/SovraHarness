@@ -331,6 +331,7 @@ mod tests {
             issues: vec!["é".repeat(500); 50],
             completed_at: None,
             auto_refresh: false,
+            scan_options: sovra_core::file_index::ScanOptions::default(),
         });
         assert_eq!(summary["id"], "scope");
         assert_eq!(summary["issues"].as_array().unwrap().len(), 3);

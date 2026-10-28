@@ -106,7 +106,10 @@ pub(crate) struct SkillLibrary {
 
 impl SkillLibrary {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills…"));
+        let search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("What do you want help with? (e.g. letter, budget, photos, web)…")
+        });
         let subscription = cx.subscribe(&search, |_, _, event, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
@@ -345,8 +348,8 @@ fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
         .w_full()
         .gap(t.space.small)
         .child(design::page_header(
-            "Skills & Shortcuts",
-            "Everything Sovra knows how to do. Click Try in chat on any card below, or type / in the chat box to use a shortcut anytime.",
+            "What Sovra Can Do for You",
+            "Every helper, tool, and shortcut built into your personal AI. Pick any card below and press “Try in chat” or “Try example” — no technical knowledge needed.",
             cx,
         ))
         .child(
@@ -410,15 +413,15 @@ fn how_it_works(cx: &Context<Shell>) -> impl IntoElement + use<> {
         .gap(t.space.small)
         .child(step(
             "1",
-            "Pick any card below — from web search and reading files to asking an expert.",
+            "Pick any card below — from web search and reading files to asking a specialist.",
         ))
         .child(step(
             "2",
-            "Press “Try in chat” and Sovra fills in the /shortcut for you.",
+            "Press “Try example” to test a ready-made question, or “Try in chat” to write your own.",
         ))
         .child(step(
             "3",
-            "Press “New skill” to save your own repeatable recipe in plain English.",
+            "Press “New skill” anytime to teach Sovra your own repeatable recipe in plain English.",
         ))
 }
 
@@ -470,7 +473,7 @@ fn category_explanation(category: &str) -> (&'static str, &'static str, IconName
     match category {
         "Workspace" => (
             "Quick actions & navigation",
-            "One-click shortcuts that open files, folders, or pages inside Sovra right away.",
+            "One-click shortcuts that open files, folders, WhatsApp QR linking, or pages inside Sovra right away.",
             IconName::Sparkles,
         ),
         "Research" => (
@@ -480,7 +483,7 @@ fn category_explanation(category: &str) -> (&'static str, &'static str, IconName
         ),
         "Files" => (
             "Read your files & folders",
-            "Attach documents, search indexed folders, inspect file history, and save work to your library.",
+            "Attach documents, search connected folders, inspect file history, and save work to your library.",
             IconName::FileText,
         ),
         "Presentation" => (
@@ -490,7 +493,7 @@ fn category_explanation(category: &str) -> (&'static str, &'static str, IconName
         ),
         "Specialists" => (
             "Specialist AI helpers",
-            "Send your question straight to a dedicated specialist — coding, stocks, housing, research, or docs.",
+            "Send your question straight to a dedicated specialist — letters, budgets, coding, stocks, housing, or research.",
             IconName::Users,
         ),
         _ => (
@@ -498,6 +501,37 @@ fn category_explanation(category: &str) -> (&'static str, &'static str, IconName
             "Personal recipes you created or imported so Sovra follows your exact steps.",
             IconName::BookOpen,
         ),
+    }
+}
+
+fn skill_icon(skill: &Skill) -> IconName {
+    match skill.name.as_str() {
+        "files" | "read-files" | "document-reader" | "document-author" | "documentation" => {
+            IconName::FileText
+        }
+        "index-folder" | "search-files" | "file-catalog" | "file-history" | "map-files"
+        | "file-knowledge" => IconName::Database,
+        "web-search" | "connections" | "google-workspace" | "microsoft-workspace" => {
+            IconName::Globe
+        }
+        "new" | "team" => IconName::MessageCircle,
+        "schedules" | "scheduler" | "todos" => IconName::Calendar,
+        "table" | "spreadsheet" => IconName::Table,
+        "coding" | "execution" | "github" => IconName::Code,
+        "stock-market" | "progress" => IconName::TrendingUp,
+        "housing-market" | "housing-advisor" => IconName::House,
+        "image-search" | "image-generation" => IconName::Image,
+        "artifacts" | "save-artifact" => IconName::LibraryBig,
+        "settings" => IconName::Settings,
+        "models" => IconName::Box,
+        _ => match skill.category.as_str() {
+            "Workspace" => IconName::Sparkles,
+            "Research" => IconName::Globe,
+            "Files" => IconName::FileText,
+            "Presentation" => IconName::Table,
+            "Specialists" => IconName::Users,
+            _ => IconName::BookOpen,
+        },
     }
 }
 
@@ -595,125 +629,6 @@ fn render_skills_catalog(
         );
     }
     sections.into_any_element()
-}
-
-fn friendly_card_copy(skill: &Skill) -> (String, String) {
-    let summary = skill
-        .description
-        .strip_prefix("Consult this specialist when you need help with: ")
-        .or_else(|| skill.description.strip_prefix("Use when "))
-        .map_or_else(
-            || skill.description.clone(),
-            |rest| {
-                let mut chars = rest.chars();
-                match chars.next() {
-                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                    None => skill.description.clone(),
-                }
-            },
-        );
-
-    let example = match skill.name.as_str() {
-        "files" => "Opens your file picker to attach documents or pictures".to_owned(),
-        "index-folder" => "Lets you pick a folder on your computer for Sovra to search".to_owned(),
-        "help" => "Opens this Skills & Shortcuts guide".to_owned(),
-        "new" => "Starts a fresh, clean conversation right away".to_owned(),
-        "models" => "Opens Models so you can pick or connect an AI".to_owned(),
-        "knowledge" => "Opens Knowledge to view saved memories and indexed folders".to_owned(),
-        "schedules" => "Opens Schedules to run or set up recurring briefings".to_owned(),
-        "agents" => "Opens My AI's to see how Sovra routes tasks to specialists".to_owned(),
-        "settings" => "Opens Settings for light/dark appearance, text size, and keys".to_owned(),
-        "team" => "Switches chat so your whole team of AI helpers answers together".to_owned(),
-        "artifacts" => "Opens your library of saved documents, tables, and code".to_owned(),
-        "connections" => {
-            "Opens Connections so you can link your personal WhatsApp via QR code".to_owned()
-        }
-        "web-search" => {
-            "Try: /web-search What are the healthiest Mediterranean dinner ideas?".to_owned()
-        }
-        "save-artifact" => "Try: /save-artifact Our family trip packing list".to_owned(),
-        "read-files" => "Try: /read-files Summarize the main points of this contract".to_owned(),
-        "search-files" => {
-            "Try: /search-files Where did we mention the kitchen renovation budget?".to_owned()
-        }
-        "map-files" => {
-            "Try: /map-files Connect the people and deadlines across these project notes".to_owned()
-        }
-        "file-knowledge" => {
-            "Try: /file-knowledge What have we reviewed about our project timeline?".to_owned()
-        }
-        "file-catalog" => {
-            "Try: /file-catalog Show all PDFs and spreadsheets in my indexed folders".to_owned()
-        }
-        "file-history" => {
-            "Try: /file-history What changed in our budget notes recently?".to_owned()
-        }
-        "card" => "Try: /card Key facts and emergency numbers for our trip".to_owned(),
-        "table" => "Try: /table Compare three beginner-friendly indoor plants".to_owned(),
-        "confirm" => "Try: /confirm Should we send the formal or friendly version?".to_owned(),
-        "alert" => "Try: /alert Reminder to check passport renewal dates".to_owned(),
-        "progress" => "Try: /progress Show our 4-step moving checklist progress".to_owned(),
-        "coding" => "Try: /coding Explain what this error message means in simple terms".to_owned(),
-        "deep-research" => {
-            "Try: /deep-research Compare heat pumps vs gas boilers for a small home".to_owned()
-        }
-        "stock-market" => {
-            "Try: /stock-market How did major tech stocks perform this week?".to_owned()
-        }
-        "housing-market" => {
-            "Try: /housing-market What should I look for when viewing a house?".to_owned()
-        }
-        "housing-advisor" => {
-            "Try: /housing-advisor How does a 15-year vs 30-year mortgage compare?".to_owned()
-        }
-        "scholar" => {
-            "Try: /scholar What does recent research say about daily walking and sleep?".to_owned()
-        }
-        "image-search" => "Try: /image-search Cozy Scandinavian living room ideas".to_owned(),
-        "image-generation" => {
-            "Try: /image-generation A watercolor illustration of a sunlit garden".to_owned()
-        }
-        "execution" => {
-            "Try: /execution Calculate compound interest on $5,000 over 10 years at 5%".to_owned()
-        }
-        "documentation" => {
-            "Try: /documentation Write a simple step-by-step guide for our home Wi-Fi".to_owned()
-        }
-        "project" => "Try: /project Break our garage cleanout into 5 easy weekend tasks".to_owned(),
-        "document-reader" => {
-            "Try: /document-reader Find the warranty coverage in this manual".to_owned()
-        }
-        "presentation" => {
-            "Try: /presentation Outline a 5-slide family reunion presentation".to_owned()
-        }
-        "document-author" => {
-            "Try: /document-author Write a polite letter to our landlord about a repair".to_owned()
-        }
-        "spreadsheet" => {
-            "Try: /spreadsheet Create a simple monthly household budget table".to_owned()
-        }
-        "google-workspace" => {
-            "Try: /google-workspace Draft an email reply thanking everyone for coming".to_owned()
-        }
-        "microsoft-workspace" => {
-            "Try: /microsoft-workspace Summarize action items for our Word handout".to_owned()
-        }
-        "scheduler" => {
-            "Try: /scheduler Plan a recurring Monday morning week-ahead briefing".to_owned()
-        }
-        "todos" => "Try: /todos Organize my errands by priority for tomorrow morning".to_owned(),
-        "github" => {
-            "Try: /github Summarize the latest changes and open issues in this repo".to_owned()
-        }
-        _ => {
-            if skill.argument_hint.is_empty() {
-                format!("Type /{} in chat", skill.name)
-            } else {
-                format!("Type: /{} {}", skill.name, skill.argument_hint)
-            }
-        }
-    };
-    (summary, example)
 }
 
 fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
@@ -868,7 +783,8 @@ fn card(
     let editing = skill.clone();
     let enabled = skill.enabled;
     let is_action = matches!(skill.kind, SkillKind::Action(_));
-    let (summary, example) = friendly_card_copy(skill);
+    let copy = skill.friendly_card_copy();
+    let sample_draft = copy.sample_draft.clone();
     let showing_details = view.details.as_ref() == Some(&name);
 
     let badge_label = if !skill.builtin {
@@ -880,10 +796,10 @@ fn card(
     } else if is_action {
         "Instant action"
     } else {
-        "Guided recipe"
+        "Guided helper"
     };
 
-    let primary_cta_label = if is_action { "Run now" } else { "Try in chat" };
+    let primary_cta_label = if is_action { "Open now" } else { "Try in chat" };
 
     let mut card = v_flex()
         .id(("skill-card", index))
@@ -902,11 +818,23 @@ fn card(
                 .justify_between()
                 .gap(t.space.compact)
                 .child(
-                    div()
+                    h_flex()
                         .min_w_0()
                         .flex_1()
-                        .sovra_text(TextRole::SectionTitle, cx)
-                        .child(skill.title.clone()),
+                        .items_center()
+                        .gap(t.space.small)
+                        .child(
+                            Icon::new(skill_icon(skill))
+                                .small()
+                                .text_color(cx.theme().link),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .child(copy.friendly_title),
+                        ),
                 )
                 .child(
                     h_flex()
@@ -934,7 +862,7 @@ fn card(
                         ),
                 ),
         )
-        .child(div().sovra_text(TextRole::Body, cx).child(summary))
+        .child(div().sovra_text(TextRole::Body, cx).child(copy.summary))
         .child(
             div()
                 .w_full()
@@ -943,7 +871,7 @@ fn card(
                 .bg(t.subtle)
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
-                .child(example),
+                .child(copy.example_display),
         );
 
     let mut actions = h_flex()
@@ -960,6 +888,16 @@ fn card(
                     shell.fill_composer_draft(&format!("/{run_name} "), window, cx);
                 })),
         )
+        .children((!is_action).then(|| {
+            design::button(("skill-try-example", index), "Try example", cx)
+                .small()
+                .disabled(!enabled)
+                .tooltip("Fill the chat box with this ready-made example question")
+                .on_click(cx.listener(move |shell, _, window, cx| {
+                    shell.select_tab(NavTab::Chat, cx);
+                    shell.fill_composer_draft(&sample_draft, window, cx);
+                }))
+        }))
         .child(
             design::button(
                 ("skill-details", index),

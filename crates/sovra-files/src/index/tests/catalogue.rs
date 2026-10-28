@@ -38,7 +38,13 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
         Some(sovra_core::files::MAX_FILE_BYTES + 1)
     );
     assert!(unread.first_passage.is_none() && unread.content_digest.is_none());
-    assert!(unread.note.as_ref().unwrap().contains("extraction limit"));
+    assert!(
+        unread
+            .note
+            .as_ref()
+            .unwrap()
+            .contains("document-decoder budget")
+    );
 
     query.filter.name_contains = Some("100%_budget".into());
     query.filter.mime_prefix = Some("text/".into());
@@ -165,10 +171,11 @@ fn inventory_filters_groups_and_pages_without_treating_unread_files_as_text() {
 #[test]
 fn failed_and_blank_extractions_keep_metadata_and_never_become_readable_on_refresh() {
     let fixture = Fixture::new();
-    fixture.write(
-        "too-much-text.txt",
-        &"x".repeat(sovra_core::files::MAX_DOCUMENT_BYTES + 1),
-    );
+    // This non-streaming decoder still reports expansion failures; large UTF-8
+    // sources use a separate complete-text path and must no longer fail here.
+    let mut wide = vec![0xff, 0xfe];
+    wide.extend([b'x', 0].repeat(sovra_core::files::MAX_DOCUMENT_BYTES + 1));
+    std::fs::write(fixture.source().join("too-much-text.txt"), wide).unwrap();
     fixture.write("blank.txt", " \t\n\u{2003}\n");
     fixture.write("empty.txt", "");
     std::fs::write(fixture.source().join("unknown.bin"), [0, 255, 128]).unwrap();
@@ -238,6 +245,7 @@ fn legacy_index_migrates_atomically_without_inventing_sizes_or_losing_citations(
         issues: vec![],
         completed_at: Some(1),
         auto_refresh: false,
+        scan_options: sovra_core::file_index::ScanOptions::default(),
     };
     db.execute(
         "INSERT INTO index_roots(id,path,identity,details) VALUES('legacy',?1,'identity',?2)",

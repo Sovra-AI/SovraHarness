@@ -8,7 +8,7 @@ use cap_fs_ext::DirExt as _;
 use cap_std::fs::Dir;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
 use sovra_core::file_index::{
-    IndexChanges, IndexError, IndexWatch, IndexedRoot, MAX_INDEX_ENTRIES, excluded_name,
+    IndexChanges, IndexError, IndexWatch, IndexedRoot, MAX_INDEX_ENTRIES, ScanOptions,
 };
 
 use super::io_error;
@@ -24,13 +24,14 @@ pub(super) fn start(
     changes: Arc<dyn IndexChanges>,
 ) -> Result<Box<dyn IndexWatch>, IndexError> {
     let scope = root.path.clone();
+    let options = root.scan_options;
     let excluded = std::fs::canonicalize(storage).ok();
     let event_scope = scope.clone();
     let event_excluded = excluded.clone();
     let mut guard = NativeWatch(
         RecommendedWatcher::new(
             move |event: notify::Result<notify::Event>| match event {
-                Ok(event) if relevant(&event, &event_scope, event_excluded.as_deref()) => {
+                Ok(event) if relevant(&event, &event_scope, event_excluded.as_deref(), options) => {
                     changes.changed();
                 }
                 Ok(_) => {}
@@ -46,7 +47,10 @@ pub(super) fn start(
     );
     let dir =
         Dir::open_ambient_dir(&scope, cap_std::ambient_authority()).map_err(|e| io_error(&e))?;
-    let mut budget = Budget::default();
+    let mut budget = Budget {
+        options,
+        ..Budget::default()
+    };
     let mut paths = guard.0.paths_mut();
     register(
         paths.as_mut(),
@@ -66,6 +70,7 @@ pub(super) fn start(
 
 #[derive(Default)]
 struct Budget {
+    options: ScanOptions,
     directories: usize,
     entries: u64,
 }
@@ -100,7 +105,8 @@ fn register(
             continue;
         };
         let child_path = path.join(name);
-        if excluded_name(name) || excluded.is_some_and(|excluded| child_path.starts_with(excluded))
+        if budget.options.exclusion_reason(name).is_some()
+            || excluded.is_some_and(|excluded| child_path.starts_with(excluded))
         {
             continue;
         }
@@ -113,7 +119,12 @@ fn register(
     Ok(())
 }
 
-fn relevant(event: &notify::Event, scope: &Path, excluded: Option<&Path>) -> bool {
+fn relevant(
+    event: &notify::Event,
+    scope: &Path,
+    excluded: Option<&Path>,
+    options: ScanOptions,
+) -> bool {
     if event.need_rescan() {
         return true;
     }
@@ -129,7 +140,9 @@ fn relevant(event: &notify::Event, scope: &Path, excluded: Option<&Path>) -> boo
                 return false;
             };
             relative.components().all(|component| match component {
-                Component::Normal(name) => name.to_str().is_some_and(|name| !excluded_name(name)),
+                Component::Normal(name) => name
+                    .to_str()
+                    .is_some_and(|name| options.exclusion_reason(name).is_none()),
                 Component::CurDir
                 | Component::ParentDir
                 | Component::RootDir
@@ -155,20 +168,29 @@ mod tests {
             "/chosen/../secret",
         ] {
             let event = notify::Event::new(notify::EventKind::Any).add_path(path.into());
-            assert!(!relevant(&event, root, excluded), "{path}");
+            assert!(
+                !relevant(&event, root, excluded, ScanOptions::default()),
+                "{path}"
+            );
         }
         let rename = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any))
             .add_path("/chosen/target/file".into())
             .add_path("/chosen/notes/file".into());
-        assert!(relevant(&rename, root, excluded));
+        assert!(relevant(&rename, root, excluded, ScanOptions::default()));
         let read = notify::Event::new(notify::EventKind::Access(AccessKind::Any))
             .add_path("/chosen/a".into());
-        assert!(!relevant(&read, root, excluded));
-        assert!(relevant(&read.set_flag(Flag::Rescan), root, excluded));
+        assert!(!relevant(&read, root, excluded, ScanOptions::default()));
+        assert!(relevant(
+            &read.set_flag(Flag::Rescan),
+            root,
+            excluded,
+            ScanOptions::default()
+        ));
         assert!(relevant(
             &notify::Event::new(notify::EventKind::Any).add_path(root.into()),
             root,
-            excluded
+            excluded,
+            ScanOptions::default()
         ));
     }
 }

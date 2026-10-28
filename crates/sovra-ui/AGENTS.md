@@ -21,3 +21,7 @@ GPUI views. Owns windows, views, actions, key bindings, menus and theming.
 - Team and Artifacts views (`team_view.rs`, `artifacts_view.rs`) read the roster and
   library from the shell's `WorkspaceState` and change them only through
   `Command::Teams` / `Command::Artifacts`; they own just their form state.
+- **Skills page (`skill_library.rs`):** Keep the Skills view simple, visual, and
+  jargon-free so a non-technical user ("a grandma") can browse capabilities, click
+  **Try example** or **Try in chat**, and create custom skills in plain English. Every
+  new agent or capability must appear here via `sovra_core::skills::builtin_skills()`.

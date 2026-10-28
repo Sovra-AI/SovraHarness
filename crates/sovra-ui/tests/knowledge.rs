@@ -217,6 +217,7 @@ fn semantic_folder_choice_discloses_the_destination_and_fits_each_layout(cx: &mu
                 issues: vec![],
                 completed_at: Some(1),
                 auto_refresh: false,
+                scan_options: ScanOptions::default(),
             }])))
             .unwrap();
         cx.executor()

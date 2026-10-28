@@ -129,6 +129,17 @@ Without tools, answers remain limited to initial excerpts. The agent is instruct
 to disclose omissions and never infer whole-document understanding from excerpts or
 binary fragments. File contents remain untrusted evidence, never instructions.
 
+## Folder indexing versus attachments
+
+The limits above apply to chat attachments. Folder indexing now streams complete
+large UTF-8 text/source files with fixed-size buffers, including files beyond
+20 MiB and text beyond 4 MiB. Its two-pass hash check and transaction prevent
+partial or changing sources from becoming current citations. Refresh reuses an
+unchanged version; cancellation retains the prior version. Binary documents and
+non-UTF-8 decoding still use the bounded document readers and report unsupported
+or oversized content explicitly. The broader indexing UI and exclusion controls
+remain under active development; see [folder indexing](skills-and-file-knowledge.md).
+
 ## Storage and ownership
 
 The app creates `attachments/` inside its OS data directory. Each attachment has

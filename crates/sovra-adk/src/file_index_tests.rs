@@ -160,6 +160,7 @@ impl IndexedFiles for Reader {
             issues: vec![],
             completed_at: Some(100),
             auto_refresh: true,
+            scan_options: sovra_core::file_index::ScanOptions::default(),
         }])
     }
 

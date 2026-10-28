@@ -1,7 +1,9 @@
 //! Native folder grants and index management; all reads and scans belong to runtime.
 
 use gpui_kit::component::{
-    Disableable as _, h_flex,
+    Disableable as _,
+    checkbox::Checkbox,
+    h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
 };
@@ -27,6 +29,8 @@ pub(crate) struct FileIndexView {
     pub(crate) state: IndexState,
     search: Entity<InputState>,
     removing: Option<String>,
+    detailed_roots: std::collections::BTreeSet<String>,
+    options: std::collections::BTreeMap<String, sovra_core::file_index::ScanOptions>,
     picker: Option<Task<()>>,
     semantic_root: Option<String>,
     embedding_search: Entity<InputState>,
@@ -34,6 +38,20 @@ pub(crate) struct FileIndexView {
 }
 
 impl FileIndexView {
+    pub(crate) fn apply(&mut self, event: &sovra_core::file_index::IndexEvent) {
+        self.state.apply(event);
+        if matches!(event, sovra_core::file_index::IndexEvent::Error(_)) {
+            self.options.clear();
+        } else {
+            self.options.retain(|id, options| {
+                self.state
+                    .roots
+                    .iter()
+                    .any(|root| root.id == *id && root.scan_options != *options)
+            });
+        }
+    }
+
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         let embedding_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Filter embedding models…"));
@@ -50,6 +68,8 @@ impl FileIndexView {
             state: IndexState::default(),
             search: cx.new(|cx| InputState::new(window, cx).placeholder("Search indexed files…")),
             removing: None,
+            detailed_roots: std::collections::BTreeSet::new(),
+            options: std::collections::BTreeMap::new(),
             picker: None,
             semantic_root: None,
             embedding_search,
@@ -111,8 +131,46 @@ impl Shell {
         {
             self.file_index.state.notice = Some(error.to_string());
             self.file_index.state.knowledge_reviewing.clear();
+            self.file_index.options.clear();
         }
         cx.notify();
+    }
+
+    fn change_index_inclusion(
+        &mut self,
+        id: &str,
+        hidden: bool,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root) = self
+            .file_index
+            .state
+            .roots
+            .iter()
+            .find(|root| root.id == id)
+        else {
+            return;
+        };
+        let mut options = self
+            .file_index
+            .options
+            .get(id)
+            .copied()
+            .unwrap_or(root.scan_options);
+        if hidden {
+            options.include_hidden = enabled;
+        } else {
+            options.include_generated = enabled;
+        }
+        self.file_index.options.insert(id.into(), options);
+        self.index_command(
+            IndexCommand::SetScanOptions {
+                root_id: id.into(),
+                options,
+            },
+            cx,
+        );
     }
 
     fn search_index(&mut self, cx: &mut Context<Self>) {
@@ -141,7 +199,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Your indexed folders"))
         .child(div().sovra_text(TextRole::Caption, cx).child("Keyword indexing stays on this device. Optional semantic search sends extracted text and searches to the embedding server you choose for each folder. Chat queries send requested metadata and passages to your chat AI. Hidden files, generated folders and symbolic links are skipped. Automatic updates run while Sovra is open; indexed text is a snapshot."))
         .child(design::button("index-folder", "Index a folder", cx).on_click(cx.listener(|shell, _, window, cx| shell.choose_index_folder(window, cx))))
-        .children(state.roots.iter().map(|root| root_row(root, state.monitors.get(&root.id), state.semantic.iter().find(|s| s.setting.root_id == root.id), shell.file_index.removing.as_deref() == Some(root.id.as_str()), cx)));
+        .children(state.roots.iter().map(|root| root_row(root, state.monitors.get(&root.id), state.semantic.iter().find(|s| s.setting.root_id == root.id), shell.file_index.removing.as_deref() == Some(root.id.as_str()), shell.file_index.detailed_roots.contains(&root.id), shell.file_index.options.get(&root.id).copied(), cx)));
     if let Some(root_id) = shell
         .file_index
         .semantic_root
@@ -245,13 +303,15 @@ fn root_row(
     monitor: Option<&MonitorStatus>,
     semantic: Option<&sovra_core::file_index::semantic::SemanticStatus>,
     removing: bool,
+    detailed: bool,
+    pending_options: Option<sovra_core::file_index::ScanOptions>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let status = match root.status {
         IndexStatus::Pending => "Waiting to scan",
         IndexStatus::Scanning => "Indexing",
-        IndexStatus::Ready => "Indexed",
+        IndexStatus::Ready => "Scan complete",
         IndexStatus::Cancelled => "Cancelled — refresh to continue",
         IndexStatus::Interrupted => "Interrupted — refresh to recover",
         IndexStatus::Failed => "Needs attention",
@@ -426,8 +486,64 @@ fn root_row(
                 .child(design::button(gpui_kit::SharedString::from(format!("confirm-remove-index-{id}")), "Remove index", cx).on_click(cx.listener(move |shell, _, _, cx| { shell.file_index.removing = None; shell.index_command(IndexCommand::Remove { root_id: id.clone() }, cx); })))
                 .child(design::button(gpui_kit::SharedString::from(format!("keep-index-{}", root.id)), "Keep", cx).on_click(cx.listener(|shell, _, _, cx| { shell.file_index.removing = None; cx.notify(); }))));
     }
-    for issue in root.issues.iter().take(5) {
-        row = row.child(div().sovra_text(TextRole::Caption, cx).child(issue.clone()));
+    let details_id = root.id.clone();
+    row = row.child(
+        design::button(
+            gpui_kit::SharedString::from(format!("index-details-{}", root.id)),
+            if detailed {
+                "Hide folder details".into()
+            } else {
+                format!("Folder settings · {} notices", root.issues.len())
+            },
+            cx,
+        )
+        .on_click(cx.listener(move |shell, _, _, cx| {
+            if !shell.file_index.detailed_roots.remove(&details_id) {
+                shell.file_index.detailed_roots.insert(details_id.clone());
+            }
+            cx.notify();
+        })),
+    );
+    if detailed {
+        let options = pending_options.unwrap_or(root.scan_options);
+        let hidden_id = root.id.clone();
+        let generated_id = root.id.clone();
+        row = row
+            .child(div().sovra_text(TextRole::SectionTitle, cx).child("What to include"))
+            .child(Checkbox::new(gpui_kit::SharedString::from(format!("index-hidden-{}", root.id)))
+                .cursor_pointer()
+                .label("Include hidden files and folders").checked(options.include_hidden)
+                .on_click(cx.listener(move |shell, checked, _, cx| shell.change_index_inclusion(&hidden_id, true, *checked, cx))))
+            .child(Checkbox::new(gpui_kit::SharedString::from(format!("index-generated-{}", root.id)))
+                .cursor_pointer()
+                .label("Include generated folders").checked(options.include_generated)
+                .on_click(cx.listener(move |shell, checked, _, cx| shell.change_index_inclusion(&generated_id, false, *checked, cx))))
+            .child(div().sovra_text(TextRole::Caption, cx).child("Generated folders include build, target and node_modules. Hidden files may contain private settings. Changes refresh this folder; excluded files leave current search, while saved history is kept. Credential folders and Sovra's own index data remain excluded."));
+        if pending_options.is_some() {
+            row = row.child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .child("Applying folder settings…"),
+            );
+        }
+        if !root.issues.is_empty() {
+            row = row.child(div().sovra_text(TextRole::SectionTitle, cx).child("Scan notices"))
+                .child(div().sovra_text(TextRole::Caption, cx).child("Up to 50 examples are recorded per scan; the totals above include all skipped entries."));
+            for (index, issue) in root.issues.iter().enumerate() {
+                row = row.child(
+                    div()
+                        .id(gpui_kit::SharedString::from(format!(
+                            "index-issue-{}-{index}",
+                            root.id
+                        )))
+                        .test_support()
+                        .w_full()
+                        .min_w_0()
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(issue.clone()),
+                );
+            }
+        }
     }
     row
 }
@@ -451,9 +567,10 @@ mod tests {
             path: format!("/selected/{}/notes", "long-folder-name".repeat(24)).into(),
             status: IndexStatus::Ready,
             progress: IndexProgress::default(),
-            issues: vec![],
+            issues: (0..12).map(|n| format!("File {n}: contents could not be read. Check its format and refresh to retry.")).collect(),
             completed_at: Some(42),
             auto_refresh: true,
+            scan_options: sovra_core::file_index::ScanOptions::default(),
         }
     }
 
@@ -479,6 +596,8 @@ mod tests {
             window.render_frame(cx);
             window.click("automatic-index-chosen", cx);
             window.click("refresh-index-chosen", cx);
+            window.click("index-details-chosen", cx);
+            assert!(shell.read(cx).file_index.detailed_roots.contains("chosen"));
             window.click("remove-index-chosen", cx);
             assert!(shell.read(cx).file_index.removing.is_some());
         })
@@ -538,6 +657,7 @@ mod tests {
                         .file_index
                         .state
                         .apply(&IndexEvent::Roots(vec![root()]));
+                    shell.file_index.detailed_roots.insert("chosen".into());
                     shell.select_tab(NavTab::Knowledge, cx);
                 });
                 for mode in [ThemeMode::Dark, ThemeMode::Light] {
@@ -550,6 +670,10 @@ mod tests {
                         "refresh-index-chosen",
                         "remove-index-chosen",
                         "search-index",
+                        "index-details-chosen",
+                        "index-hidden-chosen",
+                        "index-generated-chosen",
+                        "index-issue-chosen-11",
                     ] {
                         let bounds = window.find(id).bounds();
                         assert!(

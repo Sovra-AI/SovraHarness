@@ -1,6 +1,283 @@
-//! Built-ins describe capabilities actually implemented by the native client.
+//! Built-ins describe capabilities actually implemented by the native client, plus
+//! grandma-friendly display metadata (`SkillCardCopy`) so the Skills page is effortless
+//! for non-technical people to browse and try with one click.
 
 use super::{Skill, SkillAction, SkillKind};
+
+/// Plain-English presentation metadata for a [`Skill`] on the Skills page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillCardCopy {
+    /// Warm, jargon-free title shown as the card heading.
+    pub friendly_title: String,
+    /// One-sentence plain-English explanation of what this skill helps with.
+    pub summary: String,
+    /// Relatable example shown in the subtle preview box on the card.
+    pub example_display: String,
+    /// Exact text filled into the chat composer when the user clicks "Try example".
+    pub sample_draft: String,
+}
+
+impl Skill {
+    /// Returns grandma-friendly title, summary, example display, and 1-click starter draft.
+    pub fn friendly_card_copy(&self) -> SkillCardCopy {
+        let friendly_title = match self.name.as_str() {
+            "files" => "Attach files or photos",
+            "index-folder" => "Connect a folder on your computer",
+            "help" => "Browse all skills & shortcuts",
+            "new" => "Start a fresh chat",
+            "models" => "Choose or connect your AI",
+            "knowledge" => "See what Sovra remembers",
+            "schedules" => "Saved tasks & daily briefings",
+            "agents" => "How Sovra picks the best helper",
+            "settings" => "Appearance, text size & settings",
+            "team" => "Ask your whole AI team together",
+            "artifacts" => "Open your saved work library",
+            "connections" => "Connect personal WhatsApp (QR code)",
+            "web-search" => "Search the live web",
+            "save-artifact" => "Save work to your library",
+            "read-files" => "Read & explain attached files",
+            "search-files" => "Search inside your connected folders",
+            "map-files" => "Connect people & topics in your files",
+            "file-knowledge" => "Explore reviewed file connections",
+            "file-catalog" => "List & count files in your folders",
+            "file-history" => "See what changed in a file over time",
+            "card" => "Summarize as a neat info card",
+            "table" => "Compare side-by-side in a table",
+            "confirm" => "Show a clear yes/no choice card",
+            "alert" => "Highlight an important reminder",
+            "progress" => "Show a step-by-step progress bar",
+            "coding" => "Coding & technical problem helper",
+            "deep-research" => "Deep multi-source researcher",
+            "stock-market" => "Stock market & company helper",
+            "housing-market" => "Home buying & rental explorer",
+            "housing-advisor" => "Mortgage & home budget advisor",
+            "scholar" => "Science & medical paper explainer",
+            "image-search" => "Find reference pictures & photos",
+            "image-generation" => "Create illustrations & pictures",
+            "execution" => "Calculator & number cruncher",
+            "documentation" => "Clear how-to guide writer",
+            "project" => "Project & weekend task planner",
+            "document-reader" => "Long document & PDF reader",
+            "presentation" => "Slide deck & talk outliner",
+            "document-author" => "Polite letter & report writer",
+            "spreadsheet" => "Household budget & table builder",
+            "google-workspace" => "Gmail, Calendar & Drive helper",
+            "microsoft-workspace" => "Outlook, Word & Excel helper",
+            "scheduler" => "Recurring routine planner",
+            "todos" => "Personal to-do list organizer",
+            "github" => "GitHub code & issue helper",
+            _ => &self.title,
+        }
+        .to_owned();
+
+        let summary = self
+            .description
+            .strip_prefix("Consult this specialist when you need help with: ")
+            .or_else(|| self.description.strip_prefix("Use when "))
+            .map_or_else(
+                || self.description.clone(),
+                |rest| {
+                    let mut chars = rest.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => self.description.clone(),
+                    }
+                },
+            );
+
+        let (example_display, sample_draft) = match self.name.as_str() {
+            "files" => (
+                "Opens your computer's file picker so you can attach documents or pictures."
+                    .to_owned(),
+                "/files ".to_owned(),
+            ),
+            "index-folder" => (
+                "Lets you choose a folder on your computer for Sovra to search privately."
+                    .to_owned(),
+                "/index-folder ".to_owned(),
+            ),
+            "help" => (
+                "Opens this Skills & Shortcuts guide anytime.".to_owned(),
+                "/help ".to_owned(),
+            ),
+            "new" => (
+                "Starts a clean conversation right away.".to_owned(),
+                "/new ".to_owned(),
+            ),
+            "models" => (
+                "Opens Models so you can pick or connect an AI brain.".to_owned(),
+                "/models ".to_owned(),
+            ),
+            "knowledge" => (
+                "Opens Knowledge to see saved memories and connected folders.".to_owned(),
+                "/knowledge ".to_owned(),
+            ),
+            "schedules" => (
+                "Opens Schedules to run or set up recurring briefings.".to_owned(),
+                "/schedules ".to_owned(),
+            ),
+            "agents" => (
+                "Opens My AI's to see how Sovra chooses helpers for each task.".to_owned(),
+                "/agents ".to_owned(),
+            ),
+            "settings" => (
+                "Opens Settings for light/dark mode, text size, and personal instructions."
+                    .to_owned(),
+                "/settings ".to_owned(),
+            ),
+            "team" => (
+                "Switches chat so your whole team of AI helpers answers together.".to_owned(),
+                "/team ".to_owned(),
+            ),
+            "artifacts" => (
+                "Opens your library of saved documents, checklists, tables, and code.".to_owned(),
+                "/artifacts ".to_owned(),
+            ),
+            "connections" => (
+                "Opens Settings → Connections so you can link personal WhatsApp with a QR code."
+                    .to_owned(),
+                "/connections ".to_owned(),
+            ),
+            "web-search" => sample_pair(
+                "web-search",
+                "What are three easy, healthy Mediterranean dinner ideas?",
+            ),
+            "save-artifact" => sample_pair("save-artifact", "Our family trip packing checklist"),
+            "read-files" => sample_pair(
+                "read-files",
+                "Summarize the main points of this document in plain English",
+            ),
+            "search-files" => sample_pair(
+                "search-files",
+                "Where did we mention the kitchen renovation budget?",
+            ),
+            "map-files" => sample_pair(
+                "map-files",
+                "Connect the people and key dates across these project notes",
+            ),
+            "file-knowledge" => sample_pair(
+                "file-knowledge",
+                "What have we reviewed about our project timeline?",
+            ),
+            "file-catalog" => sample_pair(
+                "file-catalog",
+                "Show all PDFs and spreadsheets in my connected folders",
+            ),
+            "file-history" => {
+                sample_pair("file-history", "What changed in our budget notes recently?")
+            }
+            "card" => sample_pair("card", "Emergency contacts and hotel address for our trip"),
+            "table" => sample_pair("table", "Compare three easy-care indoor houseplants"),
+            "confirm" => sample_pair(
+                "confirm",
+                "Should we send the warm friendly note or the formal letter?",
+            ),
+            "alert" => sample_pair("alert", "Reminder to check passport renewal dates"),
+            "progress" => sample_pair("progress", "Show our 4-step moving checklist progress"),
+            "coding" => sample_pair(
+                "coding",
+                "Explain what this computer error message means in simple terms",
+            ),
+            "deep-research" => sample_pair(
+                "deep-research",
+                "Compare heat pumps vs gas boilers for a small family home",
+            ),
+            "stock-market" => sample_pair(
+                "stock-market",
+                "How did major technology companies perform this week?",
+            ),
+            "housing-market" => sample_pair(
+                "housing-market",
+                "What should I check when viewing an older house?",
+            ),
+            "housing-advisor" => sample_pair(
+                "housing-advisor",
+                "How does a 15-year vs 30-year mortgage compare on monthly cost?",
+            ),
+            "scholar" => sample_pair(
+                "scholar",
+                "What does recent research say about daily walking and sleep quality?",
+            ),
+            "image-search" => {
+                sample_pair("image-search", "Cozy sunlit Scandinavian living room ideas")
+            }
+            "image-generation" => sample_pair(
+                "image-generation",
+                "A warm watercolor illustration of a cottage garden",
+            ),
+            "execution" => sample_pair(
+                "execution",
+                "Calculate compound interest on $5,000 over 10 years at 5%",
+            ),
+            "documentation" => sample_pair(
+                "documentation",
+                "Write a simple step-by-step guide for guests using our home Wi-Fi",
+            ),
+            "project" => sample_pair(
+                "project",
+                "Break our garage cleanout into 5 easy weekend steps",
+            ),
+            "document-reader" => sample_pair(
+                "document-reader",
+                "Find the warranty coverage and return policy in this manual",
+            ),
+            "presentation" => sample_pair(
+                "presentation",
+                "Outline a friendly 5-slide family reunion presentation",
+            ),
+            "document-author" => sample_pair(
+                "document-author",
+                "Write a polite letter to our landlord about fixing a leaky tap",
+            ),
+            "spreadsheet" => sample_pair(
+                "spreadsheet",
+                "Create a simple monthly household budget table",
+            ),
+            "google-workspace" => sample_pair(
+                "google-workspace",
+                "Draft a warm thank-you email reply after Sunday dinner",
+            ),
+            "microsoft-workspace" => sample_pair(
+                "microsoft-workspace",
+                "Summarize the action items for our Word handout",
+            ),
+            "scheduler" => sample_pair(
+                "scheduler",
+                "Plan a recurring Monday morning week-ahead briefing",
+            ),
+            "todos" => sample_pair(
+                "todos",
+                "Organize my errands by priority for tomorrow morning",
+            ),
+            "github" => sample_pair(
+                "github",
+                "Summarize the latest changes and open issues in this repository",
+            ),
+            _ => {
+                let sample = if self.argument_hint.is_empty() {
+                    format!("/{} ", self.name)
+                } else {
+                    format!("/{} {}", self.name, self.argument_hint)
+                };
+                (format!("Example: {sample}"), sample)
+            }
+        };
+
+        SkillCardCopy {
+            friendly_title,
+            summary,
+            example_display,
+            sample_draft,
+        }
+    }
+}
+
+fn sample_pair(name: &str, example_request: &str) -> (String, String) {
+    (
+        format!("Example: “{example_request}”"),
+        format!("/{name} {example_request}"),
+    )
+}
 
 pub fn builtin_skills() -> Vec<Skill> {
     let mut skills = vec![
@@ -14,7 +291,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "index-folder",
             "Index a folder",
-            "Choose a folder to index locally and search in Knowledge.",
+            "Choose a folder to search locally, see unreadable files, and choose whether to include hidden or generated content.",
             SkillAction::IndexFolder,
             &["index-file-system", "index-files"],
         ),
@@ -251,7 +528,9 @@ pub fn builtin_skills() -> Vec<Skill> {
             &specialist.route_key.replace('_', "-"),
             &specialist.name,
             &format!("Consult this specialist when you need help with: {}", specialist.description),
-            "Specialists", &[], &[&specialist.id],
+            "Specialists",
+            &[],
+            &[&specialist.id],
             &format!("Delegate the user's request to {} and synthesize the result. Supply the relevant context explicitly. A specialist's domain description is not evidence that an external integration is connected: use only its actual tools, disclose missing access and never claim an action was executed without a tool result.", specialist.id),
             "<request>",
         ));
