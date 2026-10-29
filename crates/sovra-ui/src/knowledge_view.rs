@@ -31,6 +31,10 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         self.knowledge_section = section;
+        if section == KnowledgeSection::Memories {
+            self.memory_view
+                .update(cx, |view, cx| view.refresh_captured(true, cx));
+        }
         self.knowledge_scroll.set_offset(gpui_kit::Point::default());
         cx.notify();
     }

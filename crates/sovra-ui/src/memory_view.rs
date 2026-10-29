@@ -32,6 +32,7 @@ pub(crate) struct MemoryView {
     editing: Option<FactId>,
     stopping: Option<FactId>,
     source_only: bool,
+    new_memories: bool,
 }
 
 impl MemoryView {
@@ -63,6 +64,7 @@ impl MemoryView {
             editing: None,
             stopping: None,
             source_only: false,
+            new_memories: false,
         }
     }
 
@@ -83,6 +85,7 @@ impl MemoryView {
     }
 
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
+        self.new_memories = false;
         self.source_only = false;
         self.query.search = self.search.read(cx).value().to_string();
         self.query.before = None;
@@ -93,6 +96,36 @@ impl MemoryView {
 
     pub(crate) fn source_only(&self) -> bool {
         self.source_only
+    }
+
+    pub(crate) fn captured(
+        &mut self,
+        job: &sovra_core::MemoryJob,
+        visible: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if job.state == sovra_core::MemoryJobState::Complete && !job.fact_ids.is_empty() {
+            self.new_memories = true;
+            self.refresh_captured(visible, cx);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn refresh_captured(&mut self, visible: bool, cx: &mut Context<Self>) {
+        // A background save must not discard a correction, move an older page,
+        // or apply search text that the user is still typing.
+        if self.new_memories
+            && visible
+            && !self.source_only
+            && !self.state.loading
+            && self.state.detail.is_none()
+            && self.editing.is_none()
+            && self.stopping.is_none()
+            && self.query.before.is_none()
+            && self.search.read(cx).value().as_ref() == self.query.search
+        {
+            self.load(cx);
+        }
     }
 
     pub(crate) fn open_source(&mut self, id: FactId, cx: &mut Context<Self>) {
@@ -232,6 +265,11 @@ impl Render for MemoryView {
                         view.load(cx);
                     }))));
             column = column.child(self.semantic_controls(cx));
+            if self.new_memories {
+                column = column.child(div().id("memory-new-details").test_support()
+                    .min_w_0().sovra_text(TextRole::Body, cx)
+                    .child("New details were saved. Finish reviewing or editing, then use Search / refresh to update this list."));
+            }
         }
         if busy {
             column = column.child(
@@ -549,6 +587,75 @@ mod tests {
         }
     }
 
+    fn captured() -> Event {
+        Event::Memory(MemoryEvent::Processed(sovra_core::MemoryJob {
+            episode_id: EpisodeId("episode:tea".into()),
+            state: sovra_core::MemoryJobState::Complete,
+            attempts: 1,
+            error: None,
+            fact_ids: vec![FactId("fact:tea".into())],
+            candidates: vec![],
+            extraction_model: Some("fixture".into()),
+        }))
+    }
+
+    #[gpui_kit::test]
+    fn newly_captured_memories_refresh_the_open_list(cx: &mut TestAppContext) {
+        let (client, commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+            let shell = cx.new(|cx| {
+                let mut shell = crate::Shell::new(window, cx);
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(
+                    crate::knowledge_view::KnowledgeSection::Memories,
+                    cx,
+                );
+                shell
+            });
+            Root::new(shell, window, cx)
+        });
+        let load = request(&commands);
+        respond(
+            &events,
+            load.request_id,
+            MemoryReviewResult::Page(MemoryPage::default()),
+        );
+        settle(cx);
+        events.send_blocking(captured()).unwrap();
+        settle(cx);
+        let refresh = request(&commands);
+        assert!(matches!(refresh.action, MemoryAction::List(_)));
+        events.send_blocking(captured()).unwrap();
+        settle(cx);
+        assert!(
+            !std::iter::from_fn(|| commands.try_recv().ok())
+                .any(|command| matches!(command, Command::Memory(_)))
+        );
+        respond(
+            &events,
+            refresh.request_id,
+            MemoryReviewResult::Page(MemoryPage::default()),
+        );
+        settle(cx);
+        let refresh = request(&commands);
+        respond(
+            &events,
+            refresh.request_id,
+            MemoryReviewResult::Page(MemoryPage {
+                facts: vec![detail().fact],
+                next: None,
+            }),
+        );
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("memory-empty").is_none());
+            assert!(window.try_find(("memory-open", 0usize)).is_some());
+        })
+        .unwrap();
+    }
+
     #[gpui_kit::test]
     fn saved_memory_controls_work_through_the_shell_at_every_size(cx: &mut TestAppContext) {
         for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
@@ -625,6 +732,27 @@ mod tests {
                         input.set_value("I prefer jasmine tea", window, cx);
                     });
                 });
+            })
+            .unwrap();
+            events.send_blocking(captured()).unwrap();
+            settle(cx);
+            assert!(
+                !std::iter::from_fn(|| commands.try_recv().ok())
+                    .any(|command| matches!(command, Command::Memory(_)))
+            );
+            cx.update_window(window.into(), |_, window, cx| {
+                let view = shell.read(cx).memory_view.clone();
+                assert_eq!(
+                    view.read(cx).correction.read(cx).value().as_ref(),
+                    "I prefer jasmine tea"
+                );
+                for theme in [ThemeMode::Light, ThemeMode::Dark] {
+                    Theme::change(theme, Some(window), cx);
+                    window.render_frame(cx);
+                    let bounds = window.find("memory-new-details").bounds();
+                    assert!(bounds.left() >= px(0.) && bounds.right() <= px(width));
+                    assert!(bounds.size.height > px(0.));
+                }
                 click(window, "memory-save", height, cx);
             })
             .unwrap();

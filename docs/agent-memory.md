@@ -6,6 +6,40 @@ skills and team integrations based on `79d86b4`. This is not a published or sign
 release. The final audit below supersedes earlier checkpoint failures; measured
 quality and portability limitations remain explicit.
 
+## Capture and recall check (2026-10-29)
+
+A live synthetic check with the selected OpenRouter model,
+`anthropic/claude-haiku-5.5`, saved a breakfast preference and a dated residence
+from one conversation. A separate conversation recalled jasmine tea and cited the
+actual saved fact. Both extraction jobs completed on their first attempt; the
+question produced no new facts. The check used a separate local store with 100
+synthetic distractor facts and semantic search disabled. The
+[retained report](evaluations/memory-2026-10-29/smoke.json) contains synthetic
+messages only. This two-turn check establishes that the configured capture and
+recall path works for this example, not a general accuracy score.
+
+The UI regression exposed a separate issue: opening Memories before extraction
+completed left its list empty until manual refresh. Completed captures now refresh
+an idle visible list, or refresh when Memories is opened. A capture during a list
+request schedules a follow-up refresh. Editing, source review, unsent search text
+and older pages are preserved, with a new-details notice. Headless tests reproduce
+the original failure and cover the fix, loading races and preservation of an edit
+at minimum/wide window sizes, 200% interface size and both themes. The real-disk
+memory lifecycle test also passed, including recall after runtime restart.
+Full `cargo xtask ci` passed in the isolated checkout: all gates and 647 tests
+passed, with six opt-in tests skipped.
+
+Run the small live check with an existing development connection and a new output
+directory (it makes requests to the selected service):
+
+```sh
+SOVRA_MEMORY_EVAL_SUITE=smoke \
+SOVRA_MEMORY_EVAL_DEV_DATA=/path/to/development/app-data \
+SOVRA_MEMORY_EVAL_OUTPUT=/tmp/sovra-memory-smoke-new \
+cargo nextest run --workspace --run-ignored ignored-only \
+  -E 'test(synthetic_selected_model_evaluation)'
+```
+
 ## Final acceptance audit (2026-10-27)
 
 `cargo xtask ci` passes **every gate**: formatting, Clippy, layering, styling,

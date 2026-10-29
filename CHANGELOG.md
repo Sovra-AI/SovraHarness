@@ -513,6 +513,11 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- **Show newly captured memories:** the open Memories list refreshes when a
+  background capture finishes. Captures arriving during a load trigger a follow-up
+  refresh; hidden lists refresh when opened. Corrections, source review, typed
+  searches and older pages stay in place with a notice that new details are saved.
+
 - Folder summaries now show skipped or unread-content notices without opening
   Folder settings. A completed scan with notices says to review them and points
   directly to Scan report; clearing the notices removes the prompt.

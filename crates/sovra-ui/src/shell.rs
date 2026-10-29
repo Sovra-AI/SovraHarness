@@ -237,6 +237,16 @@ impl Shell {
                 let applied = this.update(cx, |shell, cx| {
                     let mut should_persist_thread = false;
                     for event in batch {
+                        let memory_visible = shell.state.active_tab == NavTab::Knowledge
+                            && shell.knowledge_section
+                                == crate::knowledge_view::KnowledgeSection::Memories;
+                        if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Processed(job)) =
+                            &event
+                        {
+                            shell
+                                .memory_view
+                                .update(cx, |view, cx| view.captured(job, memory_visible, cx));
+                        }
                         if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Semantic(
                             status,
                         )) = &event
@@ -248,9 +258,10 @@ impl Shell {
                         if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Review(event)) =
                             &event
                         {
-                            shell
-                                .memory_view
-                                .update(cx, |view, cx| view.apply(event, cx));
+                            shell.memory_view.update(cx, |view, cx| {
+                                view.apply(event, cx);
+                                view.refresh_captured(memory_visible, cx);
+                            });
                         }
                         if let sovra_core::Event::FileIndex(event) = &event {
                             shell.file_index.apply(event);
