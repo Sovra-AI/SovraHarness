@@ -133,6 +133,7 @@ move them under a version heading when the tag is cut.
 
 ### Changed
 
+- `cargo deny` now allows the `Unicode-DFS-2016` licence, which `finl_unicode` (pulled in by `xberg` → `comrak`) carries. It is an OSI-approved Unicode data licence, and the check was already failing on this before the Google work.
 - Refine the native UI throughout: neutral charcoal/paper palettes, restrained
   violet accents, consistent typography and spacing, flatter cards, quieter chat
   bubbles and a more comfortable composer. Unify page headers and simplify setup
