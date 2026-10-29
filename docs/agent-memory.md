@@ -26,6 +26,10 @@ and older pages are preserved, with a new-details notice. Headless tests reprodu
 the original failure and cover the fix, loading races and preservation of an edit
 at minimum/wide window sizes, 200% interface size and both themes. The real-disk
 memory lifecycle test also passed, including recall after runtime restart.
+The restart check closes the runtime, reopens the same disk store, and sends a
+question in a new conversation with no restored context. It verifies that the
+provider request contains the saved fact, original quote, source ID and citation
+before proceeding to correction and Stop using checks.
 Full `cargo xtask ci` passed in the isolated checkout: all gates and 647 tests
 passed, with six opt-in tests skipped.
 
