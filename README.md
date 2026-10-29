@@ -240,8 +240,11 @@ Pausing remembering also disables automatic recall. Explicit source review remai
 available. Reopened chats and model
 changes use a bounded excerpt of the visible conversation, preserving user/reply
 roles without replaying earlier tool actions, widgets or reasoning. This same-chat
-context stays available when remembering is off. Knowledge → What I remember lists
+context stays available when remembering is off. Knowledge → Memories → What I remember lists
 your saved details with search, older pages, retained history and original sources.
+Newly captured details refresh the open list automatically. While you are reviewing
+a source, editing, typing a search or browsing older pages, a notice announces new
+details so your work stays in place. Use Search / refresh when ready.
 Correct saves a new version and its source note; Stop using asks for confirmation
 and excludes that version from current and historical recall. Both keep previous versions and the
 original conversation, which still supplies its own same-chat context. Reviewing

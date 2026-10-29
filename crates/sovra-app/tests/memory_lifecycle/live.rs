@@ -220,9 +220,10 @@ fn synthetic_selected_model_evaluation() {
     let selected_suite =
         std::env::var("SOVRA_MEMORY_EVAL_SUITE").unwrap_or_else(|_| "general".into());
     let (suite_name, cases) = match selected_suite.as_str() {
+        "smoke" => ("synthetic-memory-smoke-v1", &GENERAL_CASES[..2]),
         "general" => ("synthetic-memory-v3", GENERAL_CASES),
         "temporal" => ("synthetic-memory-temporal-v1", TEMPORAL_CASES),
-        _ => panic!("SOVRA_MEMORY_EVAL_SUITE must be general or temporal"),
+        _ => panic!("SOVRA_MEMORY_EVAL_SUITE must be smoke, general or temporal"),
     };
     let source_root = PathBuf::from(
         std::env::var("SOVRA_MEMORY_EVAL_DEV_DATA")
