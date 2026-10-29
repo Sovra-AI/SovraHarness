@@ -413,6 +413,20 @@ fn real_disk_memory_lifecycle_reaches_provider_and_survives_runtime_restart() {
     };
     assert_eq!(cited.source.as_ref(), Some(&source));
 
+    driver.close();
+    let mut driver = fixture.start();
+    let question = "After reopening the app, which tea do I prefer?";
+    driver.prompt("restarted-chat", question, ConversationContext::default());
+    let recalled = evidence(&fixture.request_for(question)).unwrap();
+    assert_eq!(recalled["memories"].as_array().unwrap().len(), 1);
+    assert_eq!(recalled["memories"][0]["fact_id"], original.id.0);
+    assert_eq!(recalled["memories"][0]["quote"], SOURCE);
+    assert_eq!(recalled["memories"][0]["source_id"], source.id.0);
+    assert_eq!(
+        recalled["memories"][0]["citation"],
+        format!("memory:{}", original.id.0)
+    );
+
     let MemoryReviewResult::Changed(replacement) =
         driver.review(MemoryAction::Correct(MemoryCorrection {
             target: original.id.clone(),
