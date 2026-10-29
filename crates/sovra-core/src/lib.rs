@@ -47,10 +47,12 @@ pub use chat_history::{
 };
 pub use citations::sources_footer;
 pub use connections::{
-    ChannelError, ChannelEvent, ChannelSession, ChannelSink, ChannelStartOptions, ChatKind,
-    ConnectionCommand, ConnectionEvent, ConnectionsState, IncomingMessage, LinkedDevice,
-    MessagingChannel, WhatsAppBridgedMessage, WhatsAppQrTicket, WhatsAppSettings, WhatsAppStatus,
-    is_whatsapp_session, whatsapp_session_id,
+    BridgedMessage, ChannelError, ChannelEvent, ChannelKind, ChannelSession, ChannelSink,
+    ChannelStartOptions, ChatKind, ConnectionCommand, ConnectionEvent, ConnectionsState,
+    IncomingMessage, LinkedDevice, MessagingChannel, PollOutcome, TelegramAction, TelegramSettings,
+    TelegramStatus, WhatsAppQrTicket, WhatsAppSettings, WhatsAppStatus, channel_of_session,
+    is_whatsapp_session, telegram_action, telegram_link_code, telegram_session_id,
+    whatsapp_session_id,
 };
 pub use context_budget::{
     ContextAllowance, ContextBudget, ContextLimitError, ContextTrim, media_input_units,

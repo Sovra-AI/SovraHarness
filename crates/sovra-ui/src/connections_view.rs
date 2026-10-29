@@ -19,7 +19,8 @@ use gpui_kit::{
 };
 use sovra_core::Command;
 use sovra_core::connections::{
-    ConnectionCommand, ConnectionsState, WhatsAppQrTicket, WhatsAppSettings, WhatsAppStatus,
+    ConnectionCommand, ConnectionsState, TelegramSettings, TelegramStatus, WhatsAppQrTicket,
+    WhatsAppSettings, WhatsAppStatus,
 };
 
 use crate::RuntimeClient;
@@ -28,17 +29,26 @@ use crate::models_view::{ModelsView, caption, pill};
 use crate::settings_view::settings_section;
 
 pub(crate) struct WhatsAppForm {
-    pub(crate) phone_input: Entity<InputState>,
-    pub(crate) test_msg_input: Entity<InputState>,
+    pub(crate) phone: Entity<InputState>,
+    pub(crate) test_message: Entity<InputState>,
+    pub(crate) telegram_token: Entity<InputState>,
+    pub(crate) telegram_test: Entity<InputState>,
 }
 
 impl WhatsAppForm {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<ModelsView>) -> Self {
         Self {
-            phone_input: cx.new(|cx| {
+            phone: cx.new(|cx| {
                 InputState::new(window, cx).placeholder("Phone number with country code")
             }),
-            test_msg_input: cx
+            test_message: cx
+                .new(|cx| InputState::new(window, cx).placeholder("Hello from my computer")),
+            telegram_token: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder("Paste the token from @BotFather")
+                    .masked(true)
+            }),
+            telegram_test: cx
                 .new(|cx| InputState::new(window, cx).placeholder("Hello from my computer")),
         }
     }
@@ -201,7 +211,7 @@ impl ModelsView {
                         .gap(t.space.small)
                         .child(
                             div().flex_1().min_w(t.layout.filter_width).child(
-                                Input::new(&self.whatsapp_form.test_msg_input)
+                                Input::new(&self.whatsapp_form.test_message)
                                     .id("whatsapp-test-msg-input")
                                     .aria_label("Message to send to your own WhatsApp")
                                     .small(),
@@ -217,7 +227,7 @@ impl ModelsView {
                             .on_click(cx.listener(|view, _, window, cx| {
                                 let text = view
                                     .whatsapp_form
-                                    .test_msg_input
+                                    .test_message
                                     .read(cx)
                                     .value()
                                     .to_string();
@@ -230,7 +240,7 @@ impl ModelsView {
                                     ConnectionCommand::SendTestWhatsAppMessage { text },
                                     cx,
                                 );
-                                view.whatsapp_form.test_msg_input.update(cx, |input, cx| {
+                                view.whatsapp_form.test_message.update(cx, |input, cx| {
                                     input.set_value("", window, cx);
                                 });
                             })),
@@ -245,7 +255,7 @@ impl ModelsView {
                     .test_support()
                     .w_full()
                     .gap(t.space.small)
-                    .child(caption("Recent messages from WhatsApp", cx))
+                    .child(caption("Recent messages from your linked apps", cx))
                     .children(state.recent_messages.iter().enumerate().map(|(idx, msg)| {
                         v_flex()
                             .id(("whatsapp-msg-row", idx))
@@ -258,7 +268,11 @@ impl ModelsView {
                                 div()
                                     .sovra_text(TextRole::Caption, cx)
                                     .text_color(cx.theme().link)
-                                    .child(msg.sender_name.clone()),
+                                    .child(format!(
+                                        "{} · {}",
+                                        msg.sender_name,
+                                        msg.channel.label()
+                                    )),
                             )
                             .child(div().sovra_text(TextRole::Body, cx).child(msg.text.clone()))
                             .children(
@@ -268,6 +282,263 @@ impl ModelsView {
                             )
                     })),
             );
+        }
+
+        section
+    }
+
+    /// Telegram: a bot of your own, connected with the token `@BotFather` gives you. You
+    /// prove it is yours by sending it a code, then it answers you.
+    pub(crate) fn render_telegram_section(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let state = &self.connections;
+        let status = &state.telegram;
+        let linked = status.is_linked();
+
+        let mut section = settings_section(
+            "settings-telegram",
+            "Telegram",
+            "Talk to Sovra from Telegram through a bot of your own. In Telegram, open @BotFather, send /newbot, and paste the token it gives you here.",
+            cx,
+        )
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap(t.space.small)
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(t.space.compact)
+                        .child(Icon::new(IconName::Send).small().text_color(cx.theme().link))
+                        .child(div().sovra_text(TextRole::Body, cx).child("Telegram"))
+                        .child(
+                            div()
+                                .id("telegram-status-badge")
+                                .test_support()
+                                .child(pill(status.badge_label().to_owned(), cx)),
+                        ),
+                )
+                .children(linked.then(|| {
+                    design::button("telegram-disconnect-btn", "Disconnect Telegram", cx)
+                        .small()
+                        .ghost()
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.send_connection(ConnectionCommand::DisconnectTelegram, cx);
+                        }))
+                })),
+        );
+
+        match status {
+            TelegramStatus::Disconnected | TelegramStatus::Error { .. } => {
+                if let TelegramStatus::Error { message } = status {
+                    section = section.child(
+                        caption(message.clone(), cx)
+                            .id("telegram-error")
+                            .test_support()
+                            .text_color(cx.theme().danger),
+                    );
+                }
+                section = section.child(
+                    h_flex()
+                        .w_full()
+                        .flex_wrap()
+                        .gap(t.space.small)
+                        .child(
+                            div().flex_1().min_w(t.layout.filter_width).child(
+                                Input::new(&self.whatsapp_form.telegram_token)
+                                    .id("telegram-token-input")
+                                    .aria_label("Telegram bot token")
+                                    .small(),
+                            ),
+                        )
+                        .child(
+                            design::primary_button("telegram-connect-btn", "Connect Telegram", cx)
+                                .small()
+                                .icon(IconName::Send)
+                                .on_click(cx.listener(|view, _, window, cx| {
+                                    let token = view
+                                        .whatsapp_form
+                                        .telegram_token
+                                        .read(cx)
+                                        .value()
+                                        .to_string();
+                                    view.send_connection(
+                                        ConnectionCommand::ConnectTelegram { token },
+                                        cx,
+                                    );
+                                    view.whatsapp_form
+                                        .telegram_token
+                                        .update(cx, |input, cx| input.set_value("", window, cx));
+                                })),
+                        ),
+                );
+            }
+            TelegramStatus::Connecting => {
+                section = section.child(
+                    caption("Checking the token with Telegram…", cx)
+                        .id("telegram-connecting")
+                        .test_support(),
+                );
+            }
+            TelegramStatus::AwaitingOwner { bot_username, code } => {
+                section = section.child(
+                    v_flex()
+                        .id("telegram-link-code")
+                        .test_support()
+                        .w_full()
+                        .p(t.space.medium)
+                        .gap(t.space.small)
+                        .sovra_surface(Surface::Subtle, cx)
+                        .child(
+                            div()
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .child(format!("Your bot @{bot_username} is live")),
+                        )
+                        .child(caption(
+                            format!(
+                                "In Telegram, open @{bot_username}, press Start, and send it this code so it knows you are its owner:"
+                            ),
+                            cx,
+                        ))
+                        .child(
+                            div()
+                                .px(t.space.small)
+                                .py(t.space.hair)
+                                .rounded(t.radius.input)
+                                .bg(t.nav_active_background)
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .text_color(cx.theme().link)
+                                .child(code.clone()),
+                        ),
+                );
+            }
+            TelegramStatus::Connected {
+                bot_username,
+                owner_name,
+                online,
+                ..
+            } => {
+                let settings = state.telegram_settings;
+                section = section
+                    .child(
+                        v_flex()
+                            .id("telegram-connected-details")
+                            .test_support()
+                            .w_full()
+                            .p(t.space.medium)
+                            .gap(t.space.small)
+                            .sovra_surface(Surface::Subtle, cx)
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::SectionTitle, cx)
+                                    .child(format!("@{bot_username} answers {owner_name}")),
+                            )
+                            .child(caption(
+                                if *online {
+                                    "Message your bot in Telegram and Sovra replies there."
+                                        .to_owned()
+                                } else {
+                                    "Reconnecting to Telegram…".to_owned()
+                                },
+                                cx,
+                            ))
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .flex_wrap()
+                                    .gap(t.space.medium)
+                                    .child(
+                                        Switch::new("telegram-toggle-owner-only")
+                                            .checked(settings.only_owner)
+                                            .label(
+                                                "Only answer me, not other people who find the bot",
+                                            )
+                                            .on_click(cx.listener(
+                                                move |view, checked: &bool, _, cx| {
+                                                    view.send_connection(
+                                                        ConnectionCommand::UpdateTelegramSettings {
+                                                            settings: TelegramSettings {
+                                                                only_owner: *checked,
+                                                                ..settings
+                                                            },
+                                                        },
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                    .child(
+                                        Switch::new("telegram-toggle-auto-reply")
+                                            .checked(settings.auto_reply_enabled)
+                                            .label("Answer Telegram messages automatically")
+                                            .on_click(cx.listener(
+                                                move |view, checked: &bool, _, cx| {
+                                                    view.send_connection(
+                                                        ConnectionCommand::UpdateTelegramSettings {
+                                                            settings: TelegramSettings {
+                                                                auto_reply_enabled: *checked,
+                                                                ..settings
+                                                            },
+                                                        },
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .flex_wrap()
+                            .gap(t.space.small)
+                            .child(
+                                div().flex_1().min_w(t.layout.filter_width).child(
+                                    Input::new(&self.whatsapp_form.telegram_test)
+                                        .id("telegram-test-msg-input")
+                                        .aria_label("Message to send to your Telegram bot chat")
+                                        .small(),
+                                ),
+                            )
+                            .child(
+                                design::primary_button(
+                                    "telegram-send-test-btn",
+                                    "Send to my Telegram",
+                                    cx,
+                                )
+                                .small()
+                                .on_click(cx.listener(
+                                    |view, _, window, cx| {
+                                        let text = view
+                                            .whatsapp_form
+                                            .telegram_test
+                                            .read(cx)
+                                            .value()
+                                            .to_string();
+                                        let text = if text.trim().is_empty() {
+                                            "Hello from Sovra on my computer.".to_owned()
+                                        } else {
+                                            text
+                                        };
+                                        view.send_connection(
+                                            ConnectionCommand::SendTestTelegramMessage { text },
+                                            cx,
+                                        );
+                                        view.whatsapp_form.telegram_test.update(cx, |input, cx| {
+                                            input.set_value("", window, cx);
+                                        });
+                                    },
+                                )),
+                            ),
+                    );
+            }
         }
 
         section
@@ -397,7 +668,7 @@ impl ModelsView {
                                     .gap(t.space.small)
                                     .child(
                                         div().flex_1().min_w(t.layout.filter_width).child(
-                                            Input::new(&self.whatsapp_form.phone_input)
+                                            Input::new(&self.whatsapp_form.phone)
                                                 .id("whatsapp-phone-input")
                                                 .aria_label("Phone number for the linking code")
                                                 .small(),
@@ -409,7 +680,7 @@ impl ModelsView {
                                             .on_click(cx.listener(|view, _, _, cx| {
                                                 let phone_number = view
                                                     .whatsapp_form
-                                                    .phone_input
+                                                    .phone
                                                     .read(cx)
                                                     .value()
                                                     .to_string();

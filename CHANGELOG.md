@@ -191,6 +191,26 @@ move them under a version heading when the tag is cut.
   failed rule without displaying model response text. Extraction and linking errors
   found during evaluation remain documented rather than counted as quality passes.
 
+- **Telegram, the same way (`sovra-telegram` new, `sovra-core`, `sovra-runtime`, `sovra-ui`, `sovra-app`)**:
+  - **Settings → Telegram** links a bot of your own over Telegram's official Bot API, built
+    into the single binary (HTTPS long polling, no third-party client, no sidecar). Create
+    the bot with `@BotFather`, paste its token, and Sovra shows a six-digit code; send that
+    code to the bot in Telegram and you become its owner. From then on your messages to the
+    bot are answered by Sovra's helpers, with the same model, memory and web search as the
+    chat window, and long answers are split to Telegram's size limit.
+  - Safe by default: only the owner is answered (a switch allows everyone); people who find
+    the bot before it is linked are told how to link it; groups and queued-while-closed
+    messages are never answered. **Disconnect Telegram** stops the bot and forgets the
+    token. The link resumes on its own after a restart.
+  - The token is an API key, so it lives with the model keys (OS keychain, or the
+    `SOVRA_DEV` plaintext files in debug builds), never in the saved page state or logs.
+  - Both links now share one runtime task and one `MessagingChannel` port; adapters that
+    poll implement `ChannelSession::poll` and the runtime does the waiting. The Connections
+    page lists recent messages from both services with their service name.
+  - Tests: core policy for owner linking and strangers, adapter message splitting, a runtime
+    end-to-end run with a scripted bot, the Settings flow headless, and an opt-in live check
+    that Telegram refuses a made-up token in plain words.
+
 - **WhatsApp really links now (`sovra-whatsapp` new, `sovra-core`, `sovra-runtime`, `sovra-ui`, `sovra-app`)**:
   - The earlier Connect WhatsApp screen was a mock: it drew a locally invented code that
     no phone could accept and needed a manual "I've scanned" click. It is replaced by a

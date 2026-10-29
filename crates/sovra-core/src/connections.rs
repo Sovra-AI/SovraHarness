@@ -30,6 +30,81 @@ pub fn is_whatsapp_session(session_id: &str) -> bool {
     session_id.starts_with(WHATSAPP_SESSION_PREFIX)
 }
 
+/// Chat sessions that answer Telegram messages carry this prefix.
+pub const TELEGRAM_SESSION_PREFIX: &str = "telegram:";
+
+/// The chat session that answers messages from one Telegram chat.
+pub fn telegram_session_id(chat_id: &str) -> String {
+    format!("{TELEGRAM_SESSION_PREFIX}{chat_id}")
+}
+
+/// Which messaging service a session or message belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    #[default]
+    WhatsApp,
+    Telegram,
+}
+
+impl ChannelKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::WhatsApp => "WhatsApp",
+            Self::Telegram => "Telegram",
+        }
+    }
+
+    /// The chat session that answers messages from `chat` on this service.
+    pub fn session_id(self, chat: &str) -> String {
+        match self {
+            Self::WhatsApp => whatsapp_session_id(chat),
+            Self::Telegram => telegram_session_id(chat),
+        }
+    }
+}
+
+/// The service whose link a session answers, if it is one of those sessions. The runtime
+/// keeps such sessions' events off the chat window.
+pub fn channel_of_session(session_id: &str) -> Option<ChannelKind> {
+    if is_whatsapp_session(session_id) {
+        Some(ChannelKind::WhatsApp)
+    } else if session_id.starts_with(TELEGRAM_SESSION_PREFIX) {
+        Some(ChannelKind::Telegram)
+    } else {
+        None
+    }
+}
+
+/// Six digits the owner sends to the Telegram bot to prove the bot is theirs. Derived from
+/// the moment the link started; it only has to be unguessable for a few minutes.
+pub fn telegram_link_code(seed_ms: i64) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in seed_ms.to_le_bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{:06}", hash % 1_000_000)
+}
+
+/// A pasted bot token must look like Telegram's `<bot id>:<secret>` before it is tried.
+pub fn normalize_bot_token(input: &str) -> Result<String, String> {
+    let token = input.trim().trim_start_matches("bot").to_owned();
+    let valid = token.split_once(':').is_some_and(|(id, secret)| {
+        !id.is_empty()
+            && id.chars().all(|c| c.is_ascii_digit())
+            && secret.len() >= 30
+            && secret
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    });
+    if valid {
+        Ok(token)
+    } else {
+        Err("That doesn't look like a bot token. In Telegram, open @BotFather, send /newbot, and paste the token it gives you (digits, a colon, then letters).".into())
+    }
+}
+
 /// Digits only, with the country code and no leading zeros, as `WhatsApp` expects for
 /// phone-number linking. Rejects anything that cannot be a phone number.
 pub fn normalize_phone_number(input: &str) -> Result<String, String> {
@@ -166,10 +241,151 @@ impl WhatsAppStatus {
     }
 }
 
-/// A message that came in over `WhatsApp` and what Sovra answered.
+/// What Sovra does with messages that arrive on the Telegram bot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelegramSettings {
+    /// Answer messages automatically through the helpers.
+    pub auto_reply_enabled: bool,
+    /// Only answer the person who linked the bot, never other people who find it.
+    pub only_owner: bool,
+}
+
+impl Default for TelegramSettings {
+    fn default() -> Self {
+        Self {
+            auto_reply_enabled: true,
+            only_owner: true,
+        }
+    }
+}
+
+/// Connection lifecycle state for the Telegram bot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "stage", rename_all = "snake_case")]
+pub enum TelegramStatus {
+    #[default]
+    Disconnected,
+    /// Checking the token with Telegram.
+    Connecting,
+    /// The bot is live; waiting for its owner to send `code` to it in Telegram.
+    AwaitingOwner {
+        bot_username: String,
+        code: String,
+    },
+    /// Linked to its owner. `online` is false while the connection is being re-established.
+    Connected {
+        bot_username: String,
+        owner_chat_id: String,
+        owner_name: String,
+        linked_at: Timestamp,
+        online: bool,
+    },
+    Error {
+        message: String,
+    },
+}
+
+impl TelegramStatus {
+    pub const fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected { online: true, .. })
+    }
+
+    /// Has a bot token that is worth resuming on the next start.
+    pub const fn is_linked(&self) -> bool {
+        matches!(self, Self::Connected { .. } | Self::AwaitingOwner { .. })
+    }
+
+    pub fn owner_chat_id(&self) -> Option<&str> {
+        match self {
+            Self::Connected { owner_chat_id, .. } => Some(owner_chat_id),
+            Self::Disconnected
+            | Self::Connecting
+            | Self::AwaitingOwner { .. }
+            | Self::Error { .. } => None,
+        }
+    }
+
+    pub fn bot_username(&self) -> Option<&str> {
+        match self {
+            Self::AwaitingOwner { bot_username, .. } | Self::Connected { bot_username, .. } => {
+                Some(bot_username)
+            }
+            Self::Disconnected | Self::Connecting | Self::Error { .. } => None,
+        }
+    }
+
+    pub fn badge_label(&self) -> &'static str {
+        match self {
+            Self::Disconnected => "Not connected",
+            Self::Connecting => "Checking the token…",
+            Self::AwaitingOwner { .. } => "Send the code to your bot",
+            Self::Connected { online: true, .. } => "Connected",
+            Self::Connected { online: false, .. } => "Reconnecting…",
+            Self::Error { .. } => "Needs attention",
+        }
+    }
+}
+
+/// What to do with a message that reached the Telegram bot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelegramAction {
+    /// The sender typed the link code: they are the owner now.
+    LinkOwner,
+    /// Nobody owns the bot yet; tell the sender how to link it.
+    AskForCode,
+    /// Not for Sovra (group, empty, or a stranger while only the owner is answered).
+    Ignore,
+    /// Keep it, and answer it when `answer` is true.
+    Record { answer: bool },
+}
+
+/// Decides what happens to a Telegram message given who owns the bot.
+pub fn telegram_action(
+    message: &IncomingMessage,
+    status: &TelegramStatus,
+    settings: &TelegramSettings,
+) -> TelegramAction {
+    let text = message.text.trim();
+    if text.is_empty() || message.chat == ChatKind::Group {
+        return TelegramAction::Ignore;
+    }
+    match status {
+        TelegramStatus::AwaitingOwner { code, .. } => {
+            if text == code {
+                TelegramAction::LinkOwner
+            } else {
+                TelegramAction::AskForCode
+            }
+        }
+        TelegramStatus::Connected { owner_chat_id, .. } => {
+            let from_owner = *owner_chat_id == message.chat_jid;
+            if !from_owner && settings.only_owner {
+                TelegramAction::Ignore
+            } else {
+                TelegramAction::Record {
+                    answer: settings.auto_reply_enabled && !message.backlog,
+                }
+            }
+        }
+        TelegramStatus::Disconnected
+        | TelegramStatus::Connecting
+        | TelegramStatus::Error { .. } => TelegramAction::Ignore,
+    }
+}
+
+/// What the bot answers someone who writes before it is linked.
+pub const TELEGRAM_ASK_FOR_CODE_REPLY: &str = "This bot belongs to a Sovra user. To link it, send the six-digit code shown in Sovra's Settings.";
+
+/// What the bot answers its owner once the code matched.
+pub const TELEGRAM_LINKED_REPLY: &str =
+    "Linked. Messages you send here are answered by Sovra on your computer.";
+
+/// A message that came in over a linked service and what Sovra answered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WhatsAppBridgedMessage {
+pub struct BridgedMessage {
     pub id: String,
+    #[serde(default)]
+    pub channel: ChannelKind,
     pub chat_jid: String,
     pub sender_name: String,
     pub sender_jid: String,
@@ -184,9 +400,13 @@ pub struct ConnectionsState {
     pub whatsapp: WhatsAppStatus,
     pub settings: WhatsAppSettings,
     #[serde(default)]
+    pub telegram: TelegramStatus,
+    #[serde(default)]
+    pub telegram_settings: TelegramSettings,
+    #[serde(default)]
     pub qr_modal_open: bool,
     #[serde(default)]
-    pub recent_messages: Vec<WhatsAppBridgedMessage>,
+    pub recent_messages: Vec<BridgedMessage>,
     #[serde(default)]
     pub notice: Option<String>,
 }
@@ -215,6 +435,19 @@ pub enum ConnectionCommand {
     },
     /// Unlink this computer from the phone and forget the saved link.
     DisconnectWhatsApp,
+    /// Connect a Telegram bot with the token from `@BotFather`.
+    ConnectTelegram {
+        token: String,
+    },
+    UpdateTelegramSettings {
+        settings: TelegramSettings,
+    },
+    /// Send a message to the owner's Telegram chat to check the link works.
+    SendTestTelegramMessage {
+        text: String,
+    },
+    /// Stop the bot and forget its token.
+    DisconnectTelegram,
 }
 
 /// Events emitted by `sovra-runtime` back to the UI.
@@ -223,7 +456,9 @@ pub enum ConnectionEvent {
     Loaded(Box<ConnectionsState>),
     StatusChanged(WhatsAppStatus),
     SettingsUpdated(WhatsAppSettings),
-    MessageBridged(WhatsAppBridgedMessage),
+    TelegramStatusChanged(TelegramStatus),
+    TelegramSettingsUpdated(TelegramSettings),
+    MessageBridged(BridgedMessage),
     /// Sovra's answer to the bridged message `message_id` was sent to the phone.
     ReplySent {
         message_id: String,
@@ -256,6 +491,12 @@ impl ConnectionsState {
             ConnectionEvent::SettingsUpdated(settings) => {
                 self.settings = *settings;
             }
+            ConnectionEvent::TelegramStatusChanged(status) => {
+                self.telegram = status.clone();
+            }
+            ConnectionEvent::TelegramSettingsUpdated(settings) => {
+                self.telegram_settings = *settings;
+            }
             ConnectionEvent::MessageBridged(message) => {
                 self.recent_messages.insert(0, message.clone());
                 self.recent_messages.truncate(MAX_RECENT_MESSAGES);
@@ -285,6 +526,19 @@ impl ConnectionsState {
 pub struct ChannelStartOptions {
     /// Also ask for an 8-character code for this phone number (digits only).
     pub phone_number: Option<String>,
+    /// A freshly pasted bot token (Telegram). `None` resumes the saved one.
+    pub token: Option<String>,
+}
+
+/// What a polling session wants the runtime to do next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PollOutcome {
+    /// Poll again straight away.
+    Again,
+    /// Wait this long before polling again (the service asked, or a request failed).
+    Wait(std::time::Duration),
+    /// The session is closed; stop polling.
+    Finished,
 }
 
 /// A message received on the channel.
@@ -401,6 +655,14 @@ pub trait ChannelSession: Send + Sync {
 
     /// This account's own "Message yourself" chat, once linked.
     fn own_chat_jid(&self) -> Option<String>;
+
+    /// Fetches whatever the service has queued (long polling) and reports events through
+    /// the sink given at start. Sessions with their own connection return `Finished` at
+    /// once; the runtime drives the loop and does the waiting, so adapters never need an
+    /// executor of their own.
+    async fn poll(&self) -> PollOutcome {
+        PollOutcome::Finished
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -593,8 +855,9 @@ mod tests {
     fn messages_are_kept_newest_first_with_their_replies() {
         let mut state = ConnectionsState::default();
         for n in 0..(MAX_RECENT_MESSAGES + 3) {
-            state.apply(&ConnectionEvent::MessageBridged(WhatsAppBridgedMessage {
+            state.apply(&ConnectionEvent::MessageBridged(BridgedMessage {
                 id: format!("m{n}"),
+                channel: ChannelKind::WhatsApp,
                 chat_jid: "447700900123@s.whatsapp.net".into(),
                 sender_name: "You".into(),
                 sender_jid: "447700900123@s.whatsapp.net".into(),
@@ -633,6 +896,8 @@ mod tests {
                 auto_reply_enabled: false,
                 only_self_chat: true,
             },
+            telegram: TelegramStatus::default(),
+            telegram_settings: TelegramSettings::default(),
             qr_modal_open: false,
             recent_messages: Vec::new(),
             notice: None,
@@ -640,5 +905,96 @@ mod tests {
         let json = serde_json::to_string(&state).unwrap();
         let back: ConnectionsState = serde_json::from_str(&json).unwrap();
         assert_eq!(back, state);
+    }
+
+    #[test]
+    fn telegram_sessions_and_codes_are_recognised() {
+        assert_eq!(
+            channel_of_session(&telegram_session_id("12345")),
+            Some(ChannelKind::Telegram)
+        );
+        assert_eq!(
+            channel_of_session(&ChannelKind::WhatsApp.session_id("x@s.whatsapp.net")),
+            Some(ChannelKind::WhatsApp)
+        );
+        assert_eq!(channel_of_session("chat-1"), None);
+        let code = telegram_link_code(1_793_080_000_000);
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+        assert_ne!(code, telegram_link_code(1_793_080_000_001));
+    }
+
+    #[test]
+    fn bot_tokens_are_checked_before_they_are_tried() {
+        let token = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw5";
+        assert_eq!(normalize_bot_token(token), Ok(token.to_owned()));
+        assert_eq!(
+            normalize_bot_token(&format!("  bot{token} ")),
+            Ok(token.to_owned())
+        );
+        assert!(normalize_bot_token("hello").is_err());
+        assert!(normalize_bot_token("123:short").is_err());
+    }
+
+    #[test]
+    fn telegram_messages_link_the_owner_then_follow_the_settings() {
+        let settings = TelegramSettings::default();
+        let waiting = TelegramStatus::AwaitingOwner {
+            bot_username: "sovra_bot".into(),
+            code: "482913".into(),
+        };
+        let mut from_owner = message("777", false, false);
+        from_owner.text = "482913".into();
+        assert_eq!(
+            telegram_action(&from_owner, &waiting, &settings),
+            TelegramAction::LinkOwner
+        );
+        from_owner.text = "hello?".into();
+        assert_eq!(
+            telegram_action(&from_owner, &waiting, &settings),
+            TelegramAction::AskForCode
+        );
+        let linked = TelegramStatus::Connected {
+            bot_username: "sovra_bot".into(),
+            owner_chat_id: "777".into(),
+            owner_name: "Sam".into(),
+            linked_at: Timestamp(1),
+            online: true,
+        };
+        assert_eq!(
+            telegram_action(&from_owner, &linked, &settings),
+            TelegramAction::Record { answer: true }
+        );
+        let stranger = message("999", false, false);
+        assert_eq!(
+            telegram_action(&stranger, &linked, &settings),
+            TelegramAction::Ignore
+        );
+        let everyone = TelegramSettings {
+            only_owner: false,
+            ..settings
+        };
+        assert_eq!(
+            telegram_action(&stranger, &linked, &everyone),
+            TelegramAction::Record { answer: true }
+        );
+        let quiet = TelegramSettings {
+            auto_reply_enabled: false,
+            ..settings
+        };
+        assert_eq!(
+            telegram_action(&from_owner, &linked, &quiet),
+            TelegramAction::Record { answer: false }
+        );
+        let mut group = message("-100123", false, false);
+        group.chat = ChatKind::Group;
+        assert_eq!(
+            telegram_action(&group, &linked, &everyone),
+            TelegramAction::Ignore
+        );
+        assert_eq!(
+            telegram_action(&from_owner, &TelegramStatus::Disconnected, &settings),
+            TelegramAction::Ignore
+        );
     }
 }

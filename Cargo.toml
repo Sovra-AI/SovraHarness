@@ -23,6 +23,7 @@ sovra-runtime = { path = "crates/sovra-runtime" }
 sovra-skills = { path = "crates/sovra-skills" }
 sovra-store-surreal = { path = "crates/sovra-store-surreal" }
 sovra-ui = { path = "crates/sovra-ui" }
+sovra-telegram = { path = "crates/sovra-telegram" }
 sovra-whatsapp = { path = "crates/sovra-whatsapp" }
 
 # External crates (versions verified on crates.io 2026-10-23)

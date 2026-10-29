@@ -126,6 +126,7 @@ impl ModelsView {
                         .child(Self::render_appearance_section(cx))
                         .child(self.render_ai_connection_section(cx))
                         .child(self.render_connections_section(cx))
+                        .child(self.render_telegram_section(cx))
                         .child(self.render_other_connections_section(cx))
                         .child(self.render_always_context_section(cx))
                         .child(self.render_agent_behavior_section(cx)),

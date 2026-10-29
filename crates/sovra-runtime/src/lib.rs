@@ -177,8 +177,59 @@ pub fn start_with_channels(
     index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
     channel: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
 ) -> Result<Client, Error> {
+    start_with_messaging(
+        version,
+        agent_config,
+        memory,
+        models,
+        files,
+        skills,
+        index,
+        MessagingChannels {
+            whatsapp: channel,
+            telegram: None,
+        },
+    )
+}
+
+/// The personal messaging adapters the composition root supplies.
+#[derive(Default)]
+pub struct MessagingChannels {
+    pub whatsapp: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
+    pub telegram: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
+}
+
+impl std::fmt::Debug for MessagingChannels {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MessagingChannels")
+            .field("whatsapp", &self.whatsapp.is_some())
+            .field("telegram", &self.telegram.is_some())
+            .finish()
+    }
+}
+
+/// Starts with every personal messaging link (`WhatsApp`, Telegram) the composition root
+/// supplies.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the composition root hands over every adapter in one call"
+)]
+pub fn start_with_messaging(
+    version: &str,
+    agent_config: AgentConfig,
+    memory: Option<MemoryFactory>,
+    models: Option<ModelsConfig>,
+    files: Option<Arc<dyn sovra_core::files::FileStore>>,
+    skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+    index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+    messaging: MessagingChannels,
+) -> Result<Client, Error> {
     let (mut client, commands, events) = Client::loopback();
     let commands_tx = client.commands.clone();
+    let channels = connections::Channels {
+        whatsapp: messaging.whatsapp,
+        telegram: messaging.telegram,
+    };
     let (stopped, completion) = async_channel::bounded(1);
     client.completion = Some(completion);
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -200,7 +251,7 @@ pub fn start_with_channels(
                     files,
                     skills,
                     index,
-                    channel,
+                    channels,
                     commands_tx,
                 },
                 handle,
@@ -239,8 +290,8 @@ struct Services {
     files: Option<Arc<dyn sovra_core::files::FileStore>>,
     skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
     index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
-    channel: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
-    /// Lets the messaging link run prompts through the same path as the UI.
+    channels: connections::Channels,
+    /// Lets the messaging links run prompts through the same path as the UI.
     commands_tx: Sender<Command>,
 }
 
@@ -258,13 +309,13 @@ async fn serve(
         files,
         skills: skill_store,
         index,
-        channel,
+        channels,
         commands_tx,
     } = services;
-    // Every event passes the connections task first: answers for WhatsApp sessions go
-    // back to the phone instead of the chat window.
+    // Every event passes the connections task first: answers for WhatsApp and Telegram
+    // sessions go back to the phone instead of the chat window.
     let connections =
-        connections::ConnectionsRuntime::start(channel, ui_events.clone(), commands_tx, &handle);
+        connections::ConnectionsRuntime::start(channels, ui_events.clone(), commands_tx, &handle);
     let events = connections.route_events(ui_events, &handle);
     let mut file_index = file_index::IndexRuntime::start(
         index,
