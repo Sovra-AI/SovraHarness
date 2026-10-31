@@ -18,11 +18,17 @@ move them under a version heading when the tag is cut.
   Argon2id PHC hashes; accounts and the active session are stored through
   `MemoryStore` in SurrealDB. Signing out retains the accounts.
 - **Optional Google sign-in backend:** authorization-code exchange with PKCE,
-  a loopback callback listener, cancellation and credential-store handling for
-  refresh tokens. The app reads `SOVRA_GOOGLE_CLIENT_ID` and optional
-  `SOVRA_GOOGLE_CLIENT_SECRET` at startup. Account creation, startup session
-  restoration and the Google browser hand-off still need UI integration;
-  this is not a completed sign-in rollout. See [development notes](docs/development.md#sign-in-integration-status).
+  a loopback callback listener (RFC 8252: literal `127.0.0.1`, OS-assigned port,
+  constant-time state check, single callback), cancellation and credential-store
+  handling for refresh tokens. The app reads `SOVRA_GOOGLE_CLIENT_ID` and optional
+  `SOVRA_GOOGLE_CLIENT_SECRET` at startup.
+- **Sign-in gate in the UI:** the shell requests the saved session at startup and
+  routes to the workspace or the Login screen; on a fresh install the first submit
+  creates the account, afterwards it signs in, with inline runtime errors. The
+  Google button opens the consent page in the browser and the Login screen shows
+  a waiting panel (*Open the page again* / *Cancel*) until the loopback listener
+  reports back. Remaining rollout notes:
+  [development notes](docs/development.md#sign-in-integration-status).
 
 - **Find files without exact capitalization:** filename and scan-report filters
   now use Unicode case folding and canonical normalization by default. Match case

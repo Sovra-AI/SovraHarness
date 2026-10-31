@@ -169,12 +169,15 @@ Development builds use a separate plaintext key store in the app data directory
 when `SOVRA_DEV=1` is set by the runner. Release builds always use the OS keychain.
 See the development guide for storage and permission details.
 
-Sign-in integration is in progress. The existing form sends the entered email
-and password to the local runtime and waits for confirmation before opening the
-workspace; sign-out also reaches the runtime. Accounts, password hashes and the
-active session now persist in the local store, and the app accepts optional Google
-client configuration. Account creation, startup session restoration and the Google
-browser flow still need UI integration. See
+Signing in is built in. At startup the app restores the saved session and opens
+the workspace, or shows the sign-in screen. On a fresh install the first submit
+creates the account (email + password, protected with Argon2id on this computer);
+afterwards the same form signs in, with friendly inline errors from the runtime.
+**Continue with Google** opens Google's own consent page in your browser and the
+screen waits, with **Open the page again** and **Cancel**, until the sign-in
+finishes by itself; it needs the optional `SOVRA_GOOGLE_CLIENT_ID` (and
+`SOVRA_GOOGLE_CLIENT_SECRET` if your client has one) set at startup. Signing out
+keeps accounts but clears the session. Remaining rollout work:
 [sign-in implementation status](docs/development.md#sign-in-integration-status).
 
 The **Models** tab guides you through two steps: connect a service, then pick a chat

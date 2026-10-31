@@ -99,12 +99,20 @@ supervisor change and may require a deliberate one-time restart.
 
 ## Sign-in integration status
 
-The sign-in backend is implemented, but the desktop sign-in flow is unfinished.
-The current email/password form sends `AuthCommand::SignIn` and waits for
-`AuthEvent::SignedIn`; sign-out sends `AuthCommand::SignOut`. The UI does not yet
-request the saved session at startup, offer account creation, or connect the
-Google button and browser hand-off to the Google commands. Configuring Google
-alone does not enable a usable Google sign-in flow in the current UI.
+The sign-in backend and the desktop flow are wired end to end. On
+`Event::Ready` the shell sends `AuthCommand::Load`; the restored session (or its
+absence) routes to the workspace or the Login screen. The form sends
+`AuthCommand::SignIn`, or `AuthCommand::CreateAccount` on a fresh install with
+no accounts, and waits for `AuthEvent::SignedIn`; sign-out sends
+`AuthCommand::SignOut`. The Google button sends `AuthCommand::StartGoogleSignIn`;
+`AuthEvent::GoogleSignInStarted` opens the consent URL in the browser and the
+Login screen shows a waiting panel with *Open the page again* and *Cancel*
+(`AuthCommand::CancelGoogleSignIn`) until the loopback listener reports back.
+
+Remaining rollout work, in honesty: a dedicated create-account mode (separate
+name field and a live password-strength meter rather than server-side errors),
+and a live end-to-end run of the Google flow against real client credentials —
+the exchange and listener are covered by tests, not by a production Google app.
 
 The implemented parts are:
 
