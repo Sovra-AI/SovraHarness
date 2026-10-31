@@ -49,6 +49,12 @@ fn main() -> anyhow::Result<()> {
     };
     // WhatsApp credentials (Signal keys) live in one SQLite file in the app data directory.
     let whatsapp = sovra_whatsapp::WhatsAppChannel::new(dirs.data_local_dir().join("whatsapp"));
+    // The Telegram bot token is an API key: it goes where model keys go (keychain, or the
+    // SOVRA_DEV plaintext files in debug builds).
+    let telegram =
+        sovra_telegram::TelegramChannel::new(Arc::new(KeychainTokenStore(credential_store(&dirs))))
+            .map_err(|error| tracing::warn!(%error, "telegram linking unavailable"))
+            .ok();
     let client = sovra_runtime::start_with_auth(
         VERSION,
         agent_config,
@@ -63,7 +69,12 @@ fn main() -> anyhow::Result<()> {
         Some(Arc::new(sovra_files::LocalFileIndex::new(
             dirs.data_local_dir().join("file-index"),
         ))),
-        Some(Arc::new(whatsapp)),
+        sovra_runtime::MessagingChannels {
+            whatsapp: Some(Arc::new(whatsapp)),
+            telegram: telegram.map(|channel| {
+                Arc::new(channel) as Arc<dyn sovra_core::connections::MessagingChannel>
+            }),
+        },
         read_google_signin_config(),
     )
     .context("failed to start the runtime")?;
@@ -142,6 +153,33 @@ fn read_google_signin_config() -> Option<sovra_providers::GoogleOAuthConfig> {
         client_id,
         client_secret,
     })
+}
+
+/// Keeps the Telegram bot token beside the model keys, under one fixed credential id.
+struct KeychainTokenStore(Arc<dyn sovra_providers::CredentialStore>);
+
+impl KeychainTokenStore {
+    const ID: &'static str = "telegram-bot-token";
+}
+
+impl sovra_telegram::TokenStore for KeychainTokenStore {
+    fn load(&self) -> Option<String> {
+        self.0
+            .get(Self::ID)
+            .ok()
+            .map(|secret| secret.0)
+            .filter(|token| !token.trim().is_empty())
+    }
+
+    fn save(&self, token: &str) -> Result<(), String> {
+        self.0
+            .set(Self::ID, &sovra_core::models::ModelSecret(token.to_owned()))
+            .map_err(|error| error.to_string())
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        self.0.delete(Self::ID).map_err(|error| error.to_string())
+    }
 }
 
 /// `cargo xtask dev` sets `SOVRA_DEV`: every rebuild changes the binary's code

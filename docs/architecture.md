@@ -154,6 +154,13 @@ answers go back to the phone rather than the chat window. Another messaging serv
 new `sovra-<service>` adapter plus one line in `sovra-app`. `rusqlite` is pinned to the
 libsqlite3-sys line the WhatsApp store uses because a binary links one SQLite.
 
+Telegram (decided 2026-10-29) reuses the same port from `sovra-telegram` over the official
+Bot API: a person's own bot, token in the keychain via a `TokenStore` the composition root
+supplies, the first sender of a six-digit code becomes the owner. Adapters that poll
+implement `ChannelSession::poll`; the runtime owns the loop and the sleeps, so no adapter
+names tokio. A user-account (MTProto) client was rejected: it needs an `api_id` registered
+per user and is not an officially supported way to automate an account.
+
 Alternatives considered: the Baileys (TypeScript) sidecar used by SovraSRXProduction needs
 Node and a second process; `wa-rs` is an older fork of the same client; writing the
 protocol ourselves duplicates a maintained library. WhatsApp does not officially support

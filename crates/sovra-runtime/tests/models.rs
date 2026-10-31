@@ -32,6 +32,9 @@ mod semantic;
 #[path = "models/summaries.rs"]
 mod summaries;
 
+#[path = "models/telegram.rs"]
+mod telegram;
+
 #[path = "models/whatsapp.rs"]
 mod whatsapp;
 

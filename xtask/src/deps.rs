@@ -29,6 +29,8 @@ const LAYERS: &[(&str, &[&str])] = &[
     // The WhatsApp Web client (its own crypto, protobuf and credential-store dependency
     // set) implements the core `MessagingChannel` port; runtime only sees the port.
     ("sovra-whatsapp", &["sovra-core"]),
+    // Telegram's official Bot API over HTTPS; same core port, its own HTTP dependency set.
+    ("sovra-telegram", &["sovra-core"]),
     ("sovra-ui", &["sovra-core", "sovra-runtime"]),
     (
         "sovra-app",
@@ -39,6 +41,7 @@ const LAYERS: &[(&str, &[&str])] = &[
             "sovra-runtime",
             "sovra-skills",
             "sovra-store-surreal",
+            "sovra-telegram",
             "sovra-ui",
             "sovra-whatsapp",
         ],

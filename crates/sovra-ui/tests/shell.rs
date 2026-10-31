@@ -967,7 +967,7 @@ fn reopening_a_saved_chat_sends_bounded_role_preserving_context(cx: &mut TestApp
 fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut TestAppContext) {
     use gpui_kit::{ScrollDelta, point};
     use sovra_core::connections::{
-        ConnectionCommand, ConnectionEvent, LinkedDevice, WhatsAppBridgedMessage, WhatsAppQrTicket,
+        BridgedMessage, ConnectionCommand, ConnectionEvent, LinkedDevice, WhatsAppQrTicket,
         WhatsAppStatus,
     };
 
@@ -1079,8 +1079,9 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
         .unwrap();
     events
         .send_blocking(Event::Connections(ConnectionEvent::MessageBridged(
-            WhatsAppBridgedMessage {
+            BridgedMessage {
                 id: "wa-1".into(),
+                channel: sovra_core::connections::ChannelKind::WhatsApp,
                 chat_jid: "15550142@s.whatsapp.net".into(),
                 sender_name: "You (WhatsApp)".into(),
                 sender_jid: "15550142@s.whatsapp.net".into(),
@@ -1116,6 +1117,116 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn telegram_bot_connects_with_a_token_and_shows_the_link_code(cx: &mut TestAppContext) {
+    use gpui_kit::{ScrollDelta, point};
+    use sovra_core::connections::{ConnectionCommand, ConnectionEvent, TelegramStatus};
+
+    fn reveal(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
+        for _ in 0..40 {
+            window.render_frame(cx);
+            let item = window.find(id);
+            if item.visible() {
+                return;
+            }
+            let delta = if item.bounds().top() < window.find("settings-sections").bounds().top() {
+                80.
+            } else {
+                -80.
+            };
+            window.scroll(
+                "settings-sections",
+                ScrollDelta::Pixels(point(px(0.), px(delta))),
+                cx,
+            );
+        }
+        panic!("{id} must be reachable in Settings");
+    }
+
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(2600.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Settings);
+        reveal(window, "settings-telegram", cx);
+        reveal(window, "telegram-connect-btn", cx);
+        // Nothing typed yet: Connect still dispatches, and the runtime answers with a notice.
+        window.click("telegram-connect-btn", cx);
+    })
+    .unwrap();
+    let dispatched: Vec<Command> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(
+        dispatched.iter().any(|cmd| matches!(
+            cmd,
+            Command::Connections(ConnectionCommand::ConnectTelegram { .. })
+        )),
+        "Connect Telegram must dispatch ConnectTelegram; saw {dispatched:?}"
+    );
+
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::TelegramStatusChanged(
+            TelegramStatus::AwaitingOwner {
+                bot_username: "sovra_test_bot".into(),
+                code: "482913".into(),
+            },
+        )))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        reveal(window, "telegram-link-code", cx);
+        assert!(window.find("telegram-link-code").visible());
+        assert!(
+            window.try_find("telegram-token-input").is_none(),
+            "the token field goes away once the bot is live"
+        );
+    })
+    .unwrap();
+
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::TelegramStatusChanged(
+            TelegramStatus::Connected {
+                bot_username: "sovra_test_bot".into(),
+                owner_chat_id: "777".into(),
+                owner_name: "Sam".into(),
+                linked_at: sovra_core::Timestamp(10_000),
+                online: true,
+            },
+        )))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        reveal(window, "telegram-connected-details", cx);
+        assert!(window.find("telegram-connected-details").visible());
+        reveal(window, "telegram-disconnect-btn", cx);
+        window.click("telegram-disconnect-btn", cx);
+    })
+    .unwrap();
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).any(|cmd| matches!(
+            cmd,
+            Command::Connections(ConnectionCommand::DisconnectTelegram)
+        )),
+        "Disconnect Telegram must dispatch DisconnectTelegram"
+    );
+}
+
 #[gpui_kit::test]
 fn quitting_requests_runtime_shutdown(cx: &mut TestAppContext) {
     let (client, commands, _events) = Client::loopback();

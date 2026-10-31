@@ -406,6 +406,20 @@ WhatsApp Web multi-device protocol); nothing else runs and no business account i
 Credentials and encryption keys are stored only in the app data directory under `whatsapp/`.
 WhatsApp does not officially support third-party clients, so use it with your own account.
 
+## Telegram on your phone
+
+Telegram works through a bot of your own, using Telegram's official Bot API. In Telegram,
+open **@BotFather**, send `/newbot`, follow its two questions, and copy the token it gives
+you. In Sovra, **Settings → Telegram**, paste the token and click **Connect Telegram**.
+Sovra shows a six-digit code: open your new bot in Telegram, press **Start**, and send it
+that code. The badge turns **Connected** and from then on anything you write to the bot is
+answered by Sovra.
+
+By default only you are answered; a switch lets other people who find the bot talk to it
+too, and another turns automatic answers off. **Disconnect Telegram** stops the bot and
+forgets the token. The token is stored with your other API keys (the keychain), never in
+plain text.
+
 ## Shipping
 
 For a local installer, install the build tool with
