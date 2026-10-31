@@ -582,6 +582,13 @@ move them under a version heading when the tag is cut.
   the chosen model cannot run (`ModelEvent::ActiveModelStatus`), so Models and Chat
   agree and ask for another model. A locked keychain no longer stops other settings
   loading, and the chosen model is re-activated before a saved key is announced.
+- **No more empty bar at the top of the window**: when the window manager
+  already frames the window (i3, X11, KDE and most Linux desktops), Sovra no
+  longer draws its own blank title strip underneath. On macOS, Windows and
+  Linux desktops where Sovra draws the frame, the bar now uses the sidebar's
+  chrome colour and shows the open page. The window title now reads
+  "<page> — Sovra" in taskbars and Alt-Tab, where it was previously blank.
+
 - Embedding model choices now use catalogue metadata before incomplete manual
   entries, matching execution and excluding models known to produce only chat text.
 

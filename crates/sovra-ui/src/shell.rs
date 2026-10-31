@@ -1,4 +1,4 @@
-//! The main window's root view: title bar, Login / 3-column Main Chat workspace, and status bar.
+//! The main window's root view: title bar (when the app draws one), Login / 3-column Main Chat workspace, and status bar.
 
 use gpui_kit::component::{
     ActiveTheme as _, TitleBar, h_flex,
@@ -67,6 +67,8 @@ pub struct Shell {
     pub(crate) transcript: Entity<crate::chat_view::Transcript>,
     /// Redraws once a second while a turn runs, for the elapsed timer.
     turn_ticker: Option<Task<()>>,
+    /// Last title handed to the OS, so it is only sent when the page changes.
+    window_title: String,
     file_picker: Option<Task<()>>,
     next_attachment_id: u64,
     _events: Task<()>,
@@ -421,6 +423,7 @@ impl Shell {
             artifacts_view,
             _team_ask: team_ask,
             turn_ticker: None,
+            window_title: String::new(),
             transcript: cx.new(|_| crate::chat_view::Transcript::new(shell_handle)),
             _events: task,
         }
@@ -1220,7 +1223,9 @@ impl Render for Shell {
         let border = cx.theme().border;
         let muted_foreground = theme.muted_foreground;
         let t = design::tokens(cx);
+        self.sync_window_title(window);
         let body_view = self.render_body(cx);
+        let title_bar = Self::app_owns_titlebar(window).then(|| self.render_title_bar(cx));
         v_flex()
             .id("sovra-shell")
             .track_focus(&self.focus_handle)
@@ -1228,7 +1233,7 @@ impl Render for Shell {
             .size_full()
             .sovra_surface(Surface::Canvas, cx)
             .sovra_text(TextRole::Body, cx)
-            .child(TitleBar::new())
+            .children(title_bar)
             .child(body_view)
             .child(
                 h_flex()
@@ -1259,6 +1264,60 @@ impl Render for Shell {
 }
 
 impl Shell {
+    /// Whether the app must draw the title bar itself. macOS and Windows hand the
+    /// titlebar to the app; on Linux the window manager frames the window unless it
+    /// granted client-side decorations, and a second, empty bar under the system one
+    /// only wastes height.
+    fn app_owns_titlebar(window: &Window) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            matches!(
+                window.window_decorations(),
+                gpui_kit::Decorations::Client { .. }
+            )
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = window;
+            true
+        }
+    }
+
+    fn sync_window_title(&mut self, window: &mut Window) {
+        let title =
+            sovra_core::window_title(self.state.route, self.state.active_tab, crate::WINDOW_BRAND);
+        if title != self.window_title {
+            window.set_window_title(&title);
+            self.window_title = title;
+        }
+    }
+
+    /// A drag strip in the chrome colour that names the open page, centred so it
+    /// clears the macOS traffic lights and the Windows/Linux window controls alike.
+    fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let page = match self.state.route {
+            ScreenRoute::Login => crate::WINDOW_BRAND,
+            ScreenRoute::MainWorkspace => self.state.active_tab.label(),
+        };
+        let border = cx.theme().border;
+        let muted_foreground = cx.theme().muted_foreground;
+        TitleBar::new()
+            .sovra_surface(Surface::Chrome, cx)
+            .border_color(border)
+            .child(
+                div()
+                    .id("title-bar-page")
+                    .test_support()
+                    .flex_1()
+                    .min_w_0()
+                    .text_center()
+                    .truncate()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(muted_foreground)
+                    .child(page),
+            )
+    }
+
     /// The shell is the window's root, so it alone sizes top-level panes from the
     /// window; nested views measure their own container with `design::width_probe`.
     /// Order of yielding: inspector undocks first (below Large), then the sidebar

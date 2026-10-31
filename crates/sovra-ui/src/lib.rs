@@ -36,13 +36,15 @@ mod team_view;
 mod widgets;
 
 use gpui_kit::component::TitleBar;
-use gpui_kit::{App, AppContext as _, Global, WindowBounds, WindowOptions};
+use gpui_kit::{App, AppContext as _, Global, TitlebarOptions, WindowBounds, WindowOptions};
 use sovra_runtime::Client;
 
 pub use models_view::ModelsView;
 pub use shell::Shell;
 
 const PRODUCT_NAME: &str = "SovraHarness";
+/// The name people see on the window, matching the sidebar brand.
+const WINDOW_BRAND: &str = "Sovra";
 
 /// The runtime handle, installed once as a GPUI global so any view can reach it with
 /// `cx.global::<RuntimeClient>()`.
@@ -86,6 +88,12 @@ fn open_main_window(cx: &mut App) {
             layout.window_min_width,
             layout.window_min_height,
         )),
+        // Window managers, taskbars and Alt-Tab read this even when the app draws
+        // its own title bar; the shell keeps it in step with the open page.
+        titlebar: Some(TitlebarOptions {
+            title: Some(WINDOW_BRAND.into()),
+            ..TitleBar::title_bar_options()
+        }),
         ..TitleBar::window_options()
     };
     if let Err(error) = gpui_kit::open_window(options, cx, |window, cx| {

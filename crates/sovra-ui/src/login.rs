@@ -7,13 +7,14 @@
 
 use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a small subset
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, h_flex,
+    ActiveTheme as _, Disableable as _, Icon, Sizable as _, h_flex,
     input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
+    prelude::FluentBuilder as _,
 };
 use sovra_core::auth::{AuthPhase, AuthState};
 
