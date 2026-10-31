@@ -329,6 +329,14 @@ impl Shell {
                             let _ = client.send(Command::Connections(
                                 sovra_core::connections::ConnectionCommand::Load,
                             ));
+                            // Restores a saved session or gates the app behind Login.
+                            let _ = client.send(Command::Auth(sovra_core::AuthCommand::Load));
+                        }
+                        if let sovra_core::Event::Auth(
+                            sovra_core::AuthEvent::GoogleSignInStarted { auth_url },
+                        ) = &event
+                        {
+                            cx.open_url(auth_url);
                         }
                         if let Some(next_prompt) = shell.state.apply_event(&event) {
                             shell.dispatch_runtime_prompt(&next_prompt, cx);
@@ -582,20 +590,46 @@ impl Shell {
     pub fn submit_login(&mut self, cx: &mut Context<Self>) {
         let email = self.login_email_input.read(cx).value().to_string();
         let password = self.login_password_input.read(cx).value().to_string();
-        self.state.apply_auth(&sovra_core::AuthEvent::Submitting);
-        if let Err(error) =
-            cx.global::<RuntimeClient>()
-                .0
-                .send(Command::Auth(sovra_core::AuthCommand::SignIn {
-                    email,
-                    password,
-                }))
+        // On a fresh install the first submit creates the account; afterwards it
+        // signs in. The runtime validates and answers with friendly errors.
+        let command = if self.state.auth.has_accounts
+            || matches!(self.state.auth.phase, sovra_core::AuthPhase::Unknown)
         {
+            sovra_core::AuthCommand::SignIn { email, password }
+        } else {
+            sovra_core::AuthCommand::CreateAccount {
+                email,
+                password,
+                full_name: String::new(),
+            }
+        };
+        self.state.apply_auth(&sovra_core::AuthEvent::Submitting);
+        if let Err(error) = cx.global::<RuntimeClient>().0.send(Command::Auth(command)) {
             self.state.apply_auth(&sovra_core::AuthEvent::Failed {
                 field: sovra_core::auth::AuthField::General,
                 message: error.to_string(),
             });
         }
+        self.refresh(cx);
+    }
+
+    /// Opens Google Sign-In: the runtime builds the consent URL and the
+    /// loopback listener; the browser opens when it reports back.
+    pub fn start_google_signin(&mut self, cx: &mut Context<Self>) {
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Auth(sovra_core::AuthCommand::StartGoogleSignIn));
+        cx.notify();
+    }
+
+    pub fn cancel_google_signin(&mut self, cx: &mut Context<Self>) {
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Auth(sovra_core::AuthCommand::CancelGoogleSignIn));
+        self.state
+            .apply_auth(&sovra_core::AuthEvent::GoogleSignInCancelled);
         self.refresh(cx);
     }
 
@@ -1262,10 +1296,13 @@ impl Shell {
     fn render_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         self.ensure_turn_ticker(cx);
         match self.state.route {
-            ScreenRoute::Login => {
-                render_login_screen(&self.login_email_input, &self.login_password_input, cx)
-                    .into_any_element()
-            }
+            ScreenRoute::Login => render_login_screen(
+                &self.login_email_input,
+                &self.login_password_input,
+                &self.state.auth.clone(),
+                cx,
+            )
+            .into_any_element(),
             ScreenRoute::MainWorkspace => {
                 let center = match self.state.active_tab {
                     NavTab::Models | NavTab::Settings => div()
