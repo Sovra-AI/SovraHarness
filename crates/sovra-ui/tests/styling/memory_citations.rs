@@ -23,10 +23,11 @@ fn reveal(
     for _ in 0..60 {
         window.render_frame(cx);
         let bounds = window.find(id.clone()).bounds();
-        if bounds.top() >= px(40.) && bounds.bottom() <= px(height - 40.) {
+        // Content may sit flush under the window edge now that the empty in-app title bar is gone.
+        if bounds.top() >= px(8.) && bounds.bottom() <= px(height - 8.) {
             return;
         }
-        let delta = if bounds.top() < px(40.) { 60. } else { -60. };
+        let delta = if bounds.top() < px(8.) { 60. } else { -60. };
         window.scroll(area, ScrollDelta::Pixels(point(px(0.), px(delta))), cx);
     }
     panic!("control {id:?} must be reachable");

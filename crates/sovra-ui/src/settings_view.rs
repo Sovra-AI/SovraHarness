@@ -141,7 +141,7 @@ impl ModelsView {
         let card = self.google_card.clone()?;
         Some(
             settings_section(
-                "settings-connections",
+                "settings-google-account",
                 "Connections",
                 "Let Sovra help with your own accounts. You choose what it can use, and you \
                  can switch anything off at any time.",
