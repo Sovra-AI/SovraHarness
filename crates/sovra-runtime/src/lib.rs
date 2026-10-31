@@ -5,6 +5,7 @@
 //! The UI never sees tokio, and this crate never sees the UI.
 
 mod artifacts;
+mod auth;
 mod chat_history;
 mod connections;
 mod file_index;
@@ -177,6 +178,36 @@ pub fn start_with_channels(
     index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
     channel: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
 ) -> Result<Client, Error> {
+    start_with_auth(
+        version,
+        agent_config,
+        memory,
+        models,
+        files,
+        skills,
+        index,
+        channel,
+        None,
+    )
+}
+
+/// Starts with Google Sign-In configured by the composition root. The latest,
+/// fullest entry point; the shorter `start_with_*` helpers delegate here.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the composition root hands over every adapter in one call"
+)]
+pub fn start_with_auth(
+    version: &str,
+    agent_config: AgentConfig,
+    memory: Option<MemoryFactory>,
+    models: Option<ModelsConfig>,
+    files: Option<Arc<dyn sovra_core::files::FileStore>>,
+    skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+    index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+    channel: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
+    google: Option<sovra_providers::GoogleOAuthConfig>,
+) -> Result<Client, Error> {
     let (mut client, commands, events) = Client::loopback();
     let commands_tx = client.commands.clone();
     let (stopped, completion) = async_channel::bounded(1);
@@ -201,6 +232,7 @@ pub fn start_with_channels(
                     skills,
                     index,
                     channel,
+                    google,
                     commands_tx,
                 },
                 handle,
@@ -240,6 +272,7 @@ struct Services {
     skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
     index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
     channel: Option<Arc<dyn sovra_core::connections::MessagingChannel>>,
+    google: Option<sovra_providers::GoogleOAuthConfig>,
     /// Lets the messaging link run prompts through the same path as the UI.
     commands_tx: Sender<Command>,
 }
@@ -259,6 +292,7 @@ async fn serve(
         skills: skill_store,
         index,
         channel,
+        google,
         commands_tx,
     } = services;
     // Every event passes the connections task first: answers for WhatsApp sessions go
@@ -266,6 +300,12 @@ async fn serve(
     let connections =
         connections::ConnectionsRuntime::start(channel, ui_events.clone(), commands_tx, &handle);
     let events = connections.route_events(ui_events, &handle);
+    let mut auth = auth::AuthRuntime::start(
+        google,
+        models.as_ref().map(|config| config.repository.clone()),
+        events.clone(),
+        &handle,
+    );
     let mut file_index = file_index::IndexRuntime::start(
         index,
         events.clone(),
@@ -302,6 +342,7 @@ async fn serve(
     let mut routing_config = RoutingConfig::default();
     let mut specialists = default_sovra_srx_agents();
     let memory = open_memory(memory_factory).await;
+    auth.attach_store(memory.clone());
     let mut memory_semantic = memory_semantic::SemanticRuntime::start(
         memory.clone(),
         memory_repository,
@@ -408,6 +449,7 @@ async fn serve(
             other => other,
         };
         match command {
+            Command::Auth(command) => auth.handle(command),
             Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
             Command::FileIndex(command) => file_index.send(command),
@@ -751,6 +793,7 @@ async fn serve(
     memory_review.stop().await;
     memory_semantic.stop().await;
     chat_history.stop().await;
+    auth.stop().await;
     tracing::info!("runtime stopped");
 }
 
@@ -825,7 +868,8 @@ fn tap_agent_events(
                         }
                     }
                 }
-                Event::Memory(_)
+                Event::Auth(_)
+                | Event::Memory(_)
                 | Event::Models(_)
                 | Event::Skills(_)
                 | Event::Teams(_)
@@ -1036,6 +1080,39 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn auth_commands_are_dispatched_and_drained_before_shutdown() {
+        let client = start("auth-test").unwrap();
+        let events = client.events();
+        assert!(matches!(events.recv().await.unwrap(), Event::Ready { .. }));
+        client
+            .send(Command::Auth(sovra_core::AuthCommand::Load))
+            .unwrap();
+        client.send(Command::Ping).unwrap();
+        client.send(Command::Shutdown).unwrap();
+        let received = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            let mut received = Vec::new();
+            loop {
+                let event = events.recv().await.unwrap();
+                let stopped = event == Event::Stopped;
+                received.push(event);
+                if stopped {
+                    return received;
+                }
+            }
+        })
+        .await
+        .expect("sign-in work must drain without leaving a detached task alive");
+        assert!(received.contains(&Event::Pong));
+        assert!(
+            received.contains(&Event::Auth(sovra_core::AuthEvent::Loaded {
+                session: None,
+                has_accounts: false,
+                google_ready: false,
+            }))
+        );
+    }
 
     #[test]
     fn answers_ping_and_shuts_down() {

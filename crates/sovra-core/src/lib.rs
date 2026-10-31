@@ -6,6 +6,7 @@
 mod agent;
 mod agui;
 pub mod artifacts;
+pub mod auth;
 mod capabilities;
 pub mod chat_history;
 mod citations;
@@ -37,6 +38,7 @@ pub use agui::{
     LLM_SETUP_SURFACE_ID, MessageRole, ResponseModel, Speaker, SubagentOutcome, UiComponent,
     default_llm_setup_widget, default_personal_ai_build_widget, llm_setup_widget_for_stage,
 };
+pub use auth::{AuthCommand, AuthEvent, AuthPhase, AuthSession, AuthState};
 pub use capabilities::{
     Capability, ORCHESTRATOR_AGENT_ID, available_specialists, required_capabilities,
 };

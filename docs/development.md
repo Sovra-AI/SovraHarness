@@ -97,6 +97,40 @@ Use tmux scrollback/capture to inspect it. A source error is fixed by another sa
 not by restarting the watcher. A change to the watcher configuration itself is a
 supervisor change and may require a deliberate one-time restart.
 
+## Sign-in integration status
+
+The sign-in backend is implemented, but the desktop sign-in flow is unfinished.
+The current email/password form sends `AuthCommand::SignIn` and waits for
+`AuthEvent::SignedIn`; sign-out sends `AuthCommand::SignOut`. The UI does not yet
+request the saved session at startup, offer account creation, or connect the
+Google button and browser hand-off to the Google commands. Configuring Google
+alone does not enable a usable Google sign-in flow in the current UI.
+
+The implemented parts are:
+
+- `sovra-core::auth`: account/session types, validation, commands/events and the
+  reducer used to update the workspace route and displayed profile.
+- `sovra-providers::auth`: Argon2id password hashing and verification, Google
+  authorization-code exchange with PKCE, and user-info retrieval.
+- `sovra-runtime::auth`: the account worker, loopback listener, browser-wait
+  cancellation, credential-store access and orderly task shutdown.
+- `sovra-store-surreal`: account records and the current session persisted as JSON
+  in the existing `team:auth` record. Passwords are stored as PHC hashes; signing
+  out clears the session without deleting accounts. Google refresh tokens use
+  the OS keychain, or the existing debug-only `SOVRA_DEV=1` credential store.
+
+The app reads `SOVRA_GOOGLE_CLIENT_ID` once at startup. An absent or blank ID
+disables the Google backend. `SOVRA_GOOGLE_CLIENT_SECRET` is optional. Supply these
+through the development environment, not tracked files. The backend binds an
+OS-assigned port on `127.0.0.1` for `/callback`, waits up to five minutes for a
+browser response, and gives HTTP requests a 30-second timeout.
+
+Tests cover domain parsing/reducers, password verification, PKCE URL construction,
+account/session storage round-trips, runtime dispatch/shutdown and the UI's wait
+for sign-in confirmation. These checks do not establish a completed browser sign-in
+flow or account-based data isolation. Save failures are currently logged rather
+than propagated as sign-in failures; this remains rollout work.
+
 ## Research and rationale
 
 Checked online on 2026-10-23 and against the pinned CLI source:

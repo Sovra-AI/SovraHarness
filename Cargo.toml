@@ -34,6 +34,11 @@ adk-session = { version = "2.3.0", default-features = false }
 adk-tool = { version = "2.3.0", default-features = false }
 adk-ui = { version = "2.2.0", default-features = false, features = ["adk-core"] } # compat::Tool must BE adk_core::Tool
 anyhow = "1.0.104"
+# Password hashing for local sign-in accounts: Argon2id with the crate's OWASP-aligned
+# defaults, stored as PHC strings (salt + parameters embedded).
+argon2 = "0.6.0"
+# OAuth 2.0 authorization-code + PKCE client for Google Sign-In (RFC 8252 loopback flow).
+oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest", "rustls-tls"] }
 async-channel = "2.5.0"
 async-trait = "0.1.89"
 directories = "6.0.0"

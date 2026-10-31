@@ -49,7 +49,7 @@ fn main() -> anyhow::Result<()> {
     };
     // WhatsApp credentials (Signal keys) live in one SQLite file in the app data directory.
     let whatsapp = sovra_whatsapp::WhatsAppChannel::new(dirs.data_local_dir().join("whatsapp"));
-    let client = sovra_runtime::start_with_channels(
+    let client = sovra_runtime::start_with_auth(
         VERSION,
         agent_config,
         Some(memory),
@@ -64,6 +64,7 @@ fn main() -> anyhow::Result<()> {
             dirs.data_local_dir().join("file-index"),
         ))),
         Some(Arc::new(whatsapp)),
+        read_google_signin_config(),
     )
     .context("failed to start the runtime")?;
     sovra_ui::run(client.clone());
@@ -119,6 +120,28 @@ fn read_gemini_api_key() -> Option<String> {
     std::env::var("GEMINI_API_KEY")
         .ok()
         .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sovra-app is the composition root and reads process environment variables once at startup"
+)]
+/// Google Sign-In is optional: without a client ID the login screen offers
+/// email + password only. A desktop-app client secret is not confidential
+/// (RFC 8252 §8.5); PKCE protects the flow either way.
+fn read_google_signin_config() -> Option<sovra_providers::GoogleOAuthConfig> {
+    let client_id = std::env::var("SOVRA_GOOGLE_CLIENT_ID")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())?;
+    let client_secret = std::env::var("SOVRA_GOOGLE_CLIENT_SECRET")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    Some(sovra_providers::GoogleOAuthConfig {
+        client_id,
+        client_secret,
+    })
 }
 
 /// `cargo xtask dev` sets `SOVRA_DEV`: every rebuild changes the binary's code

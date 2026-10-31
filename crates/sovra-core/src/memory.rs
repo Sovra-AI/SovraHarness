@@ -542,6 +542,18 @@ pub trait MemoryStore: Send + Sync {
     ) -> Result<(), MemoryError> {
         Ok(())
     }
+
+    /// Loads sign-in accounts and the saved session. Password hashes are PHC
+    /// strings (Argon2id); refresh tokens never pass through this port — they
+    /// stay in the OS keychain behind the providers' credential store.
+    async fn load_auth(&self) -> Result<Option<crate::auth::AuthRecords>, MemoryError> {
+        Ok(None)
+    }
+
+    /// Saves sign-in accounts and the active session.
+    async fn save_auth(&self, _records: &crate::auth::AuthRecords) -> Result<(), MemoryError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

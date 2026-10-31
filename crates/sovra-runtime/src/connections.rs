@@ -532,6 +532,7 @@ impl Actor {
             | Event::AgUiSurface { .. }
             | Event::ChatTitleGenerated { .. }
             | Event::FilePrepared(_)
+            | Event::Auth(_)
             | Event::Memory(_)
             | Event::Models(_)
             | Event::FileIndex(_)

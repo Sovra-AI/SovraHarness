@@ -159,6 +159,19 @@ Node and a second process; `wa-rs` is an older fork of the same client; writing 
 protocol ourselves duplicates a maintained library. WhatsApp does not officially support
 third-party clients; the UI says so and only personal accounts are linked.
 
+### Sign-in: pure rules in core, hashing and OAuth in adapters
+
+Email/password validation, the `AuthCommand`/`AuthEvent` protocol, the reducer and the
+RFC 8252 loopback callback parsing live in `sovra-core/src/auth.rs` (no sockets, no
+crypto). `sovra-providers` owns Argon2id hashing (PHC strings, OWASP defaults) and the
+Google authorization-code + PKCE exchange (`oauth2`, rustls). `sovra-runtime` owns the
+account worker and the loopback listener, and keeps sign-in events out of conversation
+memory and messaging replies. `MemoryStore::load_auth` / `save_auth` persist accounts
+and the active session in SurrealDB's existing `team:auth` record; refresh tokens
+use the providers' credential store. The app reads optional Google client configuration
+at startup. Account creation, startup session restoration and the Google browser
+hand-off still need UI integration; see [development notes](development.md#sign-in-integration-status).
+
 ### Planned (create the crate when the first feature needs it)
 
 - Secrets: `keyring` v4 (`keyring-core` + native stores) — API keys in the OS keychain.

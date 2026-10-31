@@ -810,6 +810,40 @@ impl MemoryStore for SurrealStore {
         .await?;
         Ok(())
     }
+
+    async fn load_auth(&self) -> Result<Option<sovra_core::auth::AuthRecords>, MemoryError> {
+        let rows: Vec<TeamRow> = self
+            .query(
+                "SELECT members_json FROM $record;",
+                ("record", RecordId::new("team", "auth")),
+            )
+            .await?
+            .take(0)
+            .map_err(|e| backend(&e))?;
+        rows.into_iter()
+            .next()
+            .map(|row| {
+                serde_json::from_str(&row.members_json)
+                    .map_err(|e| MemoryError::Backend(format!("deserialize auth: {e}")))
+            })
+            .transpose()
+    }
+
+    async fn save_auth(&self, records: &sovra_core::auth::AuthRecords) -> Result<(), MemoryError> {
+        let members_json = serde_json::to_string(records)
+            .map_err(|e| MemoryError::Backend(format!("serialize auth: {e}")))?;
+        self.query(
+            "UPSERT $record CONTENT $data;",
+            (
+                "record",
+                RecordId::new("team", "auth"),
+                "data",
+                TeamRow { members_json },
+            ),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 // --- rows ---------------------------------------------------------------------------

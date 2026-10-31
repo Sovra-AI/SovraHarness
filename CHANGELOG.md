@@ -13,6 +13,17 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Local sign-in foundations:** account/session types, email and password
+  validation, typed commands/events and workspace state updates. Passwords use
+  Argon2id PHC hashes; accounts and the active session are stored through
+  `MemoryStore` in SurrealDB. Signing out retains the accounts.
+- **Optional Google sign-in backend:** authorization-code exchange with PKCE,
+  a loopback callback listener, cancellation and credential-store handling for
+  refresh tokens. The app reads `SOVRA_GOOGLE_CLIENT_ID` and optional
+  `SOVRA_GOOGLE_CLIENT_SECRET` at startup. Account creation, startup session
+  restoration and the Google browser hand-off still need UI integration;
+  this is not a completed sign-in rollout. See [development notes](docs/development.md#sign-in-integration-status).
+
 - **Find files without exact capitalization:** filename and scan-report filters
   now use Unicode case folding and canonical normalization by default. Match case
   restores exact matching. Filter changes restart pagination; literal `%` and `_`
@@ -512,6 +523,21 @@ move them under a version heading when the tag is cut.
   tools", "Thinks step by step", plain prices and clearer Ollama download help.
 
 ### Fixed
+
+- **Reliable memory restart checks:** the lifecycle fixture uses the model
+  restored at startup instead of reselecting it and racing the first recall.
+  Failure cleanup shuts down the runtime before joining its event reader, so
+  an assertion failure no longer leaves the test hanging.
+- Removed duplicate sign-in dispatch/store attachment and unused account-form
+  scaffolding that prevented CI from passing. Local `.claude/worktrees/`
+  checkouts are ignored by the parent repository.
+
+- **Sign-in runtime integration:** sign-in commands reach the account worker,
+  Google configuration and storage are passed through, and shutdown drains
+  accepted commands and cancels browser waits. Sign-in events stay outside
+  conversation-memory capture and messaging replies. The existing sign-in form
+  waits for runtime confirmation instead of entering the workspace immediately;
+  signing out also notifies the runtime.
 
 - **Show newly captured memories:** the open Memories list refreshes when a
   background capture finishes. Captures arriving during a load trigger a follow-up

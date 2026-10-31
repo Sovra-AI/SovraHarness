@@ -157,20 +157,18 @@ impl Fixture {
                 Event::Models(ModelEvent::CatalogLoaded { cached: false, .. })
             )
         });
-        driver.send(Command::Models(ModelCommand::Activate {
-            key: ModelKey {
-                connection_id: "fixture".into(),
-                model_id: "memory-fixture".into(),
-            },
-        }));
-        driver.wait(|event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.is_some()));
-        let enabled = self
-            .repository
-            .load()
-            .unwrap()
-            .preferences
-            .agent_settings
-            .memory_enabled;
+        let saved = self.repository.load().unwrap().preferences;
+        let key = ModelKey {
+            connection_id: "fixture".into(),
+            model_id: "memory-fixture".into(),
+        };
+        // Startup restores a saved selection. Selecting it again can cancel the
+        // first recall while an older startup notification satisfies this wait.
+        if saved.active.as_ref() != Some(&key) {
+            driver.send(Command::Models(ModelCommand::Activate { key: key.clone() }));
+            driver.wait(|event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.as_ref() == Some(&key)));
+        }
+        let enabled = saved.agent_settings.memory_enabled;
         driver.wait(|event| matches!(event, Event::Memory(MemoryEvent::Status(status)) if *status == if enabled { MemoryStatus::Ready } else { MemoryStatus::Paused }));
         driver
     }
@@ -320,7 +318,9 @@ impl Driver {
 }
 impl Drop for Driver {
     fn drop(&mut self) {
-        self.client.take();
+        if let Some(client) = self.client.take() {
+            let _ = client.shutdown_blocking();
+        }
         if let Some(reader) = self.reader.take() {
             let _ = reader.join();
         }

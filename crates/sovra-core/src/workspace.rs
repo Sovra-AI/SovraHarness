@@ -229,6 +229,8 @@ pub struct WorkspaceState {
     pub route: ScreenRoute,
     pub active_tab: NavTab,
     pub user: UserProfile,
+    /// Sign-in state, folded from [`Event::Auth`](crate::Event::Auth).
+    pub auth: crate::auth::AuthState,
     pub session_id: String,
     pub messages: Vec<ChatMessage>,
     pub threads: Vec<ChatThread>,
@@ -296,6 +298,7 @@ impl Default for WorkspaceState {
             route: ScreenRoute::MainWorkspace,
             active_tab: NavTab::Chat,
             user: UserProfile::default(),
+            auth: crate::auth::AuthState::default(),
             session_id: initial_id,
             messages: Vec::new(),
             threads: vec![initial_thread],
@@ -390,12 +393,23 @@ fn default_config_cards() -> Vec<PersonalAiConfigCard> {
 }
 
 impl WorkspaceState {
-    pub fn login(&mut self, email: &str) {
-        let trimmed = email.trim();
-        if !trimmed.is_empty() {
-            trimmed.clone_into(&mut self.user.email);
+    /// Folds a sign-in event and keeps the route and user profile in sync: a live
+    /// session shows the workspace; a reported signed-out state gates it behind
+    /// the Login screen. Until the runtime reports ([`crate::auth::AuthPhase::Unknown`])
+    /// the route is left alone, so tests without an auth runtime keep working.
+    pub fn apply_auth(&mut self, event: &crate::auth::AuthEvent) {
+        self.auth.apply(event);
+        if let Some(session) = self.auth.session() {
+            self.user = UserProfile {
+                initials: session.initials(),
+                full_name: session.full_name.clone(),
+                email: session.email.clone(),
+                workspace_label: "Personal Workspace".to_owned(),
+            };
+            self.route = ScreenRoute::MainWorkspace;
+        } else if !matches!(self.auth.phase, crate::auth::AuthPhase::Unknown) {
+            self.route = ScreenRoute::Login;
         }
-        self.route = ScreenRoute::MainWorkspace;
     }
 
     pub fn logout(&mut self) {
@@ -931,6 +945,10 @@ impl WorkspaceState {
     pub fn apply_event(&mut self, event: &Event) -> Option<String> {
         self.runtime_status.apply(event);
         match event {
+            Event::Auth(auth_event) => {
+                self.apply_auth(auth_event);
+                None
+            }
             Event::Memory(crate::MemoryEvent::Status(status)) => {
                 self.memory_status = status.clone();
                 None
@@ -1495,9 +1513,39 @@ mod tests {
         let mut state = WorkspaceState::default();
         state.logout();
         assert_eq!(state.route, ScreenRoute::Login);
-        state.login("barney@sovra.ai");
+        let session = crate::auth::AuthSession {
+            account_id: "acct-1".into(),
+            email: "barney@sovra.ai".into(),
+            full_name: "Barney the Jedi".into(),
+            provider: crate::auth::AuthProvider::Password,
+            signed_in_at: Timestamp(1),
+        };
+        state.apply_auth(&crate::auth::AuthEvent::SignedIn {
+            session,
+            new_account: false,
+        });
         assert_eq!(state.route, ScreenRoute::MainWorkspace);
         assert_eq!(state.user.email, "barney@sovra.ai");
+        assert_eq!(state.user.initials, "BJ");
+        state.apply_auth(&crate::auth::AuthEvent::SignedOut);
+        assert_eq!(state.route, ScreenRoute::Login);
+        assert!(!state.auth.is_signed_in());
+    }
+
+    #[test]
+    fn startup_without_an_auth_report_keeps_the_workspace_route() {
+        let mut state = WorkspaceState::default();
+        assert_eq!(state.route, ScreenRoute::MainWorkspace);
+        state.apply_auth(&crate::auth::AuthEvent::Loaded {
+            session: None,
+            has_accounts: false,
+            google_ready: false,
+        });
+        assert_eq!(
+            state.route,
+            ScreenRoute::Login,
+            "no saved session gates the app"
+        );
     }
 
     #[test]

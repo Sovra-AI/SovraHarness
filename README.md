@@ -169,6 +169,14 @@ Development builds use a separate plaintext key store in the app data directory
 when `SOVRA_DEV=1` is set by the runner. Release builds always use the OS keychain.
 See the development guide for storage and permission details.
 
+Sign-in integration is in progress. The existing form sends the entered email
+and password to the local runtime and waits for confirmation before opening the
+workspace; sign-out also reaches the runtime. Accounts, password hashes and the
+active session now persist in the local store, and the app accepts optional Google
+client configuration. Account creation, startup session restoration and the Google
+browser flow still need UI integration. See
+[sign-in implementation status](docs/development.md#sign-in-integration-status).
+
 The **Models** tab guides you through two steps: connect a service, then pick a chat
 model. It shows only the next needed setup action, with suggestions labeled **Free**,
 **Everyday**, and **Thinks longer** from the live catalog, each priced in plain words

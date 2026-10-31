@@ -147,7 +147,7 @@ impl Shell {
                 .placeholder("Summarize overnight market moves and portfolio alerts.")
         });
         let login_email_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("ahmed@sovra.ai"));
+            cx.new(|cx| InputState::new(window, cx).placeholder("you@example.com"));
         let login_password_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Enter your password")
@@ -581,11 +581,29 @@ impl Shell {
 
     pub fn submit_login(&mut self, cx: &mut Context<Self>) {
         let email = self.login_email_input.read(cx).value().to_string();
-        self.state.login(&email);
+        let password = self.login_password_input.read(cx).value().to_string();
+        self.state.apply_auth(&sovra_core::AuthEvent::Submitting);
+        if let Err(error) =
+            cx.global::<RuntimeClient>()
+                .0
+                .send(Command::Auth(sovra_core::AuthCommand::SignIn {
+                    email,
+                    password,
+                }))
+        {
+            self.state.apply_auth(&sovra_core::AuthEvent::Failed {
+                field: sovra_core::auth::AuthField::General,
+                message: error.to_string(),
+            });
+        }
         self.refresh(cx);
     }
 
     pub fn logout(&mut self, cx: &mut Context<Self>) {
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Auth(sovra_core::AuthCommand::SignOut));
         self.state.logout();
         self.refresh(cx);
     }

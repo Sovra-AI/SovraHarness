@@ -87,13 +87,44 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
 
         window.click("login-submit-btn", cx);
         window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().route, ScreenRoute::MainWorkspace);
+        assert_eq!(shell.read(cx).workspace().route, ScreenRoute::Login);
     })
     .unwrap();
 
     // Verify the schedule run dispatched a real Command::RunPrompt to the runtime.
     let dispatched = commands.recv_blocking().unwrap();
     assert!(matches!(dispatched, Command::RunPrompt { .. }));
+    let auth_commands: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter_map(|command| match command {
+            Command::Auth(auth) => Some(auth),
+            _ => None,
+        })
+        .collect();
+    assert!(matches!(
+        auth_commands.as_slice(),
+        [
+            sovra_core::AuthCommand::SignOut,
+            sovra_core::AuthCommand::SignIn { .. }
+        ]
+    ));
+    events
+        .send_blocking(Event::Auth(sovra_core::AuthEvent::SignedIn {
+            session: sovra_core::AuthSession {
+                account_id: "test-account".into(),
+                email: "test@example.com".into(),
+                full_name: "Test User".into(),
+                provider: sovra_core::auth::AuthProvider::Password,
+                signed_in_at: sovra_core::Timestamp(1),
+            },
+            new_account: false,
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, _| {
+        assert_eq!(shell.workspace().route, ScreenRoute::MainWorkspace);
+    });
 
     // Stream an AG-UI surface and text chunk back from the runtime.
     events

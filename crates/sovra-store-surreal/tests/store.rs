@@ -191,6 +191,44 @@ async fn explicit_memory_corrections_keep_sources_and_roll_back_stale_edits_whil
     );
 }
 
+#[tokio::test]
+async fn auth_records_roundtrip_with_session_and_phc_hash() {
+    let store = open_store().await;
+    assert!(store.load_auth().await.unwrap().is_none());
+
+    let account = sovra_core::auth::AuthAccount {
+        id: "account-1-42".into(),
+        email: "barney@sovra.ai".into(),
+        full_name: "Barney the Jedi".into(),
+        provider: sovra_core::auth::AuthProvider::Password,
+        password_phc: Some("$argon2id$v=19$m=19456,t=2,p=1$salt$hash".into()),
+        created_at: Timestamp(42),
+    };
+    let records = sovra_core::auth::AuthRecords {
+        accounts: vec![account.clone()],
+        session: Some(sovra_core::auth::AuthSession {
+            account_id: account.id.clone(),
+            email: account.email.clone(),
+            full_name: account.full_name.clone(),
+            provider: account.provider,
+            signed_in_at: Timestamp(43),
+        }),
+    };
+    store.save_auth(&records).await.unwrap();
+    let loaded = store.load_auth().await.unwrap().expect("records saved");
+    assert_eq!(loaded, records);
+
+    // Signing out persists the cleared session without losing the account.
+    let signed_out = sovra_core::auth::AuthRecords {
+        session: None,
+        ..records
+    };
+    store.save_auth(&signed_out).await.unwrap();
+    let loaded = store.load_auth().await.unwrap().expect("records saved");
+    assert_eq!(loaded.accounts.len(), 1);
+    assert!(loaded.session.is_none());
+}
+
 async fn open_store() -> SurrealStore {
     let mut config = StoreConfig::in_memory();
     config.embedding_dimension = DIM;
