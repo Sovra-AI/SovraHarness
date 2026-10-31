@@ -55,27 +55,35 @@ fn main() -> anyhow::Result<()> {
         sovra_telegram::TelegramChannel::new(Arc::new(KeychainTokenStore(credential_store(&dirs))))
             .map_err(|error| tracing::warn!(%error, "telegram linking unavailable"))
             .ok();
-    let client = sovra_runtime::start_with_auth(
+    let google = sovra_google::GoogleAdapter::new(
+        read_google_client(),
+        Arc::new(CredentialVault(credential_store(&dirs))),
+    )
+    .context("failed to prepare Google connections")?;
+    let client = sovra_runtime::start_with_services(
         VERSION,
         agent_config,
-        Some(memory),
-        Some(models),
-        Some(Arc::new(sovra_files::LocalFileStore::new(
-            dirs.data_local_dir().join("attachments"),
-        ))),
-        Some(Arc::new(sovra_skills::LocalSkillStore::new(
-            dirs.data_local_dir().join("skills"),
-        ))),
-        Some(Arc::new(sovra_files::LocalFileIndex::new(
-            dirs.data_local_dir().join("file-index"),
-        ))),
-        sovra_runtime::MessagingChannels {
-            whatsapp: Some(Arc::new(whatsapp)),
-            telegram: telegram.map(|channel| {
-                Arc::new(channel) as Arc<dyn sovra_core::connections::MessagingChannel>
-            }),
+        sovra_runtime::RuntimeServices {
+            memory: Some(memory),
+            models: Some(models),
+            files: Some(Arc::new(sovra_files::LocalFileStore::new(
+                dirs.data_local_dir().join("attachments"),
+            ))),
+            skills: Some(Arc::new(sovra_skills::LocalSkillStore::new(
+                dirs.data_local_dir().join("skills"),
+            ))),
+            index: Some(Arc::new(sovra_files::LocalFileIndex::new(
+                dirs.data_local_dir().join("file-index"),
+            ))),
+            messaging: sovra_runtime::MessagingChannels {
+                whatsapp: Some(Arc::new(whatsapp)),
+                telegram: telegram.map(|channel| {
+                    Arc::new(channel) as Arc<dyn sovra_core::connections::MessagingChannel>
+                }),
+            },
+            signin: read_google_signin_config(),
+            google: Some(Arc::new(google)),
         },
-        read_google_signin_config(),
     )
     .context("failed to start the runtime")?;
     sovra_ui::run(client.clone());
@@ -179,6 +187,55 @@ impl sovra_telegram::TokenStore for KeychainTokenStore {
 
     fn clear(&self) -> Result<(), String> {
         self.0.delete(Self::ID).map_err(|error| error.to_string())
+    }
+}
+
+/// The Google Cloud "Desktop app" OAuth client. Release builds bake it in at
+/// compile time (`SOVRA_GOOGLE_CLIENT_ID`/`_SECRET`) so the single binary needs no
+/// setup; the same variables at run time override it for development and for
+/// people using their own Google Cloud client. Empty means "not set up yet".
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sovra-app is the composition root and reads process environment variables once at startup"
+)]
+fn read_google_client() -> sovra_google::ClientConfig {
+    let read = |name: &str, baked: Option<&'static str>| {
+        std::env::var(name)
+            .ok()
+            .or_else(|| baked.map(str::to_owned))
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    sovra_google::ClientConfig {
+        client_id: read(
+            "SOVRA_GOOGLE_CLIENT_ID",
+            option_env!("SOVRA_GOOGLE_CLIENT_ID"),
+        )
+        .unwrap_or_default(),
+        client_secret: read(
+            "SOVRA_GOOGLE_CLIENT_SECRET",
+            option_env!("SOVRA_GOOGLE_CLIENT_SECRET"),
+        ),
+    }
+}
+
+/// The Google sign-in shares the model keys' store (keychain, or dev files).
+struct CredentialVault(Arc<dyn sovra_providers::CredentialStore>);
+
+impl sovra_google::SecretVault for CredentialVault {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
+        self.0
+            .get(key)
+            .map(|secret| Some(secret.0).filter(|s| !s.is_empty()))
+            .map_err(|e| e.0)
+    }
+    fn set(&self, key: &str, secret: &str) -> Result<(), String> {
+        self.0
+            .set(key, &sovra_core::models::ModelSecret(secret.to_owned()))
+            .map_err(|e| e.0)
+    }
+    fn delete(&self, key: &str) -> Result<(), String> {
+        self.0.delete(key).map_err(|e| e.0)
     }
 }
 

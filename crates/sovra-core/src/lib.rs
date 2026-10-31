@@ -15,6 +15,7 @@ mod context_budget;
 mod conversation_context;
 pub mod file_index;
 pub mod files;
+pub mod google;
 mod knowledge;
 mod memory;
 pub mod models;

@@ -39,6 +39,7 @@ allow = [
   "ISC",
   "MPL-2.0",
   "Unicode-3.0",
+  "Unicode-DFS-2016", # finl_unicode (xberg → comrak): OSI-approved Unicode data licence
   "Unlicense", # public-domain dedication (ext-sort)
   "Zlib",
   "0BSD",

@@ -62,6 +62,8 @@ pub struct Shell {
     models: Entity<crate::ModelsView>,
     team_view: Entity<crate::team_view::TeamView>,
     artifacts_view: Entity<crate::artifacts_view::ArtifactsView>,
+    /// Shown in Settings → Connections; reads Google state from this shell.
+    google_card: Entity<crate::google_card::GoogleCard>,
     /// The conversation, rendered as a cached view: composer cursor blinks, sidebar
     /// and timer updates reuse its last frame instead of laying out every message.
     pub(crate) transcript: Entity<crate::chat_view::Transcript>,
@@ -78,6 +80,7 @@ pub struct Shell {
     _models_navigation: Subscription,
     _models_tour: Subscription,
     _team_ask: Subscription,
+    _try_asking: Subscription,
 }
 
 impl std::fmt::Debug for Shell {
@@ -320,6 +323,13 @@ impl Shell {
                         {
                             cx.open_url(&format!("file://{path}"));
                         }
+                        // Google's consent page opens in the person's own browser.
+                        if let sovra_core::Event::Google(
+                            sovra_core::google::GoogleEvent::OpenSignIn { url },
+                        ) = &event
+                        {
+                            cx.open_url(url);
+                        }
                         if matches!(event, sovra_core::Event::Ready { .. }) {
                             // The roster and library feed chat (@mentions, Saved).
                             let client = &cx.global::<RuntimeClient>().0;
@@ -377,6 +387,21 @@ impl Shell {
             let shell = shell_handle.clone();
             cx.new(|cx| crate::artifacts_view::ArtifactsView::new(shell, window, cx))
         };
+        let google_card = {
+            let shell = shell_handle.clone();
+            cx.new(|_| crate::google_card::GoogleCard::new(shell))
+        };
+        models.update(cx, |models, _| {
+            models.google_card = Some(google_card.clone());
+        });
+        let try_asking = cx.subscribe_in(
+            &google_card,
+            window,
+            |shell, _, ask: &crate::google_card::TryAsking, window, cx| {
+                shell.select_tab(NavTab::Chat, cx);
+                shell.fill_composer_draft(&ask.prompt, window, cx);
+            },
+        );
         let team_ask = cx.subscribe_in(
             &team_view,
             window,
@@ -422,6 +447,8 @@ impl Shell {
             team_view,
             artifacts_view,
             _team_ask: team_ask,
+            _try_asking: try_asking,
+            google_card,
             turn_ticker: None,
             window_title: String::new(),
             transcript: cx.new(|_| crate::chat_view::Transcript::new(shell_handle)),
@@ -444,12 +471,8 @@ impl Shell {
             NavTab::Team => self.team_view.update(cx, |_, cx| cx.notify()),
             NavTab::Artifacts => self.artifacts_view.update(cx, |_, cx| cx.notify()),
             NavTab::Knowledge => self.memory_view.update(cx, |_, cx| cx.notify()),
-            NavTab::Chat
-            | NavTab::MyAis
-            | NavTab::Models
-            | NavTab::Schedules
-            | NavTab::Settings
-            | NavTab::Skills => {}
+            NavTab::Settings => self.google_card.update(cx, |_, cx| cx.notify()),
+            NavTab::Chat | NavTab::MyAis | NavTab::Models | NavTab::Schedules | NavTab::Skills => {}
         }
         cx.notify();
     }

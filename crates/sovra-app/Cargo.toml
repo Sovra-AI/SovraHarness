@@ -16,6 +16,7 @@ anyhow = { workspace = true }
 directories = { workspace = true }
 sovra-core = { workspace = true }
 sovra-files = { workspace = true }
+sovra-google = { workspace = true }
 sovra-providers = { workspace = true }
 sovra-runtime = { workspace = true }
 sovra-skills = { workspace = true }

@@ -12,6 +12,7 @@ mod file_index;
 mod files;
 mod memory_review;
 mod memory_semantic;
+mod google;
 mod models;
 mod recalling;
 mod remembering;
@@ -255,12 +256,54 @@ pub fn start_with_auth(
     messaging: MessagingChannels,
     google: Option<sovra_providers::GoogleOAuthConfig>,
 ) -> Result<Client, Error> {
+    start_with_services(
+        version,
+        agent_config,
+        RuntimeServices {
+            memory,
+            models,
+            files,
+            skills,
+            index,
+            messaging,
+            signin: google,
+            google: None,
+        },
+    )
+}
+
+/// Every adapter the composition root can hand the runtime; each is optional.
+#[derive(Default)]
+pub struct RuntimeServices {
+    pub memory: Option<MemoryFactory>,
+    pub models: Option<ModelsConfig>,
+    pub files: Option<Arc<dyn sovra_core::files::FileStore>>,
+    pub skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+    pub index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+    pub messaging: MessagingChannels,
+    /// Google Sign-In for the login screen.
+    pub signin: Option<sovra_providers::GoogleOAuthConfig>,
+    /// The person's Google account (Connections page and agent tools).
+    pub google: Option<Arc<dyn sovra_core::google::GoogleConnector>>,
+}
+
+impl std::fmt::Debug for RuntimeServices {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeServices")
+            .field("messaging", &self.messaging)
+            .field("google", &self.google)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Starts the runtime on its own thread with the adapters in `services`.
+pub fn start_with_services(
+    version: &str,
+    agent_config: AgentConfig,
+    services: RuntimeServices,
+) -> Result<Client, Error> {
     let (mut client, commands, events) = Client::loopback();
     let commands_tx = client.commands.clone();
-    let channels = connections::Channels {
-        whatsapp: messaging.whatsapp,
-        telegram: messaging.telegram,
-    };
     let (stopped, completion) = async_channel::bounded(1);
     client.completion = Some(completion);
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -276,16 +319,8 @@ pub fn start_with_auth(
             runtime.block_on(serve(
                 version,
                 agent_config,
-                Services {
-                    memory,
-                    models,
-                    files,
-                    skills,
-                    index,
-                    channels,
-                    google,
-                    commands_tx,
-                },
+                services,
+                commands_tx,
                 handle,
                 commands,
                 events.clone(),
@@ -316,47 +351,42 @@ async fn drain_adapter_tasks(metrics: tokio::runtime::RuntimeMetrics) {
     }
 }
 
-struct Services {
-    memory: Option<MemoryFactory>,
-    models: Option<ModelsConfig>,
-    files: Option<Arc<dyn sovra_core::files::FileStore>>,
-    skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
-    index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
-    channels: connections::Channels,
-    google: Option<sovra_providers::GoogleOAuthConfig>,
-    /// Lets the messaging links run prompts through the same path as the UI.
-    commands_tx: Sender<Command>,
-}
-
 async fn serve(
     version: String,
     agent_config: AgentConfig,
-    services: Services,
+    services: RuntimeServices,
+    // Lets the messaging links run prompts through the same path as the UI.
+    commands_tx: Sender<Command>,
     handle: tokio::runtime::Handle,
     commands: Receiver<Command>,
     ui_events: Sender<Event>,
 ) {
-    let Services {
+    let RuntimeServices {
         memory: memory_factory,
         models,
         files,
         skills: skill_store,
         index,
-        channels,
+        messaging,
+        signin,
         google,
-        commands_tx,
     } = services;
+    let channels = connections::Channels {
+        whatsapp: messaging.whatsapp,
+        telegram: messaging.telegram,
+    };
     // Every event passes the connections task first: answers for WhatsApp and Telegram
     // sessions go back to the phone instead of the chat window.
     let connections =
         connections::ConnectionsRuntime::start(channels, ui_events.clone(), commands_tx, &handle);
     let events = connections.route_events(ui_events, &handle);
     let mut auth = auth::AuthRuntime::start(
-        google,
+        signin,
         models.as_ref().map(|config| config.repository.clone()),
         events.clone(),
         &handle,
     );
+    let google = google::GoogleRuntime::start(google, events.clone(), &handle);
     let mut file_index = file_index::IndexRuntime::start(
         index,
         events.clone(),
@@ -441,6 +471,7 @@ async fn serve(
     if memory.is_some() {
         chat_history.load();
     }
+    google.send(sovra_core::google::GoogleCommand::Load);
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");
         if let Some(worker) = &remembering {
@@ -503,6 +534,7 @@ async fn serve(
             Command::Auth(command) => auth.handle(command),
             Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
+            Command::Google(command) => google.send(command),
             Command::FileIndex(command) => file_index.send(command),
             Command::Teams(sovra_core::teams::TeamCommand::Run {
                 session_id,
@@ -563,6 +595,8 @@ async fn serve(
                         continue;
                     }
                 };
+                let google_tools = google.tools().await;
+                let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
                 if let Some(previous) = runs.remove(&session_id) {
                     previous.interrupt(&session_id);
                     previous.task.abort();
@@ -757,9 +791,13 @@ async fn serve(
                     previous.task.abort();
                 }
                 // Any reply may keep what it makes in Artifacts (`save_artifact`).
+                let google_tools = google.tools().await;
                 let selected = selected.map(|base| {
-                    base.with_artifact_saver(artifact_library.saver())
-                        .unwrap_or(base)
+                    let base = base
+                        .with_artifact_saver(artifact_library.saver())
+                        .unwrap_or(base);
+                    // Google tools follow what is connected and switched on right now.
+                    base.with_google(google_tools.as_ref()).unwrap_or(base)
                 });
                 let run = spawn_prompt(
                     &handle,
@@ -926,6 +964,7 @@ fn tap_agent_events(
                 | Event::Teams(_)
                 | Event::Artifacts(_)
                 | Event::Connections(_)
+                | Event::Google(_)
                 | Event::AgUi { .. }
                 | Event::FilePrepared(_)
                 | Event::FileIndex(_)

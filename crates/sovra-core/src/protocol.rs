@@ -21,6 +21,8 @@ pub enum Command {
     Teams(crate::teams::TeamCommand),
     Artifacts(crate::artifacts::ArtifactCommand),
     Connections(crate::connections::ConnectionCommand),
+    /// The Google account on the Connections page.
+    Google(crate::google::GoogleCommand),
     RunWithFiles {
         /// Explicit earlier text replaces in-process history; `None` keeps that history.
         context: Option<crate::ConversationContext>,
@@ -89,6 +91,7 @@ pub enum Event {
     Teams(crate::teams::TeamEvent),
     Artifacts(crate::artifacts::ArtifactEvent),
     Connections(crate::connections::ConnectionEvent),
+    Google(crate::google::GoogleEvent),
     /// An AG-UI protocol event for `session_id` (team runs stream through these).
     AgUi {
         session_id: String,
@@ -171,6 +174,7 @@ impl Event {
             | Self::Teams(_)
             | Self::Artifacts(_)
             | Self::Connections(_)
+            | Self::Google(_)
             | Self::ChatHistoryLoaded { .. }
             | Self::Ready { .. }
             | Self::Pong

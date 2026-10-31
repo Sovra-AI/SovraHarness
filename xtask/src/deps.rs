@@ -18,6 +18,9 @@ const LAYERS: &[(&str, &[&str])] = &[
     ("sovra-files", &["sovra-core"]),
     // Skill package IO and bounded YAML parsing stay behind the core SkillStore port.
     ("sovra-skills", &["sovra-core"]),
+    // Google sign-in, keychain-held tokens and Google REST are their own IO boundary
+    // behind the core GoogleConnector port; runtime receives it from the composition root.
+    ("sovra-google", &["sovra-core"]),
     // Provider HTTP, catalog persistence and OS credentials form an IO boundary;
     // core stays pure, and UI receives only protocol data through runtime.
     ("sovra-providers", &["sovra-core"]),
@@ -37,6 +40,7 @@ const LAYERS: &[(&str, &[&str])] = &[
         &[
             "sovra-core",
             "sovra-files",
+            "sovra-google",
             "sovra-providers",
             "sovra-runtime",
             "sovra-skills",

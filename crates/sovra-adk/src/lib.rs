@@ -11,6 +11,7 @@ pub mod decision_client;
 mod file_index;
 mod files;
 mod memory;
+mod google;
 mod native_ui;
 mod orchestrator;
 mod recall;
@@ -23,6 +24,7 @@ mod web_search;
 mod working_context;
 
 pub use artifacts::ArtifactSaver;
+pub use google::GoogleTools;
 pub use team::TeamTurn;
 pub use web_search::SearchClient;
 

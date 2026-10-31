@@ -18,6 +18,7 @@ authors = ["Sovra"]
 sovra-adk = { path = "crates/sovra-adk" }
 sovra-core = { path = "crates/sovra-core" }
 sovra-files = { path = "crates/sovra-files" }
+sovra-google = { path = "crates/sovra-google" }
 sovra-providers = { path = "crates/sovra-providers" }
 sovra-runtime = { path = "crates/sovra-runtime" }
 sovra-skills = { path = "crates/sovra-skills" }
@@ -42,6 +43,9 @@ argon2 = "0.6.0"
 oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest", "rustls-tls"] }
 async-channel = "2.5.0"
 async-trait = "0.1.89"
+# Google sign-in: PKCE verifier/state randomness and base64url (Gmail raw messages).
+base64 = "0.23.1"
+getrandom = "0.4.3"
 directories = "6.0.0"
 futures = "0.3.32"
 cap-std = "4.0.3"

@@ -283,6 +283,8 @@ pub struct WorkspaceState {
     pub artifacts: crate::artifacts::ArtifactLibrary,
     /// Personal channel connections (`WhatsApp` Personal companion state, QR pairing, bridged messages).
     pub connections: crate::connections::ConnectionsState,
+    /// The Google account, folded from [`Event::Google`].
+    pub google: crate::google::GoogleConnection,
     /// The composer sends prompts to the whole team instead of Sovra alone.
     pub team_mode: bool,
     /// AG-UI `subagentRunId` → the member it belongs to, for attributing messages.
@@ -342,6 +344,7 @@ impl Default for WorkspaceState {
             team: crate::teams::TeamRoster::default(),
             artifacts: crate::artifacts::ArtifactLibrary::default(),
             connections: crate::connections::ConnectionsState::default(),
+            google: crate::google::GoogleConnection::default(),
             team_mode: false,
             team_subagents: std::collections::BTreeMap::new(),
             active_model_problem: None,
@@ -1067,6 +1070,10 @@ impl WorkspaceState {
             }
             Event::Connections(connection_event) => {
                 self.connections.apply(connection_event);
+                None
+            }
+            Event::Google(google_event) => {
+                self.google.apply(google_event);
                 None
             }
             Event::AgUi { session_id, event } => self.apply_agui(session_id, event),

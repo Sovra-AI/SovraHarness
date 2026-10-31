@@ -28,6 +28,7 @@ impl RuntimeStatus {
             | Event::FileIndex(_)
             | Event::Teams(_)
             | Event::Artifacts(_)
+            | Event::Google(_)
             | Event::AgUi { .. }
             | Event::FilePrepared(_)
             | Event::ChatHistoryLoaded { .. }

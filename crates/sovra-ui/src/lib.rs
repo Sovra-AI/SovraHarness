@@ -13,6 +13,7 @@ mod composer;
 mod connections_view;
 pub mod design;
 mod file_index_view;
+mod google_card;
 mod inspector;
 mod knowledge_review;
 mod knowledge_view;
