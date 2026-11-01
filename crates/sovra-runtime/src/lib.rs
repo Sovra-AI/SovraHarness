@@ -391,6 +391,7 @@ async fn serve(
     let events = connections.route_events(ui_events, &handle);
     let mut auth = auth::AuthRuntime::start(
         signin,
+        google.clone(),
         models.as_ref().map(|config| config.repository.clone()),
         events.clone(),
         &handle,
@@ -497,7 +498,9 @@ async fn serve(
                 }
                 | Command::Teams(sovra_core::teams::TeamCommand::Run {
                     session_id, prompt, ..
-                }) => worker.record_user(session_id, prompt),
+                }) if connections.private_access(session_id) => {
+                    worker.record_user(session_id, prompt);
+                }
                 _ => {}
             }
         }
@@ -670,6 +673,8 @@ async fn serve(
                 let run = files::spawn_prompt(
                     &handle,
                     files::FilePrompt {
+                        messaging: connections.messaging(&session_id),
+                        google: google.tools().await,
                         context,
                         session_id: session_id.clone(),
                         prompt,
@@ -793,7 +798,7 @@ async fn serve(
                     m.web_search_enabled
                         .load(std::sync::atomic::Ordering::Relaxed)
                 });
-                let events = if memory_enabled {
+                let events = if memory_enabled && connections.private_access(&session_id) {
                     memory.as_ref().map_or_else(
                         || events.clone(),
                         |store| {
@@ -812,18 +817,25 @@ async fn serve(
                     previous.interrupt(&session_id);
                     previous.task.abort();
                 }
-                // Any reply may keep what it makes in Artifacts (`save_artifact`).
-                let google_tools = google.tools().await;
+                let private_access = connections.private_access(&session_id);
+                let google_tools = if private_access {
+                    google.tools().await
+                } else {
+                    None
+                };
                 let selected = selected.map(|base| {
+                    if !private_access {
+                        return base;
+                    }
                     let base = base
                         .with_artifact_saver(artifact_library.saver())
                         .unwrap_or(base);
-                    // Google tools follow what is connected and switched on right now.
                     base.with_google(google_tools.as_ref()).unwrap_or(base)
                 });
                 let run = spawn_prompt(
                     &handle,
                     PromptJob {
+                        private_access,
                         context,
                         harness: selected,
                         session_id: session_id.clone(),
@@ -837,14 +849,27 @@ async fn serve(
                         search: search.clone(),
                         skills: skill_catalog.clone(),
                         skill_resources: skills.resources.clone(),
-                        indexed_files: file_index.reader.clone(),
-                        remote_tools: mcp.offers(),
+                        indexed_files: if private_access {
+                            file_index.reader.clone()
+                        } else {
+                            None
+                        },
+                        messaging: connections.messaging(&session_id),
+                        remote_tools: if private_access {
+                            mcp.offers()
+                        } else {
+                            Vec::new()
+                        },
                         remote_caller: mcp.caller(),
-                        memory_reader: recalling::reader(
-                            memory.as_ref(),
-                            &memory_control,
-                            memory_semantic.service.clone(),
-                        ),
+                        memory_reader: if private_access {
+                            recalling::reader(
+                                memory.as_ref(),
+                                &memory_control,
+                                memory_semantic.service.clone(),
+                            )
+                        } else {
+                            None
+                        },
                     },
                 );
                 runs.insert(session_id, run);
@@ -1057,6 +1082,7 @@ impl ActiveRun {
 }
 
 struct PromptJob {
+    private_access: bool,
     context: Option<sovra_core::ConversationContext>,
     memory_reader: Option<Arc<dyn sovra_core::MemoryReader>>,
     harness: Option<AdkHarness>,
@@ -1072,12 +1098,14 @@ struct PromptJob {
     skills: Arc<sovra_core::skills::SkillCatalog>,
     skill_resources: Option<Arc<dyn sovra_core::skills::SkillResources>>,
     indexed_files: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
+    messaging: Option<Arc<dyn sovra_core::communications::MessagingAccess>>,
     remote_tools: Vec<sovra_core::mcp::ToolOffer>,
     remote_caller: Arc<mcp::ServiceCaller>,
 }
 
 fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
     let PromptJob {
+        private_access,
         context,
         memory_reader,
         harness,
@@ -1093,13 +1121,14 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         skills,
         skill_resources,
         indexed_files,
+        messaging,
         remote_tools,
         remote_caller,
     } = job;
     let slot = Arc::new(std::sync::RwLock::new(harness.clone()));
     let harness_slot = Arc::clone(&slot);
     let task = handle.spawn(async move {
-        let (skill, prompt) = match skills::resolve(&skills, &prompt) {
+        let (skill, prompt) = match if private_access { skills::resolve(&skills, &prompt) } else { Ok((None, prompt.clone())) } {
             Ok(resolved) => resolved,
             Err(error) => {
                 let _ = events.send(Event::AgentError { session_id, message: error.to_string() }).await;
@@ -1137,6 +1166,15 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
                 .await;
             return;
         };
+        let base = if private_access { base } else {
+            match base.for_untrusted_sender() {
+                Ok(base) => base,
+                Err(error) => {
+                    let _ = events.send(Event::AgentError { session_id, message: error.to_string() }).await;
+                    return;
+                }
+            }
+        };
         // Every turn is the orchestrator. The setting only adds or removes
         // WebSearchAgent; it does not replace the parent with that specialist.
         let adk = if web_search_enabled {
@@ -1166,7 +1204,8 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
                 }
             }
         };
-        let adk = match adk.with_working_context(context.as_ref()).and_then(|adk| adk.with_conversation_memory(memory_reader, &prompt, now())).and_then(|adk| adk.with_indexed_files(indexed_files)).and_then(|adk| adk.with_skill_library(skills, skill_resources))
+        let adk = match adk.with_working_context(context.as_ref()).and_then(|adk| adk.with_conversation_memory(memory_reader, &prompt, now())).and_then(|adk| adk.with_indexed_files(indexed_files))
+            .and_then(|adk| adk.with_messaging(messaging)).and_then(|adk| if private_access { adk.with_skill_library(skills, skill_resources) } else { Ok(adk) })
             .and_then(|adk| skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill)))
             .and_then(|adk| {
                 if remote_tools.is_empty() {

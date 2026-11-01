@@ -328,9 +328,7 @@ impl crate::AdkHarness {
         let before = tools.len();
         tools.retain(|tool| !TOOL_NAMES.contains(&tool.name()));
         let added = match google {
-            Some(google) if self.tools_enabled && !self.base_tools.is_empty() => {
-                crate::google::tools(google)
-            }
+            Some(google) if self.tools_enabled => crate::google::tools(google),
             _ => Vec::new(),
         };
         if added.is_empty() && tools.len() == before {

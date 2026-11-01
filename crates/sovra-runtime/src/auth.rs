@@ -15,6 +15,7 @@ use sovra_core::auth::{
     AuthAccount, AuthCommand, AuthEvent, AuthField, AuthProvider, AuthRecords, AuthSession,
     OauthCallback, callback_page, normalize_email, parse_oauth_redirect, password_strength,
 };
+use sovra_core::google::GoogleConnector;
 use sovra_core::{Event, MemoryStore};
 use sovra_providers::{GoogleAuthFlow, GoogleIdentity, GoogleOAuthConfig, ModelRepository};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -45,6 +46,7 @@ pub(crate) struct AuthRuntime {
 impl AuthRuntime {
     pub(crate) fn start(
         google: Option<GoogleOAuthConfig>,
+        connector: Option<Arc<dyn GoogleConnector>>,
         repository: Option<ModelRepository>,
         events: Sender<Event>,
         handle: &tokio::runtime::Handle,
@@ -54,6 +56,7 @@ impl AuthRuntime {
             handle: handle.clone(),
             store: None,
             google,
+            connector,
             repository,
             events,
             records: AuthRecords::default(),
@@ -90,6 +93,8 @@ struct Actor {
     handle: tokio::runtime::Handle,
     store: Option<Arc<dyn MemoryStore>>,
     google: Option<GoogleOAuthConfig>,
+    /// Connections' Google adapter. When present, it decides the client id.
+    connector: Option<Arc<dyn GoogleConnector>>,
     repository: Option<ModelRepository>,
     events: Sender<Event>,
     records: AuthRecords,
@@ -163,12 +168,31 @@ impl Actor {
     }
 
     async fn emit_loaded(&self) {
+        let google_ready = self.resolve_google_config().await.is_some();
         self.emit(AuthEvent::Loaded {
             session: self.records.session.clone(),
             has_accounts: !self.records.accounts.is_empty(),
-            google_ready: self.google.is_some(),
+            google_ready,
         })
         .await;
+    }
+
+    /// Saved on this computer, else the environment, else baked — the same
+    /// decision Connect Google uses. A connector is that decision by itself.
+    async fn resolve_google_config(&self) -> Option<GoogleOAuthConfig> {
+        if let Some(connector) = self.connector.clone() {
+            let client = tokio::task::spawn_blocking(move || connector.desktop_client())
+                .await
+                .ok()
+                .flatten()?;
+            return Some(GoogleOAuthConfig {
+                client_id: client.client_id,
+                client_secret: client.client_secret,
+            });
+        }
+        self.google
+            .clone()
+            .filter(|config| !config.client_id.trim().is_empty())
     }
 
     async fn create_account(&mut self, email: String, password: &str, full_name: String) {
@@ -252,12 +276,12 @@ impl Actor {
     }
 
     async fn start_google(&mut self) {
-        let Some(config) = self.google.clone() else {
+        let Some(config) = self.resolve_google_config().await else {
             return self
                 .fail(
                     AuthField::General,
-                    "Google Sign-In isn't set up in this build yet. \
-                     Use email and password instead."
+                    "Google needs a desktop client id before you can continue. Add one in \
+                     Settings, under Connections. You can also use email and password."
                         .into(),
                 )
                 .await;

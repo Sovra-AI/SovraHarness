@@ -25,6 +25,10 @@ use sovra_core::google::{
 /// The keychain entry name for the signed-in Google account.
 pub const VAULT_KEY: &str = "connection.google";
 
+/// The keychain entry for the desktop OAuth client. Separate from [`VAULT_KEY`]
+/// so signing out does not forget the client id.
+pub const CLIENT_VAULT_KEY: &str = "connection.google.client";
+
 /// Secret storage supplied by the composition root (OS keychain in release).
 pub trait SecretVault: Send + Sync {
     fn get(&self, key: &str) -> Result<Option<String>, String>;
@@ -38,6 +42,23 @@ pub trait SecretVault: Send + Sync {
 pub struct ClientConfig {
     pub client_id: String,
     pub client_secret: Option<String>,
+}
+
+/// Where a desktop client may already be configured, before any id saved on
+/// this computer. Empty ids are ignored.
+#[derive(Clone, Default)]
+pub struct ClientSources {
+    pub environment: Option<ClientConfig>,
+    pub baked: Option<ClientConfig>,
+}
+
+impl std::fmt::Debug for ClientSources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientSources")
+            .field("environment", &self.environment)
+            .field("baked", &self.baked)
+            .finish()
+    }
 }
 
 impl std::fmt::Debug for ClientConfig {
@@ -56,6 +77,15 @@ struct SavedSession {
     account: GoogleAccount,
 }
 
+/// The desktop client saved on this computer. The secret stays in this JSON,
+/// inside the vault, and is never logged.
+#[derive(Serialize, Deserialize)]
+struct SavedDesktopClient {
+    client_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_secret: Option<String>,
+}
+
 /// In-memory sign-in. Access tokens are never persisted.
 #[derive(Clone, Default)]
 struct Session {
@@ -66,7 +96,8 @@ struct Session {
 }
 
 pub struct GoogleAdapter {
-    config: ClientConfig,
+    environment: Option<ClientConfig>,
+    baked: Option<ClientConfig>,
     vault: Arc<dyn SecretVault>,
     http: reqwest::Client,
     session: Mutex<Option<Session>>,
@@ -75,13 +106,14 @@ pub struct GoogleAdapter {
 impl std::fmt::Debug for GoogleAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GoogleAdapter")
-            .field("config", &self.config)
+            .field("environment", &self.environment)
+            .field("baked", &self.baked)
             .finish_non_exhaustive()
     }
 }
 
 impl GoogleAdapter {
-    pub fn new(config: ClientConfig, vault: Arc<dyn SecretVault>) -> Result<Self, GoogleError> {
+    pub fn new(sources: ClientSources, vault: Arc<dyn SecretVault>) -> Result<Self, GoogleError> {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -91,11 +123,42 @@ impl GoogleAdapter {
                 GoogleError::Failed("Sovra couldn't prepare its connection to Google.".into())
             })?;
         Ok(Self {
-            config,
+            environment: sources.environment,
+            baked: sources.baked,
             vault,
             http,
             session: Mutex::new(None),
         })
+    }
+
+    fn saved_client(&self) -> Option<sovra_core::google::DesktopClient> {
+        let json = match self.vault.get(CLIENT_VAULT_KEY) {
+            Ok(Some(json)) => json,
+            Ok(None) => return None,
+            Err(_) => {
+                tracing::warn!("could not read the saved Google client id");
+                return None;
+            }
+        };
+        if let Ok(saved) = serde_json::from_str::<SavedDesktopClient>(&json) {
+            sovra_core::google::normalize_desktop_client(sovra_core::google::DesktopClient {
+                client_id: saved.client_id,
+                client_secret: saved.client_secret,
+            })
+        } else {
+            // The body can hold the secret, so the warning stays generic.
+            tracing::warn!("saved Google client id was unreadable");
+            None
+        }
+    }
+
+    fn client_config(&self) -> Result<ClientConfig, GoogleError> {
+        self.desktop_client()
+            .map(|client| ClientConfig {
+                client_id: client.client_id,
+                client_secret: client.client_secret,
+            })
+            .ok_or_else(|| GoogleError::Failed(sovra_core::google::DESKTOP_CLIENT_NEEDED.into()))
     }
 
     fn session(&self) -> std::sync::MutexGuard<'_, Option<Session>> {
@@ -109,7 +172,8 @@ impl GoogleAdapter {
         if let Some(token) = current.access.as_ref().filter(|t| t.is_fresh()) {
             return Ok(token.secret.clone());
         }
-        let refreshed = oauth::refresh(&self.http, &self.config, &current.refresh_token).await?;
+        let config = self.client_config()?;
+        let refreshed = oauth::refresh(&self.http, &config, &current.refresh_token).await?;
         let secret = refreshed.secret.clone();
         if let Some(session) = self.session().as_mut() {
             session.access = Some(refreshed);
@@ -131,6 +195,13 @@ impl GoogleAdapter {
     }
 }
 
+fn as_desktop(config: &ClientConfig) -> Option<sovra_core::google::DesktopClient> {
+    sovra_core::google::normalize_desktop_client(sovra_core::google::DesktopClient {
+        client_id: config.client_id.clone(),
+        client_secret: config.client_secret.clone(),
+    })
+}
+
 fn signed_out() -> GoogleError {
     GoogleError::SignInNeeded("Connect Google on the Connections page first.".into())
 }
@@ -142,11 +213,40 @@ fn vault_error(_: String) -> GoogleError {
 #[async_trait::async_trait]
 impl GoogleConnector for GoogleAdapter {
     fn unavailable_reason(&self) -> Option<String> {
-        self.config.client_id.trim().is_empty().then(|| {
-            "Google sign-in isn't set up in this copy of Sovra yet. A newer version will \
-             include it."
-                .into()
+        self.desktop_client()
+            .is_none()
+            .then(|| sovra_core::google::DESKTOP_CLIENT_NEEDED.into())
+    }
+
+    fn desktop_client(&self) -> Option<sovra_core::google::DesktopClient> {
+        sovra_core::google::client_in_force(
+            self.saved_client(),
+            self.environment.as_ref().and_then(as_desktop),
+            self.baked.as_ref().and_then(as_desktop),
+        )
+    }
+
+    fn save_desktop_client(
+        &self,
+        client_id: &str,
+        client_secret: Option<String>,
+    ) -> Result<(), GoogleError> {
+        let Some(client) =
+            sovra_core::google::normalize_desktop_client(sovra_core::google::DesktopClient {
+                client_id: client_id.to_owned(),
+                client_secret,
+            })
+        else {
+            return Err(GoogleError::Failed(
+                "Enter the desktop client id from your Google Cloud project.".into(),
+            ));
+        };
+        let json = serde_json::to_string(&SavedDesktopClient {
+            client_id: client.client_id,
+            client_secret: client.client_secret,
         })
+        .map_err(|_| GoogleError::Failed("Sovra couldn't save the Google client id.".into()))?;
+        self.vault.set(CLIENT_VAULT_KEY, &json).map_err(vault_error)
     }
 
     fn restore(&self) -> Result<Option<GoogleAccount>, GoogleError> {
@@ -175,7 +275,8 @@ impl GoogleConnector for GoogleAdapter {
         }
         let services: Vec<GoogleService> = services.iter().copied().collect();
         let scopes = sovra_core::google::scopes_for(&services);
-        let pending = loopback::PendingSignIn::open(&self.config.client_id, &scopes, login_hint)?;
+        let config = self.client_config()?;
+        let pending = loopback::PendingSignIn::open(&config.client_id, &scopes, login_hint)?;
         Ok(Box::new(pending))
     }
 
@@ -183,7 +284,8 @@ impl GoogleConnector for GoogleAdapter {
         &self,
         grant: AuthorizationGrant,
     ) -> Result<GoogleAccount, GoogleError> {
-        let tokens = oauth::exchange(&self.http, &self.config, &grant).await?;
+        let config = self.client_config()?;
+        let tokens = oauth::exchange(&self.http, &config, &grant).await?;
         let profile = oauth::profile(&self.http, &tokens.access.secret).await?;
         let previous = self.session().clone();
         // Google returns a refresh token on every consent for installed apps; keep
@@ -232,6 +334,7 @@ impl GoogleConnector for GoogleAdapter {
 
     fn forget(&self) -> Result<(), GoogleError> {
         *self.session() = None;
+        // The account entry only. The desktop client id stays for the next sign-in.
         self.vault.delete(VAULT_KEY).map_err(vault_error)
     }
 

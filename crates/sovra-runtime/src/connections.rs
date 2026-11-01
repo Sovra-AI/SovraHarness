@@ -3,6 +3,8 @@
 //! events, persists the state, and answers incoming messages by running them through the
 //! same prompt path as the chat window. One task owns everything, so there are no locks.
 
+mod messaging;
+
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
@@ -26,6 +28,12 @@ enum Input {
     Command(ConnectionCommand),
     Channel(ChannelKind, ChannelEvent),
     Agent(Event),
+    Messaging {
+        session_id: String,
+        turn: u64,
+        request: sovra_core::communications::MessagingRequest,
+        reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, ChannelError>>,
+    },
 }
 
 /// The adapters the composition root supplies; any may be missing in a build.
@@ -39,6 +47,10 @@ pub(crate) struct Channels {
 #[derive(Clone)]
 pub(crate) struct ConnectionsRuntime {
     inbox: Sender<Input>,
+    messaging_available: bool,
+    next_turn: Arc<std::sync::atomic::AtomicU64>,
+    messaging_admission: Arc<tokio::sync::Semaphore>,
+    owner_sessions: Arc<std::sync::RwLock<std::collections::BTreeSet<String>>>,
 }
 
 impl ConnectionsRuntime {
@@ -48,8 +60,11 @@ impl ConnectionsRuntime {
         commands: Sender<Command>,
         handle: &tokio::runtime::Handle,
     ) -> Self {
+        let messaging_available = channels.whatsapp.is_some() || channels.telegram.is_some();
         let (inbox, rx) = async_channel::unbounded();
+        let owner_sessions = Arc::new(std::sync::RwLock::new(std::collections::BTreeSet::new()));
         let actor = Actor {
+            owner_sessions: owner_sessions.clone(),
             store: None,
             events,
             commands,
@@ -60,9 +75,26 @@ impl ConnectionsRuntime {
             pending_code: None,
             telegram_code: String::new(),
             replies: BTreeMap::new(),
+            messaging: messaging::MessagingState::default(),
         };
         drop(handle.spawn(actor.run(rx)));
-        Self { inbox }
+        Self {
+            inbox,
+            messaging_available,
+            next_turn: messaging::counter(),
+            messaging_admission: messaging::admission(),
+            owner_sessions,
+        }
+    }
+
+    /// Runtime-authenticated own chats retain the owner's tools; other senders do not.
+    pub(crate) fn private_access(&self, session_id: &str) -> bool {
+        channel_of_session(session_id).is_none()
+            || self
+                .owner_sessions
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(session_id)
     }
 
     /// The runtime opens its store after the event plumbing exists; saved state loads and
@@ -213,11 +245,20 @@ struct Actor {
     /// The code the Telegram bot's owner must send; set when a token is connected.
     telegram_code: String,
     replies: BTreeMap<String, PendingReply>,
+    messaging: messaging::MessagingState,
+    owner_sessions: Arc<std::sync::RwLock<std::collections::BTreeSet<String>>>,
 }
 
 impl Actor {
     async fn run(mut self, inbox: Receiver<Input>) {
-        while let Ok(input) = inbox.recv().await {
+        loop {
+            let input = tokio::select! {
+                input = inbox.recv() => match input { Ok(input) => input, Err(_) => break },
+                result = self.messaging.sends.join_next(), if !self.messaging.sends.is_empty() => {
+                    if let Some(Ok((id, result))) = result { self.sent_message(&id, result).await; }
+                    continue;
+                }
+            };
             match input {
                 Input::Store(store) => {
                     self.store = store;
@@ -228,6 +269,17 @@ impl Actor {
                 Input::Channel(ChannelKind::WhatsApp, event) => self.whatsapp_event(event).await,
                 Input::Channel(ChannelKind::Telegram, event) => self.telegram_event(event).await,
                 Input::Agent(event) => self.agent_event(event).await,
+                Input::Messaging {
+                    session_id,
+                    turn,
+                    request,
+                    reply,
+                } => {
+                    if !reply.is_closed() {
+                        let result = self.messaging_request(&session_id, turn, request).await;
+                        let _ = reply.send(result);
+                    }
+                }
             }
         }
         self.whatsapp.stop().await;
@@ -246,6 +298,14 @@ impl Actor {
         match store.load_connections().await {
             Ok(Some(saved)) => {
                 self.state = saved;
+                for message in &mut self.state.outbound_messages {
+                    use sovra_core::communications::MessageDelivery;
+                    message.delivery = match &message.delivery {
+                        MessageDelivery::Review => MessageDelivery::Expired,
+                        MessageDelivery::Sending => MessageDelivery::Uncertain,
+                        other => other.clone(),
+                    };
+                }
                 self.state.qr_modal_open = false;
                 self.state.notice = None;
                 // Only saved links survive a restart; anything else starts over.
@@ -331,6 +391,11 @@ impl Actor {
 
     async fn command(&mut self, command: ConnectionCommand) {
         match command {
+            ConnectionCommand::ReviewMessage {
+                id,
+                session_id,
+                send,
+            } => self.review_message(&id, &session_id, send).await,
             ConnectionCommand::Load => {
                 self.emit(ConnectionEvent::Loaded(Box::new(self.state.clone())))
                     .await;
@@ -355,15 +420,6 @@ impl Actor {
                 self.emit(ConnectionEvent::SettingsUpdated(settings)).await;
                 self.save().await;
             }
-            ConnectionCommand::SendTestWhatsAppMessage { text } => {
-                let chat = self
-                    .whatsapp
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.own_chat_jid());
-                self.send_test_message(ChannelKind::WhatsApp, chat, text.trim())
-                    .await;
-            }
             ConnectionCommand::DisconnectWhatsApp => {
                 self.whatsapp.logout().await;
                 self.whatsapp.forget();
@@ -385,11 +441,6 @@ impl Actor {
                 self.emit(ConnectionEvent::TelegramSettingsUpdated(settings))
                     .await;
                 self.save().await;
-            }
-            ConnectionCommand::SendTestTelegramMessage { text } => {
-                let chat = self.state.telegram.owner_chat_id().map(str::to_owned);
-                self.send_test_message(ChannelKind::Telegram, chat, text.trim())
-                    .await;
             }
             ConnectionCommand::DisconnectTelegram => {
                 self.telegram.logout().await;
@@ -443,45 +494,6 @@ impl Actor {
                 message: error.to_string(),
             })
             .await;
-        }
-    }
-
-    async fn send_test_message(&mut self, kind: ChannelKind, chat: Option<String>, text: &str) {
-        let label = kind.label();
-        if text.is_empty() {
-            self.emit(ConnectionEvent::Notice("Type a message first.".into()))
-                .await;
-            return;
-        }
-        let Some(session) = self.link(kind).session.clone() else {
-            self.emit(ConnectionEvent::Notice(format!(
-                "{label} is not connected right now."
-            )))
-            .await;
-            return;
-        };
-        let Some(chat) = chat else {
-            self.emit(ConnectionEvent::Notice(format!(
-                "{label} is still finishing the link. Try again in a moment."
-            )))
-            .await;
-            return;
-        };
-        match session.send_text(&chat, text).await {
-            Ok(id) => {
-                self.link(kind).remember_sent(id);
-                let notice = match kind {
-                    ChannelKind::WhatsApp => {
-                        "Sent. Open WhatsApp on your phone and look in the chat with yourself."
-                    }
-                    ChannelKind::Telegram => "Sent. Open the chat with your bot in Telegram.",
-                };
-                self.emit(ConnectionEvent::Notice(notice.into())).await;
-            }
-            Err(error) => {
-                self.emit(ConnectionEvent::Notice(format!("Could not send: {error}")))
-                    .await;
-            }
         }
     }
 
@@ -605,7 +617,15 @@ impl Actor {
     }
 
     async fn whatsapp_message(&mut self, message: IncomingMessage) {
-        if self.whatsapp.sent_ids.contains(&message.id) || !should_record(&message) {
+        let sending_echo = message.from_me
+            && self.state.outbound_messages.iter().any(|outbound| {
+                outbound.channel == ChannelKind::WhatsApp
+                    && outbound.delivery == sovra_core::communications::MessageDelivery::Sending
+                    && outbound.recipient == message.chat_jid
+                    && outbound.text == message.text
+            });
+        if sending_echo || self.whatsapp.sent_ids.contains(&message.id) || !should_record(&message)
+        {
             return;
         }
         let answer = should_answer(&message, &self.state.settings);
@@ -785,6 +805,13 @@ impl Actor {
             return;
         }
         let session_id = kind.session_id(&message.chat_jid);
+        let owner = sovra_core::connections::is_owner_message(kind, &message, &self.state);
+        if owner {
+            self.owner_sessions
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(session_id.clone());
+        }
         self.replies.insert(
             session_id.clone(),
             PendingReply {
@@ -899,12 +926,24 @@ impl Actor {
     }
 
     async fn set_whatsapp(&mut self, status: WhatsAppStatus) {
+        if !status.is_linked() {
+            self.owner_sessions
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|id| channel_of_session(id) != Some(ChannelKind::WhatsApp));
+        }
         let event = ConnectionEvent::StatusChanged(status);
         self.state.apply(&event);
         self.emit(event).await;
     }
 
     async fn set_telegram(&mut self, status: TelegramStatus) {
+        if !status.is_connected() {
+            self.owner_sessions
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|id| channel_of_session(id) != Some(ChannelKind::Telegram));
+        }
         let event = ConnectionEvent::TelegramStatusChanged(status);
         self.state.apply(&event);
         self.emit(event).await;

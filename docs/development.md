@@ -157,9 +157,11 @@ The implemented parts are:
   out clears the session without deleting accounts. Google refresh tokens use
   the OS keychain, or the existing debug-only `SOVRA_DEV=1` credential store.
 
-The app reads `SOVRA_GOOGLE_CLIENT_ID` once at startup. An absent or blank ID
-disables the Google backend. `SOVRA_GOOGLE_CLIENT_SECRET` is optional. Supply these
-through the development environment, not tracked files. The backend binds an
+The Google adapter uses the desktop client saved in Settings, falling back to
+`SOVRA_GOOGLE_CLIENT_ID` and optional `SOVRA_GOOGLE_CLIENT_SECRET` read once at
+startup, then build-time values. Without a client, Settings offers setup and
+Google sign-in stays unavailable. Supply environment values outside tracked
+files. The backend binds an
 OS-assigned port on `127.0.0.1` for `/callback`, waits up to five minutes for a
 browser response, and gives HTTP requests a 30-second timeout.
 

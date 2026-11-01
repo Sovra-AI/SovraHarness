@@ -33,6 +33,7 @@ pub enum Capability {
     Schedules,
     Todos,
     GoogleWorkspace,
+    Messaging,
     MicrosoftWorkspace,
     GitHub,
 }
@@ -49,6 +50,7 @@ impl Capability {
             Self::Projects => "projects",
             Self::Schedules => "schedules",
             Self::Todos => "to-do lists",
+            Self::Messaging => "WhatsApp and Telegram messaging",
             Self::GoogleWorkspace => "Google account access",
             Self::MicrosoftWorkspace => "Microsoft account access",
             Self::GitHub => "GitHub access",
@@ -71,6 +73,7 @@ pub fn required_capabilities(specialist_id: &str) -> &'static [Capability] {
         "ProjectAgent" => &[Capability::Projects],
         "SchedulerAgent" => &[Capability::Schedules],
         "TodosAgent" => &[Capability::Todos],
+        "CommunicationsAgent" => &[Capability::Messaging],
         "GoogleWorkspace" => &[Capability::GoogleWorkspace],
         "MicrosoftWorkspace" => &[Capability::MicrosoftWorkspace],
         "GitHubAgent" => &[Capability::GitHub],
@@ -102,6 +105,16 @@ mod tests {
 
     fn ids<'a>(specs: &[&'a SpecialistAgentSpec]) -> Vec<&'a str> {
         specs.iter().map(|spec| spec.id.as_str()).collect()
+    }
+
+    #[test]
+    fn communications_requires_a_real_messaging_connection() {
+        let roster = default_sovra_srx_agents();
+        assert!(roster.iter().any(|spec| spec.id == "CommunicationsAgent"));
+        assert!(
+            !ids(&available_specialists(&roster, &BTreeSet::new()))
+                .contains(&"CommunicationsAgent")
+        );
     }
 
     #[test]
@@ -159,6 +172,7 @@ mod tests {
             Capability::Schedules,
             Capability::Todos,
             Capability::GoogleWorkspace,
+            Capability::Messaging,
             Capability::MicrosoftWorkspace,
             Capability::GitHub,
         ]

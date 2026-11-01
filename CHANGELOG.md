@@ -13,6 +13,21 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **WhatsApp and Telegram from chat:** the orchestrator can call a shared
+  messaging helper to check connections, inspect locally retained recent chats,
+  and prepare messages. Chat shows the exact sender, recipient, and text with
+  Send, Cancel, and Save. Sends require native review, expire after ten minutes,
+  reject stale links and repeated approvals, and report service acceptance or
+  uncertainty without automatic retries. Skills includes a plain-English example.
+  Connected Google tools now equip the Google helper as well.
+- **Google client setup in Settings:** when Google has no desktop client
+  configured, Connections accepts a client id and optional secret. The saved
+  client takes precedence over environment and build settings, is shared with
+  Continue with Google, and survives signing out. Secrets use the existing
+  credential store and are cleared from the input after saving.
+- **Messaging privacy:** authenticated own chats retain personal capabilities;
+  other phone senders cannot use the owner's memories, folders, connected account
+  tools, private instructions, or outbound messaging tools.
 - **Development mode:** An opt-in Settings switch and explicit top-bar indicator
   let Codex, Claude Code, and other local MCP clients inspect, click, type, press
   keys, scroll, and capture the running native app. It starts off and remembers
@@ -506,6 +521,10 @@ move them under a version heading when the tag is cut.
   no memory store is open. The times Sovra keeps stay behind a labeled control.
 
 ### Changed
+
+- WhatsApp and Telegram messages are prepared and reviewed in chat. Removed the
+  test-message inputs and test-send buttons from Settings; pairing, connection
+  status, and automatic-answer switches remain.
 
 - **Search while changing the selected AI:** Change on the selected model has a
   search box. It matches the name, the everyday price, or the sentence about

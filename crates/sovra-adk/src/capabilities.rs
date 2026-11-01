@@ -52,6 +52,36 @@ pub(crate) trait CapabilityProvider: Send + Sync {
     }
 }
 
+/// Account integrations share tool registration; policy stays with each toolset.
+pub(crate) struct ConnectedToolsProvider {
+    pub capability: Capability,
+    pub tools: Vec<Arc<dyn Tool>>,
+    pub procedure: String,
+    pub routing: String,
+    pub first_tool: Option<&'static str>,
+}
+
+impl CapabilityProvider for ConnectedToolsProvider {
+    fn capability(&self) -> Capability {
+        self.capability
+    }
+    fn tools(&self) -> Vec<Arc<dyn Tool>> {
+        self.tools.clone()
+    }
+    fn procedure(&self) -> String {
+        self.procedure.clone()
+    }
+    fn routing_rule(&self) -> Option<String> {
+        Some(self.routing.clone())
+    }
+    fn first_call(&self) -> Option<FirstCall> {
+        self.first_tool.map(|name| FirstCall::Tool {
+            name,
+            args: |_| serde_json::json!({}),
+        })
+    }
+}
+
 /// Built-in keyless web search plus page reading.
 pub(crate) struct WebSearchProvider {
     client: SearchClient,
@@ -98,7 +128,10 @@ impl CapabilityProvider for WebSearchProvider {
 
 /// Tool names that belong to a provider and must never sit on the parent.
 pub(crate) fn is_provider_tool(name: &str) -> bool {
-    web_search::is_search_tool(name) || crate::documents::is_reader_tool(name)
+    web_search::is_search_tool(name)
+        || crate::documents::is_reader_tool(name)
+        || crate::communications::TOOL_NAMES.contains(&name)
+        || crate::google::TOOL_NAMES.contains(&name)
 }
 
 #[cfg(test)]

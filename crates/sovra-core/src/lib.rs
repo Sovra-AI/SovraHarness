@@ -10,6 +10,7 @@ pub mod auth;
 mod capabilities;
 pub mod chat_history;
 mod citations;
+pub mod communications;
 pub mod connections;
 mod context_budget;
 mod conversation_context;

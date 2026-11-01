@@ -68,7 +68,7 @@ fn main() -> anyhow::Result<()> {
             .map_err(|error| tracing::warn!(%error, "telegram linking unavailable"))
             .ok();
     let google = sovra_google::GoogleAdapter::new(
-        read_google_client(),
+        read_google_sources(),
         Arc::new(CredentialVault(credential_store(&dirs))),
     )
     .context("failed to prepare Google connections")?;
@@ -93,7 +93,9 @@ fn main() -> anyhow::Result<()> {
                     Arc::new(channel) as Arc<dyn sovra_core::connections::MessagingChannel>
                 }),
             },
-            signin: read_google_signin_config(),
+            // Continue with Google reads the adapter: saved client, else
+            // environment, else baked. A separate startup config would disagree.
+            signin: None,
             google: Some(Arc::new(google)),
             development: Some(development),
         },
@@ -154,28 +156,6 @@ fn read_gemini_api_key() -> Option<String> {
         .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "sovra-app is the composition root and reads process environment variables once at startup"
-)]
-/// Google Sign-In is optional: without a client ID the login screen offers
-/// email + password only. A desktop-app client secret is not confidential
-/// (RFC 8252 §8.5); PKCE protects the flow either way.
-fn read_google_signin_config() -> Option<sovra_providers::GoogleOAuthConfig> {
-    let client_id = std::env::var("SOVRA_GOOGLE_CLIENT_ID")
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())?;
-    let client_secret = std::env::var("SOVRA_GOOGLE_CLIENT_SECRET")
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty());
-    Some(sovra_providers::GoogleOAuthConfig {
-        client_id,
-        client_secret,
-    })
-}
-
 /// Keeps the Telegram bot token beside the model keys, under one fixed credential id.
 struct KeychainTokenStore(Arc<dyn sovra_providers::CredentialStore>);
 
@@ -203,33 +183,38 @@ impl sovra_telegram::TokenStore for KeychainTokenStore {
     }
 }
 
-/// The Google Cloud "Desktop app" OAuth client. Release builds bake it in at
-/// compile time (`SOVRA_GOOGLE_CLIENT_ID`/`_SECRET`) so the single binary needs no
-/// setup; the same variables at run time override it for development and for
-/// people using their own Google Cloud client. Empty means "not set up yet".
+/// The Google Cloud "Desktop app" OAuth client. A client id saved in Settings
+/// wins. Otherwise the environment overrides a value baked in at compile time
+/// (`SOVRA_GOOGLE_CLIENT_ID` / `_SECRET`). A desktop-app secret is not
+/// confidential (RFC 8252 §8.5); PKCE protects the flow either way.
 #[expect(
     clippy::disallowed_methods,
     reason = "sovra-app is the composition root and reads process environment variables once at startup"
 )]
-fn read_google_client() -> sovra_google::ClientConfig {
-    let read = |name: &str, baked: Option<&'static str>| {
-        std::env::var(name)
-            .ok()
-            .or_else(|| baked.map(str::to_owned))
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
+fn read_google_sources() -> sovra_google::ClientSources {
+    let from_env = |id_name: &str, secret_name: &str| {
+        client_config(std::env::var(id_name).ok(), std::env::var(secret_name).ok())
     };
-    sovra_google::ClientConfig {
-        client_id: read(
-            "SOVRA_GOOGLE_CLIENT_ID",
-            option_env!("SOVRA_GOOGLE_CLIENT_ID"),
-        )
-        .unwrap_or_default(),
-        client_secret: read(
-            "SOVRA_GOOGLE_CLIENT_SECRET",
-            option_env!("SOVRA_GOOGLE_CLIENT_SECRET"),
+    sovra_google::ClientSources {
+        environment: from_env("SOVRA_GOOGLE_CLIENT_ID", "SOVRA_GOOGLE_CLIENT_SECRET"),
+        baked: client_config(
+            option_env!("SOVRA_GOOGLE_CLIENT_ID").map(str::to_owned),
+            option_env!("SOVRA_GOOGLE_CLIENT_SECRET").map(str::to_owned),
         ),
     }
+}
+
+fn client_config(id: Option<String>, secret: Option<String>) -> Option<sovra_google::ClientConfig> {
+    let client_id = id
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())?;
+    let client_secret = secret
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    Some(sovra_google::ClientConfig {
+        client_id,
+        client_secret,
+    })
 }
 
 /// The Google sign-in shares the model keys' store (keychain, or dev files).

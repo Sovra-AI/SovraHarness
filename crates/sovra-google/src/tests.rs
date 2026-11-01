@@ -24,12 +24,19 @@ impl SecretVault for MemoryVault {
 
 fn adapter(client_id: &str) -> (GoogleAdapter, Arc<MemoryVault>) {
     let vault = Arc::new(MemoryVault::default());
-    let config = ClientConfig {
+    let environment = (!client_id.is_empty()).then(|| ClientConfig {
         client_id: client_id.into(),
         client_secret: None,
-    };
+    });
     (
-        GoogleAdapter::new(config, vault.clone()).expect("client"),
+        GoogleAdapter::new(
+            ClientSources {
+                environment,
+                baked: None,
+            },
+            vault.clone(),
+        )
+        .expect("client"),
         vault,
     )
 }
@@ -38,7 +45,8 @@ fn adapter(client_id: &str) -> (GoogleAdapter, Arc<MemoryVault>) {
 fn a_build_without_a_google_client_says_so_in_plain_words() {
     let (google, _) = adapter("");
     let reason = google.unavailable_reason().expect("unavailable");
-    assert!(reason.contains("isn't set up"));
+    assert!(reason.contains("desktop client id"));
+    assert!(!reason.contains("newer version"));
     assert!(google.begin_sign_in(&BTreeSet::new(), None).is_err());
     assert_eq!(
         adapter("id.apps.googleusercontent.com")
@@ -46,6 +54,37 @@ fn a_build_without_a_google_client_says_so_in_plain_words() {
             .unavailable_reason(),
         None
     );
+}
+
+#[test]
+fn saved_desktop_client_survives_restart_and_account_disconnect() {
+    let (google, vault) = adapter("");
+    assert!(google.save_desktop_client(" ", None).is_err());
+    assert_eq!(vault.get(CLIENT_VAULT_KEY), Ok(None));
+    google
+        .save_desktop_client(
+            " saved.apps.googleusercontent.com ",
+            Some(" fixture-secret ".into()),
+        )
+        .unwrap();
+    assert_eq!(google.unavailable_reason(), None);
+    let restarted = GoogleAdapter::new(
+        ClientSources {
+            environment: Some(ClientConfig {
+                client_id: "environment".into(),
+                client_secret: None,
+            }),
+            baked: None,
+        },
+        vault.clone(),
+    )
+    .unwrap();
+    restarted.forget().unwrap();
+    let client = restarted.desktop_client().unwrap();
+    assert_eq!(client.client_id, "saved.apps.googleusercontent.com");
+    assert_eq!(client.client_secret.as_deref(), Some("fixture-secret"));
+    assert!(vault.get(CLIENT_VAULT_KEY).unwrap().is_some());
+    assert_eq!(vault.get(VAULT_KEY), Ok(None));
 }
 
 #[test]

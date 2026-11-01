@@ -191,25 +191,45 @@ impl Worker {
         let Some(connector) = self.connector.clone() else {
             return;
         };
-        if let Some(reason) = connector.unavailable_reason() {
-            self.publish(GoogleState::Unavailable { reason }).await;
-            return;
+        // Saving a client is what makes Google available, so it runs first.
+        // The keychain read stays off this task.
+        if !matches!(command, GoogleCommand::SaveClient { .. }) {
+            let connector = connector.clone();
+            let reason = tokio::task::spawn_blocking(move || connector.unavailable_reason())
+                .await
+                .ok()
+                .flatten();
+            if let Some(reason) = reason {
+                self.publish(GoogleState::Unavailable { reason }).await;
+                return;
+            }
         }
         let current = self.state.read().await.clone();
         match command {
-            GoogleCommand::Load => {
-                let restored = blocking({
+            GoogleCommand::Load => self.restore_account(&connector).await,
+            GoogleCommand::SaveClient {
+                client_id,
+                client_secret,
+            } => {
+                let secret = client_secret.map(|secret| secret.as_str().to_owned());
+                let saved = blocking({
                     let connector = connector.clone();
-                    move || connector.restore()
+                    move || connector.save_desktop_client(&client_id, secret)
                 })
                 .await;
-                match restored {
-                    Ok(Some(account)) => self.publish(GoogleState::Connected(account)).await,
-                    Ok(None) => self.publish(GoogleState::NotConnected).await,
+                match saved {
+                    Ok(()) => self.restore_account(&connector).await,
                     Err(error) => {
-                        tracing::warn!(%error, "google restore failed");
-                        self.publish(GoogleState::NotConnected).await;
                         self.notice(error.to_string()).await;
+                        let connector = connector.clone();
+                        let reason =
+                            tokio::task::spawn_blocking(move || connector.unavailable_reason())
+                                .await
+                                .ok()
+                                .flatten();
+                        if let Some(reason) = reason {
+                            self.publish(GoogleState::Unavailable { reason }).await;
+                        }
                     }
                 }
             }
@@ -259,6 +279,23 @@ impl Worker {
                     self.notice(error.to_string()).await;
                 }
                 self.publish(GoogleState::NotConnected).await;
+            }
+        }
+    }
+
+    async fn restore_account(&self, connector: &Arc<dyn GoogleConnector>) {
+        let restored = blocking({
+            let connector = connector.clone();
+            move || connector.restore()
+        })
+        .await;
+        match restored {
+            Ok(Some(account)) => self.publish(GoogleState::Connected(account)).await,
+            Ok(None) => self.publish(GoogleState::NotConnected).await,
+            Err(error) => {
+                tracing::warn!(%error, "google restore failed");
+                self.publish(GoogleState::NotConnected).await;
+                self.notice(error.to_string()).await;
             }
         }
     }

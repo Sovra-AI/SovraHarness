@@ -48,7 +48,7 @@ pub enum Command {
         backend: DecisionBackend,
         global_model: Option<ModelKey>,
     },
-    /// Assign a specific model override or preferred tier to one of the 22 `SovraSRX` specialist agents.
+    /// Assign a specific model override or preferred tier to one of the `SovraSRX` specialist helpers.
     SetSpecialistModel {
         specialist_id: String,
         model_override: Option<ModelKey>,

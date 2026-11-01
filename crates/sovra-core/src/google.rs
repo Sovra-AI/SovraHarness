@@ -179,13 +179,80 @@ impl GoogleAccount {
     }
 }
 
+/// What Settings says when this computer has no desktop client id yet.
+pub const DESKTOP_CLIENT_NEEDED: &str = "Google needs a desktop client id from your Google Cloud \
+     project before it can connect. Paste the id below. A secret is optional, and Sovra does not \
+     show it again after you save.";
+
+/// A Google Cloud desktop OAuth client. The secret is optional (PKCE) and never
+/// appears in `Debug` output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DesktopClient {
+    pub client_id: String,
+    pub client_secret: Option<String>,
+}
+
+impl std::fmt::Debug for DesktopClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DesktopClient")
+            .field("client_id", &self.client_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Trims the id and secret. A blank id is absent. A blank secret is dropped.
+pub fn normalize_desktop_client(mut client: DesktopClient) -> Option<DesktopClient> {
+    let client_id = client.client_id.trim().to_owned();
+    if client_id.is_empty() {
+        return None;
+    }
+    client.client_id = client_id;
+    client.client_secret = client.client_secret.and_then(|secret| {
+        let secret = secret.trim().to_owned();
+        (!secret.is_empty()).then_some(secret)
+    });
+    Some(client)
+}
+
+/// Which desktop client is in force: one saved on this computer, else the
+/// environment, else one baked into the binary. A blank id counts as absent.
+pub fn client_in_force(
+    saved: Option<DesktopClient>,
+    environment: Option<DesktopClient>,
+    baked: Option<DesktopClient>,
+) -> Option<DesktopClient> {
+    [saved, environment, baked]
+        .into_iter()
+        .find_map(|client| client.and_then(normalize_desktop_client))
+}
+
+/// A desktop-client secret carried in a command. `Debug` never includes it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ClientSecret(String);
+
+impl ClientSecret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for ClientSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ClientSecret([redacted])")
+    }
+}
+
 /// Where the Google connection is. The runtime always sends the whole state.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum GoogleState {
     /// Not yet known (before the runtime has looked in the keychain).
     #[default]
     Loading,
-    /// This build has no Google sign-in configured.
+    /// No desktop client id is saved, set in the environment, or baked in.
     Unavailable {
         reason: String,
     },
@@ -216,7 +283,7 @@ impl GoogleState {
     pub fn status_label(&self) -> &'static str {
         match self {
             Self::Loading => "Checking…",
-            Self::Unavailable { .. } => "Not available",
+            Self::Unavailable { .. } => "Needs a client id",
             Self::NotConnected => "Not connected",
             Self::Connecting { .. } => "Waiting for you in your browser",
             Self::Connected(_) => "Connected",
@@ -237,8 +304,14 @@ pub enum GoogleCommand {
     SetService { service: GoogleService, on: bool },
     /// Stop waiting for the browser.
     Cancel,
-    /// Sign out: Google forgets Sovra's access and the keychain entry is removed.
+    /// Sign out: Google forgets Sovra's access and the account entry is removed.
+    /// The saved desktop client id stays.
     Disconnect,
+    /// Keep a desktop client id (and optional secret) on this computer.
+    SaveClient {
+        client_id: String,
+        client_secret: Option<ClientSecret>,
+    },
 }
 
 /// A notification from the runtime about Google.

@@ -373,6 +373,25 @@ pub fn telegram_action(
     }
 }
 
+/// Private desktop tools require authenticated channel ownership, never a sender
+/// name or message text. Transport adapters establish self-chat/from-me identity.
+pub fn is_owner_message(
+    channel: ChannelKind,
+    message: &IncomingMessage,
+    state: &ConnectionsState,
+) -> bool {
+    match channel {
+        ChannelKind::WhatsApp => {
+            state.whatsapp.is_connected() && message.is_self_chat() && message.from_me
+        }
+        ChannelKind::Telegram => {
+            state.telegram.is_connected()
+                && message.chat == ChatKind::Direct
+                && state.telegram.owner_chat_id() == Some(message.chat_jid.as_str())
+        }
+    }
+}
+
 /// What the bot answers someone who writes before it is linked.
 pub const TELEGRAM_ASK_FOR_CODE_REPLY: &str = "This bot belongs to a Sovra user. To link it, send the six-digit code shown in Sovra's Settings.";
 
@@ -408,6 +427,8 @@ pub struct ConnectionsState {
     #[serde(default)]
     pub recent_messages: Vec<BridgedMessage>,
     #[serde(default)]
+    pub outbound_messages: Vec<crate::communications::OutboundMessage>,
+    #[serde(default)]
     pub notice: Option<String>,
 }
 
@@ -429,10 +450,6 @@ pub enum ConnectionCommand {
     UpdateWhatsAppSettings {
         settings: WhatsAppSettings,
     },
-    /// Send a message to your own `WhatsApp` chat to check the link works.
-    SendTestWhatsAppMessage {
-        text: String,
-    },
     /// Unlink this computer from the phone and forget the saved link.
     DisconnectWhatsApp,
     /// Connect a Telegram bot with the token from `@BotFather`.
@@ -442,12 +459,14 @@ pub enum ConnectionCommand {
     UpdateTelegramSettings {
         settings: TelegramSettings,
     },
-    /// Send a message to the owner's Telegram chat to check the link works.
-    SendTestTelegramMessage {
-        text: String,
-    },
     /// Stop the bot and forget its token.
     DisconnectTelegram,
+    /// Native review only; tools cannot issue this command.
+    ReviewMessage {
+        id: String,
+        session_id: String,
+        send: bool,
+    },
 }
 
 /// Events emitted by `sovra-runtime` back to the UI.
@@ -459,6 +478,7 @@ pub enum ConnectionEvent {
     TelegramStatusChanged(TelegramStatus),
     TelegramSettingsUpdated(TelegramSettings),
     MessageBridged(BridgedMessage),
+    OutboundChanged(crate::communications::OutboundMessage),
     /// Sovra's answer to the bridged message `message_id` was sent to the phone.
     ReplySent {
         message_id: String,
@@ -508,6 +528,28 @@ impl ConnectionsState {
                     .find(|message| message.id == *message_id)
                 {
                     message.reply_text = Some(reply.clone());
+                }
+            }
+            ConnectionEvent::OutboundChanged(message) => {
+                if let Some(saved) = self
+                    .outbound_messages
+                    .iter_mut()
+                    .find(|saved| saved.id == message.id)
+                {
+                    *saved = message.clone();
+                } else {
+                    self.outbound_messages.push(message.clone());
+                }
+                if self.outbound_messages.len() > crate::communications::MAX_OUTBOUND_MESSAGES
+                    && let Some(index) = self.outbound_messages.iter().position(|message| {
+                        !matches!(
+                            message.delivery,
+                            crate::communications::MessageDelivery::Review
+                                | crate::communications::MessageDelivery::Sending
+                        )
+                    })
+                {
+                    self.outbound_messages.remove(index);
                 }
             }
             ConnectionEvent::Notice(notice) => {
@@ -900,6 +942,7 @@ mod tests {
             telegram_settings: TelegramSettings::default(),
             qr_modal_open: false,
             recent_messages: Vec::new(),
+            outbound_messages: Vec::new(),
             notice: None,
         };
         let json = serde_json::to_string(&state).unwrap();

@@ -24,7 +24,7 @@ const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 pub enum AuthError {
     #[error("Could not protect the password on this computer.")]
     Hashing,
-    #[error("Google Sign-In is not set up in this build.")]
+    #[error("Google needs a desktop client id. Add one in Settings, under Connections.")]
     NotConfigured,
     #[error("Google sign-in did not finish: {0}")]
     Google(String),

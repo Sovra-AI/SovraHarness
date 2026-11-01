@@ -63,6 +63,7 @@ impl Skill {
             "presentation" => "Slide deck & talk outliner",
             "document-author" => "Polite letter & report writer",
             "spreadsheet" => "Household budget & table builder",
+            "communications" => "Send a WhatsApp or Telegram message",
             "google-workspace" => "Gmail, Calendar & Drive helper",
             "microsoft-workspace" => "Outlook, Word & Excel helper",
             "scheduler" => "Recurring routine planner",
@@ -243,6 +244,7 @@ impl Skill {
                 "spreadsheet",
                 "Create a simple monthly household budget table",
             ),
+            "communications" => sample_pair("communications", "Send me a WhatsApp reminder to bring my shopping list."),
             "google-workspace" => sample_pair(
                 "google-workspace",
                 "Draft a warm thank-you email reply after Sunday dinner",

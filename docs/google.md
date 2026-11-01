@@ -16,7 +16,7 @@ Sources were checked on 2026-10-27; they are listed at the end.
 | Connecting | "Your browser has opened Google's page" | Open the page again · Copy link · Cancel |
 | Connected | Avatar initial, name, email; one row + switch per service; "Try asking…" examples | Switch a service; **Disconnect Google** (asks once more) |
 | Needs sign-in | The account and why | **Sign in again** |
-| Not available | "Google sign-in isn't set up in this copy of Sovra yet" | — |
+| Needs a client id | Desktop client id and optional masked secret | **Save**, then **Connect Google** |
 
 - Plain words throughout: Email, Calendar, Files, Contacts, To-dos, each with the
   product name beside it and one sentence on what Sovra does with it.
@@ -29,6 +29,10 @@ Sources were checked on 2026-10-27; they are listed at the end.
   tab" page (or "Nothing was connected"). If nothing happens for five minutes,
   Sovra stops waiting and says so.
 - "Try asking" examples open Chat with the question filled in.
+- A saved desktop client takes precedence over environment configuration, then
+  build-time configuration. The same choice powers Continue with Google.
+  The credential store keeps the client separately from the account, so
+  disconnecting preserves setup; saving clears the secret input.
 
 ## What the agent can do
 

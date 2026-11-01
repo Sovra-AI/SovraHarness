@@ -74,6 +74,7 @@ struct ThinkingView {
 enum Row {
     Message { message: usize, segment: usize },
     Waiting,
+    Outbound { index: usize },
 }
 
 pub(crate) struct ChatPresentation {
@@ -317,6 +318,15 @@ impl ChatPresentation {
                 segment,
             }));
         }
+        rows.extend(
+            state
+                .connections
+                .outbound_messages
+                .iter()
+                .enumerate()
+                .filter(|(_, message)| message.session_id == state.session_id)
+                .map(|(index, _)| Row::Outbound { index }),
+        );
         if awaiting_first_output(state) {
             rows.push(Row::Waiting);
         }
@@ -332,6 +342,12 @@ impl ChatPresentation {
             self.list
                 .remeasure_items(kept.saturating_sub(1)..rows.len());
             self.rows = rows;
+        }
+        // Approval and receipt changes can change a row's height without changing its id.
+        for (index, row) in self.rows.iter().enumerate() {
+            if matches!(row, Row::Outbound { .. }) {
+                self.list.remeasure_items(index..index + 1);
+            }
         }
         // Only the first row (thinking, widgets above) and the growing last segment
         // of a changed reply need measuring again — not every segment.
@@ -474,7 +490,12 @@ pub(crate) fn render_chat_column(
         state, transcript, ..
     } = shell;
     let t = design::tokens(cx);
-    let welcome = state.messages.is_empty()
+    let welcome = !state
+        .connections
+        .outbound_messages
+        .iter()
+        .any(|m| m.session_id == state.session_id)
+        && state.messages.is_empty()
         && shell.composer_input.read(cx).value().is_empty()
         && !state.is_generating
         && state
@@ -636,6 +657,12 @@ fn render_row(
             }
             None => (div().into_any_element(), Rems::ZERO, Rems::ZERO),
         },
+        Some(Row::Outbound { index }) => (
+            crate::message_review::render(&state.connections.outbound_messages[index], index, cx)
+                .into_any_element(),
+            message_gap,
+            message_gap,
+        ),
         Some(Row::Waiting) | None => (
             h_flex()
                 .w_full()

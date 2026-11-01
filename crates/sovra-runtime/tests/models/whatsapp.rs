@@ -77,6 +77,196 @@ impl ScriptedChannel {
     }
 }
 
+fn messaging_reply(request: &Request, phase: u64) -> Reply {
+    let call = |name: &str, arguments: Value| {
+        json!({"role":"assistant", "tool_calls":[{
+            "index":0,"id":format!("call-{phase}"),"type":"function","function":{"name":name,"arguments":arguments.to_string()}
+        }]})
+    };
+    let (message, finish) = match phase % 5 {
+        0 => {
+            assert!(
+                request.body["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|t| t["function"]["name"] == "CommunicationsAgent")
+            );
+            (
+                call(
+                    "CommunicationsAgent",
+                    json!({"request":"Prepare a WhatsApp note to me: Bring the shopping list."}),
+                ),
+                "tool_calls",
+            )
+        }
+        1 => (call("messaging_status", json!({})), "tool_calls"),
+        2 => (
+            call(
+                "prepare_message",
+                json!({"channel":"whats_app","recipient":"me","text":"Bring the shopping list."}),
+            ),
+            "tool_calls",
+        ),
+        _ => (
+            json!({"role":"assistant","content":"Please review the message and press Send in chat."}),
+            "stop",
+        ),
+    };
+    if request.body["stream"] == true {
+        Reply {
+            status: 200,
+            content_type: "text/event-stream",
+            tail: None,
+            body: format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"id":"c","object":"chat.completion.chunk","created":1,"model":"messaging-model","choices":[{"index":0,"delta":message,"finish_reason":null}]}),
+                json!({"id":"c","object":"chat.completion.chunk","created":1,"model":"messaging-model","choices":[{"index":0,"delta":{},"finish_reason":finish}]})
+            ),
+        }
+    } else {
+        Reply::json(
+            &json!({"id":"c","object":"chat.completion","created":1,"model":"messaging-model","choices":[{"index":0,"message":message,"finish_reason":finish}]}),
+        )
+    }
+}
+
+#[tokio::test]
+async fn main_chat_delegates_to_messaging_but_only_native_review_can_send_once() {
+    use sovra_core::communications::MessageDelivery;
+    let phase = AtomicU64::new(0);
+    let server = Server::new(move |request| {
+        if request.path == "/v1/models" {
+            return Reply::json(
+                &json!({"data":[{"id":"messaging-model","supported_parameters":["tools"],"output_modalities":["text"]}]}),
+            );
+        }
+        messaging_reply(request, phase.fetch_add(1, Ordering::SeqCst))
+    });
+    let mut connection = ModelConnection::new("messages", ProviderKind::OpenAiCompatible);
+    connection.base_url = format!("{}/v1", server.url());
+    let fixture = Fixture::new(connection, None);
+    let channel = Arc::new(ScriptedChannel::default());
+    let client = sovra_runtime::start_with_channels(
+        "messaging-test",
+        AgentConfig::default(),
+        None,
+        Some(ModelsConfig {
+            repository: fixture.repo.clone(),
+            providers: vec![Arc::new(CompatibleProvider)],
+        }),
+        None,
+        None,
+        None,
+        Some(channel.clone()),
+    )
+    .unwrap();
+    catalog(&client).await;
+    let key = ModelKey {
+        connection_id: "messages".into(),
+        model_id: "messaging-model".into(),
+    };
+    send(&client, ModelCommand::Activate { key: key.clone() });
+    event(&client,|e| matches!(e,Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.as_ref()==Some(&key))).await;
+    client
+        .send(Command::Connections(
+            ConnectionCommand::StartWhatsAppPairing,
+        ))
+        .unwrap();
+    status(&client, |s| matches!(s, WhatsAppStatus::Connecting { .. })).await;
+    // Load executes after start has installed the channel's event sink.
+    client
+        .send(Command::Connections(ConnectionCommand::Load))
+        .unwrap();
+    event(&client, |e| {
+        matches!(e, Event::Connections(ConnectionEvent::Loaded(_)))
+    })
+    .await;
+    channel.emit(ChannelEvent::Connected {
+        device: LinkedDevice {
+            phone_display: "+447700900123".into(),
+            device_jid: OWN_CHAT.into(),
+            companion_name: "fixture".into(),
+            linked_at: sovra_core::Timestamp(0),
+        },
+    });
+    status(&client, WhatsAppStatus::is_connected).await;
+
+    for step in 0..3 {
+        let session_id = format!("desktop-{step}");
+        client
+            .send(Command::RunPrompt {
+                context: None,
+                session_id: session_id.clone(),
+                prompt: "Send me a WhatsApp note: Bring the shopping list.".into(),
+            })
+            .unwrap();
+        let prepared = event(&client, |e| {
+            matches!(
+                e,
+                Event::Connections(ConnectionEvent::OutboundChanged(_)) | Event::AgentError { .. }
+            )
+        })
+        .await;
+        let Event::Connections(ConnectionEvent::OutboundChanged(draft)) = prepared else {
+            panic!("{prepared:?}")
+        };
+        assert_eq!(draft.recipient, OWN_CHAT);
+        assert_eq!(draft.delivery, MessageDelivery::Review);
+        event(
+            &client,
+            |e| matches!(e,Event::AgentCompleted{session_id:id} if id==&session_id),
+        )
+        .await;
+        assert_eq!(
+            channel.session.sent.lock().unwrap().len(),
+            usize::from(step > 0),
+            "model calls cannot send"
+        );
+        let approve = |session: &str, send| {
+            Command::Connections(ConnectionCommand::ReviewMessage {
+                id: draft.id.clone(),
+                session_id: session.into(),
+                send,
+            })
+        };
+        client.send(approve("another-session", true)).unwrap();
+        client
+            .send(Command::Connections(ConnectionCommand::Load))
+            .unwrap();
+        event(&client, |e| {
+            matches!(e, Event::Connections(ConnectionEvent::Loaded(_)))
+        })
+        .await;
+        assert_eq!(
+            channel.session.sent.lock().unwrap().len(),
+            usize::from(step > 0)
+        );
+        if step == 2 {
+            client
+                .send(Command::Connections(ConnectionCommand::DisconnectWhatsApp))
+                .unwrap();
+            status(&client, |s| matches!(s, WhatsAppStatus::Disconnected)).await;
+        }
+        client.send(approve(&session_id, step != 1)).unwrap();
+        client.send(approve(&session_id, true)).unwrap();
+        let receipt = event(&client,|e| matches!(e,Event::Connections(ConnectionEvent::OutboundChanged(m)) if m.id==draft.id && !matches!(m.delivery,MessageDelivery::Review|MessageDelivery::Sending))).await;
+        let Event::Connections(ConnectionEvent::OutboundChanged(receipt)) = receipt else {
+            unreachable!()
+        };
+        match step {
+            0 => assert!(matches!(receipt.delivery, MessageDelivery::Accepted { .. })),
+            1 => assert_eq!(receipt.delivery, MessageDelivery::Cancelled),
+            _ => assert_eq!(receipt.delivery, MessageDelivery::Expired),
+        }
+        assert_eq!(
+            channel.session.sent.lock().unwrap().as_slice(),
+            &[(OWN_CHAT.into(), "Bring the shopping list.".into())]
+        );
+    }
+    stop(client).await;
+}
+
 async fn status(client: &Client, matches: impl Fn(&WhatsAppStatus) -> bool) -> WhatsAppStatus {
     match event(
         client,
@@ -248,23 +438,7 @@ async fn whatsapp_link_pairs_answers_on_the_phone_and_unlinks() {
         |e| matches!(e, Event::Connections(ConnectionEvent::MessageBridged(m)) if m.id == "MSG2"),
     )
     .await;
-    client
-        .send(Command::Connections(
-            ConnectionCommand::SendTestWhatsAppMessage {
-                text: "ping".into(),
-            },
-        ))
-        .unwrap();
-    event(
-        &client,
-        |e| matches!(e, Event::Connections(ConnectionEvent::Notice(n)) if n.starts_with("Sent.")),
-    )
-    .await;
-    assert_eq!(channel.session.sent.lock().unwrap().len(), 2);
-    assert_eq!(
-        channel.session.sent.lock().unwrap()[1],
-        (OWN_CHAT.to_owned(), "ping".to_owned())
-    );
+    assert_eq!(channel.session.sent.lock().unwrap().len(), 1);
 
     client
         .send(Command::Connections(ConnectionCommand::DisconnectWhatsApp))

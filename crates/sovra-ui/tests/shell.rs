@@ -179,7 +179,7 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::MyAis);
         assert!(window.find("sovra-my-ais-view").visible());
-        assert_eq!(shell.read(cx).workspace().specialists.len(), 22);
+        assert_eq!(shell.read(cx).workspace().specialists.len(), 23);
         // Engine internals stay folded away until asked for.
         assert!(window.try_find(("decision-backend-btn", 1usize)).is_none());
         assert!(window.try_find(("specialist-tier-btn", 0usize)).is_none());

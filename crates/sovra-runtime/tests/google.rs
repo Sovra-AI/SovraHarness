@@ -51,6 +51,12 @@ impl GoogleConnector for FakeGoogle {
     fn unavailable_reason(&self) -> Option<String> {
         None
     }
+    fn desktop_client(&self) -> Option<sovra_core::google::DesktopClient> {
+        None
+    }
+    fn save_desktop_client(&self, _: &str, _: Option<String>) -> Result<(), GoogleError> {
+        Ok(())
+    }
     fn restore(&self) -> Result<Option<GoogleAccount>, GoogleError> {
         Ok(self.0.lock().unwrap().saved.clone())
     }

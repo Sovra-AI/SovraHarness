@@ -21,6 +21,7 @@ mod knowledge_view;
 mod login;
 mod markdown_segments;
 mod memory_view;
+mod message_review;
 mod model_connection_editor;
 mod model_details;
 mod model_home;

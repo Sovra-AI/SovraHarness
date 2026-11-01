@@ -2,6 +2,52 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+#[test]
+fn desktop_client_precedence_ignores_blanks_and_redacts_secrets() {
+    let client = |id: &str| DesktopClient {
+        client_id: id.into(),
+        client_secret: Some(" fixture-secret ".into()),
+    };
+    let saved = client_in_force(
+        Some(client(" saved ")),
+        Some(client("env")),
+        Some(client("build")),
+    )
+    .unwrap();
+    assert_eq!(saved.client_id, "saved");
+    assert_eq!(saved.client_secret.as_deref(), Some("fixture-secret"));
+    assert!(!format!("{saved:?}").contains("fixture-secret"));
+    assert_eq!(
+        client_in_force(
+            Some(client(" ")),
+            Some(client("env")),
+            Some(client("build"))
+        )
+        .unwrap()
+        .client_id,
+        "env"
+    );
+    assert_eq!(
+        client_in_force(None, None, Some(client("build")))
+            .unwrap()
+            .client_id,
+        "build"
+    );
+    assert!(client_in_force(None, Some(client(" ")), None).is_none());
+    assert_eq!(
+        normalize_desktop_client(DesktopClient {
+            client_id: "id".into(),
+            client_secret: Some(" ".into()),
+        })
+        .unwrap()
+        .client_secret,
+        None
+    );
+    let secret = ClientSecret::new("fixture-secret");
+    assert_eq!(secret.as_str(), "fixture-secret");
+    assert!(!format!("{secret:?}").contains("fixture-secret"));
+}
+
 fn account(granted: &[GoogleService]) -> GoogleAccount {
     GoogleAccount {
         email: "sam@example.com".into(),

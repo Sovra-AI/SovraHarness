@@ -4,6 +4,8 @@
 mod development;
 #[path = "styling/memory_citations.rs"]
 mod memory_citations;
+#[path = "styling/messaging.rs"]
+mod messaging;
 
 use gpui_kit::component::{ActiveTheme as _, Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;

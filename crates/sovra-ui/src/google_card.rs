@@ -8,20 +8,22 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, button::ButtonVariants as _, h_flex,
-    switch::Switch, v_flex,
+    input::InputState, switch::Switch, v_flex,
 };
 use gpui_kit::{
-    ClipboardItem, Context, EventEmitter, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, Styled as _, TestSupportExt as _, WeakEntity, Window, div,
+    AppContext as _, ClipboardItem, Context, Entity, EventEmitter, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
+    TestSupportExt as _, WeakEntity, Window, div,
 };
 use sovra_core::Command;
 use sovra_core::google::{
-    GoogleAccount, GoogleCommand, GoogleConnection, GoogleService, GoogleState, SERVICES,
-    ServiceInfo,
+    ClientSecret, DESKTOP_CLIENT_NEEDED, GoogleAccount, GoogleCommand, GoogleConnection,
+    GoogleService, GoogleState, SERVICES, ServiceInfo,
 };
 
 use crate::RuntimeClient;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::model_connection_editor::field;
 use crate::shell::Shell;
 
 /// Ask Sovra this in Chat (an example under a connected account).
@@ -35,16 +37,51 @@ pub(crate) struct GoogleCard {
     shell: WeakEntity<Shell>,
     /// The Disconnect button asks once more before signing out.
     confirm_disconnect: bool,
+    client_id: Entity<InputState>,
+    client_secret: Entity<InputState>,
 }
 
 impl EventEmitter<TryAsking> for GoogleCard {}
 
 impl GoogleCard {
-    pub(crate) fn new(shell: WeakEntity<Shell>) -> Self {
+    pub(crate) fn new(
+        shell: WeakEntity<Shell>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             shell,
             confirm_disconnect: false,
+            client_id: cx.new(|cx| {
+                InputState::new(window, cx).placeholder("Ends with .apps.googleusercontent.com")
+            }),
+            client_secret: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder("Only if your project has one")
+                    .masked(true)
+            }),
         }
+    }
+
+    fn save_client(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let client_id = self.client_id.read(cx).value().trim().to_owned();
+        if client_id.is_empty() {
+            return;
+        }
+        let secret_text = self.client_secret.read(cx).value().trim().to_owned();
+        let client_secret = (!secret_text.is_empty()).then(|| ClientSecret::new(secret_text));
+        // The field is cleared before the runtime answers, so the secret is not
+        // left on screen or shown again after a successful save.
+        self.client_secret.update(cx, |input, cx| {
+            input.set_value(String::new(), window, cx);
+        });
+        send(
+            GoogleCommand::SaveClient {
+                client_id,
+                client_secret,
+            },
+            cx,
+        );
     }
 }
 
@@ -98,15 +135,7 @@ fn render(
     let t = design::tokens(cx);
     let body = match &google.state {
         GoogleState::Loading => caption("Checking your Google connection…", cx).into_any_element(),
-        GoogleState::Unavailable { reason } => v_flex()
-            .gap(t.space.medium)
-            .child(paragraph(reason.clone(), cx))
-            .child(
-                design::primary_button("google-connect", "Connect Google", cx)
-                    .icon(Icon::new(IconName::Plug))
-                    .disabled(true),
-            )
-            .into_any_element(),
+        GoogleState::Unavailable { .. } => client_setup(view, cx).into_any_element(),
         GoogleState::NotConnected => not_connected(cx).into_any_element(),
         GoogleState::Connecting { url, adding } => connecting(url, *adding, cx).into_any_element(),
         GoogleState::Connected(account) => {
@@ -201,6 +230,43 @@ fn header(state: &GoogleState, cx: &Context<GoogleCard>) -> impl IntoElement + u
                         .text_color(t.accent.green)
                 }))
                 .child(state.status_label()),
+        )
+}
+
+fn client_setup(view: &GoogleCard, cx: &mut Context<GoogleCard>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let id_empty = view.client_id.read(cx).value().trim().is_empty();
+    v_flex()
+        .gap(t.space.medium)
+        .child(
+            div()
+                .id("google-client-help")
+                .aria_label(DESKTOP_CLIENT_NEEDED)
+                .test_support()
+                .min_w_0()
+                .sovra_text(TextRole::Body, cx)
+                .child(DESKTOP_CLIENT_NEEDED),
+        )
+        .child(field(
+            "google-client-id",
+            "Desktop client id",
+            &view.client_id,
+            "Copy it from your Google Cloud project. It ends with .apps.googleusercontent.com.",
+            cx,
+        ))
+        .child(field(
+            "google-client-secret",
+            "Secret, if your project has one",
+            &view.client_secret,
+            "Optional. Sovra keeps it on this computer and does not show it again.",
+            cx,
+        ))
+        .child(
+            h_flex().flex_wrap().child(
+                design::primary_button("google-save-client", "Save", cx)
+                    .disabled(id_empty)
+                    .on_click(cx.listener(|view, _, window, cx| view.save_client(window, cx))),
+            ),
         )
 }
 

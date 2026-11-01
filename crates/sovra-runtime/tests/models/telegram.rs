@@ -248,23 +248,20 @@ async fn telegram_bot_connects_links_its_owner_and_answers() {
         (OWNER_CHAT.to_owned(), ANSWER_FAILED_REPLY.to_owned())
     );
 
-    // A stranger is ignored with the safe default; a test message goes to the owner.
+    // A stranger is ignored with the safe default. Load is an actor barrier.
     bot.message("999", "Alex", "Are you a bot?");
     client
-        .send(Command::Connections(
-            ConnectionCommand::SendTestTelegramMessage {
-                text: "ping".into(),
-            },
-        ))
+        .send(Command::Connections(ConnectionCommand::Load))
         .unwrap();
-    event(
-        &client,
-        |e| matches!(e, Event::Connections(ConnectionEvent::Notice(n)) if n.starts_with("Sent.")),
-    )
+    event(&client, |e| {
+        matches!(e, Event::Connections(ConnectionEvent::Loaded(_)))
+    })
     .await;
-    let sent = wait_for_sent(&bot, 4).await;
-    assert_eq!(sent.len(), 4, "the stranger got no answer");
-    assert_eq!(sent[3], (OWNER_CHAT.to_owned(), "ping".to_owned()));
+    assert_eq!(
+        bot.session.sent.lock().unwrap().len(),
+        3,
+        "the stranger got no answer"
+    );
     tokio::time::timeout(Duration::from_secs(5), async {
         while bot.session.polls.load(Ordering::SeqCst) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;

@@ -461,7 +461,7 @@ impl Shell {
         };
         let google_card = {
             let shell = shell_handle.clone();
-            cx.new(|_| crate::google_card::GoogleCard::new(shell))
+            cx.new(|cx| crate::google_card::GoogleCard::new(shell, window, cx))
         };
         models.update(cx, |models, _| {
             models.google_card = Some(google_card.clone());

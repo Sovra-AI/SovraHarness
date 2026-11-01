@@ -60,6 +60,25 @@ pub fn required_delegate<'a>(
     procedure_requests: Option<&str>,
 ) -> Option<&'a str> {
     let wanted = procedure_requests.or_else(|| {
+        let words: Vec<_> = latest_user_text
+            .split(|c: char| !c.is_alphanumeric())
+            .map(str::to_lowercase)
+            .collect();
+        let messaging = words
+            .iter()
+            .any(|w| matches!(w.as_str(), "whatsapp" | "telegram"))
+            && words.iter().any(|w| {
+                matches!(
+                    w.as_str(),
+                    "send" | "read" | "chat" | "chats" | "messages" | "connected" | "connection"
+                )
+            });
+        if messaging
+            && !is_explicit_web_search(latest_user_text)
+            && offered.contains(&"CommunicationsAgent")
+        {
+            return Some("CommunicationsAgent");
+        }
         (is_explicit_web_search(latest_user_text) || needs_current_facts(latest_user_text))
             .then_some(WEB_SEARCH_AGENT_ID)
     })?;
@@ -90,6 +109,33 @@ mod tests {
     use super::*;
 
     const OFFERED: [&str; 2] = [WEB_SEARCH_AGENT_ID, "CodingAgent"];
+
+    #[test]
+    fn messaging_requests_consult_the_connected_helper_before_guessing_or_searching_the_web() {
+        let offered = [WEB_SEARCH_AGENT_ID, "CommunicationsAgent"];
+        for prompt in [
+            "Send me a WhatsApp reminder",
+            "Read my latest Telegram messages",
+            "Is WhatsApp connected?",
+        ] {
+            assert_eq!(
+                required_delegate(prompt, &offered, None),
+                Some("CommunicationsAgent")
+            );
+        }
+        assert_eq!(
+            required_delegate("Send me a WhatsApp reminder", &[], None),
+            None
+        );
+        assert_eq!(
+            required_delegate(
+                "Search the web for WhatsApp connection help",
+                &offered,
+                None
+            ),
+            Some(WEB_SEARCH_AGENT_ID)
+        );
+    }
 
     #[test]
     fn explicit_web_wording_requires_the_search_helper() {

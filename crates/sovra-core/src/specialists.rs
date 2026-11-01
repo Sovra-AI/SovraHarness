@@ -1,4 +1,4 @@
-//! Canonical `SovraSRX` 22-specialist agent roster and per-agent model overrides.
+//! Canonical `SovraSRX` 23-specialist agent roster and per-agent model overrides.
 //!
 //! Mirrors `SovraSRXProduction/backend/src/app/agents/orchestrator_react/agents.py` and
 //! `questions.py::DISPATCHABLE_SPECIALISTS` so the dynamic router and per-agent model
@@ -41,9 +41,9 @@ impl SpecialistAgentSpec {
     }
 }
 
-/// Returns the full 22-agent `SovraSRX` specialist roster (`create_specialist_agents`).
+/// Returns the full 23-agent `SovraSRX` specialist roster (`create_specialist_agents`).
 pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
-    let specs: [(&str, &str, &str, &str, bool, ModelTier); 22] = [
+    let specs: [(&str, &str, &str, &str, bool, ModelTier); 23] = [
         (
             "OrchestratorAgent",
             "general",
@@ -181,6 +181,14 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             ModelTier::Standard,
         ),
         (
+            "CommunicationsAgent",
+            "communications",
+            "WhatsApp & Telegram helper",
+            "Check connected messaging, read recent chats, and prepare messages for you to review and send.",
+            false,
+            ModelTier::Standard,
+        ),
+        (
             "GoogleWorkspace",
             "google_workspace",
             "Google Workspace Specialist",
@@ -256,9 +264,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seeds_all_22_sovra_srx_specialists_and_resolves_dispatchable_keys() {
+    fn seeds_all_23_sovra_srx_specialists_and_resolves_dispatchable_keys() {
         let agents = default_sovra_srx_agents();
-        assert_eq!(agents.len(), 22);
+        assert_eq!(agents.len(), 23);
         assert_eq!(
             specialist_id_for_route_key(&agents, "coding"),
             Some("CodingAgent")

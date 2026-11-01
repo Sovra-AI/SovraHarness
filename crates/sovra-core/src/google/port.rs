@@ -39,8 +39,18 @@ pub trait GoogleSignIn: Send + std::fmt::Debug {
 
 #[async_trait::async_trait]
 pub trait GoogleConnector: Send + Sync + std::fmt::Debug {
-    /// Why this build cannot sign in to Google, if it cannot.
+    /// Why Google cannot sign in yet, if it cannot. Blocking: may read the keychain.
     fn unavailable_reason(&self) -> Option<String>;
+    /// The desktop client in force (saved, else environment, else baked).
+    /// Blocking: may read the keychain. The secret stays out of `Debug`.
+    fn desktop_client(&self) -> Option<super::DesktopClient>;
+    /// Stores a desktop client on this computer. A blank id is refused.
+    /// Does not remove a signed-in account. Blocking: writes the keychain.
+    fn save_desktop_client(
+        &self,
+        client_id: &str,
+        client_secret: Option<String>,
+    ) -> Result<(), GoogleError>;
     /// Blocking: the account saved in the keychain, if any.
     fn restore(&self) -> Result<Option<GoogleAccount>, GoogleError>;
     /// Blocking: opens the local listener and builds the consent link for `services`.

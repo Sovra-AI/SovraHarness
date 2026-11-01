@@ -201,8 +201,8 @@ creates the account (email + password, protected with Argon2id on this computer)
 afterwards the same form signs in, with friendly inline errors from the runtime.
 **Continue with Google** opens Google's own consent page in your browser and the
 screen waits, with **Open the page again** and **Cancel**, until the sign-in
-finishes by itself; it needs the optional `SOVRA_GOOGLE_CLIENT_ID` (and
-`SOVRA_GOOGLE_CLIENT_SECRET` if your client has one) set at startup. Signing out
+finishes by itself. It uses the desktop client saved in Settings, or the optional
+`SOVRA_GOOGLE_CLIENT_ID` and `SOVRA_GOOGLE_CLIENT_SECRET` configuration. Signing out
 keeps accounts but clears the session. Remaining rollout work:
 [sign-in implementation status](docs/development.md#sign-in-integration-status).
 
@@ -423,8 +423,13 @@ Once connected, just ask, for example "What's on my calendar this week?" or
 
 **Disconnect Google** signs out and asks Google to forget Sovra's access.
 
-Release builds bake in the Google client with `SOVRA_GOOGLE_CLIENT_ID` and
-`SOVRA_GOOGLE_CLIENT_SECRET`; the same variables override it at run time. Setup,
+If the card says **Needs a client id**, paste your Google Cloud desktop client
+id and optional secret, then choose **Save**. Sovra keeps them in its credential
+store; signing out keeps the client setup. Both **Connect Google** and
+**Continue with Google** use that saved setup.
+
+A saved client takes precedence over `SOVRA_GOOGLE_CLIENT_ID` and
+`SOVRA_GOOGLE_CLIENT_SECRET` in the environment, then values baked into the build. Setup,
 scopes, Google's verification requirements and the safety design are in
 [Google in Sovra](docs/google.md).
 
@@ -475,6 +480,19 @@ people's direct messages too, and another turns automatic answers off. Groups, c
 and messages that queued while Sovra was closed are never answered. **Unlink WhatsApp**
 removes the link on the phone and deletes the saved credentials.
 
+You can also ask in the desktop chat: **“Send me a WhatsApp reminder to bring my
+shopping list.”** Sovra's messaging helper checks the connection and prepares the
+message in chat. Review the exact recipient and text, then choose **Send** or
+**Cancel**. A receipt reports service acceptance; it does not claim the person
+has received or read it. The same helper works with Telegram. Find **Send a
+WhatsApp or Telegram message** in Skills.
+
+For someone else on WhatsApp, supply their international phone number or choose
+an exact recent chat. Telegram can use chats that have already contacted the bot.
+Recent-message lookup covers only the messages Sovra has retained locally, not
+your whole phone history or address book. These controls replace the test-message
+fields in Settings. See [messaging behavior and safeguards](docs/communications.md).
+
 The client is compiled into the single binary (the open-source `whatsapp-rust` crate,
 WhatsApp Web multi-device protocol); nothing else runs and no business account is needed.
 Credentials and encryption keys are stored only in the app data directory under `whatsapp/`.
@@ -493,6 +511,12 @@ By default only you are answered; a switch lets other people who find the bot ta
 too, and another turns automatic answers off. **Disconnect Telegram** stops the bot and
 forgets the token. The token is stored with your other API keys (the keychain), never in
 plain text.
+
+Your authenticated own WhatsApp chat and linked Telegram owner chat retain your
+personal tools and memory. Other senders get general answers without access to
+your saved memories, connected folders, account tools, or private instructions.
+Incoming messages from other people cannot create memories about you or prepare
+outbound messages in your desktop chat.
 
 ## Connect a service you already use
 
