@@ -195,6 +195,7 @@ impl Shell {
                 cx.notify();
             }
         });
+        let development_window = window.window_handle();
         let task = cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv().await {
                 // Streamed tokens arrive far faster than frames. Wait out one frame
@@ -239,6 +240,20 @@ impl Shell {
                         _ => batch.push(event),
                     }
                 }
+                let development_requests = batch
+                    .iter()
+                    .filter_map(|event| match event {
+                        sovra_core::Event::Development(
+                            sovra_core::development::DevelopmentEvent::UiRequest {
+                                generation,
+                                request_id,
+                                request,
+                                deadline,
+                            },
+                        ) => Some((generation.clone(), *request_id, request.clone(), *deadline)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
                 let applied = this.update(cx, |shell, cx| {
                     let mut should_persist_thread = false;
                     for event in batch {
@@ -290,6 +305,12 @@ impl Shell {
                                     },
                                 ));
                             }
+                        }
+                        if let sovra_core::Event::Development(event) = &event {
+                            shell.models.update(cx, |models, cx| {
+                                models.development.apply(event);
+                                cx.notify();
+                            });
                         }
                         if let sovra_core::Event::Models(event) = &event {
                             shell
@@ -375,6 +396,47 @@ impl Shell {
                 });
                 if applied.is_err() {
                     break; // view dropped
+                }
+                for (generation, request_id, request, deadline) in development_requests {
+                    let output = development_window.update(cx, |_, window, cx| {
+                        let allowed = this.upgrade().is_some_and(|shell| {
+                            let shell = shell.read(cx);
+                            shell.state.development.accepts(&generation)
+                                && shell.models.read(cx).development.accepts(&generation)
+                        });
+                        if allowed && deadline > std::time::Instant::now() {
+                            crate::development_view::execute(
+                                request,
+                                &generation,
+                                gpui_kit::Bounds::new(
+                                    gpui_kit::Point::default(),
+                                    window.viewport_size(),
+                                ),
+                                window,
+                                cx,
+                            )
+                        } else {
+                            Err("Development access was revoked or the request expired.".into())
+                        }
+                    });
+                    let result = match output {
+                        Ok(Ok(output)) => {
+                            cx.background_executor()
+                                .spawn(async move { output.encode() })
+                                .await
+                        }
+                        Ok(Err(error)) => Err(error),
+                        Err(_) => Err("The app window was closed.".into()),
+                    };
+                    let _ = this.update(cx, |_, cx| {
+                        let _ = cx.global::<RuntimeClient>().0.send(Command::Development(
+                            sovra_core::development::DevelopmentCommand::UiReply {
+                                generation,
+                                request_id,
+                                result,
+                            },
+                        ));
+                    });
                 }
             }
         });
@@ -1248,7 +1310,8 @@ impl Render for Shell {
         let t = design::tokens(cx);
         self.sync_window_title(window);
         let body_view = self.render_body(cx);
-        let title_bar = Self::app_owns_titlebar(window).then(|| self.render_title_bar(cx));
+        let title_bar = (Self::app_owns_titlebar(window) || self.state.development.enabled)
+            .then(|| self.render_title_bar(cx));
         v_flex()
             .id("sovra-shell")
             .track_focus(&self.focus_handle)
@@ -1339,6 +1402,13 @@ impl Shell {
                     .text_color(muted_foreground)
                     .child(page),
             )
+            .children(self.state.development.enabled.then(|| {
+                design::title_button("development-mode-badge", "Development mode", cx)
+                    .accessibility_label("Development mode is on. Open Settings")
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.select_tab(NavTab::Settings, cx);
+                    }))
+            }))
     }
 
     /// The shell is the window's root, so it alone sizes top-level panes from the

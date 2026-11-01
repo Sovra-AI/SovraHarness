@@ -106,6 +106,16 @@ pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App
         .font_weight(FontWeight::MEDIUM)
 }
 
+/// Title-bar controls fit the native chrome even at 200% interface size.
+/// Caption typography preserves room for both the label and keyboard focus.
+pub fn title_button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
+    button(id, label, cx)
+        .min_h_0()
+        .h_full()
+        .sovra_text(TextRole::Caption, cx)
+        .line_height(relative(1.0))
+}
+
 /// Brand gradient and neutral elevation, keeping GPUI's focus and input handling.
 pub fn primary_button(
     id: impl Into<ElementId>,

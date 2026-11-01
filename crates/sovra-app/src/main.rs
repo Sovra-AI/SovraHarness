@@ -19,6 +19,18 @@ fn main() -> anyhow::Result<()> {
 
     let dirs = directories::ProjectDirs::from("com", "Sovra", "SovraHarness")
         .context("could not resolve the user's home directory")?;
+    let development_directory = dirs.data_local_dir().join("development-control");
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--development-mcp")
+    {
+        return sovra_runtime::run_development_mcp(development_directory)
+            .context("development MCP server failed");
+    }
+    let development = sovra_runtime::DevelopmentConfig {
+        directory: development_directory,
+        executable: std::env::current_exe().context("could not resolve Sovra executable")?,
+    };
     let _log_guard = logging::init(&dirs.data_local_dir().join("logs"))?;
     tracing::info!(version = VERSION, "starting SovraHarness");
 
@@ -83,6 +95,7 @@ fn main() -> anyhow::Result<()> {
             },
             signin: read_google_signin_config(),
             google: Some(Arc::new(google)),
+            development: Some(development),
         },
     )
     .context("failed to start the runtime")?;

@@ -52,16 +52,36 @@ pub(crate) fn settings_section(
         .child(caption(description, cx))
 }
 
+fn settings_page(content: gpui_kit::AnyElement, cx: &App) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex()
+        .id("sovra-settings-view")
+        .test_support()
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .p(t.space.large)
+        .child(
+            v_flex()
+                .id("settings-sections")
+                .test_support()
+                .w_full()
+                .flex_1()
+                .min_h_0()
+                .items_center()
+                .overflow_y_scroll()
+                .child(content),
+        )
+}
+
 impl ModelsView {
     pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let mut page = v_flex()
-            .id("sovra-settings-view")
-            .test_support()
-            .size_full()
+            .w_full()
+            .max_w(t.layout.reading_width)
             .min_w_0()
-            .min_h_0()
-            .p(t.space.large)
+            .flex_shrink_0()
             .gap(t.space.large)
             .child(
                 h_flex()
@@ -88,50 +108,62 @@ impl ModelsView {
             page = page.child(caption(notice.clone(), cx));
         }
         if self.connections.qr_modal_open {
-            return page
-                .child(self.render_whatsapp_qr_modal(&self.connections, cx))
-                .into_any_element();
+            return settings_page(
+                page.child(self.render_whatsapp_qr_modal(&self.connections, cx))
+                    .into_any_element(),
+                cx,
+            )
+            .into_any_element();
         }
         if self.connections.qr_modal_open {
-            return page
-                .child(self.render_whatsapp_qr_modal(&self.connections, cx))
-                .into_any_element();
+            return settings_page(
+                page.child(self.render_whatsapp_qr_modal(&self.connections, cx))
+                    .into_any_element(),
+                cx,
+            )
+            .into_any_element();
         }
         if self.manual_form.is_some() {
-            return page.child(self.render_manual_form(cx)).into_any_element();
+            return settings_page(
+                page.child(self.render_manual_form(cx)).into_any_element(),
+                cx,
+            )
+            .into_any_element();
         }
         if let Some(form) = &self.connection_form {
             if form.original.kind == ProviderKind::OpenRouter {
-                return page
-                    .child(self.render_key_form(form, cx))
-                    .into_any_element();
-            }
-            return page
-                .child(self.render_connection_form(cx))
+                return settings_page(
+                    page.child(self.render_key_form(form, cx))
+                        .into_any_element(),
+                    cx,
+                )
                 .into_any_element();
+            }
+            return settings_page(
+                page.child(self.render_connection_form(cx))
+                    .into_any_element(),
+                cx,
+            )
+            .into_any_element();
         }
 
-        page.child(
-            v_flex()
-                .id("settings-sections")
-                .test_support()
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .child(
-                    v_flex()
-                        .w_full()
-                        .max_w(t.layout.reading_width)
-                        .gap(t.space.small)
-                        .child(Self::render_appearance_section(cx))
-                        .child(self.render_ai_connection_section(cx))
-                        .child(self.render_connections_section(cx))
-                        .child(self.render_telegram_section(cx))
-                        .child(self.render_other_connections_section(cx))
-                        .children(self.render_google_section(cx))
-                        .child(self.render_always_context_section(cx))
-                        .child(self.render_agent_behavior_section(cx)),
-                ),
+        settings_page(
+            page.child(
+                v_flex()
+                    .w_full()
+                    .gap(t.space.small)
+                    .child(Self::render_appearance_section(cx))
+                    .child(self.render_ai_connection_section(cx))
+                    .child(self.render_connections_section(cx))
+                    .child(self.render_telegram_section(cx))
+                    .child(self.render_development_section(cx))
+                    .child(self.render_other_connections_section(cx))
+                    .children(self.render_google_section(cx))
+                    .child(self.render_always_context_section(cx))
+                    .child(self.render_agent_behavior_section(cx)),
+            )
+            .into_any_element(),
+            cx,
         )
         .into_any_element()
     }

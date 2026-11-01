@@ -1,5 +1,7 @@
 //! Check the design contract where failures affect readability or real UI behaviour.
 
+#[path = "styling/development.rs"]
+mod development;
 #[path = "styling/memory_citations.rs"]
 mod memory_citations;
 

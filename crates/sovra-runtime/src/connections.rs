@@ -850,6 +850,7 @@ impl Actor {
             | Event::Teams(_)
             | Event::Artifacts(_)
             | Event::Connections(_)
+            | Event::Development(_)
             | Event::Google(_)
             | Event::ChatHistoryLoaded { .. }
             | Event::Ready { .. }

@@ -60,6 +60,11 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
         "sovra-runtime",
         "async lives in sovra-runtime; the UI talks to it over channels",
     ),
+    (
+        "rmcp",
+        "sovra-runtime",
+        "incoming MCP sessions own async IO and cancellation in the runtime",
+    ),
     ("gpui-kit", "sovra-ui", "GPUI is confined to sovra-ui"),
     (
         "whatsapp-rust",

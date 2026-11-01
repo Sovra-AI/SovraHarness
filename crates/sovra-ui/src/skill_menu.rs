@@ -484,18 +484,30 @@ mod tests {
             assert!(window.find("skills-how-it-works").visible());
             assert!(window.find("skill-category-filters").visible());
 
+            let web_search = shell
+                .read(cx)
+                .skills
+                .search_all("")
+                .iter()
+                .position(|skill| skill.name == "web-search")
+                .expect("the built-in catalogue includes web search");
+
             // Filter by Web search category
             window.click("skill-filter-research", cx);
             window.render_frame(cx);
-            assert!(window.find(("skill-card", 13usize)).visible());
+            assert!(window.find(("skill-card", web_search)).visible());
 
             // Expand "How it works" instructions on the web-search card
-            window.click(("skill-details", 13usize), cx);
+            window.click(("skill-details", web_search), cx);
             window.render_frame(cx);
-            assert!(window.find(("skill-instructions-box", 13usize)).visible());
+            assert!(
+                window
+                    .find(("skill-instructions-box", web_search))
+                    .visible()
+            );
 
             // Click "Try example" on web-search -> switches to Chat and fills the full example question
-            window.click(("skill-try-example", 13usize), cx);
+            window.click(("skill-try-example", web_search), cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
             assert_eq!(
@@ -506,7 +518,7 @@ mod tests {
             // Return to Skills, filter by Web search, and click "Try in chat" -> fills `/web-search `
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
             window.render_frame(cx);
-            window.click(("skill-use", 13usize), cx);
+            window.click(("skill-use", web_search), cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
             assert_eq!(

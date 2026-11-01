@@ -8,6 +8,8 @@ mod artifacts;
 mod auth;
 mod chat_history;
 mod connections;
+mod development;
+pub use development::{DevelopmentConfig, run_development_mcp};
 mod file_index;
 mod files;
 mod google;
@@ -45,6 +47,8 @@ pub enum Error {
     Start(#[source] std::io::Error),
     #[error("the runtime has stopped")]
     Stopped,
+    #[error("development MCP failed: {0}")]
+    Development(String),
 }
 
 /// The UI's handle to the runtime. Cheap to clone.
@@ -239,8 +243,8 @@ pub fn start_with_messaging(
     )
 }
 
-/// Starts with Google Sign-In configured by the composition root. The latest,
-/// fullest entry point; the shorter `start_with_*` helpers delegate here.
+/// Starts with Google Sign-In configured by the composition root, without development
+/// control. The native app adds its explicit configuration through `start_with_services`.
 #[expect(
     clippy::too_many_arguments,
     reason = "the composition root hands over every adapter in one call"
@@ -268,6 +272,7 @@ pub fn start_with_auth(
             messaging,
             signin: google,
             google: None,
+            development: None,
         },
     )
 }
@@ -285,6 +290,8 @@ pub struct RuntimeServices {
     pub signin: Option<sovra_providers::GoogleOAuthConfig>,
     /// The person's Google account (Connections page and agent tools).
     pub google: Option<Arc<dyn sovra_core::google::GoogleConnector>>,
+    /// Local development control is off unless explicitly enabled in Settings.
+    pub development: Option<DevelopmentConfig>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -370,6 +377,7 @@ async fn serve(
         messaging,
         signin,
         google,
+        development,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
@@ -471,6 +479,8 @@ async fn serve(
     if memory.is_some() {
         chat_history.load();
     }
+    let development = development
+        .map(|config| development::DevelopmentRuntime::start(config, events.clone(), &handle));
     google.send(sovra_core::google::GoogleCommand::Load);
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");
@@ -608,6 +618,11 @@ async fn serve(
             Command::Teams(command) => team.handle(&handle, command),
             Command::Artifacts(command) => artifact_library.handle(&handle, command),
             Command::Connections(command) => connections.handle(command),
+            Command::Development(command) => {
+                if let Some(worker) = &development {
+                    worker.send(command);
+                }
+            }
             Command::Files(command) => {
                 if let Some(jobs) = &file_jobs {
                     jobs.send(command);
@@ -882,6 +897,9 @@ async fn serve(
     memory_review.stop().await;
     memory_semantic.stop().await;
     chat_history.stop().await;
+    if let Some(worker) = development {
+        worker.stop().await;
+    }
     auth.stop().await;
     tracing::info!("runtime stopped");
 }
@@ -964,6 +982,7 @@ fn tap_agent_events(
                 | Event::Teams(_)
                 | Event::Artifacts(_)
                 | Event::Connections(_)
+                | Event::Development(_)
                 | Event::Google(_)
                 | Event::AgUi { .. }
                 | Event::FilePrepared(_)

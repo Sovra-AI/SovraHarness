@@ -19,7 +19,7 @@ pub use responsive::{
 };
 pub use styles::{
     SovraStyled, Surface, TextRole, button, markdown_style, page_header, primary_button,
-    round_icon_button,
+    round_icon_button, title_button,
 };
 pub use tokens::{
     AccentTokens, ChatTokens, LayoutTokens, MotionTokens, RadiusTokens, SovraTokens, SpaceTokens,

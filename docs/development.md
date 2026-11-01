@@ -161,3 +161,10 @@ Checked online on 2026-10-23 and against the pinned CLI source:
 
 This repository's restart-based approach is an implementation decision based on
 the current Rust/GPUI architecture, not a claim that GPUI requires Watchexec.
+
+## Autonomous native app testing
+
+Use the opt-in [Development MCP server](development-mcp.md) to attach Codex, Claude
+Code, or another MCP client to the running app. Its Settings switch, explicit
+top-bar indicator, and authenticated local transport are separate from the
+`SOVRA_DEV` credential exception. Agent verification rules are in `AGENTS.md`.

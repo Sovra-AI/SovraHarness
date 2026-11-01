@@ -12,6 +12,7 @@ mod chat_view;
 mod composer;
 mod connections_view;
 pub mod design;
+mod development_view;
 mod file_index_view;
 mod google_card;
 mod inspector;

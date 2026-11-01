@@ -12,6 +12,7 @@ use crate::routing_tree::{DecisionBackend, RouteEvaluation, SelectionMode};
 /// A request from the UI to the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    Development(crate::development::DevelopmentCommand),
     Auth(crate::auth::AuthCommand),
     Memory(crate::MemoryCommand),
     Models(crate::models::ModelCommand),
@@ -82,6 +83,7 @@ pub enum Command {
 /// A notification from the runtime to the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
+    Development(crate::development::DevelopmentEvent),
     Auth(crate::auth::AuthEvent),
     Memory(crate::MemoryEvent),
     Models(crate::models::ModelEvent),
@@ -166,7 +168,8 @@ impl Event {
             | Self::AgentError { session_id, .. }
             | Self::ChatTitleGenerated { session_id, .. } => Some(session_id),
             Self::FilePrepared(prepared) => Some(&prepared.session_id),
-            Self::Auth(_)
+            Self::Development(_)
+            | Self::Auth(_)
             | Self::Memory(_)
             | Self::Models(_)
             | Self::FileIndex(_)

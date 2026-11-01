@@ -13,6 +13,19 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Development mode:** An opt-in Settings switch and explicit top-bar indicator
+  let Codex, Claude Code, and other local MCP clients inspect, click, type, press
+  keys, scroll, and capture the running native app. It starts off and remembers
+  the chosen setting across restarts. The authenticated stdio bridge survives
+  normal app reloads; switching off revokes access. Includes bounded requests,
+  credential rotation, stale-control rejection, Skills registration, and the
+  required agent testing workflow. A second app cannot overwrite the active
+  instance's saved preference when its activation fails. See the
+  [connection instructions](docs/development-mcp.md).
+  Settings scrolls its header with its controls so the off switch remains reachable
+  at the minimum window size and 200% text size. The indicator shares the
+  existing native title bar and remains visible with window-manager decorations.
+
 - **Live folder reading view:** while a folder is read, Knowledge shows "Finding your
   files…" then a determinate bar with "1,204 of 5,000 files read", a smoothed and rounded
   time estimate, the file being read now, **What I've found so far** chips and **Your files

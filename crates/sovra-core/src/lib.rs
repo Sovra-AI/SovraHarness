@@ -13,6 +13,7 @@ mod citations;
 pub mod connections;
 mod context_budget;
 mod conversation_context;
+pub mod development;
 pub mod file_index;
 pub mod files;
 pub mod google;

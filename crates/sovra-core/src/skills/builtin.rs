@@ -29,6 +29,7 @@ impl Skill {
             "knowledge" => "See what Sovra remembers",
             "schedules" => "Saved tasks & daily briefings",
             "agents" => "How Sovra picks the best helper",
+            "development" => "Test Sovra while developing",
             "settings" => "Appearance, text size & settings",
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
@@ -119,6 +120,10 @@ impl Skill {
             "agents" => (
                 "Opens My AI's to see how Sovra chooses helpers for each task.".to_owned(),
                 "/agents ".to_owned(),
+            ),
+            "development" => (
+                "Open Settings to let a coding assistant test Sovra while you improve it.".to_owned(),
+                "/development ".to_owned(),
             ),
             "settings" => (
                 "Opens Settings for light/dark mode, text size, and personal instructions."
@@ -336,6 +341,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "View specialist agents and model routing.",
             SkillAction::Agents,
             &["my-ais"],
+        ),
+        action(
+            "development",
+            "Test Sovra while developing",
+            "Let a coding assistant use Sovra and check that new features work.",
+            SkillAction::Settings,
+            &["dev-mode"],
         ),
         action(
             "settings",

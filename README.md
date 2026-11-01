@@ -24,6 +24,14 @@ cargo xtask dev
 On Linux, install system packages once first with `./scripts/install-linux-deps.sh`.
 That's it — no Node, no Python, no system packages on macOS/Windows.
 
+## Test with Codex or Claude Code
+
+Enable **Settings → Development mode**. The top bar explicitly shows when local
+automation is enabled. Add the command copied from Settings as a **stdio MCP**
+server in your coding assistant. It can inspect and operate native controls and
+capture screenshots; switching off revokes access. The existing development
+watcher keeps running. See [connection instructions and testing workflow](docs/development-mcp.md).
+
 ## Everyday commands
 
 ### Skills in chat

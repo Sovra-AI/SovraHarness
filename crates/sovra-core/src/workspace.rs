@@ -287,6 +287,7 @@ pub struct WorkspaceState {
     pub google: crate::google::GoogleConnection,
     /// The composer sends prompts to the whole team instead of Sovra alone.
     pub team_mode: bool,
+    pub development: crate::development::DevelopmentState,
     /// AG-UI `subagentRunId` → the member it belongs to, for attributing messages.
     team_subagents: std::collections::BTreeMap<String, crate::agui::Speaker>,
     active_model_problem: Option<String>,
@@ -346,6 +347,7 @@ impl Default for WorkspaceState {
             connections: crate::connections::ConnectionsState::default(),
             google: crate::google::GoogleConnection::default(),
             team_mode: false,
+            development: crate::development::DevelopmentState::default(),
             team_subagents: std::collections::BTreeMap::new(),
             active_model_problem: None,
             prompt_awaiting_setup: None,
@@ -957,6 +959,10 @@ impl WorkspaceState {
     pub fn apply_event(&mut self, event: &Event) -> Option<String> {
         self.runtime_status.apply(event);
         match event {
+            Event::Development(event) => {
+                self.development.apply(event);
+                None
+            }
             Event::Auth(auth_event) => {
                 self.apply_auth(auth_event);
                 None

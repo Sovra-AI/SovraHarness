@@ -114,6 +114,7 @@ pub struct ModelsView {
     pub(crate) compare_open: bool,
     pub(crate) connections: sovra_core::connections::ConnectionsState,
     pub(crate) whatsapp_form: crate::connections_view::WhatsAppForm,
+    pub(crate) development: sovra_core::development::DevelopmentState,
     /// Settings → Connections; set by the shell, which owns the Google state.
     pub(crate) google_card: Option<Entity<crate::google_card::GoogleCard>>,
     scroll: UniformListScrollHandle,
@@ -265,6 +266,7 @@ impl ModelsView {
             compare_open: false,
             connections: sovra_core::connections::ConnectionsState::default(),
             whatsapp_form,
+            development: sovra_core::development::DevelopmentState::default(),
             google_card: None,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
