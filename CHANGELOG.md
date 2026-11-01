@@ -694,6 +694,11 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- Conversation identities stay distinct across app restarts, including chats
+  outside the loaded history page and retained deleted conversations. New chats
+  can no longer overwrite an earlier transcript or inherit its pending actions.
+  Each launch opens a fresh draft; previous conversations remain in the sidebar.
+
 - Folder document readers retain their owning runtime handle when registering
   cancellation from parallel reader threads. This fixes the missing-runtime panic
   that prevented documents from being indexed. Refresh previously failed folders

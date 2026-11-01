@@ -10896,6 +10896,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "directories",
+ "getrandom 0.4.3",
  "serde_json",
  "sovra-core",
  "sovra-files",

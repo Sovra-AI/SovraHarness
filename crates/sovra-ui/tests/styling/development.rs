@@ -26,7 +26,7 @@ fn development_badge_and_toggle_work_at_minimum_wide_and_double_size(cx: &mut Te
                 design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
             });
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-                Root::new(cx.new(|cx| Shell::new(window, cx)), window, cx)
+                Root::new(cx.new(|cx| Shell::new(0, window, cx)), window, cx)
             });
             events
                 .send_blocking(Event::Development(DevelopmentEvent::State(

@@ -269,7 +269,7 @@ mod tests {
         for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
             let mut shell = None;
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-                let view = cx.new(|cx| Shell::new(window, cx));
+                let view = cx.new(|cx| Shell::new(0, window, cx));
                 shell = Some(view.clone());
                 Root::new(view, window, cx)
             });

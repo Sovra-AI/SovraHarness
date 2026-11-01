@@ -121,7 +121,7 @@ fn appearance_lives_in_settings_at_minimum_and_default_window_sizes(cx: &mut Tes
     cx.update(|cx| sovra_ui::init(client, cx));
     for dimensions in [size(px(640.), px(420.)), size(px(1100.), px(720.))] {
         let window = cx.open_window(dimensions, |window, cx| {
-            let shell = cx.new(|cx| Shell::new(window, cx));
+            let shell = cx.new(|cx| Shell::new(0, window, cx));
             Root::new(shell, window, cx)
         });
         cx.update_window(window.into(), |_, window, cx| {
@@ -192,7 +192,7 @@ fn routing_choices_are_keyboard_operable(cx: &mut TestAppContext) {
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell_entity = None;
     let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         shell_entity = Some(shell.clone());
         Root::new(shell, window, cx)
     });
@@ -226,7 +226,7 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
     cx.update(|cx| sovra_ui::init(client, cx));
     let dimensions = size(px(640.), px(420.));
     let window = cx.open_window(dimensions, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
@@ -281,7 +281,7 @@ fn login_controls_stay_inside_the_minimum_window(cx: &mut TestAppContext) {
     cx.update(|cx| sovra_ui::init(client, cx));
     let dimensions = size(px(640.), px(420.));
     let window = cx.open_window(dimensions, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
@@ -309,7 +309,7 @@ fn interface_scale_resizes_the_layout_and_survives_theme_changes(cx: &mut TestAp
     let (client, _commands, _events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
@@ -351,7 +351,7 @@ fn wide_windows_keep_a_centred_readable_column(cx: &mut TestAppContext) {
     cx.update(|cx| sovra_ui::init(client, cx));
     let dimensions = size(px(2560.), px(1440.));
     let window = cx.open_window(dimensions, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
@@ -380,7 +380,7 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
     cx.update(|cx| sovra_ui::init(client, cx));
     let dimensions = size(px(1280.), px(820.));
     let window = cx.open_window(dimensions, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {

@@ -11,7 +11,7 @@ use sovra_ui::Shell;
 fn open_shell(cx: &mut TestAppContext, client: Client) -> gpui_kit::WindowHandle<Root> {
     cx.update(|cx| sovra_ui::init(client, cx));
     cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        Root::new(cx.new(|cx| Shell::new(window, cx)), window, cx)
+        Root::new(cx.new(|cx| Shell::new(0, window, cx)), window, cx)
     })
 }
 

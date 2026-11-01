@@ -359,6 +359,63 @@ fn evidence(request: &Request) -> Option<Value> {
 }
 
 #[test]
+fn fresh_workspaces_preserve_transcripts_and_memory_sources_across_restarts() {
+    let fixture = Fixture::new();
+    let mut sessions = Vec::new();
+    for (namespace, prompt, expected_facts) in [(11, SOURCE, 1), (22, COLLEAGUE, 2)] {
+        let mut driver = fixture.start();
+        let mut workspace = sovra_core::WorkspaceState::new(namespace);
+        let history = driver.wait(|event| matches!(event, Event::ChatHistoryLoaded { .. }));
+        workspace.apply_event(&history);
+        assert_eq!(workspace.messages, Vec::<ChatMessage>::new());
+        assert!(!sessions.contains(&workspace.session_id));
+        workspace.submit_prompt(prompt);
+        driver.prompt(
+            &workspace.session_id,
+            prompt,
+            ConversationContext::default(),
+        );
+        assert_eq!(
+            driver.processed(&workspace.session_id).fact_ids.len(),
+            expected_facts
+        );
+        driver.send(Command::SaveChatThread {
+            thread: Box::new(workspace.active_thread().unwrap().clone()),
+        });
+        sessions.push(workspace.session_id);
+        driver.close();
+    }
+    let mut driver = fixture.start();
+    let Event::ChatHistoryLoaded { threads } =
+        driver.wait(|event| matches!(event, Event::ChatHistoryLoaded { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(threads.len(), 2);
+    for (session, prompt) in sessions.iter().zip([SOURCE, COLLEAGUE]) {
+        let thread = threads.iter().find(|thread| &thread.id == session).unwrap();
+        assert_eq!(thread.messages.len(), 1);
+        assert_eq!(thread.messages[0].text, prompt);
+    }
+    let facts = driver.facts(false);
+    assert_eq!(facts.len(), 3);
+    for fact in facts {
+        let MemoryReviewResult::Detail(detail) = driver.review(MemoryAction::Inspect(fact.id))
+        else {
+            unreachable!()
+        };
+        let source = detail.source.unwrap();
+        let (expected, _) = sessions
+            .iter()
+            .zip([SOURCE, COLLEAGUE])
+            .find(|(_, prompt)| source.content == *prompt)
+            .expect("a memory retains one of the original user messages");
+        assert_eq!(&source.session_id, expected);
+    }
+    driver.close();
+}
+
+#[test]
 fn real_disk_memory_lifecycle_reaches_provider_and_survives_runtime_restart() {
     let fixture = Fixture::new();
     let mut driver = fixture.start();

@@ -165,7 +165,7 @@ fn main() -> gpui_kit::Result<()> {
             });
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
                 let view = cx.new(|cx| {
-                    let mut shell = sovra_ui::Shell::new(window, cx);
+                    let mut shell = sovra_ui::Shell::new(0, window, cx);
                     shell.select_tab(NavTab::Knowledge, cx);
                     shell
                 });

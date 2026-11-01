@@ -227,6 +227,10 @@ favorites and comparison; filters stay closed until needed. Setup, authenticatio
 
 A single **Unified Left Sidebar** (`sidebar.rs` + `chat_history_view.rs`) houses **New chat** at the top, primary navigation (`Chat`, `My AI's`, `Knowledge`, `Models`, `Schedules`, `Settings`), a **Take a tour** launcher, instant chat search, `Chats | Scheduled` filter pills, and date-grouped conversation history (`Pinned`, `Today`, `Yesterday`, `Previous 7 Days`, `Previous 30 Days`, `Older`). After the first exchange in any conversation, the active LLM automatically generates a concise 3–6 word title (`Command::GenerateChatTitle` / `Event::ChatTitleGenerated`), and the selected row exposes named icon actions for generating a title, pinning, renaming, and deleting.
 
+Each app launch starts with a fresh draft. Open an earlier conversation from the
+sidebar to continue it. New conversations keep distinct identities across restarts,
+including when older conversations are outside the loaded history page.
+
 The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
 - **Automatic:** a fast decision engine (**Laya**, **OpenJev / TypeSafe Jev**,
   or the **Embedded Rust Heuristic**, with offline fail-open and auditable

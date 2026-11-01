@@ -58,7 +58,7 @@ fn inspect_click_and_keyboard_drive_real_controls_and_reject_stale_requests(
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });

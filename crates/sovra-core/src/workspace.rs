@@ -295,14 +295,17 @@ pub struct WorkspaceState {
     /// automatically once a model is ready, so nobody has to type it twice.
     prompt_awaiting_setup: Option<(String, String)>,
     next_msg_seq: u64,
+    session_namespace: u128,
     next_thread_seq: u64,
 }
 
-impl Default for WorkspaceState {
-    fn default() -> Self {
+impl WorkspaceState {
+    /// Starts a workspace with a fresh, externally supplied namespace. The app
+    /// supplies OS randomness so even chats absent from loaded history stay distinct.
+    pub fn new(session_namespace: u128) -> Self {
         let routing = RoutingConfig::default();
         let specialists = default_sovra_srx_agents();
-        let initial_id = "personal-ai-setup".to_owned();
+        let initial_id = format!("chat-{session_namespace:032x}-0");
         let initial_thread = ChatThread::new(initial_id.clone(), Timestamp(0));
         Self {
             runtime_status: RuntimeStatus::default(),
@@ -352,7 +355,8 @@ impl Default for WorkspaceState {
             active_model_problem: None,
             prompt_awaiting_setup: None,
             next_msg_seq: 0,
-            next_thread_seq: 1,
+            session_namespace,
+            next_thread_seq: 0,
         }
     }
 }
@@ -529,14 +533,13 @@ impl WorkspaceState {
             self.is_generating = false;
             return draft;
         }
-        self.next_thread_seq += 1;
         self.next_msg_seq += 1;
         #[allow(
             clippy::cast_possible_wrap,
             reason = "sequence counters are small positive integers"
         )]
         let ts = Timestamp(self.next_msg_seq as i64);
-        let new_id = format!("chat-session-{}", self.next_thread_seq);
+        let new_id = self.fresh_thread_id();
         let thread = ChatThread::new(new_id.clone(), ts);
         self.threads.push(thread.clone());
         self.session_id = new_id;
@@ -701,8 +704,7 @@ impl WorkspaceState {
                 self.queued_prompts.clear();
                 self.is_generating = false;
             } else {
-                self.next_thread_seq += 1;
-                let new_id = format!("chat-session-{}", self.next_thread_seq);
+                let new_id = self.fresh_thread_id();
                 let fresh = ChatThread::new(new_id.clone(), deleted_at);
                 self.threads.push(fresh);
                 self.session_id = new_id;
@@ -712,6 +714,22 @@ impl WorkspaceState {
             }
         }
         true
+    }
+
+    fn fresh_thread_id(&mut self) -> String {
+        loop {
+            self.next_thread_seq = self
+                .next_thread_seq
+                .checked_add(1)
+                .expect("a workspace cannot create 2^64 conversations");
+            let id = format!(
+                "chat-{:032x}-{}",
+                self.session_namespace, self.next_thread_seq
+            );
+            if !self.threads.iter().any(|thread| thread.id == id) {
+                return id;
+            }
+        }
     }
 
     /// Creates a new automation schedule and appends it to `self.schedules`.
@@ -1373,7 +1391,7 @@ mod tests {
 
     #[test]
     fn response_model_is_pinned_to_each_reply_and_saved_with_history() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let session_id = state.session_id.clone();
         let first = crate::ResponseModel {
             model_id: "provider/first".into(),
@@ -1418,7 +1436,7 @@ mod tests {
 
     #[test]
     fn reasoning_folds_into_the_reply_and_history_syncs_once_per_turn() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let session_id = state.session_id.clone();
         state.submit_prompt("Why?");
         for (text, elapsed_ms) in [("Let me ", 400), ("check.", 1_900)] {
@@ -1453,9 +1471,8 @@ mod tests {
     fn replies_in_a_restored_conversation_never_reuse_message_ids() {
         // A fresh app session restarts the id counter; restored messages already
         // used low ids, and a reused id made the UI overwrite an old reply's text.
-        // Every launch starts in the same session id, so history restores straight
-        // into the current conversation (not via `select_thread`).
-        let mut state = WorkspaceState::default();
+        // Exercise a restored active conversation before receiving more chunks.
+        let mut state = WorkspaceState::new(0);
         let session = state.session_id.clone();
         let mut thread = ChatThread::new(session.clone(), Timestamp(1));
         thread
@@ -1499,7 +1516,7 @@ mod tests {
 
     #[test]
     fn stopping_mid_answer_keeps_the_partial_reply_in_history() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let session_id = state.session_id.clone();
         state.submit_prompt("Long answer please");
         state.apply_event(&Event::AgentChunk {
@@ -1512,7 +1529,7 @@ mod tests {
 
     #[test]
     fn surface_revisions_update_in_place_and_ignore_other_sessions() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         state.submit_prompt("Report");
         let event = |session_id: String, version| Event::AgUiSurface {
             session_id,
@@ -1541,7 +1558,7 @@ mod tests {
 
     #[test]
     fn new_workspace_has_no_demo_conversation_or_activity() {
-        let state = WorkspaceState::default();
+        let state = WorkspaceState::new(0);
         assert_eq!(state.messages, Vec::<ChatMessage>::new());
         assert_eq!(state.queued_prompts, Vec::<String>::new());
         assert!(!state.is_generating);
@@ -1551,7 +1568,7 @@ mod tests {
 
     #[test]
     fn login_and_logout_switch_routes() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         state.logout();
         assert_eq!(state.route, ScreenRoute::Login);
         let session = crate::auth::AuthSession {
@@ -1575,7 +1592,7 @@ mod tests {
 
     #[test]
     fn startup_without_an_auth_report_keeps_the_workspace_route() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         assert_eq!(state.route, ScreenRoute::MainWorkspace);
         state.apply_auth(&crate::auth::AuthEvent::Loaded {
             session: None,
@@ -1591,7 +1608,7 @@ mod tests {
 
     #[test]
     fn queues_prompts_while_generating_and_flushes_on_complete() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let first = state.submit_prompt("First prompt");
         assert_eq!(first.as_deref(), Some("First prompt"));
         assert!(state.is_generating);
@@ -1610,7 +1627,7 @@ mod tests {
 
     #[test]
     fn preview_ai_completes_deployment_and_checklist() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         state.reset_build_progress();
         assert!(state.ai_building);
         state.activate_preview_ai();
@@ -1619,7 +1636,7 @@ mod tests {
     }
     #[test]
     fn stream_chunks_preserve_exact_markdown_and_unicode() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         state.submit_prompt("Explain this");
         for text in [
             "## He",
@@ -1641,7 +1658,7 @@ mod tests {
     }
     #[test]
     fn stopping_clears_queued_turns_and_keeps_partial_reply() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         state.submit_prompt("First");
         state.submit_prompt("Queued");
         state.apply_event(&Event::AgentChunk {
@@ -1661,8 +1678,87 @@ mod tests {
     }
 
     #[test]
+    fn new_chats_preserve_restored_conversations_after_restart() {
+        let mut state = WorkspaceState::new(0);
+        state.submit_prompt("A different conversation");
+        let mut saved = ChatThread::new("chat-session-2", Timestamp(1));
+        saved.messages.push(ChatMessage::user(
+            "msg-user-1",
+            "My name is Shaun",
+            "Earlier",
+        ));
+        state.apply_event(&Event::ChatHistoryLoaded {
+            threads: vec![saved.clone()],
+        });
+        let fresh = state.start_new_chat();
+        assert_ne!(fresh.id, saved.id, "a fresh chat must not reuse a saved id");
+        state.submit_prompt("Please remember my preferred answer format");
+        assert_eq!(
+            state.threads.iter().find(|thread| thread.id == saved.id),
+            Some(&saved),
+            "sending in the fresh chat must preserve the original transcript"
+        );
+    }
+
+    #[test]
+    fn launch_namespaces_keep_unloaded_and_deleted_conversations_distinct() {
+        let mut first = WorkspaceState::new(123);
+        let mut original_ids = std::collections::BTreeSet::new();
+        for _ in 0..60 {
+            original_ids.insert(first.session_id.clone());
+            first.submit_prompt("Remember this conversation");
+            first.start_new_chat();
+        }
+        original_ids.insert(first.session_id.clone());
+        let mut restarted = WorkspaceState::new(456);
+        assert!(!original_ids.contains(&restarted.session_id));
+        // A history page is incomplete: hidden/deleted and older chats still own
+        // their identities even when the UI never receives them.
+        restarted.apply_event(&Event::ChatHistoryLoaded {
+            threads: first.threads.iter().take(50).cloned().collect(),
+        });
+        let original = restarted.session_id.clone();
+        assert_eq!(
+            restarted.start_new_chat().id,
+            original,
+            "reuse the empty draft"
+        );
+        for _ in 0..65 {
+            restarted.submit_prompt("A new conversation after restarting");
+            let fresh = restarted.start_new_chat();
+            assert!(!original_ids.contains(&fresh.id));
+        }
+        // Removing every active thread creates another draft in this launch's
+        // namespace, without reviving a retained deleted thread.
+        let ids: Vec<_> = restarted
+            .threads
+            .iter()
+            .map(|thread| thread.id.clone())
+            .collect();
+        for id in &ids {
+            assert!(restarted.delete_thread(id));
+        }
+        assert!(!ids.contains(&restarted.session_id));
+        assert!(!original_ids.contains(&restarted.session_id));
+        assert!(restarted.active_thread().unwrap().is_untouched_draft());
+    }
+
+    #[test]
+    fn deleting_the_last_chat_does_not_reuse_a_retained_deleted_id() {
+        let mut state = WorkspaceState::new(0);
+        let original = state.session_id.clone();
+        let mut deleted = ChatThread::new("chat-session-2", Timestamp(1));
+        deleted.deleted_at = Some(Timestamp(2));
+        state.threads.push(deleted.clone());
+        assert!(state.delete_thread(&original));
+        assert_ne!(state.session_id, original);
+        assert_ne!(state.session_id, deleted.id);
+        assert!(state.active_thread().unwrap().is_untouched_draft());
+    }
+
+    #[test]
     fn manages_multiple_chat_threads_and_scheduled_runs() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let first_id = state.session_id.clone();
         state.submit_prompt("Analyze Nvidia Q3 earnings");
         state.apply_event(&Event::AgentChunk {
@@ -1708,7 +1804,7 @@ mod tests {
 
     #[test]
     fn tour_lifecycle_navigates_across_all_five_tabs_and_completes() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         assert_eq!(state.tour_step, None);
         assert!(!state.onboarding_completed);
 
@@ -1739,7 +1835,7 @@ mod tests {
 
     #[test]
     fn a_message_sent_before_setup_is_sent_once_a_model_is_chosen() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let mut router =
             crate::models::ModelConnection::new("router", crate::models::ProviderKind::OpenRouter);
         router.has_credential = true;
@@ -1776,7 +1872,7 @@ mod tests {
 
     #[test]
     fn a_chosen_model_the_runtime_cannot_run_is_not_ready() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let mut router =
             crate::models::ModelConnection::new("router", crate::models::ProviderKind::OpenRouter);
         router.has_credential = true;
@@ -1815,7 +1911,7 @@ mod tests {
 
     #[test]
     fn prompt_with_connected_key_only_shows_model_selection_setup_card() {
-        let mut state = WorkspaceState::default();
+        let mut state = WorkspaceState::new(0);
         let mut router =
             crate::models::ModelConnection::new("router", crate::models::ProviderKind::OpenRouter);
         router.has_credential = true;

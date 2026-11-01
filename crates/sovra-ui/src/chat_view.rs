@@ -1285,7 +1285,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1315,7 +1315,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1406,7 +1406,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1476,7 +1476,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let (_, cx) = cx.add_window_view(|window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1535,7 +1535,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1577,7 +1577,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1633,7 +1633,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1704,7 +1704,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(640.), px(420.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -1771,7 +1771,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(640.), px(420.)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });

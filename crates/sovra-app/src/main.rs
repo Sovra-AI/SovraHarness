@@ -36,6 +36,9 @@ fn main() -> anyhow::Result<()> {
     };
     let _log_guard = logging::init(&dirs.data_local_dir().join("logs"))?;
     tracing::info!(version = VERSION, "starting SovraHarness");
+    let mut session_namespace = [0_u8; 16];
+    getrandom::fill(&mut session_namespace)
+        .context("could not create unique conversation identities")?;
 
     let mut agent_config = AgentConfig::with_api_key(read_gemini_api_key());
     agent_config.searxng_base_url = read_searxng_base_url();
@@ -104,7 +107,7 @@ fn main() -> anyhow::Result<()> {
         },
     )
     .context("failed to start the runtime")?;
-    sovra_ui::run(client.clone());
+    sovra_ui::run(client.clone(), u128::from_be_bytes(session_namespace));
     client
         .shutdown_blocking()
         .context("runtime did not finish shutting down")?;

@@ -1508,7 +1508,7 @@ mod tests {
 
     #[test]
     fn a_tool_result_is_a_separate_reply_that_names_the_service() {
-        let mut workspace = crate::WorkspaceState::default();
+        let mut workspace = crate::WorkspaceState::new(0);
         let session_id = workspace.session_id.clone();
         let followed = workspace.apply_event(&crate::Event::Mcp(McpEvent::ToolResult {
             service_id: "svc-1".into(),

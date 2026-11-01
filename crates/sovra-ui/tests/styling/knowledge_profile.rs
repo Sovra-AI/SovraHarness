@@ -107,7 +107,7 @@ fn personal_knowledge_saves_retries_and_preserves_drafts_at_every_size(cx: &mut 
             });
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
                 let shell = cx.new(|cx| {
-                    let mut shell = Shell::new(window, cx);
+                    let mut shell = Shell::new(0, window, cx);
                     shell.select_tab(NavTab::Knowledge, cx);
                     shell
                 });

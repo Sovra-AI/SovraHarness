@@ -12,7 +12,7 @@ fn knowledge_opens_to_personal_details_and_keeps_files_and_help_reachable(cx: &m
     let (client, _commands, _events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
@@ -51,7 +51,7 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
         });
         let window = cx.open_window(size(px(width), px(height)), |window, cx| {
             let shell = cx.new(|cx| {
-                let mut shell = Shell::new(window, cx);
+                let mut shell = Shell::new(0, window, cx);
                 shell.select_tab(NavTab::Knowledge, cx);
                 shell
             });
@@ -123,7 +123,7 @@ fn memory_search_consent_discloses_destination_and_fits_each_layout(cx: &mut Tes
             });
             let mut shell = None;
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-                let view = cx.new(|cx| Shell::new(window, cx));
+                let view = cx.new(|cx| Shell::new(0, window, cx));
                 shell = Some(view.clone());
                 Root::new(view, window, cx)
             });
@@ -198,7 +198,7 @@ fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
     let mut shell_entity = None;
     // Tall enough that the whole example, including the times, is on screen.
     let window = cx.open_window(size(px(1280.), px(2400.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell_entity = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -293,7 +293,7 @@ fn semantic_folder_choice_discloses_the_destination_and_fits_each_layout(cx: &mu
         cx.update(|cx| sovra_ui::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
@@ -424,7 +424,7 @@ fn live_memory_status_and_service_disclosure_fit_all_layouts(cx: &mut TestAppCon
         cx.update(|cx| sovra_ui::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });

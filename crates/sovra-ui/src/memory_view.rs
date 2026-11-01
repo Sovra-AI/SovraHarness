@@ -718,7 +718,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
             let shell = cx.new(|cx| {
-                let mut shell = crate::Shell::new(window, cx);
+                let mut shell = crate::Shell::new(0, window, cx);
                 shell.select_tab(NavTab::Knowledge, cx);
                 shell.select_knowledge_section(
                     crate::knowledge_view::KnowledgeSection::Memories,
@@ -788,7 +788,7 @@ mod tests {
         cx.update(|cx| crate::init(client, cx));
         let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
             let shell = cx.new(|cx| {
-                let mut shell = crate::Shell::new(window, cx);
+                let mut shell = crate::Shell::new(0, window, cx);
                 shell.select_tab(NavTab::Knowledge, cx);
                 shell.select_knowledge_section(
                     crate::knowledge_view::KnowledgeSection::Memories,
@@ -858,7 +858,7 @@ mod tests {
             cx.update(|cx| crate::init(client, cx));
             let mut shell = None;
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-                let view = cx.new(|cx| crate::Shell::new(window, cx));
+                let view = cx.new(|cx| crate::Shell::new(0, window, cx));
                 shell = Some(view.clone());
                 Root::new(view, window, cx)
             });

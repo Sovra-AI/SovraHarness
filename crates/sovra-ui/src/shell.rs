@@ -94,7 +94,8 @@ impl std::fmt::Debug for Shell {
 }
 
 impl Shell {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// Each live workspace needs its own namespace, supplied by the composition root.
+    pub fn new(session_namespace: u128, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Root's native Tab bindings need an initial focus path before any input
         // has been clicked. The shell itself stays outside the tab order.
         let focus_handle = cx.focus_handle();
@@ -496,7 +497,7 @@ impl Shell {
             },
         );
         Self {
-            state: WorkspaceState::default(),
+            state: WorkspaceState::new(session_namespace),
             file_picker: None,
             next_attachment_id: 0,
             chat: ChatPresentation::new(cx),

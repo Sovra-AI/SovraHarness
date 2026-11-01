@@ -29,7 +29,7 @@ fn messaging_review_and_settings_work_at_minimum_wide_and_double_size(cx: &mut T
             });
             let mut shell = None;
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-                let view = cx.new(|cx| Shell::new(window, cx));
+                let view = cx.new(|cx| Shell::new(0, window, cx));
                 shell = Some(view.clone());
                 Root::new(view, window, cx)
             });

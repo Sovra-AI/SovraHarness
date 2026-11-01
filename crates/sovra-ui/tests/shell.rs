@@ -14,7 +14,7 @@ fn status_follows_runtime_events(cx: &mut TestAppContext) {
 
     let mut shell = None;
     let (_root, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -51,7 +51,7 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
 
     let mut shell_entity = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell_entity = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -129,7 +129,7 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
     // Stream an AG-UI surface and text chunk back from the runtime.
     events
         .send_blocking(Event::AgUiSurface {
-            session_id: "personal-ai-setup".into(),
+            session_id: sovra_core::WorkspaceState::new(0).session_id,
             widget: AgUiWidget::SurfaceCard {
                 surface_id: "personal-ai-summary".into(),
                 title: "AG-UI Surface · personal-ai-summary".into(),
@@ -139,13 +139,13 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
         .unwrap();
     events
         .send_blocking(Event::AgentChunk {
-            session_id: "personal-ai-setup".into(),
+            session_id: sovra_core::WorkspaceState::new(0).session_id,
             text: "Morning brief completed.".into(),
         })
         .unwrap();
     events
         .send_blocking(Event::AgentCompleted {
-            session_id: "personal-ai-setup".into(),
+            session_id: sovra_core::WorkspaceState::new(0).session_id,
         })
         .unwrap();
     cx.executor()
@@ -167,7 +167,7 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
 
     let mut shell_entity = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell_entity = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -234,12 +234,12 @@ fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut Tes
     let (client, commands, events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let window = cx.open_window(size(px(1000.), px(760.)), |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     events
         .send_blocking(Event::AgUiSurface {
-            session_id: "personal-ai-setup".into(),
+            session_id: sovra_core::WorkspaceState::new(0).session_id,
             widget: AgUiWidget::Components {
                 surface_id: "report".into(),
                 version: 3,
@@ -300,7 +300,7 @@ fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut Tes
     else {
         panic!("action must return to agent")
     };
-    assert_eq!(session_id, "personal-ai-setup");
+    assert_eq!(session_id, sovra_core::WorkspaceState::new(0).session_id);
     let action: serde_json::Value = serde_json::from_str(&prompt).unwrap();
     assert_eq!(action["surface_ref"]["id"], "report");
     assert_eq!(action["surface_ref"]["version"], 3);
@@ -313,7 +313,7 @@ fn composer_enter_sends_shift_enter_adds_line_and_stop_clears_queue(cx: &mut Tes
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -372,7 +372,7 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -485,7 +485,7 @@ fn interactive_system_tour_walks_through_all_five_tabs_and_state_aware_chat_setu
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -588,7 +588,7 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -647,13 +647,13 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
     // Simulate assistant response completing
     events
         .send_blocking(Event::AgentChunk {
-            session_id: "personal-ai-setup".into(),
+            session_id: sovra_core::WorkspaceState::new(0).session_id,
             text: "Here is how to build a zero-copy HTTP/3 frame parser in Rust.".into(),
         })
         .unwrap();
     events
         .send_blocking(Event::AgentCompleted {
-            session_id: "personal-ai-setup".into(),
+            session_id: sovra_core::WorkspaceState::new(0).session_id,
         })
         .unwrap();
     cx.executor()
@@ -666,7 +666,7 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
         sent.iter().any(|cmd| matches!(
             cmd,
             Command::GenerateChatTitle { session_id, prompt, reply }
-                if session_id == "personal-ai-setup"
+                if session_id == &sovra_core::WorkspaceState::new(0).session_id
                 && prompt.contains("zero-copy parser")
                 && reply.contains("HTTP/3 frame parser")
         )),
@@ -676,7 +676,7 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
     // Deliver the model-generated title and verify it updates the sidebar history row
     events
         .send_blocking(Event::ChatTitleGenerated {
-            session_id: "personal-ai-setup".into(),
+            session_id: sovra_core::WorkspaceState::new(0).session_id,
             title: "\"Rust Zero-Copy HTTP/3 Parser\"".into(),
         })
         .unwrap();
@@ -737,7 +737,7 @@ fn file_setup_flow(
         size(px(1280.), px(820.))
     };
     let window = cx.open_window(dimensions, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         entity = Some(shell.clone());
         Root::new(shell, window, cx)
     });
@@ -866,7 +866,7 @@ fn removed_upload_cannot_reappear_after_preparation_finishes(cx: &mut TestAppCon
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut entity = None;
     let window = cx.open_window(size(px(640.), px(420.)), |window, cx| {
-        let shell = cx.new(|cx| Shell::new(window, cx));
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
         entity = Some(shell.clone());
         Root::new(shell, window, cx)
     });
@@ -910,7 +910,7 @@ fn reopening_a_saved_chat_sends_bounded_role_preserving_context(cx: &mut TestApp
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -996,7 +996,7 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -1148,7 +1148,7 @@ fn telegram_bot_connects_with_a_token_and_shows_the_link_code(cx: &mut TestAppCo
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(2600.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         shell = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -1247,7 +1247,7 @@ fn no_in_app_title_bar_under_window_manager_decorations(cx: &mut TestAppContext)
     cx.update(|cx| sovra_ui::init(client, cx));
 
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(window, cx));
+        let view = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(view, window, cx)
     });
 

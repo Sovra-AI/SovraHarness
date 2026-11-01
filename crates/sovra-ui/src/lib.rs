@@ -58,12 +58,12 @@ pub struct RuntimeClient(pub Client);
 impl Global for RuntimeClient {}
 
 /// Runs the desktop UI on the current (main) thread until the user quits.
-pub fn run(client: Client) {
+pub fn run(client: Client, session_namespace: u128) {
     gpui_kit::application()
         .with_assets(assets::Assets)
         .run(move |cx| {
             init(client, cx);
-            open_main_window(cx);
+            open_main_window(cx, session_namespace);
             cx.activate(true);
         });
 }
@@ -84,7 +84,7 @@ pub fn init(client: Client, cx: &mut App) {
     app_menu::init(PRODUCT_NAME, cx);
 }
 
-fn open_main_window(cx: &mut App) {
+fn open_main_window(cx: &mut App, session_namespace: u128) {
     let layout = design::tokens(cx).layout;
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(design::initial_window_bounds(cx))),
@@ -101,7 +101,7 @@ fn open_main_window(cx: &mut App) {
         ..TitleBar::window_options()
     };
     if let Err(error) = gpui_kit::open_window(options, cx, |window, cx| {
-        cx.new(|cx| Shell::new(window, cx))
+        cx.new(|cx| Shell::new(session_namespace, window, cx))
     }) {
         tracing::error!(%error, "failed to open the main window");
         cx.quit();

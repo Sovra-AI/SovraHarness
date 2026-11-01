@@ -221,7 +221,7 @@ mod tests {
     ) -> (Entity<Shell>, WindowHandle<Root>) {
         let mut shell = None;
         let window = cx.open_window(dimensions, |window, cx| {
-            let view = cx.new(|cx| Shell::new(window, cx));
+            let view = cx.new(|cx| Shell::new(0, window, cx));
             shell = Some(view.clone());
             Root::new(view, window, cx)
         });
