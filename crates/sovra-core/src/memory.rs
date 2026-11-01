@@ -25,6 +25,8 @@ mod citations;
 pub use citations::{MAX_MEMORY_CITATIONS, memory_citations};
 mod lifecycle;
 pub use lifecycle::*;
+mod profile;
+pub use profile::*;
 mod semantic;
 pub use semantic::*;
 

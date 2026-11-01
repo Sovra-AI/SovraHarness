@@ -60,6 +60,7 @@ fn respond(
                 MemoryAction::List(_) => MemoryReviewResult::Page(MemoryPage {
                     facts: vec![detail().fact],
                     next: None,
+                    overview: None,
                 }),
                 MemoryAction::Inspect(_) => MemoryReviewResult::Detail(Box::new(detail())),
                 MemoryAction::Correct(_)

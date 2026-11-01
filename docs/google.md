@@ -186,9 +186,11 @@ either choice is a data change plus tool tweaks.
    SOVRA_GOOGLE_CLIENT_ID=… SOVRA_GOOGLE_CLIENT_SECRET=… cargo xtask dist
    ```
 
-   The same variables at **run time** override the baked-in values. That covers
-   development, and people who use their own client. Without a client ID, the
-   card says Google isn't set up in this copy yet.
+   The same variables at **run time** override the baked-in values. A client id
+   saved in Settings wins over both. That covers development, and people who
+   use their own client. Without a client id anywhere, the card asks for one.
+   **Connect Google** and **Continue with Google** stay off until a desktop
+   client id is saved, set in the environment, or baked in.
 5. Use a separate client for development. *Testing* status expires refresh
    tokens after seven days.
 

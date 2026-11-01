@@ -226,21 +226,32 @@ impl FileIndex for Store {
         let mut root = self.root.lock().expect("index root lock").clone();
         root.status = IndexStatus::Scanning;
         if self.decoder {
-            let (obsolete, obsolete_events) = mpsc::channel();
-            let watch = observer.watch_cancellation(Arc::new(move || {
-                let _ = obsolete.send(());
-            }));
-            assert!(watch.is_some());
-            drop(watch);
-            let (cancel, cancelled) = mpsc::channel();
-            let _watch = observer.watch_cancellation(Arc::new(move || {
-                let _ = cancel.send(());
-            }));
-            observer.progress(&root);
-            cancelled
-                .recv_timeout(std::time::Duration::from_secs(3))
-                .expect("decoder receives cancellation without returning to the scan loop");
-            assert!(obsolete_events.try_recv().is_err());
+            // Real file decoders run on scoped reader threads, outside Tokio's
+            // blocking pool. Their cancellation callback must work there too.
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        let (obsolete, obsolete_events) = mpsc::channel();
+                        let watch = observer.watch_cancellation(Arc::new(move || {
+                            let _ = obsolete.send(());
+                        }));
+                        assert!(watch.is_some());
+                        drop(watch);
+                        let (cancel, cancelled) = mpsc::channel();
+                        let _watch = observer.watch_cancellation(Arc::new(move || {
+                            let _ = cancel.send(());
+                        }));
+                        observer.progress(&root);
+                        cancelled
+                            .recv_timeout(std::time::Duration::from_secs(3))
+                            .expect(
+                                "decoder receives cancellation without returning to the scan loop",
+                            );
+                        assert!(obsolete_events.try_recv().is_err());
+                    })
+                    .join()
+                    .expect("decoder thread must not panic");
+            });
         } else {
             observer.progress(&root);
             self.release

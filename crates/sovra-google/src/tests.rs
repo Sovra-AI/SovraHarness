@@ -127,6 +127,71 @@ fn saved_sign_in_survives_a_restart_and_forget_removes_it() {
 }
 
 #[test]
+fn a_saved_desktop_client_is_what_the_consent_page_uses_and_forget_keeps_it() {
+    let (google, vault) = adapter("env-id.apps.googleusercontent.com");
+    let saved_id = "saved-id.apps.googleusercontent.com";
+    let secret = "fixture-desktop-secret-9c2e";
+    google
+        .save_desktop_client(saved_id, Some(secret.into()))
+        .expect("save client");
+    *google.session() = Some(Session {
+        refresh_token: "1//refresh".into(),
+        scope: "openid".into(),
+        ..Session::default()
+    });
+    google
+        .save(&GoogleAccount {
+            email: "sam@example.com".into(),
+            name: "Sam".into(),
+            ..GoogleAccount::default()
+        })
+        .expect("save account");
+
+    let sign_in = google
+        .begin_sign_in(&BTreeSet::new(), None)
+        .expect("consent page");
+    let url = sign_in.url().to_owned();
+    drop(sign_in);
+    assert!(
+        url.starts_with("https://accounts.google.com/"),
+        "consent page is Google's"
+    );
+    assert!(
+        url.contains(saved_id),
+        "saved client is the one in the consent page"
+    );
+    assert!(
+        !url.contains("env-id"),
+        "environment client does not replace a saved one"
+    );
+    assert!(url.contains("127.0.0.1"), "redirect stays on loopback");
+    assert!(
+        !url.contains(secret),
+        "authorization URL must not carry the client secret"
+    );
+    let shown = format!("{:?}", google.desktop_client());
+    assert!(
+        !shown.contains(secret),
+        "debug output omits the client secret"
+    );
+
+    google.forget().expect("forget");
+    assert_eq!(vault.get(VAULT_KEY).expect("vault read"), None);
+    let kept = vault
+        .get(CLIENT_VAULT_KEY)
+        .expect("vault read")
+        .expect("client remains");
+    assert!(
+        kept.contains(saved_id),
+        "disconnect leaves the desktop client id"
+    );
+    assert_eq!(
+        google.desktop_client().expect("client stays").client_id,
+        saved_id
+    );
+}
+
+#[test]
 fn an_unreadable_vault_entry_signs_out_instead_of_failing() {
     let (google, vault) = adapter("id");
     vault.set(VAULT_KEY, "not json").expect("set");

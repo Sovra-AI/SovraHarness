@@ -401,6 +401,7 @@ async fn run_actor(
         let work_controls = controls.clone();
         let work_events = events.clone();
         let work_stopped = stopped.clone();
+        let work_handle = tokio::runtime::Handle::current();
         let result = tokio::task::spawn_blocking(move || {
             mutate(
                 &work_store,
@@ -408,6 +409,7 @@ async fn run_actor(
                 &work_controls,
                 work_stopped,
                 work_events,
+                work_handle,
             )
         })
         .await;
@@ -430,6 +432,7 @@ fn mutate(
     controls: &SharedControls,
     stopped: Arc<AtomicBool>,
     events: Sender<Event>,
+    handle: tokio::runtime::Handle,
 ) -> Result<(Vec<IndexedRoot>, Option<String>), IndexError> {
     let root_id = match command {
         IndexCommand::SetScanOptions { root_id, options } => {
@@ -483,6 +486,7 @@ fn mutate(
             token,
             stopped,
             events,
+            handle,
         };
         let result = store.scan(id, &observer);
         controls
@@ -693,6 +697,7 @@ struct Observer {
     token: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
     events: Sender<Event>,
+    handle: tokio::runtime::Handle,
 }
 impl ScanObserver for Observer {
     fn watch_cancellation(
@@ -704,7 +709,9 @@ impl ScanObserver for Observer {
             return None;
         }
         let observer = self.clone();
-        let task = tokio::runtime::Handle::current().spawn(async move {
+        // Scoped document-reader threads do not inherit Tokio's thread-local
+        // context. Keep the owning runtime handle from the scan actor.
+        let task = self.handle.spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(25));
             loop {
                 interval.tick().await;

@@ -13,6 +13,12 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- Persisted memory-capture summaries in the memory store: saved and historical
+  fact totals, queued/failed work, and the latest eight capture receipts, independent
+  of search pagination. This provides data for the ongoing Knowledge UI work.
+- Regression coverage for saved Google desktop-client precedence, credential
+  redaction, restart persistence, both sign-in entry points, and Settings controls.
+
 - **WhatsApp and Telegram from chat:** the orchestrator can call a shared
   messaging helper to check connections, inspect locally retained recent chats,
   and prepare messages. Chat shows the exact sender, recipient, and text with
@@ -680,6 +686,11 @@ move them under a version heading when the tag is cut.
   tools", "Thinks step by step", plain prices and clearer Ollama download help.
 
 ### Fixed
+
+- Folder document readers retain their owning runtime handle when registering
+  cancellation from parallel reader threads. This fixes the missing-runtime panic
+  that prevented documents from being indexed. Refresh previously failed folders
+  in Knowledge to retry them.
 
 - **Knowledge access for helpers:** delegated specialists and team members now
   inherit the turn's granted file search, history, reviewed-knowledge and saved-memory

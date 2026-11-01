@@ -236,3 +236,51 @@ fn html_email_becomes_readable_text() {
         "a lone < is text, not a tag"
     );
 }
+
+fn desktop(id: &str, secret: Option<&str>) -> DesktopClient {
+    DesktopClient {
+        client_id: id.into(),
+        client_secret: secret.map(str::to_owned),
+    }
+}
+
+#[test]
+fn a_saved_client_wins_and_blank_ids_are_absent() {
+    let chosen = client_in_force(
+        Some(desktop(" saved-id ", Some("  "))),
+        Some(desktop("env-id", Some("env-secret"))),
+        Some(desktop("baked-id", None)),
+    )
+    .expect("the saved client is in force");
+    assert_eq!(chosen.client_id, "saved-id");
+    assert_eq!(chosen.client_secret, None);
+
+    let from_env = client_in_force(
+        Some(desktop("  ", None)),
+        Some(desktop(" env-id ", Some(" env-secret "))),
+        None,
+    )
+    .expect("the environment client is in force");
+    assert_eq!(from_env.client_id, "env-id");
+    assert_eq!(from_env.client_secret.as_deref(), Some("env-secret"));
+
+    let from_baked = client_in_force(
+        None,
+        Some(desktop("", None)),
+        Some(desktop("baked-id", None)),
+    )
+    .expect("the baked client is in force");
+    assert_eq!(from_baked.client_id, "baked-id");
+    assert!(client_in_force(None, None, Some(desktop(" \n ", None))).is_none());
+}
+
+#[test]
+fn client_secret_debug_is_redacted() {
+    let secret = ClientSecret::new("fixture-desktop-secret-9c2e");
+    let shown = format!("{secret:?}");
+    assert_eq!(shown, "ClientSecret([redacted])");
+    assert!(
+        !shown.contains("fixture-desktop"),
+        "debug output omits the client secret"
+    );
+}

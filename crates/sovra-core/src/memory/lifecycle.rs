@@ -53,6 +53,9 @@ impl MemoryListQuery {
 pub struct MemoryPage {
     pub facts: Vec<Fact>,
     pub next: Option<MemoryCursor>,
+    /// Capture totals are not filtered by the visible search. `None` means the
+    /// backend cannot report them, rather than claiming nothing was saved.
+    pub overview: Option<super::MemoryOverview>,
 }
 
 /// An explicit edit creates a new user-authored note and a replacement fact atomically.

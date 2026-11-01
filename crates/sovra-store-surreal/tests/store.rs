@@ -20,6 +20,10 @@ mod consolidation;
 #[path = "store/growth.rs"]
 mod growth;
 
+#[cfg(test)]
+#[path = "store/profile.rs"]
+mod profile;
+
 #[tokio::test]
 async fn memory_browsing_pages_without_duplicates_and_filters_before_limiting() {
     use sovra_core::MemoryListQuery;

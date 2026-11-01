@@ -5,6 +5,9 @@
 
 mod logging;
 
+#[cfg(test)]
+mod google_client;
+
 use std::sync::Arc;
 
 use anyhow::Context as _;

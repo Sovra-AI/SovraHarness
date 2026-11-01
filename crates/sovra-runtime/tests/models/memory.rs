@@ -279,6 +279,7 @@ impl MemoryStore for Store {
         Ok(sovra_core::MemoryPage {
             facts: self.facts.lock().unwrap().clone(),
             next: None,
+            overview: None,
         })
     }
     async fn memory_fact(&self, id: &FactId) -> Result<sovra_core::Fact, MemoryError> {

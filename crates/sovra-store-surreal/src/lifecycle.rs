@@ -53,7 +53,11 @@ impl SurrealStore {
         } else {
             None
         };
-        Ok(MemoryPage { facts: found, next })
+        Ok(MemoryPage {
+            facts: found,
+            next,
+            overview: Some(self.memory_overview().await?),
+        })
     }
 
     pub(super) async fn exact_fact(&self, id: &FactId) -> Result<Fact, MemoryError> {

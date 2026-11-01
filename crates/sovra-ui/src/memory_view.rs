@@ -702,6 +702,7 @@ mod tests {
             MemoryReviewResult::Page(MemoryPage {
                 facts: vec![detail().fact],
                 next: None,
+                overview: None,
             }),
         );
         settle(cx);
@@ -833,6 +834,7 @@ mod tests {
                 MemoryReviewResult::Page(MemoryPage {
                     facts: vec![detail().fact],
                     next: None,
+                    overview: None,
                 }),
             );
             settle(cx);
@@ -917,6 +919,7 @@ mod tests {
                 MemoryReviewResult::Page(MemoryPage {
                     facts: vec![detail().fact],
                     next: None,
+                    overview: None,
                 }),
             );
             settle(cx);

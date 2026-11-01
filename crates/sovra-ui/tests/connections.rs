@@ -4,8 +4,13 @@ use std::collections::BTreeSet;
 
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
-use sovra_core::google::{GoogleAccount, GoogleCommand, GoogleEvent, GoogleService, GoogleState};
+use gpui_kit::{
+    App, AppContext as _, Entity, ScrollDelta, TestAppContext, Window, WindowHandle, point, px,
+    size,
+};
+use sovra_core::google::{
+    DESKTOP_CLIENT_NEEDED, GoogleAccount, GoogleCommand, GoogleEvent, GoogleService, GoogleState,
+};
 use sovra_core::models::InterfaceScale;
 use sovra_core::{Command, Event, NavTab};
 use sovra_runtime::Client;
@@ -221,6 +226,127 @@ fn google_card_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
             }
         })
         .unwrap();
+        google(
+            &events,
+            GoogleState::Unavailable {
+                reason: "Google sign-in isn't set up in this copy of Sovra yet. A newer version \
+                         will include it."
+                    .into(),
+            },
+            cx,
+        );
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let card = window.find("google-card").bounds();
+            let at = format!("{width}x{height}@{scale}");
+            for id in [
+                "google-client-help",
+                "google-client-id",
+                "google-client-secret",
+                "google-save-client",
+            ] {
+                let element = window.find(id).bounds();
+                assert!(
+                    element.left() >= card.left() && element.right() <= card.right(),
+                    "{at}: {id} overflows"
+                );
+            }
+        })
+        .unwrap();
         cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
     }
+}
+
+#[gpui_kit::test]
+fn saving_a_desktop_client_id_enables_connect_google(cx: &mut TestAppContext) {
+    let (window, _shell, commands, events) = open(cx, 1100., 2400.);
+    google(
+        &events,
+        GoogleState::Unavailable {
+            reason: "Google sign-in isn't set up in this copy of Sovra yet. A newer version \
+                     will include it."
+                .into(),
+        },
+        cx,
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        reveal(window, "google-client-help", cx);
+        let help = window
+            .find("google-client-help")
+            .label()
+            .map(ToString::to_string);
+        assert_eq!(help.as_deref(), Some(DESKTOP_CLIENT_NEEDED));
+        assert!(window.try_find("google-connect").is_none());
+        assert_eq!(window.find("google-save-client").disabled(), Some(true));
+        reveal(window, "google-client-id", cx);
+        window.click("google-client-id", cx);
+        window.input("typed-id.apps.googleusercontent.com", cx);
+        reveal(window, "google-client-secret", cx);
+        window.click("google-client-secret", cx);
+        window.input("fixture-desktop-secret-9c2e", cx);
+        window.render_frame(cx);
+        reveal(window, "google-save-client", cx);
+        assert_ne!(window.find("google-save-client").disabled(), Some(true));
+        window.click("google-save-client", cx);
+    })
+    .unwrap();
+
+    let saved = google_commands(&commands);
+    let [
+        GoogleCommand::SaveClient {
+            client_id,
+            client_secret,
+        },
+    ] = saved.as_slice()
+    else {
+        panic!("saving must send the desktop client");
+    };
+    assert_eq!(client_id, "typed-id.apps.googleusercontent.com");
+    let secret = client_secret
+        .as_ref()
+        .expect("the optional secret is sent once");
+    assert_eq!(secret.as_str(), "fixture-desktop-secret-9c2e");
+    let shown = format!("{saved:?}");
+    assert!(
+        !shown.contains("fixture-desktop-secret-9c2e"),
+        "the command debug output omits the secret"
+    );
+
+    google(&events, GoogleState::NotConnected, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        reveal(window, "google-connect", cx);
+        assert_eq!(
+            window.find("google-connect").label(),
+            Some("Connect Google")
+        );
+        assert_ne!(window.find("google-connect").disabled(), Some(true));
+    })
+    .unwrap();
+}
+
+fn reveal(window: &mut Window, id: &'static str, cx: &mut App) {
+    for _ in 0..100 {
+        window.render_frame(cx);
+        let item = window.find(id);
+        let bounds = item.bounds();
+        let viewport = window.find("settings-sections").bounds();
+        if item.visible() && bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
+        {
+            return;
+        }
+        let delta = if bounds.top() < viewport.top() {
+            60.
+        } else {
+            -60.
+        };
+        window.scroll(
+            "settings-sections",
+            ScrollDelta::Pixels(point(px(0.), px(delta))),
+            cx,
+        );
+    }
+    panic!("{id} must be reachable in Settings");
 }

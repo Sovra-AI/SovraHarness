@@ -56,7 +56,8 @@ every 15 minutes catches missed changes. Large scopes or unavailable notificatio
 fall back to periodic checks, shown in Knowledge. Cancel pauses automatic updates;
 Refresh performs a manual scan. Cancel and Pause also signal a document being read;
 it stops at the reader's cancellation checkpoints and keeps the previous indexed
-version. Removing an index
+version. If an earlier scan failed to read documents, use **Refresh** to retry
+after updating Sovra. Removing an index
 leaves the original files intact. Each folder's **Scan report** pages through every
 recorded skip, unreadable file and failure from its latest scan, with path/reason
 filters and incomplete-scan labels. The compact settings summary shows at most 50

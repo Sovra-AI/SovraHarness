@@ -13,6 +13,7 @@
 mod facts;
 mod ingestion;
 mod lifecycle;
+mod profile;
 mod schema;
 mod semantic;
 

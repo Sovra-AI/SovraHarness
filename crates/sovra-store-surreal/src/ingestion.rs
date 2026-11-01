@@ -354,14 +354,7 @@ struct JobRow {
 }
 impl JobRow {
     fn into_job(self) -> Result<MemoryJob, MemoryError> {
-        let state = match self.state.as_str() {
-            "pending" => MemoryJobState::Pending,
-            "processing" => MemoryJobState::Processing,
-            "complete" => MemoryJobState::Complete,
-            "failed" => MemoryJobState::Failed,
-            "cancelled" => MemoryJobState::Cancelled,
-            _ => return Err(MemoryError::Backend("unknown remembering job state".into())),
-        };
+        let state = job_state(&self.state)?;
         let candidates = self
             .result_json
             .as_deref()
@@ -383,6 +376,17 @@ impl JobRow {
                 .collect(),
         })
     }
+}
+
+pub(super) fn job_state(value: &str) -> Result<MemoryJobState, MemoryError> {
+    Ok(match value {
+        "pending" => MemoryJobState::Pending,
+        "processing" => MemoryJobState::Processing,
+        "complete" => MemoryJobState::Complete,
+        "failed" => MemoryJobState::Failed,
+        "cancelled" => MemoryJobState::Cancelled,
+        _ => return Err(MemoryError::Backend("unknown remembering job state".into())),
+    })
 }
 
 #[derive(Debug, SurrealValue)]
