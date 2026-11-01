@@ -4,6 +4,7 @@ mod documents;
 mod graph;
 mod history;
 mod legacy_text;
+mod live;
 #[cfg(unix)]
 mod recovery;
 mod report;

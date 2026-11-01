@@ -32,8 +32,15 @@ Use `/index-folder` or **Knowledge → Files → Add folders** to select one or 
 folders for local indexing. The selection is registered together, then scanned in
 the background. Failed additions show their paths and reasons with **Retry failed
 folders**; successful folders stay connected. Existing folders keep their settings.
-**Knowledge** shows scan
-progress and provides Cancel, Refresh, Pause/Resume updates, Remove, and text search.
+**Knowledge** shows a live view while a folder is read: "Finding your files…" while it
+counts, then a progress bar with "1,204 of 5,000 files read", a rounded time estimate once
+it is reliable, the file being read now, and **What I've found so far** — files sorted into
+plain groups (Photos & pictures, Documents & letters, Bills, receipts & statements, …) and
+everyday life areas (Money, Health, Travel, …) guessed from folder names. Problems appear
+as one line with **See why**. Each group is linked to open standards (DCMI, schema.org,
+NEPOMUK, IPTC); see [docs/file-ontology.md](docs/file-ontology.md). Files are read in
+parallel on all but one core with bounded memory. The card also provides Cancel, Refresh,
+Pause/Resume updates, Remove, and text search.
 While Sovra is open, native folder notifications trigger updates and a full check
 every 15 minutes catches missed changes. Large scopes or unavailable notifications
 fall back to periodic checks, shown in Knowledge. Cancel pauses automatic updates;

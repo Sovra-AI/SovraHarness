@@ -13,6 +13,16 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Live folder reading view:** while a folder is read, Knowledge shows "Finding your
+  files…" then a determinate bar with "1,204 of 5,000 files read", a smoothed and rounded
+  time estimate, the file being read now, **What I've found so far** chips and **Your files
+  seem to be about** life areas. Problems are one line with **See why**. Finished folders
+  summarise what was found ("Found 320 photos, 85 documents and 12 spreadsheets.").
+- **File understanding taxonomy:** every indexed file is classified into a plain-English
+  kind (15 SKOS-shaped concepts linked to DCMI Type, schema.org and NEPOMUK NFO/NMO IRIs)
+  and an optional life area (11 concepts, IPTC Media Topic links where genuine). See
+  `docs/file-ontology.md`.
+
 - **Local sign-in foundations:** account/session types, email and password
   validation, typed commands/events and workspace state updates. Passwords use
   Argon2id PHC hashes; accounts and the active session are stored through
@@ -456,6 +466,23 @@ move them under a version heading when the tag is cut.
 
 ### Changed
 
+- **Parallel folder scanning:** one capability-safe walker feeds N reader threads (cores − 1,
+  max 8) that read, hash and extract in parallel, with a 512 MiB in-flight byte cap; a single
+  writer saves results in batched transactions with per-file savepoints. Unchanged versions
+  are skipped by reader-side lookups, a decoder panic on one damaged file no longer ends the
+  scan, and progress is sampled from atomics (every 32 files or 100 ms) instead of per entry.
+- **Refreshes skip unchanged files:** a file whose path, identity, size and modification
+  time match its saved reading (same extractor and document budget) is confirmed without
+  reading it again; git-style racy-timestamp protection re-reads files edited in the same
+  second as the previous scan.
+- **Progress bar appears almost at once:** a listing-only count runs beside the reading
+  walk, so the determinate "1,204 of 5,000 files read" bar no longer waits for reading to
+  reach the end of the folder.
+- **File groups and life areas understand more languages:** bills, forms and life areas
+  recognise common French, German, Spanish, Italian, Dutch and Portuguese words, with or
+  without accents; ambiguous words are deliberately excluded.
+- Folder card statuses use everyday words ("Done — ready to search", "Stopped — press Refresh
+  to carry on") and the **Connect folders** skill card describes the live view in plain terms.
 - **Web search fixed**: it used to rely on a public SearXNG server (`searx.be`) that answers in HTML, not JSON, so every search returned no results. It now uses the built-in sources above. The orchestrator also asks the search helper whenever an answer depends on current facts, not only when the user typed an exact phrase. More plain phrases ("search online", "look it up online", "google it") count as an explicit request.
 - **Orchestrator offers only working specialists**: it no longer offers itself, or specialists whose integrations do not exist yet (email, calendars, GitHub, to-dos, running code), so it cannot hand a question to a helper that would only guess. A missing ability is now reported plainly.
 
@@ -565,6 +592,9 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
+- Unicode filename-filter tests no longer collide on case- and normalization-insensitive
+  volumes (default APFS); non-Unicode filename escaping is tested without filesystem support.
+- `sovra-ui` login form compiles again (missing `Disableable`/`FluentBuilder` imports).
 - **Reliable memory restart checks:** the lifecycle fixture uses the model
   restored at startup instead of reselecting it and racing the first recall.
   Failure cleanup shuts down the runtime before joining its event reader, so

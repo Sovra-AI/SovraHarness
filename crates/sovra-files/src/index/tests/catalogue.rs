@@ -4,7 +4,12 @@ use sovra_core::file_index::{CatalogFilter, CatalogGroupBy, CatalogQuery, Extrac
 #[test]
 fn filename_filters_ignore_unicode_casing_and_normalization_by_default() {
     let fixture = Fixture::new();
-    for path in ["Straße.Café.txt", "STRASSE.cafe\u{301}.txt", "other.txt"] {
+    // Distinct suffixes keep both fixtures on case/normalization-insensitive volumes.
+    for path in [
+        "Straße.Café-first.txt",
+        "STRASSE.cafe\u{301}-second.txt",
+        "other.txt",
+    ] {
         fixture.write(path, "orchid source");
     }
     let store = fixture.store();
@@ -37,7 +42,7 @@ fn filename_filters_ignore_unicode_casing_and_normalization_by_default() {
     query.filter.name_contains = Some("Straße.Café".into());
     let exact = store.catalogue(&query).unwrap();
     assert_eq!(exact.total_files, 1);
-    assert_eq!(exact.files[0].path, "Straße.Café.txt");
+    assert_eq!(exact.files[0].path, "Straße.Café-first.txt");
     query.filter.name_contains = Some("' OR 1=1 --".into());
     query.filter.match_case = false;
     assert_eq!(store.catalogue(&query).unwrap().total_files, 0);

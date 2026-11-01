@@ -10,6 +10,8 @@ pub use options::{DocumentBudget, ScanOptions};
 
 pub mod graph;
 mod history;
+pub mod live;
+pub mod ontology;
 mod refresh;
 pub mod semantic;
 pub mod summary;
@@ -56,6 +58,29 @@ pub struct IndexProgress {
     pub failed: u64,
     pub removed: u64,
     pub bytes_read: u64,
+    /// Regular files the walk has found so far; final once `walk_complete`.
+    #[serde(default)]
+    pub discovered: u64,
+    /// Discovered files whose outcome (read, reused, skipped, failed) is settled.
+    #[serde(default)]
+    pub handled: u64,
+    /// The walk finished, so `discovered` is the true total and progress is determinate.
+    #[serde(default)]
+    pub walk_complete: bool,
+    /// Relative path most recently settled — "Now reading …".
+    #[serde(default)]
+    pub current: Option<String>,
+    #[serde(default)]
+    pub elapsed_ms: u64,
+    /// Smoothed settle rate; 0 until enough samples make an estimate honest.
+    #[serde(default)]
+    pub files_per_minute: u64,
+    /// What has been found so far, by [`ontology::FileKind`].
+    #[serde(default)]
+    pub kinds: std::collections::BTreeMap<ontology::FileKind, u64>,
+    /// What it seems to be about, by [`ontology::LifeArea`] (from folder/file names).
+    #[serde(default)]
+    pub areas: std::collections::BTreeMap<ontology::LifeArea, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

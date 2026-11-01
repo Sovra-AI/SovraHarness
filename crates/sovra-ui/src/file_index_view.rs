@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod browser;
+mod live;
 mod report;
 mod selection;
 
@@ -366,17 +367,17 @@ fn root_row(
     let status = match root.status {
         IndexStatus::Pending => {
             if root.auto_refresh {
-                "Waiting to scan"
+                "Waiting to read this folder"
             } else {
-                "Paused — resume updates to scan"
+                "Paused — turn on automatic updates to read it"
             }
         }
-        IndexStatus::Scanning => "Indexing",
-        IndexStatus::Ready if has_notices => "Scan complete — review notices",
-        IndexStatus::Ready => "Scan complete",
-        IndexStatus::Cancelled => "Cancelled — refresh to continue",
-        IndexStatus::Interrupted => "Interrupted — refresh to recover",
-        IndexStatus::Failed => "Scan incomplete",
+        IndexStatus::Scanning => "Reading your files…",
+        IndexStatus::Ready if has_notices => "Done — a few files need a look",
+        IndexStatus::Ready => "Done — ready to search",
+        IndexStatus::Cancelled => "Stopped — press Refresh to carry on",
+        IndexStatus::Interrupted => "Interrupted — press Refresh to carry on",
+        IndexStatus::Failed => "Couldn't finish reading this folder",
     };
     let mut row = v_flex()
         .min_w_0()
@@ -394,15 +395,36 @@ fn root_row(
                 .aria_label(root.path.display().to_string())
                 .sovra_text(TextRole::Body, cx)
                 .child(root.path.display().to_string()),
-        )
-        .child(div().sovra_text(TextRole::Caption, cx).child(format!(
-            "{status} · {} visited · {} updated · {} unchanged · {} skipped · {} failed",
-            root.progress.visited,
-            root.progress.indexed,
-            root.progress.reused,
-            root.progress.skipped,
-            root.progress.failed
-        )));
+        );
+    row = if root.status == IndexStatus::Scanning {
+        row.child(live::reading_panel(root, cx))
+    } else {
+        let progress = &root.progress;
+        let row = row.child(
+            div()
+                .id(gpui_kit::SharedString::from(format!(
+                    "index-capture-status-{}",
+                    root.id
+                )))
+                .test_support()
+                .role(gpui_kit::Role::Status)
+                .aria_label(status)
+                .sovra_text(TextRole::Body, cx)
+                .child(status),
+        );
+        let row = match live::found_summary(root, cx) {
+            Some(found) => row.child(found),
+            None => row,
+        };
+        // The plain-number detail stays for people who want it, in everyday words.
+        row.child(div().sovra_text(TextRole::Caption, cx).child(format!(
+            "Last time: {} new or changed · {} already saved · {} left out · {} couldn't be read",
+            sovra_core::file_index::ontology::group_digits(progress.indexed),
+            sovra_core::file_index::ontology::group_digits(progress.reused),
+            sovra_core::file_index::ontology::group_digits(progress.skipped),
+            sovra_core::file_index::ontology::group_digits(progress.failed),
+        )))
+    };
     if has_notices {
         row = row.child(div()
             .id(gpui_kit::SharedString::from(format!("index-attention-{}", root.id)))

@@ -507,18 +507,18 @@ fn indexed_archives_keep_members_beyond_one_hundred() {
 
 #[test]
 fn cancellation_while_reading_a_large_document_keeps_the_previous_version() {
-    struct CancelOnRead(AtomicBool);
+    // Readers poll cancellation every 64 KiB block; trip after ~64 polls (≈4 MiB) so the
+    // request lands mid-file, as a person pressing Stop would.
+    struct CancelOnRead(AtomicBool, AtomicU64);
     impl ScanObserver for CancelOnRead {
         fn cancellation(&self) -> Option<ScanCancellation> {
-            self.0
-                .load(Ordering::Relaxed)
-                .then_some(ScanCancellation::Requested)
-        }
-        fn progress(&self, root: &IndexedRoot) {
-            if root.progress.bytes_read >= 4 * 1024 * 1024 {
-                self.0.store(true, Ordering::Relaxed);
+            if self.0.load(Ordering::Relaxed) && self.1.fetch_add(1, Ordering::Relaxed) >= 64 {
+                Some(ScanCancellation::Requested)
+            } else {
+                None
             }
         }
+        fn progress(&self, _: &IndexedRoot) {}
     }
     let fixture = Fixture::new();
     let path = fixture.source().join("large.pdf");
@@ -540,7 +540,10 @@ fn cancellation_while_reading_a_large_document_keeps_the_previous_version() {
     )
     .unwrap();
     let cancelled = store
-        .scan(&root.id, &CancelOnRead(AtomicBool::new(false)))
+        .scan(
+            &root.id,
+            &CancelOnRead(AtomicBool::new(true), AtomicU64::new(0)),
+        )
         .unwrap();
     assert_eq!(cancelled.status, IndexStatus::Cancelled);
     assert_eq!(cancelled.progress.failed, 0);

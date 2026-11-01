@@ -15,8 +15,9 @@ fn query(root_id: &str) -> NoticeQuery {
 #[test]
 fn report_filters_ignore_unicode_casing_and_normalization_by_default() {
     let fixture = Fixture::new();
-    fixture.write(".Straße.Café", "hidden");
-    fixture.write(".STRASSE.cafe\u{301}", "hidden");
+    // Keep two fixtures even on case/normalization-insensitive volumes.
+    fixture.write(".Straße.Café-first", "hidden");
+    fixture.write(".STRASSE.cafe\u{301}-second", "hidden");
     let store = fixture.store();
     let root = store.add_root(&fixture.source()).unwrap();
     store.scan(&root.id, &Observer::default()).unwrap();
@@ -45,7 +46,8 @@ fn report_filters_ignore_unicode_casing_and_normalization_by_default() {
     assert_eq!(store.report(&query).unwrap().total, 0);
 }
 
-#[cfg(unix)]
+// APFS rejects the fixture names before scanning; escaping is tested without IO in scan.rs.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn report_paths_distinguish_non_unicode_filenames_without_lossy_replacement() {
     use std::os::unix::ffi::OsStringExt as _;

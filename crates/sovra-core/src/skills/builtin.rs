@@ -92,7 +92,7 @@ impl Skill {
                 "/files ".to_owned(),
             ),
             "index-folder" => (
-                "Open Knowledge → Files to add folders together, retry failed additions, read saved text part by part, find partial reads or skipped content in Scan report, and adjust document reading budgets."
+                "Pick a folder and watch Sovra read it: you'll see how far along it is, about how long is left, and what it finds — photos, letters, bills — sorted into everyday groups like Money, Health and Travel."
                     .to_owned(),
                 "/index-folder ".to_owned(),
             ),
@@ -291,7 +291,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "index-folder",
             "Index folders",
-            "Choose one or more folders to search locally, retry failed additions, browse files, review full scan reports, read saved text in parts, and include hidden or generated content when needed.",
+            "Let Sovra read folders on your computer so you can ask about them. It shows what it's finding as it goes and sorts everything into plain groups like photos, bills and letters.",
             SkillAction::IndexFolder,
             &["index-file-system", "index-files"],
         ),
