@@ -6,8 +6,8 @@ use gpui_kit::{
     AppContext as _, Entity, ScrollDelta, TestAppContext, WindowHandle, point, px, size,
 };
 use sovra_core::models::{
-    CatalogSnapshot, ModelCommand, ModelConnection, ModelEvent, ModelInfo, ModelPreferences,
-    ProviderKind,
+    CatalogSnapshot, InterfaceScale, ModelCommand, ModelConnection, ModelEvent, ModelInfo,
+    ModelPreferences, ProviderKind,
 };
 use sovra_core::{Command, Event};
 use sovra_runtime::Client;
@@ -27,6 +27,22 @@ fn open_shell(
         Root::new(view, window, cx)
     });
     (window, shell.expect("shell was created"))
+}
+
+fn priced_chat(
+    id: &str,
+    name: &str,
+    parameters: &[&str],
+    prompt: Option<&str>,
+    completion: Option<&str>,
+) -> ModelInfo {
+    let mut info = model(id, name, "text", false);
+    info.supported_parameters = parameters.iter().map(|item| (*item).to_owned()).collect();
+    if let (Some(prompt), Some(completion)) = (prompt, completion) {
+        info.pricing.insert("prompt".into(), prompt.into());
+        info.pricing.insert("completion".into(), completion.into());
+    }
+    info
 }
 
 fn model(id: &str, name: &str, output: &str, tools: bool) -> ModelInfo {
@@ -263,6 +279,584 @@ fn choosing_a_model_waits_for_confirmation_then_goes_straight_to_chat(cx: &mut T
             sovra_core::NavTab::Chat
         );
     });
+}
+
+fn deliver_selected_catalog(send: impl Fn(Event), models: Vec<ModelInfo>, active: &str) {
+    let active_key = models
+        .iter()
+        .find(|model| model.id == active)
+        .expect("selected model is in the catalog")
+        .key("router");
+    let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+    connection.has_credential = true;
+    send(Event::Models(ModelEvent::Loaded {
+        connections: vec![connection],
+        preferences: ModelPreferences {
+            active: Some(active_key),
+            ..ModelPreferences::default()
+        },
+    }));
+    send(Event::Models(ModelEvent::CatalogLoaded {
+        connection_id: "router".into(),
+        snapshot: CatalogSnapshot {
+            models,
+            fetched_at: 1,
+        },
+        cached: false,
+    }));
+}
+
+#[gpui_kit::test]
+fn changing_the_selected_model_starts_on_its_card(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    let (window, shell) = open_shell(cx, client, 1280., 820.);
+    deliver_selected_catalog(
+        |event| {
+            events.send_blocking(event).expect("saved setup delivered");
+        },
+        vec![
+            priced_chat(
+                "example/alpha",
+                "Alpha Writer",
+                &["tools"],
+                Some("0"),
+                Some("0"),
+            ),
+            priced_chat(
+                "example/beta",
+                "Beta Planner",
+                &["reasoning"],
+                Some("0.000003"),
+                Some("0.000015"),
+            ),
+            priced_chat("example/quiet", "Quiet Note", &[], None, None),
+            model("example/clip", "Clip", "video", false),
+        ],
+        "example/alpha",
+    );
+    cx.run_until_parked();
+    let active_name = cx.update(|cx| {
+        let state = shell.read(cx).models().read(cx).state();
+        let active = state
+            .preferences
+            .active
+            .clone()
+            .expect("a model is already selected");
+        state
+            .model(&active)
+            .expect("the selected model is loaded")
+            .name
+            .clone()
+    });
+    let chosen_key = cx
+        .update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("nav-models", cx);
+            let shown = window
+                .within("models-home-active")
+                .find("models-home-active-name")
+                .label()
+                .map(str::to_owned);
+            assert_eq!(shown.as_deref(), Some(active_name.as_str()));
+            assert!(window.find("models-browse-all").visible());
+            assert!(window.try_find("models-search").is_none());
+            let state = shell.read(cx).models().read(cx).state();
+            let active = state
+                .preferences
+                .active
+                .clone()
+                .expect("a model is already selected");
+            let active_info = state.model(&active).expect("the selected model is loaded");
+            let expected_price = active_info.plain_price();
+            let expected_good_for = active_info.plain_good_for();
+            assert_eq!(
+                window
+                    .find("models-home-active-price")
+                    .label()
+                    .map(str::to_owned)
+                    .as_deref(),
+                Some(expected_price.as_str())
+            );
+            assert_eq!(
+                window
+                    .find("models-home-active-good-for")
+                    .label()
+                    .map(str::to_owned)
+                    .as_deref(),
+                Some(expected_good_for.as_str())
+            );
+            window
+                .within("models-home-active")
+                .click("models-home-change", cx);
+            assert!(window.try_find("models-search").is_none());
+            assert!(
+                window
+                    .within("models-home-active")
+                    .find("models-home-change-choices")
+                    .visible()
+            );
+            let mut rows = Vec::new();
+            for index in 0..2usize {
+                let name = window
+                    .find(("models-home-change-name", index))
+                    .label()
+                    .map(str::to_owned)
+                    .expect("choice name");
+                let price = window
+                    .find(("models-home-change-price", index))
+                    .label()
+                    .map(str::to_owned)
+                    .expect("choice price");
+                let good_for = window
+                    .find(("models-home-change-good-for", index))
+                    .label()
+                    .map(str::to_owned)
+                    .expect("choice good for");
+                rows.push((name, price, good_for));
+            }
+            assert!(
+                window
+                    .try_find(("models-home-change-choice", 2usize))
+                    .is_none()
+            );
+            let state = shell.read(cx).models().read(cx).state();
+            let mut chosen = Vec::new();
+            for (name, price, good_for) in &rows {
+                let info = state
+                    .catalogs
+                    .get("router")
+                    .expect("catalog")
+                    .snapshot
+                    .models
+                    .iter()
+                    .find(|info| info.name == *name && info.can_chat())
+                    .expect("choice is a loaded chat model");
+                assert_ne!(info.name, "Clip");
+                assert_eq!(price, &info.plain_price());
+                assert_eq!(good_for, &info.plain_good_for());
+                chosen.push(info.key("router"));
+            }
+            assert_ne!(
+                rows[0].1, rows[1].1,
+                "the choices advertise different prices"
+            );
+            assert_ne!(
+                rows[0].2, rows[1].2,
+                "the choices advertise different abilities"
+            );
+            while commands.try_recv().is_ok() {}
+            window
+                .within("models-home-active")
+                .click(("models-home-change-choice", 0usize), cx);
+            chosen.remove(0)
+        })
+        .expect("window exists");
+    let activations: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter_map(|command| match command {
+            Command::Models(ModelCommand::Activate { key }) => Some(key),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(activations, vec![chosen_key.clone()]);
+    events
+        .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
+            ModelPreferences {
+                active: Some(chosen_key.clone()),
+                ..ModelPreferences::default()
+            },
+        )))
+        .expect("switch confirmed");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().active_tab,
+            sovra_core::NavTab::Models
+        );
+        let chosen = shell
+            .read(cx)
+            .models()
+            .read(cx)
+            .state()
+            .model(&chosen_key)
+            .expect("the chosen model stays loaded")
+            .clone();
+        let name = chosen.name.clone();
+        let price = chosen.plain_price();
+        let good_for = chosen.plain_good_for();
+        assert_eq!(
+            window
+                .within("models-home-active")
+                .find("models-home-active-name")
+                .label(),
+            Some(name.as_str())
+        );
+        assert_eq!(
+            window
+                .find("models-home-active-price")
+                .label()
+                .map(str::to_owned)
+                .as_deref(),
+            Some(price.as_str())
+        );
+        assert_eq!(
+            window
+                .find("models-home-active-good-for")
+                .label()
+                .map(str::to_owned)
+                .as_deref(),
+            Some(good_for.as_str())
+        );
+        assert!(window.try_find("models-search").is_none());
+    })
+    .expect("window exists");
+}
+
+#[gpui_kit::test]
+fn searching_the_change_list_keeps_the_matching_model(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    let (window, shell) = open_shell(cx, client, 1280., 820.);
+    deliver_selected_catalog(
+        |event| {
+            events.send_blocking(event).expect("saved setup delivered");
+        },
+        vec![
+            priced_chat(
+                "example/alpha",
+                "Alpha Writer",
+                &["tools"],
+                Some("0"),
+                Some("0"),
+            ),
+            priced_chat(
+                "example/beta",
+                "Beta Planner",
+                &["reasoning"],
+                Some("0.000003"),
+                Some("0.000015"),
+            ),
+            priced_chat("example/quiet", "Quiet Note", &[], None, None),
+            model("example/clip", "Clip", "video", false),
+        ],
+        "example/alpha",
+    );
+    cx.run_until_parked();
+    let query = "step";
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-models", cx);
+        window
+            .within("models-home-active")
+            .click("models-home-change", cx);
+        assert!(window.try_find("models-search").is_none());
+        assert!(window.find("models-home-change-search").visible());
+        window.click("models-home-change-search", cx);
+        window.input(query, cx);
+    })
+    .expect("window exists");
+    cx.run_until_parked();
+    let chosen_key = cx
+        .update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("models-search").is_none());
+            let state = shell.read(cx).models().read(cx).state();
+            let active = state
+                .preferences
+                .active
+                .clone()
+                .expect("a model is already selected");
+            let mut hits = Vec::new();
+            for info in &state
+                .catalogs
+                .get("router")
+                .expect("catalog")
+                .snapshot
+                .models
+            {
+                let key = info.key("router");
+                if !info.can_chat() || key == active {
+                    continue;
+                }
+                let visible = format!(
+                    "{} {} {}",
+                    info.name,
+                    info.plain_price(),
+                    info.plain_good_for()
+                );
+                if visible.to_lowercase().contains(query) {
+                    hits.push(key);
+                }
+            }
+            assert_eq!(hits.len(), 1);
+            let expected = hits.remove(0);
+            let info = state
+                .model(&expected)
+                .expect("the matching model stays loaded");
+            let name = info.name.clone();
+            let price = info.plain_price();
+            let good_for = info.plain_good_for();
+            assert_eq!(
+                window
+                    .find(("models-home-change-name", 0usize))
+                    .label()
+                    .map(str::to_owned)
+                    .as_deref(),
+                Some(name.as_str())
+            );
+            assert_eq!(
+                window
+                    .find(("models-home-change-price", 0usize))
+                    .label()
+                    .map(str::to_owned)
+                    .as_deref(),
+                Some(price.as_str())
+            );
+            assert_eq!(
+                window
+                    .find(("models-home-change-good-for", 0usize))
+                    .label()
+                    .map(str::to_owned)
+                    .as_deref(),
+                Some(good_for.as_str())
+            );
+            assert!(
+                window
+                    .try_find(("models-home-change-choice", 1usize))
+                    .is_none()
+            );
+            while commands.try_recv().is_ok() {}
+            window
+                .within("models-home-active")
+                .click(("models-home-change-choice", 0usize), cx);
+            expected
+        })
+        .expect("window exists");
+    let activations: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter_map(|command| match command {
+            Command::Models(ModelCommand::Activate { key }) => Some(key),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(activations, vec![chosen_key]);
+}
+
+fn scroll_change_control_into_window(
+    window: &mut gpui_kit::Window,
+    width: f32,
+    height: f32,
+    cx: &mut gpui_kit::App,
+) {
+    assert!(window.find("models-setup-home").visible());
+    for _ in 0..48 {
+        window.render_frame(cx);
+        let change = window.find("models-home-change");
+        let bounds = change.bounds();
+        if change.visible()
+            && bounds.left() >= px(0.)
+            && bounds.top() >= px(0.)
+            && bounds.right() <= px(width)
+            && bounds.bottom() <= px(height)
+        {
+            return;
+        }
+        let dy = if bounds.top() < px(0.) { 80. } else { -80. };
+        window.scroll(
+            "models-setup-home",
+            ScrollDelta::Pixels(point(px(0.), px(dy))),
+            cx,
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn selected_model_change_control_stays_inside_the_window(cx: &mut TestAppContext) {
+    for (width, height, scale, mode) in [
+        (640., 420., 100u16, ThemeMode::Dark),
+        (640., 420., 100, ThemeMode::Light),
+        (2560., 1440., 100, ThemeMode::Dark),
+        (640., 420., 200, ThemeMode::Light),
+    ] {
+        let (client, _commands, events) = Client::loopback();
+        let (window, _) = open_shell(cx, client, width, height);
+        cx.update(|cx| {
+            Theme::change(mode, None, cx);
+            sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+        });
+        deliver_selected_catalog(
+            |event| {
+                events.send_blocking(event).expect("saved setup delivered");
+            },
+            vec![model("example/alpha", "Alpha Writer", "text", true)],
+            "example/alpha",
+        );
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("nav-models", cx);
+            scroll_change_control_into_window(window, width, height, cx);
+            let change = window
+                .within("models-home-active")
+                .find("models-home-change");
+            assert!(
+                change.visible(),
+                "{width}x{height} @{scale}% {mode:?}: {change:?}"
+            );
+            let bounds = change.bounds();
+            assert!(bounds.left() >= px(0.), "{bounds:?}");
+            assert!(bounds.top() >= px(0.), "{bounds:?}");
+            assert!(bounds.right() <= px(width), "{bounds:?}");
+            assert!(bounds.bottom() <= px(height), "{bounds:?}");
+            assert!(window.find("models-browse-all").visible());
+        })
+        .expect("window exists");
+        cx.update(|cx| {
+            sovra_ui::design::set_interface_scale(InterfaceScale::default(), cx);
+        });
+    }
+}
+
+fn scroll_home_element_into_window(
+    window: &mut gpui_kit::Window,
+    id: &str,
+    width: f32,
+    height: f32,
+    cx: &mut gpui_kit::App,
+) {
+    assert!(window.find("models-setup-home").visible());
+    for _ in 0..48 {
+        window.render_frame(cx);
+        let element = window.find(id.to_owned());
+        let bounds = element.bounds();
+        if element.visible()
+            && bounds.left() >= px(0.)
+            && bounds.top() >= px(0.)
+            && bounds.right() <= px(width)
+            && bounds.bottom() <= px(height)
+            && bounds.bottom() > bounds.top()
+        {
+            return;
+        }
+        let dy = if bounds.top() < px(0.) { 80. } else { -80. };
+        window.scroll(
+            "models-setup-home",
+            ScrollDelta::Pixels(point(px(0.), px(dy))),
+            cx,
+        );
+    }
+}
+
+fn scroll_choice_facts_into_window(
+    window: &mut gpui_kit::Window,
+    width: f32,
+    height: f32,
+    cx: &mut gpui_kit::App,
+) {
+    assert!(window.find("models-setup-home").visible());
+    for _ in 0..48 {
+        window.render_frame(cx);
+        let (price_visible, price_bounds) = {
+            let price = window.find(("models-home-change-price", 0usize));
+            (price.visible(), price.bounds())
+        };
+        let (good_visible, good_bounds) = {
+            let good_for = window.find(("models-home-change-good-for", 0usize));
+            (good_for.visible(), good_for.bounds())
+        };
+        let inside = |bounds: gpui_kit::Bounds<gpui_kit::Pixels>| {
+            bounds.left() >= px(0.)
+                && bounds.top() >= px(0.)
+                && bounds.right() <= px(width)
+                && bounds.bottom() <= px(height)
+                && bounds.bottom() > bounds.top()
+        };
+        if price_visible && good_visible && inside(price_bounds) && inside(good_bounds) {
+            return;
+        }
+        let dy = if price_bounds.top() < px(0.) {
+            80.
+        } else {
+            -80.
+        };
+        window.scroll(
+            "models-setup-home",
+            ScrollDelta::Pixels(point(px(0.), px(dy))),
+            cx,
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn selected_model_choice_facts_stay_inside_the_window(cx: &mut TestAppContext) {
+    for mode in [ThemeMode::Dark, ThemeMode::Light] {
+        let (client, _commands, events) = Client::loopback();
+        let (window, _) = open_shell(cx, client, 640., 420.);
+        cx.update(|cx| {
+            Theme::change(mode, None, cx);
+            sovra_ui::design::set_interface_scale(InterfaceScale::default(), cx);
+        });
+        deliver_selected_catalog(
+            |event| {
+                events.send_blocking(event).expect("saved setup delivered");
+            },
+            vec![
+                priced_chat(
+                    "example/alpha",
+                    "Alpha Writer",
+                    &["tools"],
+                    Some("0"),
+                    Some("0"),
+                ),
+                priced_chat(
+                    "example/beta",
+                    "Beta Planner",
+                    &["reasoning"],
+                    Some("0.000003"),
+                    Some("0.000015"),
+                ),
+            ],
+            "example/alpha",
+        );
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("nav-models", cx);
+            window
+                .within("models-home-active")
+                .click("models-home-change", cx);
+            assert!(window.try_find("models-search").is_none());
+            scroll_home_element_into_window(window, "models-home-change-search", 640., 420., cx);
+            let search = window.find("models-home-change-search");
+            assert!(search.visible(), "{mode:?}: {search:?}");
+            let search_bounds = search.bounds();
+            assert!(search_bounds.left() >= px(0.), "{search_bounds:?}");
+            assert!(search_bounds.top() >= px(0.), "{search_bounds:?}");
+            assert!(search_bounds.right() <= px(640.), "{search_bounds:?}");
+            assert!(search_bounds.bottom() <= px(420.), "{search_bounds:?}");
+            drop(search);
+            scroll_choice_facts_into_window(window, 640., 420., cx);
+            let price = window.find(("models-home-change-price", 0usize));
+            assert!(price.visible(), "{mode:?}: {price:?}");
+            let price_bounds = price.bounds();
+            assert!(price_bounds.left() >= px(0.), "{price_bounds:?}");
+            assert!(price_bounds.top() >= px(0.), "{price_bounds:?}");
+            assert!(price_bounds.right() <= px(640.), "{price_bounds:?}");
+            assert!(price_bounds.bottom() <= px(420.), "{price_bounds:?}");
+            assert!(
+                price_bounds.bottom() > price_bounds.top(),
+                "{price_bounds:?}"
+            );
+            drop(price);
+            let good_for = window.find(("models-home-change-good-for", 0usize));
+            assert!(good_for.visible(), "{mode:?}: {good_for:?}");
+            let good_bounds = good_for.bounds();
+            assert!(good_bounds.left() >= px(0.), "{good_bounds:?}");
+            assert!(good_bounds.top() >= px(0.), "{good_bounds:?}");
+            assert!(good_bounds.right() <= px(640.), "{good_bounds:?}");
+            assert!(good_bounds.bottom() <= px(420.), "{good_bounds:?}");
+            assert!(good_bounds.bottom() > good_bounds.top(), "{good_bounds:?}");
+        })
+        .expect("window exists");
+    }
 }
 
 fn assert_setup_fits_minimum_window(cx: &mut TestAppContext, mode: ThemeMode) {

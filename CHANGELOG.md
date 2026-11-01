@@ -466,6 +466,17 @@ move them under a version heading when the tag is cut.
 
 ### Changed
 
+- **Search while changing the selected AI:** Change on the selected model has a
+  search box. It matches the name, the everyday price, or the sentence about
+  what the model is good for. A search with no match says so.
+- **See the price and what a model is good for before you choose it:** On Models,
+  the selected AI and each model you can switch to show an everyday price
+  (free, or about how much one message costs) and a plain sentence about what
+  it is good for. If the service did not list a price or an ability, the choice
+  says so instead of guessing.
+- **Change the selected AI on its card:** When a model is already selected, Models
+  shows it with a Change button on that same card. Change lists the other models
+  already loaded, and choosing one selects it. Browse all models stays in the header.
 - **Parallel folder scanning:** one capability-safe walker feeds N reader threads (cores − 1,
   max 8) that read, hash and extract in parallel, with a 512 MiB in-flight byte cap; a single
   writer saves results in batched transactions with per-file savepoints. Unchanged versions

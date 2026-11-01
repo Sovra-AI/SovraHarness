@@ -2,16 +2,75 @@
 //! never repeat completed steps, curated model recommendations, and 1-click tour launch.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, button::ButtonVariants as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Sizable as _, button::ButtonVariants as _, h_flex,
+    input::Input, v_flex,
 };
 use gpui_kit::{
-    Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, div,
 };
 use sovra_core::models::{ModelCommand, ModelInfo, ModelKey, RecommendedModelCard, SetupStage};
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::models_view::{GoToChat, ModelsView, StartSystemTour, caption, pill};
+
+/// One chat model a person can switch to, with the everyday facts beside its name.
+struct ListedChatModel {
+    key: ModelKey,
+    name: String,
+    price: String,
+    good_for: String,
+}
+
+fn model_fact(
+    id: impl Into<gpui_kit::ElementId>,
+    text: String,
+    muted: bool,
+    cx: &App,
+) -> impl IntoElement {
+    let color = if muted {
+        design::tokens(cx).text_secondary
+    } else {
+        cx.theme().foreground
+    };
+    div()
+        .id(id)
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .whitespace_normal()
+        .aria_label(text.clone())
+        .sovra_text(TextRole::Body, cx)
+        .text_color(color)
+        .child(text)
+}
+
+/// The words on the card are the only things a person can search: name, price,
+/// and the plain sentence. A hidden id is not one of those words.
+fn change_query_matches(model: &ListedChatModel, query: &str) -> bool {
+    let query = query.trim();
+    if query.is_empty() {
+        return true;
+    }
+    let query = query.to_lowercase();
+    model.name.to_lowercase().contains(&query)
+        || model.price.to_lowercase().contains(&query)
+        || model.good_for.to_lowercase().contains(&query)
+}
+
+fn choice_name(id: impl Into<gpui_kit::ElementId>, name: String, cx: &App) -> impl IntoElement {
+    div()
+        .id(id)
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .whitespace_normal()
+        .aria_label(name.clone())
+        .sovra_text(TextRole::Body, cx)
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(cx.theme().foreground)
+        .child(name)
+}
 
 impl ModelsView {
     pub(crate) fn open_selected_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -47,6 +106,42 @@ impl ModelsView {
         self.selected = None;
         self.compare_open = false;
         cx.notify();
+    }
+
+    /// Chat models on connections that can be used now, ordered by name.
+    fn switchable_chat_models(&self) -> Vec<ListedChatModel> {
+        let mut models = Vec::new();
+        for connection in self
+            .state
+            .connections
+            .iter()
+            .filter(|connection| connection.is_ready())
+        {
+            let Some(catalog) = self.state.catalogs.get(&connection.id) else {
+                continue;
+            };
+            for info in catalog
+                .snapshot
+                .models
+                .iter()
+                .filter(|info| info.can_chat())
+            {
+                models.push(ListedChatModel {
+                    key: info.key(&connection.id),
+                    name: info.name.clone(),
+                    price: info.plain_price(),
+                    good_for: info.plain_good_for(),
+                });
+            }
+        }
+        models.sort_by(|left, right| {
+            (&left.name, &left.key.connection_id, &left.key.model_id).cmp(&(
+                &right.name,
+                &right.key.connection_id,
+                &right.key.model_id,
+            ))
+        });
+        models
     }
 
     pub(crate) fn choose_model(&mut self, key: &ModelKey, cx: &mut Context<Self>) {
@@ -159,6 +254,15 @@ impl ModelsView {
                     .text_color(cx.theme().foreground)
                     .child(price_text),
             )
+            .child(model_fact(
+                ("models-home-rec-good-for", index),
+                self.state.model(&rec.key).map_or_else(
+                    || "What it is good for is not listed.".to_owned(),
+                    ModelInfo::plain_good_for,
+                ),
+                true,
+                cx,
+            ))
     }
 
     pub(crate) fn render_model_home(
@@ -237,36 +341,165 @@ impl ModelsView {
                     .child("Checking your saved setup…"),
             );
         } else if let Some(key) = active {
-            let name = self
-                .state
-                .model(key)
-                .map_or_else(|| key.model_id.clone(), |model| model.name.clone());
-            next = next
-                .child(caption("Your active AI", cx))
-                .child(
-                    div()
-                        .id("models-home-active-name")
-                        .test_support()
-                        .sovra_text(TextRole::SectionTitle, cx)
-                        .child(name),
-                )
-                .child(caption(
-                    "Ready for your next conversation. You can switch models anytime.",
-                    cx,
-                ))
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap(t.space.small)
-                        .child(
-                            design::primary_button("models-home-chat", "Go to chat", cx)
-                                .on_click(cx.listener(|_, _, _, cx| cx.emit(GoToChat))),
-                        )
-                        .child(
-                            design::button("models-home-take-tour", "Take a tour", cx)
-                                .on_click(cx.listener(|_, _, _, cx| cx.emit(StartSystemTour))),
-                        ),
-                );
+            let shown = self.state.model(key);
+            let name = shown.map_or_else(|| key.model_id.clone(), |model| model.name.clone());
+            let active_price =
+                shown.map_or_else(|| "Price not listed".to_owned(), ModelInfo::plain_price);
+            let active_good_for = shown.map_or_else(
+                || "What it is good for is not listed.".to_owned(),
+                ModelInfo::plain_good_for,
+            );
+            let query = self.change_search.read(cx).value().to_string();
+            let alternatives: Vec<_> = self
+                .switchable_chat_models()
+                .into_iter()
+                .filter(|choice| choice.key != *key)
+                .filter(|choice| change_query_matches(choice, &query))
+                .collect();
+            let other_models = self
+                .switchable_chat_models()
+                .into_iter()
+                .any(|choice| choice.key != *key);
+            next = next.child(
+                v_flex()
+                    .id("models-home-active")
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .gap(t.space.small)
+                    .child(caption("Your active AI", cx))
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .text_ellipsis()
+                            .id("models-home-active-name")
+                            .test_support()
+                            .aria_label(name.clone())
+                            .sovra_text(TextRole::SectionTitle, cx)
+                            .child(name),
+                    )
+                    .child(model_fact(
+                        "models-home-active-price",
+                        active_price,
+                        false,
+                        cx,
+                    ))
+                    .child(model_fact(
+                        "models-home-active-good-for",
+                        active_good_for,
+                        true,
+                        cx,
+                    ))
+                    .child(caption(
+                        "Ready for your next conversation. You can switch models anytime.",
+                        cx,
+                    ))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .flex_wrap()
+                            .gap(t.space.small)
+                            .child(
+                                design::primary_button("models-home-chat", "Go to chat", cx)
+                                    .on_click(cx.listener(|_, _, _, cx| cx.emit(GoToChat))),
+                            )
+                            .child(
+                                design::button("models-home-take-tour", "Take a tour", cx)
+                                    .on_click(cx.listener(|_, _, _, cx| cx.emit(StartSystemTour))),
+                            )
+                            .child(
+                                design::button("models-home-change", "Change", cx)
+                                    .small()
+                                    .accessibility_label("Change the selected AI")
+                                    .on_click(cx.listener(|view, _, window, cx| {
+                                        view.changing_active = !view.changing_active;
+                                        if view.changing_active {
+                                            view.change_search.update(cx, |input, cx| {
+                                                input.set_value(String::new(), window, cx);
+                                            });
+                                        }
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .children(self.changing_active.then(|| {
+                        let listed = if other_models {
+                            v_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap(t.space.small)
+                                .child(
+                                    Input::new(&self.change_search)
+                                        .id("models-home-change-search")
+                                        .aria_label("Search models")
+                                        .cleanable(true)
+                                        .w_full(),
+                                )
+                                .child(caption(
+                                    "The price is for one message. The sentence says what that model is good for.",
+                                    cx,
+                                ))
+                                .children(alternatives.is_empty().then(|| {
+                                    caption(
+                                        "Nothing matches that. Try a name, a price, or what it is good for.",
+                                        cx,
+                                    )
+                                }))
+                                .children(alternatives.into_iter().enumerate().map(
+                                    |(index, listed)| {
+                                        let ListedChatModel {
+                                            key: choice,
+                                            name,
+                                            price,
+                                            good_for,
+                                        } = listed;
+                                        let accessible =
+                                            format!("Use {name}. {price}. {good_for}");
+                                        v_flex()
+                                            .w_full()
+                                            .min_w_0()
+                                            .p(t.space.small)
+                                            .gap(t.space.compact)
+                                            .sovra_surface(Surface::Matte, cx)
+                                            .child(choice_name(
+                                                ("models-home-change-name", index),
+                                                name,
+                                                cx,
+                                            ))
+                                            .child(model_fact(
+                                                ("models-home-change-price", index),
+                                                price,
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(model_fact(
+                                                ("models-home-change-good-for", index),
+                                                good_for,
+                                                true,
+                                                cx,
+                                            ))
+                                            .child(
+                                                design::button(
+                                                    ("models-home-change-choice", index),
+                                                    "Use this model",
+                                                    cx,
+                                                )
+                                                .accessibility_label(accessible)
+                                                .w_full()
+                                                .on_click(cx.listener(move |view, _, _, cx| {
+                                                    view.choose_model(&choice, cx);
+                                                })),
+                                            )
+                                    },
+                                ))
+                        } else {
+                            v_flex().child(caption("No other models are listed yet.", cx))
+                        };
+                        listed.id("models-home-change-choices").test_support()
+                    })),
+            );
         } else if let SetupStage::NeedsModelKey {
             model_id,
             connection_name,

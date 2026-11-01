@@ -194,6 +194,12 @@ model. It shows only the next needed setup action, with suggestions labeled **Fr
 needed; Sovra checks the key with OpenRouter before saving it, and saving moves
 straight on to picking a model. **Use this model** takes you straight into the
 chat, and a message you typed before setup finished is sent for you.
+When a model is already selected, **Change** on that card lists the other
+models already loaded. Each one shows an everyday price and a plain sentence
+about what it is good for, taken from what the service listed. If a price or
+an ability is not listed, the choice says so. Choosing one switches to it and
+stays on Models. The search box on that list finds a model by its name, its
+price, or what it is good for.
 **Browse all models** lists chat models by default, each labelled by what it makes;
 the **Show** picker lists pictures, video, voices and other types. Every row has a
 1-click **Use Model** / **✓ Active** button, plus optional Ollama connections,

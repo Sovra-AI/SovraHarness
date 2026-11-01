@@ -73,6 +73,10 @@ pub struct ModelsView {
     /// Measured from this pane by `design::width_probe`; starts single-pane.
     width_class: design::WidthClass,
     pub(crate) pending_activation: Option<ModelKey>,
+    /// The selected-model card is showing the loaded models you can switch to.
+    pub(crate) changing_active: bool,
+    /// Filters that change list by the name, price, or plain "good for" sentence.
+    pub(crate) change_search: Entity<InputState>,
     /// The open key form was reached from a setup step, so saving it moves the user
     /// on to the next step. Keys managed from Settings stay on their form.
     pub(crate) setup_flow: bool,
@@ -136,6 +140,9 @@ impl ModelsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search by name or maker…"));
+        let change_search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Name, price, or what it is good for")
+        });
         let author = selector(vec![Choice::new("", "Any maker")], window, cx);
         let connection = selector(vec![Choice::new("", "Any service")], window, cx);
         let input_modality = selector(vec![Choice::new("", "Reads anything")], window, cx);
@@ -185,14 +192,18 @@ impl ModelsView {
             )
         });
         let whatsapp_form = crate::connections_view::WhatsAppForm::new(window, cx);
-        let mut subscriptions =
-            vec![
-                cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        view.read_filters(cx);
-                    }
-                }),
-            ];
+        let mut subscriptions = vec![
+            cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    view.read_filters(cx);
+                }
+            }),
+            cx.subscribe_in(&change_search, window, |_, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
+        ];
         for control in [
             &author,
             &connection,
@@ -213,6 +224,8 @@ impl ModelsView {
             home_open: true,
             width_class: design::WidthClass::Compact,
             pending_activation: None,
+            changing_active: false,
+            change_search,
             setup_flow: false,
             choosing_purpose: None,
             filter: ModelFilter {
@@ -284,6 +297,8 @@ impl ModelsView {
     }
 
     pub(crate) fn apply(&mut self, event: &ModelEvent, cx: &mut Context<Self>) {
+        // Captured before apply, because a confirmed switch replaces the active model.
+        let was_ready = self.state.has_active_llm();
         self.state.apply(event);
         if let (Some(purpose), Some(key)) =
             (self.choosing_purpose, self.pending_activation.as_ref())
@@ -301,11 +316,15 @@ impl ModelsView {
             && matches!(event, ModelEvent::PreferencesChanged(preferences)
                 if preferences.active.as_ref() == self.pending_activation.as_ref())
         {
-            // Choosing a model is the last setup step: go straight to the conversation.
+            // The first choice finishes setup and opens chat. A later switch stays
+            // on the selected-model card so the new name is visible there.
             self.pending_activation = None;
+            self.changing_active = false;
             self.home_open = true;
             self.selected = None;
-            cx.emit(GoToChat);
+            if !was_ready {
+                cx.emit(GoToChat);
+            }
         }
         if matches!(event, ModelEvent::Error(_)) {
             self.pending_activation = None;

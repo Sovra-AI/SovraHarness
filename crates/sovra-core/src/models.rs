@@ -343,6 +343,55 @@ impl ModelInfo {
             None => "Price not listed".into(),
         }
     }
+
+    /// Everyday sentence from abilities the catalog lists.
+    ///
+    /// The model name and provider description are not abilities. When nothing
+    /// listed maps to a plain phrase, this says so instead of guessing a use.
+    pub fn plain_good_for(&self) -> String {
+        let mut parts: Vec<&'static str> = Vec::new();
+        if self.supports("reasoning") || self.supports("include_reasoning") {
+            parts.push("working through a hard question step by step");
+        }
+        if self.supports("tools") {
+            parts.push("using tools you already set up");
+        }
+        if self.lists_input("image") {
+            parts.push("looking at pictures you share");
+        }
+        if self.lists_input("video") {
+            parts.push("looking at videos you share");
+        }
+        if self.lists_input("audio") || self.lists_input("speech") {
+            parts.push("listening to sound you share");
+        }
+        if self.supports("response_format") || self.supports("structured_outputs") {
+            parts.push("giving an answer in a layout you ask for");
+        }
+        if self.lists_output("image") {
+            parts.push("making pictures");
+        }
+        if self.lists_output("video") {
+            parts.push("making videos");
+        }
+        if self.lists_output("audio") || self.lists_output("speech") {
+            parts.push("speaking replies out loud");
+        }
+        match parts.as_slice() {
+            [] => "What it is good for is not listed.".into(),
+            [only] => format!("Good for {only}."),
+            [first, second] => format!("Good for {first} and {second}."),
+            [leading @ .., last] => format!("Good for {}, and {last}.", leading.join(", ")),
+        }
+    }
+
+    fn lists_input(&self, modality: &str) -> bool {
+        self.input_modalities.iter().any(|value| value == modality)
+    }
+
+    fn lists_output(&self, modality: &str) -> bool {
+        self.output_modalities.iter().any(|value| value == modality)
+    }
 }
 
 /// Light or dark app theme. Saved alongside model preferences so the choice survives restarts.

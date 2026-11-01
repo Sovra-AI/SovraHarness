@@ -170,6 +170,77 @@ fn prices_read_as_cost_per_message() {
     assert_eq!(ModelInfo::default().plain_price(), "Price not listed");
 }
 
+#[test]
+fn plain_facts_read_as_price_and_what_it_is_good_for() {
+    let chat = |prompt: Option<&str>, completion: Option<&str>, parameters: &[&str]| {
+        let mut info = ModelInfo {
+            id: "provider/internal-id".into(),
+            name: "Everyday genius".into(),
+            description: "Elite coding persona. Best at every modality and token.".into(),
+            input_modalities: vec!["text".into()],
+            output_modalities: vec!["text".into()],
+            supported_parameters: parameters.iter().map(|item| (*item).to_owned()).collect(),
+            ..ModelInfo::default()
+        };
+        if let (Some(prompt), Some(completion)) = (prompt, completion) {
+            info.pricing.insert("prompt".into(), prompt.into());
+            info.pricing.insert("completion".into(), completion.into());
+        }
+        info
+    };
+
+    let free = chat(Some("0"), Some("0"), &[]);
+    assert_eq!(free.plain_price(), "Free");
+    assert_eq!(free.plain_good_for(), "What it is good for is not listed.");
+    assert!(!free.plain_good_for().contains("genius"));
+    assert!(!free.plain_good_for().contains("token"));
+    assert!(!free.plain_good_for().contains("persona"));
+    assert!(!free.plain_good_for().contains("modality"));
+    assert!(!free.plain_good_for().contains("agent"));
+    assert!(!free.plain_good_for().contains(&free.id));
+
+    let priced = chat(Some("0.000003"), Some("0.000015"), &[]);
+    assert_eq!(priced.plain_price(), "About 1¢ a message");
+    assert_eq!(
+        priced.plain_good_for(),
+        "What it is good for is not listed."
+    );
+
+    let thinker = chat(Some("0.000003"), Some("0.000015"), &["reasoning"]);
+    assert_eq!(thinker.plain_price(), "About 1¢ a message");
+    assert_eq!(
+        thinker.plain_good_for(),
+        "Good for working through a hard question step by step."
+    );
+
+    let with_tools = chat(Some("0"), Some("0"), &["tools"]);
+    assert_eq!(with_tools.plain_price(), "Free");
+    assert_eq!(
+        with_tools.plain_good_for(),
+        "Good for using tools you already set up."
+    );
+
+    let unlisted = chat(None, None, &["temperature"]);
+    assert_eq!(unlisted.plain_price(), "Price not listed");
+    assert_eq!(
+        unlisted.plain_good_for(),
+        "What it is good for is not listed."
+    );
+    assert!(!unlisted.plain_good_for().contains("temperature"));
+
+    let mut pictured = chat(
+        Some("0.000002"),
+        Some("0.000004"),
+        &["include_reasoning", "tools", "response_format"],
+    );
+    pictured.input_modalities.push("image".into());
+    assert_eq!(pictured.plain_price(), "About 0.5¢ a message");
+    assert_eq!(
+        pictured.plain_good_for(),
+        "Good for working through a hard question step by step, using tools you already set up, looking at pictures you share, and giving an answer in a layout you ask for."
+    );
+}
+
 fn fixture() -> ModelsState {
     let paid = ModelInfo {
         id: "author/vision".into(),
