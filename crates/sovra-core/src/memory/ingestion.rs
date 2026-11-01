@@ -138,6 +138,28 @@ pub struct MemoryJob {
     pub extraction_model: Option<String>,
 }
 
+impl MemoryJob {
+    /// A receipt describes persisted output, including a successful empty check.
+    pub fn result_label(&self) -> Option<String> {
+        match self.state {
+            MemoryJobState::Complete => Some(match self.fact_ids.len() {
+                0 => "Last check finished. No new detail was saved.".into(),
+                1 => "Last check finished. 1 saved detail is ready to review.".into(),
+                count => format!("Last check finished. {count} saved details are ready to review."),
+            }),
+            MemoryJobState::Failed => Some(format!(
+                "A message could not be remembered. {}",
+                self.error
+                    .as_deref()
+                    .unwrap_or("Check your selected AI in Models and try again.")
+            )),
+            MemoryJobState::Pending | MemoryJobState::Processing | MemoryJobState::Cancelled => {
+                None
+            }
+        }
+    }
+}
+
 /// Only the matching, unexpired token may finish or fail a claimed input.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemoryClaim {
@@ -296,6 +318,53 @@ impl MemoryStatus {
 #[cfg(test)]
 mod output_tests {
     use super::*;
+
+    #[test]
+    fn capture_receipts_distinguish_saved_empty_failed_and_unfinished_jobs() {
+        let mut job = MemoryJob {
+            episode_id: EpisodeId("episode:receipt".into()),
+            state: MemoryJobState::Complete,
+            attempts: 1,
+            error: None,
+            fact_ids: vec![],
+            candidates: vec![],
+            extraction_model: None,
+        };
+        assert_eq!(
+            job.result_label().as_deref(),
+            Some("Last check finished. No new detail was saved.")
+        );
+        job.fact_ids.push(FactId("fact:1".into()));
+        assert_eq!(
+            job.result_label().as_deref(),
+            Some("Last check finished. 1 saved detail is ready to review.")
+        );
+        job.fact_ids.push(FactId("fact:2".into()));
+        assert_eq!(
+            job.result_label().as_deref(),
+            Some("Last check finished. 2 saved details are ready to review.")
+        );
+        job.state = MemoryJobState::Failed;
+        assert!(
+            job.result_label()
+                .unwrap()
+                .contains("Check your selected AI")
+        );
+        job.error = Some("The selected AI could not be reached.".into());
+        assert_eq!(
+            job.result_label().as_deref(),
+            Some("A message could not be remembered. The selected AI could not be reached.")
+        );
+        for state in [
+            MemoryJobState::Pending,
+            MemoryJobState::Processing,
+            MemoryJobState::Cancelled,
+        ] {
+            job.state = state;
+            assert!(job.result_label().is_none());
+        }
+    }
+
     #[test]
     fn reuse_requires_known_references_and_cannot_conflict_with_correction() {
         let source = Episode {

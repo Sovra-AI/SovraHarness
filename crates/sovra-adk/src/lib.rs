@@ -8,6 +8,7 @@ mod admission;
 mod artifacts;
 mod capabilities;
 pub mod decision_client;
+mod documents;
 mod file_index;
 mod files;
 mod google;
@@ -15,6 +16,7 @@ mod memory;
 mod native_ui;
 mod orchestrator;
 mod recall;
+mod remote_tools;
 mod required_delegation;
 mod skills;
 mod sources_footer;
@@ -42,16 +44,38 @@ use sovra_core::{AgentConfig, Event, ResponseModel};
 
 const DEFAULT_USER_ID: &str = "local-user";
 
+/// ADK otherwise admits an unbounded delegation batch. Each dispatcher queues
+/// excess calls; dropping its invocation releases both running and waiting work.
+fn run_config() -> adk_core::RunConfig {
+    adk_core::RunConfig {
+        tool_concurrency: adk_core::ToolConcurrencyConfig {
+            max_concurrency: Some(4),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 /// The one place capability providers are registered for a turn. A new
 /// integration adds its provider here; the orchestrator and roster pick it up.
 fn capability_providers(
     search: Option<&SearchClient>,
     web_search_enabled: bool,
+    attachments: Option<&Arc<files::ReadAttachment>>,
+    pages: Option<&Arc<dyn sovra_core::files::PageViewer>>,
+    llm: &Arc<dyn Llm>,
 ) -> Vec<Arc<dyn capabilities::CapabilityProvider>> {
     let mut providers: Vec<Arc<dyn capabilities::CapabilityProvider>> = Vec::new();
     if web_search_enabled && let Some(client) = search {
         providers.push(Arc::new(capabilities::WebSearchProvider::new(
             client.clone(),
+        )));
+    }
+    if let Some(reader) = attachments {
+        providers.push(Arc::new(documents::DocumentReaderProvider::new(
+            Arc::clone(reader),
+            Arc::clone(llm),
+            pages.cloned(),
         )));
     }
     providers
@@ -93,7 +117,11 @@ pub struct AdkHarness {
     llm: Arc<dyn Llm>,
     base_tools: Vec<Arc<dyn Tool>>,
     base_instruction: String,
+    /// User settings and application guidance, without a turn's selected procedure.
+    standing_instruction: String,
     file_reader: Option<Arc<files::ReadAttachment>>,
+    /// Renders the turn's PDF pages as pictures; set only for picture-reading models.
+    page_viewer: Option<Arc<dyn sovra_core::files::PageViewer>>,
     /// Built parent. Its sub-agents are the roster delegates.
     root: Arc<dyn Agent>,
     search: Option<SearchClient>,
@@ -128,6 +156,26 @@ impl AdkHarness {
         }
         self.rebuild(self.base_instruction.clone(), tools)
     }
+
+    /// Offer tools from services the person connected. An empty list leaves the turn unchanged.
+    pub fn with_remote_tools<C>(
+        &self,
+        offers: &[sovra_core::mcp::ToolOffer],
+        caller: Arc<C>,
+    ) -> Result<Self, Error>
+    where
+        C: sovra_core::mcp::RemoteToolCaller + 'static,
+    {
+        if offers.is_empty() {
+            return Ok(self.clone());
+        }
+        let caller: Arc<dyn sovra_core::mcp::RemoteToolCaller> = caller;
+        let mut tools = self.base_tools.clone();
+        tools.retain(|tool| !tool.name().starts_with("connected_"));
+        tools.extend(remote_tools::tools(offers, &caller));
+        self.rebuild(self.base_instruction.clone(), tools)
+    }
+
     /// Apply an explicitly selected procedure without inserting it into user history.
     pub fn with_skill(&self, skill: &sovra_core::skills::Skill) -> Result<Self, Error> {
         skill
@@ -396,9 +444,23 @@ impl AdkHarness {
         }
         let mut base = self.clone();
         base.tools_enabled &= tools_enabled;
-        let mut harness = base.rebuild(files::instruction(&self.base_instruction), tools)?;
-        harness.file_reader = Some(reader);
-        Ok(harness)
+        // Set before rebuilding so the document reader is equipped with these files.
+        base.file_reader = Some(reader);
+        base.rebuild(files::instruction(&self.base_instruction), tools)
+    }
+
+    /// Lets the document reader look at printed PDF pages as pictures. The
+    /// runtime passes a viewer only when the turn's model can see pictures.
+    pub fn with_page_viewer(
+        &self,
+        viewer: Option<Arc<dyn sovra_core::files::PageViewer>>,
+    ) -> Result<Self, Error> {
+        if viewer.is_none() && self.page_viewer.is_none() {
+            return Ok(self.clone());
+        }
+        let mut base = self.clone();
+        base.page_viewer = viewer;
+        base.rebuild(self.base_instruction.clone(), self.base_tools.clone())
     }
 
     /// Executes actual text/media inputs. The caller has already validated the model's modalities.
@@ -471,7 +533,7 @@ impl AdkHarness {
             &config,
             Arc::clone(&self.llm),
             tools,
-            Some(Arc::clone(&self.sessions)),
+            Some(self),
             search,
             web_search_enabled,
             self.tools_enabled,
@@ -480,6 +542,7 @@ impl AdkHarness {
         built.secrets.clone_from(&self.secrets);
         built.artifact_saver.clone_from(&self.artifact_saver);
         built.file_reader.clone_from(&self.file_reader);
+        built.page_viewer.clone_from(&self.page_viewer);
         built.memory_output = self.memory_output;
         Ok(built)
     }
@@ -488,7 +551,7 @@ impl AdkHarness {
         config: &AgentConfig,
         llm: Arc<dyn Llm>,
         tools: Vec<Arc<dyn Tool>>,
-        sessions: Option<Arc<InMemorySessionService>>,
+        parent: Option<&Self>,
         search: Option<SearchClient>,
         web_search_enabled: bool,
         tools_enabled: bool,
@@ -500,6 +563,10 @@ impl AdkHarness {
             provider: String::new(),
         };
         let base_instruction = config.instruction.clone();
+        let standing_instruction = parent.map_or_else(
+            || config.instruction.clone(),
+            |parent| parent.standing_instruction.clone(),
+        );
         let instruction = if tools.is_empty() {
             base_instruction.clone()
         } else {
@@ -515,16 +582,27 @@ impl AdkHarness {
             llm: Arc::clone(&llm),
             parent_tools: stored_tools.clone(),
             instruction,
-            providers: capability_providers(search.as_ref(), web_search_enabled),
+            standing_instruction: standing_instruction.clone(),
+            providers: capability_providers(
+                search.as_ref(),
+                web_search_enabled,
+                parent.and_then(|parent| parent.file_reader.as_ref()),
+                parent.and_then(|parent| parent.page_viewer.as_ref()),
+                &llm,
+            ),
             tools_enabled,
         })?;
-        let sessions = sessions.unwrap_or_else(|| Arc::new(InMemorySessionService::new()));
+        let sessions = parent.map_or_else(
+            || Arc::new(InMemorySessionService::new()),
+            |parent| Arc::clone(&parent.sessions),
+        );
         let session_service: Arc<dyn SessionService> =
             Arc::clone(&sessions) as Arc<dyn SessionService>;
         let runner = Runner::builder()
             .app_name(&config.app_name)
             .agent(Arc::clone(&root) as Arc<dyn Agent>)
             .session_service(session_service)
+            .run_config(run_config())
             .build()
             .map_err(Error::RunnerBuild)?;
         Ok(Self {
@@ -536,7 +614,9 @@ impl AdkHarness {
             llm,
             base_tools: stored_tools,
             base_instruction,
+            standing_instruction,
             file_reader: None,
+            page_viewer: None,
             memory_output: memory::OutputMode::Prompt,
             artifact_saver: None,
             root,

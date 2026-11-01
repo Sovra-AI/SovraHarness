@@ -445,3 +445,204 @@ fn agent_discovers_searches_reads_and_synthesizes_without_expanding_tool_permiss
         assert_eq!(disabled.skill_capabilities(), [] as [String; 0]);
     });
 }
+
+struct HelperKnowledgeModel {
+    check_context: bool,
+}
+
+#[async_trait::async_trait]
+impl Llm for HelperKnowledgeModel {
+    fn name(&self) -> &'static str {
+        "helper-knowledge-test"
+    }
+
+    async fn generate_content(
+        &self,
+        request: LlmRequest,
+        _: bool,
+    ) -> adk_core::Result<LlmResponseStream> {
+        let request_text = serde_json::to_string(&request).unwrap();
+        assert!(request_text.contains("Standing instruction: use plain words."));
+        if self.check_context {
+            assert_eq!(
+                request_text.contains("Parent procedure scope sentinel."),
+                request.tools.contains_key("CodingAgent")
+            );
+            for (text, role) in [
+                ("The project is an orchid greenhouse.", "user"),
+                ("We chose a small greenhouse.", "model"),
+            ] {
+                assert_eq!(request_text.matches(text).count(), 1);
+                assert!(request.contents.iter().any(|content| {
+                    content.role == role
+                        && content
+                            .parts
+                            .iter()
+                            .any(|part| matches!(part, Part::Text { text: value } if value == text))
+                }));
+            }
+            assert!(!request_text.contains("Private old reasoning"));
+        }
+        let response = request
+            .contents
+            .iter()
+            .rev()
+            .flat_map(|content| content.parts.iter().rev())
+            .find_map(|part| {
+                if let Part::FunctionResponse {
+                    function_response, ..
+                } = part
+                {
+                    Some(function_response)
+                } else {
+                    None
+                }
+            });
+        let answer = "The orchid budget is 420 dollars. [notes/budget.md:7]";
+        let part = if request.tools.contains_key("CodingAgent") {
+            if let Some(response) = response {
+                assert_eq!(response.name, "CodingAgent");
+                assert!(response.response.to_string().contains("420 dollars"));
+                Part::Text {
+                    text: answer.into(),
+                }
+            } else {
+                call(
+                    "CodingAgent",
+                    json!({"request":"Find the orchid budget in the indexed project notes and cite its source."}),
+                    0,
+                )
+            }
+        } else {
+            for name in [
+                "search_indexed_files",
+                "read_indexed_file",
+                "query_indexed_files",
+                "inspect_file_history",
+                "read_file_history",
+                "query_file_knowledge",
+                "read_file_knowledge_evidence",
+            ] {
+                assert!(
+                    request.tools.contains_key(name),
+                    "helper cannot access {name}"
+                );
+            }
+            assert!(!request.tools.contains_key("propose_file_knowledge"));
+            match response {
+                None => call(
+                    "search_indexed_files",
+                    json!({"query":"orchid budget", "roots":["root"]}),
+                    1,
+                ),
+                Some(response) if response.name == "search_indexed_files" => {
+                    assert_eq!(response.response["passages"][0]["text"], passage().text);
+                    call(
+                        "read_indexed_file",
+                        json!({"reference":response.response["passages"][0]["reference"]}),
+                        2,
+                    )
+                }
+                Some(response) => {
+                    assert_eq!(response.name, "read_indexed_file");
+                    assert_eq!(response.response["passage"]["text"], passage().text);
+                    Part::Text {
+                        text: answer.into(),
+                    }
+                }
+            }
+        };
+        let response = LlmResponse::new(Content {
+            role: "model".into(),
+            parts: vec![part],
+        });
+        Ok(Box::pin(futures::stream::once(async move { Ok(response) })))
+    }
+}
+
+#[tokio::test]
+async fn delegated_helper_reads_granted_knowledge_and_returns_cited_evidence() {
+    let reader = Arc::new(Reader::default());
+    let mut reply =
+        sovra_core::ChatMessage::assistant("a", "We chose a small greenhouse.", "", vec![]);
+    reply.thinking = "Private old reasoning".into();
+    let context = sovra_core::ConversationContext::from_messages(&[
+        sovra_core::ChatMessage::user("u", "The project is an orchid greenhouse.", ""),
+        reply,
+    ]);
+    let mut skill = sovra_core::skills::builtin_skills()
+        .into_iter()
+        .find(|skill| skill.name == "search-files")
+        .unwrap();
+    skill.instructions = "Parent procedure scope sentinel.".into();
+    let harness = AdkHarness::with_llm_and_tools(
+        &AgentConfig {
+            instruction: "Standing instruction: use plain words.".into(),
+            ..AgentConfig::default()
+        },
+        Arc::new(HelperKnowledgeModel {
+            check_context: true,
+        }),
+        vec![],
+    )
+    .unwrap()
+    .with_indexed_files(Some(reader.clone()))
+    .unwrap()
+    .with_skill(&skill)
+    .unwrap()
+    .with_working_context(Some(&context))
+    .unwrap();
+    let (events, received) = async_channel::unbounded();
+    harness
+        .run_prompt(
+            "delegated-knowledge",
+            "Find the budget in my project notes.",
+            &events,
+        )
+        .await;
+    let output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+    assert!(
+        output
+            .iter()
+            .any(|event| matches!(event, Event::AgentCompleted { .. })),
+        "{output:?}"
+    );
+    assert!(output.iter().any(|event| matches!(event, Event::AgentChunk { text, .. } if text.contains("notes/budget.md:7"))));
+    assert_eq!(reader.searches.load(Ordering::SeqCst), 1);
+    assert_eq!(reader.proposals.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn team_member_reads_granted_knowledge_and_streams_cited_evidence() {
+    let reader = Arc::new(Reader::default());
+    let harness = AdkHarness::with_llm_and_tools(
+        &AgentConfig {
+            instruction: "Standing instruction: use plain words.".into(),
+            ..AgentConfig::default()
+        },
+        Arc::new(HelperKnowledgeModel {
+            check_context: false,
+        }),
+        vec![],
+    )
+    .unwrap()
+    .with_indexed_files(Some(reader.clone()))
+    .unwrap();
+    let member = sovra_core::teams::default_team()
+        .into_iter()
+        .find(|member| !member.conductor)
+        .unwrap();
+    let turn = crate::TeamTurn {
+        session_id: "team-knowledge".into(),
+        run_id: "knowledge-turn".into(),
+        prompt: "Find the orchid budget in my project notes.".into(),
+        history: vec![],
+        members: vec![member],
+    };
+    let (events, received) = async_channel::unbounded();
+    harness.run_team(&turn, &events).await;
+    let output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+    assert!(output.iter().any(|event| matches!(event, Event::AgUi { event: sovra_core::AgUiEvent::TextMessageContent { delta, .. }, .. } if delta.contains("notes/budget.md:7"))), "{output:?}");
+    assert_eq!(reader.searches.load(Ordering::SeqCst), 1);
+    assert_eq!(reader.proposals.load(Ordering::SeqCst), 0);
+}

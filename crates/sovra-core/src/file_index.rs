@@ -274,6 +274,7 @@ pub struct IndexState {
     pub passages: Vec<IndexPassage>,
     pub request_id: u64,
     pub searching: bool,
+    pub search_completed: bool,
     pub notice: Option<String>,
     pub monitors: std::collections::BTreeMap<String, MonitorStatus>,
     pub semantic: Vec<semantic::SemanticStatus>,
@@ -283,6 +284,55 @@ pub struct IndexState {
 }
 
 impl IndexState {
+    /// Summarizes observed scan state without treating a finished scan as complete coverage.
+    pub fn capture_summary(&self) -> String {
+        if self.roots.is_empty() {
+            return "No folders connected.".into();
+        }
+        let mut reading = 0;
+        let mut waiting = 0;
+        let mut paused = 0;
+        let mut checked = 0;
+        let mut attention = 0;
+        for root in &self.roots {
+            match root.status {
+                IndexStatus::Scanning => reading += 1,
+                IndexStatus::Pending if root.auto_refresh => waiting += 1,
+                IndexStatus::Pending => paused += 1,
+                IndexStatus::Ready => checked += 1,
+                IndexStatus::Cancelled | IndexStatus::Interrupted | IndexStatus::Failed => {}
+            }
+            if matches!(
+                root.status,
+                IndexStatus::Cancelled | IndexStatus::Interrupted | IndexStatus::Failed
+            ) || !root.issues.is_empty()
+                || root.progress.skipped > 0
+                || root.progress.failed > 0
+            {
+                attention += 1;
+            }
+        }
+        let count = self.roots.len();
+        let noun = if count == 1 { "folder" } else { "folders" };
+        let mut summary = format!("{count} {noun} connected.");
+        for (count, description) in [
+            (reading, "reading now"),
+            (waiting, "waiting to be read"),
+            (paused, "paused"),
+            (checked, "checked"),
+            (attention, "with items to review"),
+        ] {
+            if count > 0 {
+                summary.push(' ');
+                summary.push_str(&count.to_string());
+                summary.push(' ');
+                summary.push_str(description);
+                summary.push('.');
+            }
+        }
+        summary
+    }
+
     /// A review starts only from a visible proposal and cannot be submitted twice.
     pub fn begin_review(&mut self, id: u64) -> bool {
         self.knowledge_pending.iter().any(|p| p.id == id) && self.knowledge_reviewing.insert(id)
@@ -291,6 +341,7 @@ impl IndexState {
     pub fn begin_search(&mut self) -> u64 {
         self.request_id = self.request_id.saturating_add(1);
         self.searching = true;
+        self.search_completed = false;
         self.notice = None;
         self.request_id
     }
@@ -340,6 +391,7 @@ impl IndexState {
                     self.browser.invalidate();
                     self.report.invalidate();
                     self.passages.clear();
+                    self.search_completed = false;
                 }
                 self.roots.clone_from(roots);
                 self.monitors
@@ -362,6 +414,7 @@ impl IndexState {
                         self.browser.invalidate();
                         self.report.invalidate();
                         self.passages.retain(|p| p.reference.root_id != root.id);
+                        self.search_completed = false;
                     }
                     current.clone_from(root);
                 } else {
@@ -387,12 +440,14 @@ impl IndexState {
                         .cloned()
                         .collect();
                     self.searching = false;
+                    self.search_completed = true;
                 }
             }
             IndexEvent::Error(message) => {
                 self.knowledge_reviewing.clear();
                 self.notice = Some(message.clone());
                 self.searching = false;
+                self.search_completed = false;
             }
             IndexEvent::Browsed { request_id, result } => {
                 self.browser.finish_browse(*request_id, result);
@@ -565,6 +620,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn capture_summary_counts_observed_states_and_keeps_notices_visible() {
+        let mut state = IndexState::default();
+        assert_eq!(state.capture_summary(), "No folders connected.");
+        let root = IndexedRoot {
+            id: "root".into(),
+            path: "/chosen".into(),
+            status: IndexStatus::Ready,
+            progress: IndexProgress::default(),
+            issues: vec![],
+            completed_at: Some(1),
+            auto_refresh: true,
+            scan_options: ScanOptions::default(),
+        };
+        state.roots.push(root.clone());
+        assert_eq!(state.capture_summary(), "1 folder connected. 1 checked.");
+        state.roots[0].progress.skipped = 1;
+        assert_eq!(
+            state.capture_summary(),
+            "1 folder connected. 1 checked. 1 with items to review."
+        );
+        for status in [
+            IndexStatus::Scanning,
+            IndexStatus::Pending,
+            IndexStatus::Cancelled,
+            IndexStatus::Interrupted,
+            IndexStatus::Failed,
+        ] {
+            state.roots.push(IndexedRoot {
+                status,
+                ..root.clone()
+            });
+        }
+        state.roots.push(IndexedRoot {
+            status: IndexStatus::Pending,
+            auto_refresh: false,
+            ..root
+        });
+        assert_eq!(
+            state.capture_summary(),
+            "7 folders connected. 1 reading now. 1 waiting to be read. 1 paused. 1 checked. 4 with items to review."
+        );
+    }
+
+    #[test]
     fn folder_addition_failures_survive_scan_and_search_updates() {
         let mut state = IndexState::default();
         let result = FolderAddition {
@@ -653,6 +752,7 @@ mod tests {
     #[test]
     fn stale_search_responses_cannot_replace_a_newer_query() {
         let mut state = IndexState::default();
+        assert!(!state.search_completed);
         let old = state.begin_search();
         let current = state.begin_search();
         state.apply(&IndexEvent::Results {
@@ -660,13 +760,16 @@ mod tests {
             passages: vec![],
         });
         assert!(state.searching);
+        assert!(!state.search_completed);
         state.apply(&IndexEvent::Results {
             request_id: current,
             passages: vec![],
         });
         assert!(!state.searching);
+        assert!(state.search_completed);
         state.apply(&IndexEvent::Error("Retry".into()));
         assert_eq!(state.notice.as_deref(), Some("Retry"));
+        assert!(!state.search_completed);
     }
 
     #[test]

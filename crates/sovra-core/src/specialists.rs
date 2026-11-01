@@ -152,7 +152,7 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             "DocumentReaderAgent",
             "document_reader",
             "Document & PDF Reader",
-            "Extracting grounded answers and citations from uploaded files and PDFs.",
+            "Reads attached files of any kind (PDFs, Word, spreadsheets, slides, emails, ebooks, web pages, archives and more) cover to cover, several at once, and answers with file, section and line citations.",
             false,
             ModelTier::Standard,
         ),

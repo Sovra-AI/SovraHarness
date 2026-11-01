@@ -144,8 +144,11 @@ disallowed_methods = "deny"
 debug = "line-tables-only"
 
 # Optimise dependencies (GPUI rendering, parsers) even in dev; keep our crates fast to rebuild.
+# No debug info for dependencies: it was most of target/debug/deps, and backtraces still
+# name dependency frames; only our crates keep line tables.
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.dev.build-override]
 opt-level = 2

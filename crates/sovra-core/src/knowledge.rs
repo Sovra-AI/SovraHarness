@@ -2,8 +2,8 @@
 //!
 //! The picture is a fixed example of the memory model in [`crate::memory`]:
 //! a record is an episode, a belief is a fact, the names are entities, history
-//! is supersession (never a delete), and finding a memory uses meaning plus
-//! the words themselves. Nothing here reads a clock, a store, or the network.
+//! is supersession (never a delete), and finding a memory uses words with
+//! optional meaning search. Nothing here reads a clock, a store, or the network.
 
 /// Where a step sits in the life of one memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +140,7 @@ pub fn memory_explanation() -> MemoryExplanation {
         ],
         search: SearchPicture {
             heading: "How Sovra finds a memory",
-            summary: "Sovra uses the meaning and the words themselves. The meaning of \"where does Maya live?\" can find this memory. The word Lisbon can find it too.",
+            summary: "Sovra searches the words in saved details. You can also turn on optional meaning search in Memories to help find related wording. Searches can miss things; open a saved detail to check its source.",
         },
         times: &[
             TimeNote {
@@ -166,6 +166,15 @@ pub fn memory_explanation() -> MemoryExplanation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_distinguishes_default_word_search_from_optional_meaning_search() {
+        let summary = memory_explanation().search.summary;
+        assert!(summary.contains("words"));
+        assert!(summary.contains("optional"));
+        assert!(summary.contains("turn on"));
+        assert!(summary.contains("can miss"));
+    }
 
     #[test]
     fn worked_example_teaches_the_memory_lifecycle() {

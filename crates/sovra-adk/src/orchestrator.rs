@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use adk_agent::{Agent, LlmAgent, LlmAgentBuilder};
-use adk_core::{Llm, Tool};
+use adk_core::{Llm, Tool, ToolExecutionStrategy};
 use adk_tool::{AgentTool, AgentToolSessionSnapshot};
 use std::collections::BTreeSet;
 
@@ -22,6 +22,10 @@ use crate::capabilities::{self, CapabilityProvider};
 use crate::required_delegation::{FirstCall, RequiredFirstCall};
 use crate::sources_footer::SourcesFooter;
 use crate::text_tool_calls::TextToolCalls;
+
+#[cfg(test)]
+#[path = "orchestrator/concurrency_tests.rs"]
+mod concurrency_tests;
 
 /// Parent agent id. Matches the roster entry the router already uses.
 pub(crate) const ORCHESTRATOR_ID: &str = "OrchestratorAgent";
@@ -139,6 +143,7 @@ pub(crate) struct OrchestratorParts {
     pub llm: Arc<dyn Llm>,
     pub parent_tools: Vec<Arc<dyn Tool>>,
     pub instruction: String,
+    pub standing_instruction: String,
     /// Real tool sets this turn. Specialists whose requirements are unmet are
     /// not offered, so the parent cannot route to one that would only guess.
     pub providers: Vec<Arc<dyn CapabilityProvider>>,
@@ -190,15 +195,19 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
             Some(rule) => RequiredFirstCall::wrap(Arc::clone(&parts.llm), rule),
             None => Arc::clone(&parts.llm),
         };
-        // Every specialist may also look up the user's saved memories.
-        tools.extend(
-            parts
-                .parent_tools
-                .iter()
-                .filter(|tool| tool.name() == crate::recall::LOOKUP_NAME)
-                .cloned(),
-        );
-        delegates.push(child_agent(spec, llm, tools, instruction)?);
+        // A provider may already carry a shared reader (read_attachment);
+        // ADK rejects duplicate tool names.
+        let shared: Vec<Arc<dyn Tool>> = capabilities::shared_knowledge_tools(&parts.parent_tools)
+            .filter(|shared| tools.iter().all(|tool| tool.name() != shared.name()))
+            .collect();
+        tools.extend(shared);
+        delegates.push(child_agent(
+            spec,
+            llm,
+            tools,
+            instruction,
+            &parts.standing_instruction,
+        )?);
     }
 
     let mut parent_tools = Vec::new();
@@ -268,11 +277,24 @@ fn child_agent(
     llm: Arc<dyn Llm>,
     tools: Vec<Arc<dyn Tool>>,
     instruction: String,
+    standing_instruction: &str,
 ) -> Result<Arc<dyn Agent>, Error> {
+    // ADK Auto groups safe reads ahead of ordered calls. Only use it when
+    // there are no ordering barriers anywhere in this helper's tool set.
+    let strategy = if tools
+        .iter()
+        .all(|tool| tool.is_read_only() && tool.is_concurrency_safe())
+    {
+        ToolExecutionStrategy::Auto
+    } else {
+        ToolExecutionStrategy::Sequential
+    };
     let mut builder = LlmAgentBuilder::new(spec.id.as_str())
         .description(spec.description.clone())
         .instruction(instruction)
-        .model(llm);
+        .global_instruction(standing_instruction)
+        .model(llm)
+        .tool_execution_strategy(strategy);
     for tool in tools {
         builder = builder.tool(tool);
     }
@@ -331,9 +353,11 @@ fn parent_instruction(
     format!(
         "{base}\n\nYou are {ORCHESTRATOR_ID}. You speak to the user. These are the specialists \
          you can call as tools:\n{catalog}{rules}\n\
-         Call a specialist by its tool name. Independent specialists run at the same time, and \
-         each one sees only the request you send it. Do not transfer the conversation away from \
-         yourself.",
+         Call a specialist by its tool name. Independent specialists can run concurrently, up to four at once. \
+         They receive your delegated request, standing instructions, the earlier conversation supplied for this turn, \
+         and the same granted knowledge readers, but not sibling work or your live tool-call history. \
+         Include the relevant task details and exact attachment IDs in each delegation. \
+         Do not forward unrelated private material or transfer the conversation away from yourself.",
         rules = rules.join("\n")
     )
 }

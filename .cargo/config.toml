@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+
+# Cap parallel rustc/link jobs: uncapped (14 cores) rustc + rust-analyzer + the app exhausted RAM
+# and froze the machine. 8 keeps the 10 performance cores busy without starving the OS.
+[build]
+jobs = 8

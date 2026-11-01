@@ -240,6 +240,38 @@ pub trait FileStore: Send + Sync {
     fn prepare(&self, id: &str, path: &Path) -> Result<Attachment, FileError>;
     fn load(&self, id: &str) -> Result<FileContent, FileError>;
     fn discard(&self, id: &str) -> Result<(), FileError>;
+
+    /// Printed pages in a stored attachment that can be shown as pictures
+    /// (a PDF with a text layer). Stores without page rendering have none.
+    fn page_count(&self, _id: &str) -> Result<usize, FileError> {
+        Err(no_page_pictures())
+    }
+
+    /// 1-based pages rendered as PNG pictures, in the order asked, so a
+    /// picture-reading model can see charts, tables and layout that a text
+    /// layer loses. At most [`MAX_PAGE_PICTURES`] pages per call.
+    fn render_pages(&self, _id: &str, _pages: &[usize]) -> Result<Vec<MediaPart>, FileError> {
+        Err(no_page_pictures())
+    }
+}
+
+/// Pages one rendering call may produce; bounds memory and model input.
+pub const MAX_PAGE_PICTURES: usize = 4;
+
+fn no_page_pictures() -> FileError {
+    FileError("Pages of this file cannot be shown as pictures.".into())
+}
+
+/// Turn-scoped page pictures for the document reader. The runtime implements
+/// it over [`FileStore`] on blocking tasks and only for the turn's own files.
+#[async_trait::async_trait]
+pub trait PageViewer: Send + Sync {
+    async fn page_count(&self, file_id: &str) -> Result<usize, FileError>;
+    async fn render_pages(
+        &self,
+        file_id: &str,
+        pages: &[usize],
+    ) -> Result<Vec<MediaPart>, FileError>;
 }
 
 /// Stable, Unicode-safe sections used both in prompt excerpts and the read-file tool.

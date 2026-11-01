@@ -1082,6 +1082,10 @@ impl WorkspaceState {
                 self.google.apply(google_event);
                 None
             }
+            Event::Mcp(mcp_event) => {
+                crate::mcp::record_tool_result(self, mcp_event);
+                None
+            }
             Event::AgUi { session_id, event } => self.apply_agui(session_id, event),
             Event::AgentResponseStarted { session_id, .. }
             | Event::AgentChunk { session_id, .. }
@@ -1249,6 +1253,21 @@ impl WorkspaceState {
             );
         }
         history
+    }
+
+    /// A reply that came from a connected service. The speaker line names that service.
+    pub(crate) fn push_service_reply(&mut self, service_name: &str, text: &str) {
+        let id = self.fresh_message_id("assistant");
+        let mut message = ChatMessage::assistant(id, text, "Just now", Vec::new());
+        service_name.clone_into(&mut message.author);
+        message.speaker = Some(crate::agui::Speaker {
+            member_id: format!("service:{service_name}"),
+            name: service_name.to_owned(),
+            icon: "link".into(),
+            role: "Connected service".into(),
+        });
+        self.messages.push(message);
+        self.sync_active_thread();
     }
 
     /// Message ids key per-message UI state, so they must be unique within the

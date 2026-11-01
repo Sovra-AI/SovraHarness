@@ -44,29 +44,31 @@ const TOOLS: &[&str] = &[
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = match args.first().map(String::as_str) {
-        Some("setup") => setup(),
-        Some("dev") => dev::run(&root()),
-        Some("run") => cargo(&["run", "--package", "sovra-app"]),
-        Some("ci") => ci(),
-        Some("fix") => fix(),
-        Some("check-deps") => deps::check(&root()),
-        Some("check-styles") => styles::check(&root()),
-        Some("hook") => return hook::run(&root()),
-        Some("dist") => dist::run(&root()),
-        Some("help" | "-h" | "--help") | None => {
-            print!("{HELP}");
-            Ok(())
-        }
-        Some(other) => Err(anyhow::anyhow!("unknown command `{other}`\n\n{HELP}")),
-    };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
+    match dispatch(&args) {
+        Ok(code) => code,
         Err(error) => {
             eprintln!("xtask: {error:#}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn dispatch(args: &[String]) -> anyhow::Result<ExitCode> {
+    match args.first().map(String::as_str) {
+        Some("setup") => setup()?,
+        Some("dev") => dev::run(&root()?)?,
+        Some("dev-cycle") => dev::cycle(&root()?)?, // Internal: one watcher rebuild.
+        Some("run") => cargo(&["run", "--package", "sovra-app"])?,
+        Some("ci") => ci()?,
+        Some("fix") => fix()?,
+        Some("check-deps") => deps::check(&root()?)?,
+        Some("check-styles") => styles::check(&root()?)?,
+        Some("hook") => return Ok(hook::run(&root()?)),
+        Some("dist") => dist::run(&root()?)?,
+        Some("help" | "-h" | "--help") | None => print!("{HELP}"),
+        Some(other) => bail!("unknown command `{other}`\n\n{HELP}"),
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn setup() -> anyhow::Result<()> {
@@ -90,8 +92,8 @@ fn ci() -> anyhow::Result<()> {
             "warnings",
         ])
     })?;
-    step("check-deps", || deps::check(&root()))?;
-    step("check-styles", || styles::check(&root()))?;
+    step("check-deps", || deps::check(&root()?))?;
+    step("check-styles", || styles::check(&root()?))?;
     step("deny", || cargo(&["deny", "--all-features", "check"]))?;
     step("shear", || cargo(&["shear"]))?;
     step("test", || {
@@ -122,15 +124,28 @@ fn step(name: &str, f: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()
     f().with_context(|| format!("`{name}` failed"))
 }
 
-/// Workspace root (the parent of this crate's manifest dir).
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+/// Shared target directories can supply a binary compiled in another checkout.
+/// Resolve the invocation workspace rather than trusting its compiled-in path.
+fn root() -> anyhow::Result<PathBuf> {
+    let cwd = std::env::current_dir().context("read xtask invocation directory")?;
+    let manifest = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
+    invocation_root(&cwd, manifest.as_deref())
+}
+
+fn invocation_root(cwd: &Path, manifest: Option<&Path>) -> anyhow::Result<PathBuf> {
+    cwd.ancestors()
+        .chain(manifest.into_iter().flat_map(Path::ancestors))
+        .find(|path| {
+            path.join("Cargo.toml").is_file()
+                && path.join("xtask/Cargo.toml").is_file()
+                && path.join("crates/sovra-core/Cargo.toml").is_file()
+        })
+        .map(Path::to_path_buf)
+        .context("cannot locate the Sovra workspace; run xtask from its checkout")
 }
 
 fn cargo(args: &[&str]) -> anyhow::Result<()> {
-    run(Command::new(env!("CARGO")).args(args).current_dir(root()))
+    run(Command::new(env!("CARGO")).args(args).current_dir(root()?))
 }
 
 fn run(command: &mut Command) -> anyhow::Result<()> {
@@ -179,6 +194,60 @@ fn has_cargo_subcommand(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_xtask_binary_uses_the_invocation_workspace() {
+        let base =
+            std::env::temp_dir().join(format!("sovra-xtask-workspaces-{}", std::process::id()));
+        for name in ["first", "second"] {
+            let workspace = base.join(name);
+            std::fs::create_dir_all(workspace.join("xtask/src")).unwrap();
+            std::fs::create_dir_all(workspace.join("crates/sovra-core")).unwrap();
+            for manifest in [
+                "Cargo.toml",
+                "xtask/Cargo.toml",
+                "crates/sovra-core/Cargo.toml",
+            ] {
+                std::fs::write(workspace.join(manifest), "").unwrap();
+            }
+        }
+        std::fs::create_dir_all(base.join("outside")).unwrap();
+        let base = base.canonicalize().unwrap();
+        let first = base.join("first");
+        let second = base.join("second");
+        let outside = base.join("outside");
+        for (cwd, manifest, expected) in [
+            (first.join("xtask/src"), second.join("xtask"), &first),
+            (
+                second.join("crates/sovra-core"),
+                first.join("xtask"),
+                &second,
+            ),
+            (outside.clone(), first.join("xtask"), &first),
+        ] {
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::inspect_invocation_root"])
+                .current_dir(cwd)
+                .env("CARGO_MANIFEST_DIR", manifest)
+                .env("SOVRA_XTASK_ROOT_PROBE", expected)
+                .status()
+                .unwrap();
+            assert!(
+                status.success(),
+                "shared binary selected the wrong workspace"
+            );
+        }
+        assert!(invocation_root(&outside, None).is_err());
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn inspect_invocation_root() {
+        let Some(expected) = std::env::var_os("SOVRA_XTASK_ROOT_PROBE") else {
+            return;
+        };
+        assert_eq!(root().unwrap(), PathBuf::from(expected));
+    }
 
     #[test]
     fn child_cargo_does_not_inherit_xtask_metadata() {

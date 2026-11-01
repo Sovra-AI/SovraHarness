@@ -481,55 +481,96 @@ mod tests {
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
             window.render_frame(cx);
             assert!(window.find("sovra-skills-view").visible());
-            assert!(window.find("skills-how-it-works").visible());
+            assert!(window.try_find("skills-how-it-works").is_none());
             assert!(window.find("skill-category-filters").visible());
+            assert!(window.find("skill-import").visible());
 
-            let web_search = shell
+            let web = shell
                 .read(cx)
                 .skills
-                .search_all("")
-                .iter()
-                .position(|skill| skill.name == "web-search")
-                .expect("the built-in catalogue includes web search");
-
-            // Filter by Web search category
+                .find("web-search")
+                .expect("web search")
+                .clone();
+            let copy = web.friendly_card_copy();
             window.click("skill-filter-research", cx);
             window.render_frame(cx);
-            assert!(window.find(("skill-card", web_search)).visible());
-
-            // Expand "How it works" instructions on the web-search card
-            window.click(("skill-details", web_search), cx);
-            window.render_frame(cx);
+            let index = card_with_title(window, &copy.friendly_title);
+            let card = window.find(("skill-card", index));
+            let label = card
+                .label()
+                .expect("card names its visible text")
+                .to_owned();
+            assert!(label.contains(copy.friendly_title.as_str()), "{label}");
+            assert!(label.contains(copy.summary.as_str()), "{label}");
+            assert!(label.contains(copy.example_display.as_str()), "{label}");
             assert!(
-                window
-                    .find(("skill-instructions-box", web_search))
-                    .visible()
+                !label.contains(&format!("/{}", web.name)),
+                "command chip is still on the card: {label}"
             );
+            assert!(window.try_find(("skill-details", index)).is_none());
+            assert!(window.try_find(("skill-instructions-box", index)).is_none());
+            assert!(window.try_find(("skill-edit", index)).is_none());
+            assert!(window.try_find(("skill-toggle", index)).is_none());
+            assert!(window.try_find(("skill-remove", index)).is_none());
 
-            // Click "Try example" on web-search -> switches to Chat and fills the full example question
-            window.click(("skill-try-example", web_search), cx);
+            click_visible(window, ("skill-try-example", index), cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
             assert_eq!(
                 shell.read(cx).composer_input.read(cx).value().as_ref(),
-                "/web-search What are three easy, healthy Mediterranean dinner ideas?"
+                copy.sample_draft
             );
 
-            // Return to Skills, filter by Web search, and click "Try in chat" -> fills `/web-search `
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
             window.render_frame(cx);
-            window.click(("skill-use", web_search), cx);
+            click_visible(window, ("skill-use", index), cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
             assert_eq!(
                 shell.read(cx).composer_input.read(cx).value().as_ref(),
-                "/web-search "
+                format!("/{} ", web.name)
             );
 
-            // Return to Skills and create a custom skill without typing a technical command slug
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
             window.render_frame(cx);
-            window.click("skill-create", cx);
+            click_visible(window, "skill-filter-all", cx);
+            let service = shell
+                .read(cx)
+                .skills
+                .find("connect-service")
+                .expect("connect a service")
+                .clone();
+            let service_copy = service.friendly_card_copy();
+            let service_use = format!("/{} ", service.name);
+            assert_ne!(service_copy.sample_draft, service_use);
+            let service_index = card_with_title(window, &service_copy.friendly_title);
+            click_visible(window, ("skill-try-example", service_index), cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                service_copy.sample_draft
+            );
+
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
+            click_visible(window, "skill-search", cx);
+            window.input(&web.name, cx);
+            window.render_frame(cx);
+            let files = shell
+                .read(cx)
+                .skills
+                .find("files")
+                .expect("files")
+                .friendly_card_copy();
+            assert!(card_with_title_opt(window, &files.friendly_title).is_none());
+            assert!(card_with_title_opt(window, &copy.friendly_title).is_some());
+            for _ in 0..web.name.chars().count() {
+                window.press("backspace", cx);
+            }
+            window.render_frame(cx);
+
+            click_visible(window, "skill-create", cx);
             window.render_frame(cx);
             assert!(window.find("skill-editor").visible());
             shell.update(cx, |shell, cx| {
@@ -543,17 +584,190 @@ mod tests {
                 );
             });
             window.render_frame(cx);
-            window.click("skill-save", cx);
+            click_visible(window, "skill-save", cx);
+            window.render_frame(cx);
+            click_visible(window, "skill-editor-back", cx);
+            window.render_frame(cx);
+
+            shell.update(cx, |shell, cx| {
+                let mut skills = shell.skills.skills().to_vec();
+                skills.push(personal_skill());
+                shell
+                    .skills
+                    .apply(&sovra_core::skills::SkillEvent::Loaded {
+                        skills,
+                        issues: Vec::new(),
+                    })
+                    .expect("personal skill loads");
+                cx.notify();
+            });
+            window.render_frame(cx);
+            click_visible(window, "skill-filter-custom", cx);
+            window.render_frame(cx);
+            let personal = card_with_title(window, "Sunday soup");
+            assert!(window.find(("skill-edit", personal)).visible());
+            click_visible(window, ("skill-edit", personal), cx);
+            window.render_frame(cx);
+            assert!(window.find("skill-editor").visible());
+            click_visible(window, "skill-editor-back", cx);
+            window.render_frame(cx);
+            click_visible(window, ("skill-toggle", personal), cx);
+            click_visible(window, ("skill-remove", personal), cx);
+            window.render_frame(cx);
+            click_visible(window, "skill-confirm-remove", cx);
             window.render_frame(cx);
         })
         .unwrap();
 
-        let saved = std::iter::from_fn(|| commands.try_recv().ok()).find_map(|cmd| match cmd {
-            Command::Skills(sovra_core::skills::SkillCommand::Save(skill)) => Some(*skill),
-            _ => None,
-        });
+        let mut saved = None;
+        let mut turned_off = false;
+        let mut removed = false;
+        for command in std::iter::from_fn(|| commands.try_recv().ok()) {
+            match command {
+                Command::Skills(sovra_core::skills::SkillCommand::Save(skill)) => {
+                    saved = Some(*skill);
+                }
+                Command::Skills(sovra_core::skills::SkillCommand::SetEnabled {
+                    name,
+                    enabled: false,
+                }) if name == "sunday-soup" => turned_off = true,
+                Command::Skills(sovra_core::skills::SkillCommand::Remove { name })
+                    if name == "sunday-soup" =>
+                {
+                    removed = true;
+                }
+                _ => {}
+            }
+        }
         let saved = saved.expect("saving a skill dispatches SkillCommand::Save");
         assert_eq!(saved.name, "sunday-family-dinner");
         assert_eq!(saved.title, "Sunday Family Dinner");
+        assert!(turned_off, "turn off sends SetEnabled");
+        assert!(removed, "remove sends Remove");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
+            click_visible(window, "skill-import", cx);
+        })
+        .unwrap();
+        cx.simulate_path_prompt_response(|_| Some(vec!["/chosen/skill".into()]));
+        cx.run_until_parked();
+        let imported = std::iter::from_fn(|| commands.try_recv().ok()).any(|command| {
+            matches!(
+                command,
+                Command::Skills(sovra_core::skills::SkillCommand::Import { directory })
+                    if directory.ends_with("skill")
+            )
+        });
+        assert!(imported, "import sends the chosen folder");
+    }
+
+    #[gpui_kit::test]
+    fn skills_catalogue_fits_minimum_wide_and_double_text_in_both_themes(cx: &mut TestAppContext) {
+        let (client, _commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+            let (shell, window) = open(cx, size(px(width), px(height)));
+            cx.update_window(window.into(), |_, window, cx| {
+                design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+                for mode in [ThemeMode::Dark, ThemeMode::Light] {
+                    Theme::change(mode, Some(window), cx);
+                    shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+                    window.render_frame(cx);
+                    assert!(window.find("sovra-skills-view").visible());
+                    assert!(window.try_find("skills-how-it-works").is_none());
+                    let action = ("skill-use", 0usize);
+                    reveal_inside(window, "sovra-skills-view", &action, width, height, cx);
+                    let bounds = window.find(action).bounds();
+                    assert!(
+                        bounds.left() >= px(0.) && bounds.right() <= px(width),
+                        "{scale}% {mode:?} horizontal {bounds:?}"
+                    );
+                    assert!(
+                        bounds.top() >= px(0.) && bounds.bottom() <= px(height),
+                        "{scale}% {mode:?} vertical {bounds:?}"
+                    );
+                }
+            })
+            .unwrap();
+        }
+    }
+
+    fn card_with_title(window: &Window, title: &str) -> usize {
+        match card_with_title_opt(window, title) {
+            Some(index) => index,
+            None => panic!("missing card {title}"),
+        }
+    }
+
+    fn card_with_title_opt(window: &Window, title: &str) -> Option<usize> {
+        (0..80).find(|&index| {
+            window
+                .try_find(("skill-card", index))
+                .is_some_and(|card| card.label().is_some_and(|label| label.contains(title)))
+        })
+    }
+
+    /// Wheel toward a control until its bounds sit in the window. A negative
+    /// delta brings a control up from below the fold, matching the Knowledge tests.
+    fn reveal_inside(
+        window: &mut Window,
+        scroller: &'static str,
+        id: &(impl Into<gpui_kit::ElementId> + Clone),
+        width: f32,
+        height: f32,
+        cx: &mut gpui_kit::App,
+    ) {
+        for _ in 0..40 {
+            let bounds = window.find(id.clone()).bounds();
+            let vertically_inside = bounds.top() >= px(0.) && bounds.bottom() <= px(height);
+            let horizontally_inside = bounds.left() >= px(0.) && bounds.right() <= px(width);
+            if vertically_inside && horizontally_inside {
+                return;
+            }
+            if vertically_inside {
+                return;
+            }
+            let delta = if bounds.bottom() > px(height) {
+                -80.
+            } else {
+                80.
+            };
+            window.scroll(
+                scroller,
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(delta))),
+                cx,
+            );
+        }
+    }
+
+    fn click_visible(
+        window: &mut Window,
+        id: impl Into<gpui_kit::ElementId> + Clone,
+        cx: &mut gpui_kit::App,
+    ) {
+        reveal_inside(window, "sovra-skills-view", &id, 1280., 820., cx);
+        window.click(id, cx);
+    }
+
+    fn personal_skill() -> Skill {
+        Skill {
+            name: "sunday-soup".into(),
+            title: "Sunday soup".into(),
+            description: "Plan a simple pot of soup.".into(),
+            category: "Your skills".into(),
+            aliases: Vec::new(),
+            kind: SkillKind::Procedure,
+            instructions: "Ask what is already in the kitchen.".into(),
+            tools: Vec::new(),
+            argument_hint: String::new(),
+            requires_input: false,
+            enabled: true,
+            builtin: false,
+            license: None,
+            compatibility: None,
+            metadata: std::collections::BTreeMap::new(),
+        }
     }
 }

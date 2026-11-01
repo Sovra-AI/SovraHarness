@@ -23,6 +23,7 @@ impl RuntimeStatus {
             Event::Auth(_)
             | Event::Memory(_)
             | Event::Connections(_)
+            | Event::Mcp(_)
             | Event::Development(_)
             | Event::Models(_)
             | Event::Skills(_)

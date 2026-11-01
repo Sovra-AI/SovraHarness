@@ -34,6 +34,7 @@ impl Skill {
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
             "connections" => "Connect personal WhatsApp (QR code)",
+            "connect-service" => "Connect a service",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
             "read-files" => "Read & explain attached files",
@@ -58,7 +59,7 @@ impl Skill {
             "execution" => "Calculator & number cruncher",
             "documentation" => "Clear how-to guide writer",
             "project" => "Project & weekend task planner",
-            "document-reader" => "Long document & PDF reader",
+            "document-reader" => "Read & compare any document",
             "presentation" => "Slide deck & talk outliner",
             "document-author" => "Polite letter & report writer",
             "spreadsheet" => "Household budget & table builder",
@@ -110,7 +111,7 @@ impl Skill {
                 "/models ".to_owned(),
             ),
             "knowledge" => (
-                "Opens Knowledge to see saved memories and connected folders.".to_owned(),
+                "Open Knowledge to see connected folders, or choose Memories to check what was saved and where it came from.".to_owned(),
                 "/knowledge ".to_owned(),
             ),
             "schedules" => (
@@ -143,6 +144,10 @@ impl Skill {
                     .to_owned(),
                 "/connections ".to_owned(),
             ),
+            "connect-service" => sample_pair(
+                "connect-service",
+                "Connect my recipe box at https://recipes.example.com",
+            ),
             "web-search" => sample_pair(
                 "web-search",
                 "What are three easy, healthy Mediterranean dinner ideas?",
@@ -154,7 +159,7 @@ impl Skill {
             ),
             "search-files" => sample_pair(
                 "search-files",
-                "Where did we mention the kitchen renovation budget?",
+                "Find the budget in my greenhouse project notes and show where it is written",
             ),
             "map-files" => sample_pair(
                 "map-files",
@@ -224,7 +229,7 @@ impl Skill {
             ),
             "document-reader" => sample_pair(
                 "document-reader",
-                "Find the warranty coverage and return policy in this manual",
+                "Read these two contracts and list every difference in the cancellation rules",
             ),
             "presentation" => sample_pair(
                 "presentation",
@@ -377,6 +382,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             SkillAction::Connections,
             &["whatsapp"],
         ),
+        action(
+            "connect-service",
+            "Connect a service",
+            "Paste a web address to connect a service you already use, and sign in if it asks.",
+            SkillAction::Settings,
+            &["mcp", "service"],
+        ),
         procedure(
             "save-artifact",
             "Save an artifact",
@@ -400,7 +412,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         procedure(
             "read-files",
             "Read attached files",
-            "Use when inspecting, searching or comparing files attached to this chat.",
+            "Ask Sovra or a helper to read, search or compare files attached to your current message.",
             "Files",
             &["read-attachment"],
             &["read_attachment"],
@@ -410,7 +422,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         procedure(
             "search-files",
             "Search indexed folders",
-            "Use when a question needs evidence from folders indexed in Knowledge.",
+            "Let chat and team helpers find answers in your connected folders and show the original source.",
             "Files",
             &["find-files", "file-search"],
             &[

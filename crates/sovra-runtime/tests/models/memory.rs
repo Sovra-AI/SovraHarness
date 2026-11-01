@@ -21,8 +21,12 @@ struct Store {
     sources: Mutex<Vec<Episode>>,
     recalls: Mutex<Vec<RecallQuery>>,
     recall_gate: Mutex<Option<async_channel::Receiver<()>>>,
+    keyword_probe: Option<Arc<parallel::ReadProbe>>,
     related_gate: Mutex<Option<async_channel::Receiver<()>>>,
     related_started: Option<async_channel::Sender<()>>,
+    enqueue_gate: Option<async_channel::Receiver<()>>,
+    enqueue_started: Option<async_channel::Sender<()>>,
+    recent_started: Option<async_channel::Sender<()>>,
     pending: Mutex<Option<MemoryInput>>,
     inputs: Mutex<Vec<MemoryInput>>,
     completed: Mutex<Vec<Vec<MemoryCandidate>>>,
@@ -170,6 +174,12 @@ impl MemoryStore for Store {
         self.memory_policy().await
     }
     async fn enqueue_memory(&self, input: MemoryInput) -> Result<EpisodeId, MemoryError> {
+        if let Some(started) = &self.enqueue_started {
+            let _ = started.send(()).await;
+        }
+        if let Some(gate) = &self.enqueue_gate {
+            let _ = gate.recv().await;
+        }
         self.inputs.lock().unwrap().push(input.clone());
         *self.pending.lock().unwrap() = Some(input);
         Ok(EpisodeId("episode:test".into()))
@@ -296,6 +306,18 @@ impl MemoryStore for Store {
     }
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError> {
         self.recalls.lock().unwrap().push(query.clone());
+        let _pending = if let (Some(probe), Some(term)) = (&self.keyword_probe, &query.text) {
+            Some(probe.enter(term).await)
+        } else {
+            None
+        };
+        if query.text.is_none()
+            && query.entity.is_none()
+            && query.limit == 8
+            && let Some(started) = &self.recent_started
+        {
+            let _ = started.send(()).await;
+        }
         if query.text.is_none() && query.entity.is_some() {
             if let Some(started) = &self.related_started {
                 let _ = started.send(()).await;
@@ -384,7 +406,142 @@ async fn start(server: &Server, store: Arc<Store>, enabled: bool) -> (Fixture, C
         },
     );
     event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.is_some())).await;
+    // Activation publishes remembering settings before this event. Its Ready
+    // status may already have been consumed while waiting for PreferencesChanged.
+    // Callers synchronize on their own observable IO, not another Ready event.
     (fixture, client)
+}
+
+#[tokio::test]
+async fn shutdown_persists_accepted_memory_inputs_in_order_before_stopping() {
+    let server = recall_server();
+    let (release, gate) = async_channel::bounded(3);
+    let (started, entered) = async_channel::bounded(3);
+    let store = Arc::new(Store {
+        enqueue_gate: Some(gate),
+        enqueue_started: Some(started),
+        ..Default::default()
+    });
+    let (_fixture, client) = start(&server, store.clone(), true).await;
+    let messages = [
+        "I live in Lisbon",
+        "I now live in Rome",
+        "I prefer jasmine tea",
+    ];
+    for prompt in messages {
+        client
+            .send(Command::RunPrompt {
+                context: None,
+                session_id: "s1".into(),
+                prompt: prompt.into(),
+            })
+            .unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(5), entered.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    client.send(Command::Ping).unwrap();
+    event(&client, |event| matches!(event, Event::Pong)).await;
+    client.send(Command::Shutdown).unwrap();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            event(&client, |event| matches!(event, Event::Stopped))
+        )
+        .await
+        .is_err(),
+        "shutdown must wait for accepted evidence to reach storage"
+    );
+    for _ in messages {
+        release.send(()).await.unwrap();
+    }
+    event(&client, |event| matches!(event, Event::Stopped)).await;
+    let inputs = store.inputs.lock().unwrap();
+    assert_eq!(
+        inputs
+            .iter()
+            .map(|input| input.episode.content.as_str())
+            .collect::<Vec<_>>(),
+        messages
+    );
+    assert!(inputs.iter().all(|input| input.episode.session_id == "s1"));
+    assert!(inputs.windows(2).all(|pair| pair[0].key != pair[1].key));
+}
+
+#[tokio::test]
+async fn shutdown_releases_active_memory_claim_without_waiting_for_the_model() {
+    let (release, waiting) = std::sync::mpsc::channel();
+    let waiting = Mutex::new(waiting);
+    let (entered, requests) = async_channel::bounded(1);
+    let server = Server::new(move |request| {
+        if request.path == "/v1/models" {
+            return Reply::json(&json!({"data":[{"id":"memory-model"}]}));
+        }
+        if is_extraction(request) {
+            entered.try_send(()).unwrap();
+            let _ = waiting.lock().unwrap().recv_timeout(Duration::from_secs(5));
+            return reply(valid());
+        }
+        attachment_reply("memory-model")
+    });
+    let store = Arc::new(Store::default());
+    let (_fixture, client) = start(&server, store.clone(), true).await;
+    client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "closing-chat".into(),
+            prompt: "I live in Lisbon".into(),
+        })
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), stop(client))
+        .await
+        .expect("shutdown must cancel the model request before its response is released");
+    assert_eq!(store.inputs.lock().unwrap().len(), 1);
+    assert!(store.completed.lock().unwrap().is_empty());
+    assert_eq!(
+        store.failures.lock().unwrap().as_slice(),
+        ["Remembering was interrupted when Sovra closed."]
+    );
+    release.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn extraction_checks_recent_context_while_keyword_read_is_pending() {
+    let server = recall_server();
+    let (release, gate) = async_channel::bounded(1);
+    let (recent_started, entered) = async_channel::bounded(1);
+    let store = Arc::new(Store {
+        recall_gate: Mutex::new(Some(gate)),
+        recent_started: Some(recent_started),
+        ..Default::default()
+    });
+    let (_fixture, client) = start(&server, store.clone(), true).await;
+    client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "s1".into(),
+            prompt: "Lisbon".into(),
+        })
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), entered.recv())
+        .await
+        .expect("recent context must start before the keyword read is released")
+        .unwrap();
+    client.send(Command::Ping).unwrap();
+    event(&client, |event| matches!(event, Event::Pong)).await;
+    release.close();
+    event(&client, |event| {
+        matches!(event, Event::Memory(MemoryEvent::Processed(_)))
+    })
+    .await;
+    assert_eq!(store.completed.lock().unwrap().len(), 1);
+    assert!(store.failures.lock().unwrap().is_empty());
+    stop(client).await;
 }
 
 #[tokio::test]
@@ -1336,3 +1493,6 @@ mod history;
 
 #[path = "memory/related.rs"]
 mod related;
+
+#[path = "memory/parallel.rs"]
+mod parallel;

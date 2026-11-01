@@ -33,6 +33,7 @@ pub(crate) struct MemoryView {
     stopping: Option<FactId>,
     source_only: bool,
     new_memories: bool,
+    capture_result: Option<String>,
 }
 
 impl MemoryView {
@@ -42,7 +43,7 @@ impl MemoryView {
         cx: &mut Context<Self>,
     ) -> Self {
         let embedding_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Filter embedding models…"));
+            cx.new(|cx| InputState::new(window, cx).placeholder("Find a search helper…"));
         let subscription = cx.subscribe_in(
             &embedding_search,
             window,
@@ -65,6 +66,7 @@ impl MemoryView {
             stopping: None,
             source_only: false,
             new_memories: false,
+            capture_result: None,
         }
     }
 
@@ -104,6 +106,10 @@ impl MemoryView {
         visible: bool,
         cx: &mut Context<Self>,
     ) {
+        if let Some(result) = job.result_label() {
+            self.capture_result = Some(result);
+            cx.notify();
+        }
         if job.state == sovra_core::MemoryJobState::Complete && !job.fact_ids.is_empty() {
             self.new_memories = true;
             self.refresh_captured(visible, cx);
@@ -264,7 +270,18 @@ impl Render for MemoryView {
                         view.query.include_history = !view.query.include_history;
                         view.load(cx);
                     }))));
-            column = column.child(self.semantic_controls(cx));
+            if let Some(result) = &self.capture_result {
+                column = column.child(
+                    div()
+                        .id("memory-capture-result")
+                        .test_support()
+                        .role(gpui_kit::Role::Status)
+                        .aria_label(result.clone())
+                        .min_w_0()
+                        .sovra_text(TextRole::Body, cx)
+                        .child(result.clone()),
+                );
+            }
             if self.new_memories {
                 column = column.child(div().id("memory-new-details").test_support()
                     .min_w_0().sovra_text(TextRole::Body, cx)
@@ -287,11 +304,35 @@ impl Render for MemoryView {
             && !busy
             && self.state.error.is_none()
         {
+            let message = if self.query.before.is_some() {
+                "No more saved details on this page. Use Back to newest to return to recent memories."
+            } else if self.query.search.is_empty() {
+                "No saved details yet. Start a conversation and share something you want Sovra to remember, such as ‘I prefer tea without sugar.’ Keep remembering switched on above."
+            } else {
+                "No saved details match your search. Try fewer words, or clear the search to see everything."
+            };
             column = column.child(
                 div()
                     .id("memory-empty")
                     .test_support()
-                    .child("No saved details match this view."),
+                    .aria_label(message)
+                    .child(message),
+            );
+        }
+        if !self.source_only && self.state.detail.is_none() && !self.state.page.facts.is_empty() {
+            let count = self.state.page.facts.len();
+            let label = if count == 1 {
+                "1 saved detail shown".to_owned()
+            } else {
+                format!("{count} saved details shown")
+            };
+            column = column.child(
+                div()
+                    .id("memory-count")
+                    .test_support()
+                    .aria_label(label.clone())
+                    .sovra_text(TextRole::Caption, cx)
+                    .child(label),
             );
         }
         for (index, fact) in self
@@ -499,6 +540,9 @@ impl Render for MemoryView {
             }
             column = column.child(panel);
         }
+        if !self.source_only {
+            column = column.child(self.semantic_controls(cx));
+        }
         column
     }
 }
@@ -548,18 +592,31 @@ mod tests {
             window.render_frame(cx);
             let item = window.find(id.clone());
             let bounds = item.bounds();
-            if item.visible() && bounds.top() >= px(60.) && bounds.bottom() <= px(height - 60.) {
+            let viewport = window.find("sovra-knowledge-view").bounds();
+            assert!(viewport.bottom() <= px(height));
+            if item.visible()
+                && bounds.top() >= viewport.top()
+                && bounds.bottom() <= viewport.bottom()
+            {
                 window.click(id, cx);
                 return;
             }
-            let delta = if bounds.top() < px(60.) { 80. } else { -80. };
+            let delta = if bounds.top() < viewport.top() {
+                viewport.top() - bounds.top() + px(1.)
+            } else {
+                viewport.bottom() - bounds.bottom() - px(1.)
+            };
             window.scroll(
                 "sovra-knowledge-view",
-                ScrollDelta::Pixels(point(px(0.), px(delta))),
+                ScrollDelta::Pixels(point(px(0.), delta)),
                 cx,
             );
         }
-        panic!("memory control {id:?} must be reachable by scrolling");
+        panic!(
+            "memory control {id:?} must be reachable by scrolling: {:?}, viewport {:?}",
+            window.find(id.clone()).bounds(),
+            window.find("sovra-knowledge-view").bounds()
+        );
     }
 
     fn detail() -> MemoryDetail {
@@ -652,6 +709,87 @@ mod tests {
             window.render_frame(cx);
             assert!(window.try_find("memory-empty").is_none());
             assert!(window.try_find(("memory-open", 0usize)).is_some());
+            assert_eq!(
+                window.find("memory-capture-result").label(),
+                Some("Last check finished. 1 saved detail is ready to review.")
+            );
+            assert_eq!(
+                window.find("memory-count").label(),
+                Some("1 saved detail shown")
+            );
+            assert!(
+                window.find(("memory-open", 0usize)).bounds().top()
+                    < window.find("memory-semantic").bounds().top()
+            );
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn capture_results_distinguish_empty_success_and_failure(cx: &mut TestAppContext) {
+        let (client, commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+            let shell = cx.new(|cx| {
+                let mut shell = crate::Shell::new(window, cx);
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(
+                    crate::knowledge_view::KnowledgeSection::Memories,
+                    cx,
+                );
+                shell
+            });
+            Root::new(shell, window, cx)
+        });
+        let load = request(&commands);
+        respond(
+            &events,
+            load.request_id,
+            MemoryReviewResult::Page(MemoryPage::default()),
+        );
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("memory-capture-result").is_none());
+            assert!(
+                window
+                    .find("memory-empty")
+                    .label()
+                    .unwrap()
+                    .contains("Start a conversation")
+            );
+        })
+        .unwrap();
+        let Event::Memory(MemoryEvent::Processed(mut job)) = captured() else {
+            unreachable!()
+        };
+        job.fact_ids.clear();
+        events
+            .send_blocking(Event::Memory(MemoryEvent::Processed(job.clone())))
+            .unwrap();
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("memory-capture-result").label(),
+                Some("Last check finished. No new detail was saved.")
+            );
+            assert!(window.try_find("memory-count").is_none());
+        })
+        .unwrap();
+        job.state = sovra_core::MemoryJobState::Failed;
+        job.error = Some("The selected AI could not be reached.".into());
+        events
+            .send_blocking(Event::Memory(MemoryEvent::Processed(job)))
+            .unwrap();
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("memory-capture-result").label(),
+                Some("A message could not be remembered. The selected AI could not be reached.")
+            );
+            assert!(window.try_find("memory-count").is_none());
         })
         .unwrap();
     }
@@ -749,9 +887,11 @@ mod tests {
                 for theme in [ThemeMode::Light, ThemeMode::Dark] {
                     Theme::change(theme, Some(window), cx);
                     window.render_frame(cx);
-                    let bounds = window.find("memory-new-details").bounds();
-                    assert!(bounds.left() >= px(0.) && bounds.right() <= px(width));
-                    assert!(bounds.size.height > px(0.));
+                    for id in ["memory-new-details", "memory-capture-result"] {
+                        let bounds = window.find(id).bounds();
+                        assert!(bounds.left() >= px(0.) && bounds.right() <= px(width));
+                        assert!(bounds.size.height > px(0.));
+                    }
                 }
                 click(window, "memory-save", height, cx);
             })

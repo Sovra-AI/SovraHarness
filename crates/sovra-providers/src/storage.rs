@@ -216,6 +216,11 @@ impl ModelRepository {
         self.credentials.set(id, secret)
     }
 
+    /// Reads a secret by its storage id. Empty means nothing is saved.
+    pub fn named_secret(&self, id: &str) -> Result<ModelSecret, ModelError> {
+        self.credentials.get(id)
+    }
+
     pub fn delete_credential(&self, id: &str) -> Result<(), ModelError> {
         self.credentials.delete(id)
     }

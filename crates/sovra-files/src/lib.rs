@@ -21,8 +21,8 @@ use sovra_core::file_index::DocumentBudget;
 use image::{ImageDecoder as _, ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
 use sovra_core::files::{
-    Attachment, FileContent, FileError, FileStore, MAX_DOCUMENT_BYTES, MAX_FILE_BYTES, MediaPart,
-    ModelPurpose, file_sections,
+    Attachment, FileContent, FileError, FileStore, MAX_DOCUMENT_BYTES, MAX_FILE_BYTES,
+    MAX_PAGE_PICTURES, MediaPart, ModelPurpose, file_sections,
 };
 
 const MAX_MEDIA_PARTS: usize = 12;
@@ -41,6 +41,9 @@ struct Manifest {
     media_types: Vec<String>,
     #[serde(default)]
     has_raw: bool,
+    /// The original PDF is kept so its pages can be shown as pictures.
+    #[serde(default)]
+    has_pages: bool,
 }
 
 impl LocalFileStore {
@@ -60,7 +63,7 @@ impl LocalFileStore {
         Ok(self.directory.join(id))
     }
 
-    fn save(&self, content: &FileContent) -> Result<(), FileError> {
+    fn save(&self, content: &FileContent, original_pdf: Option<&[u8]>) -> Result<(), FileError> {
         private_directory(&self.directory)?;
         let destination = self.location(&content.attachment.id)?;
         let staging = self
@@ -72,6 +75,7 @@ impl LocalFileStore {
             let manifest = Manifest {
                 attachment: content.attachment.clone(),
                 has_raw: content.raw.is_some(),
+                has_pages: original_pdf.is_some(),
                 media_types: content
                     .media
                     .iter()
@@ -84,6 +88,9 @@ impl LocalFileStore {
             private_write(&staging.join("text.txt"), content.text.as_bytes())?;
             if let Some(raw) = &content.raw {
                 private_write(&staging.join("source.bin"), raw)?;
+            }
+            if let Some(pdf) = original_pdf {
+                private_write(&staging.join("original.pdf"), pdf)?;
             }
             for (index, part) in content.media.iter().enumerate() {
                 private_write(&staging.join(format!("media-{index}")), &part.data)?;
@@ -98,6 +105,40 @@ impl LocalFileStore {
             let _ = fs::remove_dir_all(&staging);
         }
         result
+    }
+}
+
+impl LocalFileStore {
+    fn manifest(&self, id: &str) -> Result<(PathBuf, Manifest), FileError> {
+        let directory = self.location(id)?;
+        let metadata = bounded_read(
+            File::open(directory.join("manifest.json")).map_err(missing_file)?,
+            512 * 1024,
+        )?;
+        let manifest: Manifest = serde_json::from_slice(&metadata).map_err(|_| {
+            FileError("The saved file details could not be read. Please add the file again.".into())
+        })?;
+        if manifest.attachment.id != id || manifest.media_types.len() > MAX_MEDIA_PARTS {
+            return Err(FileError(
+                "The saved file details are invalid. Please add the file again.".into(),
+            ));
+        }
+        Ok((directory, manifest))
+    }
+
+    /// The kept original of a text-layer PDF, opened for page rendering.
+    fn pdf_pages(&self, id: &str) -> Result<xberg::pdf::PdfRenderSession, FileError> {
+        let (directory, manifest) = self.manifest(id)?;
+        if !manifest.has_pages {
+            return Err(FileError(
+                "Pages of this file cannot be shown as pictures. For a PDF added before this was possible, add it again.".into(),
+            ));
+        }
+        let bytes = bounded_read(
+            File::open(directory.join("original.pdf")).map_err(missing_file)?,
+            MAX_FILE_BYTES,
+        )?;
+        xberg::pdf::PdfRenderSession::open(&bytes, None).map_err(extraction_error)
     }
 }
 
@@ -124,24 +165,18 @@ impl FileStore for LocalFileStore {
             |name| name.to_string_lossy().into_owned(),
         );
         let content = prepare_bytes(id, &name, &bytes)?;
-        self.save(&content)?;
+        // A text-layer PDF loses its charts, pictures and layout in extraction;
+        // keep the original so the reader can look at chosen pages.
+        let pages = (content.attachment.mime_type == "application/pdf"
+            && content.media.is_empty()
+            && content.raw.is_none())
+        .then_some(bytes.as_slice());
+        self.save(&content, pages)?;
         Ok(content.attachment)
     }
 
     fn load(&self, id: &str) -> Result<FileContent, FileError> {
-        let directory = self.location(id)?;
-        let metadata = bounded_read(
-            File::open(directory.join("manifest.json")).map_err(missing_file)?,
-            512 * 1024,
-        )?;
-        let manifest: Manifest = serde_json::from_slice(&metadata).map_err(|_| {
-            FileError("The saved file details could not be read. Please add the file again.".into())
-        })?;
-        if manifest.attachment.id != id || manifest.media_types.len() > MAX_MEDIA_PARTS {
-            return Err(FileError(
-                "The saved file details are invalid. Please add the file again.".into(),
-            ));
-        }
+        let (directory, manifest) = self.manifest(id)?;
         let text = bounded_read(
             File::open(directory.join("text.txt")).map_err(missing_file)?,
             MAX_DOCUMENT_BYTES as u64,
@@ -183,6 +218,39 @@ impl FileStore for LocalFileStore {
             text,
             media,
         })
+    }
+
+    fn page_count(&self, id: &str) -> Result<usize, FileError> {
+        Ok(self.pdf_pages(id)?.page_count())
+    }
+
+    fn render_pages(&self, id: &str, pages: &[usize]) -> Result<Vec<MediaPart>, FileError> {
+        if pages.is_empty() || pages.len() > MAX_PAGE_PICTURES {
+            return Err(FileError(format!(
+                "Choose between 1 and {MAX_PAGE_PICTURES} pages at a time."
+            )));
+        }
+        let pdf = self.pdf_pages(id)?;
+        let count = pdf.page_count();
+        pages
+            .iter()
+            .map(|&page| {
+                if !(1..=count).contains(&page) {
+                    return Err(FileError(format!(
+                        "This PDF has pages 1–{count}; page {page} does not exist."
+                    )));
+                }
+                let png = pdf
+                    .render_page_to_png(page - 1, Some(144))
+                    .map_err(extraction_error)?;
+                let (data, _thumbnail) = normalize_image(&png)?;
+                Ok(MediaPart {
+                    mime_type: "image/png".into(),
+                    data,
+                    duration_millis: None,
+                })
+            })
+            .collect()
     }
 
     fn discard(&self, id: &str) -> Result<(), FileError> {

@@ -1,6 +1,7 @@
 //! Scoped per-turn recall. Queries and evidence reads have one deadline and pause epoch.
 
 use crate::remembering::MemoryControl;
+use futures::{StreamExt as _, TryStreamExt as _, stream};
 use sovra_core::{
     Episode, Fact, MAX_MEMORY_PRIMARY_ITEMS, MemoryContext, MemoryError, MemoryReader,
     MemorySearch, MemoryStore, Timestamp, fuse_rrf,
@@ -12,6 +13,7 @@ use tokio::time::Instant;
 const RECALL_DEADLINE: Duration = Duration::from_secs(2);
 const RELATED_DEADLINE: Duration = Duration::from_millis(200);
 const FINAL_POLICY_RESERVE: Duration = Duration::from_millis(100);
+const KEYWORD_READ_CONCURRENCY: usize = 4;
 
 struct Reader {
     semantics: Option<Arc<crate::memory_semantic::SemanticMemory>>,
@@ -28,17 +30,20 @@ pub(crate) async fn keyword_candidates(
     query: &MemorySearch,
     now: Timestamp,
 ) -> Result<Vec<Vec<Fact>>, MemoryError> {
-    let mut legs = Vec::new();
-    for term in query.terms() {
-        let hits = store.recall(query.query(term, now)).await?;
-        legs.push(
-            hits.into_iter()
+    // Preserve term order for deterministic fusion while overlapping independent
+    // IO. Dropping this stream also drops every in-flight read on pause/deadline.
+    stream::iter(query.terms())
+        .map(|term| async move {
+            let hits = store.recall(query.query(term, now)).await?;
+            Ok(hits
+                .into_iter()
                 .filter(|hit| query.accepts(&hit.fact, now))
                 .map(|hit| query.as_known(hit.fact))
-                .collect(),
-        );
-    }
-    Ok(legs)
+                .collect())
+        })
+        .buffered(KEYWORD_READ_CONCURRENCY)
+        .try_collect()
+        .await
 }
 
 pub(crate) fn reader(

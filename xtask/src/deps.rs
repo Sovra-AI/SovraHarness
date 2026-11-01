@@ -125,7 +125,15 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
 
 /// External crates `sovra-core` may use: pure, no IO, no async runtime, no GUI.
 /// `serde_json` parses search source JSON (Mwmbl, Wikipedia, `SearXNG`) for ranking. It performs no IO.
-const CORE_ALLOWED_EXTERNAL: &[&str] = &["serde", "serde_json", "thiserror", "async-trait"];
+/// `url` and `sha2` are pure: web-address checks and the PKCE S256 challenge. They open nothing.
+const CORE_ALLOWED_EXTERNAL: &[&str] = &[
+    "serde",
+    "serde_json",
+    "sha2",
+    "thiserror",
+    "async-trait",
+    "url",
+];
 
 pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
     let output = Command::new(env!("CARGO"))

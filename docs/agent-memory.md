@@ -1,10 +1,187 @@
 # Agent memory: research and implementation contract
 
-Research checked 2026-10-27. The seven implementation and local verification steps
+Latest context audit checked 2026-11-01; earlier research checkpoints are dated below.
+The seven implementation and local verification steps
 below are complete in the working tree, including the file index, file knowledge,
 skills and team integrations based on `79d86b4`. This is not a published or signed
 release. The final audit below supersedes earlier checkpoint failures; measured
 quality and portability limitations remain explicit.
+
+## Helper context and concurrency audit (2026-11-01)
+
+Delegated specialists previously received saved-memory lookup but no indexed-file
+readers; team runs did not attach the file index. Both also missed the user's
+standing instructions. They now receive the same granted read handles as chat,
+including file search/catalogue, current and historical passages, reviewed file
+relationships and saved-memory lookup. Current attachment readers are available
+to delegates. Read handles retain their scope and revocation checks; proposal,
+UI and unrelated connected-service tools are not inherited by this policy.
+File and explicit lookup tools require tools to be enabled and supported by the
+selected model. Automatic saved-memory retrieval still follows the remembering
+setting independently of file indexing.
+
+The repository uses **ADK-Rust 2.3.0**, a separate Rust implementation. Google's
+ADK guidance informs the design; Python or Go examples are not assumed to be Rust
+APIs. This audit checked the installed `adk-agent`, `adk-tool`, `adk-core` and
+`adk-runner` 2.3.0 sources, particularly `LlmAgentBuilder`, `AgentTool`,
+`ToolConcurrencyConfig` and `RunnerBuilder`.
+
+Primary guidance checked on the web:
+
+- [Google ADK context](https://adk.dev/context/): use scoped context and load larger
+  content through references on demand. Sovra supplies granted readers rather
+  than embedding the whole Knowledge library in every prompt.
+- [Google ADK parallel workflows](https://adk.dev/agents/workflow-agents/parallel-agents/):
+  concurrent branches must be independent, and data sharing must be explicit.
+  Sovra isolates delegate sessions and returns their results to the parent.
+- [ADK-Rust memory in agents](https://adk-rust.com/en/docs/memory/tools-and-agents):
+  automatic retrieval and deliberate lookup serve complementary purposes.
+  Sovra implements these through its existing core memory port and model/tool
+  adapters so evidence validation, temporal queries, pause and review rules stay
+  consistent with Knowledge. It does not add a second transcript memory store.
+- [Tokio cancellation](https://tokio.rs/tokio/tutorial/select#cancellation):
+  dropping owned futures cancels their work; separately spawned tasks need their
+  own lifecycle. Delegation futures belong to the run and cancellation tests hold
+  both active and queued work to verify that neither continues after its owner.
+
+Context boundaries checked:
+
+| Context | Contract and verification |
+| --- | --- |
+| Standing instructions | Preserved separately from a selected skill and supplied through ADK's global instruction to every specialist/team member; checked in fake-model and actual HTTP requests. |
+| Current request | Parent explicitly delegates task details and attachment IDs. Helpers do not inherit sibling work or the parent's live tool-call history. |
+| Earlier chat | The authoritative visible snapshot is bounded, preserves user/assistant roles and appears once. Fresh sessions exclude old tool calls, reasoning, widgets and provider continuation IDs. Delegation tests verify the same role-labelled history at the child boundary. |
+| Selected procedure | Applies to the parent for this turn; it is not promoted into standing instructions. A regression asserts the procedure marker stays out of child requests. |
+| Saved memory | Fresh cited evidence is retrieved at the provider boundary, with a shared bounded lookup allowance. Runtime tests cover historical queries, unrelated/future/expired evidence, pause and revocation while reads are pending. |
+| Files and relationships | Search then read an exact source reference. The real-index/HTTP test verifies both delegation and team replies; removing the root prevents subsequent source text from reaching the provider. Historical and graph tools retain their existing validation rules. |
+| Attachments | The current turn's inventory is authoritative. Delegates read through its tool; unknown and previous-turn IDs fail, and raw media is not automatically copied into the child session. |
+| Request budget | Final admission runs after context assembly and counts instructions, history, evidence, tool schemas/results and media reservations. Optional history/evidence yields first; oversized mandatory input fails before provider IO. Estimates are conservative, not provider-specific tokenization. |
+| Team conversation | Bounded transcript plus the explicit current request, followed by ordered member replies and the Conductor. Team work remains sequential because later replies use earlier ones. |
+
+Independent delegation batches now queue above **four active calls** through
+`RunConfig.tool_concurrency`. This is a per-invocation limit, not a process-wide
+provider quota; separate conversations can each have active work. Ordinary tool
+calls on the parent retain ADK's sequential ordering. A helper enables automatic
+parallel tools only when its entire tool set is read-only and concurrency-safe;
+otherwise it preserves call order. The pinned automatic dispatcher moves safe
+reads ahead of ordered calls in a mixed batch. A regression reproduced that
+reordering and verifies that the guard prevents it. Document reading can also
+use bounded batches inside a helper; four delegates is not a global model-request
+cap. Independent keyword memory reads separately use
+four owned futures per lookup and preserve query order for deterministic fusion.
+
+Regression coverage includes:
+
+- `sovra-adk`: helper/team source access; standing instructions and selected-skill
+  scope; current attachment inventory; six delegates with four held active and
+  two queued; cancellation of both groups; mixed-tool ordering; history restoration
+  and budget tests.
+- `sovra-app::memory_lifecycle`: a real temporary folder and local file index,
+  runtime `Client`, actual ADK execution and an HTTP model fixture that performs
+  search/read/delegation. It asserts source-bearing chat/team text and revocation.
+  This verifies wiring and protocol behavior, not a live model's answer quality.
+- `sovra-runtime::models`: memory retrieval across chats, teams and attachments;
+  historical lookup; model/context changes; pause/revocation and concurrent reads.
+
+Verification on the shared macOS checkout: `NEXTEST_TEST_THREADS=4 cargo xtask ci`
+passed every gate, with **744 tests passed and seven opt-in tests skipped**.
+The [complete CI log](evaluations/helper-context-2026-11-01/ci.log) records the result,
+including the concurrent document-tool changes. Four test workers avoided the
+startup timeout seen when multiple full CI suites competed for resources; test
+deadlines and assertions were unchanged. This supersedes the earlier shared-checkout
+build failure recorded below.
+
+The desktop sends an explicit history snapshot. The existing inbound WhatsApp
+path uses its ADK session history instead; it is not claimed to have desktop
+snapshot restoration. Removing a grant prevents future reads; it cannot retract
+content already delivered to a provider or erase a visible earlier reply.
+
+## Capture feedback and concurrent reads (2026-10-31)
+
+The current work preserves accepted memory inputs on normal shutdown: closing the
+owned input channel lets queued writes finish in order before the worker exits.
+Unfinished extraction is cancelled and recorded as interrupted, subject to the
+existing retry budget. Explicitly pausing remembering still cancels pending work.
+Sudden process termination or a failed disk write is not a successful save.
+
+Independent keyword reads now overlap, at most four per lookup, and return in
+query order for deterministic fusion. Extraction checks recent context alongside
+keyword candidates. Existing deadlines and pause cancellation remain in effect.
+Model extractions remain ordered because a later correction needs the saved fact
+IDs produced by earlier messages; overlapping writes alone would not prevent stale
+model context. This is bounded concurrent IO, not a claim of a universal speedup.
+
+A live synthetic smoke check using the currently selected OpenRouter model,
+`google/gemini-4-argon`, captured a jasmine-tea preference and a Porto residence
+with its explicit 2024-01-01 start date. A separate conversation recalled jasmine
+tea and cited the actual saved fact; the question added no fact. Both extraction
+jobs completed on attempt one. The first reply and extraction completed in 6.465 s;
+the recall reply completed in 4.420 s. This small observation is not a latency or
+accuracy benchmark. The [retained report](evaluations/knowledge-2026-10-31/smoke.json)
+contains only synthetic messages and was generated from an isolated copy of the
+knowledge changes while a separate session edited MCP support in the shared
+checkout. No synthetic memories were added to the user's store.
+
+Memories shows the most recent completed capture receipt, including empty results
+and failures, above actual saved details and their sources. Optional meaning-search
+setup follows the results. Files puts reading status before search, reports empty
+searches, and accepts Enter. The teaching example is explicitly labelled; it does
+not masquerade as captured information.
+
+Primary guidance checked online for this change:
+
+- [W3C status messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html):
+  report waiting, success and failure without taking focus; native status roles and
+  plain text apply that principle here, without claiming web conformance.
+- [W3C older users](https://www.w3.org/WAI/older-users/): readable controls, text
+  scaling and clear feedback inform the minimum/wide/200% checks in both themes.
+- [Tokio channels](https://tokio.rs/tokio/tutorial/channels): owned message-passing
+  workers and bounded work keep background activity separate from interaction.
+- [Async-channel close](https://docs.rs/async-channel/latest/async_channel/struct.Sender.html#method.close)
+  retains queued messages for receivers;
+  [Futures buffered](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.buffered)
+  limits in-flight futures while retaining output order. These are the shutdown
+  and lookup mechanisms used here.
+
+Verification entry points:
+
+```sh
+cargo xtask ci
+# macOS, native offscreen Metal rendering of clearly labelled synthetic UI data:
+SOVRA_KNOWLEDGE_VISUAL_OUTPUT=/tmp/sovra-knowledge-visual-new \
+  cargo run -p sovra-ui --example knowledge_visual
+```
+
+The optional visual proof writes Files, Memories, capture-receipt and source
+screenshots at minimum/standard/wide/200% sizes in both themes. It uses scripted protocol
+events and fictional details; it does not prove a model extracted those details.
+The example runs on the process main thread for AppKit and uses a hidden native
+renderer; it does not open another app window or replace the development watcher.
+The retained native previews show [Memories](evaluations/knowledge-2026-10-31/memories.png),
+[Files](evaluations/knowledge-2026-10-31/files.png),
+[the original message](evaluations/knowledge-2026-10-31/source.png),
+[the minimum window](evaluations/knowledge-2026-10-31/minimum.png), and
+[200% text](evaluations/knowledge-2026-10-31/large-text.png). All use fictional data.
+The real-disk lifecycle test separately checks saved evidence in provider requests
+after a runtime restart. The opt-in model smoke check below evaluates actual model
+capture and recall in an isolated store, without adding test memories to your data.
+
+`cargo xtask ci` passed every gate in the verification checkout based on `6e3185b`
+with these knowledge and build-runner changes, excluding the concurrent MCP work:
+**677 tests passed, six opt-in tests skipped**. The [complete CI log](evaluations/knowledge-2026-10-31/ci.log)
+records formatting, Clippy, layering, styling, dependency policy, unused dependency
+checks and tests. The opt-in live smoke check above was run separately. All 100 UI
+tests also passed together with fail-fast disabled; the native renderer produced
+32 screenshots across four window/text configurations and both themes.
+
+At that 2026-10-31 checkpoint, the shared checkout's `cargo xtask ci` reached Clippy but could not compile the
+separate MCP work: `Event::Mcp` is unhandled in `sovra-runtime/src/connections.rs`
+and `sovra-runtime/src/lib.rs`, and `Command::Mcp` is unhandled in the runtime
+command loop ([failed shared CI log](evaluations/knowledge-2026-10-31/shared-ci.log)).
+This also prevented the development watcher from launching that
+shared app. The existing `xtask dev` / Watchexec supervisor remained running; it was
+not replaced with a verification binary. At that checkpoint the combined checkout
+was not green; the 2026-11-01 result above records the subsequent successful check.
 
 ## Capture and recall check (2026-10-29)
 

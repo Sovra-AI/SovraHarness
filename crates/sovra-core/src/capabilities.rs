@@ -65,7 +65,8 @@ pub fn required_capabilities(specialist_id: &str) -> &'static [Capability] {
         "ImageSearchAgent" => &[Capability::ImageSearch],
         "ImageAgent" => &[Capability::ImageGeneration],
         "ExecutionAgent" => &[Capability::CodeExecution],
-        // Delegates run on isolated sessions; attachments stay with the parent.
+        // Delegates run on isolated sessions, so the reader is offered only
+        // when the turn's attachments are handed to it as tools.
         "DocumentReaderAgent" => &[Capability::AttachedFiles],
         "ProjectAgent" => &[Capability::Projects],
         "SchedulerAgent" => &[Capability::Schedules],

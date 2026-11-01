@@ -14,7 +14,8 @@ pub use embeddings::HttpEmbedder;
 pub use summaries::HttpSummarizer;
 
 pub use auth::{
-    AuthError, GoogleAuthFlow, GoogleIdentity, GoogleOAuthConfig, hash_password, verify_password,
+    AuthError, GoogleAuthFlow, GoogleIdentity, GoogleOAuthConfig, SignInProof, hash_password,
+    verify_password,
 };
 pub use catalog::{
     AnthropicProvider, CompatibleProvider, OllamaProvider, OpenRouterProvider, pull_ollama,

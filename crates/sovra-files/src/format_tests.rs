@@ -130,6 +130,49 @@ pub(crate) fn stream(data: &[u8], attributes: &str) -> Vec<u8> {
 }
 
 #[test]
+fn text_pdf_pages_can_be_shown_as_pictures_but_other_files_cannot() {
+    let root = std::env::temp_dir().join(format!("sovra-pages-test-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let page = |text: &str| {
+        format!("BT /F1 12 Tf 20 100 Td ({text}) Tj ET")
+            .as_bytes()
+            .to_vec()
+    };
+    let two_pages = pdf(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        stream(&page("Quarterly chart page one"), ""),
+        stream(&page("Totals page two"), ""),
+    ]);
+    fs::write(root.join("report.pdf"), &two_pages).unwrap();
+    fs::write(root.join("notes.txt"), "plain words").unwrap();
+    let store = LocalFileStore::new(root.join("managed"));
+    let report = store.prepare("report", &root.join("report.pdf")).unwrap();
+    assert!(
+        store.load(&report.id).unwrap().raw.is_none(),
+        "byte tools stay off"
+    );
+    assert_eq!(store.page_count(&report.id).unwrap(), 2);
+    let pictures = store.render_pages(&report.id, &[2, 1]).unwrap();
+    assert_eq!(pictures.len(), 2);
+    assert!(
+        pictures
+            .iter()
+            .all(|part| part.mime_type == "image/png" && part.data.starts_with(b"\x89PNG"))
+    );
+    for pages in [&[][..], &[3], &[0], &[1, 1, 1, 1, 1]] {
+        assert!(store.render_pages(&report.id, pages).is_err(), "{pages:?}");
+    }
+    let notes = store.prepare("notes", &root.join("notes.txt")).unwrap();
+    assert!(store.page_count(&notes.id).is_err());
+    assert!(store.render_pages(&notes.id, &[1]).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn extracts_pdf_text_and_turns_scanned_pages_into_real_picture_inputs() {
     let text_pdf = pdf(&[
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),

@@ -26,6 +26,34 @@ move them under a version heading when the tag is cut.
   at the minimum window size and 200% text size. The indicator shares the
   existing native title bar and remains visible with window-manager decorations.
 
+- **Read & compare any document:** When files are attached, the document
+  reader helper can now read them cover to cover, several at once, and answer
+  with file, section and line citations. It lists what is attached, searches
+  every file in one step, and reads long documents in parallel parts, telling
+  you exactly which parts are still unread. It also looks at attached
+  pictures, scanned pages and recordings directly and, with a picture-reading
+  AI, at the actual pages of a PDF for charts, tables, signatures and stamps.
+  Find it on the Skills page.
+  Reading is bounded to four concurrent batches and reports unread or failed
+  sections explicitly. PDF page previews are limited to the current turn's
+  attachments; older saved PDFs need to be attached again for page previews.
+  Helpers whose tools only read now run those reads at the same time.
+
+- **Connect a service:** In Settings, paste a web address to connect a service
+  you already use. Sign in in the browser if it asks. A connected service can
+  help during chat, and the reply shows which service did the work. Remove
+  stops later use. An optional secret stays on this computer and is not shown
+  again.
+
+- **Dev build cache monitoring:** `cargo xtask dev` checks the Cargo target
+  directory before every rebuild and warns above 30 GiB (`SOVRA_TARGET_BUDGET_GIB`).
+  Watcher cycles preserve live build/test outputs; cleanup is an explicit step
+  after the watcher and other Cargo work have stopped.
+  Shared build outputs now resolve the invoking checkout at runtime, so a
+  verification worktree cannot redirect the normal development runner.
+  Dependencies no longer carry debug info in dev builds.
+  Parallel build jobs are capped at 8 to keep RAM free while rebuilding.
+
 - **Live folder reading view:** while a folder is read, Knowledge shows "Finding your
   files…" then a determinate bar with "1,204 of 5,000 files read", a smoothed and rounded
   time estimate, the file being read now, **What I've found so far** chips and **Your files
@@ -507,6 +535,24 @@ move them under a version heading when the tag is cut.
   without accents; ambiguous words are deliberately excluded.
 - Folder card statuses use everyday words ("Done — ready to search", "Stopped — press Refresh
   to carry on") and the **Connect folders** skill card describes the live view in plain terms.
+- **Skills is a short list:** Skills opens with a title, one sentence, search, plain
+  filters, and cards. Each card shows a plain title, one sentence, an example, and
+  a button that fills chat. Try the example fills that example, including when the
+  card also opens a shortcut. A skill you added can be edited, turned off, or removed.
+  Leave the shortcut blank and the name comes from the title.
+- **Clear knowledge capture results:** Memories shows whether the last check
+  saved details, found nothing new, or failed, with saved details and original
+  sources above optional search setup. Files puts reading progress first, moves
+  optional meaning search into Folder settings, and reports search progress and
+  empty results. Enter submits a file search. How it works labels its example
+  separately from saved information and explains that meaning search is optional.
+- **Faster memory lookups:** up to four independent keyword reads overlap, with
+  stable result order, existing deadlines and cancellation. Capture reads recent
+  context alongside keyword matches; model extraction and corrections stay ordered.
+- Knowledge evaluation now includes synthetic native UI captures and a saved
+  memory smoke-test record. These document observed behavior and limitations;
+  they do not claim an automated memory-quality score.
+
 - **Web search fixed**: it used to rely on a public SearXNG server (`searx.be`) that answers in HTML, not JSON, so every search returned no results. It now uses the built-in sources above. The orchestrator also asks the search helper whenever an answer depends on current facts, not only when the user typed an exact phrase. More plain phrases ("search online", "look it up online", "google it") count as an explicit request.
 - **Orchestrator offers only working specialists**: it no longer offers itself, or specialists whose integrations do not exist yet (email, calendars, GitHub, to-dos, running code), so it cannot hand a question to a helper that would only guess. A missing ability is now reported plainly.
 
@@ -616,9 +662,31 @@ move them under a version heading when the tag is cut.
 
 ### Fixed
 
-- Unicode filename-filter tests no longer collide on case- and normalization-insensitive
-  volumes (default APFS); non-Unicode filename escaping is tested without filesystem support.
+- **Knowledge access for helpers:** delegated specialists and team members now
+  inherit the turn's granted file search, history, reviewed-knowledge and saved-memory
+  readers. Delegates can also read current attachments; obsolete attachment IDs
+  remain unavailable. Standing instructions reach each helper without copying the
+  parent's selected procedure. Independent delegations are queued above four active
+  calls per invocation, and cancellation drops active and queued work. Real-index,
+  HTTP-provider and ADK regressions cover cited answers, grant removal, context
+  scope and concurrent execution. Helpers with a mix of concurrent and ordered
+  tools preserve requested call order; parallel tool execution requires the whole
+  tool set to be safe for concurrency.
+
 - `sovra-ui` login form compiles again (missing `Disableable`/`FluentBuilder` imports).
+- Connecting a service speaks to it in the current way on the first try. Sovra
+  uses the older handshake only when the service does not understand that.
+- Accepted conversation-memory inputs drain to storage when Sovra closes instead
+  of being dropped with the worker. Interrupted extraction remains recoverable.
+- Failed or invalid file searches hide previous matches instead of showing a stale
+  success. Empty memory guidance and the teaching-example notice have explicit
+  accessible labels.
+- Unicode filename-search fixtures remain distinct on case-insensitive filesystems,
+  preserving normalization, pagination and exact-case coverage on macOS.
+  Non-Unicode path escaping is checked without filesystem IO on macOS, where
+  APFS rejects the invalid-byte fixture names; the raw-filename scan remains
+  covered on Unix platforms that support those names.
+
 - **Reliable memory restart checks:** the lifecycle fixture uses the model
   restored at startup instead of reselecting it and racing the first recall.
   Failure cleanup shuts down the runtime before joining its event reader, so

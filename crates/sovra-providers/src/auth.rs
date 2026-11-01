@@ -98,6 +98,43 @@ pub struct GoogleAuthFlow {
     auth_url: String,
 }
 
+/// A one-time sign-in verifier and matching state. `Debug` hides the verifier.
+#[derive(Clone)]
+pub struct SignInProof {
+    verifier: String,
+    state: String,
+}
+
+impl SignInProof {
+    /// Random verifier from the system generator, so this works on every desktop.
+    pub fn generate() -> Self {
+        let (_, verifier) = PkceCodeChallenge::new_random_sha256();
+        let state = CsrfToken::new_random();
+        Self {
+            verifier: verifier.secret().to_owned(),
+            state: state.secret().to_owned(),
+        }
+    }
+
+    pub fn verifier(&self) -> &str {
+        &self.verifier
+    }
+
+    pub fn state(&self) -> &str {
+        &self.state
+    }
+}
+
+impl std::fmt::Debug for SignInProof {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SignInProof")
+            .field("verifier", &"…")
+            .field("state", &self.state)
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for GoogleAuthFlow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GoogleAuthFlow")

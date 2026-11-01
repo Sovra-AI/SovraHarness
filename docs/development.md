@@ -75,6 +75,36 @@ start one watcher if absent. The repo does not install an OS login daemon.
   without it, the app's existing focused debug filter applies. Avoid globally
   enabling trace logs for HTTP clients or logging keys/prompts.
 
+## Monitoring the build cache
+
+Cargo never garbage-collects a target directory: every lockfile bump, feature
+change or flag change leaves a stale copy of the affected dependencies in
+`target/debug/deps`. A long-lived watcher plus the per-edit clippy hook once grew
+it to 85 GiB. The dev loop reports growth without deleting outputs that a running
+app, watcher or test command may still need:
+
+- Each watcher cycle runs `cargo xtask dev-cycle`, which measures the effective
+  target directory (from `cargo metadata`, so `CARGO_TARGET_DIR` is honoured).
+  Above the warning threshold (default 30 GiB, `SOVRA_TARGET_BUDGET_GIB=<n>` to
+  change) it reports the size and keeps building. This is an advisory threshold,
+  not an enforced disk limit; the watcher never runs `cargo clean`.
+- To reclaim space explicitly, first stop the watcher and finish all other Cargo
+  work, then run `cargo clean --profile dev`. This removes dev-profile outputs and
+  requires a cold rebuild; release/dist output is left alone. Cleaning during live
+  development can delete test binaries between compilation and execution, even
+  when Cargo's build lock is respected. Ordinary edits and checks must leave the
+  watcher running; schedule cleanup separately when development is stopped.
+- Per-crate builds (the hook's `clippy -p <crate>`, per-crate tests) can resolve
+  different dependency features than `cargo run` and so add duplicate dependency
+  builds. Workspace feature unification would prevent that but is nightly-only in
+  Cargo 1.99. The warning makes this growth visible without interrupting builds.
+- Dependencies build without debug info in the dev profile; workspace crates keep
+  line tables for backtraces.
+- `build.jobs = 8` caps concurrent rustc/linker processes so a rebuild beside
+  rust-analyzer and the running app does not exhaust RAM.
+- On macOS, `target` may be a symlink to a `*.noindex` directory outside the
+  checkout so Spotlight does not index build output.
+
 The first build can take longer; subsequent saves reuse the incremental target
 directory. Edits during a build cancel that build and schedule the newest state.
 The full CI gates remain separate: do not run the entire test suite on every save.

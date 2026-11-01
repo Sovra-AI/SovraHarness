@@ -27,6 +27,9 @@ use http::{Reply, Request, Server};
 #[path = "memory_lifecycle/live.rs"]
 mod live;
 
+#[path = "memory_lifecycle/knowledge.rs"]
+mod knowledge;
+
 const SOURCE: &str = "I prefer mint tea.";
 const ORIGINAL: &str = "The user prefers mint tea.";
 const CORRECTION: &str = "The user now prefers coffee.";
@@ -97,6 +100,10 @@ impl Fixture {
                 &json!({"id":"fixture","object":"chat.completion","created":1,"model":"memory-fixture","choices":[{"index":0,"message":{"role":"assistant","content":output},"finish_reason":"stop"}]}),
             )
         });
+        Self::with_server(server)
+    }
+
+    fn with_server(server: Server) -> Self {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

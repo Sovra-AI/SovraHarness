@@ -159,6 +159,7 @@ impl ModelsView {
                     .child(self.render_development_section(cx))
                     .child(self.render_other_connections_section(cx))
                     .children(self.render_google_section(cx))
+                    .child(self.render_service_connect_section(cx))
                     .child(self.render_always_context_section(cx))
                     .child(self.render_agent_behavior_section(cx)),
             )

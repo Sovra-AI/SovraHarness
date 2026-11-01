@@ -852,6 +852,7 @@ impl Actor {
             | Event::Connections(_)
             | Event::Development(_)
             | Event::Google(_)
+            | Event::Mcp(_)
             | Event::ChatHistoryLoaded { .. }
             | Event::Ready { .. }
             | Event::Pong

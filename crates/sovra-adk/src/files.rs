@@ -90,10 +90,20 @@ impl ReadAttachment {
         Self { files, indices }
     }
 
+    /// The turn's attachment inventory, in attachment order.
+    pub(crate) fn files(&self) -> &[FileContent] {
+        &self.files
+    }
+
+    /// Search index for `files()[file]`.
+    pub(crate) fn index(&self, file: usize) -> Option<&FileSearchIndex> {
+        self.indices.get(file)
+    }
+
     fn read(&self, args: &Value) -> Value {
         let id = args.get("file_id").and_then(Value::as_str).unwrap_or("");
         let Some((file_index, file)) = self
-            .files
+            .files()
             .iter()
             .enumerate()
             .find(|(_, file)| file.attachment.id == id)
@@ -111,7 +121,9 @@ impl ReadAttachment {
             "text" => {}
             _ => return json!({"error": "Choose text, bytes, or byte_search mode."}),
         }
-        let all = &self.indices[file_index];
+        let all = self
+            .index(file_index)
+            .expect("each attached file has a search index");
         let query = match args.get("query") {
             None => None,
             Some(Value::String(query)) => {

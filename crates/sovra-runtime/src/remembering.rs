@@ -148,7 +148,9 @@ impl RememberingRuntime {
         }
     }
     pub(crate) async fn stop(&mut self) {
-        self.task.abort();
+        // Closing keeps accepted evidence in the queue until its ordered storage
+        // write finishes. Model work can resume from the persisted job on reopen.
+        self.inputs.close();
         let _ = (&mut self.task).await;
     }
 }
@@ -287,9 +289,12 @@ impl Worker {
                                     let known = tokio::time::timeout(Duration::from_secs(2), async {
                                         let now = crate::now();
                                         let query = MemorySearch { text: source.content.clone(), ..Default::default() };
-                                        let legs = crate::recalling::keyword_candidates(store.as_ref(), &query, now).await?;
+                                        let (legs, recent) = tokio::try_join!(
+                                            crate::recalling::keyword_candidates(store.as_ref(), &query, now),
+                                            store.recall(RecallQuery::recent(8)),
+                                        )?;
                                         let related = fuse_rrf(legs, 24).into_iter().map(|hit| hit.fact).collect();
-                                        let recent = store.recall(RecallQuery::recent(8)).await?.into_iter().map(|hit| hit.fact).collect();
+                                        let recent = recent.into_iter().map(|hit| hit.fact).collect();
                                         Ok::<_, sovra_core::MemoryError>(consolidation_context(related, recent, now))
                                     }).await.map_err(|_| "Earlier memories took too long to check.".to_owned())?
                                         .map_err(|_| "Earlier memories could not be read.".to_owned())?;
@@ -302,6 +307,18 @@ impl Worker {
                     }
                 }
             }
+        }
+        self.jobs.abort_all();
+        while self.jobs.join_next().await.is_some() {}
+        if let Some((claim, _)) = self.active.take() {
+            let _ = self
+                .store
+                .fail_memory(
+                    &claim,
+                    "Remembering was interrupted when Sovra closed.",
+                    crate::now(),
+                )
+                .await;
         }
     }
 }

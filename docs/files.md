@@ -133,6 +133,47 @@ Without tools, answers remain limited to initial excerpts. The agent is instruct
 to disclose omissions and never infer whole-document understanding from excerpts or
 binary fragments. File contents remain untrusted evidence, never instructions.
 
+### The document reader helper
+
+With tools enabled, attaching files also equips `DocumentReaderAgent`
+(Skills page: **Read & compare any document**). The orchestrator calls it when
+the answer needs more than the initial excerpts: summaries, comparisons between
+files, checklists, every mention of something, or long documents. Its tools are
+built per turn from the same attachment inventory, so they can only read those
+files:
+
+| Tool | What it does |
+| --- | --- |
+| `list_attachments` | Inventory: `file_id`, name, type, sections, lines, whether fully decoded, reader note. The reader's required first call (ADK's `list_artifacts`). |
+| `search_attachments` | One relevance-ranked search across every file (or `file_ids`). Each file's next best hit takes a turn, so one long file cannot fill the page. Continue with `result_offset`. |
+| `read_whole_attachments` | Reads documents cover to cover for a `question`, including pictures, scanned pages and recordings. Sections are grouped four at a time and read by the model in parallel (at most four calls at once), each batch returning cited notes or `NONE`. Up to eight batches per call; the reply lists `next_sections` to continue from and `unreadable_sections` that failed. `complete` is true only when every requested section was read. |
+| `read_attachment` | The parent's section, search and byte tool, for quoting exact passages. |
+| `look_at_pdf_pages` | Only when the turn's model can see pictures. Renders printed pages of a text-layer PDF as PNG (xberg's native engine, 144 dpi) for charts, graphs, table layout, diagrams, signatures and stamps that extraction loses, following Gemini's native-vision guidance. Up to 16 pages per call (explicit `pages` or `first_page`), rendered on the runtime's blocking pool four at a time and read in parallel. Notes cite real page numbers; continue with `next_page`. |
+
+Design notes, from ADK and Gemini guidance:
+
+- Fan-out/gather: batches are independent, so they overlap and the reader merges
+  the notes. Plans take turns across files and keep section order
+  (`sovra_core::document_reading`, unit-tested). Dropping the call cancels every
+  batch in flight.
+- The batch budget keeps two parallel rounds inside ADK's 300-second limit
+  for the delegated helper call.
+- Batch prompts place the document before the question (Gemini's document
+  guidance), frame file text as untrusted evidence and give the model no tools.
+- Page pictures come from the original PDF, kept beside the extracted text only
+  for text-layer PDFs (`original.pdf`, owner-only like the rest of the store).
+  The byte tools stay off for these files. PDFs added before this change need
+  adding again to get page pictures. The runtime's `PageViewer` accepts only
+  the turn's own file IDs.
+- Helpers whose tools are all read-only and concurrency-safe use ADK's `Auto`
+  strategy, so independent reads run together. A helper with any ordered tool
+  stays sequential, because `Auto` would move safe reads ahead of it.
+- Pictures, scanned pages and recordings are read too: files with media are
+  planned by media item (four pictures or pages per call, one recording per
+  call) and sent as real inline media parts with their duration annotation,
+  each after a `[file, picture or page N]` label and before the question. The
+  runtime has already checked that the chat model accepts these media types.
+
 ## Folder indexing versus attachments
 
 The limits above apply to chat attachments. Folder indexing now streams complete
@@ -298,6 +339,17 @@ conversation titles. Text-only follow-ups use the latest file-bearing turn.
   `LICENSE-UNICODE` is **UNICODE LICENSE V3**. `deny.toml` records that factual
   clarification to the already-approved `Unicode-3.0`, without changing the
   allowlist. Recheck this clarification when upgrading that crate.
+- 7z stays an inspected format (decision 2026-11-01). The pure-Rust
+  [`sevenz-rust2` 0.24.1](https://crates.io/crates/sevenz-rust2/0.24.1) was
+  checked locally. Its member decoders are bounded by our expansion budget,
+  but an encoded (compressed) header is decoded with
+  `MAX_MEM_LIMIT_KB = usize::MAX` and read to its end inside
+  `ArchiveReader::new`, before any caller check. A small hostile file could
+  therefore inflate to gigabytes during folder indexing, the same class of
+  attack the ZIP probe in `detection.rs` guards against. Its bzip2 method also
+  needs the license outside the allowlist. Revisit when the reader accepts a
+  memory and header-size limit. RAR has no maintained pure-Rust decoder
+  (UnRAR is proprietary C++), so it also stays inspected.
 
 Synthetic fixtures cover DOCX, XLSX, email, ZIP, text PDF and scanned PDF. Tests also
 cover expansion limits, normalized pictures, persistent copies, capability setup,

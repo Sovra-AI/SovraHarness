@@ -167,3 +167,109 @@ fn agent_reads_later_search_pages_and_respects_disabled_tools() {
             }
         });
 }
+
+struct FileDelegate;
+
+#[async_trait::async_trait]
+impl Llm for FileDelegate {
+    fn name(&self) -> &'static str {
+        "delegated-attachments"
+    }
+    async fn generate_content(
+        &self,
+        request: LlmRequest,
+        _: bool,
+    ) -> adk_core::Result<LlmResponseStream> {
+        let result = request
+            .contents
+            .iter()
+            .rev()
+            .flat_map(|content| content.parts.iter().rev())
+            .find_map(|part| {
+                if let Part::FunctionResponse {
+                    function_response, ..
+                } = part
+                {
+                    Some(function_response)
+                } else {
+                    None
+                }
+            });
+        let part = if request.tools.contains_key("CodingAgent") {
+            if let Some(result) = result {
+                assert!(result.response.to_string().contains("93"));
+                Part::Text {
+                    text: "The invoice total is 93. [evidence.png, section 1]".into(),
+                }
+            } else {
+                Part::FunctionCall {
+                    name: "CodingAgent".into(),
+                    args: json!({"request":"Inspect attachment picture-1 for the invoice total; cite its text section."}),
+                    id: Some("delegate-file".into()),
+                    thought_signature: None,
+                }
+            }
+        } else {
+            assert!(request.tools.contains_key("read_attachment"));
+            assert!(
+                !request
+                    .contents
+                    .iter()
+                    .flat_map(|content| &content.parts)
+                    .any(|part| matches!(part, Part::InlineData { .. }))
+            );
+            match result {
+                None => call_tool(json!({"file_id":"not-attached"}), 0),
+                Some(result) if result.response.get("error").is_some() => {
+                    call_tool(json!({"file_id":"picture-1"}), 1)
+                }
+                Some(result) => {
+                    assert_eq!(result.response["file_name"], "evidence.png");
+                    assert_eq!(
+                        result.response["sections"][0]["text"],
+                        "The invoice total is 93."
+                    );
+                    Part::Text {
+                        text: "93 [evidence.png, section 1]".into(),
+                    }
+                }
+            }
+        };
+        let response = LlmResponse::new(Content {
+            role: "model".into(),
+            parts: vec![part],
+        });
+        Ok(Box::pin(futures::stream::once(async move { Ok(response) })))
+    }
+}
+
+#[tokio::test]
+async fn delegated_attachment_reads_use_only_the_current_turn_inventory() {
+    let base =
+        AdkHarness::with_llm_and_tools(&AgentConfig::default(), Arc::new(FileDelegate), vec![])
+            .unwrap();
+    let mut old = super::tests::fixture();
+    old.attachment.id = "not-attached".into();
+    old.text = "Private obsolete attachment".into();
+    let harness = base
+        .with_files(Arc::new(vec![old]), true)
+        .unwrap()
+        .with_files(Arc::new(vec![super::tests::fixture()]), true)
+        .unwrap();
+    let (events, received) = async_channel::unbounded();
+    harness
+        .run_with_files("file-delegation", "Inspect the invoice.", 300, &events)
+        .await;
+    let output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+    assert!(
+        output
+            .iter()
+            .any(|event| matches!(event, Event::AgentCompleted { .. })),
+        "{output:?}"
+    );
+    assert!(
+        output
+            .iter()
+            .any(|event| matches!(event, Event::AgentChunk { text, .. } if text.contains("93")))
+    );
+}

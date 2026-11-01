@@ -40,15 +40,17 @@ Use `/index-folder` or **Knowledge → Files → Add folders** to select one or 
 folders for local indexing. The selection is registered together, then scanned in
 the background. Failed additions show their paths and reasons with **Retry failed
 folders**; successful folders stay connected. Existing folders keep their settings.
-**Knowledge** shows a live view while a folder is read: "Finding your files…" while it
-counts, then a progress bar with "1,204 of 5,000 files read", a rounded time estimate once
-it is reliable, the file being read now, and **What I've found so far** — files sorted into
-plain groups (Photos & pictures, Documents & letters, Bills, receipts & statements, …) and
-everyday life areas (Money, Health, Travel, …) guessed from folder names. Problems appear
-as one line with **See why**. Each group is linked to open standards (DCMI, schema.org,
-NEPOMUK, IPTC); see [docs/file-ontology.md](docs/file-ontology.md). Files are read in
-parallel on all but one core with bounded memory. The card also provides Cancel, Refresh,
-Pause/Resume updates, Remove, and text search.
+**Knowledge** puts a live folder summary first. While a folder is read it shows
+"Finding your files…" while it counts, then a progress bar with "1,204 of 5,000 files
+read", a rounded time estimate once it is reliable, the file being read now, and **What
+I've found so far** — files sorted into plain groups (Photos & pictures, Documents &
+letters, Bills, receipts & statements, …) and everyday life areas (Money, Health,
+Travel, …) guessed from folder names. Problems appear as one line with **See why**. Each
+group is linked to open standards (DCMI, schema.org, NEPOMUK, IPTC); see
+[docs/file-ontology.md](docs/file-ontology.md). Files are read in parallel on all but one
+core with bounded memory. The card provides Cancel, Refresh, Pause/Resume updates,
+Remove, and text search. Enter or Search files searches saved text, with a clear result
+message when nothing matches. Optional meaning search is under **Folder settings**.
 While Sovra is open, native folder notifications trigger updates and a full check
 every 15 minutes catches missed changes. Large scopes or unavailable notifications
 fall back to periodic checks, shown in Knowledge. Cancel pauses automatic updates;
@@ -112,6 +114,15 @@ Folder summaries flag notices even when Folder settings is closed, so a complete
 scan does not hide skipped or unread content. Open **Scan report** for the reasons
 and recovery steps.
 See [scope and current limits](docs/skills-and-file-knowledge.md).
+
+Chat helpers and team members can search connected folders, read cited passages,
+inspect recorded file history and follow reviewed file connections. They also
+receive your standing instructions and can look up saved memories when remembering
+is enabled. Delegated helpers can read files attached to the current message;
+old attachments are not silently carried forward. Removing a folder stops later
+reads. Independent delegated tasks overlap, with at most four running per turn;
+team discussions stay ordered so each reply can build on the previous one. See the
+[context and concurrency audit](docs/agent-memory.md#helper-context-and-concurrency-audit-2026-11-01).
 
 Type `/` to browse skills. Arrow keys select, Tab or Enter chooses, and Escape
 closes suggestions. Choosing a model procedure fills the draft so you can add a
@@ -232,8 +243,8 @@ folder controls, and focused file browsing and scan reports. **Memories** holds
 saved-memory controls. **How it works** explains how Sovra remembers, with one worked example a
 new reader can follow: something happens, a record is kept, a current belief is
 formed, a later belief replaces it, and the earlier belief stays as history.
-The explanation names who or what the belief is about, and that finding a memory
-uses both the meaning and the words themselves. It is an explanation, not the
+The explanation names who or what the belief is about. Finding a memory uses
+matching words, with optional meaning search that you can enable in Memories. It is an explanation, not the
 chat, and it does not need a memory store to be open. The times Sovra keeps are
 under *Show the times Sovra keeps*.
 
@@ -250,6 +261,10 @@ suppressed after Stop using, including after restart. New paraphrases may still
 be missed, and matching accuracy remains under evaluation.
 An owned background worker now uses the selected
 chat model to extract supported details from user messages, including team prompts.
+Accepted messages are written to the memory queue before normal shutdown finishes;
+interrupted extraction can resume when Sovra reopens. Independent keyword lookups
+run up to four at a time, and capture reads recent context alongside those matches.
+Extraction and corrections stay ordered so later messages see earlier updates.
 Models advertising structured-output support receive an extraction schema where
 the provider adapter supports it; every result still needs an exact source quote
 and local validation. Useful stated details can concern named people and projects
@@ -277,6 +292,9 @@ your saved details with search, older pages, retained history and original sourc
 Newly captured details refresh the open list automatically. While you are reviewing
 a source, editing, typing a search or browsing older pages, a notice announces new
 details so your work stays in place. Use Search / refresh when ready.
+The last capture result says whether details were saved, nothing new was saved,
+or remembering failed. Saved details and their sources appear before optional
+search settings. The example in How it works is clearly separate from your data.
 Correct saves a new version and its source note; Stop using asks for confirmation
 and excludes that version from current and historical recall. Both keep previous versions and the
 original conversation, which still supplies its own same-chat context. Reviewing
@@ -435,6 +453,13 @@ can be read as pictures (up to 12 pages). See [file reading and limits](docs/fil
 for coverage, extraction limitations, model compatibility, and research sources.
 The file agent selects relevant passages from long files, cites extracted-text line
 ranges, and can page through further text or binary search results when tools are enabled.
+For summaries, comparisons and "find every mention" questions it hands the files to the
+document reader helper (**Read & compare any document** on the Skills page). The helper
+searches every file at once and reads long documents, scanned pages, pictures and
+recordings cover to cover in parallel parts. With a picture-reading AI it also looks at
+the actual PDF pages, so charts, tables, signatures and stamps are not lost.
+It says exactly which parts it has not read yet. See
+[the document reader helper](docs/files.md#the-document-reader-helper).
 
 ## WhatsApp on your phone
 
@@ -468,6 +493,17 @@ By default only you are answered; a switch lets other people who find the bot ta
 too, and another turns automatic answers off. **Disconnect Telegram** stops the bot and
 forgets the token. The token is stored with your other API keys (the keychain), never in
 plain text.
+
+## Connect a service you already use
+
+**Settings → Connect a service**. Paste the web address the service gave you.
+Add a name if you want one. If the service gave you a secret, paste that too.
+It stays on this computer and is not shown again. Choose **Connect**.
+
+If the service needs you to sign in, choose **Sign in** and finish in your browser.
+When the status says **Connected**, you can see what the service can do, in
+everyday words. Ask in chat as usual. A reply that came from the service shows
+that service's name. **Remove** stops Sovra from using it later.
 
 ## Shipping
 

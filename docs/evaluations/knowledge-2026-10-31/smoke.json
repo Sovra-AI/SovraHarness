@@ -1,0 +1,131 @@
+{
+  "suite": "synthetic-memory-smoke-v1",
+  "model": "google/gemini-4-argon",
+  "connection_id": "openrouter",
+  "seeded_distractors": 100,
+  "semantic_search": false,
+  "scoring": "manual review required; no automated quality score",
+  "status": "observations_complete",
+  "observations": [
+    {
+      "id": "initial",
+      "prompt": "I prefer jasmine tea with breakfast. I started living in Porto on 2024-01-01.",
+      "expected_for_manual_review": "Extract the drink preference and Porto with the explicit start date.",
+      "answer": "Got it! Jasmine tea is a lovely, fragrant way to start the morning, and living in Porto since January 1, 2024 sounds wonderful. \n\nHow can I help you today?",
+      "answer_ms": 5595,
+      "answer_and_extraction_ms": 6465,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [
+        {
+          "content": "The user prefers jasmine tea with breakfast.",
+          "evidence": "I prefer jasmine tea with breakfast.",
+          "entities": [
+            "user",
+            "jasmine tea"
+          ],
+          "valid_at": null,
+          "replaces": null
+        },
+        {
+          "content": "The user lives in Porto.",
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "valid_at": 1704067200000,
+          "replaces": null
+        }
+      ],
+      "extracted_fact_ids": [
+        "fact:memory_5bb059aa08d1e293b103fd6ff0623963f2911da943b4adfea1ae6dc86c577a89",
+        "fact:memory_d8122840638c9b6b69bd07768505bbcc7c74fd89d847aafccf27bacfc993d22e"
+      ],
+      "facts_after": [
+        {
+          "id": "fact:memory_d8122840638c9b6b69bd07768505bbcc7c74fd89d847aafccf27bacfc993d22e",
+          "content": "The user lives in Porto.",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_ac3d7eab0b84ce2578a9e1a8be187d84f551d72837e4abc0421186eeb618e06d",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "google/gemini-4-argon"
+        },
+        {
+          "id": "fact:memory_5bb059aa08d1e293b103fd6ff0623963f2911da943b4adfea1ae6dc86c577a89",
+          "content": "The user prefers jasmine tea with breakfast.",
+          "entities": [
+            "user",
+            "jasmine tea"
+          ],
+          "source": "episode:memory_ac3d7eab0b84ce2578a9e1a8be187d84f551d72837e4abc0421186eeb618e06d",
+          "replaces": null,
+          "valid_at": 1793474991005,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I prefer jasmine tea with breakfast.",
+          "model": "google/gemini-4-argon"
+        }
+      ]
+    },
+    {
+      "id": "drink",
+      "prompt": "What drink do I prefer with breakfast? Answer briefly and cite the saved evidence.",
+      "expected_for_manual_review": "Jasmine tea; cite a real saved fact. Do not extract the question as a fact.",
+      "answer": "You prefer **jasmine tea** with breakfast (\"I prefer jasmine tea with breakfast.\") [memory:fact:memory_5bb059aa08d1e293b103fd6ff0623963f2911da943b4adfea1ae6dc86c577a89].",
+      "answer_ms": 4420,
+      "answer_and_extraction_ms": 4420,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [],
+      "extracted_fact_ids": [],
+      "facts_after": [
+        {
+          "id": "fact:memory_d8122840638c9b6b69bd07768505bbcc7c74fd89d847aafccf27bacfc993d22e",
+          "content": "The user lives in Porto.",
+          "entities": [
+            "user",
+            "Porto"
+          ],
+          "source": "episode:memory_ac3d7eab0b84ce2578a9e1a8be187d84f551d72837e4abc0421186eeb618e06d",
+          "replaces": null,
+          "valid_at": 1704067200000,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I started living in Porto on 2024-01-01.",
+          "model": "google/gemini-4-argon"
+        },
+        {
+          "id": "fact:memory_5bb059aa08d1e293b103fd6ff0623963f2911da943b4adfea1ae6dc86c577a89",
+          "content": "The user prefers jasmine tea with breakfast.",
+          "entities": [
+            "user",
+            "jasmine tea"
+          ],
+          "source": "episode:memory_ac3d7eab0b84ce2578a9e1a8be187d84f551d72837e4abc0421186eeb618e06d",
+          "replaces": null,
+          "valid_at": 1793474991005,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": "I prefer jasmine tea with breakfast.",
+          "model": "google/gemini-4-argon"
+        }
+      ]
+    }
+  ]
+}

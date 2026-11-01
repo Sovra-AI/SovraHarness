@@ -117,6 +117,12 @@ pub struct ModelsView {
     pub(crate) development: sovra_core::development::DevelopmentState,
     /// Settings → Connections; set by the shell, which owns the Google state.
     pub(crate) google_card: Option<Entity<crate::google_card::GoogleCard>>,
+    pub(crate) services: sovra_core::mcp::McpState,
+    pub(crate) service_name: Entity<InputState>,
+    pub(crate) service_address: Entity<InputState>,
+    pub(crate) service_secret: Entity<InputState>,
+    pub(crate) service_client_id: Entity<InputState>,
+    pub(crate) service_client_secret: Entity<InputState>,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -193,6 +199,21 @@ impl ModelsView {
             )
         });
         let whatsapp_form = crate::connections_view::WhatsAppForm::new(window, cx);
+        let service_name =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Name, if you want one"));
+        let service_address = cx.new(|cx| InputState::new(window, cx).placeholder("https://"));
+        let service_secret = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Only if the service gave you one")
+                .masked(true)
+        });
+        let service_client_id =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Name from the service"));
+        let service_client_secret = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Password from the service, if it gave you one")
+                .masked(true)
+        });
         let mut subscriptions = vec![
             cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -204,6 +225,15 @@ impl ModelsView {
                     cx.notify();
                 }
             }),
+            cx.subscribe_in(
+                &service_address,
+                window,
+                |_, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                },
+            ),
         ];
         for control in [
             &author,
@@ -268,6 +298,12 @@ impl ModelsView {
             whatsapp_form,
             development: sovra_core::development::DevelopmentState::default(),
             google_card: None,
+            services: sovra_core::mcp::McpState::default(),
+            service_name,
+            service_address,
+            service_secret,
+            service_client_id,
+            service_client_secret,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         }

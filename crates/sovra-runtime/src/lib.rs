@@ -13,6 +13,7 @@ pub use development::{DevelopmentConfig, run_development_mcp};
 mod file_index;
 mod files;
 mod google;
+mod mcp;
 mod memory_review;
 mod memory_semantic;
 mod models;
@@ -415,6 +416,7 @@ async fn serve(
         });
     let memory_control = remembering::MemoryControl::new();
     let memory_repository = models.as_ref().map(|config| config.repository.clone());
+    let mcp_repository = models.as_ref().map(|config| config.repository.clone());
     if models.is_none() {
         memory_control.publish(true, harness.clone());
     }
@@ -426,6 +428,7 @@ async fn serve(
             memory_control.clone(),
         )
     });
+    let mut mcp = mcp::McpRuntime::start(mcp_repository, events.clone(), &handle);
     let mut runs = std::collections::BTreeMap::<String, ActiveRun>::new();
     let mut memory_taps = tokio::task::JoinSet::new();
     let mut routing_config = RoutingConfig::default();
@@ -583,15 +586,18 @@ async fn serve(
                 let base = base
                     .with_artifact_saver(artifact_library.saver())
                     .unwrap_or(base);
-                let base = match base.with_conversation_memory(
-                    recalling::reader(
-                        memory.as_ref(),
-                        &memory_control,
-                        memory_semantic.service.clone(),
-                    ),
-                    &prompt,
-                    now(),
-                ) {
+                let base = match base
+                    .with_conversation_memory(
+                        recalling::reader(
+                            memory.as_ref(),
+                            &memory_control,
+                            memory_semantic.service.clone(),
+                        ),
+                        &prompt,
+                        now(),
+                    )
+                    .and_then(|base| base.with_indexed_files(file_index.reader.clone()))
+                {
                     Ok(base) => base,
                     Err(error) => {
                         let _ = events
@@ -623,6 +629,7 @@ async fn serve(
                     worker.send(command);
                 }
             }
+            Command::Mcp(command) => mcp.handle(command),
             Command::Files(command) => {
                 if let Some(jobs) = &file_jobs {
                     jobs.send(command);
@@ -831,6 +838,8 @@ async fn serve(
                         skills: skill_catalog.clone(),
                         skill_resources: skills.resources.clone(),
                         indexed_files: file_index.reader.clone(),
+                        remote_tools: mcp.offers(),
+                        remote_caller: mcp.caller(),
                         memory_reader: recalling::reader(
                             memory.as_ref(),
                             &memory_control,
@@ -900,6 +909,7 @@ async fn serve(
     if let Some(worker) = development {
         worker.stop().await;
     }
+    mcp.stop().await;
     auth.stop().await;
     tracing::info!("runtime stopped");
 }
@@ -984,6 +994,7 @@ fn tap_agent_events(
                 | Event::Connections(_)
                 | Event::Development(_)
                 | Event::Google(_)
+                | Event::Mcp(_)
                 | Event::AgUi { .. }
                 | Event::FilePrepared(_)
                 | Event::FileIndex(_)
@@ -1061,6 +1072,8 @@ struct PromptJob {
     skills: Arc<sovra_core::skills::SkillCatalog>,
     skill_resources: Option<Arc<dyn sovra_core::skills::SkillResources>>,
     indexed_files: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
+    remote_tools: Vec<sovra_core::mcp::ToolOffer>,
+    remote_caller: Arc<mcp::ServiceCaller>,
 }
 
 fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
@@ -1080,6 +1093,8 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         skills,
         skill_resources,
         indexed_files,
+        remote_tools,
+        remote_caller,
     } = job;
     let slot = Arc::new(std::sync::RwLock::new(harness.clone()));
     let harness_slot = Arc::clone(&slot);
@@ -1152,7 +1167,14 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
             }
         };
         let adk = match adk.with_working_context(context.as_ref()).and_then(|adk| adk.with_conversation_memory(memory_reader, &prompt, now())).and_then(|adk| adk.with_indexed_files(indexed_files)).and_then(|adk| adk.with_skill_library(skills, skill_resources))
-            .and_then(|adk| skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill))) {
+            .and_then(|adk| skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill)))
+            .and_then(|adk| {
+                if remote_tools.is_empty() {
+                    Ok(adk)
+                } else {
+                    adk.with_remote_tools(&remote_tools, remote_caller)
+                }
+            }) {
             Ok(adk) => adk,
             Err(error) => {
                 let _ = events.send(Event::AgentError { session_id, message: error.to_string() }).await;

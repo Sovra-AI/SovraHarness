@@ -8,7 +8,7 @@ use async_channel::Sender;
 use sovra_core::Event;
 use sovra_core::files::{
     Attachment, FileCommand, FileError, FilePrepared, FileStore, MAX_ATTACHMENTS, MAX_FILE_BYTES,
-    ModelPurpose,
+    MediaPart, ModelPurpose, PageViewer,
 };
 use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinSet;
@@ -86,6 +86,53 @@ impl Drop for FileRuntime {
     }
 }
 
+/// Page pictures for this turn's own attachments, rendered on blocking tasks
+/// so PDF rasterising never occupies an async worker.
+struct StorePages {
+    store: Arc<dyn FileStore>,
+    ids: BTreeSet<String>,
+}
+
+impl StorePages {
+    fn allowed(&self, file_id: &str) -> Result<String, FileError> {
+        if self.ids.contains(file_id) {
+            Ok(file_id.to_owned())
+        } else {
+            Err(FileError(
+                "Choose a file_id from this conversation's attachments.".into(),
+            ))
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl PageViewer for StorePages {
+    async fn page_count(&self, file_id: &str) -> Result<usize, FileError> {
+        let id = self.allowed(file_id)?;
+        let store = Arc::clone(&self.store);
+        tokio::task::spawn_blocking(move || store.page_count(&id))
+            .await
+            .unwrap_or_else(|_| Err(render_failed()))
+    }
+
+    async fn render_pages(
+        &self,
+        file_id: &str,
+        pages: &[usize],
+    ) -> Result<Vec<MediaPart>, FileError> {
+        let id = self.allowed(file_id)?;
+        let store = Arc::clone(&self.store);
+        let pages = pages.to_vec();
+        tokio::task::spawn_blocking(move || store.render_pages(&id, &pages))
+            .await
+            .unwrap_or_else(|_| Err(render_failed()))
+    }
+}
+
+fn render_failed() -> FileError {
+    FileError("These pages could not be shown as pictures.".into())
+}
+
 async fn discard(store: &Arc<dyn FileStore>, id: String) {
     let store = store.clone();
     let _ = tokio::task::spawn_blocking(move || store.discard(&id)).await;
@@ -142,6 +189,10 @@ async fn run(
     }
     let store = job.store;
     let ids = job.ids;
+    let page_viewer = StorePages {
+        store: Arc::clone(&store),
+        ids: ids.iter().cloned().collect(),
+    };
     let loaded = tokio::task::spawn_blocking(move || {
         ids.iter()
             .map(|id| store.load(id))
@@ -211,6 +262,10 @@ async fn run(
         ));
     };
     let tools_enabled = selected.model.supports("tools");
+    // Page pictures only help a model that can see them.
+    let pages: Option<Arc<dyn PageViewer>> = (tools_enabled
+        && ModelPurpose::Images.accepts(&selected.model, selected.provider))
+    .then(|| Arc::new(page_viewer) as Arc<dyn PageViewer>);
     let harness = harness
         .with_working_context(job.context.as_ref())
         .map_err(|error| FileError(error.to_string()))?
@@ -219,7 +274,9 @@ async fn run(
     // Build the shared prompt/tool index off the executor; large files must not
     // stall other chats or the command loop while their text is case-folded.
     let harness = tokio::task::spawn_blocking(move || {
-        let harness = harness.with_files(Arc::new(files), tools_enabled)?;
+        let harness = harness
+            .with_files(Arc::new(files), tools_enabled)?
+            .with_page_viewer(pages)?;
         let harness = if job.web_search_enabled {
             harness.with_web_search(job.search)?
         } else {
@@ -255,4 +312,63 @@ async fn run(
         )
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Records which ids reach the store; every id has three pages.
+    #[derive(Default)]
+    struct PagedStore {
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl FileStore for PagedStore {
+        fn prepare(&self, _: &str, _: &std::path::Path) -> Result<Attachment, FileError> {
+            Err(FileError("unused".into()))
+        }
+        fn load(&self, _: &str) -> Result<sovra_core::files::FileContent, FileError> {
+            Err(FileError("unused".into()))
+        }
+        fn discard(&self, _: &str) -> Result<(), FileError> {
+            Ok(())
+        }
+        fn page_count(&self, id: &str) -> Result<usize, FileError> {
+            self.asked.lock().expect("asked").push(id.to_owned());
+            Ok(3)
+        }
+        fn render_pages(&self, id: &str, pages: &[usize]) -> Result<Vec<MediaPart>, FileError> {
+            self.asked.lock().expect("asked").push(id.to_owned());
+            Ok(pages
+                .iter()
+                .map(|_| MediaPart {
+                    mime_type: "image/png".into(),
+                    data: vec![1],
+                    duration_millis: None,
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn page_pictures_are_limited_to_the_turns_own_attachments() {
+        let store = Arc::new(PagedStore::default());
+        let pages = StorePages {
+            store: Arc::clone(&store) as Arc<dyn FileStore>,
+            ids: BTreeSet::from(["report".to_owned()]),
+        };
+        assert_eq!(pages.page_count("report").await.expect("count"), 3);
+        assert_eq!(
+            pages
+                .render_pages("report", &[1, 2])
+                .await
+                .expect("pages")
+                .len(),
+            2
+        );
+        assert!(pages.page_count("other-turn-file").await.is_err());
+        assert!(pages.render_pages("../escape", &[1]).await.is_err());
+        assert_eq!(*store.asked.lock().expect("asked"), ["report", "report"]);
+    }
 }

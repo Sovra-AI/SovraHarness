@@ -323,6 +323,15 @@ impl Shell {
                                 cx.notify();
                             });
                         }
+                        if let sovra_core::Event::Mcp(event) = &event {
+                            if let sovra_core::mcp::McpEvent::OpenSignIn { url, .. } = event {
+                                cx.open_url(url);
+                            }
+                            shell.models.update(cx, |models, cx| {
+                                models.services.apply(event);
+                                cx.notify();
+                            });
+                        }
                         if matches!(
                             event,
                             sovra_core::Event::AgentCompleted { .. }
@@ -362,6 +371,7 @@ impl Shell {
                             let _ = client.send(Command::Connections(
                                 sovra_core::connections::ConnectionCommand::Load,
                             ));
+                            let _ = client.send(Command::Mcp(sovra_core::mcp::McpCommand::Load));
                             // Restores a saved session or gates the app behind Login.
                             let _ = client.send(Command::Auth(sovra_core::AuthCommand::Load));
                         }

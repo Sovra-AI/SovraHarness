@@ -274,7 +274,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("sovra-media-duration-{}", std::process::id()));
         let store = crate::LocalFileStore::new(directory.clone());
-        store.save(&file).unwrap();
+        store.save(&file, None).unwrap();
         let reopened = crate::LocalFileStore::new(directory.clone())
             .load("duration-test")
             .unwrap();
@@ -284,7 +284,7 @@ mod tests {
         legacy.attachment.id = "unknown-duration".into();
         legacy.attachment.note = None;
         legacy.media[0].data = b"unsupported movie timing".to_vec();
-        store.save(&legacy).unwrap();
+        store.save(&legacy, None).unwrap();
         let unknown = store.load("unknown-duration").unwrap();
         assert_eq!(unknown.media[0].duration_millis, None);
         assert!(

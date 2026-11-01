@@ -35,6 +35,7 @@ pub(crate) struct FileIndexView {
     report: report::ReportView,
     pub(crate) state: IndexState,
     search: Entity<InputState>,
+    _search: gpui_kit::Subscription,
     removing: Option<String>,
     detailed_roots: std::collections::BTreeSet<String>,
     options: std::collections::BTreeMap<String, sovra_core::file_index::ScanOptions>,
@@ -63,8 +64,18 @@ impl FileIndexView {
     }
 
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Find words in your files…"));
+        let search_subscription =
+            cx.subscribe_in(&search, window, |shell, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. })
+                    && !shell.file_index.state.searching
+                {
+                    shell.search_index(cx);
+                }
+            });
         let embedding_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Filter embedding models…"));
+            cx.new(|cx| InputState::new(window, cx).placeholder("Find a search helper…"));
         let subscription = cx.subscribe_in(
             &embedding_search,
             window,
@@ -78,7 +89,8 @@ impl FileIndexView {
             browser: browser::BrowserView::new(window, cx),
             report: report::ReportView::new(window, cx),
             state: IndexState::default(),
-            search: cx.new(|cx| InputState::new(window, cx).placeholder("Search indexed files…")),
+            search,
+            _search: search_subscription,
             removing: None,
             detailed_roots: std::collections::BTreeSet::new(),
             options: std::collections::BTreeMap::new(),
@@ -178,8 +190,11 @@ impl Shell {
                         result: Err(sovra_core::file_index::IndexError(error.to_string())),
                     });
             }
-            self.file_index.state.notice = Some(error.to_string());
-            self.file_index.state.knowledge_reviewing.clear();
+            self.file_index
+                .state
+                .apply(&sovra_core::file_index::IndexEvent::Error(
+                    error.to_string(),
+                ));
             self.file_index.options.clear();
         }
         cx.notify();
@@ -225,7 +240,11 @@ impl Shell {
             limit: 20,
         };
         if let Err(error) = query.validate() {
-            self.file_index.state.notice = Some(error.to_string());
+            self.file_index
+                .state
+                .apply(&sovra_core::file_index::IndexEvent::Error(
+                    error.to_string(),
+                ));
             cx.notify();
             return;
         }
@@ -243,6 +262,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     if report::active_root(shell).is_some() {
         return report::render(shell, cx).into_any_element();
     }
+    let capture_summary = state.capture_summary();
     let mut panel = v_flex().id("file-index-panel").test_support().min_w_0().w_full().gap(t.space.small)
         .sovra_surface(Surface::Matte, cx).p(t.space.medium)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Your folders"))
@@ -250,8 +270,11 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .child(div().sovra_text(TextRole::Caption, cx).child("Choose one or more folders to search on this computer. Chat sends requested file details and saved passages to your selected AI service. Files stay in their original folders."))
         .children(state.notice.as_ref().map(|notice| div().sovra_text(TextRole::Body, cx).child(notice.clone())))
         .children(selection::render(shell, cx))
-        .children((!state.roots.is_empty()).then(|| browser::render(shell, cx)))
+        .children((!state.roots.is_empty()).then(|| div().id("index-capture-summary").test_support()
+            .role(gpui_kit::Role::Status).aria_label(capture_summary.clone())
+            .min_w_0().sovra_text(TextRole::Body, cx).child(capture_summary)))
         .children((!state.roots.is_empty()).then(|| render_search(shell, cx)))
+        .children((!state.roots.is_empty()).then(|| browser::render(shell, cx)))
         .children(state.roots.iter().map(|root| root_row(root, state.monitors.get(&root.id), state.semantic.iter().find(|s| s.setting.root_id == root.id), shell.file_index.removing.as_deref() == Some(root.id.as_str()), shell.file_index.detailed_roots.contains(&root.id), shell.file_index.options.get(&root.id).copied(), cx)));
     if let Some(root_id) = shell
         .file_index
@@ -264,9 +287,9 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             shell.file_index.embedding_search.read(cx).value().as_ref(),
         );
         let mut chooser = v_flex().id("semantic-chooser").test_support().min_w_0().gap(t.space.small)
-            .child(div().sovra_text(TextRole::SectionTitle,cx).child("Choose an embedding model"))
+            .child(div().sovra_text(TextRole::SectionTitle,cx).child("Choose a search helper"))
             .child(div().sovra_text(TextRole::Caption,cx).child("Enabling sends this folder’s extracted passages and future searches to the named server, including newly indexed files. The service may charge for usage. No model is downloaded automatically. Use a model designed for plain-text embeddings; models requiring task prefixes are not supported yet."))
-            .child(Input::new(&shell.file_index.embedding_search).aria_label("Filter embedding models"));
+            .child(Input::new(&shell.file_index.embedding_search).aria_label("Filter search helpers"));
         if candidates.is_empty() {
             chooser = chooser.child(div().sovra_text(TextRole::Body,cx).child("No matching models. In Models, refresh OpenRouter, inspect an installed Ollama embedding model to load its capabilities, or add an embedding model ID to an OpenAI-compatible connection."));
         }
@@ -318,6 +341,16 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
     let mut panel = v_flex().w_full().min_w_0().gap(t.space.small);
     if !state.roots.is_empty() {
         panel = panel
+            .child(
+                div()
+                    .sovra_text(TextRole::SectionTitle, cx)
+                    .child("Find something you saved"),
+            )
+            .child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .child("Enter a word or phrase from a file to see its saved text and source."),
+            )
             .child(Input::new(&shell.file_index.search).aria_label("Search indexed files"))
             .child(
                 design::button(
@@ -333,9 +366,40 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
                 .on_click(cx.listener(|shell, _, _, cx| shell.search_index(cx))),
             );
     }
-    for passage in &state.passages {
+    if state.searching || state.search_completed {
+        let label = if state.searching {
+            "Searching saved file text…".to_owned()
+        } else if state.passages.is_empty() {
+            "No matching text found. Try fewer words, or check that the folder has finished reading.".to_owned()
+        } else if state.passages.len() == 1 {
+            "1 matching passage found. Its saved text is shown below.".to_owned()
+        } else {
+            format!(
+                "{} matching passages found. Their saved text is shown below.",
+                state.passages.len()
+            )
+        };
+        panel = panel.child(
+            div()
+                .id("index-search-result")
+                .test_support()
+                .role(gpui_kit::Role::Status)
+                .aria_label(label.clone())
+                .min_w_0()
+                .sovra_text(TextRole::Body, cx)
+                .child(label),
+        );
+    }
+    for (index, passage) in state
+        .passages
+        .iter()
+        .filter(|_| state.search_completed)
+        .enumerate()
+    {
         let preview: String = passage.text.chars().take(800).collect();
         let mut result = v_flex()
+            .id(("index-search-passage", index))
+            .test_support()
             .gap(t.space.compact)
             .p(t.space.small)
             .sovra_surface(Surface::Subtle, cx)
@@ -481,56 +545,58 @@ fn root_row(
             shell.browse_index_folder(Some(browse_id.clone()), window, cx);
         })),
     );
-    if let Some(status) = semantic {
-        row = row.child(
-            div()
-                .min_w_0()
-                .sovra_text(TextRole::Caption, cx)
-                .child(format!(
-                    "Semantic search · {} · {} of {} unique passages · {}",
-                    status.setting.target.key.model_id,
-                    status.embedded,
-                    status.total,
-                    status.setting.target.base_url
-                )),
-        );
-        if let Some(message) = &status.message {
-            row = row.child(div().sovra_text(TextRole::Body, cx).child(message.clone()));
+    if detailed {
+        if let Some(status) = semantic {
+            row = row.child(
+                div()
+                    .min_w_0()
+                    .sovra_text(TextRole::Caption, cx)
+                    .child(format!(
+                        "Search by meaning · {} · {} of {} unique passages · {}",
+                        status.setting.target.key.model_id,
+                        status.embedded,
+                        status.total,
+                        status.setting.target.base_url
+                    )),
+            );
+            if let Some(message) = &status.message {
+                row = row.child(div().sovra_text(TextRole::Body, cx).child(message.clone()));
+            }
+            let disable = id.clone();
+            actions = actions.child(
+                design::button(
+                    gpui_kit::SharedString::from(format!("disable-semantic-{id}")),
+                    "Turn off search by meaning",
+                    cx,
+                )
+                .on_click(cx.listener(move |shell, _, _, cx| {
+                    shell.index_command(
+                        IndexCommand::ConfigureSemantic {
+                            root_id: disable.clone(),
+                            target: None,
+                        },
+                        cx,
+                    );
+                })),
+            );
         }
-        let disable = id.clone();
+        let choose = id.clone();
         actions = actions.child(
             design::button(
-                gpui_kit::SharedString::from(format!("disable-semantic-{id}")),
-                "Disable semantic search",
+                gpui_kit::SharedString::from(format!("choose-semantic-{id}")),
+                if semantic.is_some() {
+                    "Change search helper"
+                } else {
+                    "Find by meaning (optional)"
+                },
                 cx,
             )
             .on_click(cx.listener(move |shell, _, _, cx| {
-                shell.index_command(
-                    IndexCommand::ConfigureSemantic {
-                        root_id: disable.clone(),
-                        target: None,
-                    },
-                    cx,
-                );
+                shell.file_index.semantic_root = Some(choose.clone());
+                cx.notify();
             })),
         );
     }
-    let choose = id.clone();
-    actions = actions.child(
-        design::button(
-            gpui_kit::SharedString::from(format!("choose-semantic-{id}")),
-            if semantic.is_some() {
-                "Change or rebuild embeddings"
-            } else {
-                "Set up semantic search"
-            },
-            cx,
-        )
-        .on_click(cx.listener(move |shell, _, _, cx| {
-            shell.file_index.semantic_root = Some(choose.clone());
-            cx.notify();
-        })),
-    );
     let automatic_id = id.clone();
     let enabled =
         !root.auto_refresh || monitor.is_some_and(|status| status.mode == MonitorMode::Paused);
@@ -754,6 +820,193 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn file_search_reports_empty_results_and_enter_submits_once(cx: &mut TestAppContext) {
+        let (client, commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1280.), px(1000.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.file_index.apply(&IndexEvent::Roots(vec![root()]));
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell.file_index.search.update(cx, |input, cx| {
+                    input.set_value("tea", window, cx);
+                    cx.emit(InputEvent::PressEnter {
+                        secondary: false,
+                        shift: false,
+                    });
+                });
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let requests: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+            .filter_map(|command| {
+                if let Command::FileIndex(IndexCommand::Search { request_id, query }) = command {
+                    Some((request_id, query))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].1.text, "tea");
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("index-search-result").label(),
+                Some("Searching saved file text…")
+            );
+            assert!(window.try_find("choose-semantic-chosen").is_none());
+            assert!(
+                window.find("index-capture-summary").bounds().top()
+                    < window.find("search-index").bounds().top()
+            );
+            assert!(
+                window.find("search-index").bounds().top()
+                    < window.find("index-capture-status-chosen").bounds().top()
+            );
+            let search = shell.read(cx).file_index.search.clone();
+            search.update(cx, |_, cx| {
+                cx.emit(InputEvent::PressEnter {
+                    secondary: false,
+                    shift: false,
+                });
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(
+            !std::iter::from_fn(|| commands.try_recv().ok())
+                .any(|command| matches!(command, Command::FileIndex(IndexCommand::Search { .. })))
+        );
+        events
+            .send_blocking(Event::FileIndex(IndexEvent::Results {
+                request_id: requests[0].0,
+                passages: vec![],
+            }))
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window
+                    .find("index-search-result")
+                    .label()
+                    .unwrap()
+                    .starts_with("No matching text found.")
+            );
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_search_never_displays_previous_results(cx: &mut TestAppContext) {
+        let (client, commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1280.), px(1000.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell.file_index.apply(&IndexEvent::Roots(vec![root()]));
+                let request_id = shell.file_index.state.begin_search();
+                shell.file_index.apply(&IndexEvent::Results {
+                    request_id,
+                    passages: vec![sovra_core::file_index::IndexPassage {
+                        reference: sovra_core::file_index::PassageRef {
+                            root_id: "chosen".into(),
+                            file_id: "file".into(),
+                            version_id: "v1".into(),
+                            ordinal: 0,
+                        },
+                        path: "notes.txt".into(),
+                        text: "I prefer tea without sugar.".into(),
+                        start_line: 1,
+                        end_line: 1,
+                        mime_type: "text/plain".into(),
+                        note: None,
+                        observed_at: 1,
+                        modified_at: None,
+                    }],
+                });
+            });
+            window.render_frame(cx);
+            assert!(window.try_find(("index-search-passage", 0usize)).is_some());
+            assert!(
+                window
+                    .find("index-search-result")
+                    .label()
+                    .unwrap()
+                    .starts_with("1 matching passage")
+            );
+            shell.update(cx, |shell, cx| {
+                shell.file_index.state.begin_search();
+                shell.file_index.apply(&IndexEvent::Error(
+                    "Search could not finish. Try again.".into(),
+                ));
+                cx.notify();
+            });
+            window.render_frame(cx);
+            assert!(window.try_find(("index-search-passage", 0usize)).is_none());
+            assert!(window.try_find("index-search-result").is_none());
+            shell.update(cx, |shell, cx| {
+                let passages = shell.file_index.state.passages.clone();
+                let request_id = shell.file_index.state.begin_search();
+                shell.file_index.apply(&IndexEvent::Results {
+                    request_id,
+                    passages,
+                });
+                cx.notify();
+            });
+            window.render_frame(cx);
+            assert!(window.try_find(("index-search-passage", 0usize)).is_some());
+            shell.update(cx, |shell, cx| {
+                shell
+                    .file_index
+                    .search
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                shell.search_index(cx);
+            });
+            window.render_frame(cx);
+            assert!(
+                window.try_find(("index-search-passage", 0usize)).is_none(),
+                "An invalid new search must not retain previous matches."
+            );
+            assert!(window.try_find("index-search-result").is_none());
+        })
+        .unwrap();
+        drop(commands);
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell
+                    .file_index
+                    .search
+                    .update(cx, |input, cx| input.set_value("coffee", window, cx));
+                shell.search_index(cx);
+                assert!(
+                    !shell.file_index.state.searching,
+                    "A disconnected runtime must not leave search stuck."
+                );
+                assert!(shell.file_index.state.notice.is_some());
+            });
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
     fn controls_send_pause_refresh_and_confirmed_removal_without_touching_sources(
         cx: &mut TestAppContext,
     ) {
@@ -902,6 +1155,8 @@ mod tests {
                     assert!(window.try_find("index-issue-chosen-3").is_none());
                     for id in [
                         "file-index-panel",
+                        "index-capture-summary",
+                        "index-capture-status-chosen",
                         "index-attention-chosen",
                         "index-recovery-chosen",
                         "automatic-index-chosen",

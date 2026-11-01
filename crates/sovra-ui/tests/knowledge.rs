@@ -217,6 +217,8 @@ fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
         assert!(window.try_find("sovra-chat-main").is_none());
         assert!(window.try_find("chat-composer-input").is_none());
         assert!(window.try_find("chat-scroll-area").is_none());
+        assert_eq!(window.find("knowledge-example-notice").label(),
+            Some("Example only — these people and details are not your saved memories. Open Memories to see what Sovra has actually saved."));
 
         let mut story_text = String::new();
         for (index, step) in story.steps.iter().enumerate() {
@@ -339,21 +341,35 @@ fn semantic_folder_choice_discloses_the_destination_and_fits_each_layout(cx: &mu
                     ScrollDelta::Pixels(point(px(0.), px(5000.))),
                     cx,
                 );
-                for _ in 0..30 {
-                    let choice = window.find("choose-semantic-folder");
-                    if choice.visible()
-                        && choice.bounds().bottom() < px(height - 60.)
-                        && choice.bounds().top() > px(60.)
-                    {
-                        break;
+                let choices = if window.try_find("choose-semantic-folder").is_some() {
+                    vec!["choose-semantic-folder"]
+                } else {
+                    vec!["index-details-folder", "choose-semantic-folder"]
+                };
+                for id in choices {
+                    for _ in 0..80 {
+                        window.render_frame(cx);
+                        let choice = window.find(id);
+                        let viewport = window.find("sovra-knowledge-view").bounds();
+                        if choice.visible()
+                            && choice.bounds().bottom() < viewport.bottom()
+                            && choice.bounds().top() > viewport.top()
+                        {
+                            break;
+                        }
+                        let dy = if choice.bounds().top() <= viewport.top() {
+                            60.
+                        } else {
+                            -60.
+                        };
+                        window.scroll(
+                            "sovra-knowledge-view",
+                            ScrollDelta::Pixels(point(px(0.), px(dy))),
+                            cx,
+                        );
                     }
-                    window.scroll(
-                        "sovra-knowledge-view",
-                        ScrollDelta::Pixels(point(px(0.), px(-80.))),
-                        cx,
-                    );
+                    window.click(id, cx);
                 }
-                window.click("choose-semantic-folder", cx);
                 window.render_frame(cx);
                 assert!(window.try_find("semantic-chooser").is_some());
                 while let Ok(command) = commands.try_recv() {

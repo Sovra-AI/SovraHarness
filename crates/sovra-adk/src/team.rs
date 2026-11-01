@@ -343,8 +343,8 @@ impl TeamRunState<'_> {
 impl AdkHarness {
     /// A plain single agent for one member invocation, on the same model, in its
     /// own throwaway session store: the shared history travels in the prompt, so
-    /// nothing outlives the reply. Members get scoped memory lookup plus their
-    /// own artifact saver; other parent tools are not inherited.
+    /// nothing outlives the reply. Members get the same scoped knowledge readers
+    /// plus their own artifact saver; unrelated parent tools are not inherited.
     async fn member_runner(
         &self,
         member: &TeamMember,
@@ -354,13 +354,10 @@ impl AdkHarness {
         let mut builder = LlmAgentBuilder::new(member.id.clone())
             .description(member.role.clone())
             .instruction(instruction)
+            .global_instruction(&self.standing_instruction)
             .model(Arc::clone(&self.llm));
-        for tool in self
-            .base_tools
-            .iter()
-            .filter(|tool| tool.name() == crate::recall::LOOKUP_NAME)
-        {
-            builder = builder.tool(tool.clone());
+        for tool in crate::capabilities::shared_knowledge_tools(&self.base_tools) {
+            builder = builder.tool(tool);
         }
         if let Some(saver) = &self.artifact_saver {
             builder = builder.tool(crate::artifacts::save_artifact_tool(
@@ -383,6 +380,7 @@ impl AdkHarness {
             .app_name(&self.app_name)
             .agent(Arc::new(agent))
             .session_service(sessions as Arc<dyn SessionService>)
+            .run_config(crate::run_config())
             .build()
             .map_err(crate::Error::RunnerBuild)
     }

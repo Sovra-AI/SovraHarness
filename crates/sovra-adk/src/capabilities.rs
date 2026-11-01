@@ -16,6 +16,21 @@ use sovra_core::{Capability, WEB_SEARCH_AGENT_ID};
 use crate::required_delegation::FirstCall;
 use crate::web_search::{self, SearchClient};
 
+/// Reuse the turn's granted readers without handing helpers proposal, UI or
+/// connected-service tools. Cloning the handles preserves scope and revocation.
+pub(crate) fn shared_knowledge_tools(
+    tools: &[Arc<dyn Tool>],
+) -> impl Iterator<Item = Arc<dyn Tool>> + '_ {
+    tools
+        .iter()
+        .filter(|tool| {
+            tool.is_read_only()
+                && (crate::file_index::TOOL_NAMES.contains(&tool.name())
+                    || matches!(tool.name(), crate::recall::LOOKUP_NAME | "read_attachment"))
+        })
+        .cloned()
+}
+
 pub(crate) trait CapabilityProvider: Send + Sync {
     fn capability(&self) -> Capability;
 
@@ -83,7 +98,7 @@ impl CapabilityProvider for WebSearchProvider {
 
 /// Tool names that belong to a provider and must never sit on the parent.
 pub(crate) fn is_provider_tool(name: &str) -> bool {
-    web_search::is_search_tool(name)
+    web_search::is_search_tool(name) || crate::documents::is_reader_tool(name)
 }
 
 #[cfg(test)]

@@ -29,6 +29,7 @@ mod my_ais_view;
 mod native_surface;
 mod onboarding_bar;
 mod schedules_view;
+mod service_connect_view;
 mod settings_view;
 mod shell;
 mod sidebar;
