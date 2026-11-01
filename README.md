@@ -40,7 +40,7 @@ Use `/index-folder` or **Knowledge → Files → Add folders** to select one or 
 folders for local indexing. The selection is registered together, then scanned in
 the background. Failed additions show their paths and reasons with **Retry failed
 folders**; successful folders stay connected. Existing folders keep their settings.
-**Knowledge** puts a live folder summary first. While a folder is read it shows
+**Knowledge → Files** shows a live folder summary. While a folder is read it shows
 "Finding your files…" while it counts, then a progress bar with "1,204 of 5,000 files
 read", a rounded time estimate once it is reliable, the file being read now, and **What
 I've found so far** — files sorted into plain groups (Photos & pictures, Documents &
@@ -239,13 +239,18 @@ The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
 The engine choice, routing tree and prompt tester are folded under
 *How automatic choice works → Show details*.
 
-The **Knowledge** tab opens to **Files**, with **Add folders**, local search,
-folder controls, and focused file browsing and scan reports. **Memories** holds
-saved-memory controls. **How it works** explains how Sovra remembers, with one worked example a
+The **Knowledge** tab opens to **About you**: saved personal details, pending
+learning and messages needing attention. **Add a detail** saves what you write
+immediately, with its original source, without an AI call. **Recent activity**
+shows the latest eight message checks, including failures and checks that found
+nothing new. **Try failed messages again** retries failed work while remembering
+is on; completed and cancelled work stays untouched. **Files** contains
+connected folders, search, file browsing and scan reports.
+**Guide** explains how Sovra remembers, with one worked example a
 new reader can follow: something happens, a record is kept, a current belief is
 formed, a later belief replaces it, and the earlier belief stays as history.
 The explanation names who or what the belief is about. Finding a memory uses
-matching words, with optional meaning search that you can enable in Memories. It is an explanation, not the
+matching words, with optional meaning search that you can enable in About you. It is an explanation, not the
 chat, and it does not need a memory store to be open. The times Sovra keeps are
 under *Show the times Sovra keeps*.
 
@@ -288,18 +293,19 @@ Pausing remembering also disables automatic recall. Explicit source review remai
 available. Reopened chats and model
 changes use a bounded excerpt of the visible conversation, preserving user/reply
 roles without replaying earlier tool actions, widgets or reasoning. This same-chat
-context stays available when remembering is off. Knowledge → Memories → What I remember lists
+context stays available when remembering is off. Knowledge → About you → What I remember lists
 your saved details with search, older pages, retained history and original sources.
 Newly captured details refresh the open list automatically. While you are reviewing
 a source, editing, typing a search or browsing older pages, a notice announces new
 details so your work stays in place. Use Search / refresh when ready.
 The last capture result says whether details were saved, nothing new was saved,
 or remembering failed. Saved details and their sources appear before optional
-search settings. The example in How it works is clearly separate from your data.
+search settings. The example in Guide is clearly separate from your data.
 Correct saves a new version and its source note; Stop using asks for confirmation
 and excludes that version from current and historical recall. Both keep previous versions and the
 original conversation, which still supplies its own same-chat context. Reviewing
-and correcting saved details remains available while automatic remembering is off.
+and correcting saved details, including adding an explicit personal note, remains
+available while automatic remembering is off.
 Optional **Find memories by meaning → Choose a search helper** uses an existing
 Ollama, OpenRouter or OpenAI-compatible embedding model. Enabling explicitly permits sending
 saved details, including retained versions, and future questions to the displayed

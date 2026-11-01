@@ -125,6 +125,10 @@ mod tests {
                     let view = cx.new(|cx| {
                         let mut shell = Shell::new(window, cx);
                         shell.select_tab(NavTab::Knowledge, cx);
+                        shell.select_knowledge_section(
+                            crate::knowledge_view::KnowledgeSection::Files,
+                            cx,
+                        );
                         shell
                             .file_index
                             .apply(&IndexEvent::FoldersAdded(FolderAddition {

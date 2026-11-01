@@ -66,12 +66,31 @@ pub struct MemoryCorrection {
     pub text: String,
 }
 
+/// A detail the person explicitly asks to keep, without model interpretation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryNote {
+    pub text: String,
+}
+
+impl MemoryNote {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        if self.text.trim().is_empty() || self.text.len() > 2048 {
+            return Err(MemoryError::InvalidInput(
+                "Write a short detail to remember. Please keep it to a few sentences.".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryAction {
     ConfigureSemantic(Option<crate::models::ModelDestination>),
     List(MemoryListQuery),
     Inspect(FactId),
     Correct(MemoryCorrection),
+    Remember(MemoryNote),
+    RetryFailed,
     StopUsing(FactId),
 }
 
@@ -93,6 +112,7 @@ pub enum MemoryReviewResult {
     Page(MemoryPage),
     Detail(Box<MemoryDetail>),
     Changed(FactId),
+    Retried(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +168,7 @@ impl MemoryReviewState {
                 self.detail = None;
             }
             Ok(MemoryReviewResult::Detail(detail)) => self.detail = Some((**detail).clone()),
-            Ok(MemoryReviewResult::Changed(_)) => {
+            Ok(MemoryReviewResult::Changed(_) | MemoryReviewResult::Retried(_)) => {
                 self.page = MemoryPage::default();
                 self.detail = None;
             }
@@ -176,6 +196,16 @@ impl MemoryCorrection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_notes_require_bounded_nonempty_text() {
+        for text in [String::new(), "  \n ".into(), "é".repeat(1025)] {
+            assert!(MemoryNote { text }.validate().is_err());
+        }
+        for text in [" I prefer tea without sugar ".into(), "é".repeat(1024)] {
+            assert!(MemoryNote { text }.validate().is_ok());
+        }
+    }
 
     #[test]
     fn configuration_acknowledgement_does_not_erase_newer_worker_progress() {

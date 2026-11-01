@@ -273,7 +273,10 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
-            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx));
+            shell.update(cx, |shell, cx| {
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
+            });
             click_control(window, cx, "scan-report-chosen");
         })
         .unwrap();
@@ -396,6 +399,10 @@ mod tests {
                 shell.update(cx, |shell, cx| {
                     shell.file_index.apply(&IndexEvent::Roots(vec![root()]));
                     shell.select_tab(NavTab::Knowledge, cx);
+                    shell.select_knowledge_section(
+                        crate::knowledge_view::KnowledgeSection::Files,
+                        cx,
+                    );
                     shell.open_scan_report("chosen", window, cx);
                     shell.file_index.state.report.page = Some(page());
                     shell.file_index.state.report.loading = false;

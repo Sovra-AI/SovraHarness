@@ -305,6 +305,20 @@ impl MemoryStore for Store {
             .push(sovra_core::MemoryAction::Correct(correction));
         Ok(FactId("fact:corrected".into()))
     }
+    async fn remember_note(&self, note: sovra_core::MemoryNote) -> Result<FactId, MemoryError> {
+        self.review_actions
+            .lock()
+            .unwrap()
+            .push(sovra_core::MemoryAction::Remember(note));
+        Ok(FactId("fact:note".into()))
+    }
+    async fn retry_failed_memories(&self) -> Result<usize, MemoryError> {
+        self.review_actions
+            .lock()
+            .unwrap()
+            .push(sovra_core::MemoryAction::RetryFailed);
+        Ok(2)
+    }
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError> {
         self.recalls.lock().unwrap().push(query.clone());
         let _pending = if let (Some(probe), Some(term)) = (&self.keyword_probe, &query.text) {
@@ -822,6 +836,60 @@ fn recall_server() -> Server {
 }
 
 #[tokio::test]
+async fn memory_review_saves_explicit_notes_but_retry_requires_enabled_remembering() {
+    use sovra_core::{MemoryAction, MemoryCommand, MemoryNote, MemoryReviewResult};
+    for enabled in [false, true] {
+        let server = recall_server();
+        let store = Arc::new(Store::default());
+        let (_fixture, client) = start(&server, store.clone(), enabled).await;
+        for (request_id, action) in [
+            (
+                1,
+                MemoryAction::Remember(MemoryNote {
+                    text: "I prefer short answers".into(),
+                }),
+            ),
+            (2, MemoryAction::Remember(MemoryNote { text: " ".into() })),
+            (3, MemoryAction::RetryFailed),
+        ] {
+            client
+                .send(Command::Memory(MemoryCommand { request_id, action }))
+                .unwrap();
+            let response = event(&client, |event| matches!(event, Event::Memory(MemoryEvent::Review(event)) if event.request_id == request_id)).await;
+            let Event::Memory(MemoryEvent::Review(response)) = response else {
+                unreachable!()
+            };
+            match request_id {
+                1 => assert_eq!(
+                    response.result.unwrap(),
+                    MemoryReviewResult::Changed(FactId("fact:note".into()))
+                ),
+                2 => assert!(response.result.is_err()),
+                3 if enabled => {
+                    assert_eq!(response.result.unwrap(), MemoryReviewResult::Retried(2));
+                }
+                3 => assert!(response.result.unwrap_err().contains("Turn on remembering")),
+                _ => unreachable!(),
+            }
+        }
+        stop(client).await;
+        let actions = store.review_actions.lock().unwrap();
+        assert!(
+            matches!(&actions[0], MemoryAction::Remember(note) if note.text == "I prefer short answers")
+        );
+        assert_eq!(actions.len(), if enabled { 2 } else { 1 });
+        assert!(
+            server
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|request| !request.path.ends_with("completions"))
+        );
+    }
+}
+
+#[tokio::test]
 async fn memory_review_uses_the_storage_port_while_paused_and_drains_accepted_edits() {
     use sovra_core::{
         MemoryAction, MemoryCommand, MemoryCorrection, MemoryListQuery, MemoryReviewResult,
@@ -856,7 +924,9 @@ async fn memory_review_uses_the_storage_port_while_paused_and_drains_accepted_ed
             unreachable!()
         };
         match response.result.unwrap() {
-            MemoryReviewResult::Semantics(_) => panic!("no semantic setting was requested"),
+            MemoryReviewResult::Semantics(_) | MemoryReviewResult::Retried(_) => {
+                panic!("no configuration or retry was requested")
+            }
             MemoryReviewResult::Page(page) => assert_eq!(page.facts[0].id.0, "fact:tea"),
             MemoryReviewResult::Detail(detail) => {
                 assert_eq!(detail.source.unwrap().content, "I prefer jasmine tea");

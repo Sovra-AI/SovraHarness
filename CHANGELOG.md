@@ -13,9 +13,16 @@ move them under a version heading when the tag is cut.
 
 ### Added
 
+- **Knowledge → About you:** Knowledge opens with the person's saved details,
+  capture totals and recent activity. **Add a detail** saves an explicit note
+  immediately, with a retained source and no AI interpretation. Failed message
+  captures can be retried without reprocessing completed or paused-away work.
+  Capture activity refreshes without discarding drafts, corrections or older pages;
+  **Files** and **Guide** remain one click away.
+
 - Persisted memory-capture summaries in the memory store: saved and historical
   fact totals, queued/failed work, and the latest eight capture receipts, independent
-  of search pagination. This provides data for the ongoing Knowledge UI work.
+  of search pagination. These power the Knowledge → About you overview.
 - Regression coverage for saved Google desktop-client precedence, credential
   redaction, restart persistence, both sign-in entry points, and Settings controls.
 

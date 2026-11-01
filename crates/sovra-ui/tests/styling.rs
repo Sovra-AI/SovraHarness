@@ -2,6 +2,8 @@
 
 #[path = "styling/development.rs"]
 mod development;
+#[path = "styling/knowledge_profile.rs"]
+mod knowledge_profile;
 #[path = "styling/memory_citations.rs"]
 mod memory_citations;
 #[path = "styling/messaging.rs"]

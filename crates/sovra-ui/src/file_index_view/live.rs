@@ -367,6 +367,7 @@ mod tests {
                     .state
                     .apply(&IndexEvent::Roots(vec![counting()]));
                 shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
             });
             window.render_frame(cx);
             window.render_frame(cx);
@@ -425,6 +426,7 @@ mod tests {
             shell.update(cx, |shell, cx| {
                 shell.file_index.state.apply(&IndexEvent::Roots(vec![done]));
                 shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
             });
             window.render_frame(cx);
             window.render_frame(cx);
@@ -456,6 +458,10 @@ mod tests {
                         .state
                         .apply(&IndexEvent::Roots(vec![reading()]));
                     shell.select_tab(NavTab::Knowledge, cx);
+                    shell.select_knowledge_section(
+                        crate::knowledge_view::KnowledgeSection::Files,
+                        cx,
+                    );
                 });
                 for mode in [ThemeMode::Dark, ThemeMode::Light] {
                     Theme::change(mode, Some(window), cx);

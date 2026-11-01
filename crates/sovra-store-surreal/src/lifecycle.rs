@@ -1,8 +1,8 @@
 //! Keyset browsing and atomic corrections with an immutable user-authored source.
 
 use sovra_core::{
-    Fact, FactId, MemoryCorrection, MemoryCursor, MemoryError, MemoryListQuery, MemoryPage,
-    NewFact, Timestamp,
+    Fact, FactId, MemoryCorrection, MemoryCursor, MemoryError, MemoryListQuery, MemoryNote,
+    MemoryPage, NewFact, Timestamp,
 };
 use surrealdb::types::{RecordId, SurrealValue, ToSql as _};
 
@@ -78,8 +78,22 @@ impl SurrealStore {
         correction: MemoryCorrection,
     ) -> Result<FactId, MemoryError> {
         correction.validate()?;
+        self.user_note(correction.text, Some(correction.target))
+            .await
+    }
+
+    pub(super) async fn save_note(&self, note: MemoryNote) -> Result<FactId, MemoryError> {
+        note.validate()?;
+        self.user_note(note.text, None).await
+    }
+
+    async fn user_note(
+        &self,
+        text: String,
+        replaces: Option<FactId>,
+    ) -> Result<FactId, MemoryError> {
         let at = self.next_fact_ms();
-        let text = correction.text.trim().to_owned();
+        let text = text.trim().to_owned();
         let note = NewEpisodeRow {
             session_id: "memory-review".into(),
             kind: "note".into(),
@@ -95,7 +109,7 @@ impl SurrealStore {
                 embedding: None,
                 source: None,
                 valid_at: Some(Timestamp(at)),
-                replaces: Some(correction.target),
+                replaces,
             },
             at,
             None,
@@ -118,7 +132,7 @@ impl SurrealStore {
         let index = result.num_statements().saturating_sub(2);
         let id: Option<RecordId> = result.take(index).map_err(|error| backend(&error))?;
         id.map(|id| FactId(id.to_sql()))
-            .ok_or_else(|| MemoryError::Backend("Correction returned no memory.".into()))
+            .ok_or_else(|| MemoryError::Backend("Saving returned no memory.".into()))
     }
 }
 

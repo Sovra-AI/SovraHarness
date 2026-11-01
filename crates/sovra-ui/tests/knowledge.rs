@@ -8,7 +8,7 @@ use sovra_runtime::Client;
 use sovra_ui::Shell;
 
 #[gpui_kit::test]
-fn knowledge_opens_to_files_and_keeps_memory_and_help_reachable(cx: &mut TestAppContext) {
+fn knowledge_opens_to_personal_details_and_keeps_files_and_help_reachable(cx: &mut TestAppContext) {
     let (client, _commands, _events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
@@ -18,8 +18,8 @@ fn knowledge_opens_to_files_and_keeps_memory_and_help_reachable(cx: &mut TestApp
     cx.update_window(window.into(), |_, window, cx| {
         window.click("nav-knowledge", cx);
         window.render_frame(cx);
-        assert!(window.try_find("memory-browser").is_none());
-        assert!(window.find("index-folder").visible());
+        assert!(window.try_find("file-index-panel").is_none());
+        assert!(window.find("conversation-memory-status").visible());
         window.click("knowledge-memories", cx);
         window.render_frame(cx);
         assert!(window.find("memory-browser").visible());
@@ -218,7 +218,7 @@ fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
         assert!(window.try_find("chat-composer-input").is_none());
         assert!(window.try_find("chat-scroll-area").is_none());
         assert_eq!(window.find("knowledge-example-notice").label(),
-            Some("Example only — these people and details are not your saved memories. Open Memories to see what Sovra has actually saved."));
+            Some("Example only — these people and details are not your saved memories. Open About you to see what Sovra has actually saved."));
 
         let mut story_text = String::new();
         for (index, step) in story.steps.iter().enumerate() {
@@ -341,6 +341,8 @@ fn semantic_folder_choice_discloses_the_destination_and_fits_each_layout(cx: &mu
                     ScrollDelta::Pixels(point(px(0.), px(5000.))),
                     cx,
                 );
+                window.click("knowledge-files", cx);
+                window.render_frame(cx);
                 let choices = if window.try_find("choose-semantic-folder").is_some() {
                     vec!["choose-semantic-folder"]
                 } else {

@@ -30,6 +30,10 @@ mod live;
 #[path = "memory_lifecycle/knowledge.rs"]
 mod knowledge;
 
+/// `Ready` is sent only after the on-disk store opens, and that open shares
+/// the disk with the rest of the suite. Catalog events can arrive first.
+const EVENT_WAIT: Duration = Duration::from_secs(60);
+
 const SOURCE: &str = "I prefer mint tea.";
 const ORIGINAL: &str = "The user prefers mint tea.";
 const CORRECTION: &str = "The user now prefers coffee.";
@@ -231,7 +235,7 @@ impl Driver {
             pending: VecDeque::new(),
             reader: Some(reader),
             next_request: 0,
-            timeout: Duration::from_secs(15),
+            timeout: EVENT_WAIT,
             observe_memory_failures: false,
         }
     }
@@ -313,7 +317,7 @@ impl Driver {
         self.client.take();
         // Closing every event sender observes runtime teardown, not just Stopped.
         loop {
-            match self.events.recv_timeout(Duration::from_secs(15)) {
+            match self.events.recv_timeout(EVENT_WAIT) {
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     panic!("runtime retained an event sender after shutdown")

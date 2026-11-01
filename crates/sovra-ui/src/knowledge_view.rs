@@ -18,8 +18,8 @@ use crate::shell::Shell;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum KnowledgeSection {
-    #[default]
     Files,
+    #[default]
     Memories,
     Help,
 }
@@ -91,9 +91,13 @@ pub(crate) fn render_knowledge_view(
         .flex_wrap()
         .gap(t.space.small);
     for (id, label, section) in [
+        (
+            "knowledge-memories",
+            "About you",
+            KnowledgeSection::Memories,
+        ),
         ("knowledge-files", "Files", KnowledgeSection::Files),
-        ("knowledge-memories", "Memories", KnowledgeSection::Memories),
-        ("knowledge-help", "How it works", KnowledgeSection::Help),
+        ("knowledge-help", "Guide", KnowledgeSection::Help),
     ] {
         navigation = navigation.child(
             design::button(id, label, cx)
@@ -144,12 +148,11 @@ fn render_memory_status(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElem
                 .aria_label(format!("Conversation memory. {} Messages may be sent to your selected AI service. Saved details are stored on this computer.", shell.workspace().memory_status.label()))
                 .w_full().min_w_0().sovra_surface(Surface::Matte, cx)
                 .p(t.space.medium).gap(t.space.small)
-                .child(div().sovra_text(TextRole::SectionTitle, cx).child("Conversation memory"))
+                .child(design::page_header("What I know about you", "Your preferences, important people, work and plans — with sources you can check.", cx))
                 .child(div().id("memory-working-status").role(gpui_kit::Role::Status)
                     .aria_label(shell.workspace().memory_status.label().to_owned())
                     .sovra_text(TextRole::Body, cx).child(shell.workspace().memory_status.label().to_owned()))
-                .child(div().sovra_text(TextRole::Caption, cx).child("Uses the AI selected in Models. Messages may be sent to that service; saved details are stored on this computer."))
-                .child(div().sovra_text(TextRole::Caption, cx).child("Matching saved details can inform answers with source references. Turning remembering off stops new remembering and long-term recall; saved history is kept."))
+                .child(div().sovra_text(TextRole::Caption, cx).child("Sovra learns useful details from what you share in chat using your selected AI service. Saved details stay on this computer. Pause below to stop automatic learning and recall; your saved history stays."))
                 .child(Checkbox::new("knowledge-memory-toggle")
                     .cursor_pointer()
                     .disabled(!shell.models().read(cx).state.loaded)
@@ -167,7 +170,7 @@ fn render_memory_status(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElem
 
 fn render_intro(story: &MemoryExplanation, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let example_notice = "Example only — these people and details are not your saved memories. Open Memories to see what Sovra has actually saved.";
+    let example_notice = "Example only — these people and details are not your saved memories. Open About you to see what Sovra has actually saved.";
     v_flex()
         .id("knowledge-intro")
         .test_support()

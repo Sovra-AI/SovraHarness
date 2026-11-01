@@ -35,6 +35,7 @@ impl MemoryReviewRuntime {
                             semantic_service.as_deref(),
                             command.action,
                             token,
+                            &control,
                         )
                         .await
                     }
@@ -97,6 +98,7 @@ async fn execute(
     semantics: Option<&crate::memory_semantic::SemanticMemory>,
     action: MemoryAction,
     token: u64,
+    control: &crate::remembering::MemoryControl,
 ) -> Result<MemoryReviewResult, MemoryError> {
     match action {
         MemoryAction::ConfigureSemantic(target) => {
@@ -127,6 +129,24 @@ async fn execute(
             .correct_memory(correction)
             .await
             .map(MemoryReviewResult::Changed),
+        MemoryAction::Remember(note) => {
+            note.validate()?;
+            store
+                .remember_note(note)
+                .await
+                .map(MemoryReviewResult::Changed)
+        }
+        MemoryAction::RetryFailed => {
+            if !control.enabled() {
+                return Err(MemoryError::InvalidInput(
+                    "Turn on remembering before retrying messages.".into(),
+                ));
+            }
+            store
+                .retry_failed_memories()
+                .await
+                .map(MemoryReviewResult::Retried)
+        }
         MemoryAction::StopUsing(id) => {
             store.stop_memory(&id, super::now()).await?;
             Ok(MemoryReviewResult::Changed(id))

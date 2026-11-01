@@ -394,6 +394,14 @@ impl MemoryStore for SurrealStore {
         self.read_job(episode).await
     }
 
+    async fn retry_failed_memories(&self) -> Result<usize, MemoryError> {
+        self.retry_failed().await
+    }
+
+    async fn remember_note(&self, note: sovra_core::MemoryNote) -> Result<FactId, MemoryError> {
+        self.save_note(note).await
+    }
+
     async fn record_episode(&self, episode: NewEpisode) -> Result<EpisodeId, MemoryError> {
         episode.validate()?;
         let row = NewEpisodeRow {

@@ -567,7 +567,7 @@ async fn disk_reopen_preserves_history_sources_and_embedding_identity() {
         Vec::new()
     );
     drop(isolated);
-    let store = reopen(config).await;
+    let store = reopen(config.clone()).await;
     store.health().await.unwrap();
     let reviewed_fact = store.memory_fact(&reviewed).await.unwrap();
     assert!(!reviewed_fact.is_current());
@@ -607,6 +607,38 @@ async fn disk_reopen_preserves_history_sources_and_embedding_identity() {
             .enqueue_memory(memory_input("recover", "new"))
             .await
             .is_err()
+    );
+    let note = store
+        .remember_note(sovra_core::MemoryNote {
+            text: "I prefer short answers".into(),
+        })
+        .await
+        .unwrap();
+    let overview = store
+        .list_memories(sovra_core::MemoryListQuery::default())
+        .await
+        .unwrap()
+        .overview;
+    drop(store);
+    let store = reopen(config).await;
+    let saved = store.memory_fact(&note).await.unwrap();
+    assert!(saved.is_current());
+    assert_eq!(saved.content, "I prefer short answers");
+    assert_eq!(
+        store
+            .episode(saved.source.as_ref().unwrap())
+            .await
+            .unwrap()
+            .kind,
+        EpisodeKind::Note
+    );
+    assert_eq!(
+        store
+            .list_memories(sovra_core::MemoryListQuery::default())
+            .await
+            .unwrap()
+            .overview,
+        overview
     );
     drop(store);
     // Windows also needs the engine's asynchronous shutdown to release its handles.

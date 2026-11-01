@@ -267,6 +267,20 @@ impl Shell {
                                 .memory_view
                                 .update(cx, |view, cx| view.captured(job, memory_visible, cx));
                         }
+                        if matches!(
+                            &event,
+                            sovra_core::Event::Memory(
+                                sovra_core::MemoryEvent::Queued { .. }
+                                    | sovra_core::MemoryEvent::Status(
+                                        sovra_core::MemoryStatus::Working
+                                            | sovra_core::MemoryStatus::Paused
+                                    )
+                            )
+                        ) {
+                            shell
+                                .memory_view
+                                .update(cx, |view, cx| view.capture_activity(memory_visible, cx));
+                        }
                         if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Semantic(
                             status,
                         )) = &event
@@ -1144,7 +1158,7 @@ impl Shell {
         match key {
             "model" => self.select_tab(NavTab::MyAis, cx),
             "deployment" => self.state.activate_preview_ai(),
-            "knowledge" => self.state.select_tab(NavTab::Knowledge),
+            "knowledge" => self.select_tab(NavTab::Knowledge, cx),
             "memory" | "behaviour" | "guardrails" => self.select_tab(NavTab::Settings, cx),
             _ => {}
         }

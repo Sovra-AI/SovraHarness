@@ -80,11 +80,12 @@ pub use memory::{
     MemoryAction, MemoryActivity, MemoryCandidate, MemoryClaim, MemoryCommand, MemoryContext,
     MemoryCorrection, MemoryCursor, MemoryDetail, MemoryEmbeddingInput, MemoryError, MemoryEvent,
     MemoryEvidence, MemoryExtraction, MemoryInput, MemoryJob, MemoryJobState, MemoryListQuery,
-    MemoryOverview, MemoryPage, MemoryPolicy, MemoryReader, MemoryReviewEvent, MemoryReviewResult,
-    MemoryReviewState, MemorySearch, MemorySemanticHit, MemorySemanticPhase, MemorySemanticSetting,
-    MemorySemanticState, MemorySemanticStatus, MemoryStatus, MemoryStore, MemoryVector, NewEpisode,
-    NewFact, RRF_K, RecallQuery, RecalledFact, Timestamp, consolidation_context, fuse_rrf,
-    memory_citations, parse_memory_candidates, validate_memory_batch, validate_memory_vectors,
+    MemoryNote, MemoryOverview, MemoryPage, MemoryPolicy, MemoryReader, MemoryReviewEvent,
+    MemoryReviewResult, MemoryReviewState, MemorySearch, MemorySemanticHit, MemorySemanticPhase,
+    MemorySemanticSetting, MemorySemanticState, MemorySemanticStatus, MemoryStatus, MemoryStore,
+    MemoryVector, NewEpisode, NewFact, RRF_K, RecallQuery, RecalledFact, Timestamp,
+    consolidation_context, fuse_rrf, memory_citations, parse_memory_candidates,
+    validate_memory_batch, validate_memory_vectors,
 };
 pub use protocol::{Command, Event};
 pub use providers::{

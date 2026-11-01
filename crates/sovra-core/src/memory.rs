@@ -424,6 +424,22 @@ pub trait MemoryStore: Send + Sync {
     ) -> Result<(), MemoryError>;
     async fn memory_job(&self, episode: &EpisodeId) -> Result<MemoryJob, MemoryError>;
 
+    /// Explicitly retries failed captures up to available queue capacity. Never
+    /// revives cancelled work or repeats completed captures; paused policy rejects it.
+    async fn retry_failed_memories(&self) -> Result<usize, MemoryError> {
+        Err(MemoryError::Backend(
+            "Retrying saved messages is unavailable.".into(),
+        ))
+    }
+
+    /// An explicit user note and its fact commit together, even while automatic
+    /// remembering is paused. It remains separate from model-generated claims.
+    async fn remember_note(&self, _note: MemoryNote) -> Result<FactId, MemoryError> {
+        Err(MemoryError::Backend(
+            "Saving a personal detail is unavailable.".into(),
+        ))
+    }
+
     /// Appends an immutable episode.
     async fn record_episode(&self, episode: NewEpisode) -> Result<EpisodeId, MemoryError>;
 

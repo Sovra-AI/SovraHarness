@@ -3,6 +3,129 @@
 use super::*;
 use sovra_core::{MemoryCorrection, MemoryJobState, MemoryListQuery, MemoryOverview};
 
+#[tokio::test]
+async fn explicit_notes_are_atomic_sourced_and_available_while_capture_is_paused() {
+    let store = open_store().await;
+    store.set_memory_enabled(false).await.unwrap();
+    let id = store
+        .remember_note(sovra_core::MemoryNote {
+            text: " I prefer short answers ".into(),
+        })
+        .await
+        .unwrap();
+    let fact = store.memory_fact(&id).await.unwrap();
+    assert_eq!(fact.content, "I prefer short answers");
+    assert!(fact.is_current());
+    assert!(fact.extraction.is_none());
+    let source = store.episode(fact.source.as_ref().unwrap()).await.unwrap();
+    assert_eq!(source.kind, EpisodeKind::Note);
+    assert_eq!(source.content, fact.content);
+    let mut context = sovra_core::MemoryContext::default();
+    assert!(context.push(&fact, &source));
+    assert!(!context.memories[0].interpretation);
+    assert!(!store.memory_policy().await.unwrap().enabled);
+    assert!(
+        store
+            .remember_note(sovra_core::MemoryNote { text: " ".into() })
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .recent_episodes("memory-review", 50)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(overview(&store).await.current, 1);
+}
+
+#[tokio::test]
+async fn retry_only_requeues_failures_with_fresh_leases_and_respects_pause_and_capacity() {
+    let store = open_store().await;
+    let failed = store
+        .enqueue_memory(memory_input("failed", "m1"))
+        .await
+        .unwrap();
+    let mut now = Timestamp(2_000);
+    let mut old_claim = None;
+    for _ in 0..sovra_core::MAX_MEMORY_ATTEMPTS {
+        let claim = store.claim_memory(now).await.unwrap().unwrap();
+        store
+            .fail_memory(&claim, "Cannot read this message.", now)
+            .await
+            .unwrap();
+        now = Timestamp(now.millis() + sovra_core::MEMORY_RETRY_MILLIS);
+        old_claim = Some(claim);
+    }
+    let completed = store
+        .enqueue_memory(memory_input("complete", "m1"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(now).await.unwrap().unwrap();
+    store
+        .complete_memory(&claim, vec![], "fixture", now)
+        .await
+        .unwrap();
+    let cancelled = store
+        .enqueue_memory(memory_input("cancelled", "m1"))
+        .await
+        .unwrap();
+    store.set_memory_enabled(false).await.unwrap();
+    assert!(store.retry_failed_memories().await.is_err());
+    assert_eq!(
+        store.memory_job(&failed).await.unwrap().state,
+        MemoryJobState::Failed
+    );
+    store.set_memory_enabled(true).await.unwrap();
+    for index in 0..sovra_core::MAX_PENDING_MEMORIES {
+        store
+            .enqueue_memory(memory_input("queued", &format!("m{index}")))
+            .await
+            .unwrap();
+    }
+    assert_eq!(store.retry_failed_memories().await.unwrap(), 0);
+    let claim = store.claim_memory(now).await.unwrap().unwrap();
+    store
+        .complete_memory(&claim, vec![], "fixture", now)
+        .await
+        .unwrap();
+    assert_eq!(store.retry_failed_memories().await.unwrap(), 1);
+    assert_eq!(store.retry_failed_memories().await.unwrap(), 0);
+    let job = store.memory_job(&failed).await.unwrap();
+    assert_eq!(job.state, MemoryJobState::Pending);
+    assert_eq!(job.attempts, 0);
+    assert!(job.error.is_none());
+    let retry = store.claim_memory(now).await.unwrap().unwrap();
+    assert_eq!(retry.episode.id, failed);
+    assert_eq!(retry.attempt, 1);
+    assert_ne!(retry.token, old_claim.as_ref().unwrap().token);
+    assert!(
+        store
+            .complete_memory(old_claim.as_ref().unwrap(), vec![], "fixture", now)
+            .await
+            .is_err()
+    );
+    store
+        .complete_memory(
+            &retry,
+            vec![candidate("User lives in Lisbon")],
+            "fixture",
+            now,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.memory_job(&completed).await.unwrap().state,
+        MemoryJobState::Complete
+    );
+    assert_eq!(
+        store.memory_job(&cancelled).await.unwrap().state,
+        MemoryJobState::Cancelled
+    );
+}
+
 async fn overview(store: &SurrealStore) -> MemoryOverview {
     store
         .list_memories(MemoryListQuery {

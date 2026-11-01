@@ -64,6 +64,8 @@ fn respond(
                 }),
                 MemoryAction::Inspect(_) => MemoryReviewResult::Detail(Box::new(detail())),
                 MemoryAction::Correct(_)
+                | MemoryAction::Remember(_)
+                | MemoryAction::RetryFailed
                 | MemoryAction::StopUsing(_)
                 | MemoryAction::ConfigureSemantic(_) => {
                     panic!("visual proof must not request mutations")

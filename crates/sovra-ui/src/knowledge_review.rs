@@ -295,6 +295,10 @@ mod tests {
                         .state
                         .apply(&IndexEvent::KnowledgePending(vec![proposal()]));
                     shell.select_tab(NavTab::Knowledge, cx);
+                    shell.select_knowledge_section(
+                        crate::knowledge_view::KnowledgeSection::Files,
+                        cx,
+                    );
                 });
                 for mode in [ThemeMode::Dark, ThemeMode::Light] {
                     Theme::change(mode, Some(window), cx);

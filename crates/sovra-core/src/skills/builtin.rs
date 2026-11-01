@@ -112,7 +112,7 @@ impl Skill {
                 "/models ".to_owned(),
             ),
             "knowledge" => (
-                "Open Knowledge to see connected folders, or choose Memories to check what was saved and where it came from.".to_owned(),
+                "See what Sovra knows about you, add a personal detail, correct a memory, retry missed messages, or browse your connected files.".to_owned(),
                 "/knowledge ".to_owned(),
             ),
             "schedules" => (

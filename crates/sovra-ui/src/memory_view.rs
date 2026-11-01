@@ -20,6 +20,20 @@ use crate::{
     models_view::ModelsView,
 };
 
+mod profile;
+
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent view flags; a state enum would be artificial"
+)]
+#[derive(Default)]
+struct CaptureView {
+    dirty: bool,
+    expanded: bool,
+    new_details: bool,
+    result: Option<String>,
+}
+
 pub(crate) struct MemoryView {
     state: MemoryReviewState,
     models: Entity<ModelsView>,
@@ -32,8 +46,11 @@ pub(crate) struct MemoryView {
     editing: Option<FactId>,
     stopping: Option<FactId>,
     source_only: bool,
-    new_memories: bool,
-    capture_result: Option<String>,
+    capture: CaptureView,
+    adding: bool,
+    note: Entity<TextareaState>,
+    notice: Option<String>,
+    width_class: design::WidthClass,
 }
 
 impl MemoryView {
@@ -65,8 +82,11 @@ impl MemoryView {
             editing: None,
             stopping: None,
             source_only: false,
-            new_memories: false,
-            capture_result: None,
+            capture: CaptureView::default(),
+            adding: false,
+            note: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 5)),
+            notice: None,
+            width_class: design::WidthClass::Compact,
         }
     }
 
@@ -87,7 +107,8 @@ impl MemoryView {
     }
 
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
-        self.new_memories = false;
+        self.capture.new_details = false;
+        self.capture.dirty = false;
         self.source_only = false;
         self.query.search = self.search.read(cx).value().to_string();
         self.query.before = None;
@@ -107,26 +128,32 @@ impl MemoryView {
         cx: &mut Context<Self>,
     ) {
         if let Some(result) = job.result_label() {
-            self.capture_result = Some(result);
+            self.capture.result = Some(result);
             cx.notify();
         }
         if job.state == sovra_core::MemoryJobState::Complete && !job.fact_ids.is_empty() {
-            self.new_memories = true;
-            self.refresh_captured(visible, cx);
-            cx.notify();
+            self.capture.new_details = true;
         }
+        self.capture_activity(visible, cx);
+    }
+
+    pub(crate) fn capture_activity(&mut self, visible: bool, cx: &mut Context<Self>) {
+        self.capture.dirty = true;
+        self.refresh_captured(visible, cx);
+        cx.notify();
     }
 
     pub(crate) fn refresh_captured(&mut self, visible: bool, cx: &mut Context<Self>) {
         // A background save must not discard a correction, move an older page,
         // or apply search text that the user is still typing.
-        if self.new_memories
+        if (self.capture.new_details || self.capture.dirty)
             && visible
             && !self.source_only
             && !self.state.loading
             && self.state.detail.is_none()
             && self.editing.is_none()
             && self.stopping.is_none()
+            && !self.adding
             && self.query.before.is_none()
             && self.search.read(cx).value().as_ref() == self.query.search
         {
@@ -236,8 +263,34 @@ impl MemoryView {
 
     pub(crate) fn apply(&mut self, event: &MemoryReviewEvent, cx: &mut Context<Self>) {
         if self.state.apply(event) {
-            if matches!(event.result, Ok(MemoryReviewResult::Changed(_))) {
-                self.load(cx);
+            match &event.result {
+                Ok(MemoryReviewResult::Changed(_)) => {
+                    if self.adding {
+                        self.adding = false;
+                        self.notice = Some(
+                            "Saved exactly as you wrote it. You can review or correct it below."
+                                .into(),
+                        );
+                    }
+                    self.load(cx);
+                }
+                Ok(MemoryReviewResult::Retried(count)) => {
+                    self.notice = Some(if *count == 0 {
+                        "No failed messages were queued. If the queue is full, let it finish and try again.".into()
+                    } else {
+                        format!(
+                            "{count} {} queued to try again. Progress appears in Recent activity.",
+                            if *count == 1 { "message" } else { "messages" }
+                        )
+                    });
+                    self.load(cx);
+                }
+                Ok(
+                    MemoryReviewResult::Semantics(_)
+                    | MemoryReviewResult::Page(_)
+                    | MemoryReviewResult::Detail(_),
+                )
+                | Err(_) => {}
             }
             cx.notify();
         }
@@ -254,11 +307,14 @@ impl Render for MemoryView {
             .w_full()
             .min_w_0()
             .flex_shrink_0()
+            .relative()
+            .child(design::width_probe(cx, |view| &mut view.width_class))
             .sovra_surface(Surface::Matte, cx)
             .p(t.space.medium)
             .gap(t.space.small);
         if !self.source_only {
             column = column
+            .child(self.profile(cx))
             .child(div().sovra_text(TextRole::SectionTitle, cx).child("What I remember"))
             .child(div().sovra_text(TextRole::Caption, cx).child("Corrections keep previous versions. Stop using excludes that version from current and historical recall; its record and original conversation remain."))
             .child(Input::new(&self.search).aria_label("Search saved memories"))
@@ -270,7 +326,7 @@ impl Render for MemoryView {
                         view.query.include_history = !view.query.include_history;
                         view.load(cx);
                     }))));
-            if let Some(result) = &self.capture_result {
+            if let Some(result) = &self.capture.result {
                 column = column.child(
                     div()
                         .id("memory-capture-result")
@@ -282,7 +338,7 @@ impl Render for MemoryView {
                         .child(result.clone()),
                 );
             }
-            if self.new_memories {
+            if self.capture.new_details {
                 column = column.child(div().id("memory-new-details").test_support()
                     .min_w_0().sovra_text(TextRole::Body, cx)
                     .child("New details were saved. Finish reviewing or editing, then use Search / refresh to update this list."));
@@ -307,7 +363,7 @@ impl Render for MemoryView {
             let message = if self.query.before.is_some() {
                 "No more saved details on this page. Use Back to newest to return to recent memories."
             } else if self.query.search.is_empty() {
-                "No saved details yet. Start a conversation and share something you want Sovra to remember, such as ‘I prefer tea without sugar.’ Keep remembering switched on above."
+                "No saved details yet. Add a detail above, or tell Sovra about your preferences, important people, work or plans in chat. Keep remembering switched on for automatic learning."
             } else {
                 "No saved details match your search. Try fewer words, or clear the search to see everything."
             };
@@ -757,7 +813,7 @@ mod tests {
                     .find("memory-empty")
                     .label()
                     .unwrap()
-                    .contains("Start a conversation")
+                    .contains("Add a detail")
             );
         })
         .unwrap();

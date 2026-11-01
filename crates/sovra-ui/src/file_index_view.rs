@@ -834,6 +834,7 @@ mod tests {
             shell.update(cx, |shell, cx| {
                 shell.file_index.apply(&IndexEvent::Roots(vec![root()]));
                 shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
                 shell.file_index.search.update(cx, |input, cx| {
                     input.set_value("tea", window, cx);
                     cx.emit(InputEvent::PressEnter {
@@ -921,6 +922,7 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| {
             shell.update(cx, |shell, cx| {
                 shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
                 shell.file_index.apply(&IndexEvent::Roots(vec![root()]));
                 let request_id = shell.file_index.state.begin_search();
                 shell.file_index.apply(&IndexEvent::Results {
@@ -1026,7 +1028,10 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
-            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx));
+            shell.update(cx, |shell, cx| {
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
+            });
             window.render_frame(cx);
             assert!(window.find("index-recovery-chosen").bounds().size.height > px(0.));
             for id in [
@@ -1107,6 +1112,10 @@ mod tests {
                 shell.update(cx, |shell, cx| {
                     shell.file_index.apply(&IndexEvent::Roots(vec![root]));
                     shell.select_tab(NavTab::Knowledge, cx);
+                    shell.select_knowledge_section(
+                        crate::knowledge_view::KnowledgeSection::Files,
+                        cx,
+                    );
                 });
                 window.render_frame(cx);
                 window.render_frame(cx);
@@ -1147,6 +1156,10 @@ mod tests {
                         .apply(&IndexEvent::Roots(vec![incomplete]));
                     shell.file_index.detailed_roots.insert("chosen".into());
                     shell.select_tab(NavTab::Knowledge, cx);
+                    shell.select_knowledge_section(
+                        crate::knowledge_view::KnowledgeSection::Files,
+                        cx,
+                    );
                 });
                 for mode in [ThemeMode::Dark, ThemeMode::Light] {
                     Theme::change(mode, Some(window), cx);

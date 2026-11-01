@@ -306,6 +306,29 @@ impl SurrealStore {
         row.ok_or_else(|| MemoryError::NotFound(episode.0.clone()))?
             .into_job()
     }
+
+    pub(super) async fn retry_failed(&self) -> Result<usize, MemoryError> {
+        let count: Option<usize> = returned(self.query(
+            "BEGIN TRANSACTION;
+             LET $policy = (SELECT * FROM ONLY meta:remembering);
+             IF !$policy.enabled { THROW 'Turn on remembering before retrying messages.'; };
+             LET $active = (SELECT id FROM memory_job WHERE state IN ['pending', 'processing'] LIMIT $bound);
+             LET $room = math::max([0, $bound - array::len($active)]);
+             LET $failed = IF $room = 0 { [] } ELSE {
+                 SELECT id, created_at FROM memory_job WHERE state = 'failed'
+                     ORDER BY created_at ASC, id ASC LIMIT $room
+             };
+             UPDATE meta:remembering SET revision += 1;
+             FOR $job IN $failed {
+                 UPDATE $job.id SET state = 'pending', attempts = 0, error = NONE,
+                     retry_at = 0, lease_until = 0, token = NONE, generation = $policy.generation;
+             };
+             RETURN array::len($failed);
+             COMMIT TRANSACTION;",
+            ("bound", MAX_PENDING_MEMORIES),
+        ).await?)?;
+        count.ok_or_else(|| MemoryError::Backend("Retry returned no capture count.".into()))
+    }
 }
 
 #[derive(Debug, SurrealValue)]
