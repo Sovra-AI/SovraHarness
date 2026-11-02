@@ -36,8 +36,11 @@ impl Drop for Fixture {
     }
 }
 
+/// Startup and shutdown share the machine with the rest of the suite.
+const EVENT_WAIT: Duration = Duration::from_secs(30);
+
 async fn next_development(events: &Receiver<Event>) -> DevelopmentEvent {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(EVENT_WAIT, async {
         loop {
             if let Event::Development(event) = events.recv().await.unwrap() {
                 return event;
@@ -60,7 +63,7 @@ async fn state(events: &Receiver<Event>, enabled: bool) -> DevelopmentState {
 
 async fn stop(client: &crate::Client, events: &Receiver<Event>) {
     client.send(Command::Shutdown).unwrap();
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(EVENT_WAIT, async {
         while events.recv().await.unwrap() != Event::Stopped {}
     })
     .await

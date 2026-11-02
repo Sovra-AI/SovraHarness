@@ -2,8 +2,11 @@
 
 use super::*;
 
+/// Runtime startup shares the machine with the rest of the suite.
+const EVENT_WAIT: Duration = Duration::from_secs(15);
+
 async fn next(client: &Client, matches: impl Fn(&Event) -> bool) -> Event {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(EVENT_WAIT, async {
         loop {
             let event = client.events().recv().await.unwrap();
             if matches(&event) {
@@ -53,7 +56,7 @@ async fn fixture() -> (
     .await;
     save(&client, "held");
     assert_eq!(
-        tokio::time::timeout(Duration::from_secs(5), observed.recv())
+        tokio::time::timeout(EVENT_WAIT, observed.recv())
             .await
             .unwrap()
             .unwrap(),

@@ -182,7 +182,8 @@ async fn cancelling_a_partial_summary_does_not_allow_an_unreserved_retry() {
         HttpSummarizer::from_repository(&fixture.repo, &prepared.configuration.plan.summarizer)
             .unwrap();
     let mut pending = Box::pin(adapter.summarize(&prepared));
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // The local server records the request only after this task is scheduled.
+    tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             tokio::select! {
                 result = &mut pending => panic!("Response should wait for its tail: {result:?}"),

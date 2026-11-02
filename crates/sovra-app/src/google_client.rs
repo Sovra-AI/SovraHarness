@@ -1,8 +1,9 @@
 //! Shipped Google connect and sign-in, driven from an empty start through the runtime.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sovra_core::google::{ClientSecret, GoogleCommand, GoogleConnector, GoogleEvent, GoogleState};
 use sovra_core::{AgentConfig, AuthCommand, AuthEvent, Command, Event};
@@ -47,8 +48,37 @@ struct Session {
     reader: Option<std::thread::JoinHandle<()>>,
 }
 
+/// The dev file store `cargo xtask dev` actually uses (`SOVRA_DEV=1`).
+struct DevCredentialFiles {
+    dir: PathBuf,
+    vault: Arc<super::CredentialVault>,
+}
+
+impl DevCredentialFiles {
+    fn new() -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "sovra-google-dev-credentials-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let vault = Arc::new(super::CredentialVault(Arc::new(
+            sovra_providers::FileCredentialStore::new(dir.clone()),
+        )));
+        Self { dir, vault }
+    }
+}
+
+impl Drop for DevCredentialFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 impl Session {
-    fn start(vault: Arc<MemoryVault>) -> Self {
+    fn start(vault: Arc<dyn SecretVault>) -> Self {
         let client = sovra_runtime::start_with_services(
             "test",
             AgentConfig::default(),
@@ -188,7 +218,8 @@ fn both_buttons(session: &Session) {
 
 #[test]
 fn saved_desktop_client_starts_both_buttons_and_survives_restart() {
-    let vault = Arc::new(MemoryVault::default());
+    let creds = DevCredentialFiles::new();
+    let vault = creds.vault.clone();
     let mut session = Session::start(vault.clone());
     let first = session.wait_for(Duration::from_secs(20), |event| match event {
         Event::Google(GoogleEvent::Changed(state)) => Some(state.clone()),
@@ -250,6 +281,18 @@ fn saved_desktop_client_starts_both_buttons_and_survives_restart() {
     assert!(
         still.client_secret.as_deref() == Some(SECRET),
         "the saved secret is still the one both buttons use"
+    );
+    assert!(
+        creds.dir.join(sovra_google::CLIENT_VAULT_KEY).is_file(),
+        "the client id is one file in the dev credential store"
+    );
+    assert!(
+        !creds.dir.join(sovra_google::VAULT_KEY).exists(),
+        "signing out removes only the account file"
+    );
+    assert!(
+        !creds.dir.join("connection").exists(),
+        "a dotted credential name is not a directory"
     );
     restarted.shutdown();
 }

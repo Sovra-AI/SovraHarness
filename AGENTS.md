@@ -273,3 +273,12 @@ the first two rules.
 - **Prove it.** Layout changes get a headless test at the minimum window
   (640×420), a wide window (≥2560px) and 200% interface size (`tests/styling.rs`).
 
+
+
+<claude-mem-context>
+# Memory Context
+
+# [SovraHarnessRust] recent context, 2026-10-31 10:41pm GMT+4
+
+No previous sessions found.
+</claude-mem-context>

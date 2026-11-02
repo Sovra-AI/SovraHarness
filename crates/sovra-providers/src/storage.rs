@@ -58,7 +58,14 @@ impl FileCredentialStore {
     }
 
     fn path(&self, id: &str) -> Result<PathBuf, ModelError> {
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        // Names such as `connection.google` are one file. A dot separates words.
+        // It is not a directory, and `..` must not leave this folder.
+        let one_file = !id.is_empty()
+            && id.chars().all(|character| {
+                character.is_ascii_alphanumeric() || character == '-' || character == '.'
+            })
+            && id.split('.').all(|part| !part.is_empty());
+        if !one_file {
             return Err(ModelError("Invalid connection identifier.".into()));
         }
         Ok(self.directory.join(id))
@@ -295,8 +302,40 @@ mod tests {
             .unwrap();
         assert_eq!(store.get("openrouter").unwrap().0, "test-value");
         assert!(!format!("{store:?}").contains("test-value"));
-        for id in ["", "../escape", "/absolute", "other/key"] {
-            assert!(store.get(id).is_err());
+        store
+            .set(
+                "connection.google.client",
+                &ModelSecret("client-entry".into()),
+            )
+            .unwrap();
+        store
+            .set("connection.google", &ModelSecret("account-entry".into()))
+            .unwrap();
+        assert_eq!(
+            store.get("connection.google.client").unwrap().0,
+            "client-entry"
+        );
+        assert_eq!(store.get("connection.google").unwrap().0, "account-entry");
+        assert!(path.join("connection.google.client").is_file());
+        assert!(path.join("connection.google").is_file());
+        assert!(!path.join("connection").exists());
+        store.delete("connection.google").unwrap();
+        assert_eq!(store.get("connection.google").unwrap().0, "");
+        assert_eq!(
+            store.get("connection.google.client").unwrap().0,
+            "client-entry"
+        );
+        for id in [
+            "",
+            ".",
+            "..",
+            "../escape",
+            "/absolute",
+            "other/key",
+            "foo..bar",
+            "connection.google/../x",
+        ] {
+            assert!(store.get(id).is_err(), "{id}");
             assert!(store.set(id, &ModelSecret("test-value".into())).is_err());
             assert!(store.delete(id).is_err());
         }
@@ -326,6 +365,7 @@ mod tests {
         }
         store.delete("openrouter").unwrap();
         store.delete("openrouter").unwrap();
+        store.delete("connection.google.client").unwrap();
         assert_eq!(store.get("openrouter").unwrap().0, "");
         std::fs::remove_dir(path).unwrap();
     }

@@ -438,6 +438,9 @@ If the card says **Needs a client id**, paste your Google Cloud desktop client
 id and optional secret, then choose **Save**. Sovra keeps them in its credential
 store; signing out keeps the client setup. Both **Connect Google** and
 **Continue with Google** use that saved setup.
+This also works with the file-backed credential store used by `cargo xtask dev`;
+the client setup and signed-in account are stored separately, so signing out
+keeps the client available after a restart. Release builds use the OS keychain.
 
 A saved client takes precedence over `SOVRA_GOOGLE_CLIENT_ID` and
 `SOVRA_GOOGLE_CLIENT_SECRET` in the environment, then values baked into the build. Setup,

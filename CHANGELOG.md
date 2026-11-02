@@ -11,6 +11,34 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+### Current progress — 2026-11-02
+
+- **Knowledge and remembering:** the About you overview, explicit personal notes,
+  capture recovery, document-reader repair and conversation identity fixes are on
+  `main`. Recall relevance, extraction accuracy and correction linking still need
+  broader live-model evaluation; passing pipeline tests does not establish answer
+  quality. See the [memory implementation record](docs/agent-memory.md).
+- **Connected helpers:** reviewed WhatsApp/Telegram sending, shared Google client
+  setup, connected-service tools and parallel document reading are on `main`.
+  This checkpoint fixes Google client/account storage in development builds and
+  exercises restart and sign-out through the real file-backed credential store.
+  A completed Google browser sign-in with production credentials remains unverified.
+- **File knowledge:** indexing, saved-text browsing, semantic retrieval and
+  reviewed relationships are available. Summary provenance, invalidation and
+  budgets are implemented; background summary generation, recursive clustering
+  and compiled maps remain unfinished. See the [scope record](docs/skills-and-file-knowledge.md).
+- **Development tooling:** opt-in native MCP testing and the persistent watcher
+  are on `main`. Runtime regression waits now allow more scheduling time under
+  concurrent suite load, while retaining bounded deadlines and event assertions.
+- **Verification:** `cargo xtask ci` passed every gate: 841 tests passed and
+  8 opt-in tests were skipped. The native MCP bridge initialized, but
+  `sovra_inspect` returned "Open Sovra and enable Development mode in Settings."
+  Saving Google setup through the running native controls was therefore not
+  verified in this checkpoint; file-store and runtime regressions passed.
+- **Integration scope:** current uncommitted work is consolidated on `main`.
+  The older `memory/base`, `memory/base-2` and `memory/living` prototypes remain
+  separate from the current memory implementation.
+
 ### Added
 
 - **Knowledge → About you:** Knowledge opens with the person's saved details,
@@ -693,6 +721,16 @@ move them under a version heading when the tag is cut.
   tools", "Thinks step by step", plain prices and clearer Ollama download help.
 
 ### Fixed
+
+- Development credential files accept dotted names such as
+  `connection.google.client` and `connection.google`, fixing saved Google setup
+  and account credentials under `SOVRA_DEV=1`. Each name stays a single file;
+  empty components, traversal and directory separators remain rejected. Signing
+  out removes account credentials while keeping the desktop client setup.
+  Regression tests cover file permissions, name validation, restart persistence
+  and both Google entry points. Release builds continue to use the OS keychain.
+- Development-mode, memory-history and partial-summary runtime tests use longer
+  bounded event waits to tolerate scheduling contention during the full suite.
 
 - Conversation identities stay distinct across app restarts, including chats
   outside the loaded history page and retained deleted conversations. New chats
