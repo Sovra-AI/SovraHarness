@@ -3,15 +3,14 @@
 //! The picture uses only links the domain already stored or confirmed. Words stay
 //! in a card beside or under the drawing so a diagram is never the only way to read.
 
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Selectable as _, h_flex, v_flex};
 use gpui_kit::{
-    Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _, PathBuilder, Pixels,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, canvas, div, fill,
-    point, size,
+    Bounds, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, PathBuilder,
+    Pixels, Rems, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window,
+    canvas, div, fill, point, size,
 };
 use sovra_core::{
-    Fact, Hsla as _, MemoryDuplicateReport, MemoryFactChat, MemoryGraph, MemoryGraphEdgeKind,
+    Fact, MemoryDuplicateReport, MemoryFactChat, MemoryGraph, MemoryGraphEdgeKind,
     MemoryGraphNodeId, MemoryGraphRecord, MemoryPoint, check_memory_duplicates,
     confirm_memory_duplicate, memory_graph,
 };
