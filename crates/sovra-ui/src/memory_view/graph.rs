@@ -281,7 +281,7 @@ impl MemoryView {
         if let Some(report) = &self.duplicates {
             panel = panel
                 .child(exact_block(report, cx))
-                .child(near_block(self, report, cx));
+                .child(near_block(report, cx));
         }
         panel
     }
@@ -358,12 +358,10 @@ fn exact_block(
 }
 
 fn near_block(
-    view: &MemoryView,
     report: &MemoryDuplicateReport,
     cx: &mut Context<MemoryView>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let _ = view;
     let mut panel = v_flex().w_full().min_w_0().gap(t.space.small);
     if report.near.is_empty() {
         return panel.child(

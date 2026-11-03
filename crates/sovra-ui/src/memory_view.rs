@@ -607,8 +607,7 @@ impl Render for MemoryView {
                     .child(label),
             );
         }
-        if !self.source_only && self.state.detail.is_none() && !busy && self.state.error.is_none()
-        {
+        if !self.source_only && self.state.detail.is_none() && !busy && self.state.error.is_none() {
             column = column.child(self.memory_picture(cx));
         }
         for (index, fact) in self
