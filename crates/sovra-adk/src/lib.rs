@@ -9,6 +9,7 @@ mod artifacts;
 mod capabilities;
 mod communications;
 pub mod decision_client;
+mod deep_research;
 mod documents;
 mod file_index;
 mod files;
@@ -18,6 +19,7 @@ mod native_ui;
 mod orchestrator;
 mod recall;
 mod remote_tools;
+mod reply_inputs;
 mod required_delegation;
 mod skills;
 mod sources_footer;
@@ -27,6 +29,7 @@ mod web_search;
 mod working_context;
 
 pub use artifacts::ArtifactSaver;
+pub use deep_research::{DeepResearchTurn, new_research_run_id};
 pub use google::GoogleTools;
 pub use team::TeamTurn;
 pub use web_search::SearchClient;
@@ -542,6 +545,11 @@ impl AdkHarness {
             events,
         )
         .await;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn offered_tools(&self) -> &[Arc<dyn Tool>] {
+        &self.base_tools
     }
 
     fn tools_without_search(&self) -> Vec<Arc<dyn Tool>> {

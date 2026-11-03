@@ -14,8 +14,11 @@ mod facts;
 mod ingestion;
 mod lifecycle;
 mod profile;
+mod removal;
+mod reply_dependencies;
 mod schema;
 mod semantic;
+mod sources;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -168,7 +171,7 @@ impl SurrealStore {
                     None
                 }
             }
-            Some(2 | 3 | 4 | 5 | schema::SCHEMA_VERSION) => Some(
+            Some(2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | schema::SCHEMA_VERSION) => Some(
                 self.embedding_index()
                     .await?
                     .ok_or_else(|| MemoryError::Backend("missing memory index metadata".into()))?,
@@ -199,8 +202,27 @@ impl SurrealStore {
         } else {
             ""
         };
+        let source_migration = if version.is_none_or(|version| version < 7) {
+            schema::MIGRATE_SOURCES
+        } else {
+            ""
+        };
+        let attribution_migration = if version.is_none_or(|version| version < 9) {
+            schema::MIGRATE_SOURCE_IDENTITIES
+        } else {
+            ""
+        };
+        let dependency_migration = if version.is_none_or(|version| version < 10) {
+            schema::MIGRATE_REPLY_DEPENDENCIES
+        } else {
+            ""
+        };
+        // Version 12 separates whole-source revocation from raw wording withdrawn by a fact edit.
+        // Existing revocations remain conservative; missing raw_withdrawn_at means none.
+        // Version 11 adds optional source/time fields inside serialized chat messages.
+        // Serde defaults preserve legacy unknown provenance; no evidence is invented.
         let statements = format!(
-            "BEGIN TRANSACTION;\n{}\n{}\nUPSERT meta:embedding SET model = $model, dimension = $dimension;\nUPSERT meta:remembering SET enabled = enabled ?? true, generation = generation ?? 0, revision = revision ?? 0;\nUPSERT meta:memory_semantic SET generation = generation ?? 0, revision = revision ?? 0;\n{withdrawal_migration}\nUPSERT meta:schema SET version = $version;\nCOMMIT TRANSACTION;",
+            "BEGIN TRANSACTION;\n{}\n{}\nUPSERT meta:embedding SET model = $model, dimension = $dimension;\nUPSERT meta:remembering SET enabled = enabled ?? true, generation = generation ?? 0, revision = revision ?? 0;\nUPSERT meta:memory_semantic SET generation = generation ?? 0, revision = revision ?? 0;\n{withdrawal_migration}\n{source_migration}\n{attribution_migration}\n{dependency_migration}\nUPSERT meta:memory_facts SET revision = revision ?? 0;\nUPSERT meta:schema SET version = $version;\nCOMMIT TRANSACTION;",
             schema::STATIC_SCHEMA,
             schema::hnsw_index(self.config.embedding_dimension),
         );
@@ -261,13 +283,46 @@ impl SurrealStore {
         statements: &str,
         bindings: impl IntoVariables,
     ) -> Result<IndexedResults, MemoryError> {
-        let response = self
-            .db
-            .query(statements)
-            .bind(bindings)
-            .await
-            .map_err(|e| backend(&e))?;
-        ensure_ok(response)
+        let bindings =
+            surrealdb::types::Object::from(bindings.into_variables().map_err(|e| backend(&e))?);
+        // Only an explicit, fully rolled-back transaction is safe to replay.
+        // Parallel extraction can contend with policy and revision fences.
+        let transactional = statements.trim_start().starts_with("BEGIN TRANSACTION;");
+        for attempt in 0..8 {
+            let response = self.db.query(statements).bind(bindings.clone()).await;
+            let mut response = match response {
+                Err(error) if transactional && attempt < 7 && transaction_conflict(&error) => {
+                    continue;
+                }
+                Err(error) => return Err(backend(&error)),
+                Ok(response) => response,
+            };
+            let errors = response.take_errors();
+            if transactional && attempt < 7 && errors.values().any(transaction_conflict) {
+                tracing::debug!(attempt, "retrying rolled-back memory transaction conflict");
+                continue;
+            }
+            // A rolled-back transaction also reports cancelled sibling statements.
+            // Keep the original cause so callers can reconcile a stale revision.
+            if let Some((index, error)) = errors.into_iter().min_by_key(|(index, error)| {
+                (
+                    matches!(
+                        error.query_details(),
+                        Some(
+                            surrealdb::types::QueryError::NotExecuted
+                                | surrealdb::types::QueryError::Cancelled
+                        )
+                    ),
+                    *index,
+                )
+            }) {
+                return Err(MemoryError::Backend(format!("statement {index}: {error}")));
+            }
+            return Ok(response);
+        }
+        Err(MemoryError::Backend(
+            "Memory transaction remained busy; retry this operation.".into(),
+        ))
     }
 
     async fn check_embedding(&self, embedding: &Embedding) -> Result<(), MemoryError> {
@@ -309,6 +364,13 @@ impl SurrealStore {
 
 #[async_trait]
 impl MemoryStore for SurrealStore {
+    async fn admit_memory_source(
+        &self,
+        source: sovra_core::MemorySourceAdmission,
+    ) -> Result<sovra_core::MemorySourceReceipt, MemoryError> {
+        self.admit_source(source).await
+    }
+
     async fn memory_semantics(&self) -> Result<sovra_core::MemorySemanticState, MemoryError> {
         self.semantic_state().await
     }
@@ -352,6 +414,46 @@ impl MemoryStore for SurrealStore {
         ensure_ok(response).map(|_| ())
     }
 
+    async fn search_memory_sources(
+        &self,
+        query: sovra_core::MemorySearch,
+        now: Timestamp,
+    ) -> Result<Vec<sovra_core::MemorySourceEvidence>, MemoryError> {
+        self.evidence_sources(query, now).await
+    }
+    async fn stop_memory_source(&self, id: &EpisodeId, at: Timestamp) -> Result<(), MemoryError> {
+        self.revoke_evidence(id, at).await
+    }
+    async fn memory_episodes(&self, ids: &[EpisodeId]) -> Result<Vec<Episode>, MemoryError> {
+        self.evidence_batch(ids).await
+    }
+    async fn memory_preceding_sources(&self, id: &EpisodeId) -> Result<Vec<Episode>, MemoryError> {
+        self.preceding_evidence(id).await
+    }
+    async fn memory_revision(&self) -> Result<u64, MemoryError> {
+        self.query(
+            "SELECT VALUE revision FROM ONLY meta:memory_facts;",
+            surrealdb::types::Object::default(),
+        )
+        .await?
+        .take::<Option<u64>>(0)
+        .map_err(|error| backend(&error))?
+        .ok_or_else(|| MemoryError::Backend("missing fact revision".into()))
+    }
+    async fn memory_connections(
+        &self,
+        id: &FactId,
+    ) -> Result<sovra_core::MemoryNeighborhood, MemoryError> {
+        self.connected_memories(id).await
+    }
+    async fn save_memory_extraction(
+        &self,
+        claim: &sovra_core::MemoryClaim,
+        extracted: &sovra_core::MemoryExtractedChunk,
+        at: Timestamp,
+    ) -> Result<(), MemoryError> {
+        self.stage_extraction(claim, extracted, at).await
+    }
     async fn memory_policy(&self) -> Result<sovra_core::MemoryPolicy, MemoryError> {
         self.read_memory_policy().await
     }
@@ -496,11 +598,11 @@ impl MemoryStore for SurrealStore {
     async fn invalidate_fact(&self, id: &FactId, at: Timestamp) -> Result<(), MemoryError> {
         let updated: Vec<RecordId> = self
             .query(
-                "UPDATE $fact SET invalid_at = invalid_at ?? $at, expired_at = expired_at ?? $at RETURN VALUE id;",
+                "BEGIN TRANSACTION; UPDATE meta:memory_facts SET revision += 1; UPDATE $fact SET invalid_at = invalid_at ?? $at, expired_at = expired_at ?? $at RETURN VALUE id; COMMIT TRANSACTION;",
                 ("fact", parse_id(&id.0, "fact")?, "at", at.millis()),
             )
             .await?
-            .take(0)
+            .take(2)
             .map_err(|e| backend(&e))?;
         if updated.is_empty() {
             return Err(MemoryError::NotFound(id.0.clone()));
@@ -510,13 +612,21 @@ impl MemoryStore for SurrealStore {
 
     async fn stop_memory(&self, id: &FactId, at: Timestamp) -> Result<(), MemoryError> {
         let updated: Vec<RecordId> = self.query(
-            "UPDATE $fact SET stopped_at = stopped_at ?? $at, invalid_at = invalid_at ?? $at, expired_at = expired_at ?? $at RETURN VALUE id;",
+            "BEGIN TRANSACTION; UPDATE meta:memory_facts SET revision += 1; UPDATE $fact SET stopped_at = stopped_at ?? $at, invalid_at = invalid_at ?? $at, expired_at = expired_at ?? $at RETURN VALUE id;
+             UPDATE episode SET raw_withdrawn_at = raw_withdrawn_at ?? $at WHERE id IN (SELECT VALUE episode FROM memory_job WHERE fact_ids CONTAINS $fact);
+             UPDATE memory_job SET state = 'cancelled', token = NONE
+                 WHERE state IN ['pending', 'processing'] AND (episode.revoked_at IS NOT NONE OR episode.raw_withdrawn_at IS NOT NONE);
+             COMMIT TRANSACTION;",
             ("fact", parse_id(&id.0, "fact")?, "at", at.millis()),
-        ).await?.take(0).map_err(|error| backend(&error))?;
+        ).await?.take(2).map_err(|error| backend(&error))?;
         if updated.is_empty() {
             return Err(MemoryError::NotFound(id.0.clone()));
         }
         Ok(())
+    }
+
+    async fn remove_memory(&self, id: &FactId, at: Timestamp) -> Result<(), MemoryError> {
+        self.remove_history(id, at).await
     }
 
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError> {
@@ -621,6 +731,27 @@ impl MemoryStore for SurrealStore {
             );
         }
         Ok(fuse_rrf(legs, query.limit))
+    }
+
+    async fn list_memory_sources(
+        &self,
+        query: sovra_core::MemorySourceQuery,
+    ) -> Result<sovra_core::MemorySourcePage, MemoryError> {
+        self.source_page(query).await
+    }
+
+    async fn review_memory_source(
+        &self,
+        id: &EpisodeId,
+    ) -> Result<sovra_core::MemorySourceRecord, MemoryError> {
+        self.source_record(id).await
+    }
+
+    async fn list_memory_subjects(
+        &self,
+        query: sovra_core::MemorySubjectQuery,
+    ) -> Result<sovra_core::MemorySubjectPage, MemoryError> {
+        self.subject_page(query).await
     }
 
     async fn list_memories(
@@ -1037,6 +1168,13 @@ fn backend(error: &surrealdb::Error) -> MemoryError {
     MemoryError::Backend(error.to_string())
 }
 
+fn transaction_conflict(error: &surrealdb::Error) -> bool {
+    matches!(
+        error.query_details(),
+        Some(surrealdb::types::QueryError::TransactionConflict)
+    )
+}
+
 fn unavailable(error: &surrealdb::Error) -> MemoryError {
     MemoryError::Unavailable(error.to_string())
 }
@@ -1053,6 +1191,65 @@ fn ensure_ok(mut response: IndexedResults) -> Result<IndexedResults, MemoryError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn version_eight_adds_identity_without_inventing_legacy_attribution() {
+        let store = SurrealStore::open(StoreConfig::in_memory()).await.unwrap();
+        let episode = store
+            .record_episode(NewEpisode {
+                session_id: "legacy".into(),
+                kind: EpisodeKind::AgentMessage,
+                content: "A legacy reply.".into(),
+                occurred_at: Timestamp(1),
+            })
+            .await
+            .unwrap();
+        let fact = store
+            .save_fact(NewFact {
+                content: "A legacy detail.".into(),
+                entities: vec![],
+                source: Some(episode.clone()),
+                embedding: None,
+                valid_at: None,
+                replaces: None,
+            })
+            .await
+            .unwrap();
+        store
+            .db
+            .query("UPDATE meta:schema SET version = 8;")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        store.apply_schema().await.unwrap();
+        let record = store.review_memory_source(&episode).await.unwrap();
+        assert_eq!(
+            record.metadata.origin,
+            sovra_core::MemorySourceOrigin::LegacyUnknown
+        );
+        assert_eq!(
+            record.metadata.scope,
+            sovra_core::MemorySourceScope::Unknown
+        );
+        assert!(record.metadata.attribution.is_none());
+        assert!(record.metadata.admitted_at.is_none());
+        assert_eq!(
+            store.memory_fact(&fact).await.unwrap().source,
+            Some(episode.clone())
+        );
+        let family: Option<RecordId> = store
+            .db
+            .query("SELECT VALUE source_family FROM ONLY $source;")
+            .bind(("source", parse_id(&episode.0, "episode").unwrap()))
+            .await
+            .unwrap()
+            .take(0)
+            .unwrap();
+        assert_eq!(family.unwrap().to_sql(), episode.0);
+        store.apply_schema().await.unwrap();
+        assert_eq!(store.review_memory_source(&episode).await.unwrap(), record);
+    }
 
     #[tokio::test]
     async fn version_five_keeps_expiration_distinct_from_withdrawal_when_adding_aliases() {
@@ -1087,7 +1284,7 @@ mod tests {
             .unwrap()
             .take(0)
             .unwrap();
-        assert_eq!(version, Some(6));
+        assert_eq!(version, Some(schema::SCHEMA_VERSION));
     }
 
     #[tokio::test]

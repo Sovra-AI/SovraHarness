@@ -127,3 +127,38 @@ async fn shutdown_drains_accepted_chat_snapshots_before_reporting_stopped() {
     next(&client, |event| matches!(event, Event::Stopped)).await;
     assert_eq!(store.chats.lock().unwrap()["restored"].title, "latest");
 }
+
+#[tokio::test]
+async fn chat_snapshots_preserve_caller_dates_instead_of_guessing_from_small_numbers() {
+    let memory = Arc::new(Store::default());
+    let store = memory.clone();
+    let client = sovra_runtime::start_with_config(
+        "chat-dates",
+        AgentConfig::default(),
+        Some(Box::new(move || {
+            Box::pin(async move { Ok(store as Arc<dyn MemoryStore>) })
+        })),
+    )
+    .unwrap();
+    next(&client, |event| {
+        matches!(event, Event::ChatHistoryLoaded { .. })
+    })
+    .await;
+    let mut thread = sovra_core::ChatThread::new("dated", Timestamp(42));
+    thread.updated_at = Timestamp(123);
+    client
+        .send(Command::SaveChatThread {
+            thread: Box::new(thread.clone()),
+        })
+        .unwrap();
+    client.send(Command::LoadChatHistory).unwrap();
+    let Event::ChatHistoryLoaded { threads } = next(&client, |event| {
+        matches!(event, Event::ChatHistoryLoaded { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(threads, vec![thread]);
+    stop(client).await;
+}

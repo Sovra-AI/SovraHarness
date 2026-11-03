@@ -29,6 +29,10 @@ mod live;
 
 #[path = "memory_lifecycle/knowledge.rs"]
 mod knowledge;
+#[path = "memory_lifecycle/performance.rs"]
+mod performance;
+#[path = "memory_lifecycle/sources.rs"]
+mod sources;
 
 /// `Ready` is sent only after the on-disk store opens, and that open shares
 /// the disk with the rest of the suite. Catalog events can arrive first.
@@ -364,11 +368,13 @@ fn fresh_workspaces_preserve_transcripts_and_memory_sources_across_restarts() {
     let mut sessions = Vec::new();
     for (namespace, prompt, expected_facts) in [(11, SOURCE, 1), (22, COLLEAGUE, 2)] {
         let mut driver = fixture.start();
-        let mut workspace = sovra_core::WorkspaceState::new(namespace);
+        let mut workspace =
+            sovra_core::WorkspaceState::new_at(namespace, sovra_core::Timestamp(100));
         let history = driver.wait(|event| matches!(event, Event::ChatHistoryLoaded { .. }));
         workspace.apply_event(&history);
         assert_eq!(workspace.messages, Vec::<ChatMessage>::new());
         assert!(!sessions.contains(&workspace.session_id));
+        workspace.observe_time(sovra_core::Timestamp(200));
         workspace.submit_prompt(prompt);
         driver.prompt(
             &workspace.session_id,
@@ -396,6 +402,8 @@ fn fresh_workspaces_preserve_transcripts_and_memory_sources_across_restarts() {
         let thread = threads.iter().find(|thread| &thread.id == session).unwrap();
         assert_eq!(thread.messages.len(), 1);
         assert_eq!(thread.messages[0].text, prompt);
+        assert_eq!(thread.created_at, sovra_core::Timestamp(100));
+        assert_eq!(thread.updated_at, sovra_core::Timestamp(200));
     }
     let facts = driver.facts(false);
     assert_eq!(facts.len(), 3);
@@ -411,8 +419,32 @@ fn fresh_workspaces_preserve_transcripts_and_memory_sources_across_restarts() {
             .find(|(_, prompt)| source.content == *prompt)
             .expect("a memory retains one of the original user messages");
         assert_eq!(&source.session_id, expected);
+        assert!(source.occurred_at > sovra_core::Timestamp(200));
     }
+    let mut resumed = sovra_core::WorkspaceState::new_at(33, sovra_core::Timestamp(300));
+    resumed.apply_event(&Event::ChatHistoryLoaded { threads });
+    assert!(resumed.select_thread(&sessions[0]));
+    resumed.observe_time(sovra_core::Timestamp(400));
+    resumed.submit_prompt("A fictional follow-up after reopening.");
+    let updated = resumed.active_thread().unwrap().clone();
+    driver.send(Command::SaveChatThread {
+        thread: Box::new(updated.clone()),
+    });
     driver.close();
+
+    let mut reopened = fixture.start();
+    let Event::ChatHistoryLoaded { threads } =
+        reopened.wait(|event| matches!(event, Event::ChatHistoryLoaded { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        threads.iter().find(|thread| thread.id == sessions[0]),
+        Some(&updated)
+    );
+    assert_eq!(updated.created_at, sovra_core::Timestamp(100));
+    assert_eq!(updated.updated_at, sovra_core::Timestamp(400));
+    reopened.close();
 }
 
 #[test]

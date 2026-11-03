@@ -26,11 +26,13 @@ use crate::{
 };
 
 mod browser;
+mod knowledge;
 mod live;
 mod report;
 mod selection;
 
 pub(crate) struct FileIndexView {
+    knowledge: knowledge::KnowledgeView,
     browser: browser::BrowserView,
     report: report::ReportView,
     pub(crate) state: IndexState,
@@ -86,6 +88,7 @@ impl FileIndexView {
             },
         );
         Self {
+            knowledge: knowledge::KnowledgeView::new(window, cx),
             browser: browser::BrowserView::new(window, cx),
             report: report::ReportView::new(window, cx),
             state: IndexState::default(),
@@ -146,6 +149,11 @@ impl Shell {
     }
 
     pub(crate) fn index_command(&mut self, command: IndexCommand, cx: &mut Context<Self>) {
+        let knowledge_request = match &command {
+            IndexCommand::BrowseKnowledge { request_id, .. } => Some((*request_id, false)),
+            IndexCommand::KnowledgeEvidence { request_id, .. } => Some((*request_id, true)),
+            _ => None,
+        };
         let report_id = if let IndexCommand::Report { request_id, .. } = &command {
             Some(*request_id)
         } else {
@@ -166,6 +174,20 @@ impl Shell {
             .0
             .send(Command::FileIndex(command))
         {
+            if let Some((request_id, evidence)) = knowledge_request {
+                let error = sovra_core::file_index::IndexError(error.to_string());
+                self.file_index.state.apply(&if evidence {
+                    sovra_core::file_index::IndexEvent::KnowledgeEvidence {
+                        request_id,
+                        result: Err(error),
+                    }
+                } else {
+                    sovra_core::file_index::IndexEvent::KnowledgeBrowsed {
+                        request_id,
+                        result: Err(error),
+                    }
+                });
+            }
             if let Some(request_id) = report_id {
                 self.file_index
                     .state
@@ -254,6 +276,9 @@ impl Shell {
 }
 
 pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    if shell.file_index.knowledge.active {
+        return knowledge::render(shell, cx).into_any_element();
+    }
     let t = design::tokens(cx);
     let state = &shell.file_index.state;
     if browser::is_open(shell) {
@@ -266,7 +291,9 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     let mut panel = v_flex().id("file-index-panel").test_support().min_w_0().w_full().gap(t.space.small)
         .sovra_surface(Surface::Matte, cx).p(t.space.medium)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Your folders"))
-        .child(design::button("index-folder", "Add folders", cx).on_click(cx.listener(|shell, _, window, cx| shell.choose_index_folder(window, cx))))
+        .child(h_flex().w_full().min_w_0().flex_wrap().gap(t.space.small)
+            .child(design::button("index-folder", "Add folders", cx).max_w_full().on_click(cx.listener(|shell, _, window, cx| shell.choose_index_folder(window, cx))))
+            .child(knowledge::entry(cx)))
         .child(div().sovra_text(TextRole::Caption, cx).child("Choose one or more folders to search on this computer. Chat sends requested file details and saved passages to your selected AI service. Files stay in their original folders."))
         .children(state.notice.as_ref().map(|notice| div().sovra_text(TextRole::Body, cx).child(notice.clone())))
         .children(selection::render(shell, cx))

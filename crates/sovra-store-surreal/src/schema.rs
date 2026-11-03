@@ -7,16 +7,19 @@
 //! migration arm in [`super::SurrealStore::open`].
 
 /// Bump when stored data (not just indexes) needs migrating.
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+pub(crate) const SCHEMA_VERSION: i64 = 12;
 
 /// Statements that don't depend on configuration.
 pub(crate) const STATIC_SCHEMA: &str = "
 DEFINE TABLE OVERWRITE memory_job SCHEMALESS;
 DEFINE INDEX OVERWRITE memory_job_due ON memory_job FIELDS state, retry_at;
+DEFINE INDEX OVERWRITE memory_job_episode ON memory_job FIELDS episode;
+DEFINE INDEX OVERWRITE memory_job_conversation ON memory_job FIELDS session_id, state, created_at;
 DEFINE INDEX OVERWRITE memory_job_lease ON memory_job FIELDS state, lease_until;
 
 DEFINE TABLE OVERWRITE episode SCHEMALESS;
 DEFINE INDEX OVERWRITE episode_session ON episode FIELDS session_id, occurred_at;
+DEFINE INDEX OVERWRITE episode_source_family ON episode FIELDS source_family, source_version;
 
 DEFINE TABLE OVERWRITE chat_thread SCHEMALESS;
 DEFINE INDEX OVERWRITE chat_thread_session ON chat_thread FIELDS session_id UNIQUE;
@@ -76,3 +79,18 @@ pub(crate) fn semantic_index(generation: u64, dimension: usize) -> String {
 /// Before v5 an explicit stop was an expiration without a successor. Preserve
 /// those withdrawals conservatively; correction history still has its successor.
 pub(crate) const MIGRATE_WITHDRAWALS: &str = "UPDATE fact SET stopped_at = expired_at WHERE expired_at IS NOT NONE AND stopped_at IS NONE AND array::len(<-supersedes<-fact) = 0;";
+
+/// Existing IDs, completed receipts and provenance remain unchanged. Old pending
+/// jobs start at the beginning; the origin is explicitly unknown for old evidence.
+pub(crate) const MIGRATE_SOURCES: &str = "
+UPDATE memory_job SET cursor = 0, session_id = episode.session_id WHERE cursor IS NONE;
+UPDATE episode SET origin = 'legacy_unknown', permission_scope = 'unknown', source_version = 1 WHERE origin IS NONE;
+";
+
+/// Existing record IDs are known identities; authorship and admission time remain unknown.
+pub(crate) const MIGRATE_SOURCE_IDENTITIES: &str =
+    "UPDATE episode SET source_family = source_family ?? id;";
+
+/// Earlier helper replies have no complete record of their model inputs.
+pub(crate) const MIGRATE_REPLY_DEPENDENCIES: &str =
+    "UPDATE episode SET dependency_complete = false WHERE dependency_complete IS NONE;";

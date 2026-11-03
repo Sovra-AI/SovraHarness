@@ -64,12 +64,26 @@ pub enum AgUiWidget {
     },
     /// Live team card: AG-UI `ACTIVITY_SNAPSHOT` content for a team run.
     TeamActivity(crate::teams::TeamActivity),
+    /// In-chat research kanban: waiting / working / done lanes for deep research.
+    ResearchBoard(crate::research::ResearchBoard),
     /// An artifact an agent saved during the turn, shown as a card to open it.
     ArtifactSaved {
         artifact_id: String,
         title: String,
         artifact_kind: crate::artifacts::ArtifactKind,
     },
+}
+
+/// Live activity payload for AG-UI `ACTIVITY_SNAPSHOT` (team card or research board).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "activity_type", rename_all = "snake_case")]
+pub enum LiveActivity {
+    /// Moderated team chat (`activityType: "sovra.team"`).
+    #[serde(rename = "sovra.team")]
+    Team(crate::teams::TeamActivity),
+    /// Parallel deep research board (`activityType: "sovra.research"`).
+    #[serde(rename = "sovra.research")]
+    Research(crate::research::ResearchBoard),
 }
 
 /// Who wrote a message when it was not the default assistant: a team member.
@@ -100,10 +114,10 @@ pub enum AgUiEvent {
     RunStarted {
         run_id: String,
     },
-    /// Replaces the activity message `message_id` (`activityType: "sovra.team"`).
+    /// Replaces the activity message `message_id` (team card or research board).
     ActivitySnapshot {
         message_id: String,
-        activity: crate::teams::TeamActivity,
+        activity: LiveActivity,
     },
     SubagentStarted {
         subagent_run_id: String,
@@ -151,6 +165,11 @@ pub struct ChatMessage {
     pub author: String,
     pub timestamp: String,
     pub text: String,
+    /// An immutable saved source, attached only after durable admission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<crate::EpisodeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<crate::Timestamp>,
     pub widgets: Vec<AgUiWidget>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<crate::files::Attachment>,
@@ -180,6 +199,8 @@ impl ChatMessage {
             author: "AA".to_owned(),
             timestamp: timestamp.into(),
             text: text.into(),
+            source: None,
+            occurred_at: None,
             widgets: Vec::new(),
             attachments: Vec::new(),
             model: None,
@@ -202,6 +223,8 @@ impl ChatMessage {
             author: "SOVRA".to_owned(),
             timestamp: timestamp.into(),
             text: text.into(),
+            source: None,
+            occurred_at: None,
             widgets,
             attachments: Vec::new(),
             model: None,
@@ -384,7 +407,7 @@ pub fn llm_setup_widget_for_stage(
                                     disabled: false,
                                 },
                                 UiComponent::Button {
-                                    label: "2. Paste OpenRouter Key in Settings →".to_owned(),
+                                    label: "2. Paste OpenRouter Key in Connections →".to_owned(),
                                     action_id: "setup:openrouter-key".to_owned(),
                                     disabled: false,
                                 },

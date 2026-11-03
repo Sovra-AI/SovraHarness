@@ -10,8 +10,8 @@ use std::sync::{
 use time::{Date, OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub(crate) const NAME: &str = "search_saved_details";
-const LIMIT: usize = 4;
-pub(super) const GUIDANCE: &str = "For a historical question, first call search_saved_details with the requested date; initial automatic evidence describes current beliefs, not the past. For ambiguous dates or people, ask for clarification instead of inventing precision. valid_at asks what applied then; known_at asks what had been learned by then. These are distinct. Use explicit entities only when supported by the conversation or evidence. A tool receipt schedules the next fresh evidence lookup; the receipt is not evidence. Compare dates with separate lookups when needed, citing each supported statement. Withdrawn versions remain excluded at every date.";
+const LIMIT: usize = sovra_core::MAX_MEMORY_SEARCHES;
+pub(super) const GUIDANCE: &str = "When a question or task depends on the user's circumstances or earlier interactions and the supplied evidence does not answer it, call search_saved_details before saying you do not know. Reformulate with concise alternative wording and synonyms, rather than repeating a failed question verbatim. Omit unknown entity filters. Search again when results are incomplete; never treat empty results as proof nothing is saved. For a historical question, first call search_saved_details with the requested date; initial automatic evidence describes current beliefs, not the past. For ambiguous dates or people, ask for clarification instead of inventing precision. valid_at asks what applied then; known_at asks what had been learned by then. These are distinct. Use explicit entities only when supported by the conversation or evidence. A tool receipt schedules the next fresh evidence lookup; the receipt is not evidence. Compare dates with separate lookups when needed, citing each supported statement. Withdrawn versions remain excluded at every date.";
 
 pub(super) struct Lookup {
     invocation: u64,
@@ -76,34 +76,42 @@ impl Lookup {
         }
     }
 
-    pub(super) fn query(
+    pub(super) fn queries(
         &self,
         request: &LlmRequest,
-        prompt: &str,
-    ) -> Result<MemorySearch, MemoryError> {
-        let receipt = request
+    ) -> Result<Option<Vec<MemorySearch>>, MemoryError> {
+        let mut receipts = Vec::new();
+        for part in request
             .contents
             .iter()
             .rev()
             .flat_map(|content| content.parts.iter().rev())
-            .find_map(|part| match part {
+        {
+            match part {
                 Part::FunctionResponse {
                     function_response, ..
                 } if function_response.name == NAME
                     && function_response.response["invocation"].as_u64()
                         == Some(self.invocation) =>
                 {
-                    Some(&function_response.response)
+                    receipts.push(&function_response.response);
                 }
-                _ => None,
-            });
-        match receipt {
-            Some(receipt) => parse(receipt["lookup"].clone()),
-            None => Ok(MemorySearch {
-                text: prompt.into(),
-                ..Default::default()
-            }),
+                // Responses can be separate Content records. Their originating
+                // model call bounds the round, independently of provider roles.
+                Part::FunctionCall { .. } if !receipts.is_empty() => break,
+                _ => {}
+            }
         }
+        if receipts.is_empty() {
+            return Ok(None);
+        }
+        receipts.reverse();
+        let queries = receipts
+            .into_iter()
+            .map(|receipt| parse(receipt["lookup"].clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        sovra_core::validate_memory_searches(&queries)?;
+        Ok(Some(queries))
     }
 
     fn receipt(&self, args: &Value) -> Value {
@@ -131,7 +139,7 @@ impl Tool for Lookup {
         true
     }
     fn is_concurrency_safe(&self) -> bool {
-        false
+        true
     }
     fn parameters_schema(&self) -> Option<Value> {
         Some(json!({"type":"object", "properties": {
@@ -221,24 +229,15 @@ mod tests {
             lookup.receipt(&json!({"query":"tea", "valid_at":"2024-01-01"})),
         ));
         assert!(
-            lookup
-                .query(&request, "current question")
-                .unwrap()
+            lookup.queries(&request).unwrap().unwrap()[0]
                 .valid_at
                 .is_some()
         );
         request.contents.push(content(
             lookup.receipt(&json!({"query":"tea", "valid_at":"yesterday"})),
         ));
-        assert!(lookup.query(&request, "current question").is_err());
+        assert!(lookup.queries(&request).is_err());
         let next = Lookup::new();
-        assert_eq!(
-            next.query(&request, "current question").unwrap().text,
-            "current question"
-        );
-        assert_eq!(
-            next.query(&request, "current question").unwrap().valid_at,
-            None
-        );
+        assert!(next.queries(&request).unwrap().is_none());
     }
 }

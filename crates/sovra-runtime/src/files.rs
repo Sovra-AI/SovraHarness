@@ -159,7 +159,9 @@ pub(crate) struct FilePrompt {
 pub(crate) fn spawn_prompt(handle: &tokio::runtime::Handle, job: FilePrompt) -> ActiveRun {
     let slot = Arc::new(std::sync::RwLock::new(None));
     let active = slot.clone();
+    let interactive = crate::model_priority::interactive();
     let task = handle.spawn(async move {
+        let _interactive = interactive;
         let session_id = job.session_id.clone();
         let events = job.events.clone();
         let result = run(job, active).await;

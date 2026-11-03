@@ -4,6 +4,194 @@ use super::*;
 use sovra_core::{FactId, MemoryCandidate, MemoryInput, MemoryListQuery};
 
 #[tokio::test]
+async fn supporting_record_browser_pages_all_reused_sources_without_unrelated_records() {
+    use sovra_core::MemorySourceQuery;
+    let store = open_store().await;
+    let id = extract(
+        &store,
+        "support-0",
+        "I live in Lisbon",
+        candidate("User lives in Lisbon"),
+    )
+    .await;
+    let first = store.memory_fact(&id).await.unwrap().source.unwrap();
+    let mut expected = vec![first];
+    for index in 1..4 {
+        let text = format!("Lisbon is still where I live, conversation {index}.");
+        let source = store
+            .enqueue_memory(MemoryInput {
+                key: format!("support-{index}"),
+                episode: episode(&format!("conversation-{index}"), &text, 1_500),
+            })
+            .await
+            .unwrap();
+        let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+        let mut repeated = candidate("User resides in Lisbon");
+        repeated.evidence = text;
+        repeated.same_as = Some(id.clone());
+        store
+            .complete_memory(&claim, vec![repeated], "fixture", Timestamp(2_001))
+            .await
+            .unwrap();
+        expected.push(source);
+    }
+    store
+        .record_episode(episode(
+            "unrelated",
+            "Lisbon is a city I might visit",
+            9_000,
+        ))
+        .await
+        .unwrap();
+    let mut query = MemorySourceQuery {
+        fact: Some(id.clone()),
+        limit: 2,
+        ..Default::default()
+    };
+    let mut actual = vec![];
+    for _ in 0..4 {
+        let page = store.list_memory_sources(query.clone()).await.unwrap();
+        assert!(
+            page.sources
+                .iter()
+                .all(|source| source.metadata.detail_count == Some(1))
+        );
+        actual.extend(page.sources.into_iter().map(|s| s.id));
+        query.before = page.next;
+        if query.before.is_none() {
+            break;
+        }
+    }
+    assert!(query.before.is_none());
+    actual.sort_by(|a, b| a.0.cmp(&b.0));
+    expected.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(actual, expected);
+    let filtered = store
+        .list_memory_sources(MemorySourceQuery {
+            fact: Some(id.clone()),
+            search: "CONVERSATION 2".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(filtered.sources.len(), 1);
+    let stopped = filtered.sources[0].id.clone();
+    let record = store.review_memory_source(&stopped).await.unwrap();
+    assert_eq!(record.metadata.detail_count, Some(1));
+    let details = store
+        .list_memories(MemoryListQuery {
+            source: Some(stopped.clone()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        details
+            .facts
+            .iter()
+            .map(|fact| &fact.id)
+            .collect::<Vec<_>>(),
+        vec![&id]
+    );
+    store
+        .stop_memory_source(&stopped, Timestamp(10_000))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .list_memories(MemoryListQuery {
+                source: Some(stopped.clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .facts
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .list_memories(MemoryListQuery {
+                source: Some(stopped.clone()),
+                include_history: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .facts
+            .len(),
+        1
+    );
+    let mut query = MemorySourceQuery {
+        fact: Some(id),
+        ..Default::default()
+    };
+    assert_eq!(
+        store
+            .list_memory_sources(query.clone())
+            .await
+            .unwrap()
+            .sources
+            .len(),
+        3
+    );
+    query.include_stopped = true;
+    let retained = store.list_memory_sources(query).await.unwrap();
+    assert_eq!(retained.sources.len(), 4);
+    assert!(
+        retained
+            .sources
+            .iter()
+            .any(|s| s.id == stopped && s.metadata.revoked_at.is_some())
+    );
+}
+
+#[tokio::test]
+async fn saved_extraction_survives_a_failed_lease_and_is_cleared_after_commit() {
+    let store = open_store().await;
+    store
+        .enqueue_memory(memory_input("staged", "one"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    let extracted = sovra_core::MemoryExtractedChunk {
+        candidates: vec![candidate("User lives in Lisbon")],
+        model: "fixture".into(),
+    };
+    store
+        .save_memory_extraction(&claim, &extracted, Timestamp(2_001))
+        .await
+        .unwrap();
+    store
+        .fail_memory(&claim, "interrupted", Timestamp(2_002))
+        .await
+        .unwrap();
+    let resumed = store
+        .claim_memory(Timestamp(20_000))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resumed.extracted, Some(extracted.clone()));
+    assert!(
+        store
+            .save_memory_extraction(&claim, &extracted, Timestamp(20_001))
+            .await
+            .is_err()
+    );
+    store
+        .complete_memory(&resumed, extracted.candidates, "fixture", Timestamp(20_002))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .claim_memory(Timestamp(30_000))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn learned_aliases_keep_withdrawn_paraphrases_suppressed_after_disk_reopen() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -257,4 +445,43 @@ async fn identical_wording_does_not_collapse_different_entities_or_explicit_date
         store.recall(RecallQuery::recent(10)).await.unwrap().len(),
         3
     );
+}
+
+#[tokio::test]
+async fn withdrawing_a_fact_also_hides_duplicate_and_later_source_evidence() {
+    let store = open_store().await;
+    let first = extract(
+        &store,
+        "first",
+        "I live in Lisbon",
+        candidate("User lives in Lisbon"),
+    )
+    .await;
+    let second = extract(
+        &store,
+        "second",
+        "I live in Lisbon",
+        candidate("User lives in Lisbon"),
+    )
+    .await;
+    assert_eq!(first, second);
+    store.stop_memory(&first, Timestamp(4_000)).await.unwrap();
+    extract(
+        &store,
+        "third",
+        "I live in Lisbon",
+        candidate("User lives in Lisbon"),
+    )
+    .await;
+    let sources = store
+        .search_memory_sources(
+            sovra_core::MemorySearch {
+                text: "Lisbon".into(),
+                ..Default::default()
+            },
+            Timestamp(9_000),
+        )
+        .await
+        .unwrap();
+    assert_eq!(sources, Vec::new());
 }

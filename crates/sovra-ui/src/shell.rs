@@ -59,10 +59,16 @@ pub struct Shell {
     pub(crate) knowledge_times_open: bool,
     pub(crate) knowledge_section: crate::knowledge_view::KnowledgeSection,
     pub(crate) knowledge_scroll: gpui_kit::ScrollHandle,
+    pub(crate) people_message_input: Entity<InputState>,
+    pub(crate) people_email_input: Entity<InputState>,
+    pub(crate) people_telegram_input: Entity<InputState>,
+    pub(crate) people_selected: Option<String>,
+    /// Exact text of Message on `WhatsApp`, until that review appears in chat.
+    pub(crate) people_open_review: Option<String>,
     models: Entity<crate::ModelsView>,
     team_view: Entity<crate::team_view::TeamView>,
     artifacts_view: Entity<crate::artifacts_view::ArtifactsView>,
-    /// Shown in Settings → Connections; reads Google state from this shell.
+    /// The Google card on the Connections tab.
     google_card: Entity<crate::google_card::GoogleCard>,
     /// The conversation, rendered as a cached view: composer cursor blinks, sidebar
     /// and timer updates reuse its last frame instead of laying out every message.
@@ -79,6 +85,9 @@ pub struct Shell {
     _models_events: Subscription,
     _models_navigation: Subscription,
     _models_tour: Subscription,
+    _connection_navigation: Subscription,
+    _show_local_ai: Subscription,
+    _show_models: Subscription,
     _team_ask: Subscription,
     _try_asking: Subscription,
 }
@@ -163,6 +172,12 @@ impl Shell {
             InputState::new(window, cx)
                 .placeholder("Type any prompt to test Laya / OpenJev routing tree...")
         });
+        let people_message_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Write a message"));
+        let people_email_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("name@example.com"));
+        let people_telegram_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Chat number you already know"));
 
         let events = cx.global::<RuntimeClient>().0.events();
         let models = cx.new(|cx| crate::ModelsView::new(window, cx));
@@ -184,6 +199,26 @@ impl Shell {
             &models,
             |shell, _, _: &crate::models_view::StartSystemTour, cx| {
                 shell.start_system_tour(cx);
+            },
+        );
+        let connection_navigation = cx.subscribe_in(
+            &models,
+            window,
+            |shell, _, open: &crate::models_view::OpenConnections, window, cx| {
+                shell.present_connections(open.kind, open.keep_editor, window, cx);
+            },
+        );
+        let show_local_ai = cx.subscribe_in(
+            &models,
+            window,
+            |shell, _, _: &crate::models_view::ShowLocalAi, window, cx| {
+                shell.show_local_ai(window, cx);
+            },
+        );
+        let show_models = cx.subscribe(
+            &models,
+            |shell, _, _: &crate::models_view::ShowModels, cx| {
+                shell.select_tab(NavTab::Models, cx);
             },
         );
         let models_events = cx.observe(&models, |shell, models, cx| {
@@ -256,7 +291,8 @@ impl Shell {
                     })
                     .collect::<Vec<_>>();
                 let applied = this.update(cx, |shell, cx| {
-                    let mut should_persist_thread = false;
+                    shell.state.observe_time(wall_time());
+                    let mut threads_to_persist = std::collections::BTreeSet::new();
                     for event in batch {
                         let memory_visible = shell.state.active_tab == NavTab::Knowledge
                             && shell.knowledge_section
@@ -271,7 +307,8 @@ impl Shell {
                         if matches!(
                             &event,
                             sovra_core::Event::Memory(
-                                sovra_core::MemoryEvent::Queued { .. }
+                                sovra_core::MemoryEvent::SourceSaved { .. }
+                                    | sovra_core::MemoryEvent::Queued { .. }
                                     | sovra_core::MemoryEvent::Status(
                                         sovra_core::MemoryStatus::Working
                                             | sovra_core::MemoryStatus::Paused
@@ -293,10 +330,16 @@ impl Shell {
                         if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Review(event)) =
                             &event
                         {
-                            shell.memory_view.update(cx, |view, cx| {
-                                view.apply(event, cx);
+                            let reset_scroll = shell.memory_view.update(cx, |view, cx| {
+                                let reset_scroll = view.apply(event, cx);
                                 view.refresh_captured(memory_visible, cx);
+                                reset_scroll
                             });
+                            if reset_scroll && memory_visible {
+                                shell
+                                    .knowledge_scroll
+                                    .set_offset(gpui_kit::Point::default());
+                            }
                         }
                         if let sovra_core::Event::FileIndex(event) = &event {
                             shell.file_index.apply(event);
@@ -353,8 +396,18 @@ impl Shell {
                                 | sovra_core::Event::AgentError { .. }
                                 | sovra_core::Event::AgUiSurface { .. }
                                 | sovra_core::Event::ChatTitleGenerated { .. }
-                        ) {
-                            should_persist_thread = true;
+                                | sovra_core::Event::Memory(
+                                    sovra_core::MemoryEvent::SourceSaved { .. }
+                                )
+                                | sovra_core::Event::AgUi {
+                                    event: sovra_core::AgUiEvent::TextMessageEnd { .. }
+                                        | sovra_core::AgUiEvent::RunFinished { .. }
+                                        | sovra_core::AgUiEvent::RunError { .. },
+                                    ..
+                                }
+                        ) && let Some(session) = event.session_id()
+                        {
+                            threads_to_persist.insert(session.to_owned());
                         }
                         let completed_session = match &event {
                             sovra_core::Event::AgentCompleted { session_id } => {
@@ -369,11 +422,16 @@ impl Shell {
                             cx.open_url(&format!("file://{path}"));
                         }
                         // Google's consent page opens in the person's own browser.
-                        if let sovra_core::Event::Google(
-                            sovra_core::google::GoogleEvent::OpenSignIn { url },
-                        ) = &event
-                        {
-                            cx.open_url(url);
+                        if let sovra_core::Event::Google(event) = &event {
+                            if let sovra_core::google::GoogleEvent::OpenSignIn { url } = event {
+                                cx.open_url(url);
+                            }
+                            // The catalogue reads its own copy. The shell state
+                            // still folds the same event below.
+                            shell.models.update(cx, |models, cx| {
+                                models.google.apply(event);
+                                cx.notify();
+                            });
                         }
                         if matches!(event, sovra_core::Event::Ready { .. }) {
                             // The roster and library feed chat (@mentions, Saved).
@@ -396,9 +454,36 @@ impl Shell {
                         {
                             cx.open_url(auth_url);
                         }
-                        if let Some(next_prompt) = shell.state.apply_event(&event) {
-                            shell.dispatch_runtime_prompt(&next_prompt, cx);
-                            should_persist_thread = true;
+                        if let Some(command) = shell.state.apply_event(&event) {
+                            threads_to_persist.insert(
+                                event
+                                    .session_id()
+                                    .unwrap_or(&shell.state.session_id)
+                                    .to_owned(),
+                            );
+                            let _ = cx.global::<RuntimeClient>().0.send(command);
+                        }
+                        let open_review = matches!(
+                            (&shell.people_open_review, &event),
+                            (
+                                Some(text),
+                                sovra_core::Event::Connections(
+                                    sovra_core::connections::ConnectionEvent::OutboundChanged(
+                                        message,
+                                    ),
+                                ),
+                            ) if message.text == *text
+                                && message.session_id == shell.state.session_id
+                                && matches!(
+                                    message.delivery,
+                                    sovra_core::communications::MessageDelivery::Review
+                                        | sovra_core::communications::MessageDelivery::Sending
+                                )
+                        );
+                        if open_review {
+                            shell.people_open_review = None;
+                            shell.chat.follow_latest();
+                            shell.select_tab(NavTab::Chat, cx);
                         }
                         if let Some(session_id) = completed_session
                             && let Some((sid, prompt, reply)) =
@@ -414,8 +499,8 @@ impl Shell {
                                     });
                         }
                     }
-                    if should_persist_thread {
-                        shell.persist_active_thread(cx);
+                    for session in threads_to_persist {
+                        shell.persist_thread(&session, cx);
                     }
                     shell.refresh(cx);
                 });
@@ -497,7 +582,7 @@ impl Shell {
             },
         );
         Self {
-            state: WorkspaceState::new(session_namespace),
+            state: WorkspaceState::new_at(session_namespace, wall_time()),
             file_picker: None,
             next_attachment_id: 0,
             chat: ChatPresentation::new(cx),
@@ -506,6 +591,9 @@ impl Shell {
             _models_events: models_events,
             _models_navigation: models_navigation,
             _models_tour: models_tour,
+            _connection_navigation: connection_navigation,
+            _show_local_ai: show_local_ai,
+            _show_models: show_models,
             focus_handle,
             history_compact: Self::sidebar_rail(window),
             history_overlay_open: false,
@@ -530,6 +618,11 @@ impl Shell {
             knowledge_times_open: false,
             knowledge_section: crate::knowledge_view::KnowledgeSection::default(),
             knowledge_scroll: gpui_kit::ScrollHandle::new(),
+            people_message_input,
+            people_email_input,
+            people_telegram_input,
+            people_selected: None,
+            people_open_review: None,
             models,
             team_view,
             artifacts_view,
@@ -558,7 +651,9 @@ impl Shell {
             NavTab::Team => self.team_view.update(cx, |_, cx| cx.notify()),
             NavTab::Artifacts => self.artifacts_view.update(cx, |_, cx| cx.notify()),
             NavTab::Knowledge => self.memory_view.update(cx, |_, cx| cx.notify()),
-            NavTab::Settings => self.google_card.update(cx, |_, cx| cx.notify()),
+            NavTab::Settings | NavTab::Connections => {
+                self.google_card.update(cx, |_, cx| cx.notify());
+            }
             NavTab::Chat | NavTab::MyAis | NavTab::Models | NavTab::Schedules | NavTab::Skills => {}
         }
         cx.notify();
@@ -575,6 +670,11 @@ impl Shell {
 
     pub fn workspace(&self) -> &WorkspaceState {
         &self.state
+    }
+
+    /// The draft used by Message on `WhatsApp` in Knowledge → People.
+    pub fn people_message_draft(&self) -> &Entity<InputState> {
+        &self.people_message_input
     }
 
     /// Opens one artifact in the Artifacts page (from a chat card).
@@ -602,10 +702,14 @@ impl Shell {
         self.refresh(cx);
     }
 
-    pub(crate) fn open_memory_source(&mut self, id: sovra_core::FactId, cx: &mut Context<Self>) {
+    pub(crate) fn open_memory_source(
+        &mut self,
+        action: sovra_core::MemoryAction,
+        cx: &mut Context<Self>,
+    ) {
         self.select_tab(NavTab::Knowledge, cx);
         self.memory_view
-            .update(cx, |view, cx| view.open_source(id, cx));
+            .update(cx, |view, cx| view.open_source(action, cx));
     }
 
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
@@ -615,19 +719,94 @@ impl Shell {
                 .update(cx, crate::memory_view::MemoryView::load);
         }
         self.models.update(cx, |models, cx| {
-            models.settings_open = tab == NavTab::Settings;
-            models.setup_flow = false;
-            if tab == NavTab::Models {
-                models.open_model_home(cx);
+            if tab == NavTab::Connections {
+                // Opening the tab shows the catalogue. A setup already in
+                // progress keeps going when its key is saved.
+                models.connections_page = true;
+                models.settings_open = false;
+                models.home_open = false;
+                models.open_kind = None;
+                models.connection_form = None;
+                models.form_subscriptions.clear();
+                models.manual_form = None;
+            } else {
+                models.connections_page = false;
+                models.open_kind = None;
+                models.connection_form = None;
+                models.form_subscriptions.clear();
+                models.manual_form = None;
+                models.setup_flow = false;
+                models.settings_open = tab == NavTab::Settings;
+                if tab == NavTab::Models {
+                    models.open_model_home(cx);
+                }
             }
             cx.notify();
         });
-        if matches!(tab, NavTab::Models | NavTab::Settings) {
+        if matches!(tab, NavTab::Models | NavTab::Settings | NavTab::Connections) {
             let _ = cx
                 .global::<RuntimeClient>()
                 .0
                 .send(Command::Models(sovra_core::models::ModelCommand::Load));
         }
+        if tab == NavTab::Connections {
+            let _ = cx.global::<RuntimeClient>().0.send(Command::Connections(
+                sovra_core::connections::ConnectionCommand::Refresh,
+            ));
+        }
+        self.refresh(cx);
+    }
+
+    /// Opens the Connections tab. `keep_editor` leaves a card the caller already
+    /// opened; otherwise `kind` opens that card, and `None` shows the catalogue.
+    pub(crate) fn present_connections(
+        &mut self,
+        kind: Option<sovra_core::CatalogueKind>,
+        keep_editor: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Move the tab before the models view notifies. The settings observer
+        // would otherwise send a closed Settings page back to Models.
+        self.state.select_tab(NavTab::Connections);
+        self.models.update(cx, |models, cx| {
+            models.settings_open = false;
+            models.home_open = false;
+            models.connections_page = true;
+            if !keep_editor {
+                if let Some(kind) = kind {
+                    models.open_catalogue_kind(kind, window, cx);
+                } else {
+                    models.open_kind = None;
+                    models.connection_form = None;
+                    models.form_subscriptions.clear();
+                    models.manual_form = None;
+                }
+            }
+            cx.notify();
+        });
+        let client = &cx.global::<RuntimeClient>().0;
+        let _ = client.send(Command::Models(sovra_core::models::ModelCommand::Load));
+        let _ = client.send(Command::Connections(
+            sovra_core::connections::ConnectionCommand::Refresh,
+        ));
+        self.refresh(cx);
+    }
+
+    /// Leaves Connections and opens the on-this-computer download in Models.
+    pub(crate) fn show_local_ai(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // `select_tab(Models)` opens the model home and would close the download.
+        self.state.select_tab(NavTab::Models);
+        self.models.update(cx, |models, cx| {
+            models.connections_page = false;
+            models.open_kind = None;
+            models.settings_open = false;
+            models.open_ollama_setup(window, cx);
+        });
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Models(sovra_core::models::ModelCommand::Load));
         self.refresh(cx);
     }
 
@@ -756,6 +935,7 @@ impl Shell {
     }
 
     pub fn submit_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.observe_time(wall_time());
         if self.accept_skill_suggestion(window, cx) {
             return;
         }
@@ -966,6 +1146,7 @@ impl Shell {
     }
 
     pub fn send_prompt_text(&mut self, prompt: &str, _window: &mut Window, cx: &mut Context<Self>) {
+        self.state.observe_time(wall_time());
         if !prompt.trim().is_empty() {
             self.chat.follow_latest();
         }
@@ -977,9 +1158,11 @@ impl Shell {
     }
 
     pub fn start_new_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.observe_time(wall_time());
         self.history_overlay_open = false;
-        self.persist_active_thread(cx);
+        let previous = self.state.session_id.clone();
         let _ = self.state.start_new_chat();
+        self.persist_thread(&previous, cx);
         self.composer_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
@@ -987,8 +1170,13 @@ impl Shell {
     }
 
     pub fn select_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
-        self.persist_active_thread(cx);
+        let previous = self.state.session_id.clone();
         if self.state.select_thread(session_id) {
+            self.persist_thread(&previous, cx);
+            if let Some(command) = self.state.resume_ready_prompt() {
+                let _ = cx.global::<RuntimeClient>().0.send(command);
+                self.persist_active_thread(cx);
+            }
             self.history_overlay_open = false;
             self.chat.follow_latest();
         }
@@ -1049,6 +1237,7 @@ impl Shell {
     }
 
     pub fn delete_thread(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        self.state.observe_time(wall_time());
         let owned = session_id.to_owned();
         if self.state.delete_thread(&owned) {
             let _ = cx
@@ -1128,7 +1317,15 @@ impl Shell {
     }
 
     pub(crate) fn persist_active_thread(&self, cx: &mut Context<Self>) {
-        if let Some(thread) = self.state.active_thread()
+        self.persist_thread(&self.state.session_id, cx);
+    }
+
+    fn persist_thread(&self, session_id: &str, cx: &mut Context<Self>) {
+        if let Some(thread) = self
+            .state
+            .threads
+            .iter()
+            .find(|thread| thread.id == session_id && thread.is_active())
             && !thread.messages.is_empty()
         {
             let _ = cx
@@ -1141,8 +1338,10 @@ impl Shell {
     }
 
     pub fn interrupt_active_session(&mut self, cx: &mut Context<Self>) {
+        self.state.observe_time(wall_time());
         let session_id = self.state.session_id.clone();
         self.state.interrupt_generation();
+        self.persist_active_thread(cx);
         let _ = cx
             .global::<RuntimeClient>()
             .0
@@ -1177,18 +1376,28 @@ impl Shell {
                 cx.open_url("https://openrouter.ai/keys");
             }
             "openrouter-key" => {
-                self.select_tab(NavTab::Settings, cx);
-                self.models.update(cx, |models, cx| {
-                    models.open_openrouter_key_editor(window, cx);
-                    models.setup_flow = true;
-                });
+                self.models.update(cx, |models, _| models.setup_flow = true);
+                self.present_connections(
+                    Some(sovra_core::CatalogueKind::OnlineAi),
+                    false,
+                    window,
+                    cx,
+                );
             }
             "selected-key" => {
-                self.select_tab(NavTab::Settings, cx);
-                self.models.update(cx, |models, cx| {
-                    models.open_selected_connection(window, cx);
-                    models.setup_flow = true;
+                let opened = self.models.update(cx, |models, cx| {
+                    if models.prepare_selected_connection(window, cx) {
+                        models.setup_flow = true;
+                        true
+                    } else {
+                        false
+                    }
                 });
+                if opened {
+                    self.present_connections(None, true, window, cx);
+                } else {
+                    self.select_tab(NavTab::Models, cx);
+                }
             }
             "recommended-models" => {
                 self.select_tab(NavTab::Models, cx);
@@ -1201,17 +1410,16 @@ impl Shell {
                 return;
             }
             "ollama" => {
-                self.select_tab(NavTab::Models, cx);
-                self.models.update(cx, |models, cx| {
-                    models.open_ollama_setup(window, cx);
-                });
+                self.show_local_ai(window, cx);
             }
             "openai-url" => {
-                self.select_tab(NavTab::Settings, cx);
-                self.models.update(cx, |models, cx| {
-                    models.open_openai_compatible_editor(window, cx);
-                    models.setup_flow = true;
-                });
+                self.models.update(cx, |models, _| models.setup_flow = true);
+                self.present_connections(
+                    Some(sovra_core::CatalogueKind::CompatibleService),
+                    false,
+                    window,
+                    cx,
+                );
             }
             "choose-model" => {
                 self.select_tab(NavTab::Models, cx);
@@ -1271,6 +1479,7 @@ impl Shell {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.state.observe_time(wall_time());
         if let Some(dispatched) = self.state.trigger_schedule(schedule_id) {
             self.dispatch_runtime_prompt(&dispatched, cx);
             self.persist_active_thread(cx);
@@ -1279,45 +1488,10 @@ impl Shell {
     }
 
     fn dispatch_runtime_prompt(&self, prompt: &str, cx: &mut Context<Self>) {
-        let session_id = self.state.session_id.clone();
-        if let Some(prompt) = self.state.team_prompt(prompt) {
-            let _ = cx.global::<RuntimeClient>().0.send(Command::Teams(
-                sovra_core::teams::TeamCommand::Run {
-                    session_id,
-                    prompt: prompt.to_owned(),
-                    history: self.state.team_history(),
-                },
-            ));
-            return;
-        }
-        let command = self
-            .state
-            .messages
-            .iter()
-            .rev()
-            .find(|message| !message.attachments.is_empty())
-            .map_or_else(
-                || Command::RunPrompt {
-                    context: Some(sovra_core::ConversationContext::before_current_turn(
-                        &self.state.messages,
-                    )),
-                    session_id: session_id.clone(),
-                    prompt: prompt.to_owned(),
-                },
-                |message| Command::RunWithFiles {
-                    context: Some(sovra_core::ConversationContext::before_current_turn(
-                        &self.state.messages,
-                    )),
-                    session_id: session_id.clone(),
-                    prompt: prompt.to_owned(),
-                    attachment_ids: message
-                        .attachments
-                        .iter()
-                        .map(|file| file.id.clone())
-                        .collect(),
-                },
-            );
-        let _ = cx.global::<RuntimeClient>().0.send(command);
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(self.state.prompt_command(prompt));
     }
 }
 
@@ -1482,7 +1656,7 @@ impl Shell {
             .into_any_element(),
             ScreenRoute::MainWorkspace => {
                 let center = match self.state.active_tab {
-                    NavTab::Models | NavTab::Settings => div()
+                    NavTab::Models | NavTab::Settings | NavTab::Connections => div()
                         .flex_1()
                         .min_w_0()
                         .h_full()
@@ -1587,4 +1761,14 @@ pub(crate) fn logo(id: &'static str, size: gpui_kit::Rems) -> impl IntoElement {
         .size(size)
         .flex_shrink_0()
         .child(img(crate::assets::SOVRA_LOGO).size_full())
+}
+
+/// UI observations and relative history labels share the same wall-clock unit.
+pub(crate) fn wall_time() -> sovra_core::Timestamp {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| {
+            i64::try_from(time.as_millis()).unwrap_or(i64::MAX)
+        });
+    sovra_core::Timestamp(millis)
 }

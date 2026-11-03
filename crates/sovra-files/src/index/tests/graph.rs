@@ -128,6 +128,102 @@ fn setup() -> (Fixture, LocalFileIndex, IndexedRoot, GraphDraft) {
 }
 
 #[test]
+fn paging_continues_after_a_full_batch_of_temporally_filtered_relationships() {
+    let (_fixture, store, _, mut draft) = setup();
+    draft.relations[0].valid_time = Some(WorldValidity {
+        from: Some(1),
+        until: Some(10),
+    });
+    let old = store.propose(&draft, &origin()).unwrap();
+    store.decide(old.id, true).unwrap();
+    store
+        .connect()
+        .unwrap()
+        .execute("UPDATE index_knowledge_relations SET created=0", [])
+        .unwrap();
+    let base = RelationDraft {
+        valid_time: None,
+        ..draft.relations[0].clone()
+    };
+    for batch in 0..42 {
+        draft.relations = (0..24)
+            .map(|n| RelationDraft {
+                statement: format!("Undated relationship {batch}/{n}"),
+                ..base.clone()
+            })
+            .collect();
+        let mut origin = origin();
+        origin.invocation_id = format!("batch-{batch}");
+        let proposal = store.propose(&draft, &origin).unwrap();
+        store.decide(proposal.id, true).unwrap();
+    }
+    let mut query = GraphQuery {
+        valid_at: Some(5),
+        ..Default::default()
+    };
+    let first = store.query(&query).unwrap();
+    assert_eq!(first.relations.len(), 0);
+    assert!(first.truncated);
+    query.before = first.next;
+    assert!(query.before.is_some());
+    let second = store.query(&query).unwrap();
+    assert_eq!(second.relations.len(), 1);
+    assert_eq!(second.relations[0].proposal_id, old.id);
+    assert!(second.next.is_none());
+    assert!(!second.truncated);
+}
+
+#[test]
+fn saved_relationship_pages_cover_equal_timestamps_and_do_not_repeat_after_insertion() {
+    let (_fixture, store, root, mut draft) = setup();
+    for n in 0..7 {
+        draft.relations[0].statement = format!("Orchid relationship {n}");
+        let mut origin = origin();
+        origin.invocation_id = format!("paging-{n}");
+        let proposal = store.propose(&draft, &origin).unwrap();
+        store.decide(proposal.id, true).unwrap();
+    }
+    // Equal timestamps exercise the ID tie-breaker without relying on test speed.
+    store
+        .connect()
+        .unwrap()
+        .execute("UPDATE index_knowledge_relations SET created=1", [])
+        .unwrap();
+    let mut query = GraphQuery {
+        limit: 2,
+        ..Default::default()
+    };
+    let first = store.query(&query).unwrap();
+    assert_eq!(first.relations.len(), 2);
+    query.before = first.next;
+    assert!(query.before.is_some());
+    let mut ids: Vec<_> = first.relations.into_iter().map(|r| r.id).collect();
+    draft.relations[0].statement = "A newly inserted relationship".into();
+    let mut origin = origin();
+    origin.invocation_id = "insert-after-first-page".into();
+    let new = store.propose(&draft, &origin).unwrap();
+    store.decide(new.id, true).unwrap();
+    for _ in 0..5 {
+        let page = store.query(&query).unwrap();
+        ids.extend(page.relations.into_iter().map(|r| r.id));
+        query.before = page.next;
+        if query.before.is_none() {
+            break;
+        }
+    }
+    assert!(query.before.is_none());
+    assert_eq!(ids.len(), 7);
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 7);
+    store.remove(&root.id).unwrap();
+    assert_eq!(
+        store.query(&GraphQuery::default()).unwrap().relations.len(),
+        0
+    );
+}
+
+#[test]
 fn review_is_required_idempotent_and_does_not_upgrade_an_inference() {
     let (fixture, store, _, draft) = setup();
     let proposed = store.propose(&draft, &origin()).unwrap();

@@ -5,13 +5,19 @@
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _, button::ButtonVariants as _,
-    checkbox::Checkbox, h_flex, v_flex,
+    checkbox::Checkbox, h_flex, input::Input, v_flex,
 };
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
-use sovra_core::{BeliefPicture, BeliefStanding, MemoryExplanation, StoryStep, memory_explanation};
+use sovra_core::connections::{ChannelKind, ConnectionCommand};
+use sovra_core::people::Reach;
+use sovra_core::{
+    BeliefPicture, BeliefStanding, Command, MemoryExplanation, StoryStep, memory_explanation,
+};
+
+use crate::RuntimeClient;
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
@@ -21,6 +27,7 @@ pub(crate) enum KnowledgeSection {
     Files,
     #[default]
     Memories,
+    People,
     Help,
 }
 
@@ -38,6 +45,20 @@ impl Shell {
         self.knowledge_scroll.set_offset(gpui_kit::Point::default());
         cx.notify();
     }
+
+    /// Opens Knowledge on the people list. Tests use this when the sidebar rail covers the tab.
+    pub fn open_knowledge_people(&mut self, cx: &mut Context<Self>) {
+        self.select_tab(sovra_core::NavTab::Knowledge, cx);
+        self.select_knowledge_section(KnowledgeSection::People, cx);
+    }
+}
+
+fn send_people(command: ConnectionCommand, cx: &mut Context<Shell>) {
+    let _ = cx
+        .global::<RuntimeClient>()
+        .0
+        .send(Command::Connections(command));
+    cx.notify();
 }
 
 pub(crate) fn render_knowledge_view(
@@ -65,9 +86,15 @@ pub(crate) fn render_knowledge_view(
         .gap(t.space.medium);
     let column = match shell.knowledge_section {
         KnowledgeSection::Files => column.child(crate::file_index_view::render(shell, cx)),
-        KnowledgeSection::Memories => column
-            .child(render_memory_status(shell, cx))
-            .child(shell.memory_view.clone()),
+        KnowledgeSection::Memories => {
+            let column = if shell.memory_view.read(cx).reading_source() {
+                column
+            } else {
+                column.child(render_memory_status(shell, cx))
+            };
+            column.child(shell.memory_view.clone())
+        }
+        KnowledgeSection::People => column.child(render_people(shell, cx)),
         KnowledgeSection::Help => {
             let story = memory_explanation();
             let column = column
@@ -96,6 +123,7 @@ pub(crate) fn render_knowledge_view(
             "About you",
             KnowledgeSection::Memories,
         ),
+        ("knowledge-people", "People", KnowledgeSection::People),
         ("knowledge-files", "Files", KnowledgeSection::Files),
         ("knowledge-help", "Guide", KnowledgeSection::Help),
     ] {
@@ -140,6 +168,295 @@ pub(crate) fn render_knowledge_view(
                 .child(column),
         )
         .into_any_element()
+}
+
+const PEOPLE_INTRO: &str = "Everyone you can message, in one place. The same person can be on a phone number, WhatsApp, Telegram, and email.";
+const PEOPLE_SAFETY: &str = "Nothing is sent until you press Send.";
+const PEOPLE_JOIN: &str = "A shared first name does not make two people the same. Join two cards only when you know they are one person.";
+const PEOPLE_TELEGRAM: &str =
+    "Telegram only knows chats that have already written to your bot, or a chat you add here.";
+
+fn render_people(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let book = shell.workspace().connections.people.clone();
+    let mut list = v_flex()
+        .id("people-list")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.medium)
+        .child(
+            div()
+                .id("people-intro")
+                .test_support()
+                .aria_label(format!("People. {PEOPLE_INTRO}"))
+                .child(design::page_header("People", PEOPLE_INTRO, cx)),
+        )
+        .child(
+            div()
+                .id("people-join-hint")
+                .test_support()
+                .aria_label(PEOPLE_JOIN)
+                .sovra_text(TextRole::Caption, cx)
+                .child(PEOPLE_JOIN),
+        )
+        .child(
+            Input::new(&shell.people_message_input)
+                .id("people-message")
+                .aria_label("Write a message"),
+        )
+        .child(
+            div()
+                .id("people-safety")
+                .test_support()
+                .aria_label(PEOPLE_SAFETY)
+                .sovra_text(TextRole::Caption, cx)
+                .child(PEOPLE_SAFETY),
+        );
+    if book.people.is_empty() {
+        let note = book
+            .note
+            .clone()
+            .unwrap_or_else(|| sovra_core::EMPTY_PEOPLE_NOTE.to_owned());
+        list = list.child(
+            div()
+                .id("people-empty")
+                .test_support()
+                .aria_label(note.clone())
+                .sovra_text(TextRole::Body, cx)
+                .child(note),
+        );
+    } else {
+        for (index, person) in book.people.iter().enumerate() {
+            list = list.child(render_person(shell, person, index, &book, cx));
+        }
+        list = list.child(render_reach_editor(shell, &book, cx));
+    }
+    list
+}
+
+fn render_person(
+    shell: &Shell,
+    person: &sovra_core::Person,
+    index: usize,
+    book: &sovra_core::PeopleBook,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let channels = person.channel_labels();
+    let connected = reach_summary(person);
+    let summary = format!("{}. {connected}", person.title());
+    let selected = shell.people_selected.as_deref() == Some(person.id.as_str());
+    let person_id = person.id.clone();
+    let mut card = v_flex()
+        .id(("person-card", index))
+        .test_support()
+        .aria_label(summary)
+        .w_full()
+        .min_w_0()
+        .sovra_surface(
+            if selected {
+                Surface::Elevated
+            } else {
+                Surface::Matte
+            },
+            cx,
+        )
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .cursor_pointer()
+        .on_click(cx.listener(move |shell, _, _, cx| {
+            shell.people_selected = Some(person_id.clone());
+            cx.notify();
+        }))
+        .child(
+            div()
+                .min_w_0()
+                .sovra_text(TextRole::Body, cx)
+                .child(person.title()),
+        )
+        .child(
+            div()
+                .id(("person-channels", index))
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .aria_label(connected.clone())
+                .sovra_text(TextRole::Caption, cx)
+                .child(connected),
+        );
+    let mut actions = h_flex().w_full().min_w_0().flex_wrap().gap(t.space.small);
+    if channels.contains(&"WhatsApp") {
+        let person_id = person.id.clone();
+        actions = actions.child(
+            design::primary_button(("person-prepare", index), "Message on WhatsApp", cx)
+                .accessibility_label("Message on WhatsApp")
+                .on_click(cx.listener(move |shell, _, _, cx| {
+                    let text = shell.people_message_input.read(cx).value().to_string();
+                    shell.people_open_review = Some(text.clone());
+                    let session_id = shell.workspace().session_id.clone();
+                    send_people(
+                        ConnectionCommand::PrepareMessage {
+                            session_id,
+                            channel: ChannelKind::WhatsApp,
+                            recipient: format!("person:{person_id}"),
+                            text,
+                        },
+                        cx,
+                    );
+                })),
+        );
+    }
+    if let Some(other_id) = shell.people_selected.clone().filter(|id| id != &person.id) {
+        let other_title = book
+            .people
+            .iter()
+            .find(|other| other.id == other_id)
+            .map_or_else(|| "that person".to_owned(), sovra_core::Person::title);
+        let keep = other_id;
+        let merge = person.id.clone();
+        let label = format!("Same person as {other_title}");
+        actions = actions.child(
+            design::button(("person-link", index), label.clone(), cx)
+                .accessibility_label(label)
+                .on_click(cx.listener(move |_shell, _, _, cx| {
+                    send_people(
+                        ConnectionCommand::LinkPeople {
+                            keep: keep.clone(),
+                            merge: merge.clone(),
+                        },
+                        cx,
+                    );
+                })),
+        );
+    }
+    card = card.child(actions);
+    card
+}
+
+fn render_reach_editor(
+    shell: &Shell,
+    book: &sovra_core::PeopleBook,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let chosen = shell.people_selected.as_ref().and_then(|id| {
+        book.people
+            .iter()
+            .find(|person| person.id == *id)
+            .map(sovra_core::Person::title)
+    });
+    let prompt = chosen.map_or_else(
+        || "Choose a person to add an email or a Telegram chat.".to_owned(),
+        |name| format!("Add a way to reach {name}."),
+    );
+    let ready = shell.people_selected.is_some();
+    v_flex()
+        .id("people-reach")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.small)
+        .child(
+            div()
+                .id("people-reach-prompt")
+                .test_support()
+                .aria_label(prompt.clone())
+                .sovra_text(TextRole::Body, cx)
+                .child(prompt),
+        )
+        .child(
+            div()
+                .id("people-telegram-note")
+                .test_support()
+                .aria_label(PEOPLE_TELEGRAM)
+                .sovra_text(TextRole::Caption, cx)
+                .child(PEOPLE_TELEGRAM),
+        )
+        .child(
+            Input::new(&shell.people_email_input)
+                .id("people-email")
+                .aria_label("Email address"),
+        )
+        .child(
+            design::button("people-add-email", "Add email", cx)
+                .disabled(!ready)
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    let Some(person_id) = shell.people_selected.clone() else {
+                        return;
+                    };
+                    let value = shell.people_email_input.read(cx).value().to_string();
+                    send_people(
+                        ConnectionCommand::AttachHandle {
+                            person_id,
+                            reach: Reach::Email,
+                            value,
+                        },
+                        cx,
+                    );
+                })),
+        )
+        .child(
+            Input::new(&shell.people_telegram_input)
+                .id("people-telegram")
+                .aria_label("Telegram chat you already know"),
+        )
+        .child(
+            design::button("people-add-telegram", "Add Telegram chat", cx)
+                .disabled(!ready)
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    let Some(person_id) = shell.people_selected.clone() else {
+                        return;
+                    };
+                    let value = shell.people_telegram_input.read(cx).value().to_string();
+                    send_people(
+                        ConnectionCommand::AttachHandle {
+                            person_id,
+                            reach: Reach::Telegram,
+                            value,
+                        },
+                        cx,
+                    );
+                })),
+        )
+}
+
+fn reach_summary(person: &sovra_core::Person) -> String {
+    let mut parts = Vec::new();
+    for reach in [Reach::Phone, Reach::WhatsApp, Reach::Telegram, Reach::Email] {
+        for handle in person.handles.iter().filter(|handle| handle.reach == reach) {
+            parts.push(format!("{} {}", reach.label(), handle.label));
+        }
+    }
+    let refs: Vec<&str> = parts.iter().map(String::as_str).collect();
+    let summary = english_list(&refs);
+    if summary.is_empty() {
+        "No phone, WhatsApp, Telegram, or email saved yet.".to_owned()
+    } else {
+        format!("{summary}.")
+    }
+}
+
+fn english_list(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [first, second] => format!("{first} and {second}"),
+        [first, rest @ ..] => {
+            let mut text = (*first).to_owned();
+            let Some((last, middle)) = rest.split_last() else {
+                return text;
+            };
+            for item in middle {
+                text.push_str(", ");
+                text.push_str(item);
+            }
+            text.push_str(", and ");
+            text.push_str(last);
+            text
+        }
+    }
 }
 
 fn render_memory_status(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {

@@ -99,14 +99,14 @@ impl Shell {
             SkillAction::Agents => self.select_tab(NavTab::MyAis, cx),
             SkillAction::TeamChat => self.ask_team(None, window, cx),
             SkillAction::Artifacts => self.select_tab(NavTab::Artifacts, cx),
-            SkillAction::Connections => {
-                self.select_tab(NavTab::Settings, cx);
-                self.models().update(cx, |models, cx| {
-                    models.send_connection(
-                        sovra_core::connections::ConnectionCommand::StartWhatsAppPairing,
-                        cx,
-                    );
-                });
+            SkillAction::Connections => self.select_tab(NavTab::Connections, cx),
+            SkillAction::ConnectService => {
+                self.present_connections(
+                    Some(sovra_core::CatalogueKind::WebAddress),
+                    false,
+                    window,
+                    cx,
+                );
             }
             SkillAction::Settings => self.select_tab(NavTab::Settings, cx),
         }

@@ -11,8 +11,9 @@ async, Velopack for install + auto-update. Rust 1.99.1 (pinned), edition 2024.
 
 | Task                    | Command                     |
 | ----------------------- | --------------------------- |
-| Persistent dev + logs   | `cargo xtask dev` (keep running in `sovra:sovraRust`; inspect before starting) |
-| One-off app launch      | `cargo xtask run` (outside the persistent dev workflow) |
+| Manual debug launch     | `cargo xtask dev` (one-shot build + launch with `SOVRA_DEV=1`; re-run yourself to reload) |
+| One-off app launch      | `cargo xtask run` (debug build without `SOVRA_DEV`) |
+| Clear build cache       | `just clear-cache` (or `cargo xtask clean-cache reclaim`; only when no `dev` session is running; see `docs/development.md`) |
 | Every gate (must pass)  | `cargo xtask ci`            |
 | Auto-fix fmt + clippy   | `cargo xtask fix`           |
 | Layering check only     | `cargo xtask check-deps`    |
@@ -29,42 +30,36 @@ if it fails, say so and show the output.
 - **Gitmoji commits:** Every commit message must start with a relevant gitmoji (e.g. `✨ feat(routing): …`, `🐛 fix(ui): …`, `📝 docs: …`).
 - **Mandatory `CHANGELOG.md` update:** Every commit that adds, changes, fixes, or removes functionality **must** update `CHANGELOG.md` under `## [Unreleased]` as part of the commit, and keep `README.md` in sync when user-facing capabilities or workflows change. Never push a commit to `main` without updating `CHANGELOG.md`.
 
-## Persistent development session (all agents)
+## Manual development launch (all agents)
 
-- The normal dev runner stays in the `sovra` tmux session, window **`sovraRust`**.
-  `cargo xtask dev` watches source/assets and automatically rebuilds and relaunches
-  the native app on save. This is restart-based live reload, not in-process Rust
-  hot swapping; in-memory UI/runtime state resets. See `docs/development.md`.
-- **Leave the watcher running.** Ordinary edits, checks and task completion do not
-  require stopping/restarting it. Do not send Ctrl-C, kill the app, start another
-  `cargo xtask run`, respawn the pane, or create a competing watcher just to see changes.
-- Never replace this pane's watcher with a direct `target/.../sovra` binary, including
-  a binary built in an agent-specific target directory. That disables automatic
-  rebuilds and can leave the user viewing stale code. A running app alone is not
-  evidence of live reload: confirm that `xtask dev` and Watchexec supervise it.
-- Inspect existing status and logs first:
-  `tmux list-panes -t sovra:sovraRust -F '#{pane_id} #{pane_current_command} #{pane_dead}'`
-  and `tmux capture-pane -p -t sovra:sovraRust -S -100`.
-  Build output, restart events and application tracing all stream in that pane.
-- A lock file is not proof of a live watcher. Verify the pane/process tree. If the
-  watcher is genuinely absent, start **one** `cargo xtask dev` in the existing idle
-  repo pane; never interrupt unrelated work. An OS-held lock rejects duplicates.
-- Keep `target/`, logs and generated artifacts out of the watch inputs. Do not
-  clear Cargo's target directory while the watcher owns its lock. Build errors
-  stay visible; fix and save, and the watcher retries without manual intervention.
-- Only change/restart the supervisor itself when its setup requires it or the user
-  explicitly requests it. No launch-on-login service or production auto-restart is
-  implied by this development workflow.
+- **No hot reload / file watcher.** `cargo xtask dev` is a **one-shot** debug
+  build + launch with `SOVRA_DEV=1`. Saving source does **not** rebuild or
+  relaunch the app. The human (or an agent when asked) reloads by running
+  `cargo xtask dev` again. See `docs/development.md`.
+- Do **not** start Watchexec, `cargo watch`, or any auto-rebuild loop for this
+  app. Do not invent a competing live-reload workflow.
+- Prefer `cargo xtask dev` over launching `target/.../sovra` directly when you
+  need the development credential store and Development-mode startup policy.
+- An OS-held lock at `target/dev/watch.lock` rejects a second concurrent
+  `cargo xtask dev`. Stop the running session before starting another, and
+  before `just clear-cache` / `cargo xtask clean-cache reclaim`.
+- Inspect logs from the terminal where `dev` was started (or tmux scrollback if
+  that is where it was launched). Build errors stay visible there until the next
+  manual `dev` run.
 
 ## Development MCP verification (all agents)
 
 - For new or changed user-facing behavior, test the running native app through
-  **Development mode** after the watcher rebuilds. Setup and tool contract:
-  [`docs/development-mcp.md`](docs/development-mcp.md).
-- Enable it in **Settings → Development mode**. The explicit top-bar indicator
+  **Development mode** after a manual `cargo xtask dev` launch. Setup and tool
+  contract: [`docs/development-mcp.md`](docs/development-mcp.md).
+- User-approved startup policy: **`cargo xtask dev` starts Development mode on**
+  only in debug builds with `SOVRA_DEV=1`. Ordinary binaries and every release/
+  packaged build **start it off**, even if a previous development run saved it on.
+  Never ship automatic development access. Settings can revoke it during a run;
+  the next `cargo xtask dev` starts it on again. The explicit top-bar indicator
   must remain visible while enabled. Attach the copied command as a stdio MCP
   server to Codex, Claude Code, or another MCP client. Do not start another GUI
-  or watcher. The MCP bridge must not enable its own access.
+  or a file watcher. The MCP bridge must not enable its own access.
 - Inspect before acting, use current observed target IDs and real controls,
   then inspect/capture the result. Wait for actual completion with a bounded
   deadline; an accepted input is not proof a feature works. After a timeout or
@@ -77,9 +72,10 @@ if it fails, say so and show the output.
 - Keep meaningful headless and runtime regressions; MCP testing complements them.
   `cargo xtask ci` remains mandatory. If live verification is unavailable, report
   the exact unavailable operation and the coverage gap; do not claim it passed.
-- Development mode is separate from `SOVRA_DEV=1`; never weaken release keychain
-  storage or commit the endpoint descriptor, credentials, screenshots of secrets,
-  or machine-specific MCP configuration.
+- Development control authentication remains separate from credential storage;
+  the `cargo xtask dev` startup default does not weaken release keychain storage
+  or commit the endpoint descriptor, credentials, screenshots of secrets, or
+  machine-specific MCP configuration.
 
 ## Architecture (machine-enforced)
 

@@ -1,17 +1,17 @@
 # SovraHarness command runner (delegates to `cargo xtask`).
 
-# Watch files, rebuild/relaunch the app, and stream logs (ensures watchexec is installed)
+# One-shot debug build + launch (re-run yourself to reload; no auto-reload)
 default: dev
 
-# Install pinned CI tools and the Watchexec development runner
+# Install pinned CI tools (deny, nextest, shear)
 setup:
-    @if ! watchexec -V 2>/dev/null | grep -qx "watchexec 2.7.2"; then cargo xtask setup; fi
+    cargo xtask setup
 
-# Watch files, rebuild/relaunch the app, and stream logs
-dev: setup
+# One-shot debug build + launch with SOVRA_DEV=1
+dev:
     cargo xtask dev
 
-# Run the desktop app (debug build)
+# Run the desktop app (debug build, without SOVRA_DEV)
 run:
     cargo xtask run
 
@@ -30,6 +30,14 @@ check-deps:
 # Enforce UI colour boundary and single SVG brand asset
 check-styles:
     cargo xtask check-styles
+
+# Report Cargo target disk use (passthrough: status / reclaim / flags)
+clean-cache *args:
+    cargo xtask clean-cache {{args}}
+
+# Clear reclaimable Cargo build caches (refuses while cargo xtask dev holds the lock)
+clear-cache *args:
+    cargo xtask clean-cache reclaim {{args}}
 
 # Release build + Velopack packaging
 dist:

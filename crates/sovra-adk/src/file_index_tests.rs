@@ -79,6 +79,7 @@ impl IndexedFiles for Reader {
             relations: vec![],
             sources: vec![],
             truncated: false,
+            next: None,
         })
     }
     async fn history(&self, query: FileHistoryQuery) -> Result<FileHistory, IndexError> {

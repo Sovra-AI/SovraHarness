@@ -9,6 +9,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
+use sovra_core::connection_catalogue::{
+    CatalogueKind, LinkPhase, LinkProbe, PROBE_BOUND, ProbeReport,
+};
 use sovra_core::connections::{
     ANSWER_FAILED_REPLY, BridgedMessage, ChannelError, ChannelEvent, ChannelKind, ChannelSession,
     ChannelSink, ChannelStartOptions, ConnectionCommand, ConnectionEvent, ConnectionsState,
@@ -34,6 +37,43 @@ enum Input {
         request: sovra_core::communications::MessagingRequest,
         reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, ChannelError>>,
     },
+    ProbeDone {
+        generation: u64,
+        report: ProbeReport,
+    },
+    /// A background contact pull finished. A stale generation is ignored.
+    ContactsPulled {
+        generation: u64,
+        pulled: Result<Vec<sovra_core::people::SyncedContact>, ChannelError>,
+    },
+}
+
+/// A saved messaging link, checked on its own during a catalogue refresh.
+struct SavedLinkProbe {
+    kind: CatalogueKind,
+    channel: Arc<dyn MessagingChannel>,
+}
+
+#[async_trait::async_trait]
+impl LinkProbe for SavedLinkProbe {
+    fn kind(&self) -> CatalogueKind {
+        self.kind
+    }
+
+    async fn probe(&self) -> Option<ProbeReport> {
+        // The trait default, and any adapter that did not reach the service,
+        // returns Ok(false). Reporting that as Linked would replace a live
+        // "working on it" or "needs you" row until the next status event.
+        let phase = match self.channel.check().await {
+            Ok(false) => return None,
+            Ok(true) => LinkPhase::Linked,
+            Err(_) => LinkPhase::NeedsYou,
+        };
+        Some(ProbeReport {
+            kind: self.kind,
+            phase,
+        })
+    }
 }
 
 /// The adapters the composition root supplies; any may be missing in a build.
@@ -59,6 +99,7 @@ impl ConnectionsRuntime {
         events: Sender<Event>,
         commands: Sender<Command>,
         handle: &tokio::runtime::Handle,
+        probes: Vec<Arc<dyn LinkProbe>>,
     ) -> Self {
         let messaging_available = channels.whatsapp.is_some() || channels.telegram.is_some();
         let (inbox, rx) = async_channel::unbounded();
@@ -69,6 +110,7 @@ impl ConnectionsRuntime {
             events,
             commands,
             handle: handle.clone(),
+            inbox: inbox.downgrade(),
             state: ConnectionsState::default(),
             whatsapp: Link::new(ChannelKind::WhatsApp, channels.whatsapp, &inbox),
             telegram: Link::new(ChannelKind::Telegram, channels.telegram, &inbox),
@@ -76,6 +118,11 @@ impl ConnectionsRuntime {
             telegram_code: String::new(),
             replies: BTreeMap::new(),
             messaging: messaging::MessagingState::default(),
+            probes,
+            refresh_generation: 0,
+            refresh_tasks: Vec::new(),
+            contact_generation: 0,
+            contact_task: None,
         };
         drop(handle.spawn(actor.run(rx)));
         Self {
@@ -247,13 +294,27 @@ struct Actor {
     replies: BTreeMap<String, PendingReply>,
     messaging: messaging::MessagingState,
     owner_sessions: Arc<std::sync::RwLock<std::collections::BTreeSet<String>>>,
+    // A strong self-sender would prevent shutdown from closing the actor.
+    inbox: async_channel::WeakSender<Input>,
+    probes: Vec<Arc<dyn LinkProbe>>,
+    refresh_generation: u64,
+    refresh_tasks: Vec<tokio::task::AbortHandle>,
+    /// Bumped when a contact pull is replaced or cancelled, so a late result is dropped.
+    contact_generation: u64,
+    contact_task: Option<tokio::task::AbortHandle>,
 }
 
 impl Actor {
     async fn run(mut self, inbox: Receiver<Input>) {
         loop {
             let input = tokio::select! {
-                input = inbox.recv() => match input { Ok(input) => input, Err(_) => break },
+                input = inbox.recv() => {
+                    let Ok(input) = input else {
+                        self.stop_contact_pull();
+                        break;
+                    };
+                    input
+                },
                 result = self.messaging.sends.join_next(), if !self.messaging.sends.is_empty() => {
                     if let Some(Ok((id, result))) = result { self.sent_message(&id, result).await; }
                     continue;
@@ -280,10 +341,88 @@ impl Actor {
                         let _ = reply.send(result);
                     }
                 }
+                Input::ContactsPulled { generation, pulled } => {
+                    if generation == self.contact_generation {
+                        match pulled {
+                            Ok(contacts) if contacts.is_empty() => {
+                                if self.state.people.people.is_empty() {
+                                    self.state.people.note_empty_sync();
+                                    self.publish_people().await;
+                                }
+                            }
+                            Ok(contacts) => self.fold_contacts(contacts).await,
+                            Err(_) => {
+                                self.state.people.note_pull_failed();
+                                self.publish_people().await;
+                            }
+                        }
+                    }
+                }
+                Input::ProbeDone { generation, report } => {
+                    if generation == self.refresh_generation {
+                        self.emit(ConnectionEvent::KindProbed(report)).await;
+                    }
+                }
             }
         }
+        self.stop_refresh();
         self.whatsapp.stop().await;
         self.telegram.stop().await;
+    }
+
+    /// Drop every probe from the current refresh. A result that already landed stays.
+    fn stop_refresh(&mut self) {
+        for task in self.refresh_tasks.drain(..) {
+            task.abort();
+        }
+        self.refresh_generation = self.refresh_generation.wrapping_add(1);
+    }
+
+    /// Probe installed links together, at most [`PROBE_BOUND`] at once.
+    ///
+    /// Each probe is its own task, so a stalled link cannot delay another. Aborting
+    /// the tasks drops their futures, which is what cancels an in-flight check.
+    fn begin_refresh(&mut self) {
+        self.stop_refresh();
+        let generation = self.refresh_generation;
+        let bound = Arc::new(tokio::sync::Semaphore::new(PROBE_BOUND));
+        for probe in self.installed_probes() {
+            let bound = Arc::clone(&bound);
+            let inbox = self.inbox.clone();
+            let task = self.handle.spawn(async move {
+                let Ok(_permit) = bound.acquire_owned().await else {
+                    return;
+                };
+                let Some(report) = probe.probe().await else {
+                    return;
+                };
+                if let Some(inbox) = inbox.upgrade() {
+                    let _ = inbox.try_send(Input::ProbeDone { generation, report });
+                }
+            });
+            self.refresh_tasks.push(task.abort_handle());
+        }
+    }
+
+    fn installed_probes(&self) -> Vec<Arc<dyn LinkProbe>> {
+        let mut probes = self.probes.clone();
+        if let Some(channel) = self.whatsapp.channel.clone()
+            && channel.has_saved_link()
+        {
+            probes.push(Arc::new(SavedLinkProbe {
+                kind: CatalogueKind::WhatsApp,
+                channel,
+            }));
+        }
+        if let Some(channel) = self.telegram.channel.clone()
+            && channel.has_saved_link()
+        {
+            probes.push(Arc::new(SavedLinkProbe {
+                kind: CatalogueKind::Telegram,
+                channel,
+            }));
+        }
+        probes
     }
 
     fn link(&mut self, kind: ChannelKind) -> &mut Link {
@@ -420,7 +559,39 @@ impl Actor {
                 self.emit(ConnectionEvent::SettingsUpdated(settings)).await;
                 self.save().await;
             }
+            ConnectionCommand::PrepareMessage {
+                session_id,
+                channel,
+                recipient,
+                text,
+            } => {
+                if let Err(error) = self
+                    .prepare_message(&session_id, 0, channel, &recipient, text)
+                    .await
+                {
+                    self.emit(ConnectionEvent::Notice(error.to_string())).await;
+                }
+            }
+            ConnectionCommand::AttachHandle {
+                person_id,
+                reach,
+                value,
+            } => match self.state.people.attach(&person_id, reach, &value) {
+                Ok(_) => self.publish_people().await,
+                Err(message) => self.emit(ConnectionEvent::Notice(message)).await,
+            },
+            ConnectionCommand::LinkPeople { keep, merge } => {
+                if self.state.people.link_people(&keep, &merge).is_some() {
+                    self.publish_people().await;
+                } else {
+                    self.emit(ConnectionEvent::Notice(
+                        "Choose two different saved people to join.".into(),
+                    ))
+                    .await;
+                }
+            }
             ConnectionCommand::DisconnectWhatsApp => {
+                self.stop_contact_pull();
                 self.whatsapp.logout().await;
                 self.whatsapp.forget();
                 self.replies
@@ -442,6 +613,8 @@ impl Actor {
                     .await;
                 self.save().await;
             }
+            ConnectionCommand::Refresh => self.begin_refresh(),
+            ConnectionCommand::CancelRefresh => self.stop_refresh(),
             ConnectionCommand::DisconnectTelegram => {
                 self.telegram.logout().await;
                 self.telegram.forget();
@@ -578,8 +751,10 @@ impl Actor {
                     .await;
                 }
                 self.save().await;
+                self.begin_contact_pull();
             }
             ChannelEvent::Offline { reason } => {
+                self.stop_contact_pull();
                 tracing::info!(%reason, "whatsapp link offline");
                 if let WhatsAppStatus::Connected { device, .. } = &self.state.whatsapp {
                     let device = device.clone();
@@ -592,6 +767,7 @@ impl Actor {
             }
             ChannelEvent::LoggedOut { reason } => {
                 tracing::info!(%reason, "whatsapp link removed");
+                self.stop_contact_pull();
                 self.whatsapp.stop().await;
                 self.whatsapp.forget();
                 self.replies
@@ -605,6 +781,7 @@ impl Actor {
             }
             ChannelEvent::Failed { message } => {
                 tracing::warn!(%message, "whatsapp link failed");
+                self.stop_contact_pull();
                 self.whatsapp.stop().await;
                 if self.state.whatsapp.is_linked() {
                     self.emit(ConnectionEvent::Notice(message)).await;
@@ -613,6 +790,7 @@ impl Actor {
                 }
             }
             ChannelEvent::Message(message) => self.whatsapp_message(message).await,
+            ChannelEvent::Contacts(contacts) => self.fold_contacts(contacts).await,
         }
     }
 
@@ -641,12 +819,14 @@ impl Actor {
     }
 
     async fn telegram_event(&mut self, event: ChannelEvent) {
+        // Telegram has no address book, so a contact event must not invent chats.
         match event {
             ChannelEvent::Connecting
             | ChannelEvent::QrCode { .. }
             | ChannelEvent::PairingCode { .. }
             | ChannelEvent::PairingCodeFailed { .. }
-            | ChannelEvent::Scanned { .. } => {}
+            | ChannelEvent::Scanned { .. }
+            | ChannelEvent::Contacts(_) => {}
             ChannelEvent::Connected { device } => {
                 let bot_username = device.phone_display.trim_start_matches('@').to_owned();
                 let status = match &self.state.telegram {
@@ -947,6 +1127,49 @@ impl Actor {
         let event = ConnectionEvent::TelegramStatusChanged(status);
         self.state.apply(&event);
         self.emit(event).await;
+    }
+
+    /// Replace any in-flight contact pull. The actor keeps serving other links.
+    fn begin_contact_pull(&mut self) {
+        self.stop_contact_pull();
+        let Some(channel) = self.whatsapp.channel.clone() else {
+            return;
+        };
+        let generation = self.contact_generation;
+        let inbox = self.inbox.clone();
+        let task = self.handle.spawn(async move {
+            let pulled = channel.pull_contacts().await;
+            if let Some(inbox) = inbox.upgrade() {
+                let _ = inbox.try_send(Input::ContactsPulled { generation, pulled });
+            }
+        });
+        self.contact_task = Some(task.abort_handle());
+    }
+
+    fn stop_contact_pull(&mut self) {
+        if let Some(task) = self.contact_task.take() {
+            task.abort();
+        }
+        self.contact_generation = self.contact_generation.wrapping_add(1);
+    }
+
+    async fn fold_contacts(&mut self, contacts: Vec<sovra_core::people::SyncedContact>) {
+        if contacts.is_empty() {
+            return;
+        }
+        let before = self.state.people.clone();
+        for contact in &contacts {
+            self.state.people.apply_synced(contact);
+        }
+        if self.state.people != before {
+            self.publish_people().await;
+        }
+    }
+
+    async fn publish_people(&mut self) {
+        self.emit(ConnectionEvent::PeopleChanged(self.state.people.clone()))
+            .await;
+        self.save().await;
     }
 
     async fn emit(&self, event: ConnectionEvent) {

@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::Timestamp;
 use crate::connections::{ChannelError, ChannelKind, ConnectionsState};
+use crate::people::NameMatch;
 
 pub const MAX_MESSAGE_CHARS: usize = 4096;
 pub const MAX_OUTBOUND_MESSAGES: usize = 40;
@@ -30,6 +31,10 @@ pub enum MessagingRequest {
     },
     Receipt {
         id: String,
+    },
+    /// A saved-person lookup. An empty query does not return the whole list.
+    FindPeople {
+        query: String,
     },
 }
 
@@ -116,8 +121,9 @@ pub fn validate_message(text: &str) -> Result<(), ChannelError> {
     Ok(())
 }
 
-/// Accept `self`, an exact observed direct-chat id, or an explicit international
-/// `WhatsApp` phone number. A name is never silently resolved to the first match.
+/// Accept `self`, an exact observed direct-chat id, an explicit international
+/// `WhatsApp` phone number, or one saved person. A name that matches more than
+/// one person is never resolved to the first.
 pub fn resolve_recipient(
     state: &ConnectionsState,
     channel: ChannelKind,
@@ -144,9 +150,19 @@ pub fn resolve_recipient(
             return Ok((format!("{digits}@s.whatsapp.net"), format!("+{digits}")));
         }
     }
-    Err(ChannelError::Failed(
-        "Choose 'me' or an exact chat id from recent chats. For WhatsApp you may also give a phone number starting with + and its country code. Ask the person when the recipient is unclear. Telegram recipients must have contacted this bot first.".into(),
-    ))
+    if let Some(person_id) = input.strip_prefix("person:") {
+        return state.people.messaging_address(person_id, channel);
+    }
+    match state.people.resolve_name(input) {
+        NameMatch::One(person_id) => state.people.messaging_address(&person_id, channel),
+        NameMatch::Many => Err(ChannelError::Failed(
+            "More than one saved person matches that name. Say the full name instead of guessing."
+                .into(),
+        )),
+        NameMatch::None => Err(ChannelError::Failed(
+            "Choose 'me' or an exact chat id from recent chats. For WhatsApp you may also give a phone number starting with + and its country code, or the full name of one saved person. Ask when more than one person matches. Telegram recipients must have contacted this bot first, unless you add that chat on the person.".into(),
+        )),
+    }
 }
 
 fn direct_chat(channel: ChannelKind, chat: &str) -> bool {

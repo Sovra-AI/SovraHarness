@@ -136,6 +136,7 @@ fn instructions_include_protocols_only_where_they_apply() {
     assert!(lead.contains(CONDUCTOR_TAIL));
     assert!(!lead.contains("# ADD OR SKIP"));
     let history = vec![TranscriptLine {
+        source: None,
         speaker: "User".into(),
         text: "Hi".into(),
     }];
@@ -175,6 +176,7 @@ fn team_prompt_preserves_the_current_request_while_bounding_earlier_text() {
         "茶".repeat(9000)
     );
     let history = vec![TranscriptLine {
+        source: None,
         speaker: "User".into(),
         text: "Old context".repeat(10000),
     }];

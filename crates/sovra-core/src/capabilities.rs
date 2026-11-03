@@ -83,6 +83,10 @@ pub fn required_capabilities(specialist_id: &str) -> &'static [Capability] {
 
 /// Specialists the orchestrator may call: every requirement met, never itself.
 /// Keeps roster order so the catalogue the model reads is stable.
+///
+/// `DeepResearchAgent` is never a solo `AgentTool` delegate — deep research always
+/// runs through the parallel in-chat board + Document path (`/deep-research` /
+/// skill tools), not as a web-search child that dumps prose.
 pub fn available_specialists<'a>(
     roster: &'a [SpecialistAgentSpec],
     available: &BTreeSet<Capability>,
@@ -90,6 +94,7 @@ pub fn available_specialists<'a>(
     roster
         .iter()
         .filter(|spec| spec.id != ORCHESTRATOR_AGENT_ID)
+        .filter(|spec| spec.id != crate::research::DEEP_RESEARCH_AGENT_ID)
         .filter(|spec| {
             required_capabilities(&spec.id)
                 .iter()
@@ -148,15 +153,50 @@ mod tests {
         let web_ids = ids(&web);
         for specialist in [
             "WebSearchAgent",
-            "DeepResearchAgent",
             "StockMarketAgent",
             "HousingMarketAgent",
             "ScholarAgent",
         ] {
             assert!(web_ids.contains(&specialist), "{specialist} missing");
         }
-        assert_eq!(web.len(), none + 5);
+        // Deep research is web-backed in required_capabilities but never offered
+        // as a solo orchestrator AgentTool — dedicated board path owns it.
+        assert!(!web_ids.contains(&crate::research::DEEP_RESEARCH_AGENT_ID));
+        assert_eq!(web.len(), none + 4);
         assert!(!web_ids.contains(&"GitHubAgent"));
+    }
+
+    #[test]
+    fn deep_research_is_never_an_orchestrator_agent_tool() {
+        let roster = default_sovra_srx_agents();
+        assert!(
+            roster
+                .iter()
+                .any(|spec| spec.id == crate::research::DEEP_RESEARCH_AGENT_ID),
+            "roster still lists DeepResearchAgent for Skills / My AIs"
+        );
+        let every: BTreeSet<Capability> = [
+            Capability::WebSearch,
+            Capability::ImageSearch,
+            Capability::ImageGeneration,
+            Capability::CodeExecution,
+            Capability::AttachedFiles,
+            Capability::Projects,
+            Capability::Schedules,
+            Capability::Todos,
+            Capability::GoogleWorkspace,
+            Capability::Messaging,
+            Capability::MicrosoftWorkspace,
+            Capability::GitHub,
+        ]
+        .into();
+        let offered = available_specialists(&roster, &every);
+        assert!(
+            offered
+                .iter()
+                .all(|spec| spec.id != crate::research::DEEP_RESEARCH_AGENT_ID),
+            "DeepResearchAgent must not be a solo AgentTool delegate"
+        );
     }
 
     #[test]
@@ -178,7 +218,8 @@ mod tests {
         ]
         .into();
         let offered = available_specialists(&roster, &every);
-        assert_eq!(offered.len(), roster.len() - 1);
+        // Orchestrator itself + DeepResearchAgent (dedicated path) are excluded.
+        assert_eq!(offered.len(), roster.len() - 2);
         assert!(offered.iter().all(|spec| spec.id != ORCHESTRATOR_AGENT_ID));
     }
 

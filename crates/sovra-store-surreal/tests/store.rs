@@ -24,6 +24,13 @@ mod growth;
 #[path = "store/profile.rs"]
 mod profile;
 
+#[path = "store/removal.rs"]
+mod removal;
+
+#[cfg(test)]
+#[path = "store/reply_dependencies.rs"]
+mod reply_dependencies;
+
 #[tokio::test]
 async fn memory_browsing_pages_without_duplicates_and_filters_before_limiting() {
     use sovra_core::MemoryListQuery;
@@ -1292,30 +1299,26 @@ async fn repeated_evidence_does_not_duplicate_or_reactivate_a_stopped_memory() {
 }
 
 #[tokio::test]
-async fn queue_limit_rejects_new_work_without_leaving_an_episode() {
+async fn durable_queue_keeps_evidence_beyond_the_old_capacity() {
     let store = open_store().await;
-    for index in 0..sovra_core::MAX_PENDING_MEMORIES {
+    for index in 0..=sovra_core::MAX_PENDING_MEMORIES {
         store
             .enqueue_memory(memory_input("s1", &format!("m{index}")))
             .await
             .unwrap();
     }
-    assert!(
-        store
-            .enqueue_memory(memory_input("overflow", "m1"))
-            .await
-            .is_err()
-    );
-    assert_eq!(
-        store.recent_episodes("overflow", 10).await.unwrap(),
-        Vec::new()
-    );
-    store.set_memory_enabled(false).await.unwrap();
-    store.set_memory_enabled(true).await.unwrap();
-    store
+    let id = store
         .enqueue_memory(memory_input("overflow", "m1"))
         .await
         .unwrap();
+    assert_eq!(
+        store.memory_job(&id).await.unwrap().state,
+        sovra_core::MemoryJobState::Pending
+    );
+    assert_eq!(
+        store.recent_episodes("overflow", 10).await.unwrap().len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -1438,4 +1441,526 @@ async fn recall_applies_valid_and_known_times_before_limiting() {
     query.known_at = None;
     query.valid_at = Some(Timestamp(50));
     assert_eq!(store.recall(query).await.unwrap(), Vec::new());
+}
+
+#[tokio::test]
+async fn long_sources_resume_chunks_and_reject_stale_fact_revisions() {
+    let store = open_store().await;
+    let mut input = memory_input("chunks", "dense");
+    input.episode.content = "I like tea. ".repeat(400);
+    let id = store.enqueue_memory(input).await.unwrap();
+    let mut first = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    assert_eq!(first.cursor, 0);
+    assert!(first.chunk().unwrap().content.len() <= sovra_core::MEMORY_CHUNK_BYTES);
+    store
+        .remember_note(sovra_core::MemoryNote {
+            text: "A manual correction arrived".into(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        store
+            .complete_memory(&first, vec![], "fixture", Timestamp(2_001))
+            .await
+            .is_err()
+    );
+    first.revision = store.memory_revision().await.unwrap();
+    store
+        .complete_memory(&first, vec![], "fixture", Timestamp(2_002))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.memory_job(&id).await.unwrap().state,
+        sovra_core::MemoryJobState::Pending
+    );
+    let second = store.claim_memory(Timestamp(2_003)).await.unwrap().unwrap();
+    assert_eq!(second.cursor, first.chunk().unwrap().content.len());
+    assert_eq!(second.attempt, 1);
+    assert_eq!(second.episode.id, id);
+}
+
+#[tokio::test]
+async fn sources_in_one_conversation_are_claimed_in_order() {
+    let store = open_store().await;
+    for (session, key) in [
+        ("ordered", "one"),
+        ("ordered", "two"),
+        ("independent", "three"),
+    ] {
+        store
+            .enqueue_memory(memory_input(session, key))
+            .await
+            .unwrap();
+    }
+    let first = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    let second = store.claim_memory(Timestamp(2_001)).await.unwrap().unwrap();
+    assert_ne!(first.episode.session_id, second.episode.session_id);
+    assert!(
+        store
+            .claim_memory(Timestamp(2_002))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn attributed_admission_keeps_assistant_evidence_out_of_personal_extraction() {
+    use sovra_core::{
+        MemorySourceAdmission, MemorySourceAuthor, MemorySourceOrigin, MemorySourceProvenance,
+        MemorySourceScope,
+    };
+    let store = open_store().await;
+    let mut source = MemorySourceAdmission {
+        dependencies: None,
+        expected_generation: None,
+        key: "assistant-reply-1".into(),
+        version: 1,
+        author: MemorySourceAuthor::Assistant {
+            speaker: Some("Planning helper".into()),
+        },
+        scope: MemorySourceScope::Private,
+        provenance: MemorySourceProvenance::Conversation,
+        episode: NewEpisode {
+            session_id: "attributed-chat".into(),
+            kind: EpisodeKind::AgentMessage,
+            content: "I suggest cedar tea.".into(),
+            occurred_at: Timestamp(1),
+        },
+    };
+    let first = store.admit_memory_source(source.clone()).await.unwrap();
+    assert!(!first.has_processing_job);
+    assert_eq!(
+        store.admit_memory_source(source.clone()).await.unwrap(),
+        first
+    );
+    let record = store.review_memory_source(&first.source_id).await.unwrap();
+    assert_eq!(record.metadata.origin, MemorySourceOrigin::AssistantOutput);
+    assert_eq!(record.metadata.scope, MemorySourceScope::Private);
+    assert_eq!(record.metadata.version, Some(1));
+    assert_eq!(record.metadata.processing, None);
+    assert!(record.metadata.admitted_at.is_some());
+    let attribution = record.metadata.attribution.unwrap();
+    assert_eq!(attribution.author, source.author);
+    assert_eq!(attribution.provenance, source.provenance);
+    assert_eq!(attribution.producer_key, source.key);
+    assert!(store.claim_memory(Timestamp(10)).await.unwrap().is_none());
+    assert!(
+        store
+            .search_memory_sources(
+                sovra_core::MemorySearch {
+                    text: "cedar".into(),
+                    ..Default::default()
+                },
+                Timestamp(10)
+            )
+            .await
+            .unwrap()
+            .is_empty(),
+        "assistant recall requires dependency-aware withdrawal first"
+    );
+    source.episode.content = "I suggest mint tea.".into();
+    assert!(store.admit_memory_source(source.clone()).await.is_err());
+    source.version = 2;
+    let second = store.admit_memory_source(source.clone()).await.unwrap();
+    assert_ne!(first.source_id, second.source_id);
+    assert_eq!(
+        store.episode(&first.source_id).await.unwrap().content,
+        "I suggest cedar tea."
+    );
+    assert_eq!(
+        store
+            .review_memory_source(&second.source_id)
+            .await
+            .unwrap()
+            .metadata
+            .version,
+        Some(2)
+    );
+    store
+        .stop_memory_source(&second.source_id, Timestamp(11))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.admit_memory_source(source.clone()).await.unwrap(),
+        second
+    );
+    assert_eq!(
+        store
+            .review_memory_source(&second.source_id)
+            .await
+            .unwrap()
+            .metadata
+            .revoked_at,
+        Some(Timestamp(11))
+    );
+    assert_eq!(
+        store
+            .review_memory_source(&first.source_id)
+            .await
+            .unwrap()
+            .metadata
+            .revoked_at,
+        Some(Timestamp(11))
+    );
+    source.version = 3;
+    assert!(store.admit_memory_source(source.clone()).await.is_err());
+    store.set_memory_enabled(false).await.unwrap();
+    source.key = "another-reply".into();
+    assert!(store.admit_memory_source(source).await.is_err());
+}
+
+#[tokio::test]
+async fn distinctive_source_term_keeps_a_place_in_the_provider_evidence_budget() {
+    let store = open_store().await;
+    let mut original = None;
+    for index in 0..1_000 {
+        let mut input = memory_input("distinctive-ranking", &format!("code-{index}"));
+        input.episode.content = format!("My rehearsal code is fixturecode{index}.");
+        input.episode.occurred_at = Timestamp(1);
+        let id = store.enqueue_memory(input).await.unwrap();
+        if index == 100 {
+            original = Some(id);
+        }
+    }
+    for (index, code) in ["101", "102", "103", "104", "100"].into_iter().enumerate() {
+        let mut input = memory_input("distinctive-ranking", &format!("question-{index}"));
+        input.episode.content = format!("Recall fixturecode{code}");
+        input.episode.occurred_at = Timestamp(i64::try_from(index).unwrap() + 2);
+        store.enqueue_memory(input).await.unwrap();
+    }
+    let sources = store
+        .search_memory_sources(
+            sovra_core::MemorySearch {
+                text: "Recall fixturecode100".into(),
+                ..Default::default()
+            },
+            Timestamp(100),
+        )
+        .await
+        .unwrap();
+    let mut context = sovra_core::MemoryContext::default();
+    for source in sources {
+        context.push_source(source);
+    }
+    assert!(
+        context
+            .sources
+            .iter()
+            .any(|source| Some(&source.source_id) == original.as_ref()),
+        "a distinguishing term must retain evidence even when common-word questions are shorter"
+    );
+}
+
+#[tokio::test]
+async fn relevant_original_evidence_survives_newer_questions_with_a_common_search_word() {
+    let store = open_store().await;
+    let mut input = memory_input("source-ranking", "answer");
+    input.episode.content = "My rehearsal code is fixturecode100.".into();
+    input.episode.occurred_at = Timestamp(1);
+    let original = store.enqueue_memory(input).await.unwrap();
+    for index in 0..40 {
+        let mut input = memory_input("source-ranking", &format!("question-{index}"));
+        input.episode.content = format!("Recall fixturecode{index}");
+        input.episode.occurred_at = Timestamp(index + 2);
+        store.enqueue_memory(input).await.unwrap();
+    }
+    let sources = store
+        .search_memory_sources(
+            sovra_core::MemorySearch {
+                text: "Recall fixturecode100".into(),
+                ..Default::default()
+            },
+            Timestamp(100),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        sources.first().map(|source| &source.source_id),
+        Some(&original)
+    );
+    assert!(sources.len() <= 12);
+    store
+        .stop_memory_source(&original, Timestamp(101))
+        .await
+        .unwrap();
+    let sources = store
+        .search_memory_sources(
+            sovra_core::MemorySearch {
+                text: "Recall fixturecode100".into(),
+                ..Default::default()
+            },
+            Timestamp(102),
+        )
+        .await
+        .unwrap();
+    assert!(sources.iter().all(|source| source.source_id != original));
+}
+
+#[tokio::test]
+async fn original_evidence_is_retrievable_without_facts_but_pause_and_withdrawal_win() {
+    use sovra_core::{MemorySearch, MemorySourceOrigin};
+    let store = open_store().await;
+    let mut input = memory_input("source-only", "omitted");
+    input.episode.content = "The rehearsal code is cedar and the room is upstairs.".into();
+    let id = store.enqueue_memory(input).await.unwrap();
+    let query = MemorySearch {
+        text: "cedar".into(),
+        ..Default::default()
+    };
+    let sources = store
+        .search_memory_sources(query.clone(), Timestamp(9_000))
+        .await
+        .unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].source_id, id);
+    assert_eq!(sources[0].origin, MemorySourceOrigin::UserStatement);
+    assert!(sources[0].quote.contains("cedar"));
+    assert_eq!(
+        store
+            .memory_episodes(std::slice::from_ref(&id))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    store.set_memory_enabled(false).await.unwrap();
+    assert_eq!(
+        store
+            .search_memory_sources(query.clone(), Timestamp(9_000))
+            .await
+            .unwrap(),
+        Vec::new()
+    );
+    store.set_memory_enabled(true).await.unwrap();
+    let mut detail = fact("The rehearsal code is cedar", &[], None);
+    detail.source = Some(id);
+    let detail = store.save_fact(detail).await.unwrap();
+    store.stop_memory(&detail, Timestamp(9_001)).await.unwrap();
+    assert_eq!(
+        store
+            .search_memory_sources(query, Timestamp(9_002))
+            .await
+            .unwrap(),
+        Vec::new()
+    );
+}
+
+#[tokio::test]
+async fn chunk_progress_and_unextracted_evidence_survive_disk_reopen() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "sovra-source-reopen-{}-{unique}",
+        std::process::id()
+    ));
+    let config = StoreConfig::on_disk(&path);
+    let store = SurrealStore::open(config.clone()).await.unwrap();
+    let mut input = memory_input("restart-source", "one");
+    input.episode.content = format!(
+        "{} The omitted code is cedarlock.",
+        "A retained detail. ".repeat(300)
+    );
+    let id = store.enqueue_memory(input).await.unwrap();
+    let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    let end = claim.chunk().unwrap().content.len();
+    store
+        .complete_memory(&claim, vec![], "fixture", Timestamp(2_001))
+        .await
+        .unwrap();
+    let second = store.claim_memory(Timestamp(2_002)).await.unwrap().unwrap();
+    let extracted = sovra_core::MemoryExtractedChunk {
+        candidates: vec![],
+        model: "fixture".into(),
+    };
+    store
+        .save_memory_extraction(&second, &extracted, Timestamp(2_003))
+        .await
+        .unwrap();
+    drop(store);
+    let store = reopen(config).await;
+    let next = store
+        .claim_memory(Timestamp(200_000))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.cursor, end);
+    assert_eq!(next.extracted, Some(extracted));
+    let sources = store
+        .search_memory_sources(
+            sovra_core::MemorySearch {
+                text: "cedarlock".into(),
+                ..Default::default()
+            },
+            Timestamp(9_000),
+        )
+        .await
+        .unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].source_id, id);
+    assert!(sources[0].quote.contains("cedarlock"));
+    assert_eq!(store.memory_job(&id).await.unwrap().fact_ids, Vec::new());
+    drop(store);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+async fn revoking_original_evidence_cancels_its_lease_and_preserves_review_content() {
+    let store = open_store().await;
+    let id = store
+        .enqueue_memory(memory_input("withdraw-source", "one"))
+        .await
+        .unwrap();
+    let claim = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
+    store
+        .stop_memory_source(&id, Timestamp(2_001))
+        .await
+        .unwrap();
+    store
+        .stop_memory_source(&id, Timestamp(2_002))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.memory_job(&id).await.unwrap().state,
+        sovra_core::MemoryJobState::Cancelled
+    );
+    assert!(
+        store
+            .complete_memory(&claim, vec![], "fixture", Timestamp(2_003))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .search_memory_sources(
+                sovra_core::MemorySearch {
+                    text: "Lisbon".into(),
+                    ..Default::default()
+                },
+                Timestamp(9_000)
+            )
+            .await
+            .unwrap(),
+        Vec::new()
+    );
+    assert_eq!(
+        store.episode(&id).await.unwrap().content,
+        claim.episode.content
+    );
+}
+
+#[tokio::test]
+async fn withdrawn_failed_evidence_cannot_be_retried() {
+    let store = open_store().await;
+    let id = store
+        .enqueue_memory(memory_input("failed-withdrawal", "one"))
+        .await
+        .unwrap();
+    for attempt in 0..sovra_core::MAX_MEMORY_ATTEMPTS {
+        let now = Timestamp(2_000 + i64::from(attempt) * 20_000);
+        let claim = store.claim_memory(now).await.unwrap().unwrap();
+        store
+            .fail_memory(&claim, "fixture failure", now)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        store.memory_job(&id).await.unwrap().state,
+        sovra_core::MemoryJobState::Failed
+    );
+    store
+        .stop_memory_source(&id, Timestamp(90_000))
+        .await
+        .unwrap();
+    assert_eq!(store.retry_failed_memories().await.unwrap(), 0);
+    assert_eq!(
+        store.memory_job(&id).await.unwrap().state,
+        sovra_core::MemoryJobState::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn immutable_source_versions_keep_exact_citations_and_withdraw_together() {
+    let store = open_store().await;
+    let mut source =
+        sovra_core::MemorySourceAdmission::user(memory_input("version-chat", "message"));
+    source.episode.content = "My rehearsal code is cedarlock.".into();
+    let first = store.admit_memory_source(source.clone()).await.unwrap();
+    source.version = 2;
+    source.episode.content = "My rehearsal code is mintlock.".into();
+    let second = store.admit_memory_source(source).await.unwrap();
+    let hits = store
+        .search_memory_sources(
+            sovra_core::MemorySearch {
+                text: "mintlock".into(),
+                ..Default::default()
+            },
+            Timestamp(9_000),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].version, 2);
+    assert_eq!(hits[0].source_id, second.source_id);
+    assert_eq!(hits[0].citation, format!("source:{}", second.source_id.0));
+    store
+        .stop_memory_source(&first.source_id, Timestamp(10_000))
+        .await
+        .unwrap();
+    for receipt in [first, second] {
+        assert_eq!(
+            store.memory_job(&receipt.source_id).await.unwrap().state,
+            sovra_core::MemoryJobState::Cancelled
+        );
+        assert_eq!(
+            store
+                .review_memory_source(&receipt.source_id)
+                .await
+                .unwrap()
+                .metadata
+                .revoked_at,
+            Some(Timestamp(10_000))
+        );
+    }
+    assert!(
+        store
+            .claim_memory(Timestamp(11_000))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn source_capture_cannot_cross_pause_resume_even_when_admission_runs_later() {
+    let store = open_store().await;
+    let policy = store.memory_policy().await.unwrap();
+    let mut source = sovra_core::MemorySourceAdmission::user(sovra_core::MemoryInput {
+        key: "late-source".into(),
+        episode: NewEpisode {
+            session_id: "capture-test".into(),
+            kind: EpisodeKind::UserMessage,
+            content: "Fictional source captured before a pause.".into(),
+            occurred_at: Timestamp(1),
+        },
+    });
+    source.expected_generation = Some(policy.generation);
+    store.set_memory_enabled(false).await.unwrap();
+    let resumed = store.set_memory_enabled(true).await.unwrap();
+    assert!(store.admit_memory_source(source.clone()).await.is_err());
+    let page = store
+        .list_memory_sources(sovra_core::MemorySourceQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(page.sources, Vec::new());
+    source.expected_generation = Some(resumed.generation);
+    let receipt = store.admit_memory_source(source.clone()).await.unwrap();
+    assert_eq!(
+        store.admit_memory_source(source.clone()).await.unwrap(),
+        receipt
+    );
+    store.set_memory_enabled(false).await.unwrap();
+    assert!(store.admit_memory_source(source).await.is_err());
 }

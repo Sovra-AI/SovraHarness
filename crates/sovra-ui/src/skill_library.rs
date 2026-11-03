@@ -213,6 +213,25 @@ fn slugify_command_name(title: &str) -> String {
 }
 
 impl Shell {
+    pub(crate) fn show_skill_help(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.skill_library.category = SkillCategoryFilter::All;
+        self.skill_library
+            .search
+            .update(cx, |input, cx| input.set_value(name, window, cx));
+        // An unfinished custom skill stays open; the requested card appears once
+        // the person saves or cancels that edit.
+        if self.skill_library.creating || self.skill_library.editing.is_some() {
+            self.skill_library.notice =
+                "Finish or cancel your current skill edit to see the requested helper.".into();
+        }
+        self.select_tab(NavTab::Skills, cx);
+    }
+
     fn save_skill(&mut self, cx: &mut Context<Self>) {
         let view = &self.skill_library;
         let mut skill = view.editing.clone().unwrap_or_else(|| Skill {

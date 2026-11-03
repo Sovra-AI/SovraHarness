@@ -937,6 +937,9 @@ fn reopening_a_saved_chat_sends_bounded_role_preserving_context(cx: &mut TestApp
         .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("chat-history-section-Older").visible());
+        assert!(window.try_find("chat-history-section-Today").is_none());
         shell.update(cx, |shell, cx| {
             shell.select_thread("saved-chat", cx);
             shell.send_prompt_text("What did we choose?", window, cx);
@@ -978,18 +981,18 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
             if item.visible() {
                 return;
             }
-            let delta = if item.bounds().top() < window.find("settings-sections").bounds().top() {
+            let delta = if item.bounds().top() < window.find("connections-scroll").bounds().top() {
                 80.
             } else {
                 -80.
             };
             window.scroll(
-                "settings-sections",
+                "connections-scroll",
                 ScrollDelta::Pixels(point(px(0.), px(delta))),
                 cx,
             );
         }
-        panic!("{id} must be reachable in Settings");
+        panic!("{id} must be reachable in Connections");
     }
 
     let (client, commands, events) = Client::loopback();
@@ -1004,10 +1007,13 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-settings", cx);
+        window.click("nav-connections", cx);
         window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Settings);
-        assert!(window.find("sovra-settings-view").visible());
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Connections);
+        assert!(window.find("connections-page").visible());
+        reveal(window, "connection-action-whatsapp", cx);
+        window.click("connection-action-whatsapp", cx);
+        window.render_frame(cx);
         assert!(window.find("settings-connections").visible());
         assert!(window.find("whatsapp-connect-btn").visible());
 
@@ -1110,9 +1116,9 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
         assert!(window.find("whatsapp-bridged-messages").visible());
         assert!(
             window
-                .find(("nav-context-badge", NavTab::Settings as usize))
+                .find(("nav-context-badge", NavTab::Connections as usize))
                 .visible(),
-            "Settings tab in sidebar must display WhatsApp badge when WhatsApp is connected"
+            "Connections tab in the sidebar shows a mark when WhatsApp is linked"
         );
     })
     .unwrap();
@@ -1130,18 +1136,18 @@ fn telegram_bot_connects_with_a_token_and_shows_the_link_code(cx: &mut TestAppCo
             if item.visible() {
                 return;
             }
-            let delta = if item.bounds().top() < window.find("settings-sections").bounds().top() {
+            let delta = if item.bounds().top() < window.find("connections-scroll").bounds().top() {
                 80.
             } else {
                 -80.
             };
             window.scroll(
-                "settings-sections",
+                "connections-scroll",
                 ScrollDelta::Pixels(point(px(0.), px(delta))),
                 cx,
             );
         }
-        panic!("{id} must be reachable in Settings");
+        panic!("{id} must be reachable in Connections");
     }
 
     let (client, commands, events) = Client::loopback();
@@ -1156,9 +1162,12 @@ fn telegram_bot_connects_with_a_token_and_shows_the_link_code(cx: &mut TestAppCo
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-settings", cx);
+        window.click("nav-connections", cx);
         window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Settings);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Connections);
+        reveal(window, "connection-action-telegram", cx);
+        window.click("connection-action-telegram", cx);
+        window.render_frame(cx);
         reveal(window, "settings-telegram", cx);
         reveal(window, "telegram-connect-btn", cx);
         // Nothing typed yet: Connect still dispatches, and the runtime answers with a notice.
@@ -1258,4 +1267,215 @@ fn no_in_app_title_bar_under_window_manager_decorations(cx: &mut TestAppContext)
         assert!(window.try_find("title-bar-page").is_none());
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn new_chat_dates_are_real_before_storage_and_navigation_keeps_them(cx: &mut TestAppContext) {
+    let (client, commands, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let earliest = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let mut view = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(42, window, cx));
+        view = Some(shell.clone());
+        Root::new(shell, window, cx)
+    });
+    let shell = view.unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("Fictional date fixture.", window, cx);
+        });
+        let first = shell.read(cx).workspace().active_thread().unwrap().clone();
+        window.render_frame(cx);
+        assert!(window.find("chat-history-section-Today").visible());
+        assert!(window.try_find("chat-history-section-Older").is_none());
+        assert!(
+            u128::try_from(first.created_at.millis()).unwrap() >= earliest,
+            "a live chat must not display the message counter as a date"
+        );
+        assert!(first.updated_at >= first.created_at);
+        assert_eq!(
+            sovra_core::recency_bucket(first.updated_at, first.updated_at),
+            sovra_core::RecencyBucket::Today
+        );
+        shell.update(cx, |shell, cx| shell.start_new_chat(window, cx));
+        assert_eq!(
+            shell
+                .read(cx)
+                .workspace()
+                .threads
+                .iter()
+                .find(|t| t.id == first.id)
+                .unwrap()
+                .updated_at,
+            first.updated_at,
+            "navigation is not a new conversation event"
+        );
+        let saved = std::iter::from_fn(|| commands.try_recv().ok())
+            .filter_map(|command| {
+                if let Command::SaveChatThread { thread } = command {
+                    Some(thread)
+                } else {
+                    None
+                }
+            })
+            .filter(|thread| thread.id == first.id)
+            .collect::<Vec<_>>();
+        assert_ne!(saved, Vec::new());
+        assert!(
+            saved
+                .iter()
+                .all(|thread| thread.created_at == first.created_at
+                    && thread.updated_at == first.updated_at)
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn background_completion_saves_and_dispatches_the_originating_chat(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("First context only", window, cx);
+        });
+    })
+    .unwrap();
+    let first = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    events
+        .send_blocking(Event::AgentChunk {
+            session_id: first.clone(),
+            text: "First half, ".into(),
+        })
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    while commands.try_recv().is_ok() {}
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("First follow-up", window, cx);
+            shell.start_new_chat(window, cx);
+            shell.send_prompt_text("Second context only", window, cx);
+        });
+    })
+    .unwrap();
+    let second = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    let before = std::iter::from_fn(|| commands.try_recv().ok()).collect::<Vec<_>>();
+    assert!(before.iter().any(|command| matches!(command, Command::SaveChatThread { thread }
+        if thread.id == first && thread.messages.iter().any(|message| message.text == "First half, "))));
+    for event in [
+        Event::AgentChunk {
+            session_id: first.clone(),
+            text: "second half.".into(),
+        },
+        Event::AgentCompleted {
+            session_id: first.clone(),
+        },
+    ] {
+        events.send_blocking(event).unwrap();
+    }
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    let emitted = std::iter::from_fn(|| commands.try_recv().ok()).collect::<Vec<_>>();
+    assert!(emitted.iter().any(|command| matches!(command, Command::SaveChatThread { thread }
+        if thread.id == first && thread.messages.iter().any(|message| message.text == "First half, second half."))));
+    let command = emitted.iter().find(|command| matches!(command, Command::RunPrompt { prompt, .. } if prompt == "First follow-up")).unwrap();
+    let Command::RunPrompt {
+        session_id,
+        context: Some(context),
+        ..
+    } = command
+    else {
+        unreachable!()
+    };
+    assert_eq!(session_id, &first);
+    assert!(
+        context
+            .messages()
+            .iter()
+            .any(|message| message.text == "First half, second half.")
+    );
+    assert!(
+        context
+            .messages()
+            .iter()
+            .all(|message| !message.text.contains("Second context"))
+    );
+    shell.read_with(cx, |shell, _| {
+        assert_eq!(shell.workspace().session_id, second);
+        assert!(shell.workspace().is_generating);
+        assert_eq!(shell.workspace().messages.len(), 1);
+    });
+}
+
+#[gpui_kit::test]
+fn late_source_receipt_saves_the_originating_transcript_without_changing_selection(
+    cx: &mut TestAppContext,
+) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut view = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
+        view = Some(shell.clone());
+        Root::new(shell, window, cx)
+    });
+    let shell = view.unwrap();
+    let first = cx
+        .update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.send_prompt_text("Receipt fixture", window, cx);
+            });
+            let thread = shell.read(cx).workspace().active_thread().unwrap().clone();
+            shell.update(cx, |shell, cx| shell.start_new_chat(window, cx));
+            thread
+        })
+        .unwrap();
+    let selected = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    while commands.try_recv().is_ok() {}
+    events
+        .send_blocking(Event::Memory(sovra_core::MemoryEvent::SourceSaved {
+            session_id: first.id.clone(),
+            message: Some(sovra_core::MemorySourceMessage {
+                id: Some(first.messages[0].id.clone()),
+                in_reply_to: None,
+                role: sovra_core::MessageRole::User,
+                text: first.messages[0].text.clone(),
+            }),
+            receipt: sovra_core::MemorySourceReceipt {
+                source_id: sovra_core::EpisodeId("episode:receipt".into()),
+                version: 1,
+                has_processing_job: true,
+            },
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    assert_eq!(
+        shell.read_with(cx, |shell, _| shell.workspace().session_id.clone()),
+        selected
+    );
+    let saves = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter_map(|command| match command {
+            Command::SaveChatThread { thread } => Some(thread),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(saves.iter().any(|thread| thread.id == first.id
+        && thread.updated_at == first.updated_at
+        && thread.messages[0].source == Some(sovra_core::EpisodeId("episode:receipt".into()))));
 }

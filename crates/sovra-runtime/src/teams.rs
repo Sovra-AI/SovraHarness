@@ -28,6 +28,13 @@ impl TeamRuntime {
         }
     }
 
+    pub(crate) fn with_events(&self, events: Sender<Event>) -> Self {
+        Self {
+            events,
+            ..self.clone()
+        }
+    }
+
     /// Roster changes, off the command loop. `Run` is started by [`Self::spawn_run`].
     pub(crate) fn handle(&self, handle: &tokio::runtime::Handle, command: TeamCommand) {
         let runtime = self.clone();
@@ -108,14 +115,16 @@ impl TeamRuntime {
     ) -> ActiveRun {
         let runtime = self.clone();
         let slot = Arc::new(std::sync::RwLock::new(Some(harness.clone())));
+        let interactive = crate::model_priority::interactive();
         let task = handle.spawn(async move {
+            let _interactive = interactive;
             let members = runtime
                 .load()
                 .await
                 .get_or_insert_with(teams::default_team)
                 .clone();
             let turn = TeamTurn {
-                run_id: format!("team-{}", crate::now().millis()),
+                run_id: format!("team-{}", crate::remembering::source_key()),
                 session_id: session_id.clone(),
                 prompt,
                 history,

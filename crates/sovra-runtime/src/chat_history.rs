@@ -64,14 +64,7 @@ impl ChatHistoryRuntime {
         let _ = self.commands.try_send(Action::Load);
     }
 
-    pub(crate) fn save(&self, mut thread: Box<ChatThread>) {
-        if thread.updated_at.millis() <= 1_000_000 {
-            let current = crate::now();
-            if thread.created_at.millis() <= 1_000_000 {
-                thread.created_at = current;
-            }
-            thread.updated_at = current;
-        }
+    pub(crate) fn save(&self, thread: Box<ChatThread>) {
         let _ = self.commands.try_send(Action::Save(thread));
     }
 

@@ -11,35 +11,224 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
-### Current progress — 2026-11-02
+- Compatible providers that omit a tool-call ID now receive a distinct local ID
+  before execution, keeping memory lookup calls and results paired on the next
+  model round. Existing provider IDs are preserved.
 
-- **Knowledge and remembering:** the About you overview, explicit personal notes,
-  capture recovery, document-reader repair and conversation identity fixes are on
-  `main`. Recall relevance, extraction accuracy and correction linking still need
-  broader live-model evaluation; passing pipeline tests does not establish answer
-  quality. See the [memory implementation record](docs/agent-memory.md).
-- **Connected helpers:** reviewed WhatsApp/Telegram sending, shared Google client
-  setup, connected-service tools and parallel document reading are on `main`.
-  This checkpoint fixes Google client/account storage in development builds and
-  exercises restart and sign-out through the real file-backed credential store.
-  A completed Google browser sign-in with production credentials remains unverified.
-- **File knowledge:** indexing, saved-text browsing, semantic retrieval and
-  reviewed relationships are available. Summary provenance, invalidation and
-  budgets are implemented; background summary generation, recursive clustering
-  and compiled maps remain unfinished. See the [scope record](docs/skills-and-file-knowledge.md).
-- **Development tooling:** opt-in native MCP testing and the persistent watcher
-  are on `main`. Runtime regression waits now allow more scheduling time under
-  concurrent suite load, while retaining bounded deadlines and event assertions.
-- **Verification:** `cargo xtask ci` passed every gate: 841 tests passed and
-  8 opt-in tests were skipped. The native MCP bridge initialized, but
-  `sovra_inspect` returned "Open Sovra and enable Development mode in Settings."
-  Saving Google setup through the running native controls was therefore not
-  verified in this checkpoint; file-store and runtime regressions passed.
+- New ordinary and team replies can be recalled across chats when all visible
+  history and saved-memory inputs have durable source links. Provider requests
+  and recalled evidence are tracked independently of model-written citations;
+  withdrawing an ancestor also hides dependent replies. Unknown history, files,
+  external tool results and opaque provider history keep replies review-only.
+  Source receipts persist against the exact originating message even after chat
+  navigation, without changing its activity date. Schema 11 preserves older chat
+  JSON and defaults missing source links to unknown; no automatic backfill runs.
+  Fact provenance loading now applies explicit source permissions to direct,
+  background and related evidence, excluding legacy unknown grants from model
+  input while preserving their review records. Schema 12 distinguishes a removed
+  detail's raw source wording from whole-source revocation, keeping unrelated
+  grounded details usable; existing revocations remain in force.
+
+- Memory storage now verifies bounded, immutable dependencies before returning
+  helper wording as recalled evidence. Source withdrawal blocks dependent replies
+  transitively; corrections label changed support. Unknown, missing or oversized
+  dependency chains remain reviewable but unavailable to recall. Schema 10 keeps
+  existing IDs and leaves legacy helper dependencies unknown. Runtime integration for conversation and saved-memory inputs is described above.
+
+- Switching chats now keeps each conversation's live reply, helper attribution,
+  Stop state and queued follow-ups together. Background completions save the
+  originating conversation, and follow-ups carry that conversation's context.
+  Leaving a live chat or stopping it saves the partial transcript; completed
+  ordinary and team replies survive reopening the local database.
+
+- Team replies now retain original wording, helper name and run/member identity
+  in saved-source review, independently of personal-fact extraction. Named replies
+  show who wrote them. Capture uses bounded buffers and a bounded event channel;
+  storage failures remain visible. A pause invalidates in-flight normal and team
+  replies even after remembering resumes, including at transactional admission.
+  Completed team messages and final run state now also save to chat history,
+  fixing replies that disappeared from the conversation after restarting.
+
+- Conversation history now uses real event times immediately, including before a
+  save completes. Continuing a saved chat advances its activity date while keeping
+  its creation date; switching chats leaves those dates alone. History groups use
+  the current clock, so an old newest conversation no longer appears under Today.
+  Storage preserves supplied dates instead of guessing from small numbers.
+
+- Background remembering now fills available extraction slots when evidence arrives,
+  a job finishes, or interactive AI work ends. The 250 ms poll remains for delayed
+  retries and lease recovery; it no longer limits ready work to one start per tick.
+  Pause and foreground requests retain priority, with four process-wide slots by default.
+  Existing job updates use their cancellation row as the transaction fence instead
+  of rewriting shared policy metadata; pinned-engine tests verify pause and withdrawal
+  still reject stale writes.
+
+- New private chat replies retain explicit helper authorship, producer identity,
+  version and admission time in saved-source review. Durable save receipts follow
+  persistence; reply-storage failures are visible. Assistant text is not extracted
+  as a personal fact. Cross-chat recall requires the complete input tracking
+  described above. Withdrawing an admitted
+  source revokes all its immutable versions and their pending work. Schema 9 adds
+  source-family identity without inventing legacy authorship or permissions.
+
+- **Deep research always runs as an in-chat research team:** `/deep-research`
+  (and the DeepResearchAgent skill) opens a kanban board in the chat transcript
+  with Waiting / Working / Done lanes, researches independent goals in parallel,
+  and finishes by saving a Document artifact with Open — intermediate goal notes
+  stay off the transcript. `DeepResearchAgent` is no longer offered as a solo
+  orchestrator AgentTool (that path could dump prose into chat); Skills / My AIs
+  still list it, and the dedicated board path owns every run. No separate
+  Team/Goals window.
+- Memory tool rounds now retrieve every requested query, up to four in parallel,
+  instead of discarding all but the last. Results retain separate question/date/
+  person labels under one evidence budget, and final permission checks cover the
+  whole batch, including earlier finished reads. Focused lookups omit unrelated
+  recent background details; initial automatic recall retains its small working set.
+- Original-evidence search now combines separately ranked search terms using
+  bounded reciprocal-rank fusion, preserving distinctive terms when newer questions
+  share a common word. Scope, withdrawal and temporal filters remain enforced.
+- Added an opt-in synthetic runtime memory benchmark at 1k/10k/100k sources and
+  1/4/16 concurrent requests, with zero-cost loopback responses and explicit metric
+  limitations; real-model recall reports retain the observed citation defect and repeat.
+- Fixed incomplete research-board widget rendering and research test integration
+  that prevented the shared workspace from compiling.
+
+- **`just clear-cache`:** discoverable recipe that reclaims reclaimable Cargo
+  build caches via `cargo xtask clean-cache reclaim`. Explicit reclaim always
+  runs profile-scoped `cargo clean` for `dev` and `release` (still refuses while
+  `cargo xtask dev` holds `target/dev/watch.lock`, and still reports target size
+  before that refusal). Status remains `just clean-cache` /
+  `cargo xtask clean-cache`.
+
+- **Remove from memory** now withdraws a detail's whole correction history and
+  original/repeated source records after confirmation. Concurrent corrections
+  invalidate stale removals; pending source chunks cannot restore removed details.
+  Stopped history remains reviewable, and unrelated details and chats are kept.
+  **Edit detail** continues to save a new version with its original wording.
+- Independent memory searches now retain successful evidence when another search
+  fails or exceeds its deadline, disclose incomplete coverage, and reserve time
+  for provenance and final permission checks. Removal during an in-flight search
+  still invalidates the whole result.
+
+- Private chat turns now receive a small, source-grounded set of current saved
+  details alongside targeted retrieval, so basic context does not require exact
+  keyword overlap or an embedding service. Historical lookups exclude that current
+  working set. Memory lookup instructions now ask for alternative wording before
+  concluding that personal information is unavailable. Broader recall, edit/remove
+  and performance acceptance remains in progress.
+
+- **`cargo xtask dev` is one-shot only:** no Watchexec / save-triggered reload.
+  Re-run `cargo xtask dev` yourself after edits. Setup no longer installs
+  Watchexec. Agent and development docs (`AGENTS.md`, `docs/development.md`,
+  README) now require manual reload and forbid starting an auto-rebuild watcher.
+- Saved-memory details now open **Browse supporting records**, including repeated
+  statements from other conversations. Search and paging stay scoped to that
+  detail, stopped evidence remains explicitly selectable, and returning reloads
+  the detail while preserving its exploration trail. Repeated records now report
+  their linked-detail count correctly and can open those details.
+
+- **Knowledge → Files → Browse saved relationships** opens reviewed file
+  connections without a model call. Search, page through older results, follow
+  subjects, and read cited passages with inference, date and source-freshness
+  labels. Outdated sources and replaced relationships use explicit filters;
+  removing folder access clears open records and invalidates pending reads.
+  Empty results link to a relevant helper in Skills without sending a message.
+
+- **Browse original records** now searches and pages through retained memory
+  evidence independently of extraction. Readers show recorded origin, processing
+  and withdrawal status, and link back to saved details and history. Stopped
+  records require an explicit filter; reviewing them does not restore recall.
+  Legacy metadata stays unknown, and newly written personal notes now record
+  their explicit user origin and private scope. Processing-status reads are
+  batched and use an engine-verified source index.
+  The reader keeps the original wording in focus with compact metadata and
+  wrapping actions, without repeating the overview header.
+
+- Made the file-index same-second edit regression independent of wall-clock
+  timing. It now also verifies that a same-size edit with a preserved timestamp
+  replaces the searchable text.
+
+- **Browse all subjects** now opens a searchable, alphabetical directory of the
+  people, places and projects in current saved knowledge. Pages keep stable
+  name boundaries; selecting a subject opens its details. Enter submits searches,
+  and explicit navigation starts at the top while background updates keep the
+  reader's scroll position.
+
+- Updated the locked Markdown parser (`pulldown-cmark` 0.13.6) to address the
+  nested-image wikilink parsing advisory reported by the CI security gate.
+
+- Knowledge → People lists everyone you can message. While WhatsApp is linked, contacts the phone has synced are collected in the background, so a saved person can be prepared for review before they have written. The same person can also be reached by phone number, Telegram, and email. Each card shows those details. **Message on WhatsApp** opens the chat, where you press Send. A cancelled, sent, or expired review can be prepared again. A shared first name does not join two people, and nothing is sent until you press Send.
+- Saved-memory cards now show readable dates and selectable subjects. **Explore
+  detail** opens the original evidence and **Connected knowledge**, with reasons
+  for shared sources, shared subjects and corrections. Follow links in either
+  direction through version history, return along the exploration trail, and
+  filter the library by an exact subject without treating co-occurrence as proof.
+  The overview surfaces the most-mentioned subjects across current knowledge;
+  recent activity opens original messages even when extraction found nothing.
+  Long sources expand on demand, and background-save notices remain visible
+  while a correction is being written.
+
+- **`cargo xtask clean-cache`:** report and reclaim Cargo target disk use against
+  the existing 30 GiB budget (`SOVRA_TARGET_BUDGET_GIB`). Reclaim refuses while
+  `cargo xtask dev` holds `target/dev/watch.lock`, prefers profile-scoped
+  `cargo clean`, and can optionally prune recreatable `~/.cargo` registry/git
+  caches without touching binaries, config or credentials. Reclaim only when no
+  `cargo xtask dev` session is running.
+- Watched debug builds now start with visible Development mode enabled, per the
+  workspace policy. Ordinary and release binaries start with it disabled, even
+  when an earlier development preference was on; Settings still revokes access.
+- Fixed Connections refresh retaining its own inbox and delaying runtime shutdown.
+- Checking links no longer marks a reconnecting WhatsApp link, or a Telegram link still waiting for its owner, as linked when the check did not reach the service.
+
+- Conversation memory now keeps durable pending evidence beyond the old queue
+  capacity, processes bounded source chunks with persisted offsets, and overlaps
+  extraction with a configurable process-wide limit of four. Consolidation stays
+  serial and checks the current fact revision before committing.
+- Extraction candidates survive retries and restarts before consolidation. New
+  background model calls yield to interactive turns; preceding context excludes
+  withdrawn and unadmitted sources. Original-source review includes a confirmed
+  **Stop using this message** action that cancels pending work and suppresses recall.
+- Recall can cite original admitted private messages even when extraction omitted
+  their details. Source-only citations open the original message; unknown legacy
+  permissions, paused memory and withdrawn source evidence are excluded.
+- The broader all-source memory/backfill plan remains in progress; no benchmark
+  speedup or model-quality improvement is claimed by these changes.
+
+### Current progress — 2026-11-03
+
+- **Knowledge and remembering:** About you, browse original/supporting records,
+  subject directory, connected knowledge, remove-from-memory, durable reply
+  source links, dependency-checked recall, and parallel memory-tool batches are
+  in this tree. Live-model answer quality still needs broader evaluation; see
+  [docs/agent-memory.md](docs/agent-memory.md) and the evaluation notes under
+  `docs/evaluations/`.
+- **People and messaging:** Knowledge → People lists messageable contacts with
+  WhatsApp sync prep; reviewed send flows remain gated on explicit Send.
+- **Deep research:** `/deep-research` runs as an in-chat kanban team and saves a
+  Document artifact; it is no longer offered as a solo AgentTool dump path.
+- **File knowledge:** Browse saved relationships and related indexing work are
+  included; background summary generation and compiled maps remain unfinished.
+  See [docs/skills-and-file-knowledge.md](docs/skills-and-file-knowledge.md).
+- **Development tooling:** `cargo xtask dev` is one-shot (no Watchexec).
+  `just clear-cache` / `cargo xtask clean-cache reclaim` reclaim build caches
+  when idle. Development mode still starts on for `SOVRA_DEV=1` debug launches.
+- **Verification:** xtask `clean_cache` unit tests passed (7). Full
+  `cargo xtask ci` was not re-run for this entire unreleased batch at push time;
+  run it after pull if you need the full gate.
 - **Integration scope:** current uncommitted work is consolidated on `main`.
   The older `memory/base`, `memory/base-2` and `memory/living` prototypes remain
   separate from the current memory implementation.
 
 ### Added
+
+- **Connections tab:** the sidebar lists every shipped link in everyday words
+  (an online AI, an AI on this computer, another compatible service, WhatsApp,
+  Telegram, Google, and a service added from a web address). Each row shows
+  whether it is not linked, working, linked, or needs you, plus one action.
+  Settings keeps preferences and opens this tab. Checking links looks at
+  installed connections at the same time, with a bound, so one stalled link
+  cannot delay another. Linking and unlinking stay on the page; a helper that
+  can prepare a message still runs its tools in order.
 
 - **Knowledge → About you:** Knowledge opens with the person's saved details,
   capture totals and recent activity. **Add a detail** saves an explicit note

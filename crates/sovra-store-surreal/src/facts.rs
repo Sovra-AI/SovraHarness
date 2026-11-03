@@ -88,6 +88,7 @@ pub(super) fn prepare(
 /// Runs inside the caller's transaction with `$write` bound; leaves `$created`.
 /// Ingestion and human corrections must share the same graph and validity rules.
 pub(super) const WRITE: &str = "
+UPDATE meta:memory_facts SET revision += 1;
 LET $data = $write.data;
 IF $data.embed_model != NONE {
     LET $indexed = (SELECT VALUE model FROM ONLY meta:embedding);

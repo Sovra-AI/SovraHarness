@@ -12,6 +12,15 @@ pub struct ContextMessage {
     pub role: MessageRole,
     pub text: String,
     pub speaker: Option<String>,
+    pub source: Option<crate::EpisodeId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationInput {
+    pub id: String,
+    pub text: String,
+    pub source: Option<crate::EpisodeId>,
+    pub occurred_at: Option<crate::Timestamp>,
 }
 
 /// Constructed from saved visible messages, never tools, widgets, attachments or thinking.
@@ -19,6 +28,7 @@ pub struct ContextMessage {
 pub struct ConversationContext {
     messages: Vec<ContextMessage>,
     shortened: bool,
+    current: Option<ConversationInput>,
 }
 impl ConversationContext {
     /// The latest user message is the new request and is sent separately.
@@ -26,7 +36,17 @@ impl ConversationContext {
         messages
             .iter()
             .rposition(|message| message.role == MessageRole::User)
-            .map_or_else(Self::default, |end| Self::from_messages(&messages[..end]))
+            .map_or_else(Self::default, |end| {
+                let message = &messages[end];
+                let mut context = Self::from_messages(&messages[..end]);
+                context.current = Some(ConversationInput {
+                    id: message.id.clone(),
+                    text: message.text.clone(),
+                    source: message.source.clone(),
+                    occurred_at: message.occurred_at,
+                });
+                context
+            })
     }
     pub fn from_messages(messages: &[ChatMessage]) -> Self {
         Self::bounded(messages.iter().rev().map(|message| {
@@ -37,6 +57,7 @@ impl ConversationContext {
                     .speaker
                     .as_ref()
                     .map(|speaker| speaker.name.as_str()),
+                message.source.as_ref(),
             )
         }))
     }
@@ -50,15 +71,23 @@ impl ConversationContext {
                 },
                 line.text.as_str(),
                 Some(line.speaker.as_str()),
+                line.source.as_ref(),
             )
         }))
     }
     fn bounded<'a>(
-        messages: impl Iterator<Item = (MessageRole, &'a str, Option<&'a str>)>,
+        messages: impl Iterator<
+            Item = (
+                MessageRole,
+                &'a str,
+                Option<&'a str>,
+                Option<&'a crate::EpisodeId>,
+            ),
+        >,
     ) -> Self {
         let mut result = Self::default();
         let mut bytes = 0;
-        for (role, text, speaker) in messages {
+        for (role, text, speaker, source) in messages {
             if text.trim().is_empty() {
                 continue;
             }
@@ -93,6 +122,7 @@ impl ConversationContext {
                 role,
                 text,
                 speaker,
+                source: source.cloned(),
             });
         }
         result.messages.reverse();
@@ -101,11 +131,15 @@ impl ConversationContext {
     pub fn messages(&self) -> &[ContextMessage] {
         &self.messages
     }
+    pub fn current(&self) -> Option<&ConversationInput> {
+        self.current.as_ref()
+    }
     pub fn shortened(&self) -> bool {
         self.shortened
     }
     pub fn team_history(&self) -> Vec<TranscriptLine> {
-        self.messages
+        let mut history: Vec<_> = self
+            .messages
             .iter()
             .map(|message| TranscriptLine {
                 speaker: match message.role {
@@ -115,14 +149,52 @@ impl ConversationContext {
                     }
                 },
                 text: message.text.clone(),
+                source: message.source.clone(),
             })
-            .collect()
+            .collect();
+        if self.shortened {
+            history.insert(
+                0,
+                TranscriptLine {
+                    source: None,
+                    speaker: "Sovra".into(),
+                    text: "[Older conversation omitted or shortened.]".into(),
+                },
+            );
+        }
+        history
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bounded_history_retains_source_ids_and_current_input_stays_exact() {
+        let mut old = ChatMessage::assistant("helper", "茶".repeat(9000), "", vec![]);
+        old.source = Some(crate::EpisodeId("episode:helper".into()));
+        let mut current = ChatMessage::user("current", "/team Help me", "");
+        current.occurred_at = Some(crate::Timestamp(123));
+        current.source = Some(crate::EpisodeId("episode:user".into()));
+        let context = ConversationContext::before_current_turn(&[old, current.clone()]);
+        assert!(context.shortened());
+        assert_eq!(
+            context.messages()[0].source,
+            Some(crate::EpisodeId("episode:helper".into()))
+        );
+        assert_eq!(
+            context.current(),
+            Some(&ConversationInput {
+                id: current.id,
+                text: current.text,
+                source: current.source,
+                occurred_at: current.occurred_at
+            })
+        );
+        let history = context.team_history();
+        assert!(history[0].text.contains("omitted"));
+        assert_eq!(history[1].source, context.messages()[0].source);
+    }
     #[test]
     fn restored_context_preserves_roles_without_replaying_private_or_interactive_state() {
         let mut assistant = ChatMessage::assistant(
@@ -169,6 +241,7 @@ mod tests {
         assert!(context.messages().last().unwrap().text.ends_with(SHORTENED));
         let history = (0..50)
             .map(|i| TranscriptLine {
+                source: None,
                 speaker: "Helper".into(),
                 text: format!("reply {i}"),
             })

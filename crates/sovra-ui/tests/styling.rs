@@ -2,12 +2,22 @@
 
 #[path = "styling/development.rs"]
 mod development;
+#[path = "styling/file_knowledge.rs"]
+mod file_knowledge;
 #[path = "styling/knowledge_profile.rs"]
 mod knowledge_profile;
 #[path = "styling/memory_citations.rs"]
 mod memory_citations;
+#[path = "styling/memory_directory.rs"]
+mod memory_directory;
+#[path = "styling/memory_exploration.rs"]
+mod memory_exploration;
+#[path = "styling/memory_sources.rs"]
+mod memory_sources;
 #[path = "styling/messaging.rs"]
 mod messaging;
+#[path = "styling/research_board.rs"]
+mod research_board;
 
 use gpui_kit::component::{ActiveTheme as _, Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
@@ -239,6 +249,7 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
                 ("nav-schedules", "sovra-schedules-view"),
                 ("nav-skills", "sovra-skills-view"),
                 ("nav-settings", "sovra-settings-view"),
+                ("nav-connections", "connections-page"),
                 ("nav-models", "models-setup-home"),
             ] {
                 window.click(tab, cx);
@@ -369,6 +380,14 @@ fn wide_windows_keep_a_centred_readable_column(cx: &mut TestAppContext) {
             (left - right).abs() < px(80.),
             "column is centred: {left:?} vs {right:?}"
         );
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        let connections = window.find("connections-page").bounds();
+        assert!(
+            connections.left() >= px(0.) && connections.right() <= dimensions.width,
+            "connections page fits a wide window: {connections:?}"
+        );
+        assert!(window.find("connection-card-online-ai").visible());
     })
     .unwrap();
 }
@@ -393,6 +412,7 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
             ("nav-schedules", "sovra-schedules-view"),
             ("nav-skills", "sovra-skills-view"),
             ("nav-settings", "sovra-settings-view"),
+            ("nav-connections", "connections-page"),
             ("nav-models", "models-setup-home"),
         ] {
             window.click(tab, cx);

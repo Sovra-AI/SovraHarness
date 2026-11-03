@@ -26,6 +26,8 @@ use crate::text_tool_calls::TextToolCalls;
 #[cfg(test)]
 #[path = "orchestrator/concurrency_tests.rs"]
 mod concurrency_tests;
+#[cfg(test)]
+mod connection_concurrency;
 
 /// Parent agent id. Matches the roster entry the router already uses.
 pub(crate) const ORCHESTRATOR_ID: &str = "OrchestratorAgent";
@@ -272,6 +274,20 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
     }))
 }
 
+/// Auto only when every tool is read-only and concurrency-safe. Otherwise the
+/// helper stays ordered. Never [`ToolExecutionStrategy::Parallel`], which runs
+/// calls together without looking at those flags.
+pub(crate) fn execution_strategy(tools: &[Arc<dyn Tool>]) -> ToolExecutionStrategy {
+    if tools
+        .iter()
+        .all(|tool| tool.is_read_only() && tool.is_concurrency_safe())
+    {
+        ToolExecutionStrategy::Auto
+    } else {
+        ToolExecutionStrategy::Sequential
+    }
+}
+
 fn child_agent(
     spec: &SpecialistAgentSpec,
     llm: Arc<dyn Llm>,
@@ -281,14 +297,8 @@ fn child_agent(
 ) -> Result<Arc<dyn Agent>, Error> {
     // ADK Auto groups safe reads ahead of ordered calls. Only use it when
     // there are no ordering barriers anywhere in this helper's tool set.
-    let strategy = if tools
-        .iter()
-        .all(|tool| tool.is_read_only() && tool.is_concurrency_safe())
-    {
-        ToolExecutionStrategy::Auto
-    } else {
-        ToolExecutionStrategy::Sequential
-    };
+    // `Parallel` is never selected: it ignores the read-only flags.
+    let strategy = execution_strategy(&tools);
     let mut builder = LlmAgentBuilder::new(spec.id.as_str())
         .description(spec.description.clone())
         .instruction(instruction)
@@ -483,13 +493,14 @@ mod tests {
         let remaining = roster_pairs(false);
         assert_eq!(disabled.delegates(), remaining);
         // Every web-backed specialist leaves with the search, not just WebSearchAgent.
-        for web_backed in [WEB_SEARCH_AGENT_ID, "DeepResearchAgent", "StockMarketAgent"] {
+        // DeepResearchAgent is never an orchestrator delegate (dedicated board path).
+        for web_backed in [WEB_SEARCH_AGENT_ID, "StockMarketAgent", "ScholarAgent"] {
             assert!(
                 remaining.iter().all(|(id, _)| id != web_backed),
                 "{web_backed}"
             );
         }
-        assert_eq!(remaining.len() + 5, roster_pairs(true).len());
+        assert_eq!(remaining.len() + 4, roster_pairs(true).len());
     }
 
     #[test]
@@ -500,6 +511,7 @@ mod tests {
         let ids: Vec<String> = enabled.delegates().into_iter().map(|(id, _)| id).collect();
         for absent in [
             ORCHESTRATOR_ID,
+            sovra_core::DEEP_RESEARCH_AGENT_ID,
             "GoogleWorkspace",
             "TodosAgent",
             "GitHubAgent",
@@ -510,9 +522,35 @@ mod tests {
                 "{absent} offered without its tools"
             );
         }
-        for present in [WEB_SEARCH_AGENT_ID, "DeepResearchAgent", "CodingAgent"] {
+        for present in [WEB_SEARCH_AGENT_ID, "CodingAgent"] {
             assert!(ids.iter().any(|id| id == present), "{present} missing");
         }
+    }
+
+    #[test]
+    fn deep_research_agent_is_never_a_solo_orchestrator_delegate() {
+        let enabled = harness_with(Arc::new(IdleLlm))
+            .with_web_search(SearchClient::failing("unused"))
+            .expect("enabled orchestrator");
+        assert!(
+            enabled
+                .delegates()
+                .iter()
+                .all(|(id, _)| id != sovra_core::DEEP_RESEARCH_AGENT_ID),
+            "DeepResearchAgent must not be offered as a solo AgentTool"
+        );
+        assert!(
+            !roster_pairs(true)
+                .iter()
+                .any(|(id, _)| id == sovra_core::DEEP_RESEARCH_AGENT_ID),
+            "available_specialists must exclude DeepResearchAgent"
+        );
+        assert!(
+            default_sovra_srx_agents()
+                .iter()
+                .any(|spec| spec.id == sovra_core::DEEP_RESEARCH_AGENT_ID),
+            "roster still lists DeepResearchAgent for Skills / My AIs"
+        );
     }
 
     #[test]
@@ -526,6 +564,7 @@ mod tests {
         assert!(with_web.contains("opening hours"));
         assert!(!with_web.contains("Web search is off"));
         assert!(!with_web.contains("- GoogleWorkspace"));
+        assert!(!with_web.contains("- DeepResearchAgent"));
         assert!(with_web.contains("not available yet"));
 
         let offline = available_specialists(&roster, &BTreeSet::new());
@@ -549,7 +588,13 @@ mod tests {
             let _ = collect_answer(&rx).await;
             let seen = seen.lock().expect("seen");
             let parent = seen.first().expect("parent request");
-            assert!(parent.iter().any(|name| name == "DeepResearchAgent"));
+            assert!(parent.iter().any(|name| name == WEB_SEARCH_AGENT_ID));
+            assert!(
+                parent
+                    .iter()
+                    .all(|name| name != sovra_core::DEEP_RESEARCH_AGENT_ID),
+                "solo DeepResearchAgent AgentTool must be gone: {parent:?}"
+            );
             assert!(
                 parent
                     .iter()

@@ -9,13 +9,27 @@ capability-provider registry, preserving that integration's draft-only email API
 
 `messaging_status`, `list_recent_chats`, and `read_recent_messages` inspect current
 connection state and the bounded local recent-message snapshot. This is not a
-WhatsApp contact-book or complete phone-history API. Exact recent chat ids avoid
-ambiguous name matching. An explicit international WhatsApp number is also
-accepted. Telegram recipients must already have contacted the linked bot.
+complete phone-history API. `find_people` looks up saved people by name. An empty
+question returns a count and does not list everyone. The same phone number or the
+same email joins one person. A shared first name never does. While `WhatsApp` is
+linked, contacts the phone has synced are collected in the background. There is no
+separate address-book download, and an empty or failed sync does not erase people
+already saved.
+
+`prepare_message` accepts `me`, an exact recent chat id, an explicit international
+`WhatsApp` number, one saved person's full name, or `person:<id>` from a card the
+person chose. More than one match is refused so the helper asks. A phone number
+that is not a `WhatsApp` handle is not used as a `WhatsApp` recipient. Telegram
+still needs a chat that has already written to the bot, or a chat added on that
+person. Sovra does not download a Telegram address book. Looking up people is a
+safe read. Preparing a message stays ordered and does not send.
 
 `prepare_message` validates a single text message of up to 4,096 characters and
 creates a native review in the originating chat. It does not send. Repeated
-identical requests in the same turn reuse the review or receipt. The review shows
+identical requests in the same turn reuse a review that is still waiting or
+sending. A cancelled, accepted, or expired review can be prepared again. The
+people list shows each phone number, email, and Telegram chat. Message on
+WhatsApp opens that chat so Send is on screen. The review shows
 the sender, recipient and exact text, and offers Send, Cancel and Save. No model
 tool can approve it or replace its content. Changing the message requires a new
 review. `message_receipt` is limited to the originating desktop conversation.

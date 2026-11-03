@@ -5,6 +5,9 @@ use super::{Episode, EpisodeKind, Fact, MemoryError, RecallQuery, Timestamp};
 pub const MAX_MEMORY_CONTEXT_BYTES: usize = 16 * 1024;
 pub const MAX_MEMORY_CONTEXT_ITEMS: usize = 8;
 pub const MAX_MEMORY_PRIMARY_ITEMS: usize = 6;
+pub const MAX_MEMORY_SEARCHES: usize = 4;
+const MAX_BACKGROUND_ITEMS: usize = 8;
+const MAX_BACKGROUND_BYTES: usize = 4 * 1024;
 const MAX_RELATED_ITEMS: usize = MAX_MEMORY_CONTEXT_ITEMS - MAX_MEMORY_PRIMARY_ITEMS;
 const MAX_RELATED_ENTITIES: usize = 2;
 const MAX_RELATED_CANDIDATES: usize = 8;
@@ -62,6 +65,18 @@ impl MemorySearch {
         query.known_at = self.known_at;
         query.include_expired = self.valid_at.is_some() || self.known_at.is_some();
         query
+    }
+
+    /// A small current working set accompanies word-based retrieval. Never mix
+    /// current beliefs into an explicitly historical lookup.
+    pub fn background_query(&self, now: Timestamp) -> Option<RecallQuery> {
+        if self.valid_at.is_some() || self.known_at.is_some() {
+            return None;
+        }
+        let mut query = self.query(String::new(), now);
+        query.text = None;
+        query.limit = MAX_BACKGROUND_ITEMS;
+        Some(query)
     }
 
     fn related_entities(&self, seeds: &[Fact], now: Timestamp) -> Vec<String> {
@@ -196,17 +211,69 @@ pub struct MemoryEvidence {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct MemoryContext {
     pub memories: Vec<MemoryEvidence>,
+    pub sources: Vec<super::MemorySourceEvidence>,
+    /// Recent current details, independently of query wording; not relevance-ranked
+    /// or a complete personal profile. They share the total serialized context cap.
+    pub background: Vec<MemoryEvidence>,
     pub notice: Option<String>,
 }
 impl MemoryContext {
     pub fn unavailable() -> Self {
         Self {
             memories: vec![],
+            sources: vec![],
+            background: vec![],
             notice: Some(
                 "Saved details could not be checked. Do not invent remembered facts.".into(),
             ),
         }
     }
+    pub fn push_source(&mut self, source: super::MemorySourceEvidence) -> bool {
+        if self.sources.len() >= 4
+            || self
+                .sources
+                .iter()
+                .any(|item| item.source_id == source.source_id)
+        {
+            return false;
+        }
+        self.sources.push(source);
+        if serde_json::to_vec(self).is_ok_and(|data| data.len() <= MAX_MEMORY_CONTEXT_BYTES) {
+            true
+        } else {
+            self.sources.pop();
+            false
+        }
+    }
+
+    /// Use the same source grounding as direct evidence, with an additional small
+    /// budget so always-visible context cannot crowd out targeted retrieval.
+    pub fn push_background(&mut self, fact: &Fact, source: &Episode) -> bool {
+        if !fact.is_current()
+            || self.background.len() >= MAX_BACKGROUND_ITEMS
+            || self
+                .memories
+                .iter()
+                .chain(&self.background)
+                .any(|item| item.fact_id == fact.id.0)
+        {
+            return false;
+        }
+        let mut grounded = Self::default();
+        if !grounded.push(fact, source) {
+            return false;
+        }
+        self.background.extend(grounded.memories);
+        if serde_json::to_vec(&self.background).is_ok_and(|data| data.len() <= MAX_BACKGROUND_BYTES)
+            && serde_json::to_vec(self).is_ok_and(|data| data.len() <= MAX_MEMORY_CONTEXT_BYTES)
+        {
+            true
+        } else {
+            self.background.pop();
+            false
+        }
+    }
+
     /// Reject unsupported or oversized records; never truncate a quote into a
     /// different claim. The serialized evidence, including metadata, shares one cap.
     pub fn push(&mut self, fact: &Fact, source: &Episode) -> bool {
@@ -261,13 +328,57 @@ impl MemoryContext {
 /// every request, including tool requests made after a pause.
 #[async_trait::async_trait]
 pub trait MemoryReader: Send + Sync {
+    /// Automatic turn context may include a bounded recent working set.
     async fn search(&self, query: MemorySearch) -> Result<MemoryContext, MemoryError>;
+
+    /// Focused lookups omit unrelated recent background details.
+    /// Results preserve query order. Implementations must bound total work and
+    /// recheck permissions after the whole batch, including already finished reads.
+    /// Readers without that guarantee explicitly decline multi-query requests.
+    async fn search_batch(
+        &self,
+        mut queries: Vec<MemorySearch>,
+    ) -> Result<Vec<MemoryContext>, MemoryError> {
+        validate_memory_searches(&queries)?;
+        if queries.len() != 1 {
+            return Err(MemoryError::Backend(
+                "Multiple saved-detail searches are unavailable.".into(),
+            ));
+        }
+        let mut context = self.search(queries.remove(0)).await?;
+        context.background.clear();
+        Ok(vec![context])
+    }
+}
+
+pub fn validate_memory_searches(queries: &[MemorySearch]) -> Result<(), MemoryError> {
+    if queries.is_empty() || queries.len() > MAX_MEMORY_SEARCHES {
+        return Err(MemoryError::InvalidInput(
+            "Use one to four saved-detail searches.".into(),
+        ));
+    }
+    queries.iter().try_for_each(MemorySearch::validate)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{EpisodeId, FactId, MemoryExtraction};
+    #[test]
+    fn search_batches_are_bounded_and_validate_every_query() {
+        let query = MemorySearch {
+            text: "tea".into(),
+            ..Default::default()
+        };
+        assert!(validate_memory_searches(&[]).is_err());
+        assert!(validate_memory_searches(&vec![query.clone(); 4]).is_ok());
+        assert!(validate_memory_searches(&vec![query.clone(); 5]).is_err());
+        let invalid = MemorySearch {
+            text: "x".repeat(4097),
+            ..query.clone()
+        };
+        assert!(validate_memory_searches(&[query, invalid]).is_err());
+    }
     fn pair() -> (Fact, Episode) {
         let source = Episode {
             id: EpisodeId("episode:1".into()),
@@ -475,6 +586,62 @@ mod tests {
         assert!(!query.as_known(fact.clone()).is_current());
         assert!(!MemoryContext::default().push(&fact, &source));
     }
+    #[test]
+    fn background_is_current_grounded_deduplicated_and_bounded() {
+        let (mut fact, mut source) = pair();
+        let mut context = MemoryContext::default();
+        assert!(context.push_background(&fact, &source));
+        assert!(!context.push_background(&fact, &source));
+        assert_eq!(context.memories, Vec::new());
+        assert_eq!(context.background[0].citation, "memory:fact:1");
+        context.background.clear();
+        assert!(context.push(&fact, &source));
+        assert!(!context.push_background(&fact, &source));
+        let mut context = MemoryContext::default();
+        fact.expired_at = Some(Timestamp(30));
+        assert!(!context.push_background(&fact, &source));
+        fact.expired_at = None;
+        fact.stopped_at = Some(Timestamp(30));
+        assert!(!context.push_background(&fact, &source));
+        fact.stopped_at = None;
+        source.kind = EpisodeKind::AgentMessage;
+        assert!(!context.push_background(&fact, &source));
+        source.kind = EpisodeKind::UserMessage;
+        for index in 0..50 {
+            fact.id.0 = format!("fact:{index}");
+            context.push_background(&fact, &source);
+        }
+        assert_eq!(context.background.len(), MAX_BACKGROUND_ITEMS);
+        assert!(serde_json::to_vec(&context.background).unwrap().len() <= MAX_BACKGROUND_BYTES);
+        assert!(serde_json::to_vec(&context).unwrap().len() <= MAX_MEMORY_CONTEXT_BYTES);
+        let mut context = MemoryContext::default();
+        fact.content = "\\".repeat(2048);
+        source.content = fact.content.clone();
+        fact.extraction = None;
+        assert!(!context.push_background(&fact, &source));
+        assert_eq!(context.background, Vec::new());
+    }
+
+    #[test]
+    fn background_query_preserves_entity_scope_and_omits_historical_reads() {
+        let mut search = MemorySearch {
+            text: "different words".into(),
+            entity: Some("Mira".into()),
+            ..Default::default()
+        };
+        let query = search.background_query(Timestamp(80)).unwrap();
+        assert_eq!(query.entity.as_deref(), Some("Mira"));
+        assert_eq!(query.valid_at, Some(Timestamp(80)));
+        assert_eq!(query.limit, MAX_BACKGROUND_ITEMS);
+        assert!(query.text.is_none());
+        assert!(!query.include_expired);
+        search.valid_at = Some(Timestamp(40));
+        assert!(search.background_query(Timestamp(80)).is_none());
+        search.valid_at = None;
+        search.known_at = Some(Timestamp(40));
+        assert!(search.background_query(Timestamp(80)).is_none());
+    }
+
     #[test]
     fn context_requires_user_evidence_and_bounds_actual_json() {
         let (mut fact, mut source) = pair();

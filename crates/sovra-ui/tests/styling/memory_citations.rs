@@ -23,18 +23,27 @@ fn reveal(
     for _ in 0..60 {
         window.render_frame(cx);
         let bounds = window.find(id.clone()).bounds();
-        // Content may sit flush under the window edge now that the empty in-app title bar is gone.
-        if bounds.top() >= px(8.) && bounds.bottom() <= px(height - 8.) {
+        // The fixed header can cover a control inside the window bounds. Reveal
+        // it within its actual scroll pane before sending the pointer click.
+        let viewport = window.find(area).bounds();
+        let top = viewport.top().max(px(8.));
+        let bottom = viewport.bottom().min(px(height - 8.));
+        if bounds.top() >= top && bounds.bottom() <= bottom {
             return;
         }
-        let delta = if bounds.top() < px(8.) { 60. } else { -60. };
-        window.scroll(area, ScrollDelta::Pixels(point(px(0.), px(delta))), cx);
+        let delta = if bounds.top() < top {
+            top - bounds.top() + px(1.)
+        } else {
+            bottom - bounds.bottom() - px(1.)
+        };
+        window.scroll(area, ScrollDelta::Pixels(point(px(0.), delta)), cx);
     }
     panic!("control {id:?} must be reachable");
 }
 
 fn detail() -> MemoryDetail {
     MemoryDetail {
+        neighborhood: sovra_core::MemoryNeighborhood::default(),
         fact: Fact {
             id: FactId("fact:tea".into()),
             content: "Prefers tea".into(),
@@ -60,169 +69,250 @@ fn detail() -> MemoryDetail {
 
 #[gpui_kit::test]
 fn reply_citations_open_saved_sources_at_every_size(cx: &mut TestAppContext) {
-    for mode in [ThemeMode::Dark, ThemeMode::Light] {
-        for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
-            let (client, commands, events) = Client::loopback();
-            cx.update(|cx| {
-                sovra_ui::init(client, cx);
-                Theme::change(mode, None, cx);
-                design::set_interface_scale(
-                    sovra_core::models::InterfaceScale::from_percent(scale),
-                    cx,
-                );
-            });
-            let mut shell = None;
-            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-                let view = cx.new(|cx| Shell::new(0, window, cx));
-                shell = Some(view.clone());
-                Root::new(view, window, cx)
-            });
-            let shell = shell.unwrap();
-            let mut thread = sovra_core::ChatThread::new("restored", Timestamp(1));
-            let mut reply =
-                ChatMessage::assistant("reply", "Tea. [memory:fact:tea]", "Earlier", vec![]);
-            if mode == ThemeMode::Light {
-                reply.speaker = Some(sovra_core::Speaker {
-                    member_id: "helper".into(),
-                    name: "Mira".into(),
-                    icon: "M".into(),
-                    role: "Research".into(),
+    for original in [false, true] {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            for (width, height, scale) in
+                [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)]
+            {
+                let (client, commands, events) = Client::loopback();
+                cx.update(|cx| {
+                    sovra_ui::init(client, cx);
+                    Theme::change(mode, None, cx);
+                    design::set_interface_scale(
+                        sovra_core::models::InterfaceScale::from_percent(scale),
+                        cx,
+                    );
                 });
-            }
-            thread.messages.push(reply);
-            events
-                .send_blocking(Event::ChatHistoryLoaded {
-                    threads: vec![thread],
-                })
-                .unwrap();
-            cx.executor()
-                .advance_clock(std::time::Duration::from_millis(16));
-            cx.run_until_parked();
-            cx.update(|cx| shell.update(cx, |shell, cx| shell.select_thread("restored", cx)));
-            cx.update_window(window.into(), |_, window, cx| {
-                window.render_frame(cx);
-                let id = ("memory-citation-0", 0usize);
-                reveal(window, cx, "chat-scroll-area", id, height);
-                let button = window.find(id);
-                assert!(button.visible(), "{width}@{scale}: {button:?}");
-                assert!(button.bounds().right() <= px(width));
-                window.click(id, cx);
-                window.render_frame(cx);
-                assert_eq!(
-                    shell.read(cx).workspace().active_tab,
-                    sovra_core::NavTab::Knowledge
-                );
-                reveal(
-                    window,
-                    cx,
-                    "sovra-memory-source-view",
-                    "memory-loading",
-                    height,
-                );
-                assert!(window.find("memory-loading").visible());
-                reveal(
-                    window,
-                    cx,
-                    "sovra-memory-source-view",
-                    "memory-back-chat",
-                    height,
-                );
-                assert!(window.find("memory-back-chat").visible());
-            })
-            .unwrap();
-            let request = std::iter::from_fn(|| commands.try_recv().ok())
-                .find_map(|command| match command {
-                    Command::Memory(command)
-                        if command.action == MemoryAction::Inspect(FactId("fact:tea".into())) =>
-                    {
-                        Some(command)
-                    }
-                    _ => None,
-                })
-                .unwrap();
-            events
-                .send_blocking(Event::Memory(MemoryEvent::Review(MemoryReviewEvent {
-                    request_id: request.request_id,
-                    result: Ok(MemoryReviewResult::Detail(Box::new(detail()))),
-                })))
-                .unwrap();
-            cx.executor()
-                .advance_clock(std::time::Duration::from_millis(16));
-            cx.run_until_parked();
-            cx.update_window(window.into(), |_, window, cx| {
-                reveal(
-                    window,
-                    cx,
-                    "sovra-memory-source-view",
-                    "memory-source",
-                    height,
-                );
-                assert_eq!(window.find("memory-source").label(), Some("I prefer tea."));
-                assert!(window.find("memory-source").bounds().right() <= px(width));
-                assert!(window.try_find("memory-stop").is_none());
-                assert!(window.try_find("memory-edit").is_none());
-                reveal(
-                    window,
-                    cx,
-                    "sovra-memory-source-view",
-                    "memory-back-chat",
-                    height,
-                );
-                window.click("memory-back-chat", cx);
-                window.render_frame(cx);
-                assert_eq!(
-                    shell.read(cx).workspace().active_tab,
-                    sovra_core::NavTab::Chat
-                );
-                assert_eq!(
-                    shell.read(cx).workspace().messages[0].text,
+                let mut shell = None;
+                let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                    let view = cx.new(|cx| Shell::new(0, window, cx));
+                    shell = Some(view.clone());
+                    Root::new(view, window, cx)
+                });
+                let shell = shell.unwrap();
+                let mut thread = sovra_core::ChatThread::new("restored", Timestamp(1));
+                let reply_text = if original {
+                    "Tea. [source:episode:tea]"
+                } else {
                     "Tea. [memory:fact:tea]"
-                );
-                reveal(
-                    window,
-                    cx,
-                    "chat-scroll-area",
-                    ("memory-citation-0", 0usize),
-                    height,
-                );
-                window.click(("memory-citation-0", 0usize), cx);
-            })
-            .unwrap();
-            let request = std::iter::from_fn(|| commands.try_recv().ok())
-                .filter_map(|command| match command {
-                    Command::Memory(command)
-                        if matches!(command.action, MemoryAction::Inspect(_)) =>
-                    {
-                        Some(command)
-                    }
-                    _ => None,
+                };
+                let action = if original {
+                    MemoryAction::InspectSource(EpisodeId("episode:tea".into()))
+                } else {
+                    MemoryAction::Inspect(FactId("fact:tea".into()))
+                };
+                let mut reply = ChatMessage::assistant("reply", reply_text, "Earlier", vec![]);
+                if mode == ThemeMode::Light {
+                    reply.speaker = Some(sovra_core::Speaker {
+                        member_id: "helper".into(),
+                        name: "Mira".into(),
+                        icon: "M".into(),
+                        role: "Research".into(),
+                    });
+                }
+                thread.messages.push(reply);
+                events
+                    .send_blocking(Event::ChatHistoryLoaded {
+                        threads: vec![thread],
+                    })
+                    .unwrap();
+                cx.executor()
+                    .advance_clock(std::time::Duration::from_millis(16));
+                cx.run_until_parked();
+                cx.update(|cx| shell.update(cx, |shell, cx| shell.select_thread("restored", cx)));
+                cx.update_window(window.into(), |_, window, cx| {
+                    window.render_frame(cx);
+                    let id = ("memory-citation-0", 0usize);
+                    reveal(window, cx, "chat-scroll-area", id, height);
+                    let button = window.find(id);
+                    assert!(button.visible(), "{width}@{scale}: {button:?}");
+                    assert!(button.bounds().right() <= px(width));
+                    window.click(id, cx);
+                    window.render_frame(cx);
+                    assert_eq!(
+                        shell.read(cx).workspace().active_tab,
+                        sovra_core::NavTab::Knowledge
+                    );
+                    reveal(
+                        window,
+                        cx,
+                        "sovra-memory-source-view",
+                        "memory-loading",
+                        height,
+                    );
+                    assert!(window.find("memory-loading").visible());
+                    reveal(
+                        window,
+                        cx,
+                        "sovra-memory-source-view",
+                        "memory-back-chat",
+                        height,
+                    );
+                    assert!(window.find("memory-back-chat").visible());
                 })
-                .last()
                 .unwrap();
-            events
-                .send_blocking(Event::Memory(MemoryEvent::Review(MemoryReviewEvent {
-                    request_id: request.request_id,
-                    result: Err("Saved source could not be found.".into()),
-                })))
+                let request = std::iter::from_fn(|| commands.try_recv().ok())
+                    .find_map(|command| match command {
+                        Command::Memory(command) if command.action == action => Some(command),
+                        _ => None,
+                    })
+                    .unwrap();
+                events
+                    .send_blocking(Event::Memory(MemoryEvent::Review(MemoryReviewEvent {
+                        request_id: request.request_id,
+                        result: Ok(if original {
+                            MemoryReviewResult::Source(sovra_core::MemorySourceRecord {
+                                episode: detail().source.unwrap(),
+                                metadata: sovra_core::MemorySourceMetadata::default(),
+                            })
+                        } else {
+                            MemoryReviewResult::Detail(Box::new(detail()))
+                        }),
+                    })))
+                    .unwrap();
+                cx.executor()
+                    .advance_clock(std::time::Duration::from_millis(16));
+                cx.run_until_parked();
+                if !original {
+                    cx.update_window(window.into(), |_, window, cx| {
+                        reveal(
+                            window,
+                            cx,
+                            "sovra-memory-source-view",
+                            "memory-supporting-records",
+                            height,
+                        );
+                        window.click("memory-supporting-records", cx);
+                    })
+                    .unwrap();
+                    let sources = super::knowledge_profile::request(&commands);
+                    assert!(
+                        matches!(&sources.action, MemoryAction::ListSources(query) if query.fact.as_ref() == Some(&detail().fact.id))
+                    );
+                    super::knowledge_profile::respond(
+                        &events,
+                        sources.request_id,
+                        MemoryReviewResult::Sources(sovra_core::MemorySourcePage::default()),
+                    );
+                    super::knowledge_profile::settle(cx);
+                    cx.update_window(window.into(), |_, window, cx| {
+                        super::knowledge_profile::reveal(window, "memory-sources-back-detail", cx);
+                        window.click("memory-sources-back-detail", cx);
+                    })
+                    .unwrap();
+                    let back = super::knowledge_profile::request(&commands);
+                    assert_eq!(back.action, MemoryAction::Inspect(detail().fact.id));
+                    super::knowledge_profile::respond(
+                        &events,
+                        back.request_id,
+                        MemoryReviewResult::Detail(Box::new(detail())),
+                    );
+                    super::knowledge_profile::settle(cx);
+                }
+                cx.update_window(window.into(), |_, window, cx| {
+                    reveal(
+                        window,
+                        cx,
+                        "sovra-memory-source-view",
+                        "memory-source",
+                        height,
+                    );
+                    assert_eq!(window.find("memory-source").label(), Some("I prefer tea."));
+                    assert!(window.find("memory-source").bounds().right() <= px(width));
+                    assert!(window.try_find("memory-stop").is_none());
+                    assert!(window.try_find("memory-edit").is_none());
+                    if original {
+                        reveal(
+                            window,
+                            cx,
+                            "sovra-memory-source-view",
+                            "memory-stop-source",
+                            height,
+                        );
+                        window.click("memory-stop-source", cx);
+                        window.render_frame(cx);
+                        reveal(
+                            window,
+                            cx,
+                            "sovra-memory-source-view",
+                            "memory-confirm-stop-source",
+                            height,
+                        );
+                        assert!(window.find("memory-confirm-stop-source").visible());
+                        reveal(
+                            window,
+                            cx,
+                            "sovra-memory-source-view",
+                            "memory-cancel-stop-source",
+                            height,
+                        );
+                        window.click("memory-cancel-stop-source", cx);
+                        window.render_frame(cx);
+                        assert!(window.try_find("memory-confirm-stop-source").is_none());
+                    }
+                    reveal(
+                        window,
+                        cx,
+                        "sovra-memory-source-view",
+                        "memory-back-chat",
+                        height,
+                    );
+                    window.click("memory-back-chat", cx);
+                    window.render_frame(cx);
+                    assert_eq!(
+                        shell.read(cx).workspace().active_tab,
+                        sovra_core::NavTab::Chat
+                    );
+                    assert_eq!(shell.read(cx).workspace().messages[0].text, reply_text);
+                    reveal(
+                        window,
+                        cx,
+                        "chat-scroll-area",
+                        ("memory-citation-0", 0usize),
+                        height,
+                    );
+                    window.click(("memory-citation-0", 0usize), cx);
+                })
                 .unwrap();
-            cx.executor()
-                .advance_clock(std::time::Duration::from_millis(16));
-            cx.run_until_parked();
-            cx.update_window(window.into(), |_, window, cx| {
-                reveal(
-                    window,
-                    cx,
-                    "sovra-memory-source-view",
-                    "memory-error",
-                    height,
-                );
-                assert!(window.find("memory-error").visible());
-                assert!(
-                    window.try_find("memory-source").is_none(),
-                    "a failed lookup must not show the earlier source"
-                );
-            })
-            .unwrap();
+                let request = std::iter::from_fn(|| commands.try_recv().ok())
+                    .filter_map(|command| match command {
+                        Command::Memory(command)
+                            if matches!(
+                                command.action,
+                                MemoryAction::Inspect(_) | MemoryAction::InspectSource(_)
+                            ) =>
+                        {
+                            Some(command)
+                        }
+                        _ => None,
+                    })
+                    .last()
+                    .unwrap();
+                events
+                    .send_blocking(Event::Memory(MemoryEvent::Review(MemoryReviewEvent {
+                        request_id: request.request_id,
+                        result: Err("Saved source could not be found.".into()),
+                    })))
+                    .unwrap();
+                cx.executor()
+                    .advance_clock(std::time::Duration::from_millis(16));
+                cx.run_until_parked();
+                cx.update_window(window.into(), |_, window, cx| {
+                    reveal(
+                        window,
+                        cx,
+                        "sovra-memory-source-view",
+                        "memory-error",
+                        height,
+                    );
+                    assert!(window.find("memory-error").visible());
+                    assert!(
+                        window.try_find("memory-source").is_none(),
+                        "a failed lookup must not show the earlier source"
+                    );
+                })
+                .unwrap();
+            }
         }
     }
 }

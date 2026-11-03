@@ -51,6 +51,7 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
     let mut sources = BTreeMap::new();
     let mut relations = vec![];
     let mut truncated = false;
+    let mut boundary = None;
     let mut inspected = 0;
     let started = std::time::Instant::now();
     let recorded = query.recorded_at.unwrap_or_else(now);
@@ -60,13 +61,14 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
         } else {
             ""
         };
-        let sql=format!("SELECT r.id FROM index_knowledge_relations r
+        let sql=format!("SELECT r.id,r.created FROM index_knowledge_relations r
             LEFT JOIN index_knowledge_entities s ON s.id=r.subject
             LEFT JOIN index_knowledge_entities o ON o.id=r.object
             WHERE r.created<=?1 AND (?2 OR r.expired IS NULL OR r.expired>?1)
             AND (?3='[]' OR r.subject IN (SELECT value FROM json_each(?3)) OR r.object IN (SELECT value FROM json_each(?3)))
             AND (?4='' OR instr(lower(json_extract(r.details,'$.statement')),lower(?4))>0 OR instr(lower(json_extract(s.details,'$.label')),lower(?4))>0 OR instr(lower(json_extract(o.details,'$.label')),lower(?4))>0)
             AND {GRANTED_RELATION}
+            AND (?6 IS NULL OR r.created<?6 OR (r.created=?6 AND r.id>?7))
             AND NOT EXISTS (SELECT 1 FROM index_knowledge_evidence e WHERE e.id IN (
                 SELECT evidence_id FROM index_knowledge_relation_sources WHERE relation_id=r.id
                 UNION SELECT evidence_id FROM index_knowledge_entity_sources WHERE entity_id=r.subject OR entity_id=r.object
@@ -81,9 +83,15 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
                     query.include_superseded,
                     json(&frontier)?,
                     text,
-                    json(&query.roots)?
+                    json(&query.roots)?,
+                    query
+                        .before
+                        .as_ref()
+                        .map(|c| number(c.recorded_at))
+                        .transpose()?,
+                    query.before.as_ref().map(|c| c.id.as_str())
                 ],
-                |r| r.get::<_, String>(0),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
             )
             .map_err(|e| db_error(&e))?
             .collect::<rusqlite::Result<Vec<_>>>()
@@ -92,7 +100,7 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
             truncated = true;
         }
         let mut next = BTreeSet::new();
-        for id in ids.into_iter().take(1000) {
+        for (id, recorded_at) in ids.into_iter().take(1000) {
             if !visited.insert(id.clone()) {
                 continue;
             }
@@ -107,7 +115,12 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
                 ));
             }
             let record = relation(db, &id, &query.roots)?;
+            let cursor = sovra_core::file_index::graph::GraphCursor {
+                recorded_at: u64::try_from(recorded_at).map_err(|_| missing())?,
+                id,
+            };
             if !query.include_stale && !record.sources_current {
+                boundary = Some(cursor);
                 continue;
             }
             let mut temporal = record.clone();
@@ -115,6 +128,7 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
                 temporal.expired_at = None;
             }
             if !temporal.visible_at(recorded, query.valid_at, query.include_unknown_validity) {
+                boundary = Some(cursor);
                 continue;
             }
             if relations.len() >= query.limit {
@@ -140,6 +154,7 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
                 sources.insert(*id, evidence(db, *id, &query.roots)?.source);
             }
             relations.push(record);
+            boundary = Some(cursor);
         }
         if next.is_empty() {
             break;
@@ -151,5 +166,10 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
         relations,
         sources: sources.into_values().collect(),
         truncated,
+        next: if truncated && query.hops == 1 {
+            boundary
+        } else {
+            None
+        },
     })
 }

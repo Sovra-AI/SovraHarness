@@ -5,6 +5,7 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, div,
@@ -20,7 +21,11 @@ use crate::{
     models_view::ModelsView,
 };
 
+mod directory;
+mod exploration;
+mod graph;
 mod profile;
+mod source_browser;
 
 #[allow(
     clippy::struct_excessive_bools,
@@ -34,23 +39,54 @@ struct CaptureView {
     result: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+enum SourceNavigation {
+    Conversation,
+    Memories,
+    Sources,
+}
+
+#[derive(Clone)]
+struct SupportingDetail {
+    id: FactId,
+    label: String,
+    source_only: bool,
+    navigation: SourceNavigation,
+    trail: Vec<FactId>,
+}
+
 pub(crate) struct MemoryView {
     state: MemoryReviewState,
+    navigation_request: Option<u64>,
     models: Entity<ModelsView>,
     embedding_search: Entity<InputState>,
     choosing: bool,
     _embedding_search: gpui_kit::Subscription,
     query: MemoryListQuery,
+    subject_query: Option<sovra_core::MemorySubjectQuery>,
+    subject_search: Entity<InputState>,
+    source_query: Option<sovra_core::MemorySourceQuery>,
+    supporting_detail: Option<SupportingDetail>,
+    source_search: Entity<InputState>,
+    _search_events: Vec<gpui_kit::Subscription>,
     search: Entity<InputState>,
     correction: Entity<TextareaState>,
     editing: Option<FactId>,
     stopping: Option<FactId>,
+    source_stop: Option<sovra_core::EpisodeId>,
     source_only: bool,
+    source_navigation: SourceNavigation,
+    trail: Vec<FactId>,
+    expanded_source: Option<sovra_core::EpisodeId>,
     capture: CaptureView,
     adding: bool,
     note: Entity<TextareaState>,
     notice: Option<String>,
     width_class: design::WidthClass,
+    /// Detail or chat chosen in the picture. Dropped when that detail leaves the page.
+    graph_selection: Option<sovra_core::MemoryGraphNodeId>,
+    /// Local repeat check. Empty until the person asks, and cleared when the page reloads.
+    duplicates: Option<sovra_core::MemoryDuplicateReport>,
 }
 
 impl MemoryView {
@@ -70,29 +106,93 @@ impl MemoryView {
                 }
             },
         );
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search saved details"));
+        let subject_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Find a person, place or project"));
+        let source_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search original wording"));
+        let search_events = vec![
+            cx.subscribe_in(
+                &source_search,
+                window,
+                |view, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. })
+                        && !view.state.loading
+                        && view.source_query.is_some()
+                        && !view.source_only
+                    {
+                        view.search_sources(cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. })
+                    && !view.state.loading
+                    && view.subject_query.is_none()
+                    && view.source_query.is_none()
+                    && !view.source_only
+                {
+                    view.load(cx);
+                }
+            }),
+            cx.subscribe_in(
+                &subject_search,
+                window,
+                |view, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. })
+                        && !view.state.loading
+                        && view.subject_query.is_some()
+                    {
+                        view.search_subjects(cx);
+                    }
+                },
+            ),
+        ];
         Self {
             models,
             embedding_search,
             choosing: false,
             _embedding_search: subscription,
             state: MemoryReviewState::default(),
+            navigation_request: None,
             query: MemoryListQuery::default(),
-            search: cx.new(|cx| InputState::new(window, cx).placeholder("Search saved details")),
+            search,
+            subject_search,
+            subject_query: None,
+            source_query: None,
+            supporting_detail: None,
+            source_search,
+            _search_events: search_events,
             correction: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 5)),
             editing: None,
             stopping: None,
+            source_stop: None,
             source_only: false,
+            source_navigation: SourceNavigation::Conversation,
+            trail: Vec::new(),
+            expanded_source: None,
             capture: CaptureView::default(),
             adding: false,
             note: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 5)),
             notice: None,
             width_class: design::WidthClass::Compact,
+            graph_selection: None,
+            duplicates: None,
         }
     }
 
     fn send(&mut self, action: MemoryAction, cx: &mut Context<Self>) {
+        let navigates = matches!(
+            action,
+            MemoryAction::List(_)
+                | MemoryAction::ListSubjects(_)
+                | MemoryAction::ListSources(_)
+                | MemoryAction::Inspect(_)
+                | MemoryAction::InspectSource(_)
+        );
         let command = self.state.begin(action);
         let request_id = command.request_id;
+        self.navigation_request = navigates.then_some(request_id);
         if let Err(error) = cx
             .global::<RuntimeClient>()
             .0
@@ -107,6 +207,11 @@ impl MemoryView {
     }
 
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
+        self.supporting_detail = None;
+        self.subject_query = None;
+        self.source_query = None;
+        self.trail.clear();
+        self.expanded_source = None;
         self.capture.new_details = false;
         self.capture.dirty = false;
         self.source_only = false;
@@ -114,11 +219,16 @@ impl MemoryView {
         self.query.before = None;
         self.editing = None;
         self.stopping = None;
+        self.source_stop = None;
         self.send(MemoryAction::List(self.query.clone()), cx);
     }
 
     pub(crate) fn source_only(&self) -> bool {
-        self.source_only
+        self.source_only && matches!(self.source_navigation, SourceNavigation::Conversation)
+    }
+
+    pub(crate) fn reading_source(&self) -> bool {
+        self.source_only || self.supporting_detail.is_some()
     }
 
     pub(crate) fn captured(
@@ -149,6 +259,8 @@ impl MemoryView {
         if (self.capture.new_details || self.capture.dirty)
             && visible
             && !self.source_only
+            && self.subject_query.is_none()
+            && self.source_query.is_none()
             && !self.state.loading
             && self.state.detail.is_none()
             && self.editing.is_none()
@@ -158,16 +270,25 @@ impl MemoryView {
             && self.search.read(cx).value().as_ref() == self.query.search
         {
             self.load(cx);
+            // Automatic refresh keeps the reader's position on the current page.
+            self.navigation_request = None;
         }
     }
 
-    pub(crate) fn open_source(&mut self, id: FactId, cx: &mut Context<Self>) {
+    pub(crate) fn open_source(&mut self, action: MemoryAction, cx: &mut Context<Self>) {
+        self.supporting_detail = None;
+        self.subject_query = None;
+        self.source_query = None;
+        self.trail.clear();
+        self.expanded_source = None;
         self.source_only = true;
+        self.source_navigation = SourceNavigation::Conversation;
         self.state.detail = None;
         self.state.page = sovra_core::MemoryPage::default();
         self.editing = None;
         self.stopping = None;
-        self.send(MemoryAction::Inspect(id), cx);
+        self.source_stop = None;
+        self.send(action, cx);
     }
 
     pub(crate) fn apply_semantic(&mut self, status: &MemorySemanticStatus, cx: &mut Context<Self>) {
@@ -186,7 +307,7 @@ impl MemoryView {
             .child(
                 div()
                     .sovra_text(TextRole::SectionTitle, cx)
-                    .child("Find memories by meaning"),
+                    .child("Find related memories in chat"),
             )
             .child(
                 div()
@@ -261,8 +382,11 @@ impl MemoryView {
         panel
     }
 
-    pub(crate) fn apply(&mut self, event: &MemoryReviewEvent, cx: &mut Context<Self>) {
+    /// A successful explicit navigation starts at the top; stale responses never scroll.
+    pub(crate) fn apply(&mut self, event: &MemoryReviewEvent, cx: &mut Context<Self>) -> bool {
         if self.state.apply(event) {
+            let reset_scroll =
+                self.navigation_request.take() == Some(event.request_id) && event.result.is_ok();
             match &event.result {
                 Ok(MemoryReviewResult::Changed(_)) => {
                     if self.adding {
@@ -271,12 +395,25 @@ impl MemoryView {
                             "Saved exactly as you wrote it. You can review or correct it below."
                                 .into(),
                         );
+                    } else if self.stopping.is_some() {
+                        self.notice = Some("Removed this detail and its corrected versions from memory. Stopped history remains available for review.".into());
+                    } else if self.editing.is_some() {
+                        self.notice = Some("Saved your correction as a new version.".into());
                     }
                     self.load(cx);
                 }
+                Ok(MemoryReviewResult::SourceStopped(_)) => {
+                    self.source_stop = None;
+                    self.notice = Some("Stopped using this original record. It stays available with Include stopped records.".into());
+                    if matches!(self.source_navigation, SourceNavigation::Sources) {
+                        self.load_sources(self.source_query.clone().unwrap_or_default(), cx);
+                    } else {
+                        self.load(cx);
+                    }
+                }
                 Ok(MemoryReviewResult::Retried(count)) => {
                     self.notice = Some(if *count == 0 {
-                        "No failed messages were queued. If the queue is full, let it finish and try again.".into()
+                        "No failed messages need retrying. Pending messages will be checked automatically.".into()
                     } else {
                         format!(
                             "{count} {} queued to try again. Progress appears in Recent activity.",
@@ -285,15 +422,27 @@ impl MemoryView {
                     });
                     self.load(cx);
                 }
+                Ok(MemoryReviewResult::Page(_)) => {
+                    self.duplicates = None;
+                    if let Some(sovra_core::MemoryGraphNodeId::Detail(id)) = &self.graph_selection
+                        && !self.state.page.facts.iter().any(|fact| &fact.id == id)
+                    {
+                        self.graph_selection = None;
+                    }
+                }
                 Ok(
                     MemoryReviewResult::Semantics(_)
-                    | MemoryReviewResult::Page(_)
-                    | MemoryReviewResult::Detail(_),
+                    | MemoryReviewResult::Subjects(_)
+                    | MemoryReviewResult::Sources(_)
+                    | MemoryReviewResult::Detail(_)
+                    | MemoryReviewResult::Source(_),
                 )
                 | Err(_) => {}
             }
             cx.notify();
+            return reset_scroll;
         }
+        false
     }
 }
 
@@ -312,12 +461,18 @@ impl Render for MemoryView {
             .sovra_surface(Surface::Matte, cx)
             .p(t.space.medium)
             .gap(t.space.small);
-        if !self.source_only {
+        if self.subject_query.is_some() {
+            return column.child(self.subject_directory(cx));
+        }
+        if self.source_query.is_some() && !self.source_only {
+            return column.child(self.source_library(cx));
+        }
+        if !self.source_only && self.state.detail.is_none() {
             column = column
             .child(self.profile(cx))
-            .child(div().sovra_text(TextRole::SectionTitle, cx).child("What I remember"))
-            .child(div().sovra_text(TextRole::Caption, cx).child("Corrections keep previous versions. Stop using excludes that version from current and historical recall; its record and original conversation remain."))
-            .child(Input::new(&self.search).aria_label("Search saved memories"))
+            .child(div().sovra_text(TextRole::SectionTitle, cx).child("Saved details"))
+            .child(div().sovra_text(TextRole::Caption, cx).child("Read what is saved, select a person or project, or open a detail to explore its sources and connections."))
+            .child(div().id("memory-search-input").test_support().w_full().min_w_0().child(Input::new(&self.search).aria_label("Search saved memories")))
             .child(h_flex().w_full().flex_wrap().gap(t.space.small)
                 .child(design::button("memory-search", "Search / refresh", cx).disabled(busy)
                     .on_click(cx.listener(|view, _, _, cx| view.load(cx))))
@@ -326,6 +481,62 @@ impl Render for MemoryView {
                         view.query.include_history = !view.query.include_history;
                         view.load(cx);
                     }))));
+            if let Some(source) = &self.query.source {
+                let id = source.clone();
+                column = column.child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_wrap()
+                        .gap(t.space.small)
+                        .child(
+                            div()
+                                .id("memory-source-filter")
+                                .test_support()
+                                .child("Details linked to one original record"),
+                        )
+                        .child(
+                            design::button("memory-filter-source-open", "Read original record", cx)
+                                .disabled(busy)
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    view.open_source(MemoryAction::InspectSource(id.clone()), cx);
+                                    view.source_navigation = SourceNavigation::Memories;
+                                })),
+                        )
+                        .child(
+                            design::button("memory-clear-source", "All saved details", cx)
+                                .disabled(busy)
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    view.query.source = None;
+                                    view.load(cx);
+                                })),
+                        ),
+                );
+            }
+            if let Some(subject) = &self.query.subject {
+                column = column.child(
+                    h_flex()
+                        .w_full()
+                        .flex_wrap()
+                        .gap(t.space.small)
+                        .child(
+                            div()
+                                .id("memory-subject-filter")
+                                .test_support()
+                                .child(format!("About: {subject}")),
+                        )
+                        .child(
+                            design::button("memory-clear-subject", "All subjects", cx)
+                                .disabled(busy)
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    view.query.subject = None;
+                                    view.load(cx);
+                                })),
+                        ),
+                );
+            }
+        }
+        if !self.source_only {
             if let Some(result) = &self.capture.result {
                 column = column.child(
                     div()
@@ -356,12 +567,17 @@ impl Render for MemoryView {
             column = column.child(div().id("memory-error").test_support().child(error.clone()));
         }
         if !self.source_only
+            && self.state.detail.is_none()
             && self.state.page.facts.is_empty()
             && !busy
             && self.state.error.is_none()
         {
             let message = if self.query.before.is_some() {
                 "No more saved details on this page. Use Back to newest to return to recent memories."
+            } else if self.query.source.is_some() {
+                "No saved details match this source and search. Include history to see earlier or stopped details, or choose All saved details."
+            } else if self.query.subject.is_some() {
+                "No saved details match this subject and search. Choose All subjects or clear your search to broaden the results."
             } else if self.query.search.is_empty() {
                 "No saved details yet. Add a detail above, or tell Sovra about your preferences, important people, work or plans in chat. Keep remembering switched on for automatic learning."
             } else {
@@ -391,6 +607,10 @@ impl Render for MemoryView {
                     .child(label),
             );
         }
+        if !self.source_only && self.state.detail.is_none() && !busy && self.state.error.is_none()
+        {
+            column = column.child(self.memory_picture(cx));
+        }
         for (index, fact) in self
             .state
             .page
@@ -399,41 +619,7 @@ impl Render for MemoryView {
             .enumerate()
             .filter(|_| self.state.detail.is_none() && !self.source_only)
         {
-            let id = fact.id.clone();
-            column =
-                column.child(
-                    v_flex()
-                        .w_full()
-                        .min_w_0()
-                        .gap(t.space.small)
-                        .p(t.space.small)
-                        .sovra_surface(Surface::Subtle, cx)
-                        .child(
-                            div()
-                                .sovra_text(TextRole::Body, cx)
-                                .child(fact.content.clone()),
-                        )
-                        .child(div().sovra_text(TextRole::Caption, cx).child(
-                            if fact.is_current() {
-                                if fact.extraction.is_some() {
-                                    "Interpretation of something you said"
-                                } else {
-                                    "Saved detail"
-                                }
-                            } else {
-                                "Retained history · not used in current recall"
-                            },
-                        ))
-                        .child(
-                            design::button(("memory-open", index), "Source and changes", cx)
-                                .disabled(busy)
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    view.editing = None;
-                                    view.stopping = None;
-                                    view.send(MemoryAction::Inspect(id.clone()), cx);
-                                })),
-                        ),
-                );
+            column = column.child(self.saved_card(fact, index, cx));
         }
         if self.state.detail.is_none()
             && let Some(cursor) = self.state.page.next.clone()
@@ -456,6 +642,13 @@ impl Render for MemoryView {
         }
         if let Some(detail) = &self.state.detail {
             let id = detail.fact.id.clone();
+            let supporting = SupportingDetail {
+                id: id.clone(),
+                label: detail.fact.content.clone(),
+                source_only: self.source_only,
+                navigation: self.source_navigation,
+                trail: self.trail.clone(),
+            };
             let mut panel = v_flex()
                 .id("memory-detail")
                 .test_support()
@@ -467,9 +660,31 @@ impl Render for MemoryView {
                 .child(
                     div()
                         .sovra_text(TextRole::SectionTitle, cx)
-                        .child("Source and changes"),
+                        .child("Explore this detail"),
                 )
-                .child(div().child(detail.fact.content.clone()))
+                .child(
+                    div()
+                        .id("memory-detail-text")
+                        .test_support()
+                        .aria_label(detail.fact.content.clone())
+                        .sovra_text(TextRole::Reading, cx)
+                        .child(detail.fact.content.clone()),
+                )
+                .child(self.subject_buttons(&detail.fact, "memory-detail-subject", cx))
+                .child(
+                    div()
+                        .id("memory-learned-date")
+                        .test_support()
+                        .aria_label(format!(
+                            "Saved {} · dates shown in UTC",
+                            exploration::date(detail.fact.created_at)
+                        ))
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(format!(
+                            "Saved {} · dates shown in UTC",
+                            exploration::date(detail.fact.created_at)
+                        )),
+                )
                 .child(
                     div()
                         .id("memory-standing")
@@ -485,6 +700,8 @@ impl Render for MemoryView {
                 )
                 .child(
                     design::button("memory-close", "Back to memories", cx)
+                        .self_start()
+                        .max_w_full()
                         .disabled(busy)
                         .on_click(cx.listener(|view, _, _, cx| {
                             view.state.detail = None;
@@ -493,15 +710,55 @@ impl Render for MemoryView {
                             view.load(cx);
                         })),
                 );
+            if !self.trail.is_empty() {
+                panel = panel.child(
+                    design::button("memory-trail-back", "Back to previous detail", cx)
+                        .self_start()
+                        .max_w_full()
+                        .disabled(busy)
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            if let Some(id) = view.trail.pop() {
+                                view.editing = None;
+                                view.stopping = None;
+                                view.send(MemoryAction::Inspect(id), cx);
+                            }
+                        })),
+                );
+            }
+            panel = panel.child(
+                design::button("memory-supporting-records", "Browse supporting records", cx)
+                    .self_start()
+                    .max_w_full()
+                    .disabled(busy)
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.source_search
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        view.supporting_detail = Some(supporting.clone());
+                        view.load_sources(
+                            sovra_core::MemorySourceQuery {
+                                fact: Some(supporting.id.clone()),
+                                ..Default::default()
+                            },
+                            cx,
+                        );
+                    })),
+            );
             if let Some(source) = &detail.source {
                 let source_label = match source.kind {
-                    sovra_core::EpisodeKind::UserMessage => "Your original message",
-                    sovra_core::EpisodeKind::Note => "Your saved note or correction",
+                    sovra_core::EpisodeKind::UserMessage => "One supporting chat message",
+                    sovra_core::EpisodeKind::Note => "One supporting note or correction",
                     sovra_core::EpisodeKind::AgentMessage => {
                         "An earlier reply (not a user statement)"
                     }
                     sovra_core::EpisodeKind::ToolCall => "An earlier tool request",
                     sovra_core::EpisodeKind::ToolResult => "An earlier tool result",
+                };
+                let (excerpt, shortened) = exploration::source_excerpt(&source.content);
+                let expanded = self.expanded_source.as_ref() == Some(&source.id);
+                let shown = if expanded {
+                    source.content.clone()
+                } else {
+                    excerpt
                 };
                 panel = panel
                     .child(div().sovra_text(TextRole::Caption, cx).child(source_label))
@@ -509,9 +766,33 @@ impl Render for MemoryView {
                         div()
                             .id("memory-source")
                             .test_support()
-                            .aria_label(source.content.clone())
-                            .child(source.content.clone()),
+                            .aria_label(shown.clone())
+                            .sovra_text(TextRole::Reading, cx)
+                            .min_w_0()
+                            .child(shown),
                     );
+                if shortened {
+                    let source_id = source.id.clone();
+                    panel = panel.child(
+                        design::button(
+                            "memory-expand-source",
+                            if expanded {
+                                "Show shorter excerpt"
+                            } else {
+                                "Read full original message"
+                            },
+                            cx,
+                        )
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.expanded_source = if expanded {
+                                None
+                            } else {
+                                Some(source_id.clone())
+                            };
+                            cx.notify();
+                        })),
+                    );
+                }
             } else {
                 panel = panel.child(div().child("This older saved detail has no source attached."));
             }
@@ -533,7 +814,7 @@ impl Render for MemoryView {
                         })),
                 );
             }
-            if detail.fact.is_current() {
+            if detail.fact.stopped_at.is_none() {
                 let text = detail.fact.content.clone();
                 let edit_id = id.clone();
                 let stop_id = id.clone();
@@ -542,20 +823,22 @@ impl Render for MemoryView {
                         .w_full()
                         .flex_wrap()
                         .gap(t.space.small)
+                        .when(detail.fact.is_current(), |row| {
+                            row.child(
+                                design::button("memory-edit", "Edit detail", cx)
+                                    .disabled(busy)
+                                    .on_click(cx.listener(move |view, _, window, cx| {
+                                        view.correction.update(cx, |input, cx| {
+                                            input.set_value(text.clone(), window, cx);
+                                        });
+                                        view.editing = Some(edit_id.clone());
+                                        view.stopping = None;
+                                        cx.notify();
+                                    })),
+                            )
+                        })
                         .child(
-                            design::button("memory-edit", "Correct", cx)
-                                .disabled(busy)
-                                .on_click(cx.listener(move |view, _, window, cx| {
-                                    view.correction.update(cx, |input, cx| {
-                                        input.set_value(text.clone(), window, cx);
-                                    });
-                                    view.editing = Some(edit_id.clone());
-                                    view.stopping = None;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            design::button("memory-stop", "Stop using", cx)
+                            design::button("memory-stop", "Remove from memory", cx)
                                 .disabled(busy)
                                 .on_click(cx.listener(move |view, _, _, cx| {
                                     view.stopping = Some(stop_id.clone());
@@ -587,16 +870,20 @@ impl Render for MemoryView {
                     );
             }
             if self.stopping.as_ref() == Some(&id) {
-                panel = panel.child(div().child("Stop using this saved version in current and historical answers? Its record stays in history. Other versions remain available, and the original conversation keeps its own context."))
+                panel = panel.child(div().child("Remove this detail and all its corrected versions from memory? Their supporting records will also stop appearing in memory searches. Stopped history stays available for your review. Other details and the original chats are kept."))
                     .child(h_flex().flex_wrap().gap(t.space.small)
-                        .child(design::button("memory-confirm-stop", "Confirm stop using", cx).disabled(busy)
-                            .on_click(cx.listener(move |view, _, _, cx| view.send(MemoryAction::StopUsing(id.clone()), cx))))
+                        .child(design::button("memory-confirm-stop", "Confirm removal", cx).disabled(busy)
+                            .on_click(cx.listener(move |view, _, _, cx| view.send(MemoryAction::Remove(id.clone()), cx))))
                         .child(design::button("memory-cancel-stop", "Cancel", cx).disabled(busy)
                             .on_click(cx.listener(|view, _, _, cx| { view.stopping = None; cx.notify(); }))));
             }
+            panel = panel.child(self.connected_details(detail, cx));
             column = column.child(panel);
         }
-        if !self.source_only {
+        if let Some(source) = &self.state.source {
+            column = column.child(self.source_reader(source, cx));
+        }
+        if !self.source_only && self.state.detail.is_none() {
             column = column.child(self.semantic_controls(cx));
         }
         column
@@ -677,6 +964,7 @@ mod tests {
 
     fn detail() -> MemoryDetail {
         MemoryDetail {
+            neighborhood: sovra_core::MemoryNeighborhood::default(),
             fact: Fact {
                 id: FactId("fact:tea".into()),
                 content: "I prefer tea".into(),
@@ -759,6 +1047,7 @@ mod tests {
                 facts: vec![detail().fact],
                 next: None,
                 overview: None,
+                chats: Vec::new(),
             }),
         );
         settle(cx);
@@ -777,6 +1066,42 @@ mod tests {
             assert!(
                 window.find(("memory-open", 0usize)).bounds().top()
                     < window.find("memory-semantic").bounds().top()
+            );
+        })
+        .unwrap();
+        let before = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.scroll(
+                    "sovra-knowledge-view",
+                    ScrollDelta::Pixels(point(px(0.), px(-80.))),
+                    cx,
+                );
+                window.render_frame(cx);
+                let top = window.find("conversation-memory-status").bounds().top();
+                assert!(top < window.find("sovra-knowledge-view").bounds().top());
+                top
+            })
+            .unwrap();
+        events.send_blocking(captured()).unwrap();
+        settle(cx);
+        let refresh = request(&commands);
+        respond(
+            &events,
+            refresh.request_id,
+            MemoryReviewResult::Page(MemoryPage {
+                facts: vec![detail().fact],
+                next: None,
+                overview: None,
+                chats: Vec::new(),
+            }),
+        );
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("conversation-memory-status").bounds().top(),
+                before,
+                "a background save must not jump to the top of the reader"
             );
         })
         .unwrap();
@@ -891,6 +1216,7 @@ mod tests {
                     facts: vec![detail().fact],
                     next: None,
                     overview: None,
+                    chats: Vec::new(),
                 }),
             );
             settle(cx);
@@ -976,6 +1302,7 @@ mod tests {
                     facts: vec![detail().fact],
                     next: None,
                     overview: None,
+                    chats: Vec::new(),
                 }),
             );
             settle(cx);
@@ -984,13 +1311,17 @@ mod tests {
             })
             .unwrap();
             let inspect = request(&commands);
+            let mut previous = detail();
+            previous.fact.invalid_at = Some(Timestamp(2));
+            previous.fact.expired_at = Some(Timestamp(2));
             respond(
                 &events,
                 inspect.request_id,
-                MemoryReviewResult::Detail(Box::new(detail())),
+                MemoryReviewResult::Detail(Box::new(previous)),
             );
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
+                assert_eq!(window.find_all("memory-edit").len(), 0);
                 click(window, "memory-stop", height, cx);
                 assert!(
                     !std::iter::from_fn(|| commands.try_recv().ok())
@@ -1002,7 +1333,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 request(&commands).action,
-                MemoryAction::StopUsing(FactId("fact:tea".into()))
+                MemoryAction::Remove(FactId("fact:tea".into()))
             );
             cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
         }

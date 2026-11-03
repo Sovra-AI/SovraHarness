@@ -1,6 +1,6 @@
 //! Reply references are navigation hints, not proof of saved evidence.
 
-use super::FactId;
+use super::{EpisodeId, FactId};
 
 /// Bound the controls attached to a model-authored reply.
 pub const MAX_MEMORY_CITATIONS: usize = 32;
@@ -33,6 +33,33 @@ pub fn memory_citations(text: &str) -> Vec<FactId> {
     ids
 }
 
+/// Source-only citations navigate to evidence without inventing a fact identifier.
+pub fn memory_source_citations(text: &str) -> Vec<EpisodeId> {
+    let mut ids = Vec::new();
+    for tail in text.split("[source:").skip(1) {
+        let Some((id, _)) = tail.split_once(']') else {
+            continue;
+        };
+        if !id.starts_with("episode:")
+            || id.len() <= "episode:".len()
+            || id.len() > 512
+            || id
+                .chars()
+                .any(|ch| ch.is_whitespace() || ch.is_control() || "[()< >".contains(ch))
+        {
+            continue;
+        }
+        let id = EpisodeId(id.into());
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+        if ids.len() == MAX_MEMORY_CITATIONS {
+            break;
+        }
+    }
+    ids
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,6 +81,17 @@ mod tests {
             memory_citations("[web:fact:tea] memory:fact:tea https://example.com"),
             Vec::<FactId>::new()
         );
+    }
+
+    #[test]
+    fn source_citations_remain_distinct_from_facts() {
+        let text =
+            "[source:episode:one] [source:episode:one] [source:fact:no] [source:episode:two words]";
+        assert_eq!(
+            memory_source_citations(text),
+            vec![EpisodeId("episode:one".into())]
+        );
+        assert_eq!(memory_citations(text), Vec::<FactId>::new());
     }
 
     #[test]

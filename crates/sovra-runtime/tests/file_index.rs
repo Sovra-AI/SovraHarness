@@ -31,6 +31,7 @@ impl FileKnowledge for Store {
             relations: vec![],
             sources: vec![],
             truncated: false,
+            next: None,
         })
     }
     fn evidence(&self, _: u64) -> Result<GraphEvidence, IndexError> {

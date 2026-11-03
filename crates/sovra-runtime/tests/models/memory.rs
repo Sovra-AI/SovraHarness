@@ -21,6 +21,10 @@ struct Store {
     sources: Mutex<Vec<Episode>>,
     recalls: Mutex<Vec<RecallQuery>>,
     recall_gate: Mutex<Option<async_channel::Receiver<()>>>,
+    source_search_gate: Option<async_channel::Receiver<()>>,
+    source_search_started: Option<async_channel::Sender<()>>,
+    source_search_failure: bool,
+    assistant_admission_failure: bool,
     keyword_probe: Option<Arc<parallel::ReadProbe>>,
     related_gate: Mutex<Option<async_channel::Receiver<()>>>,
     related_started: Option<async_channel::Sender<()>>,
@@ -48,6 +52,32 @@ impl Store {
 }
 #[async_trait::async_trait]
 impl MemoryStore for Store {
+    async fn admit_memory_source(
+        &self,
+        source: sovra_core::MemorySourceAdmission,
+    ) -> Result<sovra_core::MemorySourceReceipt, MemoryError> {
+        source.validate()?;
+        if self.assistant_admission_failure && !source.needs_extraction() {
+            return Err(MemoryError::Backend("fixture disk failure".into()));
+        }
+        let has_processing_job = source.needs_extraction();
+        let version = source.version;
+        let source_id = if has_processing_job {
+            self.enqueue_memory(MemoryInput {
+                key: source.key,
+                episode: source.episode,
+            })
+            .await?
+        } else {
+            self.record_episode(source.episode).await?
+        };
+        Ok(sovra_core::MemorySourceReceipt {
+            source_id,
+            version,
+            has_processing_job,
+        })
+    }
+
     async fn save_chat_thread(&self, thread: &sovra_core::ChatThread) -> Result<(), MemoryError> {
         if let Some(started) = &self.chat_started {
             let _ = started.send(thread.title.clone()).await;
@@ -191,6 +221,9 @@ impl MemoryStore for Store {
             .unwrap()
             .take()
             .map(|input| MemoryClaim {
+                extracted: None,
+                cursor: 0,
+                revision: 0,
                 episode: Self::source(&input),
                 token: "lease".into(),
                 generation: self.generation.load(Ordering::SeqCst),
@@ -209,6 +242,14 @@ impl MemoryStore for Store {
         // prevents a late commit, without relying on an adapter's extra protection.
         self.completed.lock().unwrap().push(candidates);
         Ok(vec![FactId("fact:test".into())])
+    }
+    async fn save_memory_extraction(
+        &self,
+        _claim: &MemoryClaim,
+        _extracted: &sovra_core::MemoryExtractedChunk,
+        _at: Timestamp,
+    ) -> Result<(), MemoryError> {
+        Ok(())
     }
     async fn fail_memory(
         &self,
@@ -246,6 +287,14 @@ impl MemoryStore for Store {
             .cloned()
             .ok_or_else(|| MemoryError::NotFound("unused".into()))
     }
+    async fn memory_episodes(&self, ids: &[EpisodeId]) -> Result<Vec<Episode>, MemoryError> {
+        // These fixture sources are explicitly admitted private evidence.
+        let mut sources = Vec::new();
+        for id in ids {
+            sources.push(self.episode(id).await?);
+        }
+        Ok(sources)
+    }
     async fn recent_episodes(
         &self,
         _session: &str,
@@ -268,6 +317,13 @@ impl MemoryStore for Store {
             .push(sovra_core::MemoryAction::StopUsing(id.clone()));
         Ok(())
     }
+    async fn remove_memory(&self, id: &FactId, _at: Timestamp) -> Result<(), MemoryError> {
+        self.review_actions
+            .lock()
+            .unwrap()
+            .push(sovra_core::MemoryAction::Remove(id.clone()));
+        Ok(())
+    }
     async fn list_memories(
         &self,
         query: sovra_core::MemoryListQuery,
@@ -280,6 +336,7 @@ impl MemoryStore for Store {
             facts: self.facts.lock().unwrap().clone(),
             next: None,
             overview: None,
+            chats: Vec::new(),
         })
     }
     async fn memory_fact(&self, id: &FactId) -> Result<sovra_core::Fact, MemoryError> {
@@ -318,6 +375,24 @@ impl MemoryStore for Store {
             .unwrap()
             .push(sovra_core::MemoryAction::RetryFailed);
         Ok(2)
+    }
+    async fn search_memory_sources(
+        &self,
+        _: sovra_core::MemorySearch,
+        _: Timestamp,
+    ) -> Result<Vec<sovra_core::MemorySourceEvidence>, MemoryError> {
+        if let Some(started) = &self.source_search_started {
+            let _ = started.send(()).await;
+        }
+        if let Some(gate) = &self.source_search_gate {
+            let _ = gate.recv().await;
+        }
+        if self.source_search_failure {
+            return Err(MemoryError::Backend(
+                "Synthetic source-search failure".into(),
+            ));
+        }
+        Ok(Vec::new())
     }
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError> {
         self.recalls.lock().unwrap().push(query.clone());
@@ -924,7 +999,12 @@ async fn memory_review_uses_the_storage_port_while_paused_and_drains_accepted_ed
             unreachable!()
         };
         match response.result.unwrap() {
-            MemoryReviewResult::Semantics(_) | MemoryReviewResult::Retried(_) => {
+            MemoryReviewResult::Semantics(_)
+            | MemoryReviewResult::Subjects(_)
+            | MemoryReviewResult::Sources(_)
+            | MemoryReviewResult::Retried(_)
+            | MemoryReviewResult::Source(_)
+            | MemoryReviewResult::SourceStopped(_) => {
                 panic!("no configuration or retry was requested")
             }
             MemoryReviewResult::Page(page) => assert_eq!(page.facts[0].id.0, "fact:tea"),
@@ -937,13 +1017,13 @@ async fn memory_review_uses_the_storage_port_while_paused_and_drains_accepted_ed
     client
         .send(Command::Memory(MemoryCommand {
             request_id: 4,
-            action: MemoryAction::StopUsing(FactId("fact:tea".into())),
+            action: MemoryAction::Remove(FactId("fact:tea".into())),
         }))
         .unwrap();
     stop(client).await;
     let actions = store.review_actions.lock().unwrap();
     assert_eq!(actions.len(), 4);
-    assert!(matches!(&actions[3], MemoryAction::StopUsing(id) if id.0 == "fact:tea"));
+    assert!(matches!(&actions[3], MemoryAction::Remove(id) if id.0 == "fact:tea"));
     assert!(!store.enabled.load(Ordering::SeqCst));
     assert!(
         server
@@ -1057,7 +1137,7 @@ async fn ordinary_and_team_turns_can_plan_historical_memory_queries_over_real_ht
         .send(Command::Teams(sovra_core::teams::TeamCommand::Run {
             session_id: "past-team".into(),
             prompt: "What tea did I prefer on June 1, 2020, as known on December 1, 2020?".into(),
-            history: vec![],
+            context: sovra_core::ConversationContext::default(),
         }))
         .unwrap();
     event(&client, |event| matches!(event, Event::AgUi { session_id, event: sovra_core::AgUiEvent::RunFinished { .. } } if session_id == "past-team")).await;
@@ -1193,7 +1273,7 @@ async fn ordinary_and_team_turns_receive_cited_cross_conversation_evidence() {
         .send(Command::Teams(sovra_core::teams::TeamCommand::Run {
             session_id: "new-team".into(),
             prompt: "Recommend tea for me".into(),
-            history: vec![],
+            context: sovra_core::ConversationContext::default(),
         }))
         .unwrap();
     event(&client, |event| matches!(event, Event::AgUi { session_id, event: sovra_core::AgUiEvent::RunFinished { .. } } if session_id == "new-team")).await;
@@ -1567,3 +1647,42 @@ mod related;
 
 #[path = "memory/parallel.rs"]
 mod parallel;
+
+#[path = "memory/resilience.rs"]
+mod resilience;
+
+#[tokio::test]
+async fn assistant_storage_failure_is_visible_without_failing_the_chat() {
+    let server = recall_server();
+    let store = Arc::new(Store {
+        assistant_admission_failure: true,
+        ..Default::default()
+    });
+    let (_fixture, client) = start(&server, store, true).await;
+    client
+        .send(Command::RunPrompt {
+            session_id: "failed-reply-storage".into(),
+            prompt: "Hello.".into(),
+            context: None,
+        })
+        .unwrap();
+    let mut failure = false;
+    loop {
+        let next = event(&client, |_| true).await;
+        match next {
+            Event::Memory(MemoryEvent::Status(MemoryStatus::Failed(message))) => {
+                failure |= message == "This reply could not be saved in memory.";
+            }
+            Event::Memory(MemoryEvent::SourceSaved { receipt, .. })
+                if !receipt.has_processing_job =>
+            {
+                panic!("failed writes cannot acknowledge capture")
+            }
+            Event::AgentCompleted { session_id } if session_id == "failed-reply-storage" => break,
+            Event::AgentError { message, .. } => panic!("chat failed: {message}"),
+            _ => {}
+        }
+    }
+    assert!(failure);
+    stop(client).await;
+}

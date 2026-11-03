@@ -1,121 +1,108 @@
-//! Persistent native development loop. Watchexec owns filesystem watching and child groups;
-//! every rebuild reports shared Cargo target usage without deleting live build outputs.
+//! Manual native development launch. One build + run per `cargo xtask dev`;
+//! there is no file watcher or auto-reload — re-run `dev` yourself to pick up edits.
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context as _, bail};
 
-pub(crate) const WATCH_TOOL: &str = "watchexec-cli@2.7.2";
-
 /// Default warning threshold for the whole target directory. A cold debug build plus the
-/// hook's clippy/test artefacts is ~15 GiB; an unpruned watcher reached 85 GiB.
-const DEFAULT_BUDGET_GIB: u64 = 30;
-const BUDGET_ENV: &str = "SOVRA_TARGET_BUDGET_GIB";
-const GIB: u64 = 1024 * 1024 * 1024;
+/// hook's clippy/test artefacts is ~15 GiB; an unpruned long-lived target once reached 85 GiB.
+pub(crate) const DEFAULT_BUDGET_GIB: u64 = 30;
+pub(crate) const BUDGET_ENV: &str = "SOVRA_TARGET_BUDGET_GIB";
+pub(crate) const GIB: u64 = 1024 * 1024 * 1024;
 
-pub(crate) fn run(root: &Path) -> anyhow::Result<()> {
-    let state = root.join("target/dev");
-    std::fs::create_dir_all(&state).context("create dev runner state directory")?;
-    let lock = OpenOptions::new()
+/// Exclusive OS lock held by `cargo xtask dev` while that one-shot session runs.
+#[derive(Debug)]
+pub(crate) struct WatchLock {
+    _file: File,
+}
+
+impl WatchLock {
+    /// Lock file under the effective Cargo target directory (`…/dev/watch.lock`).
+    pub(crate) fn path(root: &Path) -> PathBuf {
+        watch_state_dir(root).join("watch.lock")
+    }
+}
+
+/// `target/dev` (or `$CARGO_TARGET_DIR/dev`), where the one-shot dev session keeps its lock.
+pub(crate) fn watch_state_dir(root: &Path) -> PathBuf {
+    // Fall back to `<root>/target` when metadata is unavailable (unit-test roots).
+    target_dir(root)
+        .unwrap_or_else(|_| root.join("target"))
+        .join("dev")
+}
+
+/// Acquire the dev-session lock, or fail if another `xtask dev` already holds it.
+/// Callers that reclaim `target/` must hold this across the clean.
+pub(crate) fn try_watch_lock(root: &Path) -> anyhow::Result<WatchLock> {
+    let lock_path = WatchLock::path(root);
+    let state = lock_path
+        .parent()
+        .context("watch.lock path missing parent directory")?;
+    std::fs::create_dir_all(state).context("create dev runner state directory")?;
+    let file = OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(state.join("watch.lock"))
+        .open(&lock_path)
         .context("open dev runner lock")?;
-    lock.try_lock().context(
-        "a dev watcher already owns this checkout; use the existing sovraRust tmux pane",
+    match file.try_lock() {
+        Ok(()) => Ok(WatchLock { _file: file }),
+        Err(TryLockError::WouldBlock) => {
+            bail!("a live `cargo xtask dev` session holds target/dev/watch.lock")
+        }
+        Err(TryLockError::Error(error)) => Err(error).context("lock dev runner lock"),
+    }
+}
+
+/// One-shot: report disk usage, then build and launch the app with `SOVRA_DEV=1`.
+/// No file watching — re-run `cargo xtask dev` to reload after edits.
+pub(crate) fn run(root: &Path) -> anyhow::Result<()> {
+    let lock = try_watch_lock(root).context(
+        "another `cargo xtask dev` already owns this checkout; stop it before starting again",
     )?;
 
-    let version = Command::new("watchexec")
-        .arg("-V") // The long form includes build metadata, not just the version.
-        .output()
-        .context("Watchexec is required; run `cargo xtask setup`")?;
-    let expected = WATCH_TOOL
-        .split_once('@')
-        .expect("tool has a pinned version")
-        .1;
-    if !version.status.success()
-        || String::from_utf8_lossy(&version.stdout).trim() != format!("watchexec {expected}")
-    {
-        bail!("install the verified {WATCH_TOOL} with `cargo xtask setup`");
-    }
-
-    println!("Sovra dev: watching Rust, manifests, Cargo config and embedded assets.");
-    println!("Save to rebuild/relaunch. In-memory state resets; the watcher stays running.");
-    println!("Compiler output and app tracing stream here. Leave this pane running.");
+    println!("Sovra dev: one-shot build and launch (no auto-reload).");
+    println!("Re-run `cargo xtask dev` yourself after edits to pick up changes.");
     println!(
         "Target directory warning threshold: {} GiB (override with {BUDGET_ENV}).",
         budget_gib()
     );
 
-    let mut command = Command::new("watchexec");
-    command.current_dir(root).args([
-        "--restart",
-        "--debounce=750ms",
-        "--stop-signal=TERM",
-        "--stop-timeout=5s",
-        "--shell=none",
-        "--no-meta",
-        "--no-global-ignore",
-        "--watch=crates",
-        "--watch=Cargo.toml",
-        "--watch=Cargo.lock",
-        "--watch=rust-toolchain.toml",
-        "--watch=.cargo",
-        "--ignore=**/target/**",
-        "--ignore=**/*.log",
-        "--ignore=**/*.md",
-        "--timings",
-        "--print-events",
-        "--",
-    ]);
-    // Through Cargo so edits to cycle diagnostics take effect on the next
-    // watched change without replacing the running supervisor.
-    command.args([
-        env!("CARGO"),
-        "run",
-        "--quiet",
-        "--package",
-        "xtask",
-        "--",
-        "dev-cycle",
-    ]);
-    // Keep user-selected filters/backtraces. The application's debug logger
-    // already writes to stderr and a rolling file; no tee/tail duplication.
+    report_budget(&target_dir(root)?, budget_bytes());
+
+    let mut command = Command::new(env!("CARGO"));
+    command
+        .args(["run", "--package", "sovra-app"])
+        .current_dir(root);
     // Dev rebuilds change the binary signature; skip the keychain so reloads never prompt.
     command.env("SOVRA_DEV", "1");
     if std::env::var_os("RUST_BACKTRACE").is_none() {
         command.env("RUST_BACKTRACE", "1");
     }
     let result = crate::run(&mut command);
-    drop(lock); // Held across every rebuild; the OS releases it even after a crash.
+    drop(lock); // Held for this session; the OS releases it even after a crash.
     result
 }
 
-/// One watcher cycle: report disk usage, then build and launch the app.
-pub(crate) fn cycle(root: &Path) -> anyhow::Result<()> {
-    report_budget(&target_dir(root)?, budget_gib().saturating_mul(GIB));
-    crate::run(
-        Command::new(env!("CARGO"))
-            .args(["run", "--package", "sovra-app"])
-            .current_dir(root),
-    )
-}
-
-fn budget_gib() -> u64 {
+pub(crate) fn budget_gib() -> u64 {
     std::env::var_os(BUDGET_ENV)
         .and_then(|value| value.to_str()?.trim().parse().ok())
         .filter(|&gib| gib > 0)
         .unwrap_or(DEFAULT_BUDGET_GIB)
 }
 
+pub(crate) fn budget_bytes() -> u64 {
+    budget_gib().saturating_mul(GIB)
+}
+
 /// Stale dependency variants (lockfile bumps, feature or flag changes) pile up in
 /// `target/debug/deps` forever; Cargo has no stable target-directory GC. A build
 /// lock does not protect binaries already running or about to be launched by
-/// nextest, so watcher cycles must never clean the shared target directory.
+/// nextest, so a live `cargo xtask dev` session must never clean the shared target.
 fn report_budget(target: &Path, budget: u64) {
     let used = dir_size(target);
     if used <= budget {
@@ -127,14 +114,14 @@ fn report_budget(target: &Path, budget: u64) {
         budget / GIB
     );
     println!(
-        "Build outputs were kept because the watcher and other Cargo commands may need them. \
-         To reclaim space, run `cargo clean --profile dev` only after the watcher and all \
-         other Cargo work have stopped."
+        "Build outputs were kept because this session and other Cargo commands may need them. \
+         To reclaim space when idle, stop `cargo xtask dev` and run \
+         `just clear-cache`."
     );
 }
 
 /// The effective target directory, honouring `CARGO_TARGET_DIR` and Cargo config.
-fn target_dir(root: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn target_dir(root: &Path) -> anyhow::Result<PathBuf> {
     let output = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version=1", "--no-deps", "--offline"])
         .current_dir(root)
@@ -155,7 +142,7 @@ fn target_dir(root: &Path) -> anyhow::Result<PathBuf> {
 }
 
 /// Apparent size of every file below `path`, without following symlinks.
-fn dir_size(path: &Path) -> u64 {
+pub(crate) fn dir_size(path: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(path) else {
         return 0;
     };
@@ -173,7 +160,7 @@ fn dir_size(path: &Path) -> u64 {
     clippy::cast_precision_loss,
     reason = "a one-decimal human-readable size"
 )]
-fn gib(bytes: u64) -> f64 {
+pub(crate) fn gib(bytes: u64) -> f64 {
     bytes as f64 / GIB as f64
 }
 

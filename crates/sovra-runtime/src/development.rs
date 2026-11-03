@@ -27,6 +27,8 @@ pub(super) const MAX_RESPONSE: usize = 8 * 1024 * 1024;
 /// Paths and executable are resolved once by the composition root.
 #[derive(Debug, Clone)]
 pub struct DevelopmentConfig {
+    /// Composition-root startup policy; None preserves the saved preference.
+    pub startup_enabled: Option<bool>,
     pub directory: PathBuf,
     pub executable: PathBuf,
 }
@@ -79,7 +81,10 @@ async fn run(
         connection_command: format!("\"{}\" --development-mcp", config.executable.display()),
         ..DevelopmentState::default()
     };
-    let loaded = endpoint::load_enabled(&config.directory).await;
+    let loaded = match config.startup_enabled {
+        Some(enabled) => Ok(enabled),
+        None => endpoint::load_enabled(&config.directory).await,
+    };
     let initially_enabled = loaded.as_ref().copied().unwrap_or(false);
     state.error = loaded.err();
     let mut active = None;

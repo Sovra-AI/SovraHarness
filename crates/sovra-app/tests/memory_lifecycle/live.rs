@@ -89,6 +89,61 @@ fn observe(driver: &mut Driver, id: &str, prompt: &str, expected: &str) -> Value
 
 type Case = (&'static str, &'static str, &'static str);
 
+fn old_recall_cases(driver: &mut Driver, report: &mut Value, save: &impl Fn(&Value)) {
+    let MemoryReviewResult::Changed(income) =
+        driver.review(MemoryAction::Remember(sovra_core::MemoryNote {
+            text: "My monthly income is 9,200 credits.".into(),
+        }))
+    else {
+        panic!("saved synthetic income")
+    };
+    driver.review(MemoryAction::Remember(sovra_core::MemoryNote {
+        text: "My salary arrives on the 25th.".into(),
+    }));
+    let bury = |driver: &mut Driver, phase| {
+        for index in 0..32 {
+            driver.review(MemoryAction::Remember(sovra_core::MemoryNote {
+                text: format!("Fixture inventory item {phase}-{index} is a lavender seed packet."),
+            }));
+        }
+    };
+    bury(driver, 1);
+    let first = observe(
+        driver,
+        "old-income",
+        "How much do I earn, and when is it paid?",
+        "9,200 credits monthly and the 25th, with genuine saved citations. These details are older than the recent working set.",
+    );
+    report["observations"].as_array_mut().unwrap().push(first);
+    save(report);
+    let MemoryReviewResult::Changed(updated) =
+        driver.review(MemoryAction::Correct(MemoryCorrection {
+            target: income,
+            text: "My monthly income is now 10,500 credits.".into(),
+        }))
+    else {
+        panic!("corrected synthetic income")
+    };
+    bury(driver, 2);
+    let second = observe(
+        driver,
+        "corrected-old-income",
+        "How much do I earn, and when is it paid?",
+        "10,500 credits monthly and the 25th. Do not assert the obsolete 9,200 as current.",
+    );
+    report["observations"].as_array_mut().unwrap().push(second);
+    save(report);
+    driver.review(MemoryAction::Remove(updated));
+    let third = observe(
+        driver,
+        "removed-old-income",
+        "What is my monthly income, and when does my salary arrive? Use only saved evidence.",
+        "The salary arrives on the 25th. The income amount is unavailable; disclose neither removed amount.",
+    );
+    report["observations"].as_array_mut().unwrap().push(third);
+    save(report);
+}
+
 const GENERAL_CASES: &[Case] = &[
     (
         "initial",
@@ -223,7 +278,8 @@ fn synthetic_selected_model_evaluation() {
         "smoke" => ("synthetic-memory-smoke-v1", &GENERAL_CASES[..2]),
         "general" => ("synthetic-memory-v3", GENERAL_CASES),
         "temporal" => ("synthetic-memory-temporal-v1", TEMPORAL_CASES),
-        _ => panic!("SOVRA_MEMORY_EVAL_SUITE must be smoke, general or temporal"),
+        "old-recall" => ("synthetic-memory-old-recall-v1", &[][..]),
+        _ => panic!("SOVRA_MEMORY_EVAL_SUITE must be smoke, general, temporal or old-recall"),
     };
     let source_root = PathBuf::from(
         std::env::var("SOVRA_MEMORY_EVAL_DEV_DATA")
@@ -345,6 +401,9 @@ fn synthetic_selected_model_evaluation() {
             )
         });
         let mut previous_failed = false;
+        if selected_suite == "old-recall" {
+            old_recall_cases(&mut driver, &mut report, &save);
+        }
         for &(id, prompt, expected) in cases {
             let observation = observe(&mut driver, id, prompt, expected);
             let failed = observation["extraction_state"] == "Failed";

@@ -148,10 +148,36 @@ fn messaging_review_and_settings_work_at_minimum_wide_and_double_size(cx: &mut T
             cx.executor()
                 .advance_clock(std::time::Duration::from_millis(16));
             cx.run_until_parked();
-            shell.update(cx, |shell, cx| {
-                shell.select_tab(sovra_core::NavTab::Settings, cx);
-            });
             cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                // At 200% the collapsed rail stacks Connections on the account
+                // button, so a click there signs out. Open the tab directly.
+                shell.update(cx, |shell, cx| {
+                    shell.select_tab(sovra_core::NavTab::Connections, cx);
+                });
+                window.render_frame(cx);
+                for _ in 0..40 {
+                    window.render_frame(cx);
+                    let action = window.find("connection-action-whatsapp");
+                    let pane = window.find("connections-scroll").bounds();
+                    if action.visible()
+                        && action.bounds().top() >= pane.top()
+                        && action.bounds().bottom() <= pane.bottom()
+                    {
+                        break;
+                    }
+                    let delta = if action.bounds().top() < pane.top() {
+                        80.
+                    } else {
+                        -80.
+                    };
+                    window.scroll(
+                        "connections-scroll",
+                        ScrollDelta::Pixels(point(px(0.), px(delta))),
+                        cx,
+                    );
+                }
+                window.click("connection-action-whatsapp", cx);
                 window.render_frame(cx);
                 assert!(window.try_find("whatsapp-send-test-btn").is_none());
                 assert!(window.try_find("whatsapp-test-msg-input").is_none());

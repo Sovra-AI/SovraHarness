@@ -1161,13 +1161,12 @@ fn ollama_installed_models_and_download_panel_fit_minimum_window(cx: &mut TestAp
 #[gpui_kit::test]
 fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppContext) {
     let (client, commands, events) = Client::loopback();
-    let (window, _) = open_shell(cx, client, 1280., 1000.);
+    let (window, _) = open_shell(cx, client, 1280., 2400.);
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
-        window.click("models-browse-all", cx);
-        window.click("models-connections", cx);
-        window.click("connection-add", cx);
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        window.click("connection-action-compatible", cx);
         window.click(("connection-preset", 3usize), cx);
     })
     .expect("window exists");
@@ -1245,7 +1244,12 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        assert!(window.try_find("model-connection-form").is_none());
+        assert!(window.find("model-connection-form").visible());
+        assert_ne!(window.find("connection-save").disabled(), Some(true));
+        assert_eq!(
+            window.find("connection-url").value(),
+            Some("http://localhost:8000/v1")
+        );
     })
     .expect("window exists");
 }
@@ -1262,26 +1266,28 @@ fn settings_saves_openrouter_key_through_secure_connection_protocol(cx: &mut Tes
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-settings", cx);
+        window.click("nav-connections", cx);
         window.render_frame(cx);
-        assert!(window.find("sovra-settings-view").visible());
-        window.click("settings-openrouter", cx);
+        assert!(window.find("connections-page").visible());
+        window.click("connection-action-online-ai", cx);
         window.render_frame(cx);
         window.click("connection-key", cx);
         window.input("test-openrouter-key", cx);
         window.click("connection-save", cx);
     })
     .unwrap();
-    assert!(matches!(
-        commands.try_recv().unwrap(),
-        Command::Models(ModelCommand::Load)
-    ));
-    let Command::Models(ModelCommand::SaveConnection {
-        connection,
-        credential,
-    }) = commands.try_recv().unwrap()
-    else {
-        panic!("Settings must dispatch a connection save");
+    let mut saved = None;
+    while let Ok(command) = commands.try_recv() {
+        if let Command::Models(ModelCommand::SaveConnection {
+            connection,
+            credential,
+        }) = command
+        {
+            saved = Some((connection, credential));
+        }
+    }
+    let Some((connection, credential)) = saved else {
+        panic!("Connections must dispatch a connection save");
     };
     assert_eq!(connection.id, "router");
     assert_eq!(connection.kind, ProviderKind::OpenRouter);
@@ -1308,18 +1314,20 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-settings", cx);
-        window.click("settings-openrouter", cx);
+        window.click("nav-connections", cx);
+        window.click("connection-action-online-ai", cx);
         window.click("connection-key", cx);
         window.input("test-key", cx);
         window.click("connection-save", cx);
     })
     .unwrap();
-    commands.try_recv().unwrap();
-    assert!(matches!(
-        commands.try_recv().unwrap(),
-        Command::Models(ModelCommand::SaveConnection { .. })
-    ));
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+            command,
+            Command::Models(ModelCommand::SaveConnection { .. })
+        )),
+        "saving the key sends it to the runtime"
+    );
     connection.has_credential = true;
     events
         .send_blocking(Event::Models(ModelEvent::Loaded {
@@ -1352,14 +1360,11 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
         );
         window.click("connection-cancel", cx);
         window.render_frame(cx);
-        assert!(
-            window
-                .find("settings-openrouter-status")
-                .label()
-                .unwrap()
-                .contains("saved in this computer's keychain")
+        assert_eq!(
+            window.find("connection-status-online-ai").label(),
+            Some("Linked")
         );
-        window.click("settings-openrouter", cx);
+        window.click("connection-action-online-ai", cx);
         window.render_frame(cx);
         assert!(
             window
@@ -1440,7 +1445,7 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
             window.render_frame(cx);
             let item = window.find(id);
             let bounds = item.bounds();
-            let viewport = window.find("settings-sections").bounds();
+            let viewport = window.find("connections-scroll").bounds();
             if item.visible()
                 && bounds.top() >= viewport.top()
                 && bounds.bottom() <= viewport.bottom()
@@ -1453,12 +1458,12 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
                 -60.
             };
             window.scroll(
-                "settings-sections",
+                "connections-scroll",
                 ScrollDelta::Pixels(point(px(0.), px(delta))),
                 cx,
             );
         }
-        panic!("{id} must be reachable in Settings");
+        panic!("{id} must be reachable in Connections");
     }
     let (client, _commands, events) = Client::loopback();
     let (window, _) = open_shell(cx, client, 1000., 760.);
@@ -1473,21 +1478,20 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
         window.click("nav-settings", cx);
         window.render_frame(cx);
         assert!(window.find("settings-appearance").visible());
-        assert!(window.find("settings-ai").visible());
-        assert_eq!(
-            window.find("settings-openrouter-status").label(),
-            Some("Not connected yet")
-        );
         assert!(
-            window.try_find("connection-add").is_none(),
-            "advanced connections stay folded away until asked for"
+            window.try_find("settings-ai").is_none(),
+            "Settings no longer edits connections"
         );
-        reveal(window, "settings-advanced-toggle", cx);
-        window.click("settings-advanced-toggle", cx);
+        assert!(window.try_find("connection-url").is_none());
+        assert!(window.find("settings-open-connections").visible());
+        window.click("nav-connections", cx);
         window.render_frame(cx);
-        reveal(window, "connection-add", cx);
-        assert!(window.find("connection-add").visible());
-        window.click("connection-add", cx);
+        assert!(
+            window.try_find("connection-url").is_none(),
+            "the first screen does not ask for an address"
+        );
+        reveal(window, "connection-action-compatible", cx);
+        window.click("connection-action-compatible", cx);
         window.render_frame(cx);
         assert!(window.find("connection-url").visible());
         assert!(

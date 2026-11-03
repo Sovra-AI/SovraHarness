@@ -17,6 +17,7 @@ use sovra_core::connections::{
     ChannelError, ChannelEvent, ChannelSession, ChannelSink, ChannelStartOptions, ChatKind,
     IncomingMessage, LinkedDevice, MessagingChannel,
 };
+use sovra_core::people::SyncedContact;
 use whatsapp_rust::Jid;
 use whatsapp_rust::bot::{Bot, BotHandle, EventDelivery};
 use whatsapp_rust::client::Client;
@@ -112,6 +113,12 @@ impl MessagingChannel for WhatsAppChannel {
 
     fn has_saved_link(&self) -> bool {
         self.db_path().is_file()
+    }
+
+    async fn pull_contacts(&self) -> Result<Vec<SyncedContact>, ChannelError> {
+        // The phone pushes address-book rows as contact app-state events.
+        // There is no separate download. An empty snapshot must not invent people.
+        Ok(Vec::new())
     }
 
     fn forget(&self) -> Result<(), ChannelError> {
@@ -291,8 +298,40 @@ fn map_event(event: &Event, client: &Client) -> Vec<ChannelEvent> {
                 })
                 .collect()
         }
+        Event::ContactUpdate(update) => contacts_from_update(update),
         _ => Vec::new(),
     }
+}
+
+/// A phone-number contact from app-state. Groups, LIDs, and other servers are skipped.
+fn contacts_from_update(update: &whatsapp_rust::types::events::ContactUpdate) -> Vec<ChannelEvent> {
+    let action = update.action.as_ref();
+    let phone = update
+        .jid
+        .is_pn()
+        .then(|| sovra_core::phone_digits(update.jid.user_base()))
+        .flatten()
+        .or_else(|| action.pn_jid.as_deref().and_then(sovra_core::phone_digits));
+    let Some(phone) = phone else {
+        return Vec::new();
+    };
+    let name = action
+        .full_name
+        .clone()
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| {
+            action
+                .first_name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+        })
+        .unwrap_or_default();
+    let removed = name.is_empty() && action.save_on_primary_addressbook == Some(false);
+    vec![ChannelEvent::Contacts(vec![SyncedContact {
+        name,
+        phone,
+        removed,
+    }])]
 }
 
 /// The user parts of this account's phone-number and LID addresses. Chats with either

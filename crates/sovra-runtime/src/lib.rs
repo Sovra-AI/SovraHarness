@@ -14,8 +14,10 @@ mod file_index;
 mod files;
 mod google;
 mod mcp;
+mod memory_capture;
 mod memory_review;
 mod memory_semantic;
+mod model_priority;
 mod models;
 mod recalling;
 mod remembering;
@@ -30,8 +32,8 @@ use async_channel::{Receiver, Sender};
 use sovra_adk::decision_client::fetch_systemone_answers;
 use sovra_adk::{AdkHarness, SearchClient};
 use sovra_core::{
-    AgentConfig, Command, EpisodeKind, Event, MemoryError, MemoryStore, NewEpisode, RoutingConfig,
-    SpecialistAgentSpec, Timestamp, default_sovra_srx_agents, evaluate_routing,
+    AgentConfig, Command, Event, MemoryError, MemoryStore, RoutingConfig, SpecialistAgentSpec,
+    Timestamp, default_sovra_srx_agents, evaluate_routing,
 };
 
 /// A deferred memory-store constructor. The composition root picks the backend; the
@@ -265,6 +267,7 @@ pub fn start_with_auth(
         version,
         agent_config,
         RuntimeServices {
+            memory_extraction_slots: 0,
             memory,
             models,
             files,
@@ -274,6 +277,7 @@ pub fn start_with_auth(
             signin: google,
             google: None,
             development: None,
+            probes: Vec::new(),
         },
     )
 }
@@ -281,6 +285,8 @@ pub fn start_with_auth(
 /// Every adapter the composition root can hand the runtime; each is optional.
 #[derive(Default)]
 pub struct RuntimeServices {
+    /// Background extraction slots, 1–16; zero selects the default of four.
+    pub memory_extraction_slots: usize,
     pub memory: Option<MemoryFactory>,
     pub models: Option<ModelsConfig>,
     pub files: Option<Arc<dyn sovra_core::files::FileStore>>,
@@ -291,8 +297,10 @@ pub struct RuntimeServices {
     pub signin: Option<sovra_providers::GoogleOAuthConfig>,
     /// The person's Google account (Connections page and agent tools).
     pub google: Option<Arc<dyn sovra_core::google::GoogleConnector>>,
-    /// Local development control is off unless explicitly enabled in Settings.
+    /// Local control follows the build startup policy and remains revocable in Settings.
     pub development: Option<DevelopmentConfig>,
+    /// Extra catalogue probes. Saved messaging links are probed as well.
+    pub probes: Vec<Arc<dyn sovra_core::connection_catalogue::LinkProbe>>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -371,6 +379,7 @@ async fn serve(
 ) {
     let RuntimeServices {
         memory: memory_factory,
+        memory_extraction_slots,
         models,
         files,
         skills: skill_store,
@@ -379,6 +388,7 @@ async fn serve(
         signin,
         google,
         development,
+        probes,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
@@ -386,8 +396,13 @@ async fn serve(
     };
     // Every event passes the connections task first: answers for WhatsApp and Telegram
     // sessions go back to the phone instead of the chat window.
-    let connections =
-        connections::ConnectionsRuntime::start(channels, ui_events.clone(), commands_tx, &handle);
+    let connections = connections::ConnectionsRuntime::start(
+        channels,
+        ui_events.clone(),
+        commands_tx,
+        &handle,
+        probes,
+    );
     let events = connections.route_events(ui_events, &handle);
     let mut auth = auth::AuthRuntime::start(
         signin,
@@ -473,6 +488,7 @@ async fn serve(
             memory_control.clone(),
             events.clone(),
             &handle,
+            memory_extraction_slots,
         )
     });
     if load_skills {
@@ -488,22 +504,52 @@ async fn serve(
     google.send(sovra_core::google::GoogleCommand::Load);
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");
-        if let Some(worker) = &remembering {
+        // Protect setup and capture too: immediately dispatched extraction must
+        // not race ahead of the foreground guard owned by the spawned turn.
+        let _interactive_dispatch = matches!(
+            &command,
+            Command::RunPrompt { .. }
+                | Command::RunWithFiles { .. }
+                | Command::Teams(sovra_core::teams::TeamCommand::Run { .. })
+        )
+        .then(model_priority::interactive);
+        let captured_input = if let Some(worker) = &remembering {
             match &command {
                 Command::RunPrompt {
-                    session_id, prompt, ..
+                    session_id,
+                    prompt,
+                    context,
                 }
                 | Command::RunWithFiles {
-                    session_id, prompt, ..
+                    session_id,
+                    prompt,
+                    context,
+                    ..
+                } if connections.private_access(session_id) => {
+                    worker
+                        .record_user(
+                            session_id,
+                            prompt,
+                            context
+                                .as_ref()
+                                .and_then(sovra_core::ConversationContext::current),
+                        )
+                        .await
                 }
-                | Command::Teams(sovra_core::teams::TeamCommand::Run {
-                    session_id, prompt, ..
+                Command::Teams(sovra_core::teams::TeamCommand::Run {
+                    session_id,
+                    prompt,
+                    context,
                 }) if connections.private_access(session_id) => {
-                    worker.record_user(session_id, prompt);
+                    worker
+                        .record_user(session_id, prompt, context.current())
+                        .await
                 }
-                _ => {}
+                _ => None,
             }
-        }
+        } else {
+            None
+        };
         runs.retain(|_, run| !run.task.is_finished());
         while memory_taps.try_join_next().is_some() {}
         let skill_catalog = skills.catalog.read().await.clone();
@@ -555,7 +601,7 @@ async fn serve(
             Command::Teams(sovra_core::teams::TeamCommand::Run {
                 session_id,
                 prompt,
-                history,
+                context,
             }) => {
                 let selected = match models.as_ref() {
                     Some(models) => match models.execution.read().await.clone() {
@@ -589,16 +635,21 @@ async fn serve(
                 let base = base
                     .with_artifact_saver(artifact_library.saver())
                     .unwrap_or(base);
+                let capture = memory_capture::Capture::new(Some(&context), captured_input);
+                let inputs = capture.inputs.clone();
                 let base = match base
-                    .with_conversation_memory(
-                        recalling::reader(
-                            memory.as_ref(),
-                            &memory_control,
-                            memory_semantic.service.clone(),
-                        ),
-                        &prompt,
-                        now(),
-                    )
+                    .with_reply_input_observer(inputs.clone())
+                    .and_then(|base| {
+                        base.with_conversation_memory(
+                            inputs.reader(recalling::reader(
+                                memory.as_ref(),
+                                &memory_control,
+                                memory_semantic.service.clone(),
+                            )),
+                            &prompt,
+                            now(),
+                        )
+                    })
                     .and_then(|base| base.with_indexed_files(file_index.reader.clone()))
                 {
                     Ok(base) => base,
@@ -620,8 +671,31 @@ async fn serve(
                     previous.interrupt(&session_id);
                     previous.task.abort();
                 }
-                let run =
-                    team.spawn_run(&handle, base, session_id.clone(), prompt, history, timeout);
+                let output = if connections.private_access(&session_id) && memory_control.enabled()
+                {
+                    memory.as_ref().map_or_else(
+                        || events.clone(),
+                        |store| {
+                            memory_capture::tap(
+                                &mut memory_taps,
+                                store.clone(),
+                                events.clone(),
+                                memory_control.clone(),
+                                capture,
+                            )
+                        },
+                    )
+                } else {
+                    events.clone()
+                };
+                let run = team.with_events(output).spawn_run(
+                    &handle,
+                    base,
+                    session_id.clone(),
+                    prompt,
+                    context.team_history(),
+                    timeout,
+                );
                 runs.insert(session_id, run);
             }
             Command::Teams(command) => team.handle(&handle, command),
@@ -670,6 +744,25 @@ async fn serve(
                     previous.task.abort();
                 }
                 session_files.insert(session_id.clone(), attachment_ids.clone());
+                let capture = memory_capture::Capture::new(context.as_ref(), captured_input);
+                capture.inputs.untracked();
+                let output = if connections.private_access(&session_id) && memory_control.enabled()
+                {
+                    memory.as_ref().map_or_else(
+                        || events.clone(),
+                        |store| {
+                            memory_capture::tap(
+                                &mut memory_taps,
+                                store.clone(),
+                                events.clone(),
+                                memory_control.clone(),
+                                capture,
+                            )
+                        },
+                    )
+                } else {
+                    events.clone()
+                };
                 let run = files::spawn_prompt(
                     &handle,
                     files::FilePrompt {
@@ -689,7 +782,7 @@ async fn serve(
                             memory_semantic.service.clone(),
                         ),
                         models: models.file_models.clone(),
-                        events: events.clone(),
+                        events: output,
                         web_search_enabled,
                         search: search.clone(),
                     },
@@ -798,15 +891,18 @@ async fn serve(
                     m.web_search_enabled
                         .load(std::sync::atomic::Ordering::Relaxed)
                 });
+                let capture = memory_capture::Capture::new(context.as_ref(), captured_input);
+                let inputs = capture.inputs.clone();
                 let events = if memory_enabled && connections.private_access(&session_id) {
                     memory.as_ref().map_or_else(
                         || events.clone(),
                         |store| {
-                            tap_agent_events(
+                            memory_capture::tap(
                                 &mut memory_taps,
                                 store.clone(),
                                 events.clone(),
                                 memory_control.clone(),
+                                capture,
                             )
                         },
                     )
@@ -830,7 +926,9 @@ async fn serve(
                     let base = base
                         .with_artifact_saver(artifact_library.saver())
                         .unwrap_or(base);
-                    base.with_google(google_tools.as_ref()).unwrap_or(base)
+                    let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
+                    base.with_reply_input_observer(inputs.clone())
+                        .unwrap_or(base)
                 });
                 let run = spawn_prompt(
                     &handle,
@@ -862,11 +960,11 @@ async fn serve(
                         },
                         remote_caller: mcp.caller(),
                         memory_reader: if private_access {
-                            recalling::reader(
+                            inputs.reader(recalling::reader(
                                 memory.as_ref(),
                                 &memory_control,
                                 memory_semantic.service.clone(),
-                            )
+                            ))
                         } else {
                             None
                         },
@@ -985,64 +1083,6 @@ async fn open_memory(factory: Option<MemoryFactory>) -> Option<Arc<dyn MemorySto
     Some(store)
 }
 
-fn tap_agent_events(
-    tasks: &mut tokio::task::JoinSet<()>,
-    store: Arc<dyn MemoryStore>,
-    events: Sender<Event>,
-    memory_control: remembering::MemoryControl,
-) -> Sender<Event> {
-    let (tapped, stream) = async_channel::unbounded::<Event>();
-    tasks.spawn(async move {
-        let mut transcript = String::new();
-        while let Ok(event) = stream.recv().await {
-            match &event {
-                Event::AgentChunk { text, .. } => transcript.push_str(text),
-                Event::AgentCompleted { session_id } => {
-                    if !transcript.is_empty() && memory_control.enabled() {
-                        let episode = NewEpisode {
-                            session_id: session_id.clone(),
-                            kind: EpisodeKind::AgentMessage,
-                            content: std::mem::take(&mut transcript),
-                            occurred_at: now(),
-                        };
-                        if let Err(error) = store.record_episode(episode).await {
-                            tracing::warn!(%error, "failed to record agent episode");
-                        }
-                    }
-                }
-                Event::Auth(_)
-                | Event::Memory(_)
-                | Event::Models(_)
-                | Event::Skills(_)
-                | Event::Teams(_)
-                | Event::Artifacts(_)
-                | Event::Connections(_)
-                | Event::Development(_)
-                | Event::Google(_)
-                | Event::Mcp(_)
-                | Event::AgUi { .. }
-                | Event::FilePrepared(_)
-                | Event::FileIndex(_)
-                | Event::ChatHistoryLoaded { .. }
-                | Event::Ready { .. }
-                | Event::Pong
-                | Event::RouteEvaluated { .. }
-                // Reasoning is the model's scratch work, not something to remember.
-                | Event::AgentThinkingChunk { .. }
-                | Event::AgentResponseStarted { .. }
-                | Event::AgUiSurface { .. }
-                | Event::AgentError { .. }
-                | Event::ChatTitleGenerated { .. }
-                | Event::Stopped => {}
-            }
-            if events.send(event).await.is_err() {
-                return;
-            }
-        }
-    });
-    tapped
-}
-
 fn now() -> Timestamp {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1127,7 +1167,9 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
     } = job;
     let slot = Arc::new(std::sync::RwLock::new(harness.clone()));
     let harness_slot = Arc::clone(&slot);
+    let interactive = model_priority::interactive();
     let task = handle.spawn(async move {
+        let _interactive = interactive;
         let (skill, prompt) = match if private_access { skills::resolve(&skills, &prompt) } else { Ok((None, prompt.clone())) } {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -1135,6 +1177,10 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
                 return;
             }
         };
+        let deep_research = skill.as_ref().is_some_and(|skill| {
+            sovra_core::is_deep_research_skill(&skill.name)
+                || sovra_core::skill_requests_deep_research(&skill.tools)
+        });
         let external = fetch_systemone_answers(&routing, api_key.as_deref(), &prompt)
             .await
             .ok()
@@ -1177,6 +1223,18 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         };
         // Every turn is the orchestrator. The setting only adds or removes
         // WebSearchAgent; it does not replace the parent with that specialist.
+        // Deep research always needs web search for its parallel goal helpers.
+        if deep_research && !web_search_enabled {
+            let _ = events
+                .send(Event::AgUi {
+                    session_id,
+                    event: sovra_core::AgUiEvent::RunError {
+                        message: "Deep research needs web search switched on in Models.".into(),
+                    },
+                })
+                .await;
+            return;
+        }
         let adk = if web_search_enabled {
             match base.with_web_search(search) {
                 Ok(adk) => adk,
@@ -1206,7 +1264,14 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         };
         let adk = match adk.with_working_context(context.as_ref()).and_then(|adk| adk.with_conversation_memory(memory_reader, &prompt, now())).and_then(|adk| adk.with_indexed_files(indexed_files))
             .and_then(|adk| adk.with_messaging(messaging)).and_then(|adk| if private_access { adk.with_skill_library(skills, skill_resources) } else { Ok(adk) })
-            .and_then(|adk| skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill)))
+            .and_then(|adk| {
+                if deep_research {
+                    // Dedicated parallel research path — skip the specialist procedure.
+                    Ok(adk)
+                } else {
+                    skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill))
+                }
+            })
             .and_then(|adk| {
                 if remote_tools.is_empty() {
                     Ok(adk)
@@ -1225,6 +1290,30 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             *guard = Some(adk.clone());
+        }
+        if deep_research {
+            let turn = sovra_adk::DeepResearchTurn {
+                session_id: session_id.clone(),
+                run_id: sovra_adk::new_research_run_id(),
+                prompt,
+            };
+            let run = adk.run_deep_research(&turn, &events);
+            if let Some(timeout) = timeout {
+                if tokio::time::timeout(timeout, run).await.is_err() {
+                    adk.interrupt(&session_id);
+                    let _ = events
+                        .send(Event::AgUi {
+                            session_id,
+                            event: sovra_core::AgUiEvent::RunError {
+                                message: "Deep research timed out. Increase the connection timeout or try a shorter question.".into(),
+                            },
+                        })
+                        .await;
+                }
+            } else {
+                run.await;
+            }
+            return;
         }
         let run = adk.run_prompt(&session_id, &prompt, &events);
         if let Some(timeout) = timeout {

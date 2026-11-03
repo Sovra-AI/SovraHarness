@@ -16,11 +16,15 @@ impl Fixture {
         )
     }
     fn start(&self) -> crate::Client {
+        self.start_with_policy(None)
+    }
+    fn start_with_policy(&self, startup_enabled: Option<bool>) -> crate::Client {
         crate::start_with_services(
             "test",
             AgentConfig::default(),
             crate::RuntimeServices {
                 development: Some(DevelopmentConfig {
+                    startup_enabled,
                     directory: self.0.clone(),
                     executable: PathBuf::from("/fixture/sovra"),
                 }),
@@ -270,4 +274,32 @@ async fn refuses_public_directories_and_symlink_descriptors() {
             .is_err()
     );
     assert_eq!(std::fs::read_to_string(target).unwrap(), "{}");
+}
+
+#[tokio::test]
+async fn development_startup_policy_overrides_saved_state_but_keeps_revocation() {
+    let fixture = Fixture::new();
+    let client = fixture.start_with_policy(Some(true));
+    let events = client.events();
+    assert!(state(&events, true).await.enabled);
+    client
+        .send(Command::Development(DevelopmentCommand::SetEnabled(false)))
+        .unwrap();
+    assert!(!state(&events, false).await.enabled);
+    assert!(
+        endpoint::call(&fixture.0, UiRequest::Inspect {})
+            .await
+            .is_err()
+    );
+    stop(&client, &events).await;
+    endpoint::save_enabled(&fixture.0, true).await.unwrap();
+    let client = fixture.start_with_policy(Some(false));
+    let events = client.events();
+    assert!(!state(&events, false).await.enabled);
+    assert!(
+        endpoint::call(&fixture.0, UiRequest::Inspect {})
+            .await
+            .is_err()
+    );
+    stop(&client, &events).await;
 }

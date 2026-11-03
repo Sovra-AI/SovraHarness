@@ -63,6 +63,22 @@ impl gpui_kit::EventEmitter<GoToChat> for ModelsView {}
 pub(crate) struct StartSystemTour;
 impl gpui_kit::EventEmitter<StartSystemTour> for ModelsView {}
 
+/// The shell opens the Connections tab. `keep_editor` leaves a form the view already prepared.
+#[derive(Clone, Copy)]
+pub(crate) struct OpenConnections {
+    pub(crate) kind: Option<sovra_core::CatalogueKind>,
+    pub(crate) keep_editor: bool,
+}
+impl gpui_kit::EventEmitter<OpenConnections> for ModelsView {}
+
+/// Leave Connections and open the on-this-computer AI setup in Models.
+pub(crate) struct ShowLocalAi;
+impl gpui_kit::EventEmitter<ShowLocalAi> for ModelsView {}
+
+/// Leave Connections and show the model home.
+pub(crate) struct ShowModels;
+impl gpui_kit::EventEmitter<ShowModels> for ModelsView {}
+
 #[allow(
     clippy::struct_excessive_bools,
     reason = "independent view flags; a state enum would be artificial"
@@ -71,7 +87,7 @@ pub struct ModelsView {
     pub(crate) state: ModelsState,
     pub(crate) home_open: bool,
     /// Measured from this pane by `design::width_probe`; starts single-pane.
-    width_class: design::WidthClass,
+    pub(crate) width_class: design::WidthClass,
     pub(crate) pending_activation: Option<ModelKey>,
     /// The selected-model card is showing the loaded models you can switch to.
     pub(crate) changing_active: bool,
@@ -98,7 +114,12 @@ pub struct ModelsView {
     pub(crate) download_open: bool,
     pub(crate) connections_open: bool,
     pub(crate) settings_open: bool,
-    pub(crate) settings_advanced_open: bool,
+    /// The Connections tab is showing this view.
+    pub(crate) connections_page: bool,
+    /// The card the person opened. `None` is the first-screen catalogue.
+    pub(crate) open_kind: Option<sovra_core::CatalogueKind>,
+    /// Google status for the catalogue. The shell copies each Google event here.
+    pub(crate) google: sovra_core::google::GoogleConnection,
     pub(crate) connection_form: Option<ConnectionForm>,
     pub(crate) manual_form: Option<ManualModelForm>,
     pub(crate) form_subscriptions: Vec<Subscription>,
@@ -115,7 +136,7 @@ pub struct ModelsView {
     pub(crate) connections: sovra_core::connections::ConnectionsState,
     pub(crate) whatsapp_form: crate::connections_view::WhatsAppForm,
     pub(crate) development: sovra_core::development::DevelopmentState,
-    /// Settings → Connections; set by the shell, which owns the Google state.
+    /// The Google card on the Connections tab. The shell owns the view.
     pub(crate) google_card: Option<Entity<crate::google_card::GoogleCard>>,
     pub(crate) services: sovra_core::mcp::McpState,
     pub(crate) service_name: Entity<InputState>,
@@ -280,7 +301,9 @@ impl ModelsView {
             download_open: false,
             connections_open: false,
             settings_open: false,
-            settings_advanced_open: false,
+            connections_page: false,
+            open_kind: None,
+            google: sovra_core::google::GoogleConnection::default(),
             connection_form: None,
             manual_form: None,
             form_subscriptions: Vec::new(),
@@ -389,11 +412,18 @@ impl ModelsView {
                 self.form_subscriptions.clear();
                 self.saved_form_refresh = None;
                 self.setup_flow = false;
+                self.connections_page = false;
+                self.open_kind = None;
                 self.open_model_home(cx);
                 if matches!(stage, SetupStage::Ready { .. }) {
                     cx.emit(GoToChat);
+                } else {
+                    cx.emit(ShowModels);
                 }
-            } else if self.settings_open && self.connection_form.is_some() {
+            } else if (self.settings_open || self.connections_page)
+                && self.connection_form.is_some()
+            {
+                // Stay on the open card and show the saved key without the secret.
                 self.saved_form_refresh = Some(id.clone());
             } else {
                 self.connection_form = None;
@@ -939,10 +969,11 @@ impl ModelsView {
                             )
                             .child(
                                 design::button("models-connections", "Connections", cx)
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        view.connections_open = !view.connections_open;
-                                        view.selected = None;
-                                        cx.notify();
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(OpenConnections {
+                                            kind: None,
+                                            keep_editor: false,
+                                        });
                                     })),
                             ),
                     ),
@@ -1010,7 +1041,14 @@ impl ModelsView {
                 .child(caption("Only compatible models are shown. Choose one, then return to your waiting message and files.", cx))
                 .child(h_flex().flex_wrap().gap(t.space.small)
                     .child(design::button("file-model-back", "Back to my message", cx).ghost().on_click(cx.listener(|_, _, _, cx| cx.emit(GoToChat))))
-                    .child(design::button("file-model-connections", "Connect an AI service", cx).on_click(cx.listener(|view, _, window, cx| view.open_openrouter_key_editor(window, cx))))));
+                    .child(design::button("file-model-connections", "Connect an AI service", cx).on_click(cx.listener(|view, _, window, cx| {
+                        view.setup_flow = false;
+                        view.open_catalogue_kind(sovra_core::CatalogueKind::OnlineAi, window, cx);
+                        cx.emit(OpenConnections {
+                            kind: Some(sovra_core::CatalogueKind::OnlineAi),
+                            keep_editor: true,
+                        });
+                    })))));
         }
         hdr
     }
@@ -1366,7 +1404,7 @@ impl ModelsView {
             } else if self.filter.scope == CatalogScope::Custom {
                 "Nothing here yet. Use Connections to add another service, such as LM Studio."
             } else {
-                "Try clearing the filters or pressing Refresh. To use online models, add your key in Settings."
+                "Try clearing the filters or pressing Refresh. To use online models, add your key in Connections."
             };
             content = content.child(
                 v_flex()
@@ -1437,6 +1475,9 @@ impl ModelsView {
             self.open_connection(Some(connection), window, cx);
             self.state.notice = notice;
             self.state.error = error;
+        }
+        if self.connections_page {
+            return self.render_connections_page(window, cx);
         }
         if self.settings_open {
             return self.render_settings(cx).into_any_element();

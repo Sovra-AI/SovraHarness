@@ -169,8 +169,8 @@ fn unchanged_files_are_confirmed_without_reading_them_again() {
 
 #[test]
 fn files_modified_in_the_same_second_as_the_last_scan_are_never_skipped() {
-    // Written and scanned within the same second: the timestamp cannot prove the file
-    // was not edited after it was read, so the next scan must read it again.
+    // Reproduce an observation in the file's modification second explicitly: a
+    // wall-clock age below one second can still straddle two timestamp seconds.
     let fixture = Fixture::new();
     fixture.write("fresh.txt", "Racyneedle");
     let store = fixture.store();
@@ -180,14 +180,27 @@ fn files_modified_in_the_same_second_as_the_last_scan_are_never_skipped() {
         .unwrap()
         .modified()
         .unwrap();
+    let db = store.connect().unwrap();
+    db.execute("UPDATE index_files SET observed=modified", [])
+        .unwrap();
     let again = store.scan(&root.id, &Observer::default()).unwrap();
-    let observed_same_second = SystemTime::now()
-        .duration_since(modified)
-        .is_ok_and(|age| age.as_secs() == 0);
-    if observed_same_second {
-        assert!(again.progress.bytes_read > 0, "racy file must be re-read");
-    }
+    assert!(again.progress.bytes_read > 0, "racy file must be re-read");
     assert_eq!(again.progress.reused, 1);
+
+    // A same-size edit with the same timestamp must also be found, not merely
+    // re-read and accidentally classified as unchanged.
+    fixture.write("fresh.txt", "Editneedle");
+    std::fs::File::open(fixture.source().join("fresh.txt"))
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    db.execute("UPDATE index_files SET observed=modified", [])
+        .unwrap();
+    let changed = store.scan(&root.id, &Observer::default()).unwrap();
+    assert!(changed.progress.bytes_read > 0);
+    assert_eq!(changed.progress.indexed, 1);
+    assert_eq!(search(&store, "Editneedle").len(), 1);
+    assert_eq!(search(&store, "Racyneedle").len(), 0);
 }
 
 /// Manual check against a real folder: `SOVRA_LIVE_SCAN_DIR=/some/folder cargo nextest run

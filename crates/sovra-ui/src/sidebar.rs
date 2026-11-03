@@ -27,11 +27,12 @@ const PRIMARY_TABS: [NavTab; 4] = [
     NavTab::Schedules,
 ];
 
-const AI_SETUP_TABS: [NavTab; 5] = [
+const AI_SETUP_TABS: [NavTab; 6] = [
     NavTab::Models,
     NavTab::MyAis,
     NavTab::Knowledge,
     NavTab::Skills,
+    NavTab::Connections,
     NavTab::Settings,
 ];
 
@@ -305,7 +306,12 @@ fn nav_tab_meta(tab: NavTab) -> (&'static str, IconName, &'static str) {
         NavTab::Settings => (
             "nav-settings",
             IconName::Settings,
-            "Appearance, text size, WhatsApp & personal connections",
+            "Appearance, text size, and how Sovra talks to you",
+        ),
+        NavTab::Connections => (
+            "nav-connections",
+            IconName::Link,
+            "Link an AI, WhatsApp, Telegram, Google, or a service you already use",
         ),
     }
 }
@@ -321,7 +327,7 @@ fn nav_context_badge(tab: NavTab, state: &WorkspaceState) -> Option<(String, boo
         NavTab::Schedules if !state.schedules.is_empty() => {
             Some((state.schedules.len().to_string(), false))
         }
-        NavTab::Settings if state.connections.whatsapp.is_connected() => {
+        NavTab::Connections if state.connections.whatsapp.is_connected() => {
             Some(("WhatsApp".to_owned(), true))
         }
         _ => None,

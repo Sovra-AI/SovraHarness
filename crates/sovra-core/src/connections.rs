@@ -430,6 +430,15 @@ pub struct ConnectionsState {
     pub outbound_messages: Vec<crate::communications::OutboundMessage>,
     #[serde(default)]
     pub notice: Option<String>,
+    /// People this computer can message. A missing field on older saves starts empty.
+    #[serde(default)]
+    pub people: crate::people::PeopleBook,
+    /// Live probe results. Not saved: a restart reads each link again.
+    #[serde(default, skip)]
+    pub probed: std::collections::BTreeMap<
+        crate::connection_catalogue::CatalogueKind,
+        crate::connection_catalogue::LinkPhase,
+    >,
 }
 
 /// Commands sent from the UI to `sovra-runtime` for personal connections.
@@ -467,6 +476,28 @@ pub enum ConnectionCommand {
         session_id: String,
         send: bool,
     },
+    /// Probe installed links at the same time. A later refresh replaces the previous one.
+    Refresh,
+    /// Drop every probe from the current refresh. A finished link keeps its result.
+    CancelRefresh,
+    /// Prepare a review in the desktop chat. This does not send.
+    PrepareMessage {
+        session_id: String,
+        channel: ChannelKind,
+        recipient: String,
+        text: String,
+    },
+    /// Add a phone, email, `WhatsApp` number, or known Telegram chat to one person.
+    AttachHandle {
+        person_id: String,
+        reach: crate::people::Reach,
+        value: String,
+    },
+    /// Join two saved people the person says are the same.
+    LinkPeople {
+        keep: String,
+        merge: String,
+    },
 }
 
 /// Events emitted by `sovra-runtime` back to the UI.
@@ -486,6 +517,10 @@ pub enum ConnectionEvent {
     },
     /// A short message for the Connections page (confirmation or problem).
     Notice(String),
+    /// One installed link finished its check. Other kinds are untouched.
+    KindProbed(crate::connection_catalogue::ProbeReport),
+    /// The people list changed. Other connection rows are untouched.
+    PeopleChanged(crate::people::PeopleBook),
 }
 
 impl ConnectionsState {
@@ -495,6 +530,8 @@ impl ConnectionsState {
                 *self = (**saved).clone();
             }
             ConnectionEvent::StatusChanged(status) => {
+                self.probed
+                    .remove(&crate::connection_catalogue::CatalogueKind::WhatsApp);
                 self.qr_modal_open = match status {
                     WhatsAppStatus::Connecting { pairing: true }
                     | WhatsAppStatus::AwaitingQrScan { .. }
@@ -512,6 +549,8 @@ impl ConnectionsState {
                 self.settings = *settings;
             }
             ConnectionEvent::TelegramStatusChanged(status) => {
+                self.probed
+                    .remove(&crate::connection_catalogue::CatalogueKind::Telegram);
                 self.telegram = status.clone();
             }
             ConnectionEvent::TelegramSettingsUpdated(settings) => {
@@ -554,6 +593,12 @@ impl ConnectionsState {
             }
             ConnectionEvent::Notice(notice) => {
                 self.notice = Some(notice.clone());
+            }
+            ConnectionEvent::KindProbed(report) => {
+                self.probed.insert(report.kind, report.phase);
+            }
+            ConnectionEvent::PeopleChanged(people) => {
+                self.people.clone_from(people);
             }
         }
     }
@@ -651,6 +696,8 @@ pub enum ChannelEvent {
         message: String,
     },
     Message(IncomingMessage),
+    /// Contacts the linked account synced. An empty list is not a wipe.
+    Contacts(Vec<crate::people::SyncedContact>),
 }
 
 /// Receives [`ChannelEvent`]s; adapters call it from their own tasks.
@@ -681,6 +728,24 @@ pub trait MessagingChannel: Send + Sync {
 
     /// Deletes saved credentials so the next start pairs afresh.
     fn forget(&self) -> Result<(), ChannelError>;
+
+    /// Confirms a saved link still answers.
+    ///
+    /// `Ok(true)` means the service answered. `Ok(false)` means this check did not
+    /// contact the service, so it is not evidence the link works. The default does
+    /// not call the network. Dropping the future cancels the check.
+    async fn check(&self) -> Result<bool, ChannelError> {
+        Ok(false)
+    }
+
+    /// Contacts already known to this link.
+    ///
+    /// The default does not call the network and does not invent people. A linked
+    /// phone delivers its address book as later [`ChannelEvent::Contacts`]
+    /// while it syncs. Dropping the future cancels the pull.
+    async fn pull_contacts(&self) -> Result<Vec<crate::people::SyncedContact>, ChannelError> {
+        Ok(Vec::new())
+    }
 }
 
 /// One open link.
@@ -944,6 +1009,8 @@ mod tests {
             recent_messages: Vec::new(),
             outbound_messages: Vec::new(),
             notice: None,
+            people: crate::people::PeopleBook::default(),
+            probed: std::collections::BTreeMap::new(),
         };
         let json = serde_json::to_string(&state).unwrap();
         let back: ConnectionsState = serde_json::from_str(&json).unwrap();

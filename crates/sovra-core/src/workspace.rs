@@ -2,6 +2,9 @@
 //! inspector configuration, AG-UI chat stream, `SovraSRX` 22-specialist roster,
 //! and `CogniRouteSLM` + `SovraSRX` routing tree.
 
+mod conversations;
+use conversations::ConversationRun;
+
 use crate::agui::{AgUiWidget, BuildStepState, ChatMessage, default_personal_ai_build_widget};
 use crate::chat_history::{ChatHistoryFilter, ChatThread, NEW_CHAT_TITLE};
 use crate::memory::Timestamp;
@@ -37,10 +40,12 @@ pub enum NavTab {
     Team,
     /// Everything kept from chats: documents, code, tables, diagrams.
     Artifacts,
+    /// Links this app can use. Appended so existing discriminants stay stable.
+    Connections,
 }
 
 impl NavTab {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Chat,
         Self::Team,
         Self::Artifacts,
@@ -49,6 +54,7 @@ impl NavTab {
         Self::Skills,
         Self::Models,
         Self::Schedules,
+        Self::Connections,
         Self::Settings,
     ];
 
@@ -63,6 +69,7 @@ impl NavTab {
             Self::Skills => "Skills",
             Self::Team => "Team",
             Self::Artifacts => "Artifacts",
+            Self::Connections => "Connections",
         }
     }
 }
@@ -294,6 +301,8 @@ pub struct WorkspaceState {
     /// A message sent before setup finished, as `(session_id, prompt)`. It is sent
     /// automatically once a model is ready, so nobody has to type it twice.
     prompt_awaiting_setup: Option<(String, String)>,
+    background_conversations: std::collections::BTreeMap<String, ConversationRun>,
+    observed_at: Timestamp,
     next_msg_seq: u64,
     session_namespace: u128,
     next_thread_seq: u64,
@@ -302,11 +311,17 @@ pub struct WorkspaceState {
 impl WorkspaceState {
     /// Starts a workspace with a fresh, externally supplied namespace. The app
     /// supplies OS randomness so even chats absent from loaded history stay distinct.
+    /// Without a supplied clock, dates remain the Unix epoch until `observe_time`.
     pub fn new(session_namespace: u128) -> Self {
+        Self::new_at(session_namespace, Timestamp(0))
+    }
+
+    /// The caller supplies wall time; the pure reducer never invents dates from IDs.
+    pub fn new_at(session_namespace: u128, at: Timestamp) -> Self {
         let routing = RoutingConfig::default();
         let specialists = default_sovra_srx_agents();
         let initial_id = format!("chat-{session_namespace:032x}-0");
-        let initial_thread = ChatThread::new(initial_id.clone(), Timestamp(0));
+        let initial_thread = ChatThread::new(initial_id.clone(), at);
         Self {
             runtime_status: RuntimeStatus::default(),
             memory_status: crate::MemoryStatus::Unavailable,
@@ -354,6 +369,8 @@ impl WorkspaceState {
             team_subagents: std::collections::BTreeMap::new(),
             active_model_problem: None,
             prompt_awaiting_setup: None,
+            background_conversations: std::collections::BTreeMap::new(),
+            observed_at: at,
             next_msg_seq: 0,
             session_namespace,
             next_thread_seq: 0,
@@ -496,21 +513,22 @@ impl WorkspaceState {
             .find(|t| t.id == self.session_id && t.is_active())
     }
 
+    /// Set the observation time before applying user input or runtime events.
+    /// A clock rollback must not reverse recorded conversation order.
+    pub fn observe_time(&mut self, at: Timestamp) {
+        self.observed_at = self.observed_at.max(at);
+    }
+
     fn sync_active_thread(&mut self) {
-        self.next_msg_seq += 1;
-        #[allow(
-            clippy::cast_possible_wrap,
-            reason = "sequence counters are small positive integers"
-        )]
-        let ts = Timestamp(self.next_msg_seq as i64);
         if let Some(thread) = self.threads.iter_mut().find(|t| t.id == self.session_id) {
-            thread.messages.clone_from(&self.messages);
-            let effective_ts = thread.updated_at.max(ts);
-            thread.refresh_summary(effective_ts);
+            if thread.messages != self.messages {
+                thread.messages.clone_from(&self.messages);
+                thread.refresh_summary(thread.updated_at.max(self.observed_at));
+            }
         } else {
-            let mut thread = ChatThread::new(self.session_id.clone(), ts);
+            let mut thread = ChatThread::new(self.session_id.clone(), self.observed_at);
             thread.messages.clone_from(&self.messages);
-            thread.refresh_summary(ts);
+            thread.refresh_summary(self.observed_at);
             self.threads.push(thread);
         }
     }
@@ -518,6 +536,7 @@ impl WorkspaceState {
     /// Starts a fresh chat conversation thread (or focuses an existing empty draft).
     pub fn start_new_chat(&mut self) -> ChatThread {
         self.sync_active_thread();
+        self.park_conversation();
         self.history_filter = ChatHistoryFilter::Chats;
         self.active_tab = NavTab::Chat;
         self.renaming_thread_id = None;
@@ -527,25 +546,14 @@ impl WorkspaceState {
             .find(|t| t.is_active() && t.is_untouched_draft())
         {
             let draft = existing_draft.clone();
-            self.session_id.clone_from(&draft.id);
-            self.messages.clear();
-            self.queued_prompts.clear();
-            self.is_generating = false;
+            self.focus_conversation(&draft);
             return draft;
         }
-        self.next_msg_seq += 1;
-        #[allow(
-            clippy::cast_possible_wrap,
-            reason = "sequence counters are small positive integers"
-        )]
-        let ts = Timestamp(self.next_msg_seq as i64);
+        let ts = self.observed_at;
         let new_id = self.fresh_thread_id();
-        let thread = ChatThread::new(new_id.clone(), ts);
+        let thread = ChatThread::new(new_id, ts);
         self.threads.push(thread.clone());
-        self.session_id = new_id;
-        self.messages.clear();
-        self.queued_prompts.clear();
-        self.is_generating = false;
+        self.focus_conversation(&thread);
         thread
     }
 
@@ -564,10 +572,8 @@ impl WorkspaceState {
         else {
             return false;
         };
-        self.session_id.clone_from(&target.id);
-        self.messages.clone_from(&target.messages);
-        self.queued_prompts.clear();
-        self.is_generating = false;
+        self.park_conversation();
+        self.focus_conversation(&target);
         self.renaming_thread_id = None;
         self.active_tab = NavTab::Chat;
         true
@@ -674,12 +680,7 @@ impl WorkspaceState {
 
     /// Soft-deletes `session_id`. If it was the active session, switches to the most recent remaining thread or creates a fresh draft.
     pub fn delete_thread(&mut self, session_id: &str) -> bool {
-        self.next_msg_seq += 1;
-        #[allow(
-            clippy::cast_possible_wrap,
-            reason = "sequence counters are small positive integers"
-        )]
-        let deleted_at = Timestamp(self.next_msg_seq as i64);
+        let deleted_at = self.observed_at;
         let Some(thread) = self
             .threads
             .iter_mut()
@@ -687,7 +688,8 @@ impl WorkspaceState {
         else {
             return false;
         };
-        thread.deleted_at = Some(deleted_at);
+        thread.deleted_at = Some(deleted_at.max(thread.updated_at));
+        self.background_conversations.remove(session_id);
         if self.renaming_thread_id.as_deref() == Some(session_id) {
             self.renaming_thread_id = None;
         }
@@ -699,18 +701,12 @@ impl WorkspaceState {
                 .max_by_key(|t| t.updated_at)
                 .cloned();
             if let Some(next) = next_active {
-                self.session_id = next.id;
-                self.messages = next.messages;
-                self.queued_prompts.clear();
-                self.is_generating = false;
+                self.focus_conversation(&next);
             } else {
                 let new_id = self.fresh_thread_id();
-                let fresh = ChatThread::new(new_id.clone(), deleted_at);
-                self.threads.push(fresh);
-                self.session_id = new_id;
-                self.messages.clear();
-                self.queued_prompts.clear();
-                self.is_generating = false;
+                let fresh = ChatThread::new(new_id, deleted_at);
+                self.threads.push(fresh.clone());
+                self.focus_conversation(&fresh);
             }
         }
         true
@@ -906,8 +902,9 @@ impl WorkspaceState {
 
     fn append_user_turn(&mut self, prompt: &str) {
         let user_id = self.fresh_message_id("user");
-        self.messages
-            .push(ChatMessage::user(user_id, prompt, "Just now"));
+        let mut message = ChatMessage::user(user_id, prompt, "Just now");
+        message.occurred_at = Some(self.observed_at);
+        self.messages.push(message);
         self.is_generating = true;
         self.sync_active_thread();
     }
@@ -974,7 +971,7 @@ impl WorkspaceState {
         compute_stats(&self.schedules)
     }
 
-    pub fn apply_event(&mut self, event: &Event) -> Option<String> {
+    fn fold_event(&mut self, event: &Event) -> Option<String> {
         self.runtime_status.apply(event);
         match event {
             Event::Development(event) => {
@@ -1070,6 +1067,14 @@ impl WorkspaceState {
             }
             Event::ChatTitleGenerated { session_id, title } => {
                 let _ = self.apply_generated_title(session_id, title);
+                None
+            }
+            Event::Memory(crate::MemoryEvent::SourceSaved {
+                message, receipt, ..
+            }) => {
+                if let Some(message) = message {
+                    self.link_memory_source(message, &receipt.source_id);
+                }
                 None
             }
             Event::Memory(
@@ -1175,13 +1180,20 @@ impl WorkspaceState {
                 message_id,
                 activity,
             } => {
-                let widget = AgUiWidget::TeamActivity(activity.clone());
+                let (widget, author) = match activity {
+                    crate::agui::LiveActivity::Team(team) => {
+                        (AgUiWidget::TeamActivity(team.clone()), "Team")
+                    }
+                    crate::agui::LiveActivity::Research(board) => {
+                        (AgUiWidget::ResearchBoard(board.clone()), "Research")
+                    }
+                };
                 if let Some(message) = self.messages.iter_mut().find(|m| m.id == *message_id) {
                     message.widgets = vec![widget];
                 } else {
                     let mut message =
                         ChatMessage::assistant(message_id.clone(), "", "Just now", vec![widget]);
-                    "Team".clone_into(&mut message.author);
+                    author.clone_into(&mut message.author);
                     self.messages.push(message);
                 }
                 None
@@ -1260,17 +1272,7 @@ impl WorkspaceState {
     /// Earlier visible conversation; the current request travels separately.
     pub fn team_history(&self) -> Vec<crate::teams::TranscriptLine> {
         let context = crate::ConversationContext::before_current_turn(&self.messages);
-        let mut history = context.team_history();
-        if context.shortened() {
-            history.insert(
-                0,
-                crate::teams::TranscriptLine {
-                    speaker: "Sovra".into(),
-                    text: "[Older conversation omitted or shortened.]".into(),
-                },
-            );
-        }
-        history
+        context.team_history()
     }
 
     /// A reply that came from a connected service. The speaker line names that service.
@@ -1388,6 +1390,137 @@ impl WorkspaceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_replies_and_queued_prompts_stay_with_their_original_conversation() {
+        let mut state = WorkspaceState::new_at(9, Timestamp(100));
+        let first = state.session_id.clone();
+        state.submit_prompt("First conversation");
+        state.apply_event(&Event::AgentChunk {
+            session_id: first.clone(),
+            text: "First half, ".into(),
+        });
+        state.submit_prompt("Follow up in the first conversation");
+        let second = state.start_new_chat().id;
+        state.submit_prompt("Second conversation");
+        let visible = state.messages.clone();
+        state.observe_time(Timestamp(200));
+        state.apply_event(&Event::AgentChunk {
+            session_id: first.clone(),
+            text: "second half.".into(),
+        });
+        let next = state.apply_event(&Event::AgentCompleted {
+            session_id: first.clone(),
+        });
+        assert_eq!(state.session_id, second);
+        assert_eq!(state.messages, visible);
+        assert!(
+            state.is_generating,
+            "another chat's completion cannot stop this one"
+        );
+        let stored = state
+            .threads
+            .iter()
+            .find(|thread| thread.id == first)
+            .unwrap();
+        assert!(
+            stored
+                .messages
+                .iter()
+                .any(|message| message.text == "First half, second half.")
+        );
+        let Some(crate::Command::RunPrompt {
+            session_id,
+            prompt,
+            context: Some(context),
+        }) = next
+        else {
+            panic!("the original chat's queued prompt must not be lost");
+        };
+        assert_eq!(session_id, first);
+        assert_eq!(prompt, "Follow up in the first conversation");
+        assert!(
+            context
+                .messages()
+                .iter()
+                .any(|message| message.text == "First half, second half.")
+        );
+        assert!(
+            context
+                .messages()
+                .iter()
+                .all(|message| !message.text.contains("Second conversation"))
+        );
+        assert_eq!(stored.updated_at, Timestamp(200));
+        assert!(state.select_thread(&first));
+        assert!(
+            state.is_generating,
+            "the queued follow-up is running in this conversation"
+        );
+        assert_eq!(
+            state.messages.last().unwrap().text,
+            "Follow up in the first conversation"
+        );
+        assert!(state.select_thread(&second));
+        assert!(
+            state.is_generating,
+            "returning to an unfinished conversation restores Stop"
+        );
+    }
+
+    #[test]
+    fn conversation_dates_follow_observed_events_without_rewriting_creation_or_navigation() {
+        let mut state = WorkspaceState::new_at(7, Timestamp(100));
+        let session = state.session_id.clone();
+        assert_eq!(state.active_thread().unwrap().created_at, Timestamp(100));
+        state.observe_time(Timestamp(200));
+        state.submit_prompt("A fictional conversation.");
+        assert_eq!(state.active_thread().unwrap().updated_at, Timestamp(200));
+        state.observe_time(Timestamp(300));
+        state.apply_event(&Event::AgentChunk {
+            session_id: session.clone(),
+            text: "A fictional answer.".into(),
+        });
+        state.apply_event(&Event::AgentCompleted {
+            session_id: session.clone(),
+        });
+        let completed = state.active_thread().unwrap().clone();
+        assert_eq!(completed.created_at, Timestamp(100));
+        assert_eq!(completed.updated_at, Timestamp(300));
+        state.observe_time(Timestamp(400));
+        let draft = state.start_new_chat();
+        assert_eq!(draft.created_at, Timestamp(400));
+        assert!(state.select_thread(&session));
+        assert_eq!(state.active_thread(), Some(&completed));
+
+        // Restored timestamps are evidence too, even if the clock has moved back.
+        let mut restored = WorkspaceState::new_at(8, Timestamp(250));
+        restored.apply_event(&Event::ChatHistoryLoaded {
+            threads: vec![completed],
+        });
+        assert!(restored.select_thread(&session));
+        restored.submit_prompt("A follow-up while the clock is behind.");
+        assert_eq!(restored.active_thread().unwrap().updated_at, Timestamp(300));
+        restored.apply_event(&Event::AgentCompleted {
+            session_id: session.clone(),
+        });
+        restored.observe_time(Timestamp(500));
+        restored.observe_time(Timestamp(350));
+        restored.submit_prompt("A later follow-up.");
+        assert_eq!(restored.active_thread().unwrap().created_at, Timestamp(100));
+        assert_eq!(restored.active_thread().unwrap().updated_at, Timestamp(500));
+        restored.observe_time(Timestamp(600));
+        assert!(restored.delete_thread(&session));
+        assert_eq!(
+            restored
+                .threads
+                .iter()
+                .find(|thread| thread.id == session)
+                .unwrap()
+                .deleted_at,
+            Some(Timestamp(600))
+        );
+    }
 
     #[test]
     fn response_model_is_pinned_to_each_reply_and_saved_with_history() {
@@ -1620,7 +1753,9 @@ mod tests {
         let next = state.apply_event(&Event::AgentCompleted {
             session_id: state.session_id.clone(),
         });
-        assert_eq!(next.as_deref(), Some("Queued second prompt"));
+        assert!(
+            matches!(next, Some(crate::Command::RunPrompt { prompt, session_id, .. }) if prompt == "Queued second prompt" && session_id == state.session_id)
+        );
         assert!(state.is_generating);
         assert_eq!(state.queued_prompts.len(), 0);
     }
@@ -1857,7 +1992,9 @@ mod tests {
         let resent = state.apply_event(&Event::Models(
             crate::models::ModelEvent::PreferencesChanged(preferences.clone()),
         ));
-        assert_eq!(resent.as_deref(), Some("What's the weather?"));
+        assert!(
+            matches!(resent, Some(crate::Command::RunPrompt { prompt, session_id, .. }) if prompt == "What's the weather?" && session_id == state.session_id)
+        );
         assert!(state.is_generating);
         assert_eq!(state.messages.len(), 1, "the setup card is gone");
         assert!(

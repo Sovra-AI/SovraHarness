@@ -1,6 +1,8 @@
 //! Bound prior facts for extraction, prioritizing relevance over unrelated recency.
 
-use super::{Fact, MAX_MEMORY_CANDIDATES, MemorySearch, Timestamp};
+use super::{Fact, MemorySearch, Timestamp};
+
+const MAX_KNOWN_FACTS: usize = 8;
 
 pub fn consolidation_context(related: Vec<Fact>, recent: Vec<Fact>, now: Timestamp) -> Vec<Fact> {
     let current = MemorySearch::default();
@@ -9,7 +11,7 @@ pub fn consolidation_context(related: Vec<Fact>, recent: Vec<Fact>, now: Timesta
         .into_iter()
         .chain(recent)
         .filter(|fact| current.accepts(fact, now) && seen.insert(fact.id.clone()))
-        .take(MAX_MEMORY_CANDIDATES)
+        .take(MAX_KNOWN_FACTS)
         .collect()
 }
 
@@ -61,7 +63,7 @@ mod tests {
             recent,
             Timestamp(10),
         );
-        assert_eq!(result.len(), MAX_MEMORY_CANDIDATES);
+        assert_eq!(result.len(), MAX_KNOWN_FACTS);
         assert_eq!(result[0], relevant);
         assert_eq!(result[1].id.0, "0");
         assert_eq!(

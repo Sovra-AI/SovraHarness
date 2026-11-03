@@ -8,7 +8,10 @@ use sovra_core::artifacts::{
 };
 use sovra_core::models::InterfaceScale;
 use sovra_core::teams::{SpeakerState, TeamActivity, TeamCommand, TeamEvent, default_team};
-use sovra_core::{AgUiEvent, Command, Event, NavTab, Speaker, SubagentOutcome, Timestamp};
+use sovra_core::{
+    AgUiEvent, AgUiWidget, Command, Event, LiveActivity, NavTab, ParsedResearchGoal, ResearchBoard,
+    ResearchGoalState, Speaker, SubagentOutcome, Timestamp, parse_research_plan,
+};
 use sovra_runtime::Client;
 use sovra_ui::{Shell, design};
 
@@ -140,14 +143,14 @@ fn team_page_fits_every_window_and_text_size_and_asks_the_team(cx: &mut TestAppC
             .iter()
             .find_map(|command| match command {
                 Command::Teams(TeamCommand::Run {
-                    prompt, history, ..
-                }) => Some((prompt, history)),
+                    prompt, context, ..
+                }) => Some((prompt, context)),
                 _ => None,
             })
             .expect("team mode sends a team run");
         assert_eq!(run.0, "Plan my garden");
         assert!(
-            run.1.is_empty(),
+            run.1.messages().is_empty(),
             "the current request is separate from prior history"
         );
         cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
@@ -209,7 +212,7 @@ fn mentions_route_to_the_team_and_agui_events_show_each_member(cx: &mut TestAppC
         AgUiEvent::RunStarted { run_id: "r".into() },
         AgUiEvent::ActivitySnapshot {
             message_id: "r-team".into(),
-            activity: activity.clone(),
+            activity: LiveActivity::Team(activity.clone()),
         },
         AgUiEvent::SubagentStarted {
             subagent_run_id: "r-1".into(),
@@ -246,7 +249,7 @@ fn mentions_route_to_the_team_and_agui_events_show_each_member(cx: &mut TestAppC
     for event in [
         AgUiEvent::ActivitySnapshot {
             message_id: "r-team".into(),
-            activity,
+            activity: LiveActivity::Team(activity),
         },
         AgUiEvent::RunFinished { run_id: "r".into() },
     ] {
@@ -258,6 +261,29 @@ fn mentions_route_to_the_team_and_agui_events_show_each_member(cx: &mut TestAppC
             .unwrap();
     }
     settle(cx);
+    let saved = drain(&commands)
+        .into_iter()
+        .filter_map(|command| {
+            if let Command::SaveChatThread { thread } = command {
+                Some(thread)
+            } else {
+                None
+            }
+        })
+        .next_back()
+        .expect("team completion must persist the conversation without navigation");
+    assert!(
+        saved
+            .messages
+            .iter()
+            .any(|message| message.text == "In moderation, yes." && message.author == "Priya")
+    );
+    assert!(saved.messages.iter().any(|message| {
+        message
+            .widgets
+            .iter()
+            .any(|widget| matches!(widget, AgUiWidget::TeamActivity(activity) if activity.finished))
+    }));
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         let state = shell.read(cx).workspace();
@@ -276,6 +302,171 @@ fn mentions_route_to_the_team_and_agui_events_show_each_member(cx: &mut TestAppC
             .expect("team card message");
         let status = window.find(("team-activity-status", card * 10));
         assert!(status.visible(), "{status:?}");
+        assert!(window.find("chat-composer-input").visible());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn deep_research_board_and_document_card_stay_in_chat(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 820.);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text(
+                "/deep-research Compare heat pumps vs gas boilers",
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    let session = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    // Deep research is a normal prompt route (skill), not a Team page navigation.
+    assert!(
+        !drain(&commands)
+            .iter()
+            .any(|command| matches!(command, Command::Teams(TeamCommand::Run { .. })))
+    );
+    let mut board = ResearchBoard::planning("Compare heat pumps vs gas boilers");
+    let goals: Vec<_> = parse_research_plan(
+        "- [RESEARCH] Investigate heat pump efficiency ratings today\n\
+         - [RESEARCH] Compare running costs versus gas boilers now\n\
+         - [DELIVERABLE] Write a homeowner summary for the family",
+    )
+    .into_iter()
+    .map(ParsedResearchGoal::into_goal)
+    .collect();
+    board.with_plan(goals);
+    board.set("goal-0", ResearchGoalState::Working);
+    board.set("goal-1", ResearchGoalState::Working);
+    for event in [
+        AgUiEvent::RunStarted {
+            run_id: "research-1".into(),
+        },
+        AgUiEvent::ActivitySnapshot {
+            message_id: "research-1-board".into(),
+            activity: LiveActivity::Research(board.clone()),
+        },
+    ] {
+        events
+            .send_blocking(Event::AgUi {
+                session_id: session.clone(),
+                event,
+            })
+            .unwrap();
+    }
+    settle(cx);
+    board.set("goal-0", ResearchGoalState::Done);
+    board.set("goal-1", ResearchGoalState::Done);
+    board.begin_writing();
+    board.set("goal-2", ResearchGoalState::Done);
+    board.finish("Your research document is ready");
+    for event in [
+        AgUiEvent::ActivitySnapshot {
+            message_id: "research-1-board".into(),
+            activity: LiveActivity::Research(board),
+        },
+        AgUiEvent::TextMessageStart {
+            message_id: "research-1-closing".into(),
+            subagent_run_id: None,
+        },
+        AgUiEvent::TextMessageContent {
+            message_id: "research-1-closing".into(),
+            delta: "Your research document is ready. Open it below.".into(),
+        },
+        AgUiEvent::TextMessageEnd {
+            message_id: "research-1-closing".into(),
+        },
+        AgUiEvent::RunFinished {
+            run_id: "research-1".into(),
+        },
+    ] {
+        events
+            .send_blocking(Event::AgUi {
+                session_id: session.clone(),
+                event,
+            })
+            .unwrap();
+    }
+    events
+        .send_blocking(Event::AgUiSurface {
+            session_id: session,
+            widget: AgUiWidget::ArtifactSaved {
+                artifact_id: "doc-heat-pumps".into(),
+                title: "Compare heat pumps vs gas boilers".into(),
+                artifact_kind: ArtifactKind::Document,
+            },
+        })
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let state = shell.read(cx).workspace();
+        assert_eq!(
+            state.active_tab,
+            NavTab::Chat,
+            "no separate Team/Goals window"
+        );
+        assert!(!state.is_generating);
+        let board_msg = state
+            .messages
+            .iter()
+            .position(|m| m.id == "research-1-board")
+            .expect("research board message");
+        assert!(
+            window.find(("research-board", board_msg * 10)).visible(),
+            "research board should render in chat"
+        );
+        assert!(
+            window
+                .find(("research-board-lanes", board_msg * 10))
+                .visible(),
+            "kanban lanes should be visible"
+        );
+        assert!(
+            window
+                .find(("research-board-status", board_msg * 10))
+                .visible(),
+            "board status should be visible"
+        );
+        let closing = state
+            .messages
+            .iter()
+            .find(|m| m.id == "research-1-closing")
+            .expect("closing note");
+        assert!(closing.text.contains("research document is ready"));
+        // Widget ElementIds use message_index × 10 + widget_index (see chat_view).
+        let artifact_index = state
+            .messages
+            .iter()
+            .enumerate()
+            .find_map(|(message_index, message)| {
+                message
+                    .widgets
+                    .iter()
+                    .position(|widget| {
+                        matches!(
+                            widget,
+                            AgUiWidget::ArtifactSaved {
+                                artifact_id,
+                                artifact_kind: ArtifactKind::Document,
+                                ..
+                            } if artifact_id == "doc-heat-pumps"
+                        )
+                    })
+                    .map(|widget_index| message_index * 10 + widget_index)
+            })
+            .expect("document artifact card on a chat message");
+        assert!(
+            window.find(("artifact-saved", artifact_index)).visible(),
+            "document card must render in chat"
+        );
+        assert!(
+            window
+                .find(("artifact-saved-open", artifact_index))
+                .visible(),
+            "Open control on the document card must be visible"
+        );
         assert!(window.find("chat-composer-input").visible());
     })
     .unwrap();

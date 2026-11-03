@@ -9,6 +9,7 @@
     reason = "a CLI reports to the terminal"
 )]
 
+mod clean_cache;
 mod deps;
 mod dev;
 mod dist;
@@ -23,9 +24,11 @@ use anyhow::{Context as _, bail};
 const HELP: &str = "\
 cargo xtask <command>
 
-  setup        Install pinned CI tools and the Watchexec development runner
-  dev          Watch files, rebuild/relaunch the app, and stream logs (leave running)
-  run          Run the desktop app (debug build)
+  setup        Install pinned CI tools (deny, nextest, shear)
+  dev          One-shot debug build + launch with SOVRA_DEV=1 (re-run yourself to reload)
+  run          Run the desktop app (debug build, without SOVRA_DEV)
+  clean-cache  Report / reclaim Cargo target (and optional ~/.cargo) disk use when idle
+               Prefer `just clear-cache` to reclaim reclaimable build artefacts
   ci           Every gate CI runs: fmt, clippy, check-deps, check-styles, deny, shear, tests
   fix          Auto-fix: cargo fmt + clippy --fix
   check-deps   Enforce the crate layering rules (see xtask/src/deps.rs)
@@ -39,7 +42,6 @@ const TOOLS: &[&str] = &[
     "cargo-deny@0.20.2",
     "cargo-nextest@0.9.149",
     "cargo-shear@1.14.0",
-    dev::WATCH_TOOL,
 ];
 
 fn main() -> ExitCode {
@@ -57,8 +59,8 @@ fn dispatch(args: &[String]) -> anyhow::Result<ExitCode> {
     match args.first().map(String::as_str) {
         Some("setup") => setup()?,
         Some("dev") => dev::run(&root()?)?,
-        Some("dev-cycle") => dev::cycle(&root()?)?, // Internal: one watcher rebuild.
         Some("run") => cargo(&["run", "--package", "sovra-app"])?,
+        Some("clean-cache") => clean_cache::run(&root()?, &args[1..])?,
         Some("ci") => ci()?,
         Some("fix") => fix()?,
         Some("check-deps") => deps::check(&root()?)?,

@@ -15,6 +15,9 @@ pub struct MemoryCursor {
 pub struct MemoryListQuery {
     /// A literal, case-insensitive text fragment; empty means all memories.
     pub search: String,
+    /// Exact saved subject label, selected from a displayed memory.
+    pub subject: Option<String>,
+    pub source: Option<super::EpisodeId>,
     pub include_history: bool,
     pub before: Option<MemoryCursor>,
     pub limit: usize,
@@ -24,6 +27,8 @@ impl Default for MemoryListQuery {
     fn default() -> Self {
         Self {
             search: String::new(),
+            subject: None,
+            source: None,
             include_history: false,
             before: None,
             limit: 20,
@@ -36,6 +41,14 @@ impl MemoryListQuery {
         if self.limit == 0
             || self.limit > MAX_MEMORY_PAGE
             || self.search.len() > 512
+            || self
+                .source
+                .as_ref()
+                .is_some_and(|id| id.0.is_empty() || id.0.len() > 512)
+            || self
+                .subject
+                .as_ref()
+                .is_some_and(|subject| subject.trim().is_empty() || subject.len() > 256)
             || self
                 .before
                 .as_ref()
@@ -56,6 +69,8 @@ pub struct MemoryPage {
     /// Capture totals are not filtered by the visible search. `None` means the
     /// backend cannot report them, rather than claiming nothing was saved.
     pub overview: Option<super::MemoryOverview>,
+    /// Chats already known for facts on this page. Empty when a chat was not recorded.
+    pub chats: Vec<super::MemoryFactChat>,
 }
 
 /// An explicit edit creates a new user-authored note and a replacement fact atomically.
@@ -87,11 +102,17 @@ impl MemoryNote {
 pub enum MemoryAction {
     ConfigureSemantic(Option<crate::models::ModelDestination>),
     List(MemoryListQuery),
+    ListSubjects(super::MemorySubjectQuery),
+    ListSources(super::MemorySourceQuery),
     Inspect(FactId),
+    InspectSource(super::EpisodeId),
+    StopSource(super::EpisodeId),
     Correct(MemoryCorrection),
     Remember(MemoryNote),
     RetryFailed,
     StopUsing(FactId),
+    /// Remove every correction version and its supporting sources from recall.
+    Remove(FactId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,13 +125,18 @@ pub struct MemoryCommand {
 pub struct MemoryDetail {
     pub fact: Fact,
     pub source: Option<Episode>,
+    pub neighborhood: super::MemoryNeighborhood,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryReviewResult {
     Semantics(super::MemorySemanticState),
     Page(MemoryPage),
+    Subjects(super::MemorySubjectPage),
     Detail(Box<MemoryDetail>),
+    Source(super::MemorySourceRecord),
+    Sources(super::MemorySourcePage),
+    SourceStopped(super::EpisodeId),
     Changed(FactId),
     Retried(usize),
 }
@@ -126,7 +152,10 @@ pub struct MemoryReviewEvent {
 pub struct MemoryReviewState {
     pub semantic: super::MemorySemanticStatus,
     pub page: MemoryPage,
+    pub subjects: super::MemorySubjectPage,
     pub detail: Option<MemoryDetail>,
+    pub source: Option<super::MemorySourceRecord>,
+    pub sources: super::MemorySourcePage,
     pub error: Option<String>,
     pub loading: bool,
     request_id: u64,
@@ -137,6 +166,7 @@ impl MemoryReviewState {
         self.request_id = self.request_id.wrapping_add(1);
         self.loading = true;
         self.error = None;
+        self.source = None;
         MemoryCommand {
             request_id: self.request_id,
             action,
@@ -163,14 +193,31 @@ impl MemoryReviewState {
                     });
                 }
             }
+            Ok(MemoryReviewResult::Subjects(page)) => {
+                self.subjects = page.clone();
+                self.detail = None;
+            }
             Ok(MemoryReviewResult::Page(page)) => {
                 self.page = page.clone();
                 self.detail = None;
             }
+            Ok(MemoryReviewResult::Sources(page)) => {
+                self.sources = page.clone();
+                self.detail = None;
+            }
+            Ok(MemoryReviewResult::Source(source)) => {
+                self.source = Some(source.clone());
+                self.detail = None;
+            }
             Ok(MemoryReviewResult::Detail(detail)) => self.detail = Some((**detail).clone()),
-            Ok(MemoryReviewResult::Changed(_) | MemoryReviewResult::Retried(_)) => {
+            Ok(
+                MemoryReviewResult::Changed(_)
+                | MemoryReviewResult::Retried(_)
+                | MemoryReviewResult::SourceStopped(_),
+            ) => {
                 self.page = MemoryPage::default();
                 self.detail = None;
+                self.source = None;
             }
             Err(error) => self.error = Some(error.clone()),
         }

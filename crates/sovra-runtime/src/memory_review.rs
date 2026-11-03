@@ -43,7 +43,10 @@ impl MemoryReviewRuntime {
                         "Memory is unavailable in this session.".into(),
                     )),
                 };
-                if matches!(result, Ok(MemoryReviewResult::Changed(_))) {
+                if matches!(
+                    result,
+                    Ok(MemoryReviewResult::Changed(_) | MemoryReviewResult::SourceStopped(_))
+                ) {
                     control.invalidate_recall();
                 }
                 let _ = output
@@ -110,10 +113,26 @@ async fn execute(
                 .await
                 .map(MemoryReviewResult::Semantics)
         }
+        MemoryAction::ListSources(query) => store
+            .list_memory_sources(query)
+            .await
+            .map(MemoryReviewResult::Sources),
+        MemoryAction::ListSubjects(query) => store
+            .list_memory_subjects(query)
+            .await
+            .map(MemoryReviewResult::Subjects),
         MemoryAction::List(query) => store
             .list_memories(query)
             .await
             .map(MemoryReviewResult::Page),
+        MemoryAction::StopSource(id) => {
+            store.stop_memory_source(&id, crate::now()).await?;
+            Ok(MemoryReviewResult::SourceStopped(id))
+        }
+        MemoryAction::InspectSource(id) => store
+            .review_memory_source(&id)
+            .await
+            .map(MemoryReviewResult::Source),
         MemoryAction::Inspect(id) => {
             let fact = store.memory_fact(&id).await?;
             let source = match &fact.source {
@@ -121,6 +140,7 @@ async fn execute(
                 None => None,
             };
             Ok(MemoryReviewResult::Detail(Box::new(MemoryDetail {
+                neighborhood: store.memory_connections(&id).await?,
                 fact,
                 source,
             })))
@@ -149,6 +169,10 @@ async fn execute(
         }
         MemoryAction::StopUsing(id) => {
             store.stop_memory(&id, super::now()).await?;
+            Ok(MemoryReviewResult::Changed(id))
+        }
+        MemoryAction::Remove(id) => {
+            store.remove_memory(&id, super::now()).await?;
             Ok(MemoryReviewResult::Changed(id))
         }
     }

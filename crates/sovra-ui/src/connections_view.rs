@@ -1,7 +1,6 @@
-//! Personal connections inside Settings: link your own `WhatsApp` to this app. Click
-//! Connect, scan the code `WhatsApp` issues with your phone, and messages you send
-//! yourself on `WhatsApp` are answered by Sovra. The real client runs in the runtime;
-//! this view only shows its state and sends plain commands.
+//! The Connections tab. The first screen is one catalogue of the links this app
+//! can use. Opening a card shows that link's existing setup. The runtime owns
+//! the real clients; this view only shows state and sends plain commands.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -13,19 +12,23 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Styled as _, TestSupportExt as _, Window, canvas, div, fill, point,
-    size,
+    AnyElement, AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
+    Window, canvas, div, fill, point, size,
 };
 use sovra_core::Command;
+use sovra_core::connection_catalogue::{
+    CatalogueKind, CatalogueSources, ConnectionCatalogue, LinkPhase, catalogue_from,
+};
 use sovra_core::connections::{
     ConnectionCommand, ConnectionsState, TelegramSettings, TelegramStatus, WhatsAppQrTicket,
     WhatsAppSettings, WhatsAppStatus,
 };
+use sovra_core::models::ProviderKind;
 
 use crate::RuntimeClient;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
-use crate::models_view::{ModelsView, caption, pill};
+use crate::models_view::{ModelsView, ShowLocalAi, caption, pill};
 use crate::settings_view::settings_section;
 
 pub(crate) struct WhatsAppForm {
@@ -455,7 +458,7 @@ impl ModelsView {
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
 
-        let body: gpui_kit::AnyElement = match &state.whatsapp {
+        let body: AnyElement = match &state.whatsapp {
             WhatsAppStatus::AwaitingQrScan { ticket } => {
                 self.render_scan_step(ticket, cx).into_any_element()
             }
@@ -532,7 +535,7 @@ impl ModelsView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        let code_card: gpui_kit::AnyElement = if ticket.has_qr() {
+        let code_card: AnyElement = if ticket.has_qr() {
             render_qr_card(ticket, cx).into_any_element()
         } else {
             caption("Waiting for WhatsApp to issue a code…", cx)
@@ -692,4 +695,277 @@ fn render_qr_card(ticket: &WhatsAppQrTicket, cx: &Context<ModelsView>) -> impl I
             ),
             cx,
         ))
+}
+
+impl ModelsView {
+    pub(crate) fn open_catalogue_kind(
+        &mut self,
+        kind: CatalogueKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.manual_form = None;
+        match kind {
+            CatalogueKind::OnlineAi => self.open_openrouter_key_editor(window, cx),
+            CatalogueKind::CompatibleService => self.open_openai_compatible_editor(window, cx),
+            CatalogueKind::LocalAi
+            | CatalogueKind::WhatsApp
+            | CatalogueKind::Telegram
+            | CatalogueKind::Google
+            | CatalogueKind::WebAddress => {
+                self.connections_page = true;
+                self.settings_open = false;
+                self.home_open = false;
+                self.open_kind = Some(kind);
+                self.connection_form = None;
+                self.form_subscriptions.clear();
+                cx.notify();
+            }
+        }
+    }
+
+    pub(crate) fn render_connections_page(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if self.connections.qr_modal_open {
+            let modal = self
+                .render_whatsapp_qr_modal(&self.connections, cx)
+                .into_any_element();
+            return self.connections_frame(cx, modal);
+        }
+        if let Some(kind) = self.open_kind {
+            let editor = self.render_open_connection(kind, cx);
+            return self.connections_frame(cx, editor);
+        }
+        let catalogue = self.render_catalogue(cx);
+        self.connections_frame(cx, catalogue)
+    }
+
+    fn current_catalogue(&self) -> ConnectionCatalogue {
+        catalogue_from(&CatalogueSources {
+            connections: &self.state.connections,
+            catalogs: &self.state.catalogs,
+            whatsapp: &self.connections.whatsapp,
+            telegram: &self.connections.telegram,
+            google: &self.google.state,
+            services: &self.services.services,
+            probed: &self.connections.probed,
+        })
+    }
+
+    fn connections_frame(&self, cx: &mut Context<Self>, body: AnyElement) -> AnyElement {
+        let t = design::tokens(cx);
+        let narrow = !self.width_class.fits_detail_pane();
+        let column = if self.open_kind.is_some() {
+            t.layout.reading_width
+        } else {
+            t.layout.page_width
+        };
+        v_flex()
+            .id("connections-page")
+            .test_support()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .p(if narrow {
+                t.space.small
+            } else {
+                t.space.medium
+            })
+            .child(
+                v_flex()
+                    .id("connections-scroll")
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
+                    .items_center()
+                    .overflow_y_scroll()
+                    .test_support()
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .max_w(column)
+                            .min_w_0()
+                            .gap(t.space.medium)
+                            .child(body),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_catalogue(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let t = design::tokens(cx);
+        let catalogue = self.current_catalogue();
+        let mut rows = Vec::new();
+        for card in catalogue.cards() {
+            let slug = card.kind.slug();
+            let kind = card.kind;
+            let phase = card.phase.label();
+            let color = match card.phase {
+                LinkPhase::Linked => cx.theme().success,
+                LinkPhase::NeedsYou => cx.theme().danger,
+                LinkPhase::NotLinked | LinkPhase::Working => t.text_secondary,
+            };
+            rows.push(
+                v_flex()
+                    .id(gpui_kit::SharedString::from(format!(
+                        "connection-card-{slug}"
+                    )))
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .p(t.space.medium)
+                    .gap(t.space.small)
+                    .sovra_surface(Surface::Matte, cx)
+                    .child(
+                        div()
+                            .id(gpui_kit::SharedString::from(format!(
+                                "connection-title-{slug}"
+                            )))
+                            .aria_label(card.title)
+                            .test_support()
+                            .sovra_text(TextRole::SectionTitle, cx)
+                            .child(card.title),
+                    )
+                    .child(
+                        div()
+                            .id(gpui_kit::SharedString::from(format!(
+                                "connection-sentence-{slug}"
+                            )))
+                            .aria_label(card.sentence)
+                            .test_support()
+                            .min_w_0()
+                            .sovra_text(TextRole::Body, cx)
+                            .child(card.sentence),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .flex_wrap()
+                            .items_center()
+                            .justify_between()
+                            .gap(t.space.small)
+                            .child(
+                                div()
+                                    .id(gpui_kit::SharedString::from(format!(
+                                        "connection-status-{slug}"
+                                    )))
+                                    .aria_label(phase)
+                                    .test_support()
+                                    .text_color(color)
+                                    .child(phase),
+                            )
+                            .child(
+                                design::primary_button(
+                                    gpui_kit::SharedString::from(format!(
+                                        "connection-action-{slug}"
+                                    )),
+                                    card.action,
+                                    cx,
+                                )
+                                .flex_shrink_0()
+                                .on_click(cx.listener(
+                                    move |view, _, window, cx| {
+                                        view.open_catalogue_kind(kind, window, cx);
+                                    },
+                                )),
+                            ),
+                    )
+                    .into_any_element(),
+            );
+        }
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.medium)
+            .child(design::page_header(
+                "Connections",
+                "Each link is separate. Open one when you want to set it up.",
+                cx,
+            ))
+            .child(
+                design::button("connections-refresh", "Check links", cx).on_click(cx.listener(
+                    |view, _, _, cx| {
+                        view.send_connection(ConnectionCommand::Refresh, cx);
+                    },
+                )),
+            )
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn render_open_connection(
+        &mut self,
+        kind: CatalogueKind,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = design::tokens(cx);
+        let editor = match kind {
+            CatalogueKind::OnlineAi => self.render_online_editor(cx),
+            CatalogueKind::CompatibleService => self.render_connection_form(cx).into_any_element(),
+            CatalogueKind::LocalAi => Self::render_local_editor(cx),
+            CatalogueKind::WhatsApp => self.render_connections_section(cx).into_any_element(),
+            CatalogueKind::Telegram => self.render_telegram_section(cx).into_any_element(),
+            CatalogueKind::Google => self.google_card.clone().map_or_else(
+                || caption("Google is not available in this window.", cx).into_any_element(),
+                |card| div().w_full().min_w_0().child(card).into_any_element(),
+            ),
+            CatalogueKind::WebAddress => self.render_service_connect_section(cx).into_any_element(),
+        };
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.medium)
+            .child(
+                design::button("connections-back", "All connections", cx).on_click(cx.listener(
+                    |view, _, _, cx| {
+                        view.open_kind = None;
+                        view.connection_form = None;
+                        view.form_subscriptions.clear();
+                        view.manual_form = None;
+                        cx.notify();
+                    },
+                )),
+            )
+            .child(editor)
+            .into_any_element()
+    }
+
+    fn render_online_editor(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        // The key form needs the draft and the view together. Take the draft out
+        // so both borrows can exist, then put it back for the next edit.
+        let Some(form) = self.connection_form.take() else {
+            return caption("Open this link again to add an online AI.", cx).into_any_element();
+        };
+        if form.original.kind == ProviderKind::OpenRouter {
+            let element = self.render_key_form(&form, cx).into_any_element();
+            self.connection_form = Some(form);
+            element
+        } else {
+            self.connection_form = Some(form);
+            self.render_connection_form(cx).into_any_element()
+        }
+    }
+
+    fn render_local_editor(cx: &mut Context<Self>) -> AnyElement {
+        let t = design::tokens(cx);
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.small)
+            .child(caption(
+                "A free AI can stay on this computer. Setting it up opens the model list so you can download one.",
+                cx,
+            ))
+            .child(
+                design::primary_button("connection-local-setup", "Set up on this computer", cx)
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(ShowLocalAi);
+                    })),
+            )
+            .into_any_element()
+    }
 }

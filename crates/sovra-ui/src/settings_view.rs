@@ -107,59 +107,14 @@ impl ModelsView {
         } else if let Some(notice) = &self.state.notice {
             page = page.child(caption(notice.clone(), cx));
         }
-        if self.connections.qr_modal_open {
-            return settings_page(
-                page.child(self.render_whatsapp_qr_modal(&self.connections, cx))
-                    .into_any_element(),
-                cx,
-            )
-            .into_any_element();
-        }
-        if self.connections.qr_modal_open {
-            return settings_page(
-                page.child(self.render_whatsapp_qr_modal(&self.connections, cx))
-                    .into_any_element(),
-                cx,
-            )
-            .into_any_element();
-        }
-        if self.manual_form.is_some() {
-            return settings_page(
-                page.child(self.render_manual_form(cx)).into_any_element(),
-                cx,
-            )
-            .into_any_element();
-        }
-        if let Some(form) = &self.connection_form {
-            if form.original.kind == ProviderKind::OpenRouter {
-                return settings_page(
-                    page.child(self.render_key_form(form, cx))
-                        .into_any_element(),
-                    cx,
-                )
-                .into_any_element();
-            }
-            return settings_page(
-                page.child(self.render_connection_form(cx))
-                    .into_any_element(),
-                cx,
-            )
-            .into_any_element();
-        }
-
         settings_page(
             page.child(
                 v_flex()
                     .w_full()
                     .gap(t.space.small)
                     .child(Self::render_appearance_section(cx))
-                    .child(self.render_ai_connection_section(cx))
-                    .child(self.render_connections_section(cx))
-                    .child(self.render_telegram_section(cx))
+                    .child(Self::render_open_connections_section(cx))
                     .child(self.render_development_section(cx))
-                    .child(self.render_other_connections_section(cx))
-                    .children(self.render_google_section(cx))
-                    .child(self.render_service_connect_section(cx))
                     .child(self.render_always_context_section(cx))
                     .child(self.render_agent_behavior_section(cx)),
             )
@@ -169,18 +124,21 @@ impl ModelsView {
         .into_any_element()
     }
 
-    /// The person's own accounts: Google now, and `WhatsApp` joins this section.
-    fn render_google_section(&self, cx: &App) -> Option<impl IntoElement + use<>> {
-        let card = self.google_card.clone()?;
-        Some(
-            settings_section(
-                "settings-google-account",
-                "Connections",
-                "Let Sovra help with your own accounts. You choose what it can use, and you \
-                 can switch anything off at any time.",
-                cx,
-            )
-            .child(card),
+    fn render_open_connections_section(cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        settings_section(
+            "settings-open-connections",
+            "Connections",
+            "AI, WhatsApp, Telegram, Google, and services you already use live on their own page.",
+            cx,
+        )
+        .child(
+            design::primary_button("settings-open-connections-btn", "Open Connections", cx)
+                .on_click(cx.listener(|_, _, _, cx| {
+                    cx.emit(crate::models_view::OpenConnections {
+                        kind: None,
+                        keep_editor: false,
+                    });
+                })),
         )
     }
 
@@ -264,92 +222,6 @@ impl ModelsView {
                         crate::app_menu::zoom(scale.larger(), cx);
                     })),
             )
-    }
-
-    fn render_ai_connection_section(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let t = design::tokens(cx);
-        let router = self.state.openrouter_connection();
-        let connected = router.is_some_and(|c| c.has_credential || c.environment_credential);
-        let status = router.map_or("Not connected yet", credential_status);
-        let key_preview = router.and_then(|c| self.active_key_preview(c)).map_or_else(
-            || "Active key: None".to_owned(),
-            |preview| format!("Active key: {preview}"),
-        );
-        let active_model_label = match &self.state.preferences.active {
-            Some(key) => {
-                let name = self
-                    .state
-                    .model(key)
-                    .map_or_else(|| key.model_id.clone(), |m| m.name.clone());
-                format!("Active model: {name}")
-            }
-            None => "Active model: None selected".to_owned(),
-        };
-
-        settings_section(
-            "settings-ai",
-            "AI connection",
-            "Connect OpenRouter once, then choose from its online models.",
-            cx,
-        )
-        .child(
-            h_flex()
-                .flex_wrap()
-                .gap(t.space.compact)
-                .items_center()
-                .child(
-                    div()
-                        .id("settings-openrouter-status")
-                        .test_support()
-                        .aria_label(status)
-                        .text_color(if connected {
-                            cx.theme().success
-                        } else {
-                            t.text_secondary
-                        })
-                        .child(status),
-                )
-                .child(
-                    div()
-                        .id("settings-active-key-badge")
-                        .test_support()
-                        .aria_label(key_preview.clone())
-                        .child(pill(key_preview, cx)),
-                )
-                .child(
-                    div()
-                        .id("settings-active-model-status")
-                        .test_support()
-                        .aria_label(active_model_label.clone())
-                        .child(pill(active_model_label, cx)),
-                ),
-        )
-        .child(
-            h_flex()
-                .flex_wrap()
-                .gap(t.space.small)
-                .child(
-                    design::primary_button(
-                        "settings-openrouter",
-                        if connected {
-                            "Manage OpenRouter key"
-                        } else {
-                            "Add OpenRouter key"
-                        },
-                        cx,
-                    )
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.open_openrouter_key_editor(window, cx);
-                    })),
-                )
-                .child(
-                    design::button("settings-choose-model", "Choose a model", cx).on_click(
-                        cx.listener(|view, _, _, cx| {
-                            view.open_model_home(cx);
-                        }),
-                    ),
-                ),
-        )
     }
 
     fn render_always_context_section(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -527,62 +399,6 @@ impl ModelsView {
                     cx,
                 )),
         )
-    }
-
-    fn render_other_connections_section(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let t = design::tokens(cx);
-        let mut advanced = settings_section(
-            "settings-advanced",
-            "Other connections",
-            "Run free AI on your computer with Ollama (no key needed), or connect any OpenAI-compatible URL (LM Studio, vLLM, llama.cpp).",
-            cx,
-        )
-        .child(
-            h_flex()
-                .flex_wrap()
-                .gap(t.space.small)
-                .child(
-                    design::button(
-                        "settings-advanced-toggle",
-                        if self.settings_advanced_open {
-                            "Hide advanced options"
-                        } else {
-                            "Show advanced options"
-                        },
-                        cx,
-                    )
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.settings_advanced_open = !view.settings_advanced_open;
-                        cx.notify();
-                    })),
-                )
-                .child(
-                    design::button(
-                        "settings-ollama-btn",
-                        "Set up Ollama",
-                        cx,
-                    )
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.open_ollama_setup(window, cx);
-                    })),
-                )
-                .child(
-                    design::button(
-                        "settings-openai-url-btn",
-                        "Add a server",
-                        cx,
-                    )
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.open_openai_compatible_editor(window, cx);
-                    })),
-                ),
-        );
-        if self.settings_advanced_open {
-            advanced = advanced
-                .child(Self::connections_header(cx))
-                .children(self.connection_cards(cx));
-        }
-        advanced
     }
 
     pub(crate) fn render_key_form(
@@ -770,7 +586,10 @@ impl ModelsView {
     }
 
     pub fn open_openrouter_key_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.settings_open = true;
+        self.connections_page = true;
+        self.settings_open = false;
+        self.home_open = false;
+        self.open_kind = Some(sovra_core::CatalogueKind::OnlineAi);
         let connection = self
             .state
             .connections
@@ -809,8 +628,10 @@ impl ModelsView {
     }
 
     pub fn open_openai_compatible_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.settings_open = true;
-        self.settings_advanced_open = true;
+        self.connections_page = true;
+        self.settings_open = false;
+        self.home_open = false;
+        self.open_kind = Some(sovra_core::CatalogueKind::CompatibleService);
         self.open_connection(None, window, cx);
         self.preset(
             "OpenAI compatible server",

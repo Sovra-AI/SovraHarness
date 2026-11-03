@@ -9,6 +9,8 @@ mod options;
 pub use options::{DocumentBudget, ScanOptions};
 
 pub mod graph;
+mod knowledge_browser;
+pub use knowledge_browser::KnowledgeBrowserState;
 mod history;
 pub mod live;
 pub mod ontology;
@@ -150,6 +152,14 @@ pub struct IndexPassage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexCommand {
+    BrowseKnowledge {
+        request_id: u64,
+        query: graph::GraphQuery,
+    },
+    KnowledgeEvidence {
+        request_id: u64,
+        id: u64,
+    },
     Report {
         request_id: u64,
         query: NoticeQuery,
@@ -204,6 +214,14 @@ pub enum IndexCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexEvent {
+    KnowledgeBrowsed {
+        request_id: u64,
+        result: Result<graph::GraphPage, IndexError>,
+    },
+    KnowledgeEvidence {
+        request_id: u64,
+        result: Result<Box<graph::GraphEvidence>, IndexError>,
+    },
     FoldersAdded(FolderAddition),
     Reported {
         request_id: u64,
@@ -267,6 +285,7 @@ pub struct MonitorStatus {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexState {
+    pub knowledge_browser: KnowledgeBrowserState,
     pub folder_addition: Option<FolderAddition>,
     pub report: ReportState,
     pub browser: BrowserState,
@@ -348,6 +367,12 @@ impl IndexState {
 
     pub fn apply(&mut self, event: &IndexEvent) {
         match event {
+            IndexEvent::KnowledgeBrowsed { request_id, result } => {
+                self.knowledge_browser.finish(*request_id, result);
+            }
+            IndexEvent::KnowledgeEvidence { request_id, result } => {
+                self.knowledge_browser.finish_evidence(*request_id, result);
+            }
             IndexEvent::FoldersAdded(result) => {
                 self.folder_addition = Some(result.clone());
             }
@@ -389,6 +414,7 @@ impl IndexState {
                         .any(|new| new.id == old.id && new.scan_options == old.scan_options)
                 }) {
                     self.browser.invalidate();
+                    self.knowledge_browser.invalidate();
                     self.report.invalidate();
                     self.passages.clear();
                     self.search_completed = false;
@@ -412,6 +438,7 @@ impl IndexState {
                 if let Some(current) = self.roots.iter_mut().find(|r| r.id == root.id) {
                     if current.scan_options != root.scan_options {
                         self.browser.invalidate();
+                        self.knowledge_browser.invalidate();
                         self.report.invalidate();
                         self.passages.retain(|p| p.reference.root_id != root.id);
                         self.search_completed = false;

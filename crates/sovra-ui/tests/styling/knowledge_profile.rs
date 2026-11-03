@@ -19,13 +19,13 @@ use sovra_core::{
 use sovra_runtime::Client;
 use sovra_ui::{Shell, design};
 
-fn settle(cx: &mut TestAppContext) {
+pub(super) fn settle(cx: &mut TestAppContext) {
     cx.executor()
         .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
 }
 
-fn request(commands: &async_channel::Receiver<Command>) -> MemoryCommand {
+pub(super) fn request(commands: &async_channel::Receiver<Command>) -> MemoryCommand {
     std::iter::from_fn(|| commands.try_recv().ok())
         .find_map(|command| match command {
             Command::Memory(command) => Some(command),
@@ -34,7 +34,11 @@ fn request(commands: &async_channel::Receiver<Command>) -> MemoryCommand {
         .expect("a memory action")
 }
 
-fn respond(events: &async_channel::Sender<Event>, request_id: u64, result: MemoryReviewResult) {
+pub(super) fn respond(
+    events: &async_channel::Sender<Event>,
+    request_id: u64,
+    result: MemoryReviewResult,
+) {
     events
         .send_blocking(Event::Memory(MemoryEvent::Review(MemoryReviewEvent {
             request_id,
@@ -66,7 +70,7 @@ fn page(failed: usize) -> MemoryPage {
     }
 }
 
-fn reveal(window: &mut Window, id: impl Into<ElementId>, cx: &mut App) {
+pub(super) fn reveal(window: &mut Window, id: impl Into<ElementId>, cx: &mut App) {
     let id = id.into();
     for _ in 0..100 {
         window.render_frame(cx);
@@ -77,8 +81,12 @@ fn reveal(window: &mut Window, id: impl Into<ElementId>, cx: &mut App) {
             bounds.left() >= viewport.left() && bounds.right() <= viewport.right(),
             "{id:?} overflows: {bounds:?}"
         );
-        if item.visible() && bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
-        {
+        let taller_than_pane = bounds.bottom() - bounds.top() > viewport.bottom() - viewport.top();
+        let on_screen = bounds.top() < viewport.bottom() && bounds.bottom() > viewport.top();
+        let contained = bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom();
+        // A 600-character excerpt is taller than the 640×420 window at 200% text.
+        // It is reachable when the pane shows part of it. Shorter controls must sit fully inside.
+        if item.visible() && (contained || (taller_than_pane && on_screen)) {
             return;
         }
         let delta = if bounds.top() < viewport.top() {

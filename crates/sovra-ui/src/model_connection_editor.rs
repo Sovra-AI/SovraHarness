@@ -174,6 +174,11 @@ pub(crate) fn back_button(cx: &mut Context<ModelsView>) -> gpui_kit::component::
     design::button("connection-cancel", "Back", cx).on_click(cx.listener(|view, _, _, cx| {
         view.connection_form = None;
         view.form_subscriptions.clear();
+        // The catalogue card stays open until Back returns to the list.
+        if view.connections_page {
+            view.open_kind = None;
+            view.manual_form = None;
+        }
         cx.notify();
     }))
 }
@@ -891,7 +896,7 @@ impl ModelsView {
                         if let Some(connection_id) = view.download_connection.read(cx).selected_value().cloned() {
                             let model = view.download_name.read(cx).value().to_string();
                             view.send(ModelCommand::PullOllama { connection_id,model },cx);
-                        } else { view.state.error = Some("Set up Ollama first: open Settings → Advanced and add an Ollama connection.".into()); cx.notify(); }
+                        } else { view.state.error = Some("Set up the AI on this computer from Connections first.".into()); cx.notify(); }
                     }))))
             .child(caption("Find model names at ollama.com/library. Downloads can be several gigabytes, so this may take a while. Finished models appear below.",cx));
         if let Some(progress) = &self.state.pull_progress {

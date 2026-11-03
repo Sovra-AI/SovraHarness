@@ -90,7 +90,7 @@ fn a_team_turn_without_an_ai_explains_how_to_connect_one() {
         .send(Command::Teams(TeamCommand::Run {
             session_id: "chat".into(),
             prompt: "What does everyone think?".into(),
-            history: vec![],
+            context: sovra_core::ConversationContext::default(),
         }))
         .unwrap();
     loop {

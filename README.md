@@ -26,11 +26,13 @@ That's it — no Node, no Python, no system packages on macOS/Windows.
 
 ## Test with Codex or Claude Code
 
-Enable **Settings → Development mode**. The top bar explicitly shows when local
-automation is enabled. Add the command copied from Settings as a **stdio MCP**
-server in your coding assistant. It can inspect and operate native controls and
-capture screenshots; switching off revokes access. The existing development
-watcher keeps running. See [connection instructions and testing workflow](docs/development-mcp.md).
+`cargo xtask dev` is a **one-shot** debug launch (no auto-reload) and enables
+**Development mode**. Re-run `cargo xtask dev` yourself after edits to reload.
+Ordinary and release binaries start Development mode off; enable it in Settings
+when needed. The top bar explicitly shows when local automation is enabled. Add
+the command copied from Settings as a **stdio MCP** server in your coding
+assistant. It can inspect and operate native controls and capture screenshots;
+switching off revokes access. See [connection instructions and testing workflow](docs/development-mcp.md).
 
 ## Everyday commands
 
@@ -144,6 +146,13 @@ then choose **Save inferences** or **Reject**. Approval keeps their model-infere
 label; it does not verify their truth or edit source files. `/file-knowledge [question]`
 explores saved relationships and reads their evidence. Changed source versions are
 excluded by default; historical queries must request and label them explicitly.
+For direct browsing without a model call, open **Knowledge → Files → Browse saved
+relationships**. Search saved statements and subject names, page through results,
+open a relationship, follow its subjects, and read each supporting passage. Explicit
+filters include outdated sources or replaced relationships; their labels remain
+visible. A return trail keeps previous result views reachable.
+When nothing is shown, **Find a helper for this** opens the relevant Skills card
+and an example you can review before sending.
 Removing a folder revokes dependent knowledge permanently, even after re-adding it.
 The inaccessible review history remains in the local database.
 
@@ -174,22 +183,20 @@ being implemented; [the scope record](docs/skills-and-file-knowledge.md) tracks 
 
 | Command                  | What it does                                                 |
 | ------------------------ | ------------------------------------------------------------ |
-| `cargo xtask dev`        | Persistent live reload: watch, rebuild/relaunch, stream logs  |
-| `cargo xtask run`        | Launch the app (debug)                                       |
+| `cargo xtask dev`        | One-shot debug build + launch (`SOVRA_DEV=1`); re-run to reload |
+| `cargo xtask run`        | Launch the app (debug, without `SOVRA_DEV`)                  |
 | `cargo xtask ci`         | Every gate: fmt, clippy, layering, cargo-deny, unused deps, tests |
 | `cargo xtask fix`        | Auto-apply fmt + clippy fixes                                |
 | `cargo xtask check-styles` | Check native styling boundaries and the bundled SVG logo  |
-| `cargo xtask setup`      | Install pinned CI tools and Watchexec                       |
+| `cargo xtask setup`      | Install pinned CI tools (deny, nextest, shear)              |
 | `cargo xtask dist`       | Release build and verified native installer; requires Velopack `vpk` 1.2.161 |
+| `just clear-cache`       | Reclaim reclaimable Cargo build caches when no `dev` session is running (`--dry-run` to preview) |
 
-Logs stream directly in the dev pane, with files under the OS data dir
-(`~/Library/Application Support/com.Sovra.SovraHarness/logs` on macOS). The runner
-preserves an existing `RUST_LOG` filter and defaults to focused application debug logs.
-
-For development, use the existing **`sovra:sovraRust`** tmux window: the watcher and
-live logs stay running there. Save Rust or embedded asset changes to rebuild and
-relaunch automatically; no manual start/stop is needed. This resets in-memory
-state rather than hot-swapping Rust code. Setup and operating rules:
+Logs stream in the terminal where you ran `cargo xtask dev`, with files under the
+OS data dir (`~/Library/Application Support/com.Sovra.SovraHarness/logs` on macOS).
+The runner preserves an existing `RUST_LOG` filter and defaults to focused
+application debug logs. There is **no** save-triggered rebuild: re-run
+`cargo xtask dev` after edits. Setup and operating rules:
 [`docs/development.md`](docs/development.md).
 
 Development builds use a separate plaintext key store in the app data directory
@@ -230,6 +237,9 @@ A single **Unified Left Sidebar** (`sidebar.rs` + `chat_history_view.rs`) houses
 Each app launch starts with a fresh draft. Open an earlier conversation from the
 sidebar to continue it. New conversations keep distinct identities across restarts,
 including when older conversations are outside the loaded history page.
+History uses the actual creation and latest activity times, including before a
+save completes. Continuing a saved chat updates its activity date; opening it
+without a new exchange keeps its dates unchanged.
 
 The **My AI's** tab lets anyone choose how Sovra picks an AI, in plain language:
 - **Automatic:** a fast decision engine (**Laya**, **OpenJev / TypeSafe Jev**,
@@ -250,6 +260,11 @@ shows the latest eight message checks, including failures and checks that found
 nothing new. **Try failed messages again** retries failed work while remembering
 is on; completed and cancelled work stays untouched. **Files** contains
 connected folders, search, file browsing and scan reports.
+**People** is everyone you can message, in one list. The same person can be on a
+phone number, WhatsApp, Telegram, and email. Each card shows those details, so
+two people with the same name stay easy to tell apart. You can prepare a WhatsApp
+message to a saved person before they have written to you. **Message on WhatsApp**
+opens the chat with that message ready. Nothing is sent until you press Send.
 **Guide** explains how Sovra remembers, with one worked example a
 new reader can follow: something happens, a record is kept, a current belief is
 formed, a later belief replaces it, and the earlier belief stays as history.
@@ -258,8 +273,66 @@ matching words, with optional meaning search that you can enable in About you. I
 chat, and it does not need a memory store to be open. The times Sovra keeps are
 under *Show the times Sovra keeps*.
 
+Background remembering waits for interactive AI turns, then starts ready work in
+available slots without waiting for the recovery timer. Four extraction slots are
+shared across the process by default; failures remain visible and retryable.
+
+New private chat replies are labeled **A reply from a helper** in saved-source
+review. Their wording is retained without turning it into a personal fact. New replies
+can be recalled across chats when all their conversation and saved-memory inputs
+have known sources. Withdrawing a source also blocks replies that depended on it;
+corrected support is labeled as historical. Replies with older unlinked history,
+files or untracked tool inputs remain available for review. Older records with unknown permission metadata also stay available for review and are excluded from automatic recall. A storage failure is
+reported explicitly. Source withdrawal covers every admitted version.
+Team replies also retain the helper's name and the original wording under
+**Browse original records**. These replies stay separate from personal facts.
+Pausing remembering stops capture of replies already in progress, even if you
+turn remembering on again before they finish.
+
+You can switch chats while a reply is arriving. Each conversation keeps its own
+reply and queued follow-ups; returning to a live conversation restores its Stop
+control. Completed ordinary and team replies are saved to the conversation that
+produced them, including when another chat is open.
+
 Conversation memory is being built separately from file knowledge. Its embedded
-store preserves source episodes and correction history, commits fact changes
+browser presents readable saved-detail cards. Select a person or project to
+filter the library, or choose **Explore detail** to read the original evidence
+and follow **Connected knowledge**. Each connection says whether it shares a
+source or subject, or is an earlier/updated version. Shared subjects are context,
+not proof of a relationship; corrections and withdrawn versions stay labeled.
+Back to previous detail retraces your exploration. The subject overview shows
+counts across all current details, with a clearly labeled selection of the 12
+most-mentioned subjects. **Browse all subjects** opens the complete searchable,
+alphabetical directory, with counts and paging. Select any subject to read its
+saved details. Enter submits both detail and subject searches. Recent activity
+opens the original message even when
+its check found no new details. Long sources have an expandable excerpt.
+**Browse original records** searches and pages through memory's retained evidence,
+including messages that produced no saved detail. Each reader shows recorded
+origin, processing status, and linked details. Stopped records can be included
+for review; opening one never re-enables it for answers. Older records retain an
+explicit unknown-origin or unknown-permission label when that information was
+not recorded.
+
+Private turns automatically check saved memory and include a small selection of
+current, source-backed details even when your question uses different wording.
+Original-evidence search combines ranked matches for each search term, keeping
+a common word from dominating the evidence budget. Recency breaks relevance ties.
+Focused tool lookups omit unrelated recent background details, keeping their
+evidence tied to the requested question. This working set is bounded; targeted searches handle additional history, and
+remembering-off still disables recall. An empty search does not mean you never
+shared the information. When a reply needs several lookups, up to four run together
+under one deadline. Each result retains its question, person and date filters;
+withdrawal is checked again after the whole batch. Broader recall and performance verification is tracked in
+[the current memory audit](docs/agent-memory.md#reliable-everyday-recall--active-investigation-2026-11-03).
+
+From a saved detail, **Browse supporting records** lists all linked original and
+repeated statements across conversations. Search and paging stay within that
+detail. Read a record, follow its linked details, or return to the refreshed
+detail and continue along your exploration trail. Stopped records stay hidden
+until you explicitly include them.
+
+The embedded store preserves source episodes and correction history, commits fact changes
 atomically, and checks embedding compatibility across restarts. Its persistent
 ingestion API supports stable input keys, recoverable leases, bounded retries,
 atomic batches, and cancellation when paused; it retains model/evidence attribution
@@ -269,12 +342,25 @@ Matching distinguishes people and explicit dates; corrections keep a new version
 even when returning to an earlier value. Previously recognized wordings stay
 suppressed after Stop using, including after restart. New paraphrases may still
 be missed, and matching accuracy remains under evaluation.
-An owned background worker now uses the selected
+Owned background workers use the selected
 chat model to extract supported details from user messages, including team prompts.
 Accepted messages are written to the memory queue before normal shutdown finishes;
 interrupted extraction can resume when Sovra reopens. Independent keyword lookups
 run up to four at a time, and capture reads recent context alongside those matches.
-Extraction and corrections stay ordered so later messages see earlier updates.
+Up to four source extractions overlap process-wide; `SOVRA_MEMORY_EXTRACTION_SLOTS`
+sets the startup limit (1–16). Sources within a conversation remain ordered.
+Consolidation refreshes facts serially and rejects a result if facts changed during
+model work. Long messages resume from persisted UTF-8 chunk offsets after a restart.
+Extracted candidates are saved before consolidation, so a retry can reuse the
+completed extraction. New background model calls wait for active chat, file and
+team turns; already running provider calls retain their bounded timeout.
+The pending-work backlog is durable; a full scheduling buffer applies backpressure
+instead of dropping a message. The saved-evidence receipt is emitted only after storage.
+Original admitted private user messages can also be searched without an extracted
+fact. Replies link these as original sources, with their recorded date; a quote is
+not automatically a current or confirmed fact. Legacy sources with unknown
+permissions are excluded from this new fallback. Files, generated artifacts and
+historical backfill are not yet part of this source pipeline.
 Models advertising structured-output support receive an extraction schema where
 the provider adapter supports it; every result still needs an exact source quote
 and local validation. Useful stated details can concern named people and projects
@@ -305,15 +391,19 @@ details so your work stays in place. Use Search / refresh when ready.
 The last capture result says whether details were saved, nothing new was saved,
 or remembering failed. Saved details and their sources appear before optional
 search settings. The example in Guide is clearly separate from your data.
-Correct saves a new version and its source note; Stop using asks for confirmation
-and excludes that version from current and historical recall. Both keep previous versions and the
-original conversation, which still supplies its own same-chat context. Reviewing
+**Edit detail** saves a new version and its source note. **Remove from memory**
+asks for confirmation and excludes the detail's entire correction history and
+supporting source records from current and historical memory searches. Stopped
+history remains available for review; unrelated details remain saved. The original
+conversation still supplies its own same-chat context. Reviewing
 and correcting saved details, including adding an explicit personal note, remains
 available while automatic remembering is off.
 Optional **Find memories by meaning → Choose a search helper** uses an existing
 Ollama, OpenRouter or OpenAI-compatible embedding model. Enabling explicitly permits sending
 saved details, including retained versions, and future questions to the displayed
-service, which may charge. Similarity is a candidate filter rather than proof of
+service, which may charge. Independent search failures keep successfully checked
+evidence and report incomplete coverage; permission checks still apply to every
+result. Similarity is a candidate filter rather than proof of
 relevance; remote helpers can exceed the short query deadline and fall back to
 matching words. [Measured examples](docs/agent-memory.md#live-semantic-calibration-2026-10-27)
 cover two models, including these limitations.
@@ -346,13 +436,13 @@ adapter cleanup before tearing down its executor.
 Normal desktop quit requests this shutdown and waits after the UI loop exits.
 See the [implementation contract](docs/agent-memory.md) for scope and validation.
 
-**Settings** is the one place to set Sovra up, written for people new to AI:
-**Appearance** (Light or Dark, and **Text size** from 75% to 200%; also
-**View → Zoom In/Out**, ⌘= / ⌘- / ⌘0), **AI connection** (follow the three steps to paste an
-OpenRouter key; it is kept in the OS keychain and can be checked, replaced or removed)
-and a folded-away **Advanced** section for local or other services, whose technical
-fields stay hidden until you choose *Show technical options*. Then select a chat
-model in **Models**.
+**Settings** keeps preferences: **Appearance** (Light or Dark, and **Text size** from 75% to 200%; also
+**View → Zoom In/Out**, ⌘= / ⌘- / ⌘0), development mode, always-on context, and how the helpers behave.
+**Connections** is its own sidebar tab. It lists every link in everyday words — an online AI,
+an AI on this computer, another compatible service, WhatsApp, Telegram, Google, and a service
+you add with a web address. Open one row to set it up. A key stays in the OS keychain and is
+not shown again. Technical fields stay hidden until you choose *Show technical options*.
+Then select a chat model in **Models**.
 
 **Chat** starts with a normal conversation using the selected model: quiet user
 bubbles, bare replies beside the Sovra avatar and a rounded composer. Each turn
@@ -416,7 +506,7 @@ Everything streams through AG-UI events. Design, sources and the module layout:
 
 ## Connections: Google
 
-Open **Settings → Connections** and press **Connect Google**:
+Open **Connections**, choose **Google**, and press **Connect Google**:
 
 - Google's own sign-in page opens in your browser. Sovra never sees your password.
 - Tick what Sovra may use, then come back to the app.
@@ -482,14 +572,14 @@ It says exactly which parts it has not read yet. See
 
 ## WhatsApp on your phone
 
-**Settings → WhatsApp → Connect WhatsApp** shows a code. On your phone open WhatsApp →
+**Connections → WhatsApp → Connect WhatsApp** shows a code. On your phone open WhatsApp →
 Settings (or ⋮) → **Linked devices** → **Link a device** and point the camera at it. The
 link completes by itself and the badge turns **Connected**. If you can't scan, type your
 number under "Can't scan?" and WhatsApp gives you an 8-character code to enter on the phone.
 
 Then message yourself on WhatsApp (the chat with your own number, "Message yourself").
 Sovra answers there with the same helpers, memory and web search as the chat window.
-By default it only answers your own chat; a switch in Settings lets it answer other
+By default it only answers your own chat; a switch on the WhatsApp card lets it answer other
 people's direct messages too, and another turns automatic answers off. Groups, channels
 and messages that queued while Sovra was closed are never answered. **Unlink WhatsApp**
 removes the link on the phone and deletes the saved credentials.
@@ -501,11 +591,22 @@ message in chat. Review the exact recipient and text, then choose **Send** or
 has received or read it. The same helper works with Telegram. Find **Send a
 WhatsApp or Telegram message** in Skills.
 
-For someone else on WhatsApp, supply their international phone number or choose
-an exact recent chat. Telegram can use chats that have already contacted the bot.
-Recent-message lookup covers only the messages Sovra has retained locally, not
-your whole phone history or address book. These controls replace the test-message
-fields in Settings. See [messaging behavior and safeguards](docs/communications.md).
+While WhatsApp is linked, Sovra collects people your phone has already synced, in the
+background, without blocking the window. Open **Knowledge → People** to see them.
+You can ask for a WhatsApp message to one saved person by their full name before
+that person has written to you. If more than one person matches, Sovra asks which
+one instead of guessing. Each card shows the number, email, or Telegram chat, so
+you can name the number that starts with +. You can still give an international
+phone number or an exact recent chat. **Message on WhatsApp** opens the chat.
+Nothing is sent until you press **Send**. Pressing it again after you cancel,
+send, or the review expires prepares a new one.
+
+The same person can also be reached by phone number, Telegram, and email. A shared
+first name does not join two people. Telegram shows a chat only when that chat has
+already written to your bot, or when you add that chat on the person. Sovra does
+not download a Telegram address book. Recent messages Sovra has kept are still only
+a local snapshot, not your whole phone history. These controls replace the
+test-message fields in Settings. See [messaging behavior and safeguards](docs/communications.md).
 
 The client is compiled into the single binary (the open-source `whatsapp-rust` crate,
 WhatsApp Web multi-device protocol); nothing else runs and no business account is needed.
@@ -516,7 +617,7 @@ WhatsApp does not officially support third-party clients, so use it with your ow
 
 Telegram works through a bot of your own, using Telegram's official Bot API. In Telegram,
 open **@BotFather**, send `/newbot`, follow its two questions, and copy the token it gives
-you. In Sovra, **Settings → Telegram**, paste the token and click **Connect Telegram**.
+you. In Sovra, open **Connections → Telegram**, paste the token and click **Connect Telegram**.
 Sovra shows a six-digit code: open your new bot in Telegram, press **Start**, and send it
 that code. The badge turns **Connected** and from then on anything you write to the bot is
 answered by Sovra.
@@ -534,7 +635,7 @@ outbound messages in your desktop chat.
 
 ## Connect a service you already use
 
-**Settings → Connect a service**. Paste the web address the service gave you.
+Open **Connections** and choose **A service you already use**. Paste the web address the service gave you.
 Add a name if you want one. If the service gave you a secret, paste that too.
 It stays on this computer and is not shown again. Choose **Connect**.
 
@@ -578,3 +679,11 @@ between both modes in **Settings → Appearance**; the choice is remembered. Lay
 to any window and display: sizes are rem-based and follow the remembered text size, the
 sidebar and inspector yield to the main pane at Material width classes, and reading
 columns stay capped and centred on large monitors (see *Responsive layout* in the styling guide).
+
+
+Development startup policy: `cargo xtask dev` enables the visible Development
+mode in debug builds with `SOVRA_DEV=1`. You can turn it off in Settings during a
+run; the next manual `cargo xtask dev` enables it again. Ordinary binaries and
+every release or packaged build start with it off, regardless of saved development preferences.
+The MCP bridge cannot enable access, and release credential storage stays in the
+OS keychain. See [Development MCP](docs/development-mcp.md).

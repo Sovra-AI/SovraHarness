@@ -20,7 +20,7 @@ fn reveal(window: &mut Window, id: &'static str, cx: &mut App) {
         window.render_frame(cx);
         let item = window.find(id);
         let bounds = item.bounds();
-        let viewport = window.find("settings-sections").bounds();
+        let viewport = window.find("connections-scroll").bounds();
         if item.visible() && bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
         {
             return;
@@ -31,12 +31,12 @@ fn reveal(window: &mut Window, id: &'static str, cx: &mut App) {
             -60.
         };
         window.scroll(
-            "settings-sections",
+            "connections-scroll",
             ScrollDelta::Pixels(point(px(0.), px(delta))),
             cx,
         );
     }
-    panic!("{id} must be reachable in Settings");
+    panic!("{id} must be reachable in Connections");
 }
 
 fn service(phase: McpPhase, message: &str, tools: Vec<McpToolInfo>) -> McpService {
@@ -78,7 +78,10 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-settings", cx);
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        reveal(window, "connection-action-web-address", cx);
+        window.click("connection-action-web-address", cx);
         window.render_frame(cx);
         reveal(window, "mcp-connect-section", cx);
         reveal(window, "mcp-service-address", cx);

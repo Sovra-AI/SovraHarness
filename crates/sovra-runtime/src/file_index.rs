@@ -175,6 +175,8 @@ impl IndexRuntime {
             | IndexCommand::Browse { .. }
             | IndexCommand::Preview { .. }
             | IndexCommand::Search { .. }
+            | IndexCommand::BrowseKnowledge { .. }
+            | IndexCommand::KnowledgeEvidence { .. }
             | IndexCommand::ListKnowledge
             | IndexCommand::ReviewKnowledge { .. } => {
                 self.readers.retain(|task| !task.is_finished());
@@ -239,6 +241,20 @@ impl IndexRuntime {
                             })
                         }
                         IndexCommand::List => store.list().map(IndexEvent::Roots),
+                        IndexCommand::BrowseKnowledge { request_id, query } => {
+                            Ok(IndexEvent::KnowledgeBrowsed {
+                                request_id,
+                                result: query
+                                    .validate()
+                                    .and_then(|()| knowledge(store.as_ref())?.query(&query)),
+                            })
+                        }
+                        IndexCommand::KnowledgeEvidence { request_id, id } => {
+                            Ok(IndexEvent::KnowledgeEvidence {
+                                request_id,
+                                result: knowledge(store.as_ref())?.evidence(id).map(Box::new),
+                            })
+                        }
                         IndexCommand::ListKnowledge => knowledge(store.as_ref())?
                             .pending()
                             .map(IndexEvent::KnowledgePending),
@@ -464,6 +480,8 @@ fn mutate(
         | IndexCommand::SetAutoRefresh { .. }
         | IndexCommand::Search { .. }
         | IndexCommand::ConfigureSemantic { .. }
+        | IndexCommand::BrowseKnowledge { .. }
+        | IndexCommand::KnowledgeEvidence { .. }
         | IndexCommand::ListKnowledge
         | IndexCommand::ReviewKnowledge { .. } => {
             return Err(IndexError("Invalid background index operation.".into()));
@@ -501,6 +519,14 @@ fn mutate(
 
 fn read_failure(command: &IndexCommand, message: String) -> IndexEvent {
     match command {
+        IndexCommand::BrowseKnowledge { request_id, .. } => IndexEvent::KnowledgeBrowsed {
+            request_id: *request_id,
+            result: Err(IndexError(message)),
+        },
+        IndexCommand::KnowledgeEvidence { request_id, .. } => IndexEvent::KnowledgeEvidence {
+            request_id: *request_id,
+            result: Err(IndexError(message)),
+        },
         IndexCommand::Report { request_id, .. } => IndexEvent::Reported {
             request_id: *request_id,
             result: Err(IndexError(message)),

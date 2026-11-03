@@ -9,6 +9,50 @@ use surrealdb::types::{RecordId, SurrealValue, ToSql as _};
 use super::{SurrealStore, backend, ingestion::job_state};
 
 impl SurrealStore {
+    pub(super) async fn subject_page(
+        &self,
+        query: sovra_core::MemorySubjectQuery,
+    ) -> Result<sovra_core::MemorySubjectPage, MemoryError> {
+        query.validate()?;
+        let mut rows: Vec<SubjectCount> = self
+            .query(
+                "SELECT out.name AS name, count() AS total FROM mentions
+             WHERE in.stopped_at IS NONE AND in.invalid_at IS NONE AND in.expired_at IS NONE
+             AND string::lowercase(out.name) != 'user'
+             AND ($search = '' OR string::contains(string::lowercase(out.name), $search))
+             AND ($after IS NONE OR out.name > $after)
+             GROUP BY name ORDER BY name ASC LIMIT $limit;",
+                (
+                    "search",
+                    query.search.trim().to_lowercase(),
+                    "after",
+                    query.after,
+                    "limit",
+                    query.limit + 1,
+                ),
+            )
+            .await?
+            .take(0)
+            .map_err(|error| backend(&error))?;
+        let more = rows.len() > query.limit;
+        rows.truncate(query.limit);
+        let next = if more {
+            rows.last().map(|row| row.name.clone())
+        } else {
+            None
+        };
+        Ok(sovra_core::MemorySubjectPage {
+            subjects: rows
+                .into_iter()
+                .map(|row| sovra_core::MemorySubject {
+                    name: row.name,
+                    details: row.total,
+                })
+                .collect(),
+            next,
+        })
+    }
+
     pub(super) async fn memory_overview(&self) -> Result<MemoryOverview, MemoryError> {
         let mut result = self.query(
             "SELECT count() AS total FROM fact WHERE stopped_at IS NONE AND invalid_at IS NONE AND expired_at IS NONE GROUP ALL;
@@ -17,7 +61,11 @@ impl SurrealStore {
              SELECT state, count() AS total FROM memory_job GROUP BY state;
              SELECT id, episode, episode.session_id AS session_id, created_at, state,
                  array::len(fact_ids) AS saved, error FROM memory_job ORDER BY created_at DESC, id DESC LIMIT 8;
-             SELECT id, created_at FROM fact ORDER BY created_at DESC, id DESC LIMIT 1;",
+             SELECT id, created_at FROM fact ORDER BY created_at DESC, id DESC LIMIT 1;
+             SELECT out.name AS name, count() AS total FROM mentions
+                 WHERE in.stopped_at IS NONE AND in.invalid_at IS NONE AND in.expired_at IS NONE
+                 AND string::lowercase(out.name) != 'user'
+                 GROUP BY name ORDER BY total DESC, name ASC LIMIT 13;",
             surrealdb::types::Object::default(),
         ).await?;
         let mut overview = MemoryOverview {
@@ -52,6 +100,16 @@ impl SurrealStore {
             .collect::<Result<_, MemoryError>>()?;
         let latest: Vec<SavedAt> = result.take(5).map_err(|error| backend(&error))?;
         overview.last_saved_at = latest.first().map(|row| Timestamp(row.created_at));
+        let mut subjects: Vec<SubjectCount> = result.take(6).map_err(|error| backend(&error))?;
+        overview.more_subjects = subjects.len() > 12;
+        subjects.truncate(12);
+        overview.subjects = subjects
+            .into_iter()
+            .map(|row| sovra_core::MemorySubject {
+                name: row.name,
+                details: row.total,
+            })
+            .collect();
         Ok(overview)
     }
 }
@@ -82,4 +140,10 @@ struct ActivityRow {
     state: String,
     saved: usize,
     error: Option<String>,
+}
+
+#[derive(Debug, SurrealValue)]
+struct SubjectCount {
+    name: String,
+    total: usize,
 }

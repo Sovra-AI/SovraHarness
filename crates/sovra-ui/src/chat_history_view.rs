@@ -33,13 +33,7 @@ pub(crate) fn render_chat_history_section(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let reference_now = state
-        .threads
-        .iter()
-        .filter(|th| th.is_active())
-        .map(|th| th.updated_at)
-        .max()
-        .unwrap_or(Timestamp(0));
+    let reference_now = crate::shell::wall_time();
     let grouped = group_threads(
         &state.threads,
         state.history_filter,
@@ -205,6 +199,12 @@ fn render_thread_list(
 fn render_section_label(label: &str, cx: &Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     div()
+        .id(gpui_kit::SharedString::from(format!(
+            "chat-history-section-{label}"
+        )))
+        .role(Role::Heading)
+        .aria_label(label.to_owned())
+        .test_support()
         .px(t.space.small)
         .pt(t.space.snug)
         .pb(t.space.hair)

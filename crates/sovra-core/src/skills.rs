@@ -27,6 +27,8 @@ pub enum SkillAction {
     TeamChat,
     Artifacts,
     Connections,
+    /// Opens Connections on the card that asks for a web address.
+    ConnectService,
     Settings,
 }
 

@@ -92,6 +92,11 @@ impl Kind {
         TOOL_NAMES[self as usize]
     }
 
+    /// Reads do not change the account. Drafts, events, and to-dos do.
+    const fn reads_only(self) -> bool {
+        !matches!(self, Self::DraftMail | Self::CreateEvent | Self::AddTask)
+    }
+
     fn service(self) -> GoogleService {
         match self {
             Self::SearchMail | Self::ReadMail | Self::DraftMail => GoogleService::Mail,
@@ -301,6 +306,15 @@ impl Tool for GoogleTool {
 
     fn description(&self) -> &str {
         &self.description
+    }
+
+    fn is_read_only(&self) -> bool {
+        self.kind.reads_only()
+    }
+
+    fn is_concurrency_safe(&self) -> bool {
+        // A read does not share mutable account state with another read.
+        self.kind.reads_only()
     }
 
     fn parameters_schema(&self) -> Option<Value> {

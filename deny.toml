@@ -16,6 +16,7 @@ ignore = [
   { id = "RUSTSEC-2026-0367", reason = "velopack pins zip ^8.6; update packages are first-party and hash-verified" },
   { id = "RUSTSEC-2026-0368", reason = "velopack pins zip ^8.6; update packages are first-party and hash-verified" },
   { id = "RUSTSEC-2026-0369", reason = "velopack pins zip ^8.6; update packages are first-party and hash-verified" },
+  { id = "RUSTSEC-2026-0429", reason = "velopack pins zip ^8.6; ZipArchive::extract abort is the same update-package path, and Sovra does not call extract" },
   # Inside surrealdb-core, unreachable from our embedded use. Re-check on surrealdb bumps.
   { id = "RUSTSEC-2026-0194", reason = "quick-xml via surrealdb's object_store (S3/GCS) backend; we never configure a remote object store or parse untrusted XML" },
   { id = "RUSTSEC-2026-0195", reason = "quick-xml via surrealdb's object_store backend; same as above" },

@@ -137,13 +137,52 @@ impl Llm for BudgetModel {
     ) -> adk_core::Result<LlmResponseStream> {
         prepare(&mut request, self.budget)?;
         strip_media_hints(&mut request);
+        let mut call_ids = request
+            .contents
+            .iter()
+            .flat_map(|content| &content.parts)
+            .filter_map(|part| match part {
+                Part::FunctionCall { id, .. } | Part::FunctionResponse { id, .. } => id.clone(),
+                _ => None,
+            })
+            .collect::<std::collections::HashSet<_>>();
         let responses = self.inner.generate_content(request, stream).await?;
-        Ok(Box::pin(responses.map(|result| {
+        Ok(Box::pin(responses.map(move |result| {
             result.map(|mut response| {
                 response.interaction_id = None;
+                if !response.partial
+                    && let Some(content) = &mut response.content
+                {
+                    complete_call_ids(content, &mut call_ids);
+                }
                 response
             })
         })))
+    }
+}
+
+// Some compatible providers parse textual tool calls without assigning an ID.
+// Assign before ADK executes the call so its result and saved history share it.
+fn complete_call_ids(content: &mut Content, used: &mut std::collections::HashSet<String>) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    for part in &content.parts {
+        if let Part::FunctionCall { id: Some(id), .. } = part {
+            used.insert(id.clone());
+        }
+    }
+    for part in &mut content.parts {
+        if let Part::FunctionCall { id, .. } = part
+            && id.as_ref().is_none_or(|id| id.trim().is_empty())
+        {
+            loop {
+                let candidate = format!("sovra_call_{}", NEXT.fetch_add(1, Ordering::Relaxed));
+                if used.insert(candidate.clone()) {
+                    *id = Some(candidate);
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -179,10 +218,10 @@ fn prepare(request: &mut LlmRequest, budget: ContextBudget) -> adk_core::Result<
         if units(request)? <= allowance.input_units {
             return Ok(());
         }
-        let memories = evidence
-            .as_ref()
-            .and_then(|value| value["memories"].as_array())
-            .map_or(0, Vec::len);
+        let memories = evidence.as_ref().map_or(0, |value| {
+            value["memories"].as_array().map_or(0, Vec::len)
+                + value["sources"].as_array().map_or(0, Vec::len)
+        });
         match ContextBudget::next_trim(marks.history.len(), memories) {
             Some(ContextTrim::OldestHistory) => {
                 let index = marks.history.remove(0);
@@ -194,7 +233,14 @@ fn prepare(request: &mut LlmRequest, budget: ContextBudget) -> adk_core::Result<
             }
             Some(ContextTrim::LowestMemory) => {
                 let data = evidence.as_mut().ok_or_else(error)?;
-                data["memories"].as_array_mut().ok_or_else(error)?.pop();
+                if let Some(sources) = data["sources"]
+                    .as_array_mut()
+                    .filter(|sources| !sources.is_empty())
+                {
+                    sources.pop();
+                } else {
+                    data["memories"].as_array_mut().ok_or_else(error)?.pop();
+                }
                 if !data["notice"]
                     .as_str()
                     .is_some_and(|notice| notice.contains(NOTICE))
@@ -369,6 +415,22 @@ mod tests {
     }
 
     #[test]
+    fn original_sources_yield_to_the_current_question_under_a_small_budget() {
+        let mut request = LlmRequest::new(
+            "test",
+            vec![Content::new("user").with_text("CURRENT QUESTION")],
+        );
+        mark_memory(&mut request, 0).unwrap();
+        request.contents.insert(0, Content::new("system").with_text("Source guidance").with_text(
+            json!({"memories":[], "sources":["FIRST".repeat(600), "SECOND".repeat(600), "LAST".repeat(600)], "notice":null}).to_string()));
+        prepare(&mut request, budget(4096)).unwrap();
+        assert!(units(&request).unwrap() <= budget(4096).allowance(None).unwrap().input_units);
+        let text = serde_json::to_string(&request).unwrap();
+        assert!(text.contains("CURRENT QUESTION"));
+        assert!(!text.contains("LASTLAST"));
+    }
+
+    #[test]
     fn optional_context_yields_without_changing_current_input_or_protocol_extensions() {
         let mut request = LlmRequest::new(
             "test",
@@ -528,6 +590,38 @@ mod tests {
             *annotations = Some(json!({"sovra_media_duration_millis": 600_000}));
         }
         assert!(prepare(&mut request, budget(131_072)).is_err());
+    }
+
+    #[test]
+    fn missing_call_ids_are_distinct_and_existing_provider_ids_are_preserved() {
+        let call = |id| Part::FunctionCall {
+            name: "search_saved_details".into(),
+            args: json!({}),
+            id,
+            thought_signature: None,
+        };
+        let mut content = Content {
+            role: "model".into(),
+            parts: vec![
+                call(None),
+                call(Some(String::new())),
+                call(Some("provider-kept".into())),
+            ],
+        };
+        let mut used = std::collections::HashSet::from(["sovra_call_0".into()]);
+        complete_call_ids(&mut content, &mut used);
+        let ids = content
+            .parts
+            .iter()
+            .map(|part| match part {
+                Part::FunctionCall { id, .. } => id.as_ref().unwrap(),
+                _ => unreachable!(),
+            })
+            .collect::<Vec<_>>();
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[0], "sovra_call_0");
+        assert_ne!(ids[1], "sovra_call_0");
+        assert_eq!(ids[2], "provider-kept");
     }
 
     struct Model(AtomicUsize);

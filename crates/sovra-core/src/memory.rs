@@ -15,6 +15,14 @@
 
 use async_trait::async_trait;
 
+mod dependencies;
+pub use dependencies::*;
+mod admission;
+pub use admission::*;
+mod team_capture;
+pub use team_capture::TeamMemoryCapture;
+mod sources;
+pub use sources::*;
 mod ingestion;
 pub use ingestion::*;
 mod consolidation;
@@ -22,9 +30,13 @@ pub use consolidation::consolidation_context;
 mod recall;
 pub use recall::*;
 mod citations;
-pub use citations::{MAX_MEMORY_CITATIONS, memory_citations};
+pub use citations::{MAX_MEMORY_CITATIONS, memory_citations, memory_source_citations};
 mod lifecycle;
 pub use lifecycle::*;
+mod exploration;
+pub use exploration::*;
+mod graph;
+pub use graph::*;
 mod profile;
 pub use profile::*;
 mod semantic;
@@ -34,7 +46,8 @@ pub use semantic::*;
 pub const MAX_RECALL_RESULTS: usize = 200;
 const MAX_FACT_BYTES: usize = 16 * 1024;
 const MAX_QUERY_BYTES: usize = 4 * 1024;
-const MAX_EPISODE_BYTES: usize = 128 * 1024;
+/// Maximum original-evidence size admitted as one immutable source.
+pub const MAX_EPISODE_BYTES: usize = 128 * 1024;
 
 /// Milliseconds since the Unix epoch. Core has no clock — adapters and the runtime
 /// construct these at their edges.
@@ -284,41 +297,42 @@ pub const RRF_K: f32 = 60.0;
 /// Each leg is best-first. A fact's score is the sum over legs of `1 / (RRF_K + rank)`;
 /// ties keep first-seen (leg order) priority.
 pub fn fuse_rrf(legs: Vec<Vec<Fact>>, limit: usize) -> Vec<RecalledFact> {
-    let mut order: Vec<FactId> = Vec::new();
-    let mut fused: std::collections::HashMap<FactId, RecalledFact> =
-        std::collections::HashMap::new();
+    ranked_fusion(legs, limit, |fact| fact.id.clone())
+        .into_iter()
+        .map(|(fact, score)| RecalledFact { fact, score })
+        .collect()
+}
+
+fn ranked_fusion<T, K: Clone + Eq + std::hash::Hash>(
+    legs: Vec<Vec<T>>,
+    limit: usize,
+    key: impl Fn(&T) -> K,
+) -> Vec<(T, f32)> {
+    let mut order = Vec::new();
+    let mut fused: std::collections::HashMap<K, (T, f32)> = std::collections::HashMap::new();
     for leg in legs {
         let mut seen = std::collections::HashSet::new();
-        for (rank, fact) in leg
+        for (rank, item) in leg
             .into_iter()
-            .filter(|fact| seen.insert(fact.id.clone()))
+            .filter(|item| seen.insert(key(item)))
             .enumerate()
         {
             #[allow(clippy::cast_precision_loss, reason = "ranks are tiny")]
             let contribution = 1.0 / (RRF_K + 1.0 + rank as f32);
-            if let Some(existing) = fused.get_mut(&fact.id) {
-                existing.score += contribution;
+            let id = key(&item);
+            if let Some(existing) = fused.get_mut(&id) {
+                existing.1 += contribution;
             } else {
-                order.push(fact.id.clone());
-                fused.insert(
-                    fact.id.clone(),
-                    RecalledFact {
-                        fact,
-                        score: contribution,
-                    },
-                );
+                order.push(id.clone());
+                fused.insert(id, (item, contribution));
             }
         }
     }
-    let mut results: Vec<RecalledFact> = order
+    let mut results: Vec<(T, f32)> = order
         .into_iter()
         .filter_map(|id| fused.remove(&id))
         .collect();
-    results.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(limit);
     results
 }
@@ -352,6 +366,16 @@ pub enum MemoryError {
 /// and the interface stays pure.
 #[async_trait]
 pub trait MemoryStore: Send + Sync {
+    /// Atomically admits explicitly attributed evidence and any required processing.
+    /// Adapters must preserve identity/version and never infer permission from content.
+    async fn admit_memory_source(
+        &self,
+        _source: MemorySourceAdmission,
+    ) -> Result<MemorySourceReceipt, MemoryError> {
+        Err(MemoryError::Backend(
+            "Attributed source admission is unavailable.".into(),
+        ))
+    }
     /// Explicit destination consent is separate from folder embedding permissions.
     async fn memory_semantics(&self) -> Result<MemorySemanticState, MemoryError> {
         Ok(MemorySemanticState::default())
@@ -397,6 +421,53 @@ pub trait MemoryStore: Send + Sync {
         ))
     }
 
+    /// Revision of factual content, independent of queue bookkeeping.
+    async fn memory_revision(&self) -> Result<u64, MemoryError> {
+        Ok(0)
+    }
+
+    /// Bounded review neighborhood from real subject/source/version links.
+    /// This is user-requested review, so explicit version links may include history.
+    async fn memory_connections(&self, _id: &FactId) -> Result<MemoryNeighborhood, MemoryError> {
+        Ok(MemoryNeighborhood::default())
+    }
+
+    /// Bounded original evidence, independent of extracted facts. Unknown scopes
+    /// and revoked sources must be excluded by the adapter before returning.
+    async fn search_memory_sources(
+        &self,
+        _query: MemorySearch,
+        _now: Timestamp,
+    ) -> Result<Vec<MemorySourceEvidence>, MemoryError> {
+        Ok(Vec::new())
+    }
+
+    /// Explicitly revoke an original source and cancel its pending processing.
+    /// Retain its content for review; derived facts must no longer enter recall.
+    async fn stop_memory_source(&self, _id: &EpisodeId, _at: Timestamp) -> Result<(), MemoryError> {
+        Err(MemoryError::Backend(
+            "Stopping original evidence is unavailable.".into(),
+        ))
+    }
+
+    /// Preceding admitted sources in the same conversation, oldest first. The
+    /// adapter must exclude withdrawn and unauthorized evidence before returning.
+    async fn memory_preceding_sources(&self, _id: &EpisodeId) -> Result<Vec<Episode>, MemoryError> {
+        Ok(Vec::new())
+    }
+
+    /// Batch fact provenance for recall. Return only explicitly permitted user
+    /// evidence under current pause/withdrawal policy; omit unknown grants.
+    /// Raw `episode` reads are for review and cannot substitute for this check.
+    async fn memory_episodes(&self, ids: &[EpisodeId]) -> Result<Vec<Episode>, MemoryError> {
+        if ids.len() > MAX_RECALL_RESULTS {
+            return Err(MemoryError::InvalidInput("too many evidence reads".into()));
+        }
+        Err(MemoryError::Backend(
+            "Scoped evidence loading is unavailable.".into(),
+        ))
+    }
+
     /// Cheap liveness/readiness probe.
     async fn health(&self) -> Result<(), MemoryError>;
 
@@ -407,6 +478,14 @@ pub trait MemoryStore: Send + Sync {
     async fn enqueue_memory(&self, input: MemoryInput) -> Result<EpisodeId, MemoryError>;
     /// Claims at most one due job, recovering abandoned leases with bounded attempts.
     async fn claim_memory(&self, at: Timestamp) -> Result<Option<MemoryClaim>, MemoryError>;
+    /// Persist grounded candidates before consolidation; a reclaimed lease resumes
+    /// with this result instead of calling the extractor again.
+    async fn save_memory_extraction(
+        &self,
+        claim: &MemoryClaim,
+        extracted: &MemoryExtractedChunk,
+        at: Timestamp,
+    ) -> Result<(), MemoryError>;
     /// Saves the whole validated batch and completes its job in one transaction.
     async fn complete_memory(
         &self,
@@ -424,7 +503,7 @@ pub trait MemoryStore: Send + Sync {
     ) -> Result<(), MemoryError>;
     async fn memory_job(&self, episode: &EpisodeId) -> Result<MemoryJob, MemoryError>;
 
-    /// Explicitly retries failed captures up to available queue capacity. Never
+    /// Explicitly retries a bounded page of failed captures. Never
     /// revives cancelled work or repeats completed captures; paused policy rejects it.
     async fn retry_failed_memories(&self) -> Result<usize, MemoryError> {
         Err(MemoryError::Backend(
@@ -468,8 +547,48 @@ pub trait MemoryStore: Send + Sync {
         ))
     }
 
+    /// Withdraw the complete correction history containing this detail, including
+    /// its original and repeated sources, atomically. Retain review history and
+    /// unrelated facts; never silently fall back to withdrawing only one version.
+    async fn remove_memory(&self, _id: &FactId, _at: Timestamp) -> Result<(), MemoryError> {
+        Err(MemoryError::Backend(
+            "Removing a detail and its versions is unavailable.".into(),
+        ))
+    }
+
     /// Retrieves facts by semantic similarity, entity, and/or recency per [`RecallQuery`].
     async fn recall(&self, query: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError>;
+
+    /// Bounded local review of retained evidence, independent of model recall.
+    async fn list_memory_sources(
+        &self,
+        _query: MemorySourceQuery,
+    ) -> Result<MemorySourcePage, MemoryError> {
+        Err(MemoryError::Backend(
+            "Source browsing is unavailable in this memory store.".into(),
+        ))
+    }
+
+    /// Explicit local review, distinct from permission-checked model retrieval.
+    async fn review_memory_source(
+        &self,
+        id: &EpisodeId,
+    ) -> Result<MemorySourceRecord, MemoryError> {
+        Ok(MemorySourceRecord {
+            episode: self.episode(id).await?,
+            metadata: MemorySourceMetadata::default(),
+        })
+    }
+
+    /// Bounded alphabetical discovery of subjects in current saved details.
+    async fn list_memory_subjects(
+        &self,
+        _query: MemorySubjectQuery,
+    ) -> Result<MemorySubjectPage, MemoryError> {
+        Err(MemoryError::Backend(
+            "Subject browsing is unavailable in this memory store.".into(),
+        ))
+    }
 
     /// Bounded current/history browsing, independent of automatic remembering policy.
     async fn list_memories(&self, _query: MemoryListQuery) -> Result<MemoryPage, MemoryError> {

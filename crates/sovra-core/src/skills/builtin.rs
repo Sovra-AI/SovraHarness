@@ -33,8 +33,8 @@ impl Skill {
             "settings" => "Appearance, text size & settings",
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
-            "connections" => "Connect personal WhatsApp (QR code)",
-            "connect-service" => "Connect a service",
+            "connections" => "Link the things Sovra can use",
+            "connect-service" => "Add a service you already use",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
             "read-files" => "Read & explain attached files",
@@ -49,7 +49,7 @@ impl Skill {
             "alert" => "Highlight an important reminder",
             "progress" => "Show a step-by-step progress bar",
             "coding" => "Coding & technical problem helper",
-            "deep-research" => "Deep multi-source researcher",
+            "deep-research" => "Deep research with a living board",
             "stock-market" => "Stock market & company helper",
             "housing-market" => "Home buying & rental explorer",
             "housing-advisor" => "Mortgage & home budget advisor",
@@ -112,7 +112,7 @@ impl Skill {
                 "/models ".to_owned(),
             ),
             "knowledge" => (
-                "See what Sovra knows about you, add a personal detail, correct a memory, retry missed messages, or browse your connected files.".to_owned(),
+                "Read saved details and earlier helper replies, open their original sources, follow changes over time, edit or remove a remembered detail, or browse your connected files.".to_owned(),
                 "/knowledge ".to_owned(),
             ),
             "schedules" => (
@@ -141,7 +141,7 @@ impl Skill {
                 "/artifacts ".to_owned(),
             ),
             "connections" => (
-                "Opens Settings → Connections so you can link personal WhatsApp with a QR code."
+                "Opens Connections, where you link an AI, WhatsApp, Telegram, Google, or a service from a web address."
                     .to_owned(),
                 "/connections ".to_owned(),
             ),
@@ -191,7 +191,7 @@ impl Skill {
             ),
             "deep-research" => sample_pair(
                 "deep-research",
-                "Compare heat pumps vs gas boilers for a small family home",
+                "Compare heat pumps vs gas boilers for a small family home and save a clear report",
             ),
             "stock-market" => sample_pair(
                 "stock-market",
@@ -244,7 +244,10 @@ impl Skill {
                 "spreadsheet",
                 "Create a simple monthly household budget table",
             ),
-            "communications" => sample_pair("communications", "Send me a WhatsApp reminder to bring my shopping list."),
+            "communications" => sample_pair(
+                "communications",
+                "Send Sam Rivera a WhatsApp note that the school gate opens at 3, even though Sam has not written first.",
+            ),
             "google-workspace" => sample_pair(
                 "google-workspace",
                 "Draft a warm thank-you email reply after Sunday dinner",
@@ -380,15 +383,15 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "connections",
             "Connections",
-            "Link your personal WhatsApp by scanning a QR code with your phone.",
+            "Open Connections to link an AI, WhatsApp, Telegram, Google, or a service you already use.",
             SkillAction::Connections,
             &["whatsapp"],
         ),
         action(
             "connect-service",
             "Connect a service",
-            "Paste a web address to connect a service you already use, and sign in if it asks.",
-            SkillAction::Settings,
+            "Open Connections and paste the web address of a service you already use.",
+            SkillAction::ConnectService,
             &["mcp", "service"],
         ),
         procedure(
@@ -439,7 +442,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         procedure(
             "map-files",
             "Map file knowledge",
-            "Propose cited document, part, topic and project relationships for review.",
+            "Find connections between people, projects and dates in your files, with the original passages for you to check before saving.",
             "Files",
             &["file-map", "file-relationships"],
             &[
@@ -457,7 +460,7 @@ pub fn builtin_skills() -> Vec<Skill> {
             ..procedure(
                 "file-knowledge",
                 "Explore file knowledge",
-                "Follow reviewed relationships and inspect their source evidence.",
+                "Browse saved relationships in Knowledge → Files, follow people and projects, and read the original supporting passages.",
                 "Files",
                 &["file-graph", "knowledge-graph"],
                 &[

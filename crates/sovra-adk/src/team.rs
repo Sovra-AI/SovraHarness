@@ -16,7 +16,7 @@ use sovra_core::teams::{
     self, MAX_REPLIES_PER_TURN, MAX_ROUNDS, SpeakerState, TeamActivity, TeamMember, TranscriptLine,
     Verdict, VisibleStream,
 };
-use sovra_core::{AgUiEvent, Event, Speaker, SubagentOutcome};
+use sovra_core::{AgUiEvent, Event, LiveActivity, Speaker, SubagentOutcome};
 
 use crate::{AdkHarness, DEFAULT_USER_ID, extract_output};
 
@@ -171,7 +171,7 @@ impl TeamRunState<'_> {
     async fn snapshot(&self) -> bool {
         self.send(AgUiEvent::ActivitySnapshot {
             message_id: self.activity_id.clone(),
-            activity: self.activity.clone(),
+            activity: LiveActivity::Team(self.activity.clone()),
         })
         .await
     }
@@ -250,6 +250,7 @@ impl TeamRunState<'_> {
                     text.trim().to_owned()
                 };
                 self.history.push(TranscriptLine {
+                    source: None,
                     speaker: member.name.clone(),
                     text: shown,
                 });
@@ -447,6 +448,7 @@ mod tests {
                 run_id: "run1".into(),
                 prompt: prompt.into(),
                 history: vec![sovra_core::teams::TranscriptLine {
+                    source: None,
                     speaker: "User".into(),
                     text: prompt.into(),
                 }],
@@ -519,6 +521,9 @@ mod tests {
             .find(|event| matches!(event, AgUiEvent::ActivitySnapshot { .. }))
         else {
             panic!("the team card is kept up to date");
+        };
+        let sovra_core::LiveActivity::Team(activity) = activity else {
+            panic!("team runs emit the team card");
         };
         assert!(activity.finished);
         let states: Vec<SpeakerState> = activity.speakers.iter().map(|row| row.state).collect();

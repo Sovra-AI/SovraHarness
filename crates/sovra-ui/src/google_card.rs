@@ -1,4 +1,4 @@
-//! The Google card in Settings → Connections.
+//! The Google card on the Connections tab.
 //!
 //! One button connects; Google's own page in the browser does the rest. Once
 //! connected, every service is a row with a switch, in the order of

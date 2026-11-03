@@ -2,7 +2,10 @@
 
 use super::{Episode, EpisodeId, EpisodeKind, FactId, MemoryError, NewEpisode, Timestamp};
 
-pub const MAX_MEMORY_CANDIDATES: usize = 8;
+pub const MAX_MEMORY_CANDIDATES: usize = 32;
+/// A scheduling bound, not an admission limit.
+pub const DEFAULT_MEMORY_EXTRACTION_SLOTS: usize = 4;
+pub const MEMORY_CHUNK_BYTES: usize = 2_048;
 pub const MAX_MEMORY_ATTEMPTS: u32 = 3;
 pub const MEMORY_LEASE_MILLIS: i64 = 120_000;
 pub const MEMORY_RETRY_MILLIS: i64 = 5_000;
@@ -161,13 +164,58 @@ impl MemoryJob {
 }
 
 /// Only the matching, unexpired token may finish or fail a claimed input.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MemoryExtractedChunk {
+    pub candidates: Vec<MemoryCandidate>,
+    pub model: String,
+}
+
+/// A durable source chunk lease, including any extraction saved before a restart.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemoryClaim {
+    pub extracted: Option<MemoryExtractedChunk>,
+    /// UTF-8 byte offset of the next unprocessed source chunk.
+    pub cursor: usize,
+    /// Fact revision observed before reconciliation, checked atomically at commit.
+    pub revision: u64,
     pub episode: Episode,
     pub token: String,
     pub generation: u64,
     pub attempt: u32,
     pub lease_until: Timestamp,
+}
+
+impl MemoryClaim {
+    /// Contiguous bounded chunks retain exact offsets in the immutable source.
+    pub fn chunk(&self) -> Result<Episode, MemoryError> {
+        let end = memory_chunk_end(&self.episode.content, self.cursor)?;
+        let mut chunk = self.episode.clone();
+        chunk.content = chunk.content[self.cursor..end].to_owned();
+        Ok(chunk)
+    }
+}
+
+pub fn memory_chunk_end(text: &str, start: usize) -> Result<usize, MemoryError> {
+    if start >= text.len() || !text.is_char_boundary(start) {
+        return Err(MemoryError::InvalidInput(
+            "invalid source chunk offset".into(),
+        ));
+    }
+    let mut end = (start + MEMORY_CHUNK_BYTES).min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end < text.len() {
+        // Prefer sentence/line boundaries without making progress depend on punctuation.
+        if let Some((offset, character)) =
+            text[start..end].char_indices().rev().find(|(offset, c)| {
+                *offset >= MEMORY_CHUNK_BYTES / 2 && matches!(c, '\n' | '.' | '!' | '?')
+            })
+        {
+            end = start + offset + character.len_utf8();
+        }
+    }
+    Ok(end)
 }
 
 #[cfg(test)]
@@ -184,6 +232,50 @@ mod tests {
                 occurred_at: Timestamp(10),
             },
         }
+    }
+
+    #[test]
+    fn chunks_cover_dense_unicode_sources_without_gaps_or_truncation() {
+        let text = "A useful detail about 茶.\n".repeat(500);
+        let mut cursor = 0;
+        let mut restored = String::new();
+        let mut count = 0;
+        while cursor < text.len() {
+            let end = memory_chunk_end(&text, cursor).unwrap();
+            assert!(end > cursor && end - cursor <= MEMORY_CHUNK_BYTES);
+            restored.push_str(&text[cursor..end]);
+            cursor = end;
+            count += 1;
+        }
+        assert_eq!(restored, text);
+        assert!(count > 1);
+        assert!(memory_chunk_end(&text, text.len()).is_err());
+        assert!(memory_chunk_end("茶", 1).is_err());
+    }
+
+    #[test]
+    fn a_chunk_can_preserve_more_than_eight_independent_details() {
+        let source = Episode {
+            id: EpisodeId("episode:dense".into()),
+            session_id: "dense".into(),
+            kind: EpisodeKind::UserMessage,
+            occurred_at: Timestamp(1),
+            content: (0..12)
+                .map(|index| format!("Project {index} meets on Monday. "))
+                .collect::<Vec<_>>()
+                .concat(),
+        };
+        let candidates = (0..12)
+            .map(|index| MemoryCandidate {
+                content: format!("Project {index} meets on Monday."),
+                evidence: format!("Project {index} meets on Monday."),
+                entities: vec![format!("Project {index}")],
+                valid_at: None,
+                replaces: None,
+                same_as: None,
+            })
+            .collect::<Vec<_>>();
+        assert!(validate_memory_batch(&source, &candidates).is_ok());
     }
 
     #[test]
@@ -291,6 +383,11 @@ pub enum MemoryStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryEvent {
+    SourceSaved {
+        session_id: String,
+        message: Option<super::MemorySourceMessage>,
+        receipt: super::MemorySourceReceipt,
+    },
     Semantic(super::MemorySemanticStatus),
     Review(super::MemoryReviewEvent),
     Status(MemoryStatus),

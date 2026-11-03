@@ -64,8 +64,7 @@ what the model supports. Switching models starts fresh provider history.
 
 ## Connections
 
-Open **Connections → Add connection** (or **Settings → Advanced → Show advanced
-options**), choose a preset and adjust its address. Service type (protocol),
+Open **Connections** and choose **Another compatible service**. Service type (protocol),
 how the key is sent (authentication), wait time and other headers sit behind
 **Show technical options**. Use the API base, not a web dashboard URL. Reverse-proxy path
 prefixes are preserved. Common full endpoint suffixes are normalized.

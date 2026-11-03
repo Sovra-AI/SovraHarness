@@ -42,7 +42,7 @@ async fn explicit_notes_are_atomic_sourced_and_available_while_capture_is_paused
 }
 
 #[tokio::test]
-async fn retry_only_requeues_failures_with_fresh_leases_and_respects_pause_and_capacity() {
+async fn retry_requeues_failures_with_fresh_leases_even_beyond_old_capacity() {
     let store = open_store().await;
     let failed = store
         .enqueue_memory(memory_input("failed", "m1"))
@@ -85,12 +85,6 @@ async fn retry_only_requeues_failures_with_fresh_leases_and_respects_pause_and_c
             .await
             .unwrap();
     }
-    assert_eq!(store.retry_failed_memories().await.unwrap(), 0);
-    let claim = store.claim_memory(now).await.unwrap().unwrap();
-    store
-        .complete_memory(&claim, vec![], "fixture", now)
-        .await
-        .unwrap();
     assert_eq!(store.retry_failed_memories().await.unwrap(), 1);
     assert_eq!(store.retry_failed_memories().await.unwrap(), 0);
     let job = store.memory_job(&failed).await.unwrap();
@@ -260,4 +254,125 @@ async fn overview_keeps_failure_and_empty_check_receipts_and_bounds_recent_activ
         ),
         (0, 10, 1, 1)
     );
+}
+
+#[tokio::test]
+async fn subjects_count_all_current_details_with_stable_order_and_a_bound() {
+    let store = open_store().await;
+    store
+        .save_fact(fact("Mira manages Cedar", &["Mira", "Cedar", "user"], None))
+        .await
+        .unwrap();
+    let second = store
+        .save_fact(fact("Mira keeps notes", &["Mira"], None))
+        .await
+        .unwrap();
+    let summary = overview(&store).await;
+    assert_eq!(
+        summary.subjects,
+        vec![
+            sovra_core::MemorySubject {
+                name: "Mira".into(),
+                details: 2
+            },
+            sovra_core::MemorySubject {
+                name: "Cedar".into(),
+                details: 1
+            },
+        ]
+    );
+    assert!(!summary.more_subjects);
+    store.stop_memory(&second, Timestamp(9)).await.unwrap();
+    let summary = overview(&store).await;
+    assert_eq!(
+        summary
+            .subjects
+            .iter()
+            .map(|s| (s.name.as_str(), s.details))
+            .collect::<Vec<_>>(),
+        vec![("Cedar", 1), ("Mira", 1)]
+    );
+    for index in 0..14 {
+        store
+            .save_fact(fact(
+                "another subject",
+                &[&format!("Topic {index:02}")],
+                None,
+            ))
+            .await
+            .unwrap();
+    }
+    let summary = overview(&store).await;
+    assert_eq!(summary.subjects.len(), 12);
+    assert!(summary.more_subjects);
+    assert_eq!(summary.subjects[0].name, "Cedar");
+}
+
+#[tokio::test]
+async fn subject_directory_pages_filters_and_excludes_old_or_stopped_details() {
+    use sovra_core::MemorySubjectQuery;
+    let store = open_store().await;
+    for name in ["Alder", "Birch", "Cedar", "Dogwood", "École", "茶"] {
+        store
+            .save_fact(fact(name, &[name, "user"], None))
+            .await
+            .unwrap();
+    }
+    let old = store
+        .save_fact(fact("old", &["Old subject"], None))
+        .await
+        .unwrap();
+    store.invalidate_fact(&old, Timestamp(100)).await.unwrap();
+    let stopped = store
+        .save_fact(fact("stopped", &["Stopped subject"], None))
+        .await
+        .unwrap();
+    store.stop_memory(&stopped, Timestamp(100)).await.unwrap();
+    let mut query = MemorySubjectQuery {
+        limit: 2,
+        ..Default::default()
+    };
+    let first = store.list_memory_subjects(query.clone()).await.unwrap();
+    assert_eq!(
+        first
+            .subjects
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Alder", "Birch"]
+    );
+    query.after = first.next;
+    // Inserting before the cursor must not shift or repeat subsequent pages.
+    store
+        .save_fact(fact("new", &["Aspen"], None))
+        .await
+        .unwrap();
+    let mut names = Vec::new();
+    loop {
+        let page = store.list_memory_subjects(query.clone()).await.unwrap();
+        names.extend(page.subjects.into_iter().map(|s| s.name));
+        query.after = page.next;
+        if query.after.is_none() {
+            break;
+        }
+    }
+    assert_eq!(names, vec!["Cedar", "Dogwood", "École", "茶"]);
+    let filtered = store
+        .list_memory_subjects(MemorySubjectQuery {
+            search: "ÉCO".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(filtered.subjects[0].name, "École");
+    assert_eq!(filtered.subjects.len(), 1);
+    assert!(filtered.next.is_none());
+    let none = store
+        .list_memory_subjects(MemorySubjectQuery {
+            search: "missing".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(none.subjects, Vec::<sovra_core::MemorySubject>::new());
 }

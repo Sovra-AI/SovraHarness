@@ -1,5 +1,1120 @@
 # Agent memory: research and implementation contract
 
+## Runtime input tracking — 2026-11-03
+
+New private ordinary and team replies record their actual visible conversation
+inputs and every returned memory lookup, including automatic background facts.
+The provider adapter observes requests and streamed output; external tools, media,
+opaque server history/cache and native server continuations invalidate complete
+tracking. A model cannot certify access by writing a citation or a permission claim.
+Older history without durable source links also stays unknown. File replies are
+saved for review but await file-grant lineage before recall eligibility.
+
+User admission returns a receipt only after storage. The receipt links the exact
+visible user message; helper receipts match exact wording, message identity where
+available, and the originating user turn. These links persist even if the user
+has switched chats. A receipt cannot overwrite a link or update a chat activity
+date. Context truncation preserves source references and explicit omission
+notices; the current raw user text is kept separately, including team commands.
+Schema 11 adds optional chat source/time fields without rewriting old chat JSON.
+Schema 12 separates raw wording withdrawn with a detail from whole-source
+revocation, preserving independently grounded sibling facts. Older revocations
+remain in force; the migration does not infer a narrower historical permission.
+No legacy authorship is inferred and historical backfill remains opt-in/unimplemented.
+
+Native verification found an inconsistency that the first clean-database fixtures
+missed: fact provenance loading still returned legacy sources with unknown grants,
+so a new reply's complete runtime manifest failed storage certification. A failing
+real-engine regression now covers that path. Batched direct/background/related
+fact evidence uses the same explicit private-user scope, source version, pause
+and source-withdrawal checks. Unsupported adapters fail closed. Unknown records
+remain reviewable; omitted supporting records produce a bounded model notice.
+Fact withdrawal still preserves separately grounded sibling facts from the same
+source; raw full-source recall retains its stronger whole-record withdrawal gate.
+Diagnostics record only manifest counts and eligibility booleans, never content.
+
+Capture joins the user-admission receipt under a two-second bound at completed
+output; missing receipts leave helper dependencies unknown. It never waits for
+fact extraction. Team captures accumulate saved preceding replies, and capture
+failures invalidate complete tracking for later replies. The shared bounded
+manifest may conservatively include inputs read by another member during that
+turn. Recall continues to recheck the immutable closure in storage.
+
+`cargo xtask ci` passes **991 tests, 10 skipped**, including real runtime/disk
+ordinary and team recall after restart, transitive withdrawal, automatic-fact
+dependencies, unknown-history exclusion, late receipt persistence, additive
+schema-10 migration, provider input/output tracking and minimum/wide/200% layout
+checks. The new receipt-link regression failed before implementation. Native MCP
+and release verification for this integration are still in progress. Earlier
+benchmark results below describe their named storage revisions; no new runtime
+performance or general answer-quality result is claimed.
+
+## Helper dependency storage — 2026-11-03
+
+Helper recall requires a complete record of the inputs exposed to the model,
+not merely citations chosen by its answer. The source admission contract now
+accepts a runtime-certified dependency manifest. `None` means unknown;
+`Some(empty)` explicitly certifies no saved inputs. User statements cannot supply
+helper manifests. Sources and fact IDs share a 128-item bound and are canonicalized
+for idempotent admission. A source version's manifest is immutable.
+
+Inside the admission transaction, the adapter expands existing immutable helper
+closures and fact provenance into a flattened closure. Missing inputs, unknown
+permissions, untracked parents, self-reference or closure overflow prevent recall
+eligibility. Original wording is still saved for review; dependencies are never
+silently truncated to grant access. Retrieval checks every retained ancestor and
+fact before limiting results. Withdrawing an original record, a helper record or
+a supporting fact therefore blocks transitive paraphrases without hiding unrelated
+replies. Corrected support stays available as explicitly labeled historical
+helper wording; the flag respects requested validity and knowledge dates.
+Model guidance distinguishes helper output from user statements and commitments.
+
+Schema 10 additively marks missing dependency metadata unknown. Existing source
+and fact IDs, citations and provenance stay unchanged. Runtime output capture
+still supplies unknown manifests: collecting all recalled evidence, visible
+history and tool/file inputs is the next integration step. This storage change
+does not yet enable cross-chat recall of ordinary captured helper replies. The
+existing README limitation remains accurate, and no automatic backfill is added.
+
+Verification: the initial recall regression failed before implementation. Final
+`cargo xtask ci` passes **980 tests, 10 skipped**, including dependency withdrawal,
+correction dates, missing/unknown inputs, manifest immutability, the 128-item
+closure boundary, additive migration and real-disk reopening. The pinned-engine
+source-query plan regression continues to use the full-text index. The release
+build passes in 3m 19s and produces one 221,478,552-byte ELF executable, retaining
+the same X11/keyboard and C-runtime shared-library requirements. Installer packaging
+and a clean-machine launch were not repeated.
+
+The isolated synthetic runtime rerun is recorded in
+[`runtime-dependency-storage.json`](evaluations/memory-recall-2026-11-03/runtime-dependency-storage.json).
+It retrieved all **576/576** expected evidence items and left no pending or active
+jobs. At 100k sources, p95 dispatch-to-provider was **43.66 / 52.96 / 122.24 ms**
+at **1 / 4 / 16** concurrent requests, versus **42.17 / 56.09 / 123 ms** in the
+earlier dispatch report. These single-host synthetic measurements do not establish
+a speedup. The suite uses an unoptimized build, deterministic local HTTP responses,
+no semantic service and zero provider tokens/cost. It measures the existing user-
+evidence workload with the additional source-query gate, not a helper-heavy corpus.
+The run preceded the final historical-label predicate fix; that predicate is not
+exercised by this current-only user corpus. A first attempt was deliberately stopped
+before completing any stage because it overlapped compilation; it is not included.
+Query counts, transaction conflicts and oldest queue age remain uninstrumented.
+
+After a manual development launch of the final temporal fix, Development MCP
+submitted the tagged "Copper birch recall check" question about the user's saved
+monthly income. The configured Claude Haiku 5.5 model through OpenRouter returned
+the saved amount, quoted two original statements and exposed source links. Opening
+a cited detail showed its original wording and review controls. The two test
+records were withdrawn through confirmations, their filtered list became empty,
+the test chat was deleted and the earlier income conversation restored. The native
+renderer still cannot produce MCP screenshots; the answer was checked with a
+local OS capture outside the repository. This verifies continued user-memory
+recall and source navigation after migration, not completed runtime tracking or
+cross-chat recall of helper output.
+
+## Replies in background conversations — 2026-11-03
+
+A regression reproduced lost streamed text and queued follow-ups when switching
+chats. The workspace now parks each conversation's live messages, generation
+state, queue, team attribution and pending model-setup request. Session-scoped
+events fold into their existing, non-deleted conversation. Live buffers are
+swapped rather than cloned on each chunk. A queued follow-up becomes a typed
+command with its originating session and bounded context before returning to the
+visible pane; a background completion cannot redirect it to the selected chat.
+
+The shell saves the session named by each completed event, including generated
+titles and team events. Navigation first synchronizes the departing transcript,
+then saves it; Stop also saves its partial snapshot. Returning to a conversation
+restores its live controls and can resume its original model-setup request.
+Deleting a conversation drops its parked queue and late events do not recreate it.
+This does not add cancellation of the runtime turn when deleting a background chat.
+
+Pure and headless regressions cover concurrent ordinary/team streams, interleaved
+helper attribution, queued command context, partial saves, setup and deletion.
+A real runtime with deterministic streaming HTTP and embedded disk storage verifies
+both ordinary and team replies completed elsewhere survive database reopening.
+Unknown sessions are ignored; this does not import connected-channel conversations.
+Helper cross-chat recall, connected-source provenance and optional backfill remain
+separate unfinished work.
+
+`cargo xtask ci` passes **971 tests, 10 skipped**, including minimum/wide/200%
+memory UI coverage. Through Development MCP, a fictional "Blue orchid background
+check" was sent with the configured Claude Haiku 5.5 model through OpenRouter.
+Generation was observed before switching to a clean new chat. Returning after
+completion showed all 45 requested sentences and the exact ending "BLUE ORCHID
+COMPLETE". The transcript and ending survived a manual application restart;
+original-source review also contained both the prompt and helper reply. Both
+records were withdrawn through the real confirmations, the filtered list became
+empty, the test chat was deleted and the income conversation was restored.
+The renderer still cannot capture MCP screenshots; locally inspected OS captures
+remain outside the repository. This is a conversation-persistence check, not an
+answer-quality or cross-chat helper-recall benchmark.
+
+The release build passes in 3m 52s and produces one 221,445,664-byte native ELF
+executable. Its direct shared-library requirements remain X11/keyboard and the
+normal C runtime; this increment adds no service or language runtime. Installer
+packaging and clean-machine launch were not repeated.
+
+## Team reply capture — 2026-11-03
+
+A real-runtime/disk-store regression reproduced a visible team answer disappearing
+from original-source review after reopening. Team AG-UI output now uses the same
+owned capture task and admission port as ordinary assistant replies. A pure,
+bounded reducer assembles exact visible text by message ID, retaining the run ID,
+member ID, helper name and message-start time. Distinct turns have distinct run IDs
+even within one clock tick. Source review displays the recorded helper's name;
+the Skills entry explains that these records are available. Anonymous visible
+AG-UI summaries remain anonymous assistant output. Activity cards, hidden reasoning
+and moderation controls are not relabeled as source text.
+
+The event channel holds at most 64 events; each source buffer is capped at the
+existing 128 KiB admission limit, with at most eight active team messages. Oversize
+replies report a save failure instead of silently saving a truncated source. Empty
+or interrupted unfinished messages do not produce complete-source receipts.
+Capture checks the in-process pause epoch and supplies its original persisted
+policy generation to atomic admission, so pause/resume cannot revive an older
+capture even if its database operation starts after resumption. This adds no stored
+field or schema migration. Admission still uses the shared policy transaction fence.
+
+Regression coverage includes interleaved Unicode replies, duplicate end events,
+missing attribution, anonymous summaries, oversize/empty/interrupted buffers,
+two distinct turns, disk reopen, withdrawal, and pause/resume while normal and team
+responses are held mid-stream. The fake HTTP model makes no live inference calls.
+Helper output remains excluded from personal extraction and cross-chat recall
+until dependency-aware withdrawal is complete. Connected-message provenance,
+file/artifact source references, backfill and the broader evaluation remain open.
+
+Native restart verification found a second gap: the source survived but the chat
+transcript lost the team reply. The shell saved ordinary completion events only.
+A regression first failed on the missing save command; AG-UI message end, run end
+and run error now request a conversation snapshot after the reducer folds them.
+This preserves completed members and the final activity card without requiring
+navigation to another chat. The subsequent background-conversation audit and
+verification are recorded above.
+
+Final `cargo xtask ci` passes **965 tests, 10 skipped**, including named-source
+review in both themes at minimum/wide/200% sizes. The native app was driven through
+Development MCP with fictional single-helper exchanges. "Silver fern team check"
+verified attributed source persistence and exposed the transcript failure; after
+the history fix, "Ivory moss history check" retained Priya's reply and the completed
+team card across a manual restart without navigating away before shutdown. Both
+sources from each exchange were withdrawn through the real confirmation controls,
+the filtered lists became empty, both test chats were deleted, and the earlier
+conversation was restored. Pending and failed-check counts were zero. MCP screenshot
+capture remains unsupported by this renderer; OS captures were inspected locally
+and kept outside the repository. These checks do not establish cross-chat recall
+of helper output, which remains intentionally gated as described above.
+
+The final release build passes in 3m 29s. The output is one 221,415,008-byte native
+ELF executable with the same normal X11/keyboard/C-runtime shared libraries; no
+new dependency, service or language runtime was introduced. Packaging and a
+clean-machine launch were not repeated for this increment.
+
+## Background dispatch — measured increment, 2026-11-03
+
+A readiness regression with paused Tokio time reproduced a 250 ms wait before
+starting the second independent extraction despite free slots. The worker now
+re-enters its biased select loop after each successful claim, so queued capture,
+configuration changes and completed jobs are handled before another claim. New
+evidence, a completed job and the foreground activity watch all wake dispatch.
+An empty claim or unavailable shared permit clears immediate dispatch; the 250 ms
+recovery poll still covers retry dates, expired leases and permits held by another
+worker. No slot limit, lease, consolidation order or interactive priority is removed.
+Virtual-clock coverage includes filling four slots, holding the fifth until a slot
+is released, foreground completion, new evidence and avoiding empty-queue spin.
+Tokio's test clock is enabled only through the runtime's development dependency.
+
+The first faster-dispatch benchmark failed during the 100k stage while persisting
+an extraction result. Its partial report is retained as `runtime-dispatch-contention.json`;
+the original backend error was not logged, so shared-fence contention is an inference,
+not a confirmed diagnosis of that individual failure. Runtime logging now preserves
+the backend cause. Independent claim/stage/finish/fail operations unnecessarily
+wrote the global policy record; a new real-engine regression caught that shared
+write. A second test opens a native transaction, reads a processing job, commits a
+pause or source withdrawal through the real port, and proves the stale job write
+cannot commit. Existing jobs therefore use their own cancellation row as the fence.
+Admission and explicit retry keep their policy fences; fact consolidation still
+checks and writes the fact revision. This does not yet remove every shared admission
+write required by the broader plan.
+
+Full CI after these changes passes **954 tests, 10 skipped**, including the real
+embedded-store four-lease overlap test and minimum/wide/200% memory UI checks.
+The final isolated runtime benchmark passes **576/576 expected evidence reads**;
+every stage ends with zero pending and active jobs. Full reports are
+[`runtime-before-dispatch.json`](evaluations/memory-recall-2026-11-03/runtime-before-dispatch.json),
+[`runtime-dispatch-contention.json`](evaluations/memory-recall-2026-11-03/runtime-dispatch-contention.json)
+and [`runtime-after-dispatch.json`](evaluations/memory-recall-2026-11-03/runtime-after-dispatch.json).
+
+Each cell below is seconds to dispatch 64 requests and drain their background
+checks, at concurrency **1 / 4 / 16**. This includes a zero-cost deterministic
+HTTP fixture, not real model inference. Database setup/reopening is outside these
+stage durations. Same machine, unoptimized test build, four extraction slots,
+semantic search off, native app kept open; no build or CI was run alongside either
+completed measurement. This is one before/after experiment, not a statistical
+estimate of production speedup.
+
+| Sources | Before (seconds) | After (seconds) | After retrieval p95 (ms) |
+| --- | --- | --- | --- |
+| 1,000 | 16.00 / 16.01 / 16.01 | 1.68 / 0.78 / 0.42 | 17.1 / 30.7 / 40.0 |
+| 10,000 | 16.01 / 16.02 / 16.02 | 2.48 / 1.19 / 0.68 | 21.0 / 32.3 / 51.4 |
+| 100,000 | 16.35 / 16.12 / 16.13 | 10.27 / 4.28 / 3.04 | 42.2 / 56.1 / 123.0 |
+
+Retrieval latency did not improve uniformly; for example, 100k/four-request p95
+was 52.0 ms before and 56.1 ms after. The measured improvement is queue-drain time.
+The fixture still does not instrument SQL query counts, all transaction conflicts,
+oldest queue age or real provider tokens/cost. Actual model quality and complete
+cross-source memory coverage are not established by these measurements.
+
+The optimized release build passes (3m40s), producing one 221,356,080-byte native
+ELF executable with the Linux system-library dependencies listed below. No new
+runtime service or language is introduced; installer/clean-machine validation was
+not repeated. After a manual `cargo xtask dev` reload, stdio MCP verified a fictional
+Amber Kettle exchange: source wording and helper attribution were correct, background
+checking finished, personal-detail count stayed four, and waiting/failure counts were
+zero. Both source records were withdrawn through confirmation controls; the search
+became empty, the temporary chat was deleted and the earlier earnings conversation
+restored. MCP screenshot capture returned **Screenshot capture is unavailable on this
+platform renderer**. An OS window capture was inspected instead and kept outside
+the repository; minimum/wide/200% checks passed headlessly.
+
+The native capture also exposed a separate chronology defect: a newly created
+chat appeared under Older with a 2965-week label. The reducer converted message
+sequence numbers into Unix timestamps, the runtime guessed replacement dates,
+and history grouping compared dates against the newest saved conversation.
+The UI now supplies wall time to the pure reducer before user input and runtime
+events; changed messages advance activity time without replacing creation time.
+Navigation does not touch dates, rollback cannot move a thread's date backwards,
+and runtime storage preserves caller dates exactly. History grouping uses the
+current clock. Original evidence continues to use its independent runtime source
+timestamp. Regression coverage includes immediate headless display, older history,
+reply completion, navigation, clock rollback and continued chats after disk reopen.
+This increment passes `cargo xtask ci`: **957 tests, 10 skipped**, including the
+minimum/wide/200% UI checks. The rebuilt native app was manually restarted twice
+and driven through the stdio Development MCP. A fictional "Cobalt lantern date
+check" conversation displayed **Today / now** immediately and after reopening;
+its exact user/helper source records remained available with distinct authorship,
+with zero pending checks and no new personal detail. Both test sources were
+withdrawn through the confirmation controls, the filtered active-source list was
+empty, and the temporary chat was deleted. The earlier conversation was restored.
+MCP screenshot capture still reports unsupported renderer; local OS screenshots
+were visually inspected and kept outside the repository. Broader provenance,
+backfill and evaluation work remains open.
+
+The timestamp increment also builds in release mode (3m 51s on this machine).
+`target/release/sovra` is one 221,362,464-byte native ELF executable, with normal
+X11/keyboard/C-runtime shared libraries and no new service or language runtime.
+Installer packaging and a clean-machine launch were not repeated for this increment.
+
+
+## Attributed conversation admission — verified increment, 2026-11-03
+
+`MemorySourceAdmission` now carries producer identity, immutable version, explicit
+user/helper authorship, provenance, private permission and the original conversation
+and source timestamp. Storage assigns admission time and atomically creates user
+extraction work. New assistant replies use this port, emit `SourceSaved` only after
+persistence and surface storage failures without failing the reply. They create no
+personal-fact extraction job. Saved-source review labels helper replies explicitly.
+Source-version withdrawal cancels work across the whole identity family and blocks
+new versions from reviving withdrawn evidence. Schema 9 preserves existing IDs and
+provenance; legacy family identity is the existing record ID, while missing author,
+permission and admission time stay unknown.
+
+Assistant cross-chat recall remains disabled: dependency-aware withdrawal is still
+needed so a helper's repetition cannot resurrect a removed personal detail. The
+current `ConversationContext` preserves roles, text and speaker but does not carry
+immutable source references; recall is injected at the provider boundary, and tool
+results have separate readers. A safe assistant-recall implementation must track all
+of those dependencies through capture, including working context after reopening,
+rather than merely scan the reply for citation strings. This
+inline admission contract does not yet unify document/artifact readers or every
+team/connected-message producer. `cargo xtask ci` passes: **949 tests passed, 10 skipped**. This includes
+real-engine idempotence/version/withdrawal tests, schema 8→9 migration, actual
+`EXPLAIN FULL` checks for indexed family lookups, disk-reopen chat attribution and
+an explicit runtime storage-failure test. The first migration regression failed
+because the newly defined composite index did not select missing legacy family
+fields; an unconditional, coalescing migration preserves existing values and visits
+legacy rows. A failing runtime regression first showed `LegacyUnknown` for a real
+streamed reply; it now shows `AssistantOutput` after reopening.
+
+After a manual development reload, connected stdio MCP created a fictional Juniper
+Comet reply. Original-record review showed its exact wording and **A reply from a
+helper**. The personal-detail count stayed at four with no new extracted detail.
+Both synthetic source records were withdrawn through the confirmation controls,
+and the filtered browser then showed no records. The temporary chat was deleted
+and the prior earnings conversation restored. Minimum/wide/200% source-browser
+coverage passed headlessly; this increment's native run used the existing window
+and text size. Earlier release and corpus measurements apply to the prior checkpoint,
+not this new admission code. No new performance claim is made.
+
+## Previous checkpoint — 2026-11-03
+
+The earnings recall failure is fixed and verified through the connected Development
+MCP. Edit/removal, older details, multiple concurrent lookups, failure isolation,
+and source-only recall have regressions and live observations below. Full CI passes
+**940 tests, 10 skipped**. The final optimized release build passes (3m51s), producing
+one 221,307,928-byte native executable with the same Linux system-library dependencies
+listed below. No additional application/database runtime is required.
+
+The final synthetic runtime fixture retrieves expected original evidence for
+**576/576 requests** at 1k/10k/100k sources and 1/4/16 concurrency. At 100k, measured
+p95 dispatch-to-provider latency is 44.5 / 59.7 / 138.4 ms. This excludes real model
+inference and does not establish general answer accuracy or a speedup. Failed
+baseline and intermediate reports are preserved alongside the passing result.
+
+**The full accepted all-source/backfill plan remains unfinished.** Common versioned
+admission for files/artifacts/assistant and connected-channel evidence, complete
+permission revocation across those readers, typed assertion/plan/commitment
+classification, optional backfill UI/progress, policy-fence separation, missing
+performance counters and LongMemEval evaluation still require work. The seven-case
+oracle subset is pinned but has not been evaluated. This checkpoint must not be
+reported as completion of that broader plan.
+
+## Reliable everyday recall — active investigation, 2026-11-03
+
+The current objective includes dependable automatic recall across interactions,
+editable/removable knowledge, continuing background learning, bounded parallel
+work, measured latency, and deployment in the existing native binary. The earlier
+browsing completion audit below does not establish those outcomes.
+
+### Observed failure and first regression
+
+Development MCP and a native window capture located the conversation asking
+“how much do I earn?” The reply incorrectly asserted that income was not saved.
+The saved detail uses “monthly income”; meaning-based retrieval was off. Inspection
+shows that private chat, team and attachment turns already wrap the model with
+automatic recall. The failure is not simply an absent memory-tool invocation:
+word matching misses the paraphrase, while the lookup instructions previously
+emphasized historical queries. A new disk-reopen/runtime regression reproduces
+the mismatch with synthetic income, tools disabled and no embedding service.
+Before the fix the actual provider request contained the question itself as a
+source, but omitted the saved detail. This also shows why “nonempty sources” is
+not a sufficient test of successful recall.
+
+The first change supplies up to eight recent current details as a separately
+labeled `background` working set. It shares the 16 KiB evidence cap and has its
+own 4 KiB cap; direct matches get space first. A bounded storage read overlaps
+keyword, optional semantic and original-source retrieval. It adds no model call
+or external service. Evidence still requires exact source grounding, current
+validity and final pause/revision checks. Historical lookups omit this current
+working set. This is not a complete profile or a solution for every old memory
+in a large library. Lookup guidance now requires reformulating missing personal
+context rather than asserting that an empty search proves nothing was saved.
+
+### First verification checkpoint
+
+`cargo xtask ci` passes: **919 tests passed, 9 skipped**. The real runtime/disk
+regression now verifies the differently worded income question, a subsequent
+correction and removal from current background context. Core tests cover source
+grounding, deduplication, byte/item caps, entity scope, and exclusion from historical
+lookups. Related-query and semantic-consent tests now distinguish targeted results
+from independently supplied background; unauthorized, withdrawn, future and
+unsupported evidence remain excluded, and embeddings still require consent.
+
+Through Development MCP, a synthetic note saying a package should go to Reykjavik
+was recalled for “What is the parcel’s destination?” A native correction changed
+it to Tallinn, and a fresh chat used Tallinn. After stopping that version, a
+different question retrieved the older original note. This is a confirmed gap:
+version-specific **Stop using** is not deletion of the whole logical memory.
+Removal across correction history and source-only retrieval remains required.
+The new regression's current-background check does not cover that stronger case.
+
+The user's exact earnings question was also repeated in a fresh live chat. The
+configured response model (`anthropic/claude-haiku-5.5`, OpenRouter) answered from
+the saved income and expenses and displayed three navigable source controls.
+The answer remains in the native chat for review. This is one observed successful
+answer, not a benchmark or a latency result. The initial observation loop timed
+out because navigation moved away from Chat; reinspection found the completed
+conversation. No request was resent. Native OS window captures were inspected;
+MCP screenshot capture remains unsupported by this renderer.
+The three synthetic chats were removed through their native controls. Both test
+note sources and the six generated question/reply records were withdrawn through
+source review (retained as stopped history), and the successful earnings chat was
+left open. Existing personal facts were not edited or removed.
+
+Concurrent workspace changes replaced the watched runner with a manual one-shot
+`cargo xtask dev`. Verification used that rebuilt binary and did not reinstate
+Watchexec. The app remains running with Development mode visible.
+
+### Whole-history removal — implementation checkpoint
+
+The confirmed native failure above now has a distinct `MemoryAction::Remove`
+and backend-neutral `MemoryStore::remove_memory` operation. **Remove from memory**
+is available on current and historical non-stopped details. Its confirmation
+explains that all corrected versions and supporting source records stop appearing
+in recall, while stopped review history, unrelated details and original chats remain.
+The existing per-version withdrawal operation remains available to internal callers.
+
+The adapter follows both directions of immutable correction edges in batches of
+64, with cycle deduplication and no silent depth cutoff. A short transaction checks
+the observed fact revision, withdraws the entire collected family, revokes original
+and repeated source records, and cancels remaining work for those records. A changed
+revision causes bounded fresh traversal/reconciliation; exhaustion reports a retryable
+error. No model call occurs in the transaction. Source records shared with other
+details are suppressed as whole-record search results, while unrelated exact fact
+evidence remains available. This is recall withdrawal, not physical erasure of chats
+or database history, and does not identify arbitrary unlinked future paraphrases.
+
+The regression first failed with the unsupported port, then passed against the
+embedded engine. Coverage includes removal from each of three versions, idempotence,
+current/historical source search, preserving another detail in the same original
+record, repeated sources, remaining leased chunks, known aliases, and an intervening
+manual correction. The concurrency regression also exposed cancelled sibling query
+errors masking the original transaction cause; error selection now preserves that
+cause deterministically. Runtime/provider verification removes an edited synthetic
+income detail, reopens disk storage, and checks both a paraphrase and an exact-word
+question against the actual model request.
+
+Full CI passed this checkpoint: **922 passed, 9 skipped**, including controls at
+640×420, 2560×1440, and 200% text size. After the manual development reload,
+Development MCP saved a synthetic amberglass parcel note, edited Reykjavik to
+Tallinn, opened the explicit removal confirmation, and removed it. Current saved
+details returned from five to the original four. A fresh chat asked for the removed
+destination with exact source words; the configured live model used neither city
+and said it could not establish the answer. It also said additional searches had
+unavailable results, so this establishes the deletion check, not general lookup
+reliability. The synthetic chat was deleted and its question/reply source records
+withdrawn through native controls. Searching original records for the synthetic
+marker then returned no matches. Original personal details were preserved and the
+successful earnings conversation was restored. The renderer still cannot produce
+MCP screenshots; an OS capture of only the Sovra window was inspected instead.
+
+### Independent retrieval failures — implementation checkpoint
+
+A separate runtime regression reproduced a source-search failure discarding
+successful fact retrieval. Each of the four retrieval legs now owns its timeout
+under a shared deadline; an error or timeout retains successful siblings. The
+two-second total budget reserves 400 ms for provenance and 100 ms for mandatory
+final checks. Provenance failure drops ungrounded facts while keeping verified
+original-source results. An explicit notice describes incomplete coverage. Policy,
+revision and pause cancellation still apply to the whole assembled context.
+
+The failing-provider and permanently-held-source regressions now pass through
+`Client` and inspect the actual provider request. The first full CI checkpoint for
+this change passed **923 tests, 9 skipped**; a further regression exercises removal
+while an independent source read is pending. These are functional deadline tests,
+not corpus-scale latency or throughput measurements. The revised UI also clears a
+stale “saved note” message after editing/removal and reports the action performed.
+Final CI with the withdrawal regression passes **924 tests, 9 skipped**
+(`/tmp/sovra-memory-current-ci.log`). Release verification is recorded in the integrated checkpoint below.
+
+Follow-up inspection of the live model's “additional searches” statement found
+that the lookup receipt selector uses only the latest receipt in a request. Multiple
+lookups emitted together therefore do not currently attach separately labeled
+results for every requested query. The regression below reproduces and fixes this
+without retaining evidence in tool responses.
+
+### Multiple lookups per tool round — implementation checkpoint
+
+The real ADK tool-loop regression first failed because the first of two queries
+was absent from the next provider request. The selector now collects all receipts
+from the latest matching tool round, including receipts in separate content records.
+It keeps their original order, validates every query, and ignores previous-turn
+receipts. The per-turn four-call budget is unchanged.
+
+`MemoryReader::search_batch` adds a backend-neutral bounded batch contract. The
+runtime overlaps up to four queries under one two-second deadline, reserves time
+for a final batch-wide policy/revision check, and cancels all siblings on pause or
+withdrawal. Readers without that guarantee decline multi-query requests rather
+than performing unsafe sequential fallback. Successful independent query results
+retain their own availability notices. Evidence stays ephemeral at the provider
+boundary; ordinary tool receipts contain no recalled facts.
+
+Multiple results are presented as separate query/evidence pairs so current and
+historical filters cannot silently merge. They share a 16 KiB serialized payload
+budget, including query labels. Oversized results drop whole records and disclose
+that the selection is incomplete; source quotes are never cut. A single query
+retains the existing top-level evidence arrays and adds its filters to that same
+bounded payload.
+
+Ten focused tests passed, including the real tool loop, payload size and intact
+quotes, historical single-query compatibility, and HTTP/runtime overlap. The held
+runtime test proves two independent queries start before either is released. It
+then completes one and removes the saved detail while the other is held; neither
+result reaches the provider. This is functional concurrency evidence, not a claim
+about corpus-scale speed. The disk-reopen/older-memory test also passes; final full CI verification follows.
+
+### Old details and focused evidence — verification checkpoint
+
+A real embedded-database/runtime regression saves income and payday, adds 32
+unrelated newer details, reopens storage, and asks a paraphrase with no useful
+keyword overlap. The initial request lacks both old details; two model-requested
+lookups recover both with citations. Removal plus a second reopen suppresses the
+income while retaining payday. The HTTP model is scripted, so this verifies
+retrieval and isolation, not natural-language answer quality.
+
+An isolated configured-model evaluation (`synthetic-memory-old-recall-v1`,
+`anthropic/claude-haiku-5.5` through OpenRouter, semantic search off) exercised
+old income/payday, corrected income, and removal with synthetic data only. All
+three answers recovered or withheld the expected amounts. The corrected answer
+initially attached an unrelated inventory citation to payday, then explicitly
+corrected itself. This is a citation defect, despite the correct answer content.
+Observed response times were 5,476 / 5,258 / 6,157 ms under concurrent development
+work; three observations are not latency percentiles or a benchmark. Tokens and
+model cost were not instrumented in this run.
+
+That observation motivated a failing regression: explicit focused searches were
+still carrying unrelated recent background records. Initial automatic context now
+uses `MemoryReader::search`, while tool requests use the bounded focused batch
+contract, including a one-query batch. Focused results omit unrelated background;
+automatic turn context retains the small working set. This reduces distractors but
+does not by itself establish correct citations from every model response.
+
+The post-change repeat recovered the old income/payday, used the corrected income,
+and withheld both removed amounts while preserving payday. Manual review found
+valid citations in all three answers. Its response times were 4,608 / 4,658 /
+4,671 ms. These small stochastic runs do not establish a speedup or a general
+citation-accuracy rate. [Before](evaluations/memory-recall-2026-11-03/before-focused.json)
+and [after](evaluations/memory-recall-2026-11-03/after-focused.json) reports contain
+only synthetic data, exact answers, expected results, settings and review limits.
+Fourteen focused regressions passed, including older-detail recovery after restart,
+withdrawal during overlapping queries, intact bounded quotes, and the shared
+research-board/card integration test.
+
+### Integrated native checkpoint — 2026-11-03
+
+`cargo xtask ci` passed all gates: **937 tests passed, 9 skipped**. This includes
+minimum 640×420, wide 2560×1440 and 200% text-size headless memory controls,
+together with the shared research-board/card integration correction. The app was
+manually rebuilt and relaunched through `cargo xtask dev`; Development mode
+started on and its explicit indicator remained visible.
+
+The connected stdio Development MCP submitted the user's earnings question in a
+fresh native chat. The configured model answered from saved details and displayed
+three source controls. Opening the first control showed the actual supporting
+record. Personal values and the private OS capture are excluded from committed
+reports. MCP screenshot capture is still unavailable in this renderer; the native
+window was captured and inspected through the OS fallback.
+
+A synthetic violetglass parcel note was saved, edited with retained history, and
+removed through the explicit confirmation control. Inspection confirmed the new
+correction/removal notices and a return from five to the original four saved
+details. An initial test input appended to the prefilled edit box; a subsequent
+edit selected/replaced its contents and confirmed the intended value. Whole-history
+removal included this intermediate test version. Personal facts were untouched,
+and the successful earnings conversation was left open. This latest native pass
+covers source navigation and controls; the isolated model report and disk/runtime
+regressions establish the old-detail, correction and post-removal recall checks.
+
+`cargo build --release -p sovra-app` completed successfully in 7m18s. `file` and
+`readelf -d` identify one 221,280,816-byte x86-64 Linux PIE executable with direct
+links to libxcb, libxkbcommon, libxkbcommon-x11, libgcc_s, libm, libc and the system
+loader. The embedded database is part of the executable; no Python/Node or external
+database-server dependency is introduced. This is a release compilation and ELF
+dependency check, not an installer/distribution or clean-machine smoke test. The
+release binary was not launched alongside the existing development GUI.
+
+### Runtime performance fixture
+
+The opt-in `synthetic_runtime_retrieval_measurements` integration test exercises
+`Client`, real embedded disk storage, automatic source retrieval, the ADK provider
+boundary, durable capture receipts, and ordinary background extraction. It uses
+1,000 / 10,000 / 100,000 synthetic admitted sources, 64 requests per size at each
+of 1 / 4 / 16 concurrent requests, and a deterministic zero-cost loopback provider.
+The source-only fixtures intentionally contain no extracted facts. Historical jobs
+are cancelled before measuring; each batch's new extraction jobs finish before the
+next batch begins. A copied completed `source-storage-v1` fixture may supply the
+100k seed, avoiding a second long seed run while preserving its original database.
+
+```sh
+SOVRA_RUNTIME_BENCH_OUTPUT=/tmp/fresh-runtime-report \
+SOVRA_RUNTIME_BENCH_SEED=/tmp/completed-source-storage-fixture \
+cargo nextest run -p sovra-app --run-ignored only synthetic_runtime_retrieval_measurements
+```
+
+Omit `SOVRA_RUNTIME_BENCH_SEED` to create all synthetic databases from scratch.
+Never supply production data. Reports separate dispatch-to-provider latency from
+client-observed capture/completion upper bounds; the former includes runtime
+scheduling and loopback HTTP overhead, and excludes live model inference. The
+fixture reports grounded provider requests, queue counts and extraction calls.
+SQL query counts, conflicts, oldest queue age and actual-provider token/cost
+measurements remain unavailable rather than being reported as zero. This fixture
+does not evaluate semantic retrieval or generated-answer correctness.
+
+The first runtime measurement exposed a source-ranking defect before it could be
+used as a successful-performance result. At both 1k and 10k, only the first three
+of 64 sequential requests received the expected original source, and subsequent
+4/16-concurrency runs received none. `Recall fixturecodeN` also matches the word
+“Recall” in earlier questions. Original-source search ordered by recency before its
+12-row limit, allowing those questions to displace the old answer; the provider
+context's smaller source budget made the problem visible even earlier.
+
+A real-engine regression reproduced this with one old answer and forty newer
+questions. Search now sums BM25 term scores, then breaks ties by time and stable
+ID, preserving scope, temporal, withdrawal and result bounds. The pinned 3.3.4
+planner resolves `search::score` references only from direct bind parameters or
+literals, not `$terms[index]`; source terms therefore use individually bound
+parameters. Pinned-engine regressions cover relevance/withdrawal and `EXPLAIN FULL`
+index use for one and two terms. The revised runtime measurement follows below.
+
+The intermediate summed-BM25 repeat recovered **531/576** expected sources but
+failed its all-evidence assertion. It still missed early sequential queries where
+short questions received stronger length normalization than the longer original
+answer. That is retained in `runtime-bm25-intermediate.json`, not counted as a
+successful benchmark. A second real-engine regression reproduces the miss with
+1,000 originals and five short recent questions.
+
+The final implementation ranks each term separately with BM25 and batches the
+bounded term queries into one adapter request. Core combines them using the same
+pure reciprocal-rank fusion implementation as fact retrieval. Smaller result legs
+win score ties; source versions stay distinct and duplicate hits do not receive
+extra votes. At most eight terms produce twelve rows each, fused to twelve before
+the existing provider byte/item budget. The second regression now preserves the
+expected original inside the actual provider source budget. Seven focused tests
+pass, covering both ranking failures, deterministic fusion, limits, versions,
+withdrawal and the real full-text query plans.
+
+The upstream LongMemEval oracle dataset and official evaluator have also been
+pinned in [a preparation manifest](evaluations/memory-recall-2026-11-03/longmemeval-oracle-manifest.json).
+It selects seven question IDs deterministically across categories, including
+abstention. **No LongMemEval evaluation has run yet.** Oracle evidence sessions
+exclude the full distracting history, so any later result must be labeled as an
+oracle subset and cannot be presented as a LongMemEval-S retrieval score.
+Dataset and protocol: [official repository](https://github.com/xiaowu0162/LongMemEval)
+and [cleaned release](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned).
+
+### Runtime measurement result — 2026-11-03
+
+The final opt-in run passed: **576/576** provider requests contained their expected
+original source, across 64 requests for every corpus/concurrency pair. All 576 new
+inputs received durable capture receipts and completed extraction; every measured
+stage ended with zero waiting/working jobs. This is exact-source retrieval with a
+local scripted provider, not a generated-answer quality score. Full CI with the
+fusion changes passes **940 tests, 10 skipped**.
+
+Dispatch-to-provider **p50 / p95 milliseconds** (64 samples per cell):
+
+| Initial sources | 1 concurrent | 4 concurrent | 16 concurrent |
+| --- | --- | --- | --- |
+| 1,000 | 14.4 / 18.5 | 29.2 / 36.2 | 45.5 / 54.8 |
+| 10,000 | 17.1 / 20.2 | 27.7 / 34.7 | 46.3 / 54.3 |
+| 100,000 | 39.5 / 44.5 | 40.0 / 59.7 | 71.7 / 138.4 |
+
+This includes runtime scheduling, retrieval and loopback HTTP delivery. It excludes
+live-model inference. The machine was an AMD Ryzen 7 3700X (8 cores/16 threads),
+about 62,195 MiB RAM, using the unoptimized test profile and the existing native
+app in the background. This agent launched no build/CI during the final measured
+stages. Earlier runs overlapped development work, so their timings are not a
+controlled speedup comparison. Client-observed capture-ack p95 at 100k was 1.7 / 5.9 /
+72.7 ms; these are upper bounds because queued events can wait behind another
+request while the fixture observes them.
+
+[Failed recency baseline](evaluations/memory-recall-2026-11-03/runtime-before-ranking.json),
+[failed summed-BM25 intermediate](evaluations/memory-recall-2026-11-03/runtime-bm25-intermediate.json),
+and [final per-term fusion report](evaluations/memory-recall-2026-11-03/runtime-after-fusion.json)
+retain individual latency samples, queue counts, scope, environment and missing
+metrics. Corpus contents are synthetic; the 100k fixture was copied from the
+previous isolated storage run, whose original database was preserved.
+
+With instantaneous fixture extraction, each 64-input phase still takes roughly
+16 seconds to drain: the worker currently claims one job per 250 ms tick. Four
+longer model calls can overlap, but this scheduling interval limits empty-work
+throughput. SQL query counts, transaction-conflict counts, oldest queue age and
+live-provider token/cost instrumentation remain outstanding. No “blazing fast”
+claim is inferred from these bounded source-only measurements.
+
+### Final source-only native check
+
+After rebuilding the final per-term fusion version through `cargo xtask dev`,
+Development MCP submitted a fictional copperlark capsule labeled “marigold
+waypoint.” Knowledge showed the original four personal details, zero pending or
+failed jobs, and “No new detail was saved.” In a **fresh chat**, the configured
+model recovered the label, explicitly kept its fictional attribution, and supplied
+an original-source citation rather than a fact citation. Opening the citation
+showed the exact source wording and completed processing state. This confirms a
+live case where evidence omitted by extraction remains available independently.
+
+All four synthetic question/reply/source records were withdrawn with their native
+confirmation controls, both synthetic chats were deleted, and source search for
+the marker returned no records. The earnings conversation was restored. Personal
+facts were not changed. The OS capture remains private and is not included in the
+repository; MCP renderer screenshot support remains unavailable.
+
+### Research informing the remaining work
+
+Primary sources read on 2026-11-03; dates below identify the research versions,
+not an assertion that vendor scores transfer to Sovra:
+
+- [LongMemEval, ICLR 2025, revision 2](https://arxiv.org/abs/2410.10813v2)
+  separates indexing, retrieval and reading, and evaluates updates, temporal
+  reasoning, multiple sessions and abstention. Evaluate those stages separately.
+- [Anthropic Contextual Retrieval, September 2024](https://www.anthropic.com/research/contextual-retrieval)
+  combines contextualized chunks with lexical and semantic retrieval. Preserve
+  original passages and their context; do not rely only on extracted facts.
+- [Anthropic context engineering, September 2025](https://www.anthropic.com/research/effective-context-engineering-for-ai-agents)
+  describes combining supplied context with just-in-time discovery. A compact
+  working set complements targeted search; unlimited prompt stuffing is not the goal.
+- [Letta memory blocks](https://docs.letta.com/v1-sdk/memory/memory-blocks)
+  documents always-visible bounded context alongside archival retrieval. Sovra's
+  initial recent working set is simpler than curated persistent memory blocks.
+- [Hindsight, December 2025](https://arxiv.org/html/2512.12818v1)
+  combines parallel lexical, semantic, graph and temporal retrieval, fusion,
+  reranking and a context budget. Its world/experience/opinion distinctions argue
+  for preserving attribution rather than turning assistant output into user facts.
+- [SimpleMem, January 2026](https://arxiv.org/html/2601.02553v1)
+  describes context-independent memory units and adaptive query-aware retrieval.
+  Query reformulation and sufficiency checks need tests beyond exact-word matching.
+- [Storage Is Not Memory, May 2026 technical report](https://arxiv.org/abs/2605.04897)
+  emphasizes verbatim events and retrieval-time selection. Preserve evidence
+  omitted by extraction; evaluate end-to-end answers as well as retrieval hits.
+- [DolphinBench, September 2026 revision 2](https://arxiv.org/abs/2609.24971v2)
+  evaluates implicit memory-dependent tasks and reports cost and latency alongside
+  correctness. Tests must include requests that never explicitly say “remember.”
+- [When Retrieval Is Not Enough, October 2026](https://arxiv.org/abs/2610.36308)
+  finds stale competing statements harmful even when the newest statement is
+  retrieved. Current-answer tests must inspect obsolete evidence and generation,
+  not merely assert that the newest fact occurs somewhere in the prompt.
+- [Tokio cancellation guidance](https://tokio.rs/tokio/tutorial/select)
+  documents cancellation through dropping futures. Runtime work must remain
+  bounded and owned; independent reads should overlap without detached tasks.
+
+### Acceptance still to establish
+
+| Requirement | Current evidence / remaining check |
+| --- | --- |
+| Automatic recall in every permitted private turn | Wiring exists for chat, team and attachments; prove paraphrases, implicit follow-ups and old details beyond the working-set limit. Respect remembering-off and connected-sender scope. |
+| Edit/remove individual knowledge | Existing correction and stop-using transactions/UI exist. Audit discoverability, correction ancestry, original-source retrieval and re-learning after removal; clarify retained history versus permanent erasure. |
+| Continuous learning across interactions | Durable user-message capture/chunking exists. Verify failures/retries, corrections, source-only evidence, relevant assistant output with separate attribution, and restart behavior. |
+| Fast and parallel | Four extraction slots and overlapping retrieval already exist. Measure the revised runtime path at 1k/10k/100k sources and 1/4/16 requests, retain fast successful legs when another fails, avoid repeated model work, and inspect real query plans. No speedup claimed yet. |
+| Answer correctness | Synthetic HTTP regressions inspect provider inputs; run live-model positive/negative/update/delete checks and fixed versioned fixtures. A green transport test is not an answer-quality score. |
+| Single binary | Final optimized release build and ELF dependency inspection pass: one native executable with embedded storage and Linux system libraries. Installer/clean-machine verification was not run. |
+| Native UI and integration | Run full CI and Development MCP, including editing/removal and responsive controls; retain explicit live-verification limitations. |
+
+## Memory browsing experience — implementation and local verification, 2026-11-02
+
+The active design objective is an understandable, powerful workspace for reading
+stored knowledge, checking its evidence and exploring its connections. The first
+implementation adds readable dates, subject filters, explicit connection reasons,
+and a return trail to the live saved-memory browser. Connections come from real
+stored subject, source and correction links; no model invents edges for display.
+Each neighborhood is bounded to 24 items, labels incomplete coverage, and lets
+people open adjacent versions or filter by an exact subject. Related current
+details exclude stopped versions; explicit correction links retain review history.
+The overview counts stored subject links across all current facts, independently
+of the visible page, and shows the first 12 by count then name. It labels the
+selection when more exist and excludes the generic `user` label. Selecting a
+subject applies an exact filter before pagination. Recent activity opens the
+retained original message, including checks that found no new detail. Long
+sources show a Unicode-safe 600-character excerpt with an explicit full-text
+control; the stored evidence is unchanged.
+
+The design uses these researched principles:
+
+- [NN/G: recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/): expose recognizable subject labels and readable statements so people need not remember search syntax or internal IDs.
+- [NN/G: progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/): start with readable cards, then reveal evidence, connections and correction controls in the detail reader.
+- [Li et al., Knowledge Graphs in Practice, version 4](https://arxiv.org/abs/2304.01311v4): the study identifies challenges with generic node-link diagrams for consumers and discusses knowledge cards, temporal views and discovery. Sovra uses labeled, navigable connection cards; a shared subject is explicitly distinguished from an asserted relationship.
+
+These are design decisions, not usability-study results for Sovra. The browsing
+implementation and local verification audit are complete for the knowledge
+currently retained by the app; coverage and live-renderer limits are recorded
+below. This does not complete the separate all-source capture/backfill plan.
+The recent activity list remains a
+bounded receipt view; the original-record library provides complete paged access
+to the source episodes currently retained by memory.
+
+### Supporting records for repeated memories — 2026-11-02
+
+**Browse supporting records** on a saved-memory detail scopes the original-record
+library to that exact fact. Search, paging, source inspection and the stopped
+record filter preserve that scope. The selected statement stays visible. Returning
+requests a fresh detail from storage and restores its exploration trail, including
+the route back to a conversation when opened from a reply citation.
+
+Provenance has two existing forms: `derived_from` records the original source,
+while durable processing jobs retain fact IDs reused for later statements. The
+browser reads both forms without adding edges, changing fact IDs, or inventing
+new authorship. Per-record linked-detail counts deduplicate their union, and the
+reverse source-to-details query uses both. This fixes repeated records previously
+appearing to have no linked details. Stopped evidence remains explicitly opt-in
+for local owner review; model recall policy is unchanged.
+
+Verification: `cargo xtask ci` passed every gate: **916 tests passed, 9 skipped**.
+The real embedded-store regression first reproduced the unrelated-record leak,
+then verified exact fact filtering, equal-time paging, repeated-source counts,
+reverse links, withdrawal and retained history. A runtime test reopens the disk
+database before reading the original and repeated supporting statements from
+different conversations. Headless native controls preserve the search scope,
+return trail and original chat-citation route in both themes at 640×420,
+2560×1440 and 200% text size.
+
+Development MCP on the existing watcher verified opening supporting records,
+reading original text, returning to the detail, and opening the source's two
+linked details. Native OS captures of the supporting library and overview were
+inspected. The live selected detail had one supporting record; multiple repeated
+records are covered by the real-store/runtime tests, not claimed as a live-data
+check. The current-only, unfiltered overview was restored without changing stored
+knowledge. The Development mode indicator and watcher remain active. MCP screenshot
+capture is still unsupported by this renderer; minimum/wide/200% coverage is
+headless, not live pixel inspection at each size.
+
+### Browsing completion audit
+
+The implemented paths cover reading current details and retained history; literal
+search and a complete paged subject directory; labeled source, subject and
+correction connections; full original records even with no extracted detail;
+all supporting records retained for repeated statements; reviewed file
+relationships and their saved source passages; and return navigation. Existing
+add/correct/stop controls, confirmation and draft preservation, capture status,
+retry, consent and folder revocation retain regression coverage in the full gate.
+Empty, loading, failure and partial-coverage states remain explicit. Skills and
+README describe the entry points in ordinary language.
+
+This is an implementation and local verification result, not evidence from a
+beginner usability study or a scored model-quality evaluation. The live file
+workspace had no reviewed relationships; populated browsing and revocation were
+verified through real embedded storage, runtime events and headless native
+controls. Connection neighborhoods remain bounded selections, while subject and
+source libraries page through their retained records. There is no claim that
+the app has already captured every available document, artifact or assistant
+statement; the separate plan's remaining work is listed below.
+
+### Browsing reviewed file relationships — 2026-11-02
+
+**Knowledge → Files → Browse saved relationships** exposes the already retained
+file-knowledge graph through native controls, without invoking a model. Readable
+statements lead to connected subjects, recording dates, any established world
+validity, and all relationship/endpoint source passages. Following a subject uses
+its exact stored ID. Inference, approval, source freshness and truth remain
+distinct; explicit filters include outdated source versions or replaced claims.
+Unknown world dates and origins remain unknown.
+
+The browser sends typed `BrowseKnowledge` and `KnowledgeEvidence` commands through
+the runtime's existing bounded reader tasks. Correlated results preserve errors
+and reject old replies. Removing folder access or changing inclusion options
+invalidates both the page and any pending evidence read. Evidence retrieval uses
+the file adapter's existing saved-version and permanent grant-revocation checks;
+no source files or graph records are changed by browsing.
+
+One-hop graph queries now return an exclusive recording-time/ID cursor. It also
+advances past a bounded batch of filtered records, so older matching evidence is
+not stranded behind the traversal inspection limit. Multi-hop queries retain
+their bounded traversal behavior and reject pagination cursors. A bounded return
+trail restores earlier query views; it does not promise a snapshot across edits.
+Empty results link to the relevant Skills card and its reviewable example. This
+navigation does not send a message or run a model, and an unfinished custom-skill
+edit remains open.
+
+Verification: `cargo xtask ci` passed with 914 tests passed and 9 skipped. Real
+file-store regressions cover equal-timestamp paging, insertion between pages,
+and continuation after 1,000 temporally excluded relationships. The real runtime
+reopens the disk store, returns the original cited text, and rejects that text
+after folder removal. Reducer tests reject stale pages, mismatched evidence,
+closed readers and replies arriving after invalidation. Native tests exercise
+search, paging, subject navigation, retry, replaced/outdated labels, the return
+trail and Skills navigation in both themes at minimum/wide/200% layouts. The
+existing Add folders control remains visible on entry at 200% text.
+
+Development MCP verified the entry point, Enter-to-search, empty results,
+outdated-source selection, and the exact helper card on the existing watcher.
+An OS capture of the native browser was inspected. The live workspace had no
+saved file relationships, so populated relationship/evidence navigation is
+verified by the real-store/runtime and headless tests, not claimed as a live
+populated-data check. MCP screenshot capture remains unsupported on this renderer.
+No user knowledge, files or model settings were changed by these live checks.
+
+The complete **Browse all subjects** directory now pages alphabetically through
+current saved labels, with literal case-insensitive search and per-subject counts.
+It uses an exclusive name cursor rather than offsets; inserting an earlier name
+does not duplicate later pages. Stopped and superseded facts do not contribute.
+No historical processing or model calls are needed to browse. The generic `user`
+label is omitted; untagged details remain available in the main saved list.
+The core port, review commands/results, runtime and embedded adapter own the data
+path; UI input only selects a query. Errors stay distinct from empty results.
+Explicit navigation resets the page's scroll position after its accepted response;
+background refresh and stale responses do not move the reader.
+
+### Original-record library — 2026-11-02
+
+**Browse original records** pages by descending source time and ID and searches
+literal original wording before limiting results. Each card contains a bounded
+600-character Unicode excerpt. Opening a record loads its full original text and
+current provenance, processing and withdrawal metadata. It can open all linked
+saved details, including retained history, without relying on successful model
+extraction. Processing states are loaded once for each page as a bounded ID batch;
+`EXPLAIN FULL` on pinned SurrealDB 3.3.4 verifies `memory_job_episode` for that read.
+This is an additive index, reapplied with the existing schema contract.
+
+This is explicit local review of retained records, separate from model recall.
+Paused memory and stopped records can still be inspected by their owner; recall
+continues to enforce its own permission/policy checks. The default list excludes
+stopped sources. A confirmed withdrawal returns to the current source query;
+**Include stopped records** makes the retained record reviewable with its stopped
+label and disabled repeat-withdrawal action. It never grants recall access.
+
+Unknown legacy origin and sharing permissions remain explicitly unknown. New
+explicit user notes and corrections record their user origin and private scope
+inside their existing atomic write. No model calls, historical extraction, or
+file/artifact ingestion is added by this browser.
+
+### Original-record verification — 2026-11-02
+
+`cargo xtask ci` passed: 907 tests passed and 9 skipped. Embedded-store tests
+cover literal search beyond the displayed excerpt, same-time pagination,
+withdrawal and pause, explicit unknown legacy metadata, source-to-detail links,
+and the job lookup query plan. The runtime regression reopens disk storage and
+reviews original evidence with zero extracted details. Native headless tests
+cover both themes at 640×420, 2560×1440 and 200% text, including search, paging,
+linked history, withdrawal confirmation and cancellation, and return navigation.
+
+The source reader omits the overview header, combines related metadata, and
+wraps its actions. Citation tests now reveal controls inside the actual scroll
+pane, avoiding clicks obscured by the fixed header. The full gate also exposed a
+file-index test that confused elapsed time below one second with equal timestamp
+seconds; its fixture now fixes the saved observation timestamp explicitly and
+checks same-size edits with a preserved modification timestamp.
+
+Development MCP on the existing watcher verified original-wording search,
+reading evidence with no linked details, following a record to its saved details,
+and returning to the overview. A native OS window capture of the compact reader
+was inspected, including explicit unknown metadata for a retained helper reply.
+The Development mode indicator remained visible. No stored records were changed.
+The MCP screenshot operation remains unavailable on this renderer; minimum,
+wide and 200% coverage is headless rather than live pixel verification at each
+size. The watcher remains running.
+
+### Subject directory verification — 2026-11-02
+
+`cargo xtask ci` passed with 900 tests passed and 9 skipped after the directory
+and scroll-preservation changes.
+
+The real embedded-engine regression covers filtered alphabetical paging, insertion
+before a cursor, Unicode labels, empty search results, and exclusion of stopped or
+superseded details. Runtime events return the same directory after closing and
+reopening the disk-backed database. Native headless tests cover both themes at
+640×420, 2560×1440, and 640×420 with 200% text: long names, paging, Enter-to-search,
+selection, empty/error states, retry and return navigation. A background-save
+regression verifies that the scrolled reader keeps its position after refresh.
+
+Development MCP on the existing watcher verified the directory, an Enter-submitted
+no-match search, clearing back to all subjects, selecting a subject and opening its
+filtered saved details. The unfiltered overview was restored without changing
+stored knowledge. An OS capture of the native directory was inspected; the
+previously recorded MCP screenshot-renderer limitation still applies.
+
+### Verified browsing checkpoint — 2026-11-02
+
+`cargo xtask ci` passed after the reading typography and action-layout changes:
+897 passed, 9 skipped. Coverage includes the real embedded subject counts,
+source/correction/subject links, runtime review events, and native headless
+navigation at 640×420, 2560×1440 and 200% text size in both themes. Long sources,
+long subject names, exact filters, empty results, return trails, and a source
+whose extraction found no new details are exercised through real controls.
+
+Development MCP on the existing watcher confirmed subject filtering, opening a
+linked detail, retracing to the previous detail, reading an original message
+from an empty extraction result, and returning to saved knowledge. These live
+checks were read-only and left the unfiltered overview restored. Native window
+captures through the OS were inspected for the overview and detail reader.
+`sovra_screenshot` still returns “Screenshot capture is unavailable on this
+platform renderer”; minimum/wide/200% coverage is headless, not a claim of live
+pixel inspection at all sizes. The watcher remains running.
+
+## Source-backed parallel capture — implementation in progress (2026-11-02)
+
+Private user messages admitted through desktop chat, team prompts and the existing
+private connected-messaging route now retain searchable original evidence separately
+from extracted facts. Admission commits the episode and pending job atomically.
+The 256-job admission ceiling is removed; the 64-input runtime buffer uses
+backpressure and emits a saved receipt only after the storage write succeeds.
+Disk/write failures remain explicit failures, never successful capture receipts.
+
+Schema 8 preserves existing episode/fact IDs and correction provenance. Existing
+jobs gain a cursor and conversation identity. Existing episodes gain
+`legacy_unknown` origin and `unknown` permission metadata: migration does not
+invent consent or authorship. Newly admitted user evidence is explicitly private,
+version 1. The original-evidence reader filters scope, origin, time, remembering
+policy and withdrawal before returning bounded, exact UTF-8 spans. Source citations
+open the original message independently of fact extraction. They are historical
+statements, not automatically current truth; answer guidance preserves that distinction.
+
+Extraction uses process-wide permits (four by default; startup configuration
+`SOVRA_MEMORY_EXTRACTION_SLOTS`, clamped to 1–16). Independent source chunks overlap;
+only the earliest unfinished source in a conversation is claimable. Chunks are
+contiguous and at most 2048 bytes, prefer sentence boundaries, and retain their
+byte offset. Each committed chunk advances the cursor transactionally; failure
+retries that chunk. A model call returns at most 32 grounded candidates per chunk.
+This removes the previous eight-candidate message limit, but is not a guarantee
+that a model finds every fact in an arbitrarily dense chunk. Original evidence
+remains searchable regardless of extraction coverage.
+
+Extraction receives at most three bounded preceding-context items and no live fact
+IDs. A process-wide consolidation lock serializes fresh fact lookup and reconciliation.
+Reconciliation may change only candidate references, not the extracted claims or
+quotes. A separate factual revision participates in the commit transaction and
+changes on manual edits, withdrawal and fact writes. Stale reconciliation retries
+three times, then returns to persisted retry/failure handling. No model call runs
+inside a database transaction. Both lexical and optional semantic retrieval start
+together under the same deadline; primary provenance is loaded in a batch.
+
+Grounded candidates and their extractor are persisted against the current lease
+before consolidation. Reclaiming an interrupted chunk reuses those candidates;
+advancing the cursor clears the staging record. Active chat, file and team turns
+defer new background model calls. Existing provider calls are not preempted and
+keep their timeout. Preceding context uses admitted, unrevoked sources only.
+Original-source review has a confirmed **Stop using this message** action that
+retains review history while revoking recall and cancelling pending processing.
+The real-engine source-search `EXPLAIN FULL` regression verifies use of the
+`episode_text` full-text index on pinned SurrealDB 3.3.4.
+
+The existing `meta:remembering.revision` write fence remains deliberately in place.
+Inspection of pinned SurrealKV shows that ordinary reads do not participate in
+commit-time conflict validation (`get_for_update` reads do). Removing that fence
+without an equivalent policy lock could let admission race a pause. Separating
+queue transactions from this fence is still pending verified engine support.
+
+Outstanding parts of the accepted plan: a common admission envelope for file and
+artifact versions and assistant/team output; permission revocation across those
+readers; typed assertion/plan/commitment distinctions; optional
+reviewable historical backfill; source-edit UI; queue query-plan measurements;
+full runtime/model benchmarks and versioned LongMemEval comparisons. These changes
+must not be treated as completion of that larger plan. No production data is used
+for benchmarks, and no historical backfill starts automatically.
+
+### Storage measurements and verification — 2026-11-02
+
+The isolated `source_pipeline_measurements` fixture completed 100,000 synthetic
+sources on embedded SurrealDB 3.3.4 / SurrealKV. Raw results are in
+[`storage.json`](evaluations/memory-sources-2026-11-02/storage.json). It used the
+working tree's schema-7 source admission/search implementation, before schema 8
+added extraction staging; no model, embedding service or evaluator was called
+(zero model tokens/cost). Linux, Ryzen 7 3700X, 16 logical CPUs, repository debug
+test profile with optimized dependencies; the watcher and builds shared the host.
+These are observations from one run, not an isolated hardware comparison.
+
+| Stored sources | Newly captured | Capture seconds | New sources/second | Retrieval p50/p95 ms, 1 request | 4 concurrent | 16 concurrent |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1,000 | 1,000 | 1.264 | 791 | 1.64 / 1.73 | 3.09 / 3.92 | 9.77 / 12.18 |
+| 10,000 | 9,000 | 31.477 | 286 | 4.78 / 40.05 | 13.43 / 14.35 | 55.05 / 58.08 |
+| 100,000 | 90,000 | 2,358.348 | 38 | 35.54 / 38.81 | 136.76 / 393.12 | 493.62 / 567.20 |
+
+Capture was sequential. Each retrieval concurrency used four batches (4/16/64
+requests), with one source query per request. All exact-code lookups found the
+omitted evidence, despite zero extracted facts. The fact-only score of zero is a
+mechanical empty-fact fixture, not a baseline model-quality evaluation. There were
+no capture/query errors. Queue age, conflict counts, concurrent capture throughput,
+token usage under real extraction, answer correctness, abstention and LongMemEval
+remain unmeasured. Capture slows substantially with growth; no speedup is claimed.
+
+The final full CI run passed 874 tests, with nine opt-in tests skipped, including
+minimum/wide/200% source navigation and withdrawal controls in both themes.
+Real-runtime/disk regressions cover source-only recall after reopen, four active
+leases plus a waiting fifth, responsive Ping, staged extraction recovery, manual
+correction races, pause, and withdrawal. A live-check regression also
+covers withdrawing failed sources without reviving them through Retry.
+
+Through Development MCP on the existing watcher, the visible Development mode
+indicator was confirmed, a synthetic Cedar-code message was saved, a separate
+conversation produced original-source citation controls, and opening the first
+control showed the exact earlier message after a watcher restart. Confirmed
+**Stop using this message** returned its completion notice. The selected response
+model reported `anthropic/claude-haiku-5.5` on OpenRouter. This is a navigation and
+storage check, not a scored answer-quality result. `sovra_screenshot` returned
+**Screenshot capture is unavailable on this platform renderer.** Pixel-level live
+verification is therefore unavailable; the headless layout coverage passed.
+Both synthetic sources were withdrawn, the two test conversations were removed
+through their native controls, and the UI was returned to a new chat. The original
+two saved details and three attention items remained unchanged. The watcher and
+Development mode remain running.
+
+
 Latest context audit checked 2026-11-01; earlier research checkpoints are dated below.
 The seven implementation and local verification steps
 below are complete in the working tree, including the file index, file knowledge,

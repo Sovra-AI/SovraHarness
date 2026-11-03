@@ -413,8 +413,16 @@ impl GraphRelation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphCursor {
+    pub recorded_at: u64,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GraphQuery {
+    /// Exclusive boundary for one-hop browsing, ordered by recording time then ID.
+    pub before: Option<GraphCursor>,
     pub roots: Vec<String>,
     pub text: Option<String>,
     pub entity_id: Option<String>,
@@ -430,6 +438,7 @@ pub struct GraphQuery {
 impl Default for GraphQuery {
     fn default() -> Self {
         Self {
+            before: None,
             roots: vec![],
             text: None,
             entity_id: None,
@@ -446,6 +455,15 @@ impl Default for GraphQuery {
 
 impl GraphQuery {
     pub fn validate(&self) -> Result<(), IndexError> {
+        if let Some(cursor) = &self.before {
+            calendar_time(cursor.recorded_at)?;
+            bounded_text(&cursor.id, 120)?;
+            if self.hops != 1 {
+                return Err(IndexError(
+                    "Page one level of relationships at a time.".into(),
+                ));
+            }
+        }
         for value in [self.recorded_at, self.valid_at].into_iter().flatten() {
             calendar_time(value)?;
         }
@@ -483,6 +501,9 @@ pub struct GraphPage {
     pub relations: Vec<GraphRelation>,
     pub sources: Vec<GraphSource>,
     pub truncated: bool,
+    /// Continue one-hop browsing, including past batches containing only filtered records.
+    #[serde(default)]
+    pub next: Option<GraphCursor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -26,7 +26,12 @@ pub(crate) fn render_onboarding_bar(
     if let Some(step) = state.tour_step {
         return Some(render_tour_coach_bar(step, narrow, cx).into_any_element());
     }
-    if narrow || matches!(state.active_tab, NavTab::Models | NavTab::Settings) {
+    if narrow
+        || matches!(
+            state.active_tab,
+            NavTab::Models | NavTab::Settings | NavTab::Connections
+        )
+    {
         // On minimum 640x420 windows, keep vertical space unobstructed unless the user
         // explicitly opens the interactive tour.
         return None;

@@ -111,3 +111,85 @@ async fn disk_growth_measurements() {
     )
     .unwrap();
 }
+
+#[tokio::test]
+#[ignore = "isolated 100000-source storage benchmark; set SOVRA_SOURCE_BENCH_OUTPUT"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "opt-in fixture reads its report destination once"
+)]
+async fn source_pipeline_measurements() {
+    let output = std::path::PathBuf::from(
+        std::env::var("SOVRA_SOURCE_BENCH_OUTPUT").expect("new output directory"),
+    );
+    assert!(!output.exists());
+    std::fs::create_dir_all(&output).unwrap();
+    let store = SurrealStore::open(StoreConfig::on_disk(output.join("database")))
+        .await
+        .unwrap();
+    let mut report = serde_json::json!({"suite":"source-storage-v1","engine":"SurrealDB 3.3.4 / SurrealKV",
+        "fixture":"synthetic unique rehearsal codes","model":null,"evaluator":null,
+        "model_calls":0,"tokens":0,"model_cost_usd":0,"scope":"storage only; excludes model and runtime latency",
+        "capture_concurrency":1,"capture_errors":0,"query_errors":0,"stages":[],"status":"running"});
+    let mut inserted = 0;
+    for size in [1_000, 10_000, 100_000] {
+        let capture = Instant::now();
+        let count = size - inserted;
+        while inserted < size {
+            let mut input = memory_input(&format!("synthetic-{inserted}"), "one");
+            input.episode.content = format!("My rehearsal code is fixturecode{inserted}.");
+            store.enqueue_memory(input).await.unwrap();
+            inserted += 1;
+        }
+        let capture_micros = capture.elapsed().as_micros();
+        let mut stages = Vec::new();
+        for concurrency in [1, 4, 16] {
+            let mut latencies = Vec::new();
+            for batch in 0..4 {
+                let mut tasks = tokio::task::JoinSet::new();
+                for request in 0..concurrency {
+                    let store = store.clone();
+                    tasks.spawn(async move {
+                        let query = sovra_core::MemorySearch {
+                            text: format!("fixturecode{}", (batch * concurrency + request) % size),
+                            ..Default::default()
+                        };
+                        let started = Instant::now();
+                        let sources = store
+                            .search_memory_sources(query, Timestamp(i64::MAX))
+                            .await
+                            .unwrap();
+                        assert_eq!(sources.len(), 1);
+                        started.elapsed().as_micros()
+                    });
+                }
+                while let Some(result) = tasks.join_next().await {
+                    latencies.push(result.unwrap());
+                }
+            }
+            latencies.sort_unstable();
+            stages.push(serde_json::json!({"concurrency":concurrency,"requests":latencies.len(),
+                "source_query_count":latencies.len(),"retrieval_p50_us":latencies[latencies.len()/2],
+                "retrieval_p95_us":latencies[(latencies.len()*95/100).min(latencies.len()-1)],
+                "omitted_evidence_recall":1.0,"fact_only_recall_without_extraction":0.0,
+                "latencies_us":latencies}));
+        }
+        report["stages"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+            "sources":size,"new_sources":count,"capture_us":capture_micros,
+            "pending_sources":size,"extracted_facts":0,"retrieval":stages}));
+        std::fs::write(
+            output.join("report.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
+    report["status"] = serde_json::json!("complete");
+    std::fs::write(
+        output.join("report.json"),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
+}

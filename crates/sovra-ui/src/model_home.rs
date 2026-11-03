@@ -74,7 +74,24 @@ fn choice_name(id: impl Into<gpui_kit::ElementId>, name: String, cx: &App) -> im
 
 impl ModelsView {
     pub(crate) fn open_selected_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let connection = self
+        if self.prepare_selected_connection(window, cx) {
+            self.setup_flow = true;
+            cx.emit(crate::models_view::OpenConnections {
+                kind: self.open_kind,
+                keep_editor: true,
+            });
+        } else {
+            self.open_model_home(cx);
+        }
+    }
+
+    /// Opens the editor for the AI that is already chosen, without leaving the view.
+    pub(crate) fn prepare_selected_connection(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(connection) = self
             .state
             .preferences
             .active
@@ -85,20 +102,38 @@ impl ModelsView {
                     .iter()
                     .find(|connection| connection.id == key.connection_id)
             })
-            .cloned();
-        if let Some(connection) = connection {
-            self.home_open = false;
-            self.settings_open = true;
-            self.open_connection(Some(connection), window, cx);
-        } else {
-            self.open_model_home(cx);
+            .cloned()
+        else {
+            return false;
+        };
+        let kind = match connection.kind {
+            sovra_core::models::ProviderKind::OpenRouter => sovra_core::CatalogueKind::OnlineAi,
+            sovra_core::models::ProviderKind::Ollama => sovra_core::CatalogueKind::LocalAi,
+            sovra_core::models::ProviderKind::OpenAiCompatible
+            | sovra_core::models::ProviderKind::Anthropic => {
+                sovra_core::CatalogueKind::CompatibleService
+            }
+        };
+        self.connections_page = true;
+        self.settings_open = false;
+        self.home_open = false;
+        self.open_kind = Some(kind);
+        if kind == sovra_core::CatalogueKind::LocalAi {
+            self.connection_form = None;
+            self.form_subscriptions.clear();
+            cx.notify();
+            return true;
         }
+        self.open_connection(Some(connection), window, cx);
+        true
     }
 
     pub(crate) fn open_model_home(&mut self, cx: &mut Context<Self>) {
         self.home_open = true;
         self.choosing_purpose = None;
         self.settings_open = false;
+        self.connections_page = false;
+        self.open_kind = None;
         self.connections_open = false;
         self.connection_form = None;
         self.manual_form = None;
@@ -649,8 +684,18 @@ impl ModelsView {
                                 cx,
                             )
                             .on_click(cx.listener(|view, _, window, cx| {
-                                view.open_openrouter_key_editor(window, cx);
                                 view.setup_flow = true;
+                                view.open_catalogue_kind(
+                                    sovra_core::CatalogueKind::OnlineAi,
+                                    window,
+                                    cx,
+                                );
+                                // The shell moves to Connections after this click.
+                                // The editor is already open, so it must stay.
+                                cx.emit(crate::models_view::OpenConnections {
+                                    kind: Some(sovra_core::CatalogueKind::OnlineAi),
+                                    keep_editor: true,
+                                });
                             })),
                         )
                         .child(
@@ -785,7 +830,15 @@ impl ModelsView {
                                 design::button("models-home-local", "Use Ollama", cx)
                                     .ghost()
                                     .on_click(cx.listener(|view, _, window, cx| {
-                                        view.open_ollama_setup(window, cx);
+                                        view.open_catalogue_kind(
+                                            sovra_core::CatalogueKind::LocalAi,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.emit(crate::models_view::OpenConnections {
+                                            kind: Some(sovra_core::CatalogueKind::LocalAi),
+                                            keep_editor: true,
+                                        });
                                     })),
                             )
                             .child(
@@ -796,7 +849,15 @@ impl ModelsView {
                                 )
                                 .ghost()
                                 .on_click(cx.listener(|view, _, window, cx| {
-                                    view.open_openai_compatible_editor(window, cx);
+                                    view.open_catalogue_kind(
+                                        sovra_core::CatalogueKind::CompatibleService,
+                                        window,
+                                        cx,
+                                    );
+                                    cx.emit(crate::models_view::OpenConnections {
+                                        kind: Some(sovra_core::CatalogueKind::CompatibleService),
+                                        keep_editor: true,
+                                    });
                                 })),
                             ),
                     ),

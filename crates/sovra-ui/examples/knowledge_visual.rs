@@ -33,6 +33,7 @@ fn detail() -> MemoryDetail {
         occurred_at: Timestamp(1_798_718_400_000),
     };
     MemoryDetail {
+        neighborhood: sovra_core::MemoryNeighborhood::default(),
         fact: Fact {
             id: FactId("fact:synthetic-tea".into()),
             content: "Synthetic example: I prefer jasmine tea with breakfast.".into(),
@@ -61,12 +62,28 @@ fn respond(
                     facts: vec![detail().fact],
                     next: None,
                     overview: None,
+                    chats: Vec::new(),
                 }),
+                MemoryAction::ListSources(_) => {
+                    MemoryReviewResult::Sources(sovra_core::MemorySourcePage::default())
+                }
+                MemoryAction::ListSubjects(_) => {
+                    MemoryReviewResult::Subjects(sovra_core::MemorySubjectPage::default())
+                }
                 MemoryAction::Inspect(_) => MemoryReviewResult::Detail(Box::new(detail())),
+                MemoryAction::InspectSource(_) => {
+                    let MemoryDetail { source, .. } = detail();
+                    MemoryReviewResult::Source(sovra_core::MemorySourceRecord {
+                        episode: source.expect("synthetic detail includes its source"),
+                        metadata: sovra_core::MemorySourceMetadata::default(),
+                    })
+                }
                 MemoryAction::Correct(_)
                 | MemoryAction::Remember(_)
                 | MemoryAction::RetryFailed
                 | MemoryAction::StopUsing(_)
+                | MemoryAction::Remove(_)
+                | MemoryAction::StopSource(_)
                 | MemoryAction::ConfigureSemantic(_) => {
                     panic!("visual proof must not request mutations")
                 }

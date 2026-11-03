@@ -1,17 +1,23 @@
 # Test the running app through MCP
 
-In Sovra, open **Settings → Development mode** and turn on **Enable development
-mode**. The top bar explicitly says **Development mode** and opens Settings when
-clicked. The setting survives the normal watcher's rebuild/relaunch. Turn it off
-in Settings to revoke control, close connections, and remove the local endpoint.
-It is off on first use. It does not change the separate `SOVRA_DEV=1` development
-credential policy; release builds continue to use the OS keychain.
+`cargo xtask dev` starts **Development mode** automatically in debug builds with
+`SOVRA_DEV=1`, as explicitly requested for this workspace. The top bar says
+**Development mode** and opens Settings when clicked. Turn it off there to revoke
+control immediately, close connections, and remove the local endpoint. The next
+manual `cargo xtask dev` starts it on again.
+
+Ordinary binaries and release/packaged builds always **start with mode off**, even
+if a previous development run left a saved on preference or `SOVRA_DEV=1` is set
+for a release binary. Enable it explicitly in **Settings → Development mode**
+when needed in those builds. The stdio bridge cannot enable its own access.
+This startup policy does not change credential storage: releases always use the
+OS keychain, and all development transport authentication and limits still apply.
 
 This is a standard **stdio MCP server** implemented with the official Rust SDK
 (`rmcp`, pinned in Cargo.toml). Start a client connection with the command copied
-from Settings. This launches only a small protocol bridge, not another app,
-database, or development watcher. Keep the existing `cargo xtask dev` running.
-The GUI must be open and its mode enabled before tools can operate it.
+from Settings. This launches only a small protocol bridge, not another app or
+database, and not a file watcher. Keep the GUI from `cargo xtask dev` open with
+Development mode enabled before tools can operate it.
 
 ## Connect a coding assistant
 

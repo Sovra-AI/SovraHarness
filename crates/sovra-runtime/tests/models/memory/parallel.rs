@@ -211,3 +211,126 @@ async fn pausing_drops_all_four_pending_keyword_reads_without_starting_the_rest(
     assert_eq!(recalled_requests(&server), 0);
     held.stop(client).await;
 }
+
+fn batch_server() -> Server {
+    Server::new(|request| {
+        if request.path == "/v1/models" {
+            return Reply::json(
+                &json!({"data":[{"id":"memory-model","supported_parameters":["tools"]}]}),
+            );
+        }
+        if is_extraction(request) {
+            return reply(r#"{"memories":[]}"#);
+        }
+        let has_receipt = request.body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["role"] == "tool");
+        let (message, finish) = if has_receipt {
+            (
+                json!({"role":"assistant","content":"Checked the available evidence."}),
+                "stop",
+            )
+        } else {
+            let calls = ["jasmine", "tea"].into_iter().enumerate().map(|(index, query)| {
+                json!({"index":index,"id":format!("lookup-{index}"),"type":"function","function":{
+                    "name":"search_saved_details", "arguments":json!({"query":query,"valid_at":if index == 0 {"2025-01-01"} else {"2026-01-01"}}).to_string()
+                }})
+            }).collect::<Vec<_>>();
+            (json!({"role":"assistant","tool_calls":calls}), "tool_calls")
+        };
+        Reply {
+            status: 200,
+            content_type: "text/event-stream",
+            tail: None,
+            body: format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"id":"batch","object":"chat.completion.chunk","created":1,"model":"memory-model","choices":[{"index":0,"delta":message,"finish_reason":null}]}),
+                json!({"id":"batch","object":"chat.completion.chunk","created":1,"model":"memory-model","choices":[{"index":0,"delta":{},"finish_reason":finish}]})
+            ),
+        }
+    })
+}
+
+#[tokio::test]
+async fn tool_lookup_batches_overlap_and_revoke_finished_siblings_before_delivery() {
+    for withdraw in [false, true] {
+        let server = batch_server();
+        let held = HeldReads::new();
+        let (_fixture, client) = start(&server, held.store.clone(), true).await;
+        client
+            .send(Command::RunPrompt {
+                context: Some(sovra_core::ConversationContext::default()),
+                session_id: "batch-recall".into(),
+                prompt: "the".into(),
+            })
+            .unwrap();
+        for expected in ["jasmine", "tea"] {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(3), held.started.recv())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            held.probe.peak.load(Ordering::SeqCst),
+            2,
+            "queries must overlap without releasing the first"
+        );
+        held.release("jasmine");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), held.finished.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            "jasmine"
+        );
+        if withdraw {
+            client
+                .send(Command::Memory(sovra_core::MemoryCommand {
+                    request_id: 1,
+                    action: sovra_core::MemoryAction::Remove(FactId("fact:tea".into())),
+                }))
+                .unwrap();
+        } else {
+            held.release("tea");
+        }
+        event(&client, |event| matches!(event, Event::AgentCompleted { session_id } if session_id == "batch-recall")).await;
+        assert_eq!(held.probe.active.load(Ordering::SeqCst), 0);
+        {
+            let requests = server.requests.lock().unwrap();
+            let request = requests
+                .iter()
+                .find(|request| {
+                    request.path.ends_with("completions")
+                        && request.body["messages"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|message| message["role"] == "tool")
+                })
+                .unwrap();
+            let evidence = related::evidence_sections(&request.body);
+            let lookups = evidence["lookups"]
+                .as_array()
+                .expect("separately labeled completed searches");
+            assert_eq!(lookups.len(), 2);
+            assert_eq!(lookups[0]["query"]["text"], "jasmine");
+            assert_eq!(lookups[1]["query"]["text"], "tea");
+            assert_ne!(
+                lookups[0]["query"]["valid_at"],
+                lookups[1]["query"]["valid_at"]
+            );
+            for lookup in lookups {
+                assert_eq!(
+                    lookup["evidence"].to_string().contains("memory:fact:tea"),
+                    !withdraw
+                );
+            }
+        }
+        held.stop(client).await;
+    }
+}

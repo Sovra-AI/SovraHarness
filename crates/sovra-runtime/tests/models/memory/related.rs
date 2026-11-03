@@ -14,6 +14,29 @@ fn memory_request(server: &Server) -> String {
         .to_string()
 }
 
+pub(super) fn evidence_sections(request: &Value) -> Value {
+    let evidence = request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|message| message["content"].as_str())
+        .find_map(|text| {
+            text.split_once("Evidence follows as JSON:\n")
+                .map(|(_, data)| data)
+        })
+        .expect("provider received structured memory evidence");
+    serde_json::from_str(evidence).unwrap()
+}
+
+fn first_evidence(server: &Server) -> Value {
+    let requests = server.requests.lock().unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.path == "/v1/chat/completions" && !is_extraction(request))
+        .unwrap();
+    evidence_sections(&request.body)
+}
+
 fn colleague(store: &Store) {
     saved_tea(store);
     let text = "My colleague Mira prefers rooibos tea with breakfast.";
@@ -81,9 +104,20 @@ async fn recall_adds_related_identity_without_unrelated_or_withdrawn_facts() {
         assert!(messages.contains("memory:fact:tea"));
         assert!(messages.contains("memory:fact:colleague"));
         assert!(messages.contains("My colleague Mira"));
-        for id in ["unrelated", "withdrawn", "future", "expired", "forged"] {
+        for id in ["withdrawn", "future", "expired", "forged"] {
             assert!(!messages.contains(&format!("memory:fact:{id}")));
         }
+        let evidence = evidence_sections(&request.body);
+        assert!(
+            !evidence["memories"]
+                .to_string()
+                .contains("memory:fact:unrelated")
+        );
+        assert!(
+            evidence["background"]
+                .to_string()
+                .contains("memory:fact:unrelated")
+        );
     }
     let related = store
         .recalls
@@ -118,7 +152,14 @@ async fn unsupported_primary_quotes_cannot_trigger_related_history_reads() {
         })
         .unwrap();
     event(&client, |event| matches!(event, Event::AgentCompleted { session_id } if session_id == "unsupported")).await;
-    assert!(!memory_request(&server).contains("memory:fact:"));
+    assert!(!memory_request(&server).contains("memory:fact:tea"));
+    let evidence = first_evidence(&server);
+    assert_eq!(evidence["memories"], json!([]));
+    assert!(
+        evidence["background"]
+            .to_string()
+            .contains("memory:fact:colleague")
+    );
     assert!(
         !store
             .recalls
@@ -152,7 +193,17 @@ async fn slow_related_reads_keep_primary_evidence_and_unrelated_questions_do_not
     .await;
     let messages = memory_request(&server);
     assert!(messages.contains("memory:fact:tea"));
-    assert!(!messages.contains("memory:fact:colleague"));
+    let evidence = first_evidence(&server);
+    assert!(
+        !evidence["memories"]
+            .to_string()
+            .contains("memory:fact:colleague")
+    );
+    assert!(
+        evidence["background"]
+            .to_string()
+            .contains("memory:fact:colleague")
+    );
     let before = store
         .recalls
         .lock()

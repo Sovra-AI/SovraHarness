@@ -31,6 +31,12 @@ fn main() -> anyhow::Result<()> {
             .context("development MCP server failed");
     }
     let development = sovra_runtime::DevelopmentConfig {
+        // Watched development is observable by default; installed/release binaries
+        // always start with control off, regardless of a retained dev preference.
+        startup_enabled: Some(
+            cfg!(debug_assertions)
+                && std::env::var_os("SOVRA_DEV").is_some_and(|value| value == "1"),
+        ),
         directory: development_directory,
         executable: std::env::current_exe().context("could not resolve Sovra executable")?,
     };
@@ -83,6 +89,7 @@ fn main() -> anyhow::Result<()> {
         agent_config,
         sovra_runtime::RuntimeServices {
             memory: Some(memory),
+            memory_extraction_slots: read_memory_extraction_slots(),
             models: Some(models),
             files: Some(Arc::new(sovra_files::LocalFileStore::new(
                 dirs.data_local_dir().join("attachments"),
@@ -104,6 +111,7 @@ fn main() -> anyhow::Result<()> {
             signin: None,
             google: Some(Arc::new(google)),
             development: Some(development),
+            probes: Vec::new(),
         },
     )
     .context("failed to start the runtime")?;
@@ -114,6 +122,17 @@ fn main() -> anyhow::Result<()> {
 
     tracing::info!("exiting");
     Ok(())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the composition root reads background capacity once at startup"
+)]
+fn read_memory_extraction_slots() -> usize {
+    std::env::var("SOVRA_MEMORY_EXTRACTION_SLOTS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(sovra_core::DEFAULT_MEMORY_EXTRACTION_SLOTS)
 }
 
 #[expect(

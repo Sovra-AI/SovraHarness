@@ -60,6 +60,8 @@ pub struct TranscriptLine {
     /// "User" or the member's name.
     pub speaker: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<crate::EpisodeId>,
 }
 
 /// A request from the UI about the team.
@@ -77,7 +79,7 @@ pub enum TeamCommand {
     Run {
         session_id: String,
         prompt: String,
-        history: Vec<TranscriptLine>,
+        context: crate::ConversationContext,
     },
 }
 

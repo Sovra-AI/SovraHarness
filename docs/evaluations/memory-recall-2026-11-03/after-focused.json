@@ -1,0 +1,200 @@
+{
+  "suite": "synthetic-memory-old-recall-v1",
+  "model": "anthropic/claude-haiku-5.5",
+  "seeded_distractors": 100,
+  "semantic_search": false,
+  "scoring": "manual review required; no automated quality score",
+  "status": "observations_complete",
+  "observations": [
+    {
+      "id": "old-income",
+      "prompt": "How much do I earn, and when is it paid?",
+      "expected_for_manual_review": "9,200 credits monthly and the 25th, with genuine saved citations. These details are older than the recent working set.",
+      "answer": "From what I have saved, you earn **9,200 credits a month**, and your **salary arrives on the 25th** of each month [memory:fact:01M6FW71QZBQ5WSDJ4EQA82FGE] [memory:fact:01M6FW71RB8210K8VM031Z41CA].\n\nThose notes don't say whether 9,200 credits is before or after deductions, so let me know if you want to double-check that.",
+      "answer_ms": 4608,
+      "answer_and_extraction_ms": 6777,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [],
+      "extracted_fact_ids": [],
+      "facts_after": [
+        {
+          "id": "fact:01M6FW71RB8210K8VM031Z41CA",
+          "content": "My salary arrives on the 25th.",
+          "entities": [],
+          "source": "episode:kky6dx4n56s2yh3hk6bc",
+          "replaces": null,
+          "valid_at": 1793681753865,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": null,
+          "model": null
+        },
+        {
+          "id": "fact:01M6FW71QZBQ5WSDJ4EQA82FGE",
+          "content": "My monthly income is 9,200 credits.",
+          "entities": [],
+          "source": "episode:q6n8pu2ot04hp6eqsi57",
+          "replaces": null,
+          "valid_at": 1793681753848,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": null,
+          "model": null
+        }
+      ]
+    },
+    {
+      "id": "corrected-old-income",
+      "prompt": "How much do I earn, and when is it paid?",
+      "expected_for_manual_review": "10,500 credits monthly and the 25th. Do not assert the obsolete 9,200 as current.",
+      "answer": "You earn about **10,500 credits a month**, and your salary arrives on the **25th**. [memory:fact:01M6FW78JZ7HG7ZSCW5E5FXENM] [memory:fact:01M6FW71RB8210K8VM031Z41CA]\n\nYou previously mentioned 9,200 credits, but you later said your income is now 10,500, so I'm going with the newer figure.",
+      "answer_ms": 4658,
+      "answer_and_extraction_ms": 6112,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [],
+      "extracted_fact_ids": [],
+      "facts_after": [
+        {
+          "id": "fact:01M6FW78JZ7HG7ZSCW5E5FXENM",
+          "content": "My monthly income is now 10,500 credits.",
+          "entities": [],
+          "source": "episode:bkby1wl7zvjea3q4rlz8",
+          "replaces": "fact:01M6FW71QZBQ5WSDJ4EQA82FGE",
+          "valid_at": 1793681760862,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": null,
+          "model": null
+        },
+        {
+          "id": "fact:01M6FW71RB8210K8VM031Z41CA",
+          "content": "My salary arrives on the 25th.",
+          "entities": [],
+          "source": "episode:kky6dx4n56s2yh3hk6bc",
+          "replaces": null,
+          "valid_at": 1793681753865,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": null,
+          "model": null
+        },
+        {
+          "id": "fact:01M6FW71QZBQ5WSDJ4EQA82FGE",
+          "content": "My monthly income is 9,200 credits.",
+          "entities": [],
+          "source": "episode:q6n8pu2ot04hp6eqsi57",
+          "replaces": null,
+          "valid_at": 1793681753848,
+          "invalid_at": 1793681760862,
+          "expired_at": 1793681760862,
+          "stopped_at": null,
+          "evidence": null,
+          "model": null
+        }
+      ]
+    },
+    {
+      "id": "removed-old-income",
+      "prompt": "What is my monthly income, and when does my salary arrive? Use only saved evidence.",
+      "expected_for_manual_review": "The salary arrives on the 25th. The income amount is unavailable; disclose neither removed amount.",
+      "answer": "From your saved details, I can tell you when your salary arrives, but not your monthly income.\n\n- **Salary date:** Your salary arrives on the 25th. You said this in a saved note: \"My salary arrives on the 25th.\" [memory:fact:01M6FW71RB8210K8VM031Z41CA]\n- **Monthly income:** I don't have an amount saved. Nothing in what I can see shows your monthly take-home pay or salary.\n\nIf you tell me your typical monthly take-home amount, I can use it for budgeting or affordability questions.",
+      "answer_ms": 4671,
+      "answer_and_extraction_ms": 6130,
+      "extraction_state": "Complete",
+      "attempts": 1,
+      "error": null,
+      "retries": [],
+      "candidates": [],
+      "extracted_fact_ids": [],
+      "facts_after": [
+        {
+          "id": "fact:01M6FW78JZ7HG7ZSCW5E5FXENM",
+          "content": "My monthly income is now 10,500 credits.",
+          "entities": [],
+          "source": "episode:bkby1wl7zvjea3q4rlz8",
+          "replaces": "fact:01M6FW71QZBQ5WSDJ4EQA82FGE",
+          "valid_at": 1793681760862,
+          "invalid_at": 1793681767559,
+          "expired_at": 1793681767559,
+          "stopped_at": 1793681767559,
+          "evidence": null,
+          "model": null
+        },
+        {
+          "id": "fact:01M6FW71RB8210K8VM031Z41CA",
+          "content": "My salary arrives on the 25th.",
+          "entities": [],
+          "source": "episode:kky6dx4n56s2yh3hk6bc",
+          "replaces": null,
+          "valid_at": 1793681753865,
+          "invalid_at": null,
+          "expired_at": null,
+          "stopped_at": null,
+          "evidence": null,
+          "model": null
+        },
+        {
+          "id": "fact:01M6FW71QZBQ5WSDJ4EQA82FGE",
+          "content": "My monthly income is 9,200 credits.",
+          "entities": [],
+          "source": "episode:q6n8pu2ot04hp6eqsi57",
+          "replaces": null,
+          "valid_at": 1793681753848,
+          "invalid_at": 1793681760862,
+          "expired_at": 1793681760862,
+          "stopped_at": 1793681767559,
+          "evidence": null,
+          "model": null
+        }
+      ]
+    }
+  ],
+  "provider": "openrouter",
+  "fixture_version": "old-recall-v1",
+  "configuration": {
+    "embedding_service": false,
+    "initial_inventory_notes": 100,
+    "newer_notes_after_income": 32,
+    "newer_notes_after_correction": 32,
+    "web_search": false,
+    "evaluation": "manual review by coding assistant; no independent evaluator",
+    "sampling": "configured provider defaults; sampling parameters not explicitly pinned",
+    "tokens": null,
+    "model_cost_usd": null
+  },
+  "implementation": "focused lookups exclude unrelated recent background",
+  "manual_review": [
+    {
+      "case": "old-income",
+      "answer_content": "pass",
+      "citation_grounding": "pass; cited saved notes support the associated claims"
+    },
+    {
+      "case": "corrected-old-income",
+      "answer_content": "pass",
+      "citation_grounding": "pass; cited saved notes support the associated claims"
+    },
+    {
+      "case": "removed-old-income",
+      "answer_content": "pass",
+      "citation_grounding": "pass; cited saved notes support the associated claims"
+    }
+  ],
+  "limitations": [
+    "Three observations, not an accuracy benchmark or latency percentiles.",
+    "No fixed sampling seed; configured provider defaults; model responses are stochastic.",
+    "No tokens or actual model cost instrumentation.",
+    "Corrected response also mentions obsolete income explicitly as historical.",
+    "No independent evaluator; this is manual review by the coding assistant."
+  ]
+}

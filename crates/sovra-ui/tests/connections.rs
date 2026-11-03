@@ -1,4 +1,4 @@
-//! The Google card in Settings → Connections, end to end through the shell with a scripted runtime.
+//! The Google card on the Connections tab, end to end through the shell with a scripted runtime.
 
 use std::collections::BTreeSet;
 
@@ -77,9 +77,11 @@ fn one_button_connects_and_every_service_has_a_switch(cx: &mut TestAppContext) {
     let (window, shell, commands, events) = open(cx, 1100., 2400.);
     google(&events, GoogleState::NotConnected, cx);
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-settings", cx);
+        window.click("nav-connections", cx);
         window.render_frame(cx);
-        assert!(window.find("sovra-settings-view").visible());
+        assert!(window.find("connections-page").visible());
+        window.click("connection-action-google", cx);
+        window.render_frame(cx);
         assert_eq!(
             window.find("google-connect").label(),
             Some("Connect Google")
@@ -160,7 +162,9 @@ fn one_button_connects_and_every_service_has_a_switch(cx: &mut TestAppContext) {
     });
 
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        window.click("connection-action-google", cx);
         window.render_frame(cx);
         window.click("google-disconnect", cx);
         window.render_frame(cx);
@@ -183,10 +187,12 @@ fn one_button_connects_and_every_service_has_a_switch(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn an_expired_sign_in_offers_one_button_to_fix_it(cx: &mut TestAppContext) {
-    let (window, shell, commands, events) = open(cx, 1100., 1600.);
+    let (window, _shell, commands, events) = open(cx, 1100., 1600.);
     google(&events, GoogleState::NeedsSignIn(account()), cx);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        window.click("connection-action-google", cx);
         window.render_frame(cx);
         assert!(window.find("google-account").visible());
         window.click("google-reconnect", cx);
@@ -198,13 +204,16 @@ fn an_expired_sign_in_offers_one_button_to_fix_it(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn google_card_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
     for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
-        let (window, shell, _commands, events) = open(cx, width, height);
+        let (window, _shell, _commands, events) = open(cx, width, height);
         google(&events, GoogleState::Connected(account()), cx);
         cx.update(|cx| design::set_interface_scale(InterfaceScale::from_percent(scale), cx));
         cx.update_window(window.into(), |_, window, cx| {
-            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+            window.click("nav-connections", cx);
             window.render_frame(cx);
-            let page = window.find("sovra-settings-view").bounds();
+            reveal(window, "connection-action-google", cx);
+            window.click("connection-action-google", cx);
+            window.render_frame(cx);
+            let page = window.find("connections-page").bounds();
             let card = window.find("google-card").bounds();
             let at = format!("{width}x{height}@{scale}");
             assert!(
@@ -270,7 +279,10 @@ fn saving_a_desktop_client_id_enables_connect_google(cx: &mut TestAppContext) {
         cx,
     );
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-settings", cx);
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        reveal(window, "connection-action-google", cx);
+        window.click("connection-action-google", cx);
         window.render_frame(cx);
         reveal(window, "google-client-help", cx);
         let help = window
@@ -332,7 +344,7 @@ fn reveal(window: &mut Window, id: &'static str, cx: &mut App) {
         window.render_frame(cx);
         let item = window.find(id);
         let bounds = item.bounds();
-        let viewport = window.find("settings-sections").bounds();
+        let viewport = window.find("connections-scroll").bounds();
         if item.visible() && bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
         {
             return;
@@ -343,10 +355,10 @@ fn reveal(window: &mut Window, id: &'static str, cx: &mut App) {
             -60.
         };
         window.scroll(
-            "settings-sections",
+            "connections-scroll",
             ScrollDelta::Pixels(point(px(0.), px(delta))),
             cx,
         );
     }
-    panic!("{id} must be reachable in Settings");
+    panic!("{id} must be reachable in Connections");
 }

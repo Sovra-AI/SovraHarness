@@ -43,6 +43,9 @@ pub(crate) fn render_agui_widget(
         AgUiWidget::TeamActivity(activity) => {
             render_team_activity(activity, index, cx).into_any_element()
         }
+        AgUiWidget::ResearchBoard(board) => {
+            render_research_board(board, index, cx).into_any_element()
+        }
         AgUiWidget::ArtifactSaved {
             artifact_id,
             title,
@@ -51,6 +54,174 @@ pub(crate) fn render_agui_widget(
             render_artifact_saved(artifact_id, title, *artifact_kind, index, cx).into_any_element()
         }
     }
+}
+
+/// In-chat research kanban (waiting / working / done) for a deep-research run.
+fn render_research_board(
+    board: &sovra_core::ResearchBoard,
+    index: usize,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    use sovra_core::{ResearchGoalState, ResearchPhase};
+    let t = design::tokens(cx);
+    let theme = cx.theme();
+    let (primary, success, muted, danger) = (
+        theme.primary,
+        theme.success,
+        theme.muted_foreground,
+        theme.danger,
+    );
+    let lanes = board.lanes();
+    let heading = match board.phase {
+        ResearchPhase::Planning => "Research · planning".to_owned(),
+        ResearchPhase::Researching => "Research · working".to_owned(),
+        ResearchPhase::Writing => "Research · writing document".to_owned(),
+        ResearchPhase::Done => "Research · done".to_owned(),
+    };
+    let goal_count = board.goals.len();
+    let has_failed = board
+        .goals
+        .iter()
+        .any(|goal| goal.state == ResearchGoalState::Failed);
+    let mut card = v_flex()
+        .id(("research-board", index))
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .max_w(t.layout.card_max_width)
+        .sovra_surface(Surface::Matte, cx)
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .child(
+            h_flex()
+                .gap(t.space.small)
+                .items_center()
+                .child(Icon::new(IconName::Search).small().text_color(primary))
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .min_w_0()
+                        .text_ellipsis()
+                        .child(heading),
+                ),
+        )
+        .child(
+            div()
+                .id(("research-board-title", index))
+                .test_support()
+                .sovra_text(TextRole::Body, cx)
+                .min_w_0()
+                .child(board.title.clone()),
+        )
+        .child(
+            div()
+                .id(("research-board-status", index))
+                .test_support()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(board.status.clone()),
+        )
+        .child(
+            h_flex()
+                .id(("research-board-lanes", index))
+                .test_support()
+                .w_full()
+                .gap(t.space.small)
+                .items_start()
+                .children([
+                    render_research_lane("waiting", "Waiting", &lanes.waiting, muted, index, cx),
+                    render_research_lane("working", "Working", &lanes.working, primary, index, cx),
+                    render_research_lane("done", "Done", &lanes.done, success, index, cx),
+                ]),
+        );
+    if goal_count > 0 {
+        card = card.child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(format!("{goal_count} goals · helpers work side by side")),
+        );
+    }
+    if has_failed {
+        card = card.child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(danger)
+                .child("Some goals could not finish — the document uses what was found."),
+        );
+    }
+    card
+}
+
+fn render_research_lane(
+    lane_id: &'static str,
+    label: &'static str,
+    goals: &[&sovra_core::ResearchGoal],
+    accent: gpui_kit::Hsla,
+    board_index: usize,
+    cx: &Context<Shell>,
+) -> impl IntoElement + use<> {
+    use sovra_core::ResearchGoalState;
+    let t = design::tokens(cx);
+    v_flex()
+        .id(gpui_kit::SharedString::from(format!(
+            "research-lane-{lane_id}-{board_index}"
+        )))
+        .test_support()
+        .flex_1()
+        .min_w_0()
+        .gap(t.space.compact)
+        .child(
+            h_flex()
+                .gap(t.space.compact)
+                .items_center()
+                .child(
+                    div()
+                        .size(t.layout.icon_small)
+                        .rounded(t.radius.pill)
+                        .bg(accent),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(format!("{label} · {}", goals.len())),
+                ),
+        )
+        .children(goals.iter().enumerate().map(|(goal_index, goal)| {
+            let state_label = match goal.state {
+                ResearchGoalState::Waiting => "Waiting",
+                ResearchGoalState::Working => "Looking into…",
+                ResearchGoalState::Done => "Done",
+                ResearchGoalState::Failed => "Couldn't finish",
+            };
+            v_flex()
+                .id(gpui_kit::SharedString::from(format!(
+                    "research-goal-{lane_id}-{board_index}-{goal_index}"
+                )))
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .gap(t.space.hair)
+                .px(t.space.small)
+                .py(t.space.compact)
+                .rounded(t.radius.card)
+                .border_1()
+                .border_color(t.material_border)
+                .bg(t.subtle)
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .min_w_0()
+                        .child(goal.text.clone()),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(accent)
+                        .child(state_label),
+                )
+        }))
 }
 
 /// The live team card (AG-UI `ACTIVITY_SNAPSHOT`, `activityType: "sovra.team"`):

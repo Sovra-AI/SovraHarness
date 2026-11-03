@@ -168,7 +168,8 @@ impl Event {
             | Self::AgUiSurface { session_id, .. }
             | Self::AgentCompleted { session_id }
             | Self::AgentError { session_id, .. }
-            | Self::ChatTitleGenerated { session_id, .. } => Some(session_id),
+            | Self::ChatTitleGenerated { session_id, .. }
+            | Self::Memory(crate::MemoryEvent::SourceSaved { session_id, .. }) => Some(session_id),
             Self::FilePrepared(prepared) => Some(&prepared.session_id),
             Self::Development(_)
             | Self::Auth(_)

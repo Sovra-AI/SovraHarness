@@ -1,6 +1,6 @@
 # Google in Sovra
 
-Sovra connects to a person's own Google account from **Settings → Connections**: one
+Sovra connects to a person's own Google account from the **Connections** tab: one
 **Connect Google** button, Google's own sign-in page in their browser, and a
 switch per service afterwards. The agent then gets tools for the services that
 are connected and switched on. Everything is in the single binary: no server,
@@ -87,11 +87,10 @@ sovra-adk: AdkHarness::with_google(GoogleTools) — tools per switched-on servic
   per-call guard that turns tool calls away when a service is off. When a call
   finds the sign-in no longer works, the state moves to *Needs sign-in*.
 - **`sovra-ui`** has `google_card.rs`: a `GoogleCard` entity owned by the shell
-  (which folds the Google state). It is shown as the Connections section of
-  Settings (`settings_view.rs`). The shell opens `OpenSignIn` URLs with
-  `cx.open_url`.
-  Connections sits inside Settings rather than in its own sidebar entry: a tenth
-  destination no longer fits the collapsed rail at the minimum window.
+  (which folds the Google state). It is the Google row of the **Connections**
+  sidebar tab. Settings only points at that tab. The shell opens `OpenSignIn`
+  URLs with `cx.open_url`. The collapsed rail scrolls, so Connections stays
+  reachable at the minimum window.
 
 ### Sign-in (RFC 8252, Google "installed apps")
 

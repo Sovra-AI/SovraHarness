@@ -76,7 +76,7 @@ impl ModelsView {
         let status_summary = if !model.can_chat() {
             "This model generates non-text output (such as images, video, or embeddings) and cannot be used for chat."
         } else if missing_key {
-            "Ready to connect — add your API key once in Settings or Connections to start chatting."
+            "Ready to connect — add your key once in Connections to start chatting."
         } else if self.choosing_purpose.is_some() {
             "This choice will be saved for this kind of file. Your everyday chat AI stays the same."
         } else if active {

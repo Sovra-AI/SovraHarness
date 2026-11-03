@@ -215,8 +215,23 @@ async fn semantic_memory_requires_separate_consent_and_injects_evidence_without_
     saved_tea(&store);
     let (fixture, client) = start(&server, store.clone(), true).await;
     let target = target(&fixture);
+    let latest_evidence = || {
+        let requests = server.requests.lock().unwrap();
+        let request = requests
+            .iter()
+            .rev()
+            .find(|request| request.path == "/v1/chat/completions" && !is_extraction(request))
+            .unwrap();
+        related::evidence_sections(&request.body)
+    };
     prompt(&client, "before", "Suggest beverages").await;
-    assert_eq!(recalled_requests(&server), 0);
+    assert_eq!(recalled_requests(&server), 1);
+    assert_eq!(latest_evidence()["memories"], json!([]));
+    assert!(
+        latest_evidence()["background"]
+            .to_string()
+            .contains("memory:fact:tea")
+    );
     assert!(
         !server
             .requests
@@ -229,7 +244,12 @@ async fn semantic_memory_requires_separate_consent_and_injects_evidence_without_
     // Ready with a pinned dimension proves the worker committed the HTTP response.
     event(&client, |event| matches!(event, Event::Memory(MemoryEvent::Semantic(status)) if status.phase == MemorySemanticPhase::Ready && status.state.setting.as_ref().is_some_and(|setting| setting.dimension == Some(2)))).await;
     prompt(&client, "after", "Suggest beverages").await;
-    assert_eq!(recalled_requests(&server), 1);
+    assert_eq!(recalled_requests(&server), 2);
+    assert!(
+        latest_evidence()["memories"]
+            .to_string()
+            .contains("memory:fact:tea")
+    );
     assert_eq!(store.vector_commits.load(Ordering::SeqCst), 1);
     let mut saved = fixture.repo.load().unwrap();
     saved.connections[0].base_url.push_str("/changed");
@@ -244,7 +264,7 @@ async fn semantic_memory_requires_separate_consent_and_injects_evidence_without_
     prompt(&client, "changed", "Which tea?").await;
     assert_eq!(
         recalled_requests(&server),
-        2,
+        3,
         "keyword evidence survives semantic failure"
     );
     assert_eq!(
@@ -266,7 +286,13 @@ async fn semantic_memory_requires_separate_consent_and_injects_evidence_without_
     configure(&client, 2, None);
     configured(&client, 2).await;
     prompt(&client, "disabled", "Suggest beverages").await;
-    assert_eq!(recalled_requests(&server), 2);
+    assert_eq!(recalled_requests(&server), 4);
+    assert_eq!(latest_evidence()["memories"], json!([]));
+    assert!(
+        latest_evidence()["background"]
+            .to_string()
+            .contains("memory:fact:tea")
+    );
     stop(client).await;
 }
 

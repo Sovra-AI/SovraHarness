@@ -10,5 +10,6 @@ loop, provider calls and tool execution.
   (use `tokio::task::spawn_blocking`).
 - Tests drive the real runtime through `Client` and assert on events.
 - Memory arrives as a `MemoryFactory` from the composition root; the runtime never names a
-  backend. Episode writes are fire-and-forget (`record_episode`) and agent replies are
-  captured by `tap_agent_events` — memory must never stall or fail the command loop.
+  backend. Source admission runs in owned background tasks; acknowledge capture only after
+  persistence and surface storage failures. Agent replies are captured by `tap_agent_events`
+  with explicit authorship — model processing must never stall the command loop.

@@ -84,6 +84,21 @@ fn unavailable(message: &str) -> ChannelError {
     ChannelError::Unavailable(message.into())
 }
 
+fn people_lookup(book: &sovra_core::people::PeopleBook, query: &str) -> Value {
+    match book.lookup(query) {
+        sovra_core::people::Lookup::Ask { count } => json!({
+            "count": count,
+            "ask": "Ask for a person's name. The full list is not sent."
+        }),
+        sovra_core::people::Lookup::None => json!({"matches": [], "ambiguous": false}),
+        sovra_core::people::Lookup::One { name, channels } => json!({
+            "matches": [{"name": name, "channels": channels}],
+            "ambiguous": false
+        }),
+        sovra_core::people::Lookup::Many { names } => json!({"ambiguous": true, "names": names}),
+    }
+}
+
 impl Actor {
     pub(super) async fn messaging_request(
         &mut self,
@@ -139,6 +154,7 @@ impl Actor {
                 .find(|m| m.id == id && m.session_id == session_id)
                 .map(message_result)
                 .ok_or_else(|| unavailable("That message is not in this conversation.")),
+            MessagingRequest::FindPeople { query } => Ok(people_lookup(&self.state.people, &query)),
         }
     }
 
@@ -170,7 +186,7 @@ impl Actor {
         )))
     }
 
-    async fn prepare_message(
+    pub(super) async fn prepare_message(
         &mut self,
         session_id: &str,
         turn: u64,
@@ -182,21 +198,34 @@ impl Actor {
         let (session, own) = self.connected(channel)?;
         let (recipient, recipient_label) =
             resolve_recipient(&self.state, channel, recipient, &own)?;
-        if let Some(existing) = self.state.outbound_messages.iter().find(|m| {
-            m.session_id == session_id
-                && m.channel == channel
-                && m.recipient == recipient
-                && m.text == text
-                && self
-                    .messaging
-                    .bindings
-                    .get(&m.id)
-                    .is_some_and(|(saved_turn, _)| *saved_turn == turn)
-        }) {
-            return Ok(message_result(existing));
-        }
         let now = crate::now();
         self.expire_reviews(now).await;
+        // A waiting review stays one review. A cancelled, accepted, or expired
+        // one must not swallow the next press of the same text.
+        let existing = self
+            .state
+            .outbound_messages
+            .iter()
+            .find(|m| {
+                m.session_id == session_id
+                    && m.channel == channel
+                    && m.recipient == recipient
+                    && m.text == text
+                    && matches!(
+                        m.delivery,
+                        MessageDelivery::Review | MessageDelivery::Sending
+                    )
+                    && self
+                        .messaging
+                        .bindings
+                        .get(&m.id)
+                        .is_some_and(|(saved_turn, _)| *saved_turn == turn)
+            })
+            .cloned();
+        if let Some(existing) = existing {
+            self.publish_message(existing.clone()).await;
+            return Ok(message_result(&existing));
+        }
         if self
             .state
             .outbound_messages
@@ -446,6 +475,12 @@ mod tests {
             telegram_code: String::new(),
             replies: BTreeMap::new(),
             messaging: MessagingState::default(),
+            inbox: inbox.downgrade(),
+            probes: Vec::new(),
+            refresh_generation: 0,
+            refresh_tasks: Vec::new(),
+            contact_generation: 0,
+            contact_task: None,
         }
     }
     fn prepare(channel: ChannelKind) -> MessagingRequest {
@@ -568,6 +603,68 @@ mod tests {
                 MessageDelivery::Expired
             );
             assert!(actor.messaging.sends.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_second_press_prepares_a_new_review_after_the_first_is_finished() {
+        use sovra_core::connections::ConnectionCommand;
+        #[derive(Clone, Copy)]
+        enum Finish {
+            Cancel,
+            Accept,
+            Expire,
+        }
+        for finish in [Finish::Cancel, Finish::Accept, Finish::Expire] {
+            let session = Arc::new(Session::default());
+            let mut actor = actor(session.clone());
+            let prepare = ConnectionCommand::PrepareMessage {
+                session_id: "desktop".into(),
+                channel: ChannelKind::WhatsApp,
+                recipient: "me".into(),
+                text: "The school gate opens at 3.".into(),
+            };
+            actor.command(prepare.clone()).await;
+            assert_eq!(actor.state.outbound_messages.len(), 1);
+            let first = actor.state.outbound_messages[0].id.clone();
+            assert_eq!(
+                actor.state.outbound_messages[0].delivery,
+                MessageDelivery::Review
+            );
+            match finish {
+                Finish::Cancel => actor.review_message(&first, "desktop", false).await,
+                Finish::Accept => {
+                    actor.review_message(&first, "desktop", true).await;
+                    let (sent_id, result) =
+                        actor.messaging.sends.join_next().await.unwrap().unwrap();
+                    actor.sent_message(&sent_id, result).await;
+                }
+                Finish::Expire => {
+                    actor.link(ChannelKind::WhatsApp).session = Some(Arc::new(Session::default()));
+                    actor.review_message(&first, "desktop", true).await;
+                }
+            }
+            assert_ne!(
+                actor.state.outbound_messages[0].delivery,
+                MessageDelivery::Review
+            );
+            let sent_before = session.sent.lock().unwrap().len();
+            actor.command(prepare.clone()).await;
+            assert_eq!(actor.state.outbound_messages.len(), 2);
+            let second = actor.state.outbound_messages[1].id.clone();
+            assert_ne!(second, first);
+            assert_eq!(
+                actor.state.outbound_messages[1].delivery,
+                MessageDelivery::Review
+            );
+            assert_eq!(
+                actor.state.outbound_messages[1].text,
+                "The school gate opens at 3."
+            );
+            actor.command(prepare).await;
+            assert_eq!(actor.state.outbound_messages.len(), 2);
+            assert_eq!(actor.state.outbound_messages[1].id, second);
+            assert_eq!(session.sent.lock().unwrap().len(), sent_before);
         }
     }
 

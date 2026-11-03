@@ -45,13 +45,21 @@ impl ArtifactSaver {
             save: Arc::new(move |draft| Box::pin(save(draft))),
         }
     }
+
+    /// Persists a draft through the runtime-owned saver.
+    pub async fn save(&self, draft: ArtifactDraft) -> Result<Artifact, String> {
+        (self.save)(draft).await
+    }
 }
 
 impl crate::AdkHarness {
-    /// Adds `save_artifact` when this model can call tools (it already has some).
+    /// Stores the saver for direct saves (deep research) and adds `save_artifact`
+    /// when this model already has other tools it can call.
     pub fn with_artifact_saver(&self, saver: ArtifactSaver) -> Result<Self, crate::Error> {
         if self.base_tools.is_empty() {
-            return Ok(self.clone());
+            let mut harness = self.clone();
+            harness.artifact_saver = Some(saver);
+            return Ok(harness);
         }
         let mut tools = self.base_tools.clone();
         tools.retain(|tool| tool.name() != SAVE_ARTIFACT_TOOL_NAME);
