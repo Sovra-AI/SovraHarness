@@ -236,7 +236,7 @@ mod tests {
             "sides are clamped"
         );
         assert_eq!(
-            answer("tell_the_time", &json!({}), 1_793_764_800 + 3_660, 0).as_deref(),
+            answer("tell_the_time", &json!({}), 1_793_750_400 + 3_660, 0).as_deref(),
             Ok("It's 01:01 UTC on Wednesday 2026-11-04.")
         );
         assert_eq!(
