@@ -250,6 +250,13 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
         .instruction(instruction)
         .model(parent_llm)
         .parallelize_agent_delegations(true);
+    if parent_tools
+        .iter()
+        .any(|tool| crate::terminal::is_terminal_tool(tool.name()))
+    {
+        // A terminal call waits for the person's approval and then for the command.
+        builder = builder.tool_timeout(crate::terminal::TERMINAL_TOOL_TIMEOUT);
+    }
     for tool in parent_tools {
         builder = builder.tool(tool);
     }

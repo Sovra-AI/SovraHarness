@@ -292,6 +292,8 @@ pub struct WorkspaceState {
     pub connections: crate::connections::ConnectionsState,
     /// The Google account, folded from [`Event::Google`].
     pub google: crate::google::GoogleConnection,
+    /// Terminal commands, approvals and saved rules, folded from [`Event::Terminal`].
+    pub terminal: crate::terminal::TerminalState,
     /// The composer sends prompts to the whole team instead of Sovra alone.
     pub team_mode: bool,
     pub development: crate::development::DevelopmentState,
@@ -364,6 +366,7 @@ impl WorkspaceState {
             artifacts: crate::artifacts::ArtifactLibrary::default(),
             connections: crate::connections::ConnectionsState::default(),
             google: crate::google::GoogleConnection::default(),
+            terminal: crate::terminal::TerminalState::default(),
             team_mode: false,
             development: crate::development::DevelopmentState::default(),
             team_subagents: std::collections::BTreeMap::new(),
@@ -1103,6 +1106,10 @@ impl WorkspaceState {
             }
             Event::Google(google_event) => {
                 self.google.apply(google_event);
+                None
+            }
+            Event::Terminal(terminal_event) => {
+                self.terminal.apply(terminal_event);
                 None
             }
             Event::Mcp(mcp_event) => {

@@ -36,6 +36,7 @@ pub mod skills;
 pub mod specialists;
 mod status;
 pub mod teams;
+pub mod terminal;
 mod tool_calls;
 mod web_search;
 mod workspace;

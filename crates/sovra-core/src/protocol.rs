@@ -25,6 +25,8 @@ pub enum Command {
     /// The Google account on the Connections page.
     Google(crate::google::GoogleCommand),
     Mcp(crate::mcp::McpCommand),
+    /// Terminal approvals and settings.
+    Terminal(crate::terminal::TerminalCommand),
     RunWithFiles {
         /// Explicit earlier text replaces in-process history; `None` keeps that history.
         context: Option<crate::ConversationContext>,
@@ -96,6 +98,9 @@ pub enum Event {
     Connections(crate::connections::ConnectionEvent),
     Google(crate::google::GoogleEvent),
     Mcp(crate::mcp::McpEvent),
+    /// Terminal cards and settings. Not session-scoped: the state is shared and each
+    /// call names its own conversation, so cards for background chats are kept too.
+    Terminal(crate::terminal::TerminalEvent),
     /// An AG-UI protocol event for `session_id` (team runs stream through these).
     AgUi {
         session_id: String,
@@ -182,6 +187,7 @@ impl Event {
             | Self::Connections(_)
             | Self::Google(_)
             | Self::Mcp(_)
+            | Self::Terminal(_)
             | Self::ChatHistoryLoaded { .. }
             | Self::Ready { .. }
             | Self::Pong

@@ -116,7 +116,8 @@ impl ModelsView {
                     .child(Self::render_open_connections_section(cx))
                     .child(self.render_development_section(cx))
                     .child(self.render_always_context_section(cx))
-                    .child(self.render_agent_behavior_section(cx)),
+                    .child(self.render_agent_behavior_section(cx))
+                    .child(self.render_terminal_section(cx)),
             )
             .into_any_element(),
             cx,

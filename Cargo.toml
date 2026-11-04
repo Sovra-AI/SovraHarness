@@ -89,6 +89,8 @@ umap-rs = "=0.4.5"
 ndarray = "0.17.2"
 rayon = "1.12.0"
 memchr = "2.8.3"
+# Safe `killpg` so the terminal tool stops a command's whole process group (Unix only).
+nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
 keyring = { version = "4.2.0", default-features = false, features = ["v1"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["json", "stream", "rustls-tls"] }
 # exact: GPUI has no semver promise; bump deliberately. `syntect` highlights chat code
@@ -102,7 +104,8 @@ serde-saphyr = { version = "=1.3.0", default-features = false, features = ["seri
 surrealdb = { version = "3.3.4", features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "2.0.21"
 time = { version = "0.3.55", features = ["formatting"] }
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs"] }
+# `process`: the terminal tool runs shell commands (sovra-runtime only).
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs", "process"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

@@ -37,6 +37,8 @@ mod sidebar;
 mod skill_library;
 mod skill_menu;
 mod team_view;
+mod terminal_card;
+mod terminal_settings;
 mod widgets;
 
 use gpui_kit::component::TitleBar;

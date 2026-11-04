@@ -24,6 +24,7 @@ impl RuntimeStatus {
             | Event::Memory(_)
             | Event::Connections(_)
             | Event::Mcp(_)
+            | Event::Terminal(_)
             | Event::Development(_)
             | Event::Models(_)
             | Event::Skills(_)

@@ -11,6 +11,24 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Terminal access: Sovra can run commands on your computer with
+  `run_terminal_command`, approved the way Claude Code does it. Read-only
+  commands run straight away. Everything else shows a chat card with the exact
+  command, the reason, plain-English risk notes and **Allow once** / **Always
+  allow “<command>”** / **Don't allow**. Compound commands are split, and every
+  part must be allowed. Wrappers (`timeout`, `nice`) and safe environment
+  prefixes are stripped before matching. Commands that hide inner commands
+  (`$(…)`, here-docs), launch other code (`bash -c`, `sudo`, `xargs`,
+  `find -exec`) or are destructive (`rm`, `git push --force`) are asked every
+  time and never remembered. The tool tells the model the OS, its version,
+  architecture, shell and starting folder. Commands run in the login shell's
+  environment with stdin closed, in their own process group, with live output,
+  **Stop**, a time limit and whole-tree cleanup on timeout, Stop or an
+  interrupted chat. Output for the model is bounded. Settings → Terminal
+  switches access off and removes saved rules. The terminal is never offered to
+  WhatsApp or Telegram senders. Registered on the Skills page as “Do things on
+  your computer for you”. See [docs/terminal.md](docs/terminal.md).
+
 - Compatible providers that omit a tool-call ID now receive a distinct local ID
   before execution, keeping memory lookup calls and results paired on the next
   model round. Existing provider IDs are preserved.

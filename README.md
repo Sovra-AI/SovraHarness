@@ -537,6 +537,30 @@ A saved client takes precedence over `SOVRA_GOOGLE_CLIENT_ID` and
 scopes, Google's verification requirements and the safety design are in
 [Google in Sovra](docs/google.md).
 
+## Terminal: Sovra does things on your computer
+
+Ask in plain words ("how much space is left on my disk?", "run the tests in my
+garden-planner project", or `/terminal <task>`) and Sovra runs commands in your
+own shell. It knows your operating system, its version and your shell, so it
+writes commands that work on Windows (PowerShell), macOS or Linux.
+
+- Commands that only look at things (`ls`, `cat`, `grep`, `git status`) run straight
+  away.
+- Anything else shows a card with the exact command, a one-line explanation and
+  plain warnings ("Deletes files", "Uses the internet"). Choose **Allow once**,
+  **Always allow “npm test”** or **Don't allow**.
+- Commands that can run arbitrary code or are hard to undo (`rm`, `sudo`,
+  `bash -c …`, `curl … | sh`, anything Sovra can't fully read) are asked every
+  time and never remembered.
+- While it runs you see the output live, with **Stop**. Every command has a time
+  limit, can't wait for keyboard input, and is cleaned up with everything it
+  started.
+
+**Settings → Terminal** switches this off and lists every "always allow" rule with
+**Remove**. The terminal is only offered in your own chats, never to people
+messaging you on WhatsApp or Telegram. How it works and why:
+[Terminal access](docs/terminal.md).
+
 ## Files in chat
 
 Use **Add files** (the paperclip beside the message) to attach up to eight files,

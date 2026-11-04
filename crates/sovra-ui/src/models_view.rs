@@ -136,6 +136,8 @@ pub struct ModelsView {
     pub(crate) connections: sovra_core::connections::ConnectionsState,
     pub(crate) whatsapp_form: crate::connections_view::WhatsAppForm,
     pub(crate) development: sovra_core::development::DevelopmentState,
+    /// Terminal settings for the Settings page (host and saved rules only).
+    pub(crate) terminal: sovra_core::terminal::TerminalState,
     /// The Google card on the Connections tab. The shell owns the view.
     pub(crate) google_card: Option<Entity<crate::google_card::GoogleCard>>,
     pub(crate) services: sovra_core::mcp::McpState,
@@ -320,6 +322,7 @@ impl ModelsView {
             connections: sovra_core::connections::ConnectionsState::default(),
             whatsapp_form,
             development: sovra_core::development::DevelopmentState::default(),
+            terminal: sovra_core::terminal::TerminalState::default(),
             google_card: None,
             services: sovra_core::mcp::McpState::default(),
             service_name,

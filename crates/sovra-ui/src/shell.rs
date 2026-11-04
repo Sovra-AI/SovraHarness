@@ -364,6 +364,17 @@ impl Shell {
                                 ));
                             }
                         }
+                        // Settings reads the host and rules; calls stay in the chat state.
+                        if let sovra_core::Event::Terminal(
+                            event @ (sovra_core::terminal::TerminalEvent::Ready { .. }
+                            | sovra_core::terminal::TerminalEvent::PolicyChanged(_)),
+                        ) = &event
+                        {
+                            shell.models.update(cx, |models, cx| {
+                                models.terminal.apply(event);
+                                cx.notify();
+                            });
+                        }
                         if let sovra_core::Event::Development(event) = &event {
                             shell.models.update(cx, |models, cx| {
                                 models.development.apply(event);

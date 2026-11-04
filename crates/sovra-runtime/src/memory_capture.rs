@@ -163,6 +163,7 @@ pub(crate) fn tap(
                     | Event::Development(_)
                     | Event::Google(_)
                     | Event::Mcp(_)
+                    | Event::Terminal(_)
                     | Event::FilePrepared(_)
                     | Event::FileIndex(_)
                     | Event::ChatHistoryLoaded { .. }

@@ -1060,6 +1060,7 @@ impl Actor {
             | Event::Development(_)
             | Event::Google(_)
             | Event::Mcp(_)
+            | Event::Terminal(_)
             | Event::ChatHistoryLoaded { .. }
             | Event::Ready { .. }
             | Event::Pong

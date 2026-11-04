@@ -11006,6 +11006,7 @@ dependencies = [
  "async-trait",
  "futures",
  "getrandom 0.4.3",
+ "nix",
  "reqwest 0.12.28",
  "rmcp",
  "serde",

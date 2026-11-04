@@ -30,6 +30,8 @@ pub struct ChatTokens {
     pub thinking_pill: Hsla,
     pub thinking_rule: Hsla,
     pub thinking_max_height: Rems,
+    /// Expanded terminal output scrolls inside this height.
+    pub terminal_output_max_height: Rems,
     pub composer_background: Hsla,
     pub composer_border: Hsla,
     pub composer_focus_border: Hsla,
@@ -308,6 +310,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
             },
             thinking_rule: colour(VIOLET_LIGHT).alpha(0.3),
             thinking_max_height: rem(240.),
+            terminal_output_max_height: rem(320.),
             composer_background: colour(p.surface),
             composer_border: colour(if dark { WHITE } else { 0x4c_1d_95 }).alpha(if dark {
                 0.1

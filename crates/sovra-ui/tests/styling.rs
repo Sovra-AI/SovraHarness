@@ -18,6 +18,8 @@ mod memory_sources;
 mod messaging;
 #[path = "styling/research_board.rs"]
 mod research_board;
+#[path = "styling/terminal.rs"]
+mod terminal;
 
 use gpui_kit::component::{ActiveTheme as _, Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;

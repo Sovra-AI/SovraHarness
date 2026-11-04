@@ -22,6 +22,8 @@ mod models;
 mod recalling;
 mod remembering;
 mod skills;
+mod terminal;
+pub use terminal::TerminalConfig;
 mod teams;
 pub use models::ModelsConfig;
 
@@ -278,6 +280,7 @@ pub fn start_with_auth(
             google: None,
             development: None,
             probes: Vec::new(),
+            terminal: None,
         },
     )
 }
@@ -301,6 +304,8 @@ pub struct RuntimeServices {
     pub development: Option<DevelopmentConfig>,
     /// Extra catalogue probes. Saved messaging links are probed as well.
     pub probes: Vec<Arc<dyn sovra_core::connection_catalogue::LinkProbe>>,
+    /// Terminal access for the assistant; `None` leaves the terminal tool out.
+    pub terminal: Option<TerminalConfig>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -389,6 +394,7 @@ async fn serve(
         google,
         development,
         probes,
+        terminal,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
@@ -412,6 +418,7 @@ async fn serve(
         &handle,
     );
     let google = google::GoogleRuntime::start(google, events.clone(), &handle);
+    let terminal = terminal::TerminalRuntime::start(terminal, events.clone(), &handle).await;
     let mut file_index = file_index::IndexRuntime::start(
         index,
         events.clone(),
@@ -707,6 +714,7 @@ async fn serve(
                 }
             }
             Command::Mcp(command) => mcp.handle(command),
+            Command::Terminal(command) => terminal.handle(command),
             Command::Files(command) => {
                 if let Some(jobs) = &file_jobs {
                     jobs.send(command);
@@ -768,6 +776,11 @@ async fn serve(
                     files::FilePrompt {
                         messaging: connections.messaging(&session_id),
                         google: google.tools().await,
+                        terminal: if connections.private_access(&session_id) {
+                            terminal.access()
+                        } else {
+                            None
+                        },
                         context,
                         session_id: session_id.clone(),
                         prompt,
@@ -927,6 +940,10 @@ async fn serve(
                         .with_artifact_saver(artifact_library.saver())
                         .unwrap_or(base);
                     let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
+                    let base = match terminal.access() {
+                        Some(access) => base.with_terminal(access).unwrap_or(base),
+                        None => base,
+                    };
                     base.with_reply_input_observer(inputs.clone())
                         .unwrap_or(base)
                 });

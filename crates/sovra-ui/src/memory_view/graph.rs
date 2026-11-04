@@ -97,7 +97,7 @@ impl MemoryView {
                     .child("More links exist than this picture shows."),
             );
         }
-        column = column.child(self.link_lines(&graph, cx));
+        column = column.child(Self::link_lines(&graph, cx));
         column.child(self.duplicate_check(cx))
     }
 
@@ -235,7 +235,7 @@ impl MemoryView {
             )
     }
 
-    fn link_lines(&self, graph: &MemoryGraph, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn link_lines(graph: &MemoryGraph, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let mut lines = v_flex().w_full().min_w_0().gap(t.space.hair);
         for (index, edge) in graph.edges.iter().enumerate() {

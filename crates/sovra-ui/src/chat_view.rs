@@ -72,9 +72,18 @@ struct ThinkingView {
 /// waiting row shown before the first output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
-    Message { message: usize, segment: usize },
+    Message {
+        message: usize,
+        segment: usize,
+    },
     Waiting,
-    Outbound { index: usize },
+    Outbound {
+        index: usize,
+    },
+    /// A terminal command card (index into `TerminalState::calls`).
+    Terminal {
+        index: usize,
+    },
 }
 
 pub(crate) struct ChatPresentation {
@@ -85,6 +94,8 @@ pub(crate) struct ChatPresentation {
     rows: Vec<Row>,
     /// Reasoning disclosures the reader opened (or closed while streaming).
     pub(crate) thinking_toggled: HashSet<usize>,
+    /// Terminal cards showing all their output, by call id.
+    pub(crate) terminal_expanded: HashSet<String>,
     session_id: String,
     /// When the current turn started, for the "Thinking… 12s" timer.
     pub(crate) turn_started: Option<Instant>,
@@ -247,6 +258,7 @@ impl ChatPresentation {
             markdown: HashMap::new(),
             rows: Vec::new(),
             thinking_toggled: HashSet::new(),
+            terminal_expanded: HashSet::new(),
             session_id: String::new(),
             turn_started: None,
             was_generating: false,
@@ -327,6 +339,13 @@ impl ChatPresentation {
                 .filter(|(_, message)| message.session_id == state.session_id)
                 .map(|(index, _)| Row::Outbound { index }),
         );
+        rows.extend(
+            state
+                .terminal
+                .calls()
+                .filter(|(_, view)| view.call.session_id == state.session_id)
+                .map(|(index, _)| Row::Terminal { index }),
+        );
         if awaiting_first_output(state) {
             rows.push(Row::Waiting);
         }
@@ -343,17 +362,28 @@ impl ChatPresentation {
                 .remeasure_items(kept.saturating_sub(1)..rows.len());
             self.rows = rows;
         }
-        // Approval and receipt changes can change a row's height without changing its id.
+        // Approval, receipt and streamed terminal output change a row's height
+        // without changing its id.
         for (index, row) in self.rows.iter().enumerate() {
             if matches!(row, Row::Outbound { .. }) {
                 self.list.remeasure_items(index..index + 1);
             }
         }
+        self.remeasure_terminal();
         // Only the first row (thinking, widgets above) and the growing last segment
         // of a changed reply need measuring again — not every segment.
         for (message, segments) in changed {
             self.remeasure(message, 0);
             self.remeasure(message, segments.saturating_sub(1));
+        }
+    }
+
+    /// Terminal cards grow as output streams in and when expanded.
+    pub(crate) fn remeasure_terminal(&self) {
+        for (index, row) in self.rows.iter().enumerate() {
+            if matches!(row, Row::Terminal { .. }) {
+                self.list.remeasure_items(index..index + 1);
+            }
         }
     }
 
@@ -495,6 +525,7 @@ pub(crate) fn render_chat_column(
         .outbound_messages
         .iter()
         .any(|m| m.session_id == state.session_id)
+        && state.terminal.calls_for(&state.session_id).next().is_none()
         && state.messages.is_empty()
         && shell.composer_input.read(cx).value().is_empty()
         && !state.is_generating
@@ -663,6 +694,20 @@ fn render_row(
             message_gap,
             message_gap,
         ),
+        Some(Row::Terminal { index }) => match state.terminal.call_at(index) {
+            Some(view) => (
+                crate::terminal_card::render(
+                    view,
+                    index,
+                    chat.terminal_expanded.contains(&view.call.call_id),
+                    cx,
+                )
+                .into_any_element(),
+                message_gap,
+                message_gap,
+            ),
+            None => (div().into_any_element(), Rems::ZERO, Rems::ZERO),
+        },
         Some(Row::Waiting) | None => (
             h_flex()
                 .w_full()

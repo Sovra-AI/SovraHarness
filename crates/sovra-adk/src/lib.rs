@@ -24,6 +24,7 @@ mod required_delegation;
 mod skills;
 mod sources_footer;
 mod team;
+mod terminal;
 mod text_tool_calls;
 mod web_search;
 mod working_context;

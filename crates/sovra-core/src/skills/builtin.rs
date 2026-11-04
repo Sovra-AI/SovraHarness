@@ -37,6 +37,7 @@ impl Skill {
             "connect-service" => "Add a service you already use",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
+            "terminal" => "Do things on your computer for you",
             "read-files" => "Read & explain attached files",
             "search-files" => "Search inside your connected folders",
             "map-files" => "Connect people & topics in your files",
@@ -154,6 +155,10 @@ impl Skill {
                 "What are three easy, healthy Mediterranean dinner ideas?",
             ),
             "save-artifact" => sample_pair("save-artifact", "Our family trip packing checklist"),
+            "terminal" => sample_pair(
+                "terminal",
+                "How much free space is left on my computer?",
+            ),
             "read-files" => sample_pair(
                 "read-files",
                 "Summarize the main points of this document in plain English",
@@ -403,6 +408,16 @@ pub fn builtin_skills() -> Vec<Skill> {
             &["save_artifact"],
             "Use save_artifact to keep the requested work in the user's library. Include its complete content and accurate kind. Check the returned result before claiming it was saved; do not claim this creates a source file outside the artifact library.",
             "<what to save>",
+        ),
+        procedure(
+            "terminal",
+            "Run terminal commands",
+            "Use when a task needs commands run on this computer: checking disk space, running a project's tests, organising files or installing a tool. Sovra asks before anything that changes your computer.",
+            "Computer",
+            &["shell", "command", "run"],
+            &[crate::terminal::TERMINAL_TOOL_NAME],
+            "Use run_terminal_command to do the task on the person's computer. Write commands for the operating system and shell named in the tool description. Prefer one clear command at a time and give each a short plain-English description. The person approves anything that changes files, installs software or uses the internet; if they decline, do not retry it or a variant, ask what they would like instead. Report what actually happened from the command's output and exit code, never assume success.",
+            "<what to do on the computer>",
         ),
         procedure(
             "web-search",

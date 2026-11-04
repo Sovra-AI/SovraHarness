@@ -112,6 +112,7 @@ fn main() -> anyhow::Result<()> {
             google: Some(Arc::new(google)),
             development: Some(development),
             probes: Vec::new(),
+            terminal: Some(terminal_config(dirs.data_local_dir())),
         },
     )
     .context("failed to start the runtime")?;
@@ -157,6 +158,28 @@ fn read_model_keys() -> std::collections::BTreeMap<String, sovra_core::models::M
             })
     })
     .collect()
+}
+
+/// Terminal settings live beside the other app data; commands start in the person's
+/// home folder, in their own shell.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sovra-app is the composition root and reads process environment variables once at startup"
+)]
+fn terminal_config(data_dir: &std::path::Path) -> sovra_runtime::TerminalConfig {
+    let working_dir = directories::BaseDirs::new().map_or_else(
+        || data_dir.to_path_buf(),
+        |base| base.home_dir().to_path_buf(),
+    );
+    sovra_runtime::TerminalConfig {
+        settings_path: data_dir.join("terminal").join("settings.json"),
+        working_dir,
+        login_shell: std::env::var("SHELL")
+            .ok()
+            .filter(|shell| !shell.trim().is_empty()),
+        search_path: std::env::var_os("PATH"),
+        use_login_env: true,
+    }
 }
 
 #[expect(

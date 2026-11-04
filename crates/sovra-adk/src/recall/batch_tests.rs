@@ -241,7 +241,7 @@ impl Llm for MissingIdModel {
                     _ => None,
                 })
                 .expect("provider history needs a call ID");
-            assert!(!call_id.trim().is_empty());
+            assert_ne!(call_id.trim(), "");
             let result_id = parts
                 .iter()
                 .find_map(|part| match part {
