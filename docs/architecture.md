@@ -182,7 +182,11 @@ hand-off still need UI integration; see [development notes](development.md#sign-
 ### Planned (create the crate when the first feature needs it)
 
 - Secrets: `keyring` v4 (`keyring-core` + native stores) — API keys in the OS keychain.
-- MCP: `rmcp`. Providers: one `sovra-provider-*` crate per API behind a `sovra-core` trait.
+- Providers: one `sovra-provider-*` crate per API behind a `sovra-core` trait.
+
+Connected services (MCP) live in `sovra-runtime/src/mcp*`: a hand-written Streamable HTTP
+client for web addresses and the `rmcp` client for programs on this computer. See
+[Connected services](connected-services.md).
 
 ### Agent rules: one source of truth
 

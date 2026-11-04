@@ -146,6 +146,8 @@ pub struct ModelsView {
     pub(crate) service_secret: Entity<InputState>,
     pub(crate) service_client_id: Entity<InputState>,
     pub(crate) service_client_secret: Entity<InputState>,
+    /// Form state for the connected services screen.
+    pub(crate) services_screen: crate::service_connect_view::ServicesScreen,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -237,6 +239,7 @@ impl ModelsView {
                 .placeholder("Password from the service, if it gave you one")
                 .masked(true)
         });
+        let services_screen = crate::service_connect_view::ServicesScreen::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -258,6 +261,18 @@ impl ModelsView {
                 },
             ),
         ];
+        // Search filters as you type; the program field enables its button.
+        for live in services_screen.live_inputs() {
+            subscriptions.push(cx.subscribe_in(
+                &live,
+                window,
+                |_, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                },
+            ));
+        }
         for control in [
             &author,
             &connection,
@@ -330,6 +345,7 @@ impl ModelsView {
             service_secret,
             service_client_id,
             service_client_secret,
+            services_screen,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         }

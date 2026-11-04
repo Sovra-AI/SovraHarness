@@ -12,7 +12,8 @@ async-channel = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 getrandom = { workspace = true }
-rmcp = { workspace = true }
+# `client` + child processes: programs on this computer as connected services.
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -281,6 +281,7 @@ pub fn start_with_auth(
             development: None,
             probes: Vec::new(),
             terminal: None,
+            mcp_catalogue: None,
         },
     )
 }
@@ -306,6 +307,9 @@ pub struct RuntimeServices {
     pub probes: Vec<Arc<dyn sovra_core::connection_catalogue::LinkProbe>>,
     /// Terminal access for the assistant; `None` leaves the terminal tool out.
     pub terminal: Option<TerminalConfig>,
+    /// The saved list of connected services (MCP servers). `None` keeps it in
+    /// the credential store, as older builds did.
+    pub mcp_catalogue: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -395,6 +399,7 @@ async fn serve(
         development,
         probes,
         terminal,
+        mcp_catalogue,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
@@ -451,7 +456,13 @@ async fn serve(
             memory_control.clone(),
         )
     });
-    let mut mcp = mcp::McpRuntime::start(mcp_repository, events.clone(), &handle);
+    let mut mcp = mcp::McpRuntime::start(
+        mcp_repository,
+        mcp_catalogue,
+        terminal.environment(),
+        events.clone(),
+        &handle,
+    );
     let mut runs = std::collections::BTreeMap::<String, ActiveRun>::new();
     let mut memory_taps = tokio::task::JoinSet::new();
     let mut routing_config = RoutingConfig::default();

@@ -247,7 +247,7 @@ impl<'a> Stream<'a> {
 
 /// Starts the command in a new process group so the whole tree can be signalled
 /// (and, on Windows, without a console window).
-pub(super) fn own_group(command: &mut tokio::process::Command) {
+pub(crate) fn own_group(command: &mut tokio::process::Command) {
     #[cfg(unix)]
     command.process_group(0);
     #[cfg(windows)]
@@ -267,6 +267,25 @@ pub(super) fn hide_window(command: &mut tokio::process::Command) {
     }
     #[cfg(not(windows))]
     let _ = command;
+}
+
+/// Stops a whole process group when dropped, whatever state it is in. Used for
+/// long-lived helper programs (connected services) started with [`own_group`].
+pub(crate) struct GroupGuard(ProcessTree);
+
+impl GroupGuard {
+    pub(crate) fn new(pid: Option<u32>) -> Self {
+        Self(ProcessTree::new(pid))
+    }
+}
+
+impl std::fmt::Debug for GroupGuard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("GroupGuard")
+            .field(&self.0.pid)
+            .finish()
+    }
 }
 
 /// The started command's process tree. Dropping it while the command may still be

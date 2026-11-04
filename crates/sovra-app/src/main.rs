@@ -113,6 +113,11 @@ fn main() -> anyhow::Result<()> {
             development: Some(development),
             probes: Vec::new(),
             terminal: Some(terminal_config(dirs.data_local_dir())),
+            mcp_catalogue: Some(
+                dirs.data_local_dir()
+                    .join("connected-services")
+                    .join("services.json"),
+            ),
         },
     )
     .context("failed to start the runtime")?;

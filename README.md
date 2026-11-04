@@ -659,14 +659,35 @@ outbound messages in your desktop chat.
 
 ## Connect a service you already use
 
-Open **Connections** and choose **A service you already use**. Paste the web address the service gave you.
-Add a name if you want one. If the service gave you a secret, paste that too.
-It stays on this computer and is not shown again. Choose **Connect**.
+Connected services (MCP servers) give Sovra new abilities. Open **Connections**,
+choose **A service you already use**, then **Add a service**. There are three ways
+to add one:
 
-If the service needs you to sign in, choose **Sign in** and finish in your browser.
-When the status says **Connected**, you can see what the service can do, in
-everyday words. Ask in chat as usual. A reply that came from the service shows
-that service's name. **Remove** stops Sovra from using it later.
+- **Web address**: paste the address the service gave you. Add a secret if it gave
+  you one (it stays in your keychain). Choose **Connect**, and **Sign in** in your
+  browser if it asks.
+- **Program on this computer**: paste the command from the service's instructions,
+  for example `npx -y @modelcontextprotocol/server-filesystem ~/Documents`. Add any
+  keys it needs as `NAME=value` lines under **Private settings**; they're kept in your
+  keychain. Before it runs for the first time, Sovra shows the exact command with plain
+  warnings, such as "Downloads a program from the internet and runs it". Nothing runs
+  until you choose **Run it**, and changing the command asks again.
+- **Paste settings**: paste the `mcpServers` settings from a service's instructions or
+  from Claude Desktop, Cursor, VS Code or Zed. Sovra adds every service it finds.
+  Programs still wait for your OK.
+
+Every service has its own card with:
+
+- a status;
+- a switch to pause or resume it;
+- **Reconnect**/**Restart**, **Rename**, and **Remove** (which asks first);
+- **N of M tools on**, which opens a list where you can switch off any tool you don't
+  want Sovra to use.
+
+With a long list, search by name, address or tool. Services that need you come first.
+Sovra reconnects your services when it starts. A program that stops on its own shows
+the last thing it said. Replies that came from a service show its name.
+How it works and why: [Connected services](docs/connected-services.md).
 
 ## Shipping
 

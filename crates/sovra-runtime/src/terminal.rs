@@ -5,6 +5,8 @@
 mod host;
 mod process;
 
+pub(crate) use process::{GroupGuard, own_group as own_process_group};
+
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -57,6 +59,8 @@ struct Shared {
     host: HostSystem,
     settings_path: PathBuf,
     working_dir: PathBuf,
+    /// The app's own `PATH`, used when the login shell gave none.
+    search_path: Option<OsString>,
     policy: Mutex<TerminalPolicy>,
     /// Approval cards waiting for an answer, by call id.
     waiting: Mutex<HashMap<String, oneshot::Sender<TerminalDecision>>>,
@@ -100,6 +104,7 @@ impl TerminalRuntime {
             host: host.clone(),
             settings_path: config.settings_path,
             working_dir: config.working_dir,
+            search_path: config.search_path.clone(),
             policy: Mutex::new(policy.clone()),
             waiting: Mutex::new(HashMap::new()),
             running: Mutex::new(HashMap::new()),
@@ -122,6 +127,15 @@ impl TerminalRuntime {
             shared: Some(shared),
             handle: handle.clone(),
         }
+    }
+
+    /// The person's login-shell environment, shared with other helpers that start
+    /// programs (connected services), so `npx`, `uvx` and friends are found the
+    /// same way the terminal finds them. `None` without terminal configuration.
+    pub(crate) fn environment(&self) -> Option<LoginEnvironment> {
+        self.shared.as_ref().map(|shared| LoginEnvironment {
+            shared: Arc::clone(shared),
+        })
     }
 
     /// The terminal for one conversation turn; `None` when unavailable or switched off.
@@ -266,6 +280,29 @@ async fn write_settings(path: &Path, file: &SettingsFile) -> std::io::Result<()>
     let temporary = path.with_extension("json.tmp");
     tokio::fs::write(&temporary, json).await?;
     tokio::fs::rename(&temporary, path).await
+}
+
+/// A handle on the cached login-shell environment (see [`TerminalRuntime::environment`]).
+#[derive(Debug, Clone)]
+pub(crate) struct LoginEnvironment {
+    shared: Arc<Shared>,
+}
+
+impl LoginEnvironment {
+    /// The login environment, resolved once (the first caller waits).
+    pub(crate) async fn variables(&self) -> Vec<(OsString, OsString)> {
+        self.shared.login_env().await.to_vec()
+    }
+
+    /// `PATH` to search for programs: the login shell's, else the app's.
+    pub(crate) async fn search_path(&self) -> Option<OsString> {
+        let login = self.shared.login_env().await;
+        login
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            .map(|(_, value)| value.clone())
+            .or_else(|| self.shared.search_path.clone())
+    }
 }
 
 /// The per-turn handle given to the assistant's tool.

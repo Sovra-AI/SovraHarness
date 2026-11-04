@@ -505,6 +505,7 @@ mod tests {
             phase: McpPhase::Failed,
             message: "Could not reach it.".into(),
             tools: Vec::new(),
+            ..McpService::default()
         }];
         let probed = BTreeMap::new();
         let catalogue = catalogue_from(&sources(

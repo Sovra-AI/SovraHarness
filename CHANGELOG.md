@@ -11,6 +11,27 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Connected services can now be managed at scale. Add a **web address**, a **program
+  on this computer** (local MCP servers such as `npx …`/`uvx …`), or **paste
+  settings** in the `mcpServers` format used by Claude Desktop and Cursor (also VS
+  Code's `servers` and Zed's `context_servers`). Each service has its own card with:
+  - a status;
+  - a pause switch;
+  - per-tool switches (switched-off tools are never offered to the model);
+  - Reconnect/Restart;
+  - Rename;
+  - Remove, which asks first.
+
+  Search covers names, addresses and tools, and services that need you come first.
+  Programs never run until you've seen the exact command with plain warnings and
+  chosen **Run it**; any change to the command asks again. Programs run in their own
+  process group with your login shell's `PATH`, and a crash shows what the program
+  said. Private settings and extra headers are kept in the keychain. The saved list
+  moved from the keychain to a JSON file (migrated automatically), because Windows
+  limits keychain entries to about 2.5 KB. Services reconnect at start-up, and tool
+  calls and sign-in waits no longer block other services. Tool names are capped at
+  64 characters. See [docs/connected-services.md](docs/connected-services.md).
+
 - Terminal access: Sovra can run commands on your computer with
   `run_terminal_command`, approved the way Claude Code does it. Read-only
   commands run straight away. Everything else shows a chat card with the exact

@@ -1,8 +1,19 @@
-//! Connecting a service by its web address.
+//! Connected services (MCP servers): web addresses and programs on this computer.
 //!
 //! Pure rules only: which addresses are allowed, how a sign-in challenge is read,
 //! which registration method to use, which saved secret may be reused, and the
-//! words a person sees. HTTP and the browser hand-off live in `sovra-runtime`.
+//! words a person sees. Managing many services (programs, pasted settings, the
+//! review before a program runs, search) is in [`servers`]. HTTP, processes and
+//! the browser hand-off live in `sovra-runtime`. Design: `docs/connected-services.md`.
+
+mod servers;
+
+pub use servers::{
+    DraftSetup, ImportProblem, MAX_SERVICES, MAX_TOOL_NAME, McpSummary, McpTransport, ProgramNote,
+    ServerDraft, approval_fingerprint, bounded_tool_alias, env_name_allowed, header_allowed,
+    name_for_program, parse_server_settings, program_display, program_from_command_line,
+    program_id_for, program_notes,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -408,6 +419,9 @@ pub enum SecretKind {
     Static,
     /// Hosted metadata URL already configured for one sign-in service.
     Metadata,
+    /// Private settings for one service: a program's environment values or a web
+    /// address's extra headers, as a JSON object.
+    Settings,
 }
 
 /// A secret plus the only place it may be used. The value is omitted from `Debug`.
@@ -464,7 +478,7 @@ pub fn accept_secret<'a>(
     let matches = match kind {
         SecretKind::Access => record.issuer == issuer && record.server == server,
         SecretKind::Client | SecretKind::Metadata => record.issuer == issuer && !issuer.is_empty(),
-        SecretKind::Static => {
+        SecretKind::Static | SecretKind::Settings => {
             record.issuer.is_empty() && record.server == server && !server.is_empty()
         }
     };
@@ -483,6 +497,7 @@ pub fn secret_storage_id(issuer: &str, server: &str, kind: SecretKind) -> String
         SecretKind::Client => b"client".as_slice(),
         SecretKind::Static => b"static".as_slice(),
         SecretKind::Metadata => b"metadata".as_slice(),
+        SecretKind::Settings => b"settings".as_slice(),
     });
     let digest = hasher.finalize();
     format!("mcp-{}", hex_of(&digest[..16]))
@@ -517,7 +532,7 @@ pub fn tool_alias(service_id: &str, tool: &str) -> String {
             })
             .collect()
     }
-    format!("connected_{}_{}", clean(service_id), clean(tool))
+    bounded_tool_alias(format!("connected_{}_{}", clean(service_id), clean(tool)))
 }
 
 /// Words shown for a failed connect. None of them name the protocol.
@@ -565,6 +580,8 @@ pub enum McpPhase {
     NeedsClientDetails,
     Connected,
     Failed,
+    /// A program waiting for the person to approve running it.
+    NeedsApproval,
 }
 
 impl McpPhase {
@@ -576,6 +593,7 @@ impl McpPhase {
             Self::NeedsClientDetails => "Needs a detail from you",
             Self::Connected => "Connected",
             Self::Failed => "Needs attention",
+            Self::NeedsApproval => "Waiting for your OK",
         }
     }
 }
@@ -599,11 +617,16 @@ pub fn user_facing_copy() -> Vec<&'static str> {
         McpPhase::NeedsClientDetails.label(),
         McpPhase::Connected.label(),
         McpPhase::Failed.label(),
+        McpPhase::NeedsApproval.label(),
+        PAUSED_LABEL,
         "Removed.",
         "Connected.",
         TOOL_FAILED_TEXT,
     ]
 }
+
+/// Status shown for a service the person paused.
+pub const PAUSED_LABEL: &str = "Paused";
 
 /// Shown when a connected service could not finish an action.
 pub const TOOL_FAILED_TEXT: &str = "The service couldn't do that. Try again.";
@@ -625,20 +648,59 @@ pub struct McpToolInfo {
     pub input_schema: Value,
 }
 
-/// A connected service as the screen shows it. Secrets never live here.
+/// A connected service as the screen shows it. Secrets never live here: header
+/// and environment *names* are kept, their values are in the keychain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpService {
     pub id: String,
     pub name: String,
+    /// The web address; for a program, its exact command (see [`Self::location`]).
     pub address: String,
     pub phase: McpPhase,
     pub message: String,
     pub tools: Vec<McpToolInfo>,
+    #[serde(default)]
+    pub transport: McpTransport,
+    /// Paused services keep their settings but are not started or offered.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    /// Tools the person switched off; the model never sees them.
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
+    /// Extra headers sent to a web address (names only).
+    #[serde(default)]
+    pub header_names: Vec<String>,
+}
+
+const fn default_enabled() -> bool {
+    true
+}
+
+impl Default for McpService {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            address: String::new(),
+            phase: McpPhase::default(),
+            message: String::new(),
+            tools: Vec::new(),
+            transport: McpTransport::default(),
+            enabled: true,
+            disabled_tools: Vec::new(),
+            header_names: Vec::new(),
+        }
+    }
 }
 
 impl McpService {
+    /// The status word: "Paused" for a paused service, else the phase's label.
     pub fn label(&self) -> &'static str {
-        self.phase.label()
+        if self.enabled {
+            self.phase.label()
+        } else {
+            PAUSED_LABEL
+        }
     }
 }
 
@@ -686,6 +748,42 @@ pub enum McpCommand {
         address: String,
         secret: Option<String>,
     },
+    /// Add a program on this computer. It waits for [`McpCommand::Approve`] before
+    /// it first runs.
+    AddProgram {
+        name: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        working_dir: Option<String>,
+    },
+    /// Add everything in pasted settings (see [`parse_server_settings`]).
+    Import {
+        text: String,
+    },
+    /// The person read the exact command and allows the program to run.
+    Approve {
+        id: String,
+    },
+    /// Pause (stop offering and stop the program) or resume a service.
+    SetEnabled {
+        id: String,
+        enabled: bool,
+    },
+    /// Offer or hide one tool from the model.
+    SetToolEnabled {
+        id: String,
+        tool: String,
+        enabled: bool,
+    },
+    /// Connect again: restart a program or reconnect a web address.
+    Reconnect {
+        id: String,
+    },
+    Rename {
+        id: String,
+        name: String,
+    },
     /// Continue sign-in after the person pastes the name the service gave them.
     SubmitClientDetails {
         id: String,
@@ -731,6 +829,47 @@ impl std::fmt::Debug for McpCommand {
                 .field("id", id)
                 .field("client_id", client_id)
                 .field("client_secret", &client_secret.as_ref().map(|_| "…"))
+                .finish(),
+            Self::AddProgram {
+                name,
+                command,
+                args,
+                env,
+                working_dir,
+            } => formatter
+                .debug_struct("AddProgram")
+                .field("name", name)
+                .field("command", command)
+                .field("args", args)
+                .field(
+                    "env",
+                    &env.iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>(),
+                )
+                .field("working_dir", working_dir)
+                .finish(),
+            Self::Import { text } => formatter
+                .debug_struct("Import")
+                .field("bytes", &text.len())
+                .finish(),
+            Self::Approve { id } => formatter.debug_struct("Approve").field("id", id).finish(),
+            Self::SetEnabled { id, enabled } => formatter
+                .debug_struct("SetEnabled")
+                .field("id", id)
+                .field("enabled", enabled)
+                .finish(),
+            Self::SetToolEnabled { id, tool, enabled } => formatter
+                .debug_struct("SetToolEnabled")
+                .field("id", id)
+                .field("tool", tool)
+                .field("enabled", enabled)
+                .finish(),
+            Self::Reconnect { id } => formatter.debug_struct("Reconnect").field("id", id).finish(),
+            Self::Rename { id, name } => formatter
+                .debug_struct("Rename")
+                .field("id", id)
+                .field("name", name)
                 .finish(),
             Self::SignIn { id } => formatter.debug_struct("SignIn").field("id", id).finish(),
             Self::Remove { id } => formatter.debug_struct("Remove").field("id", id).finish(),
@@ -1495,6 +1634,7 @@ mod tests {
                 description: "Repeats a short note.".into(),
                 input_schema: json!({}),
             }],
+            ..McpService::default()
         };
         state.apply(&McpEvent::Upsert(service.clone()));
         assert_eq!(state.services.len(), 1);

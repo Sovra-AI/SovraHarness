@@ -395,7 +395,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "connect-service",
             "Connect a service",
-            "Open Connections and paste the web address of a service you already use.",
+            "Open Connections and add a service you already use: its web address, a program on this computer, or the settings its instructions give you.",
             SkillAction::ConnectService,
             &["mcp", "service"],
         ),

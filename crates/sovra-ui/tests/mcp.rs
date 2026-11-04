@@ -47,6 +47,7 @@ fn service(phase: McpPhase, message: &str, tools: Vec<McpToolInfo>) -> McpServic
         phase,
         message: message.into(),
         tools,
+        ..McpService::default()
     }
 }
 
@@ -137,7 +138,10 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
             window.find("mcp-message-recipe-box").label(),
             Some("This service needs you to sign in.")
         );
-        assert!(window.try_find("mcp-status-recipe-box").is_none());
+        assert_eq!(
+            window.find("mcp-status-recipe-box").label(),
+            Some("Sign in")
+        );
     })
     .expect("window exists");
 
@@ -161,6 +165,15 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
             window.find("mcp-status-recipe-box").label(),
             Some("Connected")
         );
+        // Tool lists start folded so a long list of services stays short.
+        assert!(window.try_find("mcp-tool-recipe-box-echo").is_none());
+        reveal(window, "mcp-tools-toggle-recipe-box", cx);
+        assert_eq!(
+            window.find("mcp-tools-toggle-recipe-box").label(),
+            Some("1 of 1 tools on")
+        );
+        window.click("mcp-tools-toggle-recipe-box", cx);
+        window.render_frame(cx);
         reveal(window, "mcp-tool-recipe-box-echo", cx);
         assert_eq!(
             window.find("mcp-tool-recipe-box-echo").label(),
@@ -170,6 +183,14 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
         assert_eq!(window.find("mcp-remove-recipe-box").label(), Some("Remove"));
         assert!(window.try_find("mcp-sign-in-recipe-box").is_none());
         window.click("mcp-remove-recipe-box", cx);
+        window.render_frame(cx);
+        // Removing asks once more, in place.
+        reveal(window, "mcp-remove-confirm-recipe-box", cx);
+        assert_eq!(
+            window.find("mcp-remove-confirm-recipe-box").label(),
+            Some("Yes, remove")
+        );
+        window.click("mcp-remove-confirm-recipe-box", cx);
         assert!(window.find("mcp-service-recipe-box").visible());
     })
     .expect("window exists");
