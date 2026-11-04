@@ -17,6 +17,7 @@ use gpui_kit::component::{
     switch::Switch,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext as _, Context, Entity, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
@@ -498,6 +499,7 @@ impl ModelsView {
                     })),
             );
 
+        let reviewing = service.enabled && service.phase == McpPhase::NeedsApproval;
         let mut card = v_flex()
             .id(sid("mcp-service", &id))
             .test_support()
@@ -507,16 +509,18 @@ impl ModelsView {
             .gap(t.space.compact)
             .sovra_surface(Surface::Subtle, cx)
             .child(title_row)
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .truncate()
-                    .font_family(mono)
-                    .sovra_text(TextRole::Caption, cx)
-                    .text_color(t.text_secondary)
-                    .child(service.location()),
-            );
+            .when(!reviewing, |card| {
+                card.child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(mono)
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(service.location()),
+                )
+            });
 
         let show_message = service.enabled
             && service.phase != McpPhase::Connected
@@ -941,6 +945,7 @@ impl ModelsView {
     }
 
     fn connect_service(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.services.notice = None;
         let address = self.service_address.read(cx).value().to_string();
         if address.trim().is_empty() {
             return;
@@ -969,6 +974,7 @@ impl ModelsView {
     }
 
     fn add_program(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.services.notice = None;
         let screen = &self.services_screen;
         let typed = screen.program_command.read(cx).value().to_string();
         let draft = match program_from_command_line(&typed) {
@@ -1026,6 +1032,7 @@ impl ModelsView {
     }
 
     fn import_services(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.services.notice = None;
         let text = self.services_screen.paste.read(cx).value().to_string();
         // Check here too, so a typo is explained before anything is sent.
         if let Err(problem) = parse_server_settings(&text) {

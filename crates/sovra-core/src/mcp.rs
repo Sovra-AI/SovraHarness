@@ -723,7 +723,8 @@ impl McpState {
                 } else {
                     self.services.push(service.clone());
                 }
-                self.notice = None;
+                // Status changes keep the last notice (e.g. an import summary);
+                // the screen clears it when the person starts something new.
             }
             McpEvent::Removed { id } => {
                 self.services.retain(|service| service.id != *id);
