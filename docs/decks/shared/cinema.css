@@ -216,3 +216,51 @@ body.overview .slide .draw *{stroke-dashoffset:0!important;animation:none!import
   .slide::before,.flow,.floaty{animation:none!important}
   .rv{transition-duration:.01s!important;transition-delay:0s!important}
 }
+/* ---- professional restraint ----------------------------------------------
+   One accent (Sovra violet #5b21b6), slate for "direction", neutral surfaces.
+   No gradient type, no glow, no grain. Later rules win over the ones above. */
+:root{
+  --bg:#fcfcfd;--bg-2:#f6f6f8;--bg-3:#f1f0f5;
+  --ink:#17131f;--ink-2:#2d2838;--muted:#5d5869;--dim:#8b8696;
+  --line:rgba(23,19,31,.08);--line-2:rgba(23,19,31,.14);
+  --violet:#5b21b6;--violet-2:#6d28d9;--violet-3:#5b21b6;--magenta:#6d28d9;
+  --cyan:#475569;--cyan-2:#475569;--green:#166534;--amber:#92400e;--rose:#9f1239;
+  --grad:linear-gradient(#5b21b6,#5b21b6);--grad-cool:linear-gradient(#475569,#475569);
+}
+html,body{background:#ececf0}
+.slide::before{opacity:.28;animation:none}
+.slide::after{display:none}
+.gridbg{opacity:.3}
+h1,.h1{font-weight:650;letter-spacing:-.028em}
+.giant{font-weight:700;letter-spacing:-.04em}
+.mega{font-weight:700;letter-spacing:-.045em}
+.g,.gc{background:none;-webkit-background-clip:border-box;background-clip:border-box;color:#5b21b6}
+.eyebrow{color:#5b21b6;letter-spacing:.2em}
+.eyebrow.c{color:#475569}
+.glass{background:#fff;border:1px solid var(--line-2);box-shadow:0 1px 2px rgba(23,19,31,.04),0 14px 34px -24px rgba(23,19,31,.22);backdrop-filter:none;-webkit-backdrop-filter:none}
+.card::after{display:none}
+.card .ico{background:#f4f1fb;border:1px solid rgba(91,33,182,.16);box-shadow:none}
+.card .ico svg{stroke:#5b21b6}
+.card.c .ico{background:#f1f5f9;border-color:rgba(71,85,105,.2);box-shadow:none}
+.card.c .ico svg{stroke:#334155}
+.pill{background:#fff}
+.pill::before{box-shadow:none}
+.pill.today{color:#166534;border-color:rgba(22,101,52,.25);background:#f6faf7}
+.pill.next{color:#475569;border-color:rgba(71,85,105,.28);background:#f8fafc}
+.pill.warn{color:#92400e;border-color:rgba(146,64,14,.25);background:#fffbf5}
+.stat .n{font-weight:700;letter-spacing:-.04em}
+.stat .l{color:var(--muted)}
+.bar{background:#fff;border:1px solid var(--line-2);border-left:3px solid #5b21b6}
+.bar.c{background:#fff;border-left-color:#475569}
+.bar .k{color:#5b21b6}.bar.c .k{color:#475569}
+.divider .bignum{-webkit-text-stroke:2px rgba(23,19,31,.06)!important}
+.app{box-shadow:0 1px 2px rgba(23,19,31,.05),0 34px 80px -46px rgba(23,19,31,.45)}
+.msg.me .bub{background:#2d2838}
+.bub .who{color:var(--muted)}
+.cite{background:#f6f6f8;color:#475569;border-color:var(--line-2)}
+#progress{background:#5b21b6;box-shadow:none}
+/* two-tone headlines: ink + grey. Violet stays for the cover, the close,
+   buttons and small markers only. */
+h1 .g,h1 .gc,.h1 .g,.h1 .gc,.divider .giant .g,.divider .giant .gc{color:#7a7585}
+.stat .n.g,.stat .n.gc{color:var(--ink)}
+.step .sn.g,.step .sn.gc{color:#c9c5d1}
