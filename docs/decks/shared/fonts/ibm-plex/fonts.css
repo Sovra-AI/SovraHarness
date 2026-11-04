@@ -1,0 +1,23 @@
+/* IBM Plex · Latin only · vendored for file:// decks. */
+@font-face{font-family:'IBM Plex Sans';font-style:normal;font-weight:300;font-display:swap;
+  src:url('sans-300.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Sans';font-style:normal;font-weight:400;font-display:swap;
+  src:url('sans-400.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Sans';font-style:italic;font-weight:400;font-display:swap;
+  src:url('sans-400i.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Sans';font-style:normal;font-weight:500;font-display:swap;
+  src:url('sans-500.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Sans';font-style:normal;font-weight:600;font-display:swap;
+  src:url('sans-600.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Serif';font-style:normal;font-weight:300;font-display:swap;
+  src:url('serif-300.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Serif';font-style:normal;font-weight:400;font-display:swap;
+  src:url('serif-400.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Serif';font-style:italic;font-weight:400;font-display:swap;
+  src:url('serif-400i.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;
+  src:url('mono-400.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('mono-500.woff2') format('woff2');}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:600;font-display:swap;
+  src:url('mono-600.woff2') format('woff2');}
