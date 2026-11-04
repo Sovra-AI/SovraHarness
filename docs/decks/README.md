@@ -7,7 +7,7 @@ one `index.html`. Three frames exist; pick the one that matches the audience.
 
 | Frame | Stage | Use |
 | --- | --- | --- |
-| **Cinema** (`shared/cinema.css` + `cinema.js`) | 1920×1080 | Investor pitches. The dark Sovra canvas the logo is drawn for (`#0a0514`), aurora light, glass panels, inline-SVG diagrams, live canvas scenes and a three.js hero. |
+| **Cinema** (`shared/cinema.css` + `cinema.js`) | 1920×1080 | Investor pitches. Sovra light theme (paper `#fbfaff`, deep purple ink, violet `#7c3aed`), soft aurora tints, white glass panels, inline-SVG diagrams, live canvas scenes and a three.js hero. |
 | **Editorial** (`shared/sovra-deck.css`) | 1920×1200 | Investor and capability briefs. Kyndryl deck craft — paper, one accent, kicker, cards, stats — remapped to the Sovra light palette. |
 | **Sparse** (`shared/reveal/` + `deck.css`) | 1920×1080 | One-idea leadership slides. Vendored reveal.js 4.6.1, light `white` theme. |
 
@@ -81,8 +81,8 @@ at the 1920×1080 stage.
 - Do not invent a market size, revenue, headcount, or a fundraising ask.
 - No tour of libraries.
 
-The Editorial and Sparse frames use the light paper theme. The Cinema frame
-uses the dark Sovra canvas (`#0a0514`), which the logo itself is drawn for.
+Every frame uses the light paper theme, not a near-black canvas. The first
+Cinema cut was dark; it is in git history (`e4142d1`) if it is ever wanted.
 
 The mark on every slide is the product logo,
 `crates/sovra-ui/assets/branding/sovra-logo.svg`, linked with `<img>` so
