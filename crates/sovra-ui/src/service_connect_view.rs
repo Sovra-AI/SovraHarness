@@ -642,10 +642,7 @@ impl ModelsView {
 
     /// Shown before a program first runs: the exact, untruncated command and
     /// what it means, then **Run it**.
-    fn render_review(
-        service: &McpService,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
+    fn render_review(service: &McpService, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let id = service.id.clone();
         let mono = cx.theme().mono_font_family.clone();
