@@ -11,6 +11,14 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Connections now has an **MCP servers** card, renamed from "A service you already use"
+  and opened with **Add MCP server**. Every label is in plain words: "From a web
+  address", "From a program on this computer", "Paste setup from instructions", "Server
+  address (URL)", "Key or token (optional)".
+- New **Try the sample MCP server** button: a safe sample server built into Sovra
+  (`sovra --sample-mcp-server`) with four simple tools. It connects in one click, so
+  anyone can see what MCP servers do, and developers have a server to test against.
+
 - Connected services can now be managed at scale. Add a **web address**, a **program
   on this computer** (local MCP servers such as `npx …`/`uvx …`), or **paste
   settings** in the `mcpServers` format used by Claude Desktop and Cursor (also VS

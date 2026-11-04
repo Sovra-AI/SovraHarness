@@ -34,7 +34,7 @@ impl Skill {
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
             "connections" => "Link the things Sovra can use",
-            "connect-service" => "Add a service you already use",
+            "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
             "terminal" => "Do things on your computer for you",
@@ -395,7 +395,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "connect-service",
             "Connect a service",
-            "Open Connections and add a service you already use: its web address, a program on this computer, or the settings its instructions give you.",
+            "Give Sovra extra tools by adding an MCP server: paste its web address, the command from its instructions, or its setup. Try the built-in sample if you're new.",
             SkillAction::ConnectService,
             &["mcp", "service"],
         ),

@@ -1,4 +1,24 @@
-# Connected services (MCP servers)
+# MCP servers (connected services)
+
+In the app this is the **MCP servers** card in **Connections** (the button is **Add MCP
+server**). The code calls them "services".
+
+## The built-in sample
+
+`sovra --sample-mcp-server` (`sovra-runtime/src/mcp/sample.rs`) is a small stdio MCP
+server inside Sovra's own binary. Its tools are harmless and use no files and no
+network:
+
+- `roll_dice`
+- `tell_the_time`
+- `make_a_checklist`
+- `count_words`
+
+**Try the sample MCP server** (`McpCommand::AddSample`) adds it as a program pointing
+at the running executable. It is approved automatically: it is Sovra itself, so there
+is nothing to review. Developers can also point any MCP client at it as a test server.
+For a full-featured third-party test server, use `npx -y
+@modelcontextprotocol/server-everything`.
 
 Connected services give the assistant tools from outside Sovra through the
 [Model Context Protocol](https://modelcontextprotocol.io). A person can add as many

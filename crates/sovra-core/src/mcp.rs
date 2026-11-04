@@ -10,9 +10,9 @@ mod servers;
 
 pub use servers::{
     DraftSetup, ImportProblem, MAX_SERVICES, MAX_TOOL_NAME, McpSummary, McpTransport, ProgramNote,
-    ServerDraft, approval_fingerprint, bounded_tool_alias, env_name_allowed, header_allowed,
-    name_for_program, parse_server_settings, program_display, program_from_command_line,
-    program_id_for, program_notes,
+    SAMPLE_SERVER_FLAG, ServerDraft, approval_fingerprint, bounded_tool_alias, env_name_allowed,
+    header_allowed, name_for_program, parse_server_settings, program_display,
+    program_from_command_line, program_id_for, program_notes,
 };
 
 use serde::{Deserialize, Serialize};
@@ -762,6 +762,8 @@ pub enum McpCommand {
     Import {
         text: String,
     },
+    /// Add Sovra's own built-in sample MCP server, ready to use.
+    AddSample,
     /// The person read the exact command and allows the program to run.
     Approve {
         id: String,
@@ -850,6 +852,7 @@ impl std::fmt::Debug for McpCommand {
                 )
                 .field("working_dir", working_dir)
                 .finish(),
+            Self::AddSample => formatter.write_str("AddSample"),
             Self::Import { text } => formatter
                 .debug_struct("Import")
                 .field("bytes", &text.len())

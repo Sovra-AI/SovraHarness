@@ -23,6 +23,7 @@ mod recalling;
 mod remembering;
 mod skills;
 mod terminal;
+pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
 mod teams;
 pub use models::ModelsConfig;
@@ -282,6 +283,7 @@ pub fn start_with_auth(
             probes: Vec::new(),
             terminal: None,
             mcp_catalogue: None,
+            mcp_sample_program: None,
         },
     )
 }
@@ -310,6 +312,9 @@ pub struct RuntimeServices {
     /// The saved list of connected services (MCP servers). `None` keeps it in
     /// the credential store, as older builds did.
     pub mcp_catalogue: Option<std::path::PathBuf>,
+    /// Sovra's own executable, for the built-in sample MCP server (started with
+    /// [`SAMPLE_SERVER_FLAG`]). `None` hides the sample.
+    pub mcp_sample_program: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -400,6 +405,7 @@ async fn serve(
         probes,
         terminal,
         mcp_catalogue,
+        mcp_sample_program,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
@@ -459,6 +465,7 @@ async fn serve(
     let mut mcp = mcp::McpRuntime::start(
         mcp_repository,
         mcp_catalogue,
+        mcp_sample_program,
         terminal.environment(),
         events.clone(),
         &handle,

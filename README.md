@@ -657,37 +657,50 @@ your saved memories, connected folders, account tools, or private instructions.
 Incoming messages from other people cannot create memories about you or prepare
 outbound messages in your desktop chat.
 
-## Connect a service you already use
+## MCP servers (extra tools)
 
-Connected services (MCP servers) give Sovra new abilities. Open **Connections**,
-choose **A service you already use**, then **Add a service**. There are three ways
-to add one:
+MCP servers give Sovra extra tools, like reading your files, checking a calendar or
+searching a database. Open **Connections** and choose **Add MCP server** on the **MCP
+servers** card.
 
-- **Web address**: paste the address the service gave you. Add a secret if it gave
-  you one (it stays in your keychain). Choose **Connect**, and **Sign in** in your
-  browser if it asks.
-- **Program on this computer**: paste the command from the service's instructions,
-  for example `npx -y @modelcontextprotocol/server-filesystem ~/Documents`. Add any
-  keys it needs as `NAME=value` lines under **Private settings**; they're kept in your
-  keychain. Before it runs for the first time, Sovra shows the exact command with plain
-  warnings, such as "Downloads a program from the internet and runs it". Nothing runs
-  until you choose **Run it**, and changing the command asks again.
-- **Paste settings**: paste the `mcpServers` settings from a service's instructions or
-  from Claude Desktop, Cursor, VS Code or Zed. Sovra adds every service it finds.
-  Programs still wait for your OK.
+**New to this? Choose "Try the sample MCP server".** It's built into Sovra, needs no
+setup and can't touch your files. It adds four tools: roll a dice, tell the time, make a
+checklist, and count words. Then ask in chat: "roll a dice" or "make a picnic checklist
+with bread, jam and lemonade".
 
-Every service has its own card with:
+There are three ways to add your own:
 
-- a status;
-- a switch to pause or resume it;
-- **Reconnect**/**Restart**, **Rename**, and **Remove** (which asks first);
-- **N of M tools on**, which opens a list where you can switch off any tool you don't
-  want Sovra to use.
+- **From a web address**: paste the server's URL, plus a key or token if the
+  instructions gave you one (it's kept in your keychain). Choose **Add server**, and
+  sign in in the browser if it asks.
+- **From a program on this computer**: paste the command from the server's
+  instructions, for example `npx -y @modelcontextprotocol/server-filesystem ~/Documents`.
+  Add any keys it needs as `NAME=value` lines. Before it runs for the first time, Sovra
+  shows you the exact command with plain warnings, such as "Downloads a program from the
+  internet and runs it". Nothing runs until you choose **Run it**.
+- **Paste setup from instructions**: paste the `mcpServers` block from a server's
+  instructions, or settings from Claude Desktop, Cursor, VS Code or Zed. Sovra adds every
+  server it finds; programs still wait for your OK.
 
-With a long list, search by name, address or tool. Services that need you come first.
-Sovra reconnects your services when it starts. A program that stops on its own shows
-the last thing it said. Replies that came from a service show its name.
-How it works and why: [Connected services](docs/connected-services.md).
+Each server gets a card with:
+
+- its status;
+- an on/off switch;
+- **N of M tools on**, where you choose which tools Sovra may use;
+- **Reconnect**/**Restart**, **Rename**, and **Remove** (which asks first).
+
+Search appears once you have more than four servers. Servers reconnect when Sovra
+starts.
+
+**Servers to test with:**
+
+- The built-in sample. You can also run it by hand with `sovra --sample-mcp-server`; it
+  speaks MCP on stdin/stdout.
+- `npx -y @modelcontextprotocol/server-everything`, the official test server with every
+  feature (needs Node.js).
+- `npx -y @modelcontextprotocol/server-filesystem ~/Documents`, a real, useful one.
+
+How it works and why: [MCP servers](docs/connected-services.md).
 
 ## Shipping
 

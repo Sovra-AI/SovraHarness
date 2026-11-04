@@ -30,6 +30,13 @@ fn main() -> anyhow::Result<()> {
         return sovra_runtime::run_development_mcp(development_directory)
             .context("development MCP server failed");
     }
+    // Sovra's built-in sample MCP server: no window, no database, just stdio.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == sovra_runtime::SAMPLE_SERVER_FLAG)
+    {
+        return sovra_runtime::run_sample_mcp_server().context("sample MCP server failed");
+    }
     let development = sovra_runtime::DevelopmentConfig {
         // Watched development is observable by default; installed/release binaries
         // always start with control off, regardless of a retained dev preference.
@@ -113,6 +120,7 @@ fn main() -> anyhow::Result<()> {
             development: Some(development),
             probes: Vec::new(),
             terminal: Some(terminal_config(dirs.data_local_dir())),
+            mcp_sample_program: std::env::current_exe().ok(),
             mcp_catalogue: Some(
                 dirs.data_local_dir()
                     .join("connected-services")

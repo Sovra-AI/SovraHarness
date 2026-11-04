@@ -48,6 +48,7 @@ fn fixture_in(dir: PathBuf) -> Fixture {
         None,
         Some(dir.join("services.json")),
         None,
+        None,
         events_tx,
         &tokio::runtime::Handle::current(),
     );
@@ -367,7 +368,7 @@ async fn pasted_settings_add_many_services_and_hide_private_values() {
     })
     .await
     .expect("notice");
-    assert!(notice.starts_with("Added 3 services."), "{notice}");
+    assert!(notice.starts_with("Added 3 MCP servers."), "{notice}");
     assert!(notice.contains("wait for your OK"));
     assert_eq!(services["files"].phase, McpPhase::NeedsApproval);
     assert!(!services["old"].enabled, "disabled entries arrive paused");
@@ -413,6 +414,7 @@ async fn the_old_keychain_list_moves_to_the_file() {
         http: http_client(),
         vault,
         catalogue_path: Some(dir.join("services.json")),
+        sample_program: None,
         environment: None,
         services: Vec::new(),
         board,

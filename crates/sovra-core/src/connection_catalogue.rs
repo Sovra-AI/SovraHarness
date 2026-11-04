@@ -150,9 +150,9 @@ pub const KINDS: [KindCopy; 7] = [
     },
     KindCopy {
         kind: CatalogueKind::WebAddress,
-        title: "A service you already use",
-        sentence: "Add a web address, a program on this computer, or settings you paste. You choose which tools Sovra may use.",
-        action: "Add a service",
+        title: "MCP servers",
+        sentence: "Plug extra tools into Sovra, like reading your files, checking a calendar or searching a database.",
+        action: "Add MCP server",
     },
 ];
 

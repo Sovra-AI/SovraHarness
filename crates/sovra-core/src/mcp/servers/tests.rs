@@ -395,6 +395,13 @@ fn program_location_shows_the_exact_command() {
         working_dir: None,
     };
     assert_eq!(program.location(), "npx -y '/my docs'");
+    program.transport = McpTransport::Program {
+        command: "/opt/Sovra/sovra".into(),
+        args: vec![SAMPLE_SERVER_FLAG.into()],
+        env_names: Vec::new(),
+        working_dir: None,
+    };
+    assert_eq!(program.location(), "Built into Sovra");
     assert!(program.transport.is_program());
 }
 

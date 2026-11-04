@@ -68,8 +68,7 @@ impl ServicesScreen {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<ModelsView>) -> Self {
         Self {
             mode: AddMode::Closed,
-            query: cx
-                .new(|cx| InputState::new(window, cx).placeholder("Search services and tools")),
+            query: cx.new(|cx| InputState::new(window, cx).placeholder("Search servers and tools")),
             program_name: cx
                 .new(|cx| InputState::new(window, cx).placeholder("Name, if you want one")),
             program_command: cx.new(|cx| {
@@ -163,13 +162,13 @@ impl ModelsView {
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
                     .child(if status_bits.is_empty() {
-                        "Nothing added yet.".to_owned()
+                        "No MCP servers yet.".to_owned()
                     } else {
                         status_bits.join(" · ")
                     }),
             )
             .child(if mode == AddMode::Closed {
-                design::primary_button("mcp-add-open", "Add a service", cx)
+                design::primary_button("mcp-add-open", "Add MCP server", cx)
                     .icon(IconName::Plus)
                     .on_click(cx.listener(|view, _, _, cx| {
                         view.services_screen.mode = AddMode::Web;
@@ -191,11 +190,19 @@ impl ModelsView {
             });
         let mut section = settings_section(
             "mcp-connect-section",
-            "Connected services",
-            "Give Sovra new abilities: a service on the web, or a program on this computer. Sovra only uses the tools you leave switched on.",
+            "MCP servers",
+            "MCP servers give Sovra extra tools, like reading your files, checking a calendar or searching a database. Add one, then choose which of its tools Sovra may use.",
             cx,
         )
         .child(header);
+        let has_sample = state.services.iter().any(|service| {
+            service
+                .address
+                .ends_with(sovra_core::mcp::SAMPLE_SERVER_FLAG)
+        });
+        if !has_sample && (state.services.is_empty() || mode != AddMode::Closed) {
+            section = section.child(Self::render_sample_offer(cx));
+        }
         if mode != AddMode::Closed {
             section = section.child(self.render_add_panel(mode, cx));
         }
@@ -215,14 +222,14 @@ impl ModelsView {
             section = section.child(
                 Input::new(&screen.query)
                     .id("mcp-search")
-                    .aria_label("Search services and tools")
+                    .aria_label("Search servers and tools")
                     .w_full(),
             );
         }
         let query = screen.query.read(cx).value().to_string();
         let shown = state.matching(&query);
         if shown.is_empty() && !state.services.is_empty() {
-            section = section.child(caption("No service or tool matches that search.", cx));
+            section = section.child(caption("No server or tool matches that search.", cx));
         }
         let cards: Vec<_> = shown
             .into_iter()
@@ -239,17 +246,69 @@ impl ModelsView {
         )
     }
 
+    /// A no-setup way to see what an MCP server does: Sovra's own sample.
+    fn render_sample_offer(cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        h_flex()
+            .id("mcp-sample-offer")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap(t.space.small)
+            .p(t.space.medium)
+            .sovra_surface(Surface::Subtle, cx)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(t.space.hair)
+                    .child(
+                        div()
+                            .sovra_text(TextRole::Body, cx)
+                            .child("New to MCP servers? Try the sample"),
+                    )
+                    .child(
+                        div()
+                            .whitespace_normal()
+                            .sovra_text(TextRole::Caption, cx)
+                            .text_color(t.text_secondary)
+                            .child(
+                                "It's built into Sovra, needs no setup and can't touch your files. \
+                                 It adds four simple tools: roll a dice, tell the time, make a checklist \
+                                 and count words.",
+                            ),
+                    ),
+            )
+            .child(
+                design::button("mcp-add-sample", "Try the sample MCP server", cx)
+                    .icon(IconName::Sparkles)
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.services.notice = None;
+                        view.services_screen.mode = AddMode::Closed;
+                        send(cx, McpCommand::AddSample);
+                        cx.notify();
+                    })),
+            )
+    }
+
     fn render_add_panel(&self, mode: AddMode, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let tabs = h_flex().w_full().flex_wrap().gap(t.space.compact).children(
             [
-                (AddMode::Web, "mcp-mode-web", "Web address"),
+                (AddMode::Web, "mcp-mode-web", "From a web address"),
                 (
                     AddMode::Program,
                     "mcp-mode-program",
-                    "Program on this computer",
+                    "From a program on this computer",
                 ),
-                (AddMode::Paste, "mcp-mode-paste", "Paste settings"),
+                (
+                    AddMode::Paste,
+                    "mcp-mode-paste",
+                    "Paste setup from instructions",
+                ),
             ]
             .map(|(tab, id, label)| {
                 design::button(id, label, cx)
@@ -308,26 +367,26 @@ impl ModelsView {
                 "mcp-service-name",
                 "Name",
                 &self.service_name,
-                "Optional. Leave this blank to use the service's own name.",
+                "What you'd like to call it. Leave blank to use the server's own name.",
                 cx,
             ))
             .child(field(
                 "mcp-service-address",
-                "Web address",
+                "Server address (URL)",
                 &self.service_address,
-                "Copy it from the service. Sign in if it asks.",
+                "Starts with https://. Copy it from the server's instructions. If it asks you to sign in, a browser window opens.",
                 cx,
             ))
             .child(field(
                 "mcp-service-secret",
-                "Secret",
+                "Key or token (optional)",
                 &self.service_secret,
-                "Only if the service gave you one. It stays on this computer.",
+                "Only if the instructions gave you one. It's kept in your keychain.",
                 cx,
             ))
             .child(
                 h_flex().flex_wrap().child(
-                    design::primary_button("mcp-connect", "Connect", cx)
+                    design::primary_button("mcp-connect", "Add server", cx)
                         .disabled(address_empty)
                         .on_click(
                             cx.listener(|view, _, window, cx| view.connect_service(window, cx)),
@@ -347,21 +406,21 @@ impl ModelsView {
                 "mcp-program-name",
                 "Name",
                 &screen.program_name,
-                "Optional. Sovra makes one up from the program.",
+                "Leave blank and Sovra names it for you.",
                 cx,
             ))
             .child(field(
                 "mcp-program-command",
-                "Program and its options",
+                "Command to start it",
                 &screen.program_command,
-                "Copy the command from the service's instructions. Nothing runs until you've checked it.",
+                "Copy it from the server's instructions (it often starts with npx or uvx). Nothing runs until you've checked it.",
                 cx,
             ))
             .child(
                 v_flex()
                     .w_full()
                     .gap(t.space.compact)
-                    .child(caption("Private settings", cx))
+                    .child(caption("Keys or tokens (optional)", cx))
                     .child(
                         div().id("mcp-program-settings").test_support().w_full().child(
                             Textarea::new(&screen.program_settings)
@@ -370,7 +429,7 @@ impl ModelsView {
                         ),
                     )
                     .child(caption(
-                        "Optional: keys or tokens the instructions ask for. Kept in your keychain, never shown again.",
+                        "Only if the instructions ask for them, one per line like NAME=value. Kept in your keychain, never shown again.",
                         cx,
                     )),
             )
@@ -383,7 +442,7 @@ impl ModelsView {
             ))
             .child(
                 h_flex().flex_wrap().child(
-                    design::primary_button("mcp-add-program", "Add program", cx)
+                    design::primary_button("mcp-add-program", "Add server", cx)
                         .disabled(command_empty)
                         .on_click(cx.listener(|view, _, window, cx| view.add_program(window, cx))),
                 ),
@@ -396,7 +455,7 @@ impl ModelsView {
             .w_full()
             .gap(t.space.small)
             .child(caption(
-                "Paste the settings from a service's instructions (the part with “mcpServers”), settings copied from Claude, Cursor or VS Code, a web address, or a command. Sovra adds every service it finds.",
+                "Paste the setup from the server's instructions (the part with “mcpServers”), or settings copied from Claude, Cursor or VS Code. Sovra adds every server it finds.",
                 cx,
             ))
             .child(
@@ -408,7 +467,7 @@ impl ModelsView {
             )
             .child(
                 h_flex().flex_wrap().child(
-                    design::primary_button("mcp-import", "Add services", cx)
+                    design::primary_button("mcp-import", "Add servers", cx)
                         .on_click(cx.listener(|view, _, window, cx| view.import_services(window, cx))),
                 ),
             )
@@ -572,14 +631,14 @@ impl ModelsView {
                     "mcp-client-id",
                     "Sign-in name",
                     &self.service_client_id,
-                    "Paste the name the service gave you.",
+                    "Paste the name the server gave you.",
                     cx,
                 ))
                 .child(field(
                     "mcp-client-secret",
                     "Password",
                     &self.service_client_secret,
-                    "Only if the service gave you one. It stays on this computer.",
+                    "Only if the server gave you one. It's kept in your keychain.",
                     cx,
                 ))
                 .child(

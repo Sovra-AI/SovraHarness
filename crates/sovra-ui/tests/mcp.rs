@@ -85,13 +85,20 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
         window.click("connection-action-web-address", cx);
         window.render_frame(cx);
         reveal(window, "mcp-connect-section", cx);
+        reveal(window, "mcp-add-sample", cx);
+        assert_eq!(
+            window.find("mcp-add-sample").label(),
+            Some("Try the sample MCP server")
+        );
+        window.click("mcp-add-sample", cx);
+        window.render_frame(cx);
         reveal(window, "mcp-service-address", cx);
         assert_eq!(
             window.find("mcp-service-address").label(),
-            Some("Web address")
+            Some("Server address (URL)")
         );
         reveal(window, "mcp-connect", cx);
-        assert_eq!(window.find("mcp-connect").label(), Some("Connect"));
+        assert_eq!(window.find("mcp-connect").label(), Some("Add server"));
         assert_eq!(window.find("mcp-connect").disabled(), Some(true));
         window.click("mcp-service-name", cx);
         window.input("Recipe box", cx);
@@ -116,6 +123,11 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
             }) if name == "Recipe box" && address == "https://recipes.example.com"
         )),
         "Connect must send the typed address instead of marking the service connected"
+    );
+    assert!(
+        sent.iter()
+            .any(|command| matches!(command, Command::Mcp(McpCommand::AddSample))),
+        "the sample button adds Sovra's own sample server"
     );
 
     apply(

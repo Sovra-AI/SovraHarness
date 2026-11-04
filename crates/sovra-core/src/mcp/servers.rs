@@ -13,6 +13,8 @@ use super::{McpPhase, McpService, McpState};
 /// Most services one person can keep. A tool list this long is already more than
 /// a model can use well; the cap keeps a pasted file from flooding the screen.
 pub const MAX_SERVICES: usize = 100;
+/// Command-line flag that starts Sovra's built-in sample MCP server.
+pub const SAMPLE_SERVER_FLAG: &str = "--sample-mcp-server";
 /// Longest tool name chat models accept (`OpenAI` and Gemini both cap at 64).
 pub const MAX_TOOL_NAME: usize = 64;
 
@@ -682,6 +684,11 @@ impl McpService {
     pub fn location(&self) -> String {
         match &self.transport {
             McpTransport::Web => self.address.clone(),
+            McpTransport::Program { args, .. }
+                if args.len() == 1 && args[0] == SAMPLE_SERVER_FLAG =>
+            {
+                "Built into Sovra".to_owned()
+            }
             McpTransport::Program { command, args, .. } => program_display(command, args),
         }
     }

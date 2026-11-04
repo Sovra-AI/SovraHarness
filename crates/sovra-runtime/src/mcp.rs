@@ -8,6 +8,9 @@
 //! other commands interleave. Design: `docs/connected-services.md`.
 
 mod programs;
+mod sample;
+
+pub use sample::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -130,6 +133,7 @@ impl McpRuntime {
     pub(crate) fn start(
         repository: Option<ModelRepository>,
         catalogue_path: Option<PathBuf>,
+        sample_program: Option<PathBuf>,
         environment: Option<crate::terminal::LoginEnvironment>,
         events: Sender<Event>,
         handle: &tokio::runtime::Handle,
@@ -146,6 +150,7 @@ impl McpRuntime {
             http: http_client(),
             vault: Vault::new(repository),
             catalogue_path,
+            sample_program,
             environment,
             services: Vec::new(),
             board: Arc::clone(&board),
@@ -203,6 +208,8 @@ struct Actor {
     vault: Vault,
     /// The saved list; `None` keeps it in the credential store (tests).
     catalogue_path: Option<PathBuf>,
+    /// Sovra's own executable, which serves the built-in sample.
+    sample_program: Option<PathBuf>,
     environment: Option<crate::terminal::LoginEnvironment>,
     services: Vec<Live>,
     board: Arc<ToolBoard>,
@@ -406,13 +413,13 @@ impl Actor {
                     .await
                 {
                     self.emit(McpEvent::Notice(
-                        "Added. Check the program below and choose Run it when you're happy."
-                            .to_owned(),
+                        "Added. Check the program below, then choose Run it.".to_owned(),
                     ))
                     .await;
                 }
             }
             McpCommand::Import { text } => self.import(&text).await,
+            McpCommand::AddSample => self.add_sample().await,
             McpCommand::Approve { id } => self.approve(&id).await,
             McpCommand::SetEnabled { id, enabled } => self.set_enabled(&id, enabled).await,
             McpCommand::SetToolEnabled { id, tool, enabled } => {
@@ -689,8 +696,8 @@ impl Actor {
         }
         let mut notice = match added {
             0 => "Nothing was added.".to_owned(),
-            1 => "Added 1 service.".to_owned(),
-            count => format!("Added {count} services."),
+            1 => "Added 1 MCP server.".to_owned(),
+            count => format!("Added {count} MCP servers."),
         };
         if programs > 0 {
             notice.push_str(" Programs wait for your OK before they run.");
@@ -706,6 +713,40 @@ impl Actor {
             "imported services"
         );
         self.emit(McpEvent::Notice(notice)).await;
+    }
+
+    /// Adds the built-in sample and starts it. It is Sovra's own program, so it
+    /// needs no review.
+    async fn add_sample(&mut self) {
+        let Some(program) = self.sample_program.clone() else {
+            self.emit(McpEvent::Notice(
+                "The sample server isn't available in this copy of Sovra.".to_owned(),
+            ))
+            .await;
+            return;
+        };
+        let command = program.to_string_lossy().into_owned();
+        let args = vec![SAMPLE_SERVER_FLAG.to_owned()];
+        let id = program_id_for(&command, &args);
+        if !self
+            .add_program(
+                sample::SAMPLE_SERVER_NAME,
+                command,
+                args,
+                Vec::new(),
+                None,
+                true,
+            )
+            .await
+        {
+            return;
+        }
+        self.emit(McpEvent::Notice(
+            "Added the sample MCP server. Now ask Sovra in chat to “roll a dice” or “make a picnic checklist”."
+                .to_owned(),
+        ))
+        .await;
+        self.approve(&id).await;
     }
 
     async fn approve(&mut self, id: &str) {
@@ -1859,7 +1900,7 @@ struct Snap {
 }
 
 const FULL_TEXT: &str =
-    "You already have the most services Sovra can keep. Remove one you don't use first.";
+    "You already have the most MCP servers Sovra can keep. Remove one you don't use first.";
 
 fn label_for(name: &str, address: &str) -> String {
     if name.trim().is_empty() {
