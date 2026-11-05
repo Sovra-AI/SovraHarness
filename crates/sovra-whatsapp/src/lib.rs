@@ -27,6 +27,8 @@ use whatsapp_rust::proto_helpers::MessageExt as _;
 use whatsapp_rust::store::SqliteStore;
 use whatsapp_rust::types::events::Event;
 use whatsapp_rust::types::events::LazyHistorySync;
+use whatsapp_rust::wacore::store::DevicePropsOverride;
+use whatsapp_rust::waproto::whatsapp::device_props::PlatformType;
 
 /// File that holds the link's credentials and encryption state.
 const DB_FILE: &str = "session.sqlite";
@@ -36,8 +38,14 @@ const DB_SIDE_FILES: [&str; 3] = [
     "session.sqlite-shm",
     "session.sqlite-journal",
 ];
-/// How `WhatsApp` lists this link under Linked Devices.
-const COMPANION_NAME: &str = "Sovra";
+/// How this link appears under Linked Devices on the phone.
+///
+/// `WhatsApp` shows the `DeviceProps` `os` field when `platform_type` is
+/// `DESKTOP`. The library default is `UNKNOWN` / `"rust"`, which the phone
+/// labels "Unknown device". Pair-code hello still sends a real OS name on the
+/// wire because the server rejects branding there; the Linked Devices label is
+/// this string.
+const COMPANION_NAME: &str = "Sovra connection";
 /// Ordered delivery keeps a conversation's messages in the order the phone sent them.
 const EVENT_MAILBOX: usize = 1024;
 
@@ -113,6 +121,7 @@ impl MessagingChannel for WhatsAppChannel {
         let sink = events.clone();
         let mut builder = Bot::builder()
             .with_backend(store)
+            .with_device_props(companion_device_props())
             .with_event_delivery(EventDelivery::Ordered {
                 capacity: EVENT_MAILBOX,
             })
@@ -411,6 +420,13 @@ fn own_users(client: &Client) -> Vec<String> {
         .collect()
 }
 
+/// Identity sent during pairing so Linked Devices names this computer.
+fn companion_device_props() -> DevicePropsOverride {
+    DevicePropsOverride::new()
+        .with_os(COMPANION_NAME)
+        .with_platform_type(PlatformType::DESKTOP)
+}
+
 fn linked_device(client: &Client) -> LinkedDevice {
     let pn = client.pn();
     LinkedDevice {
@@ -449,6 +465,18 @@ pub fn qr_matrix(payload: &str) -> Vec<Vec<bool>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_phone_lists_this_link_as_sovra_connection() {
+        let props = companion_device_props();
+        assert_eq!(props.os.as_deref(), Some(COMPANION_NAME));
+        assert_eq!(props.platform_type, Some(PlatformType::DESKTOP));
+        let src = include_str!("lib.rs");
+        assert!(
+            src.contains("with_device_props(companion_device_props())"),
+            "Linked Devices naming must be sent on the live Bot builder"
+        );
+    }
 
     #[test]
     fn qr_grids_are_square_and_carry_finder_patterns() {

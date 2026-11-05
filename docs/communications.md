@@ -81,7 +81,10 @@ This design follows the human-control and input-validation guidance in the
 The shared message limit follows Telegram's
 [`sendMessage` contract](https://core.telegram.org/bots/api#sendmessage).
 WhatsApp uses the existing pinned Web-client adapter; this change does not add a
-Business API, bulk sending, media sending or arbitrary protocol access.
+Business API, bulk sending, media sending or arbitrary protocol access. A new
+link registers as **Sovra connection** under Linked Devices on the phone. An
+already-linked session keeps its previous label until you unlink and connect
+again.
 
 Verification uses fake transports and loopback model providers, never real
 outbound messages. Domain tests cover recipient validation and review scope;

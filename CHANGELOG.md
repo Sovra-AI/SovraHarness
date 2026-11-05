@@ -11,6 +11,10 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Linked Devices on your phone now names this computer **Sovra connection**
+  (instead of "Unknown device"). An already-linked phone keeps its old label
+  until you unlink and Connect WhatsApp again.
+
 - After a linked WhatsApp Web session is online, contacts the phone shares
   (including hidden-id rows that still carry a phone number) are stored in the
   people book, and groups you are in are stored with their id and name without

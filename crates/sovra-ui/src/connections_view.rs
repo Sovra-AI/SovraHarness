@@ -513,7 +513,7 @@ impl ModelsView {
                                     .child("Link WhatsApp to this computer"),
                             )
                             .child(caption(
-                                "On your phone, open WhatsApp → Settings (or ⋮) → Linked devices → Link a device, then point the camera at the code.",
+                                "On your phone, open WhatsApp → Settings (or ⋮) → Linked devices → Link a device, then point the camera at the code. It will show as Sovra connection.",
                                 cx,
                             )),
                     )
