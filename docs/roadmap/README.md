@@ -62,17 +62,18 @@ product grow:
 
 ## Decisions that cut across stages
 
-These are recorded once here and referenced from the stage documents. Each one
-needs a decision from the owner before the work it gates starts.
+These are recorded once here and referenced from the stage documents. **All
+six were approved by the owner on 2026-11-05.** Changing one now needs a stated
+reason in the same change that alters it.
 
-| # | Decision | Recommendation | Gates |
+| # | Decision | Decided | Gates |
 | --- | --- | --- | --- |
-| D1 | User-facing name for a group of *people and computers*. "Team" already means the AI helpers (`teams.rs`, the Team page). | Use **"Group"** in the UI (e.g. "Family", "Smith Plumbing") and `group` in code. Keep "Team" for helpers. | Team T1 |
-| D2 | Which crate owns peer-to-peer networking, and how it gets an async runtime, given that `tokio` is owned by `sovra-runtime` only (`xtask/src/deps.rs`). | New adapter crate **`sovra-mesh`** (the only crate naming `iroh`/`p2panda`). Allow it `tokio` as a second owner, with the reason written in `deps.rs`: iroh requires tokio, and mesh tasks are spawned from a runtime-provided handle. | Team T0 |
-| D3 | Log and sync layer: adopt p2panda (Rust, on iroh, pre-1.0) or build our own envelope on iroh plus Negentropy. | **Own envelope and port in core, p2panda behind it.** Pin `=0.7.x` exactly. Keep the swap to Keyhive/Subduction or Negentropy possible. | Team T2 |
+| D1 | User-facing name for a group of *people and computers*. "Team" already means the AI helpers (`teams.rs`, the Team page). | **"Group"** in the UI (e.g. "Family", "Smith Plumbing") and `group` in code. "Team" stays the helpers. | Team T1 |
+| D2 | Which crate owns peer-to-peer networking, and how it gets an async runtime, given that `tokio` is owned by `sovra-runtime` only (`xtask/src/deps.rs`). | New adapter crate **`sovra-mesh`**, the only crate naming `iroh`/`p2panda`. It gets `tokio` as a second owner, with the reason written in `deps.rs`: iroh requires tokio, and mesh tasks are spawned from a runtime-provided handle. | Team T0 |
+| D3 | Log and sync layer: adopt p2panda (Rust, on iroh, pre-1.0) or build our own envelope on iroh plus Negentropy. | **Own envelope and port in core, p2panda behind it.** Pin `=0.7.x` exactly. The swap to Keyhive/Subduction or Negentropy stays possible. | Team T2 |
 | D4 | Relays for NAT traversal in production. n0's public relays are for development only. | Sovra-run `iroh-relay` in two or more regions, plus a per-group override (self-host, or a member's always-on computer). | Team T1 beta |
 | D5 | Stable ids. Several ids today are counters or timestamps (`art-{millis}-{seq}`, `account-{n}-{millis}`, `sched-{slug}-{n}`) and will collide across computers. | ULID/UUIDv7 for local records, content hashes (BLAKE3) for shared records. | Person P2 |
-| D6 | SurrealDB's role once data is shared. | Keep it as each computer's **local projection and index**, rebuildable from the log. Never a sync layer. Pin the version (4.0.0 shipped 2026-11-03). | Team T2 |
+| D6 | SurrealDB's role once data is shared. | Each computer's **local projection and index**, rebuildable from the log. Never a sync layer. Pin the version (4.0.0 shipped 2026-11-03). | Team T2 |
 
 ## How to use these documents
 

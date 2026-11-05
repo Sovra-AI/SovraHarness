@@ -235,7 +235,7 @@ sovra-app  ──►  sovra-ui ──► sovra-runtime ──► sovra-core
   `RuntimeServices` as `group: Option<Arc<dyn GroupNetwork>>`. This is the same
   pattern as `MessagingChannels`.
 
-**Layering change (decision D2).** iroh requires a tokio runtime, and
+**Layering change (decision D2, approved 2026-11-05).** iroh requires a tokio runtime, and
 `xtask/src/deps.rs` lets only `sovra-runtime` use `tokio`. The change, written
 with its reason as `AGENTS.md` requires:
 
@@ -251,9 +251,9 @@ with its reason as `AGENTS.md` requires:
   small `Spawner` the runtime provides, so every task has an owner and
   cancellation.
 
-**Alternative, if the owner rejects D2:** put the iroh code inside
-`sovra-runtime` behind a module boundary. It is simpler for the layering check,
-but it bloats the runtime and makes the transport harder to swap.
+*Rejected alternative (for the record):* putting the iroh code inside
+`sovra-runtime` behind a module boundary. That is simpler for the layering
+check, but it bloats the runtime and makes the transport harder to swap.
 
 ### 5.2 Ports in `sovra-core` (new `group/` module)
 
@@ -812,7 +812,9 @@ instances**, Skills-page cards, and CHANGELOG/README updates.
 
 ### T0 — Foundations (after stage 1 P1–P4 and P6)
 
-- [ ] Decisions D1–D3 recorded in this document by the owner.
+- [x] Decisions D1–D6 approved by the owner (2026-11-05): "Group",
+  `sovra-mesh`, own envelope with p2panda behind it, Sovra-run relays,
+  ULID/UUIDv7 and content-hash ids, SurrealDB as projection only.
 - [ ] Create the `sovra-mesh` crate (lib, `//!` doc, `[lints] workspace = true`).
   Add the `LAYERS` and `EXTERNAL_OWNERS` changes from §5.1, with reasons in
   `xtask/src/deps.rs`.
@@ -978,16 +980,18 @@ instances**, Skills-page cards, and CHANGELOG/README updates.
 
 ## 17. Open questions
 
-1. Group name: confirm "Group" (D1), or choose another word such as "Circle"
-   or "Household".
-2. Adopt p2panda now, or build Sovra's envelope plus Negentropy first and add
-   p2panda-encryption later (D3)?
-3. Relay operations (D4): Sovra-run vs paid iroh plan vs bring-your-own. Who
-   pays, and what is the privacy policy for relay metadata?
-4. Should *Only me* sync between a person's own computers by default (it is
+*Answered on 2026-11-05:* the name is "Group" (D1). The log layer is Sovra's
+own envelope with p2panda behind it (D3). Relays are Sovra-run with a
+per-group override (D4).
+
+Still open:
+
+1. Relay operations detail: which regions, cost model, and the privacy policy
+   for relay metadata (IP addresses, timing).
+2. Should *Only me* sync between a person's own computers by default (it is
    very useful), or only once the person turns it on?
-5. The minimum hardware to offer work, and the default idle threshold.
-6. Per-lane cloud policy: should a group be able to say "never send our shared
+3. The minimum hardware to offer work, and the default idle threshold.
+4. Per-lane cloud policy: should a group be able to say "never send our shared
    memory to a cloud model"? This is recommended: yes, as a lane setting.
 
 ## 18. Risks
