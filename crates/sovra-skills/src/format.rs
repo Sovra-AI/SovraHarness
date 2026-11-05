@@ -22,6 +22,13 @@ struct Frontmatter {
     license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     compatibility: Option<String>,
+    /// The Agent Skills convention for "only run when asked", honoured on import.
+    #[serde(
+        default,
+        rename = "disable-model-invocation",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    disable_model_invocation: bool,
 }
 
 pub(crate) fn decode(content: &str, directory_name: &str) -> Result<Skill, SkillError> {
@@ -102,6 +109,11 @@ pub(crate) fn decode(content: &str, directory_name: &str) -> Result<Skill, Skill
             .unwrap_or_default(),
         requires_input: boolean(&front.metadata, "sovra-requires-input", false)?,
         enabled: boolean(&front.metadata, "sovra-enabled", true)?,
+        auto_apply: boolean(
+            &front.metadata,
+            "sovra-auto-apply",
+            !front.disable_model_invocation,
+        )?,
         builtin: false,
         license: front.license,
         compatibility: front.compatibility,
@@ -117,6 +129,7 @@ pub(crate) fn decode(content: &str, directory_name: &str) -> Result<Skill, Skill
                         | "sovra-argument-hint"
                         | "sovra-requires-input"
                         | "sovra-enabled"
+                        | "sovra-auto-apply"
                 )
             })
             .collect(),
@@ -156,9 +169,11 @@ pub(crate) fn encode(skill: &Skill) -> Result<String, SkillError> {
                 skill.requires_input.to_string(),
             ),
             ("sovra-enabled".into(), skill.enabled.to_string()),
+            ("sovra-auto-apply".into(), skill.auto_apply.to_string()),
         ]),
         license: skill.license.clone(),
         compatibility: skill.compatibility.clone(),
+        disable_model_invocation: !skill.auto_apply,
     };
     for (key, value) in &skill.metadata {
         front

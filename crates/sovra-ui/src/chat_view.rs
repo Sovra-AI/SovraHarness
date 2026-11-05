@@ -229,7 +229,8 @@ impl MarkdownMessage {
 
     /// Feeds new answer and reasoning bytes; returns whether either changed.
     fn feed(&mut self, message: &ChatMessage, index: usize, cx: &mut Context<Shell>) -> bool {
-        let mut changed = self.answer.feed(&message.text, index, own_row, cx);
+        let visible = sovra_core::hide_memory_citation_tokens(&message.text);
+        let mut changed = self.answer.feed(&visible, index, own_row, cx);
         if !message.thinking.is_empty() {
             changed |= self
                 .thinking
@@ -786,7 +787,13 @@ fn render_user_message(
                                 }))
                         })),
                 )
-                .child(msg.text.clone()),
+                .child(
+                    div().id(("user-text", index)).test_support().child(
+                        TextView::markdown(("user-text-md", index), msg.text.clone())
+                            .selectable(true)
+                            .scrollable(false),
+                    ),
+                ),
         )
         .child(
             h_flex()
@@ -1115,6 +1122,7 @@ fn render_assistant_segment(
         content = content.child(if first {
             body.id(("assistant-answer", index))
                 .test_support()
+                .aria_label(sovra_core::hide_memory_citation_tokens(&msg.text))
                 .into_any_element()
         } else {
             body.id(("assistant-segment", index * 100_000 + segment))
@@ -1135,69 +1143,19 @@ fn render_assistant_segment(
             content = content.child(live_line(chat, cx));
         }
         if !streaming && (answering || msg.model.is_some()) {
-            let citations = sovra_core::memory_citations(&msg.text)
-                .into_iter()
-                .map(|id| {
-                    (
-                        format!("memory:{}", id.0),
-                        sovra_core::MemoryAction::Inspect(id),
-                    )
-                })
-                .chain(
-                    sovra_core::memory_source_citations(&msg.text)
-                        .into_iter()
-                        .map(|id| {
-                            (
-                                format!("source:{}", id.0),
-                                sovra_core::MemoryAction::InspectSource(id),
-                            )
-                        }),
-                )
-                .take(sovra_core::MAX_MEMORY_CITATIONS)
-                .collect::<Vec<_>>();
+            let citations = sovra_core::memory_citation_refs(&msg.text);
             if !citations.is_empty() {
-                content = content.child(
-                    h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .flex_wrap()
-                        .gap(t.space.compact)
-                        .children(citations.into_iter().enumerate().map(
-                            |(number, (reference, action))| {
-                                design::button(
-                                    (
-                                        gpui_kit::SharedString::from(format!(
-                                            "memory-citation-{index}"
-                                        )),
-                                        number,
-                                    ),
-                                    format!("Saved source {}", number + 1),
-                                    cx,
-                                )
-                                .ghost()
-                                .xsmall()
-                                .accessibility_label(format!(
-                                    "Open saved source {}: {}",
-                                    number + 1,
-                                    reference
-                                ))
-                                .tooltip(reference)
-                                .on_click(cx.listener(
-                                    move |shell, _, _, cx| {
-                                        shell.open_memory_source(action.clone(), cx);
-                                    },
-                                ))
-                            },
-                        )),
-                );
+                content = content.child(crate::agui_widgets::render_memory_recall_card(
+                    &citations, index, cx,
+                ));
             }
-            let copy_text = msg.text.clone();
+            let copy_text = sovra_core::hide_memory_citation_tokens(&msg.text);
             let saved = state
                 .artifacts
                 .artifacts
                 .iter()
                 .any(|artifact| artifact.source.message_id == msg.id);
-            let save_text = msg.text.clone();
+            let save_text = copy_text.clone();
             let source = sovra_core::artifacts::ArtifactSource {
                 session_id: state.session_id.clone(),
                 message_id: msg.id.clone(),
@@ -1593,6 +1551,71 @@ mod tests {
         let selected = cx.update(TextSelection::selected_text);
         assert!(selected.contains("Alphamarker"), "got: {selected:?}");
         assert!(selected.contains("Omegamarker"), "got: {selected:?}");
+    }
+
+    #[gpui_kit::test]
+    fn drag_select_spans_a_user_bubble_and_the_assistant_reply(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton, base::TextSelection};
+
+        let (client, _commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| Shell::new(0, window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        let session = shell.read_with(cx, |shell, _| shell.state.session_id.clone());
+        cx.update(|window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.send_prompt_text("WakeRyanPlease take this down", window, cx);
+            });
+        });
+        for event in [
+            Event::AgentChunk {
+                session_id: session.clone(),
+                text: "WakeAckMarker I heard you.\n".into(),
+            },
+            Event::AgentCompleted {
+                session_id: session,
+            },
+        ] {
+            events.send_blocking(event).unwrap();
+        }
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        let draw = |cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+        let (from, to) = cx.update(|window, cx| {
+            window.render_frame(cx);
+            let user = window.find(("user-text", 0usize)).bounds();
+            let assistant = window.find(("assistant-answer", 1usize)).bounds();
+            (
+                user.origin + point(px(1.), px(8.)),
+                assistant.bottom_right() - point(px(4.), px(8.)),
+            )
+        });
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+        draw(cx);
+        let selected = cx.update(TextSelection::selected_text);
+        assert!(
+            selected.contains("WakeRyanPlease"),
+            "user text missing from selection: {selected:?}"
+        );
+        assert!(
+            selected.contains("WakeAckMarker"),
+            "assistant text missing from selection: {selected:?}"
+        );
     }
 
     #[gpui_kit::test]

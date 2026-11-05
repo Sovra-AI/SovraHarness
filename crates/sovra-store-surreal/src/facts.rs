@@ -6,7 +6,7 @@ use surrealdb::types::{RecordId, SurrealValue};
 use super::parse_id;
 
 pub(super) const FIELDS: &str = "id, content, entities, created_at, valid_at, invalid_at, expired_at, stopped_at, evidence, extractor, \
-    (->derived_from->episode.id)[0] AS source, (->supersedes->fact.id)[0] AS replaces";
+    (->derived_from->episode.id)[0] AS source, (->supersedes->fact.id)[0] ?? (->repeats->fact.id)[0] AS replaces";
 
 #[derive(Debug, SurrealValue)]
 pub(super) struct FactWrite {

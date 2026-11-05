@@ -196,13 +196,18 @@ impl TeamView {
             .items_center()
             .justify_between()
             .gap(t.space.small)
-            .child(design::page_header(
-                "Your team",
-                "A group of AI helpers, each good at something different. Ask them together and they talk it through, then Alex sums up what to do.",
-                cx,
-            ))
+            .child(
+                design::page_header(
+                    "Your team",
+                    "A group of AI helpers, each good at something different. Ask them together and they talk it through, then Alex sums up what to do.",
+                    cx,
+                )
+                .flex_1()
+                .min_w_0(),
+            )
             .child(
                 design::primary_button("team-ask", "Ask my team", cx)
+                    .flex_shrink_0()
                     .accessibility_label("Ask my team a question in Chat")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(AskTeam { member: None }))),
             )

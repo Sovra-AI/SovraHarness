@@ -3,8 +3,11 @@
 //!
 //! The shell runs in its own process group (Unix) or process group plus no
 //! console window (Windows), with stdin closed, so a program waiting for input
-//! fails fast instead of hanging. Timeouts, Stop and an interrupted
-//! conversation all end the whole tree, not just the shell.
+//! fails fast instead of hanging. On Unix, stdout and stderr are a PTY slave so
+//! libc line-buffers and the card can read output while the command is still
+//! running; the PTY is not a controlling terminal and stdin stays `/dev/null`.
+//! Timeouts, Stop and an interrupted conversation all end the whole tree, not
+//! just the shell.
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -29,6 +32,8 @@ const EXIT_GRACE: Duration = Duration::from_millis(300);
 /// After a polite stop, how long before the tree is killed outright.
 const KILL_AFTER: Duration = Duration::from_secs(2);
 const READ_CHUNK: usize = 16 * 1024;
+/// One captured stream (a pipe, or the PTY master when stdout and stderr share a tty).
+type OutputPipe = Pin<Box<dyn AsyncRead + Unpin + Send>>;
 
 /// One command to run.
 pub(super) struct Job<'a> {
@@ -45,6 +50,11 @@ pub(super) struct Job<'a> {
 /// the bounded output for the model.
 pub(super) async fn run(job: Job<'_>, stop: oneshot::Receiver<()>) -> (CallStatus, OutputCapture) {
     let started = Instant::now();
+    let CaptureStdio {
+        stdout: stdout_stdio,
+        stderr: stderr_stdio,
+        master,
+    } = CaptureStdio::open();
     let mut command = tokio::process::Command::new(&job.host.shell_path);
     command
         .args(job.host.shell.invocation(job.command))
@@ -52,8 +62,8 @@ pub(super) async fn run(job: Job<'_>, stop: oneshot::Receiver<()>) -> (CallStatu
         .envs(job.env.iter().map(|(key, value)| (key, value)))
         .envs(NON_INTERACTIVE_ENV.iter().copied())
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(stdout_stdio)
+        .stderr(stderr_stdio)
         .kill_on_drop(true);
     own_group(&mut command);
     let mut child = match command.spawn() {
@@ -69,8 +79,13 @@ pub(super) async fn run(job: Job<'_>, stop: oneshot::Receiver<()>) -> (CallStatu
         }
     };
     let mut tree = ProcessTree::new(child.id());
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
+    let (mut stdout, mut stderr) = match master {
+        Some(master) => (Some(box_pipe(tokio::fs::File::from_std(master))), None),
+        None => (
+            child.stdout.take().map(box_pipe),
+            child.stderr.take().map(box_pipe),
+        ),
+    };
     let mut stream = Stream::new(job.call_id, job.events);
     let mut out_buf = vec![0_u8; READ_CHUNK];
     let mut err_buf = vec![0_u8; READ_CHUNK];
@@ -168,6 +183,82 @@ async fn read_some<R: AsyncRead + Unpin>(pipe: &mut Option<R>, buf: &mut [u8]) -
         Ok(0) | Err(_) => None,
         Ok(bytes) => Some(bytes),
     }
+}
+
+fn box_pipe(reader: impl AsyncRead + Unpin + Send + 'static) -> OutputPipe {
+    Box::pin(reader)
+}
+
+/// How the child's stdout and stderr are attached.
+///
+/// Unix prefers one PTY so `isatty(1)` and `isatty(2)` are true (libc then
+/// line-buffers) while stdin stays closed. Windows, and a failed `openpty`,
+/// keep two pipes.
+struct CaptureStdio {
+    stdout: Stdio,
+    stderr: Stdio,
+    /// PTY master when both streams share a tty. The parent must not keep the
+    /// slave, or this never reaches EOF.
+    master: Option<std::fs::File>,
+}
+
+impl CaptureStdio {
+    fn open() -> Self {
+        #[cfg(unix)]
+        if let Some(pty) = unix_pty() {
+            return pty;
+        }
+        Self {
+            stdout: Stdio::piped(),
+            stderr: Stdio::piped(),
+            master: None,
+        }
+    }
+}
+
+/// Opens a PTY and points both stdout and stderr at the slave. Never makes it
+/// the controlling terminal (`setsid`/`TIOCSCTTY` are not used), so a program
+/// that waits on stdin still sees EOF.
+#[cfg(unix)]
+fn unix_pty() -> Option<CaptureStdio> {
+    let winsize = nix::pty::Winsize {
+        ws_row: 24,
+        ws_col: 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let pair = match nix::pty::openpty(Some(&winsize), None) {
+        Ok(pair) => pair,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "could not open a PTY for live command output; using pipes"
+            );
+            return None;
+        }
+    };
+    let slave_err = match pair.slave.try_clone() {
+        Ok(fd) => fd,
+        Err(error) => {
+            tracing::warn!(%error, "could not duplicate PTY slave; using pipes");
+            return None;
+        }
+    };
+    if let Err(error) = close_on_exec(&pair.master) {
+        tracing::warn!(%error, "could not set close-on-exec on PTY master");
+    }
+    Some(CaptureStdio {
+        stdout: Stdio::from(pair.slave),
+        stderr: Stdio::from(slave_err),
+        master: Some(std::fs::File::from(pair.master)),
+    })
+}
+
+#[cfg(unix)]
+fn close_on_exec(fd: &std::os::fd::OwnedFd) -> std::io::Result<()> {
+    use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+    fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)).map_err(std::io::Error::from)?;
+    Ok(())
 }
 
 async fn wait_for(timer: &mut Option<Pin<Box<tokio::time::Sleep>>>) {

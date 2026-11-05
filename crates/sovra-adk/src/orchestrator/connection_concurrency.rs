@@ -128,7 +128,7 @@ fn connection_tools_stay_ordered_unless_every_tool_is_a_safe_read() {
         .filter(|tool| tool.is_read_only() && tool.is_concurrency_safe())
         .cloned()
         .collect();
-    assert!(!reads.is_empty());
+    assert_ne!(reads.len(), 0);
     assert_automatic(execution_strategy(&reads));
     let with_prepare: Vec<_> = tools
         .iter()

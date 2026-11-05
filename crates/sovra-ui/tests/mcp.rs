@@ -4,7 +4,7 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{App, AppContext as _, ScrollDelta, TestAppContext, Window, point, px, size};
 use sovra_core::mcp::{McpCommand, McpEvent, McpPhase, McpService, McpToolInfo};
-use sovra_core::{Command, Event};
+use sovra_core::{AgUiWidget, Command, Event, UiComponent, WorkspaceState};
 use sovra_runtime::Client;
 use sovra_ui::Shell;
 
@@ -227,6 +227,56 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
         window.render_frame(cx);
         assert!(window.try_find("mcp-service-recipe-box").is_none());
         assert!(window.try_find("mcp-status-recipe-box").is_none());
+    })
+    .expect("window exists");
+}
+
+#[gpui_kit::test]
+fn sample_dice_tool_result_shows_a_native_card(cx: &mut TestAppContext) {
+    let (client, _commands, events) = Client::loopback();
+    let window = open_shell(cx, client);
+    apply(
+        cx,
+        &events,
+        Event::Ready {
+            version: "test".into(),
+        },
+    );
+    let session_id = WorkspaceState::new(0).session_id;
+    apply(
+        cx,
+        &events,
+        Event::Mcp(McpEvent::ToolResult {
+            service_id: "svc-sample".into(),
+            service_name: "Sovra sample tools".into(),
+            tool: "roll_dice".into(),
+            text: "🎲 You rolled 1 (on a 6-sided dice).".into(),
+            widget: Some(AgUiWidget::Components {
+                surface_id: "sample-dice".into(),
+                version: 1,
+                components: vec![UiComponent::Card {
+                    title: "Dice roll".into(),
+                    description: "6-sided dice".into(),
+                    children: vec![
+                        UiComponent::Text {
+                            text: "🎲 You rolled 1".into(),
+                            heading: true,
+                        },
+                        UiComponent::Button {
+                            label: "Roll again".into(),
+                            action_id: "roll_again".into(),
+                            disabled: false,
+                        },
+                    ],
+                }],
+            }),
+            session_id: Some(session_id),
+        }),
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find(("native-surface", 0usize)).visible());
+        assert!(window.find("surface-action-0-0-1").visible());
     })
     .expect("window exists");
 }

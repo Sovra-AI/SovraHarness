@@ -175,5 +175,9 @@ async fn execute(
             store.remove_memory(&id, super::now()).await?;
             Ok(MemoryReviewResult::Changed(id))
         }
+        MemoryAction::KeepSameDetails(links) => {
+            store.keep_same_details(&links).await?;
+            Ok(MemoryReviewResult::VersionLinked)
+        }
     }
 }

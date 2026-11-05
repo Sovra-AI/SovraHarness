@@ -26,6 +26,8 @@ ignore = [
   # pins calamine ^0.36; the fix is in 0.38. Remove when xberg moves to calamine >= 0.38.
   { id = "RUSTSEC-2026-0436", reason = "Approved exception: xberg =1.3.10 pins calamine ^0.36 and no fixed xberg exists; impact is a crash/OOM on a crafted spreadsheet attachment, not memory unsafety. Remove when xberg uses calamine >=0.38." },
   { id = "RUSTSEC-2026-0387", reason = "Approved exception: crypto-bigint 0.5 is pulled in by SurrealDB's WebAssembly-only jsonwebtoken rust_crypto backend; absent from Linux x86_64, Windows x86_64 and macOS arm64 release graphs. Remove when that upstream chain uses crypto-bigint >=0.7.6." },
+  # xberg 1.3.10 pins calamine 0.36.1 exactly. 0.38.0 fixes the OLE2 panic and unbounded DIFAT allocation. No newer xberg is published. Remove when xberg depends on calamine >= 0.38.
+  { id = "RUSTSEC-2026-0436", reason = "xberg 1.3.10 pins calamine 0.36.1; crates.io has no newer xberg. Denial of service on a crafted spreadsheet only. Remove when xberg uses calamine >= 0.38.0." },
 ]
 
 [licenses]

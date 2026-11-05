@@ -1,5 +1,4 @@
-//! `SovraSRX` Schedules Command Center view (`ScheduleDashboard` + `ScheduleEmpty` +
-//! `ScheduleForm` from `SovraSRXProduction`).
+//! Schedules command center: plain-words create, live stats, and a swimlane of runs.
 
 use gpui_kit::component::{
     ActiveTheme as _, IconName, Sizable as _,
@@ -9,78 +8,83 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
+    Bounds, Context, Entity, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    Pixels, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, canvas, div,
+    fill, point, size,
 };
-use sovra_core::{ScheduleItem, ScheduleStatus, WorkspaceState};
+use sovra_core::{
+    ScheduleItem, ScheduleStatus, TimelineMark, TimelineMarkKind, TimelineRange, WorkspaceState,
+    timeline_marks,
+};
 
-use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
+
+pub(crate) struct ScheduleForm<'a> {
+    pub name: &'a Entity<InputState>,
+    pub cadence: &'a Entity<InputState>,
+    pub prompt: &'a Entity<InputState>,
+    pub open: bool,
+    pub compact: bool,
+    pub range: TimelineRange,
+}
 
 pub(crate) fn render_schedules_view(
     state: &WorkspaceState,
-    schedule_name_input: &Entity<InputState>,
-    schedule_cadence_input: &Entity<InputState>,
-    schedule_prompt_input: &Entity<InputState>,
-    schedule_form_open: bool,
+    form: &ScheduleForm<'_>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let stats = state.schedule_stats();
+    let gap = if form.compact {
+        t.space.medium
+    } else {
+        t.space.large
+    };
+    let pad = if form.compact {
+        t.space.medium
+    } else {
+        t.space.large
+    };
 
     let mut page = v_flex()
+        .id("schedules-column")
+        .test_support()
         .w_full()
+        .min_w_0()
         .max_w(t.layout.page_width)
         .mx_auto()
-        .gap(t.space.large)
-        .child(render_header(schedule_form_open, cx))
-        .child(
-            h_flex()
-                .w_full()
-                .gap(t.space.small)
-                .child(render_stat_card(
-                    "Active Schedules",
-                    &format!("{} / {}", stats.active_schedules, stats.total_schedules),
-                    cx,
-                ))
-                .child(render_stat_card(
-                    "Runs Today",
-                    &stats.runs_today.to_string(),
-                    cx,
-                ))
-                .child(render_stat_card(
-                    "30d Success Rate",
-                    &format!("{}%", stats.success_rate_pct),
-                    cx,
-                )),
-        );
+        .gap(gap)
+        .child(render_header(form.open, form.compact, cx));
 
-    if schedule_form_open {
+    if !form.compact || !form.open {
+        page = page.child(render_stats(stats, form.compact, cx));
+    }
+
+    if form.open {
         page = page.child(render_schedule_form(
-            schedule_name_input,
-            schedule_cadence_input,
-            schedule_prompt_input,
+            form.name,
+            form.cadence,
+            form.prompt,
+            form.compact,
             cx,
         ));
     }
 
-    let content = if state.schedules.is_empty() {
-        page.child(render_schedules_placeholder(cx))
-    } else {
-        page.child(
-            v_flex()
-                .id("schedules-list")
-                .test_support()
-                .gap(t.space.small)
-                .children(
-                    state
-                        .schedules
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, item)| render_schedule_row(item, idx, cx)),
-                ),
-        )
-    };
+    let show_empty = state.schedules.is_empty() && !form.open;
+    let show_timeline = !state.schedules.is_empty() && (!form.compact || !form.open);
+    let show_list = !state.schedules.is_empty();
+
+    if show_empty {
+        page = page.child(render_schedules_placeholder(cx));
+    }
+    if show_timeline {
+        page = page.child(render_timeline(state, form.compact, form.range, cx));
+    }
+    if show_list {
+        page = page.child(render_schedule_list(state, cx));
+    }
+
     v_flex()
         .id("sovra-schedules-view")
         .test_support()
@@ -88,23 +92,36 @@ pub(crate) fn render_schedules_view(
         .min_w_0()
         .h_full()
         .overflow_y_scroll()
-        .p(t.space.large)
-        .child(content)
+        .p(pad)
+        .child(page)
 }
 
-fn render_header(schedule_form_open: bool, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+fn render_header(
+    schedule_form_open: bool,
+    compact: bool,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    let title = if compact {
+        div()
+            .sovra_text(TextRole::PageTitle, cx)
+            .child("Schedules")
+            .into_any_element()
+    } else {
+        design::page_header(
+            "Schedules",
+            "Repeating tasks run on their own, even while you're doing something else. Pause one anytime.",
+            cx,
+        )
+        .into_any_element()
+    };
     h_flex()
         .w_full()
         .flex_wrap()
         .gap(t.space.medium)
         .items_center()
         .justify_between()
-        .child(design::page_header(
-            "Schedules",
-            "Keep your recurring prompts in one place. Run them when you’re ready.",
-            cx,
-        ))
+        .child(title)
         .child(
             h_flex()
                 .items_center()
@@ -137,24 +154,40 @@ fn render_schedule_form(
     schedule_name_input: &Entity<InputState>,
     schedule_cadence_input: &Entity<InputState>,
     schedule_prompt_input: &Entity<InputState>,
+    compact: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    v_flex()
+    let pad = if compact {
+        t.space.small
+    } else {
+        t.space.medium
+    };
+    let mut form = v_flex()
         .id("schedule-create-form")
         .test_support()
         .w_full()
-        .p(t.space.medium)
+        .p(pad)
         .gap(t.space.small)
         .sovra_surface(Surface::Matte, cx)
         .child(
             div()
                 .sovra_text(TextRole::SectionTitle, cx)
-                .child("New schedule"),
-        )
+                .child("New repeating task"),
+        );
+    if !compact {
+        form = form.child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("Name it, say how often in ordinary words, and write what Sovra should do."),
+        );
+    }
+    form = form
         .child(
             h_flex()
                 .w_full()
+                .flex_wrap()
                 .gap(t.space.small)
                 .child(
                     div().flex_1().min_w_0().child(
@@ -167,22 +200,50 @@ fn render_schedule_form(
                     div().flex_1().min_w_0().child(
                         Input::new(schedule_cadence_input)
                             .id("schedule-cadence-input")
-                            .aria_label("Schedule cadence"),
+                            .aria_label("How often, in ordinary words"),
                     ),
                 ),
         )
         .child(
             Input::new(schedule_prompt_input)
                 .id("schedule-prompt-input")
-                .aria_label("Schedule prompt"),
+                .aria_label("What Sovra should do each time"),
+        );
+    if !compact {
+        form = form.child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(
+                    "Try: in 1 minute, just once, every weekday at 9, Fridays at 4, every 4 hours.",
+                ),
+        );
+    }
+    form.child(h_flex().w_full().justify_end().child(
+        design::primary_button("schedule-save-btn", "Save schedule", cx).on_click(cx.listener(
+            |shell, _, window, cx| {
+                shell.submit_new_schedule(window, cx);
+            },
+        )),
+    ))
+}
+
+fn render_schedule_list(
+    state: &WorkspaceState,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex()
+        .id("schedules-list")
+        .test_support()
+        .gap(t.space.small)
+        .children(
+            state
+                .schedules
+                .iter()
+                .enumerate()
+                .map(|(idx, item)| render_schedule_row(state, item, idx, cx)),
         )
-        .child(h_flex().w_full().justify_end().child(
-            design::primary_button("schedule-save-btn", "Save schedule", cx).on_click(cx.listener(
-                |shell, _, window, cx| {
-                    shell.submit_new_schedule(window, cx);
-                },
-            )),
-        ))
 }
 
 fn render_schedules_placeholder(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
@@ -198,14 +259,14 @@ fn render_schedules_placeholder(cx: &mut Context<Shell>) -> impl IntoElement + u
         .child(
             div()
                 .sovra_text(TextRole::SectionTitle, cx)
-                .child("No schedules yet"),
+                .child("No repeating tasks yet"),
         )
         .child(
             div()
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
                 .child(
-                    "Save a prompt and a cadence, then run it from here. Background scheduling is not active yet.",
+                    "Tell Sovra what to do and when, in ordinary words — like in 1 minute, just once, or every weekday at 9. It will run in the background, and you can pause it whenever you like.",
                 ),
         )
         .child(
@@ -217,10 +278,57 @@ fn render_schedules_placeholder(cx: &mut Context<Shell>) -> impl IntoElement + u
         )
 }
 
+fn render_stats(
+    stats: sovra_core::ScheduleStats,
+    compact: bool,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let on_now = format!("{} of {}", stats.active_schedules, stats.total_schedules);
+    let ran = stats.runs_today.to_string();
+    let rate = format!("{}%", stats.success_rate_pct);
+    if compact {
+        return h_flex()
+            .w_full()
+            .flex_wrap()
+            .gap(t.space.medium)
+            .child(render_stat_chip("On now", &on_now, cx))
+            .child(render_stat_chip("Ran today", &ran, cx))
+            .child(render_stat_chip("Last 30 days", &rate, cx))
+            .into_any_element();
+    }
+    h_flex()
+        .w_full()
+        .flex_wrap()
+        .gap(t.space.small)
+        .child(render_stat_card("On now", &on_now, cx))
+        .child(render_stat_card("Ran today", &ran, cx))
+        .child(render_stat_card("Finished in the last 30 days", &rate, cx))
+        .into_any_element()
+}
+
+fn render_stat_chip(label: &str, value: &str, cx: &Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    h_flex()
+        .gap(t.space.compact)
+        .items_baseline()
+        .child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(label.to_owned()),
+        )
+        .child(
+            div()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child(value.to_owned()),
+        )
+}
+
 fn render_stat_card(label: &str, value: &str, cx: &Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     v_flex()
-        .flex_1()
+        .prefer_width(t.layout.card_min_width)
         .p(t.space.medium)
         .gap(t.space.compact)
         .sovra_surface(Surface::Matte, cx)
@@ -232,12 +340,280 @@ fn render_stat_card(label: &str, value: &str, cx: &Context<Shell>) -> impl IntoE
         )
         .child(
             div()
-                .sovra_text(TextRole::PageTitle, cx)
+                .sovra_text(TextRole::SectionTitle, cx)
                 .child(value.to_owned()),
         )
 }
 
+fn render_timeline(
+    state: &WorkspaceState,
+    compact: bool,
+    range: TimelineRange,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let theme = cx.theme();
+    let book = schedule_book(state);
+    let marks = timeline_marks(&book, state.now(), range);
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "lane count is a handful of rows"
+    )]
+    let lanes = state.schedules.len().max(1) as f32;
+    let content_h = t.graph.timeline_lane * lanes + t.space.medium * 2.;
+    let min_h = if compact {
+        t.graph.timeline_compact_height
+    } else {
+        t.graph.timeline_height
+    };
+    let scene = TimelineScene {
+        backdrop: t.graph.backdrop,
+        grid: t.graph.grid,
+        now: t.accent.amber,
+        success: t.accent.green,
+        failed: t.accent.red,
+        skipped: t.accent.slate,
+        inflight: t.accent.amber,
+        next: t.accent.violet,
+        hairline: t.layout.hairline,
+        ring: t.graph.ring,
+        label_width: t.graph.timeline_label_width,
+        lane: t.graph.timeline_lane,
+        dot: t.graph.timeline_dot,
+        pad: t.space.medium,
+        names: state
+            .schedules
+            .iter()
+            .map(|item| item.name.clone())
+            .collect(),
+        marks: marks
+            .iter()
+            .filter_map(|mark| {
+                let lane = state
+                    .schedules
+                    .iter()
+                    .position(|item| item.id == mark.schedule_id)?;
+                Some(PlacedMark {
+                    lane,
+                    kind: mark.kind,
+                    at: unit(mark.at.0, state.now().0, range.duration_ms()),
+                })
+            })
+            .collect(),
+    };
+    let drawing = canvas(
+        |_, _, _| (),
+        move |bounds: Bounds<Pixels>, (), window, _| {
+            paint_timeline(bounds, &scene, window);
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full();
+
+    let pad = if compact {
+        t.space.small
+    } else {
+        t.space.medium
+    };
+    let mut chart = v_flex()
+        .id("schedules-timeline")
+        .test_support()
+        .w_full()
+        .gap(t.space.small)
+        .p(pad)
+        .sovra_surface(Surface::Matte, cx)
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .gap(t.space.small)
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("When they run"),
+                )
+                .child(
+                    h_flex()
+                        .id("schedules-range")
+                        .test_support()
+                        .gap(t.space.compact)
+                        .flex_wrap()
+                        .children(TimelineRange::ALL.iter().copied().enumerate().map(
+                            |(idx, option)| {
+                                let selected = option == range;
+                                let button =
+                                    design::button(("schedule-range", idx), option.label(), cx)
+                                        .small();
+                                let button = if selected { button.primary() } else { button };
+                                button.on_click(cx.listener(move |shell, _, _, cx| {
+                                    shell.set_schedule_timeline_range(option, cx);
+                                }))
+                            },
+                        )),
+                ),
+        );
+    if !compact {
+        chart = chart.child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("Each row is one task. Dots on the left already ran. Rings on the right are next. The line in the middle is now."),
+        );
+    }
+    chart = chart.child(
+        div()
+            .relative()
+            .w_full()
+            .min_w_0()
+            .min_h(min_h)
+            .h(content_h)
+            .overflow_hidden()
+            .rounded(t.radius.card)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(t.graph.backdrop)
+            .child(drawing)
+            .child(
+                h_flex()
+                    .absolute()
+                    .top_0()
+                    .left(t.graph.timeline_label_width)
+                    .right_0()
+                    .h_full()
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .id("schedules-now-marker")
+                            .test_support()
+                            .aria_label("Now")
+                            .w(t.layout.hairline)
+                            .h_full()
+                            .bg(t.accent.amber),
+                    )
+                    .child(div().flex_1()),
+            )
+            .child(
+                v_flex()
+                    .absolute()
+                    .top(t.space.small)
+                    .left(t.space.small)
+                    .w(t.graph.timeline_label_width)
+                    .children(state.schedules.iter().enumerate().map(|(idx, item)| {
+                        div()
+                            .id(("schedule-lane", idx))
+                            .test_support()
+                            .h(t.graph.timeline_lane)
+                            .px(t.space.compact)
+                            .flex()
+                            .items_center()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::Caption, cx)
+                                    .text_color(theme.foreground)
+                                    .truncate()
+                                    .child(item.name.clone()),
+                            )
+                    })),
+            ),
+    );
+    if compact {
+        chart
+    } else {
+        chart
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .px(t.graph.timeline_label_width)
+                    .child(
+                        div()
+                            .sovra_text(TextRole::Caption, cx)
+                            .text_color(t.text_secondary)
+                            .child("Earlier"),
+                    )
+                    .child(
+                        div()
+                            .sovra_text(TextRole::Caption, cx)
+                            .text_color(t.text_secondary)
+                            .child("Now"),
+                    )
+                    .child(
+                        div()
+                            .sovra_text(TextRole::Caption, cx)
+                            .text_color(t.text_secondary)
+                            .child("Later"),
+                    ),
+            )
+            .child(render_legend(&marks, cx))
+    }
+}
+
+fn render_legend(marks: &[TimelineMark], cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    h_flex()
+        .id("schedules-timeline-legend")
+        .test_support()
+        .w_full()
+        .flex_wrap()
+        .gap(t.space.small)
+        .items_center()
+        .children(marks.iter().enumerate().map(|(idx, mark)| {
+            let (fill_color, ring) = mark_ink(mark.kind, cx);
+            let label = match mark.kind {
+                TimelineMarkKind::Succeeded => "Finished",
+                TimelineMarkKind::Failed => "Didn't finish",
+                TimelineMarkKind::Skipped => "Skipped",
+                TimelineMarkKind::InFlight => "Running now",
+                TimelineMarkKind::Next => "Coming up",
+            };
+            h_flex()
+                .id(("schedule-run-mark", idx))
+                .test_support()
+                .aria_label(format!("{} · {label}", mark.schedule_name))
+                .items_center()
+                .gap(t.space.compact)
+                .child(if ring {
+                    div()
+                        .w(t.graph.timeline_dot)
+                        .h(t.graph.timeline_dot)
+                        .rounded_full()
+                        .bg(t.graph.backdrop)
+                        .border_1()
+                        .border_color(fill_color)
+                } else {
+                    div()
+                        .w(t.graph.timeline_dot)
+                        .h(t.graph.timeline_dot)
+                        .rounded_full()
+                        .bg(fill_color)
+                })
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(format!("{} · {label}", mark.schedule_name)),
+                )
+        }))
+}
+
+fn mark_ink(kind: TimelineMarkKind, cx: &Context<Shell>) -> (Hsla, bool) {
+    let t = design::tokens(cx);
+    match kind {
+        TimelineMarkKind::Succeeded => (t.accent.green, false),
+        TimelineMarkKind::Failed => (t.accent.red, false),
+        TimelineMarkKind::Skipped => (t.accent.slate, false),
+        TimelineMarkKind::InFlight => (t.accent.amber, false),
+        TimelineMarkKind::Next => (t.accent.violet, true),
+    }
+}
+
 fn render_schedule_row(
+    state: &WorkspaceState,
     item: &ScheduleItem,
     idx: usize,
     cx: &mut Context<Shell>,
@@ -253,6 +629,9 @@ fn render_schedule_row(
     } else {
         theme.muted_foreground
     };
+    let cadence = item.cadence_label();
+    let next = item.next_run_label(state.now());
+    let last = item.last_result_label(&state.schedule_runs, state.now());
 
     h_flex()
         .id(("schedule-row", idx))
@@ -292,16 +671,14 @@ fn render_schedule_row(
                     div()
                         .sovra_text(TextRole::Caption, cx)
                         .text_color(t.text_secondary)
-                        .child(format!(
-                            "{} · Next: {} · {}",
-                            item.cadence, item.next_run, item.last_result
-                        )),
+                        .child(format!("{cadence} · Next: {next} · {last}")),
                 ),
         )
         .child(
             h_flex()
                 .items_center()
                 .gap(t.space.small)
+                .flex_wrap()
                 .child(
                     design::button(
                         ("schedule-toggle", idx),
@@ -334,4 +711,113 @@ fn render_schedule_row(
                         })),
                 ),
         )
+}
+
+fn schedule_book(state: &WorkspaceState) -> sovra_core::ScheduleBook {
+    sovra_core::ScheduleBook {
+        next_seq: 0,
+        schedules: state.schedules.clone(),
+        runs: state.schedule_runs.clone(),
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "timeline placement is visual, not a clock"
+)]
+fn unit(at: i64, now: i64, span: i64) -> f32 {
+    if span <= 0 {
+        return 0.5;
+    }
+    let start = now.saturating_sub(span);
+    let domain = span.saturating_mul(2);
+    if domain <= 0 {
+        return 0.5;
+    }
+    ((at.saturating_sub(start) as f64) / (domain as f64)).clamp(0.0, 1.0) as f32
+}
+
+#[derive(Clone)]
+struct PlacedMark {
+    lane: usize,
+    kind: TimelineMarkKind,
+    at: f32,
+}
+
+#[derive(Clone)]
+struct TimelineScene {
+    backdrop: Hsla,
+    grid: Hsla,
+    now: Hsla,
+    success: Hsla,
+    failed: Hsla,
+    skipped: Hsla,
+    inflight: Hsla,
+    next: Hsla,
+    hairline: Pixels,
+    ring: Pixels,
+    label_width: gpui_kit::Rems,
+    lane: gpui_kit::Rems,
+    dot: gpui_kit::Rems,
+    pad: gpui_kit::Rems,
+    names: Vec<String>,
+    marks: Vec<PlacedMark>,
+}
+
+fn paint_timeline(bounds: Bounds<Pixels>, scene: &TimelineScene, window: &mut Window) {
+    window.paint_quad(fill(bounds, scene.backdrop));
+    let rem = window.rem_size();
+    let label_w = scene.label_width.to_pixels(rem);
+    let lane_h = scene.lane.to_pixels(rem);
+    let pad = scene.pad.to_pixels(rem);
+    let dot = scene.dot.to_pixels(rem);
+    let track_left = bounds.origin.x + label_w;
+    let track_width = (bounds.size.width - label_w).max(Pixels::ZERO);
+    let track_top = bounds.origin.y + pad;
+    let now_x = track_left + track_width * 0.5;
+    window.paint_quad(fill(
+        Bounds::new(
+            point(now_x, bounds.origin.y),
+            size(scene.hairline, bounds.size.height),
+        ),
+        scene.now,
+    ));
+    for index in 0..scene.names.len() {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "lane index is a handful of rows"
+        )]
+        let y = track_top + lane_h * (index as f32) + lane_h * 0.5;
+        window.paint_quad(fill(
+            Bounds::new(point(track_left, y), size(track_width, scene.hairline)),
+            scene.grid,
+        ));
+    }
+    for mark in &scene.marks {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "lane index is a handful of rows"
+        )]
+        let y = track_top + lane_h * (mark.lane as f32) + lane_h * 0.5;
+        let x = track_left + track_width * mark.at;
+        let square = Bounds::new(point(x - dot * 0.5, y - dot * 0.5), size(dot, dot));
+        let color = match mark.kind {
+            TimelineMarkKind::Succeeded => scene.success,
+            TimelineMarkKind::Failed => scene.failed,
+            TimelineMarkKind::Skipped => scene.skipped,
+            TimelineMarkKind::InFlight => scene.inflight,
+            TimelineMarkKind::Next => scene.next,
+        };
+        if mark.kind == TimelineMarkKind::Next {
+            window.paint_quad(
+                fill(square, scene.backdrop)
+                    .border_widths(scene.ring)
+                    .border_color(color)
+                    .corner_radii(dot * 0.5),
+            );
+        } else {
+            window.paint_quad(fill(square, color).corner_radii(dot * 0.5));
+        }
+    }
 }

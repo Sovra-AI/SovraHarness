@@ -167,7 +167,9 @@ The implementation is verified against the pinned `adk-ui 2.2.0` source.
 Sovra requests `ag_ui` output from the card, confirmation, table, alert and progress
 tools, decodes their `adk.ui.surface` CUSTOM events, and translates the embedded
 component tree to pure domain types. GPUI renders these natively without a WebView.
-Repeated revisions replace the current surface. Buttons send a JSON action with
-surface ID, revision and action ID as the next prompt in the same session.
+Repeated revisions replace the current surface. Buttons send the button's visible
+label as the next prompt in the same session. Connected MCP tools may also return a
+native card by putting `protocol: "ag_ui"` and a domain widget in MCP
+`structuredContent` (the sample `roll_dice` tool does this).
 Only tools with native renderers are advertised; browser forms, charts, 3D scenes,
 and arbitrary remote AG-UI HTTP endpoints are not currently exposed.

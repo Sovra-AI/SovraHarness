@@ -298,6 +298,142 @@ async fn an_interrupted_turn_stops_its_command() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn allowing_after_the_tool_future_is_aborted_still_runs() {
+    let fixture = fixture("survive-timeout").await;
+    let marker = fixture.dir.join("survived.txt");
+    let task = fixture.spawn(&format!("touch {}", marker.display()), 10);
+    let card = fixture.awaiting().await;
+    // Same as the chat dropping the tool future when "The model response timed out".
+    task.abort();
+    // Give the old WaitGuard-on-drop path time to expire the card if the bug is back.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while let Ok(event) = fixture.events.try_recv() {
+        if let Event::Terminal(TerminalEvent::Call(call)) = event {
+            assert_ne!(
+                call.status,
+                CallStatus::Expired,
+                "a model timeout must not expire a still-waiting card: {call:?}"
+            );
+        }
+    }
+    fixture.decide(&card, TerminalDecision::AllowOnce);
+    let running = fixture.next_call().await;
+    assert_eq!(running.status, CallStatus::Running, "{running:?}");
+    let finished = loop {
+        let call = fixture.next_call().await;
+        if call.status.is_settled() {
+            break call;
+        }
+    };
+    assert!(
+        matches!(
+            finished.status,
+            CallStatus::Finished {
+                exit_code: Some(0),
+                ..
+            }
+        ),
+        "{finished:?}"
+    );
+    assert!(
+        marker.exists(),
+        "Allow once still ran the command after the tool future was aborted"
+    );
+}
+
+/// libc fully buffers stdout when it is a pipe. This program prints a unique
+/// stdout line (no `fflush`) and a unique stderr line, then sleeps so a live
+/// capture can observe both *before* exit. `echo` is not this case: it flushes.
+#[cfg(unix)]
+fn compile_block_buffered_printer(dir: &Path) -> PathBuf {
+    let src = dir.join("live.c");
+    std::fs::write(
+        &src,
+        r#"#include <stdio.h>
+#include <unistd.h>
+int main(void) {
+    printf("LIVE-STDOUT-a8f3c1\n");
+    fprintf(stderr, "LIVE-STDERR-a8f3c1\n");
+    sleep(2);
+    return 0;
+}
+"#,
+    )
+    .expect("write live.c");
+    let bin = dir.join("live");
+    let status = std::process::Command::new("cc")
+        .args(["-O0", "-o"])
+        .arg(&bin)
+        .arg(&src)
+        .status()
+        .expect("cc must be available to prove live libc output");
+    assert!(status.success(), "cc failed: {status}");
+    bin
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn live_stdout_and_stderr_are_readable_while_the_command_is_still_running() {
+    const STDOUT_MARK: &str = "LIVE-STDOUT-a8f3c1";
+    const STDERR_MARK: &str = "LIVE-STDERR-a8f3c1";
+    let fixture = fixture("live-io").await;
+    compile_block_buffered_printer(&fixture.dir);
+    let task = fixture.spawn("./live", 10);
+    let card = fixture.awaiting().await;
+    fixture.decide(&card, TerminalDecision::AllowOnce);
+    assert_eq!(fixture.next_call().await.status, CallStatus::Running);
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let mut seen = String::new();
+    let mut settled = false;
+    while Instant::now() < deadline {
+        let Ok(received) =
+            tokio::time::timeout(Duration::from_millis(200), fixture.events.recv()).await
+        else {
+            continue;
+        };
+        match received.expect("event channel closed") {
+            Event::Terminal(TerminalEvent::Output { lines, partial, .. }) => {
+                for line in lines {
+                    seen.push_str(&line);
+                    seen.push('\n');
+                }
+                seen.push_str(&partial);
+                if seen.contains(STDOUT_MARK) && seen.contains(STDERR_MARK) {
+                    break;
+                }
+            }
+            Event::Terminal(TerminalEvent::Call(call)) => {
+                if call.status.is_settled() {
+                    settled = true;
+                    break;
+                }
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert!(
+        !settled,
+        "stdout and stderr must appear while the command is still running, not only after it exits"
+    );
+    assert!(
+        seen.contains(STDOUT_MARK) && seen.contains(STDERR_MARK),
+        "live card output missing unique stdout/stderr lines: {seen:?}"
+    );
+
+    let result = outcome(task).await;
+    let report = result.report_for_model();
+    let output = report["output"].as_str().unwrap_or_default();
+    assert!(
+        output.contains(STDOUT_MARK) && output.contains(STDERR_MARK),
+        "model report missing captured text: {report}"
+    );
+    assert_eq!(report["status"], "finished");
+    assert_eq!(report["exit_code"], 0);
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn huge_output_is_bounded_for_the_model() {
     let fixture = fixture("flood").await;
     let task = fixture.spawn("seq 1 300000", 30);

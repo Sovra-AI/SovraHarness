@@ -14,6 +14,7 @@ use rmcp::{
     service::RequestContext,
 };
 use serde_json::{Value, json};
+use sovra_core::{AgUiWidget, UiComponent};
 
 pub use sovra_core::mcp::SAMPLE_SERVER_FLAG;
 /// Name shown on the card when the sample is added.
@@ -48,7 +49,7 @@ fn tools() -> Vec<Tool> {
     [
         (
             "roll_dice",
-            "Roll a dice and say the number. Optionally choose how many sides it has (2 to 1000, normally 6).",
+            "Roll a dice and show the number on a native card. Optionally choose how many sides it has (2 to 1000, normally 6).",
             json!({"sides": {"type": "integer", "minimum": 2, "maximum": 1000, "description": "How many sides the dice has."}}),
             Vec::<&str>::new(),
         ),
@@ -95,8 +96,28 @@ fn tools() -> Vec<Tool> {
     .collect()
 }
 
+#[derive(Debug)]
+struct SampleAnswer {
+    text: String,
+    widget: Option<AgUiWidget>,
+}
+
+impl SampleAnswer {
+    fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            widget: None,
+        }
+    }
+}
+
 /// The answer for one tool call, or a plain problem.
-fn answer(name: &str, arguments: &Value, now_unix: u64, random: u64) -> Result<String, String> {
+fn answer(
+    name: &str,
+    arguments: &Value,
+    now_unix: u64,
+    random: u64,
+) -> Result<SampleAnswer, String> {
     match name {
         "roll_dice" => {
             let sides = arguments
@@ -105,17 +126,20 @@ fn answer(name: &str, arguments: &Value, now_unix: u64, random: u64) -> Result<S
                 .unwrap_or(6)
                 .clamp(2, 1000);
             let roll = random % sides + 1;
-            Ok(format!("🎲 You rolled {roll} (on a {sides}-sided dice)."))
+            Ok(SampleAnswer {
+                text: format!("🎲 You rolled {roll} (on a {sides}-sided dice)."),
+                widget: Some(dice_widget(roll, sides)),
+            })
         }
         "tell_the_time" => {
             let days = i64::try_from(now_unix / 86_400).unwrap_or(0);
             let (year, month, day, weekday) = sovra_core::civil_date_from_unix_days(days);
             let seconds = now_unix % 86_400;
-            Ok(format!(
+            Ok(SampleAnswer::text(format!(
                 "It's {:02}:{:02} UTC on {weekday} {year}-{month:02}-{day:02}.",
                 seconds / 3600,
                 seconds % 3600 / 60
-            ))
+            )))
         }
         "make_a_checklist" => {
             let items: Vec<&str> = arguments
@@ -145,7 +169,7 @@ fn answer(name: &str, arguments: &Value, now_unix: u64, random: u64) -> Result<S
                 list.push_str(item);
                 list.push('\n');
             }
-            Ok(list.trim_end().to_owned())
+            Ok(SampleAnswer::text(list.trim_end().to_owned()))
         }
         "count_words" => {
             let text = arguments
@@ -154,10 +178,45 @@ fn answer(name: &str, arguments: &Value, now_unix: u64, random: u64) -> Result<S
                 .unwrap_or_default();
             let words = text.split_whitespace().count();
             let letters = text.chars().filter(|c| c.is_alphanumeric()).count();
-            Ok(format!("That's {words} words and {letters} letters."))
+            Ok(SampleAnswer::text(format!(
+                "That's {words} words and {letters} letters."
+            )))
         }
         other => Err(format!("This sample doesn't have a tool called “{other}”.")),
     }
+}
+
+fn dice_widget(roll: u64, sides: u64) -> AgUiWidget {
+    AgUiWidget::Components {
+        surface_id: "sample-dice".into(),
+        version: 1,
+        components: vec![UiComponent::Card {
+            title: "Dice roll".into(),
+            description: format!("{sides}-sided dice"),
+            children: vec![
+                UiComponent::Text {
+                    text: format!("🎲 You rolled {roll}"),
+                    heading: true,
+                },
+                UiComponent::Button {
+                    label: "Roll again".into(),
+                    action_id: "roll_again".into(),
+                    disabled: false,
+                },
+            ],
+        }],
+    }
+}
+
+fn ag_ui_result(text: String, widget: Option<AgUiWidget>) -> CallToolResult {
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
+    if let Some(widget) = widget {
+        result.structured_content = Some(json!({
+            "protocol": "ag_ui",
+            "widget": widget,
+        }));
+    }
+    result
 }
 
 fn now_unix() -> u64 {
@@ -182,7 +241,9 @@ impl ServerHandler for SampleServer {
                 SAMPLE_SERVER_NAME,
                 env!("CARGO_PKG_VERSION"),
             ))
-            .with_instructions("Harmless sample tools for trying MCP servers in Sovra.")
+            .with_instructions(
+            "Harmless sample tools for trying MCP servers in Sovra. roll_dice returns a native AG-UI card.",
+        )
     }
 
     fn list_tools(
@@ -200,7 +261,7 @@ impl ServerHandler for SampleServer {
     ) -> impl Future<Output = Result<CallToolResponse, ErrorData>> {
         let arguments = request.arguments.map_or_else(|| json!({}), Value::Object);
         let result = match answer(&request.name, &arguments, now_unix(), random_number()) {
-            Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+            Ok(answer) => ag_ui_result(answer.text, answer.widget),
             Err(problem) => CallToolResult::error(vec![ContentBlock::text(problem)]),
         };
         std::future::ready(Ok(result.into()))
@@ -226,34 +287,56 @@ mod tests {
                 "count_words"
             ]
         );
-        assert_eq!(
-            answer("roll_dice", &json!({"sides": 6}), 0, 9).as_deref(),
-            Ok("🎲 You rolled 4 (on a 6-sided dice).")
+        let roll = answer("roll_dice", &json!({"sides": 6}), 0, 9).expect("roll");
+        assert_eq!(roll.text, "🎲 You rolled 4 (on a 6-sided dice).");
+        assert!(
+            matches!(
+                &roll.widget,
+                Some(AgUiWidget::Components { surface_id, components, .. })
+                    if surface_id == "sample-dice" && !components.is_empty()
+            ),
+            "{roll:?}"
         );
+        let encoded = ag_ui_result(roll.text.clone(), roll.widget.clone());
+        let value = serde_json::to_value(&encoded).expect("json");
+        assert_eq!(sovra_core::mcp::parse_tool_widget(&value), roll.widget);
         assert_eq!(
-            answer("roll_dice", &json!({"sides": 1}), 0, 5).as_deref(),
-            Ok("🎲 You rolled 2 (on a 2-sided dice)."),
+            text_of(answer("roll_dice", &json!({"sides": 1}), 0, 5)),
+            Ok("🎲 You rolled 2 (on a 2-sided dice).".into()),
             "sides are clamped"
         );
         assert_eq!(
-            answer("tell_the_time", &json!({}), 1_793_750_400 + 3_660, 0).as_deref(),
-            Ok("It's 01:01 UTC on Wednesday 2026-11-04.")
+            text_of(answer(
+                "tell_the_time",
+                &json!({}),
+                1_793_750_400 + 3_660,
+                0
+            )),
+            Ok("It's 01:01 UTC on Wednesday 2026-11-04.".into())
         );
         assert_eq!(
-            answer(
+            text_of(answer(
                 "make_a_checklist",
                 &json!({"title": "Picnic", "items": ["Bread", " ", "Jam"]}),
                 0,
                 0
-            )
-            .as_deref(),
-            Ok("Picnic\n☐ Bread\n☐ Jam")
+            )),
+            Ok("Picnic\n☐ Bread\n☐ Jam".into())
         );
         assert!(answer("make_a_checklist", &json!({"items": []}), 0, 0).is_err());
         assert_eq!(
-            answer("count_words", &json!({"text": "Hello there, world"}), 0, 0).as_deref(),
-            Ok("That's 3 words and 15 letters.")
+            text_of(answer(
+                "count_words",
+                &json!({"text": "Hello there, world"}),
+                0,
+                0
+            )),
+            Ok("That's 3 words and 15 letters.".into())
         );
         assert!(answer("launch_rocket", &json!({}), 0, 0).is_err());
+    }
+
+    fn text_of(result: Result<SampleAnswer, String>) -> Result<String, String> {
+        result.map(|answer| answer.text)
     }
 }

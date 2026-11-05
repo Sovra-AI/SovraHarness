@@ -24,7 +24,7 @@ use sovra_core::artifacts::{Artifact, ArtifactCommand, ArtifactFilter, ArtifactK
 use sovra_core::{Command, Timestamp, format_relative_time};
 
 use crate::RuntimeClient;
-use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
 /// The icon for a kind's semantic key (`KindInfo::icon`).
@@ -525,8 +525,7 @@ fn artifact_card(
     v_flex()
         .id(("artifact-card", index))
         .test_support()
-        .flex_1()
-        .min_w(t.layout.card_min_width)
+        .prefer_width(t.layout.card_min_width)
         .max_w(t.layout.card_max_width)
         .gap(t.space.small)
         .p(t.space.medium)

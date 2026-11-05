@@ -21,6 +21,7 @@ sovra-adk = { workspace = true }
 sovra-core = { workspace = true }
 sovra-providers = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true, features = ["local-offset"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }

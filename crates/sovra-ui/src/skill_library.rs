@@ -5,6 +5,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
     button::ButtonVariants as _,
+    checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     v_flex,
@@ -96,6 +97,8 @@ pub(crate) struct SkillLibrary {
     editing: Option<Skill>,
     creating: bool,
     advanced_open: bool,
+    /// Draft value of [`Skill::auto_apply`]; saved with the form.
+    auto_apply: bool,
     deleting: Option<String>,
     pub(crate) notice: String,
     picker: Option<Task<()>>,
@@ -133,6 +136,7 @@ impl SkillLibrary {
             editing: None,
             creating: false,
             advanced_open: false,
+            auto_apply: true,
             deleting: None,
             notice: String::new(),
             picker: None,
@@ -143,6 +147,7 @@ impl SkillLibrary {
     fn edit(&mut self, skill: Option<Skill>, window: &mut Window, cx: &mut Context<Shell>) {
         self.creating = skill.is_none();
         self.advanced_open = skill.as_ref().is_some_and(|s| !s.tools.is_empty());
+        self.auto_apply = skill.as_ref().is_none_or(|s| s.auto_apply);
         for (input, value) in [
             (&self.name, skill.as_ref().map_or("", |skill| &skill.name)),
             (&self.title, skill.as_ref().map_or("", |skill| &skill.title)),
@@ -246,6 +251,7 @@ impl Shell {
             argument_hint: "<request>".into(),
             requires_input: false,
             enabled: true,
+            auto_apply: true,
             builtin: false,
             license: None,
             compatibility: None,
@@ -270,6 +276,7 @@ impl Shell {
             .map(str::to_owned)
             .collect();
         skill.instructions = view.body.read(cx).value().to_string();
+        skill.auto_apply = view.auto_apply;
         match skill.validate() {
             Ok(()) => self.skill_command(SkillCommand::Save(Box::new(skill)), cx),
             Err(error) => {
@@ -335,9 +342,12 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .p(t.space.medium)
         .child(
             v_flex()
+                .id("skills-column")
+                .test_support()
                 .w_full()
                 .max_w(t.layout.page_width)
                 .min_w_0()
+                .mx_auto()
                 .flex_shrink_0()
                 .gap(t.space.medium)
                 .child(render_header(cx))
@@ -614,7 +624,7 @@ fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + us
         ))
         .child(field(
             "What it does",
-            "One sentence.",
+            "One sentence about when it helps. Sovra reads this to decide when to use it.",
             Input::new(&view.description)
                 .aria_label("When to use this skill")
                 .into_any_element(),
@@ -628,6 +638,26 @@ fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + us
                 .into_any_element(),
             cx,
         ))
+        .child(
+            v_flex()
+                .gap(t.space.hair)
+                .child(
+                    Checkbox::new("skill-editor-auto-apply")
+                        .cursor_pointer()
+                        .label("Use it on its own when a request fits")
+                        .checked(view.auto_apply)
+                        .on_click(cx.listener(|shell, checked, _, cx| {
+                            shell.skill_library.auto_apply = *checked;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child("Turn this off to use it only when you pick it from the / menu."),
+                ),
+        )
         .child(
             h_flex().child(
                 design::button(

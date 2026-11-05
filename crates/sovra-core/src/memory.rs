@@ -30,7 +30,10 @@ pub use consolidation::consolidation_context;
 mod recall;
 pub use recall::*;
 mod citations;
-pub use citations::{MAX_MEMORY_CITATIONS, memory_citations, memory_source_citations};
+pub use citations::{
+    MAX_MEMORY_CITATIONS, MemoryCitationRef, MemoryCitationTarget, hide_memory_citation_tokens,
+    memory_citation_refs, memory_citations, memory_source_citations,
+};
 mod lifecycle;
 pub use lifecycle::*;
 mod exploration;
@@ -609,6 +612,14 @@ pub trait MemoryStore: Send + Sync {
     async fn correct_memory(&self, _correction: MemoryCorrection) -> Result<FactId, MemoryError> {
         Err(MemoryError::Backend(
             "Memory correction is unavailable.".into(),
+        ))
+    }
+
+    /// Links current details as earlier and later versions without hiding either.
+    /// A second call for the same pair does not add another link.
+    async fn keep_same_details(&self, _links: &[MemorySameDetail]) -> Result<(), MemoryError> {
+        Err(MemoryError::Backend(
+            "Linking repeated details is unavailable.".into(),
         ))
     }
 

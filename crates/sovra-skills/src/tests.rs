@@ -28,10 +28,43 @@ const SOURCE: &str = "---\nname: weekly-review\ndescription: Use when reviewing 
 
 #[test]
 fn malformed_boolean_metadata_cannot_silently_enable_a_skill() {
-    for key in ["sovra-enabled", "sovra-requires-input"] {
+    for key in ["sovra-enabled", "sovra-requires-input", "sovra-auto-apply"] {
         let invalid = SOURCE.replace("author: Test", &format!("{key}: definitely"));
         assert!(format::decode(&invalid, "weekly-review").is_err());
     }
+}
+
+#[test]
+fn automatic_use_defaults_on_and_respects_both_opt_out_spellings() {
+    assert!(format::decode(SOURCE, "weekly-review").unwrap().auto_apply);
+    let manual = SOURCE.replace(
+        "allowed-tools:",
+        "disable-model-invocation: true\nallowed-tools:",
+    );
+    let mut skill = format::decode(&manual, "weekly-review").unwrap();
+    assert!(!skill.auto_apply);
+    let overridden = SOURCE.replace("author: Test", "sovra-auto-apply: false");
+    assert!(
+        !format::decode(&overridden, "weekly-review")
+            .unwrap()
+            .auto_apply
+    );
+    assert!(!skill.metadata.contains_key("sovra-auto-apply"));
+    skill.auto_apply = true;
+    let encoded = format::encode(&skill).unwrap();
+    assert!(!encoded.contains("disable-model-invocation"));
+    assert!(
+        format::decode(&encoded, "weekly-review")
+            .unwrap()
+            .auto_apply
+    );
+    skill.auto_apply = false;
+    let encoded = format::encode(&skill).unwrap();
+    assert!(
+        !format::decode(&encoded, "weekly-review")
+            .unwrap()
+            .auto_apply
+    );
 }
 
 #[test]

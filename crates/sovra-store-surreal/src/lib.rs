@@ -772,6 +772,13 @@ impl MemoryStore for SurrealStore {
         self.user_correction(correction).await
     }
 
+    async fn keep_same_details(
+        &self,
+        links: &[sovra_core::MemorySameDetail],
+    ) -> Result<(), MemoryError> {
+        self.link_repeated_details(links).await
+    }
+
     async fn save_chat_thread(&self, thread: &ChatThread) -> Result<(), MemoryError> {
         let messages_json = serde_json::to_string(&thread.messages)
             .map_err(|e| MemoryError::Backend(format!("serialize chat messages: {e}")))?;

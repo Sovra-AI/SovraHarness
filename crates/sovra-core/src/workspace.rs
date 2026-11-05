@@ -14,7 +14,9 @@ use crate::providers::ModelTier;
 use crate::routing_eval::evaluate_routing;
 use crate::routing_tree::{DecisionBackend, RouteEvaluation, RoutingConfig, SelectionMode};
 use crate::schedules::{
-    ScheduleItem, ScheduleStats, ScheduleStatus, compute_stats, default_schedules,
+    ScheduleEvent, ScheduleItem, ScheduleRun, ScheduleStats, ScheduleStatus, compute_stats,
+    create_in_book, default_schedules, delete_in_book, pause_in_book, resume_in_book,
+    run_now_in_book,
 };
 use crate::specialists::{SpecialistAgentSpec, default_sovra_srx_agents};
 use crate::status::RuntimeStatus;
@@ -263,6 +265,7 @@ pub struct WorkspaceState {
     pub ai_building: bool,
     pub config_cards: Vec<PersonalAiConfigCard>,
     pub schedules: Vec<ScheduleItem>,
+    pub schedule_runs: Vec<ScheduleRun>,
     pub specialists: Vec<SpecialistAgentSpec>,
     pub routing: RoutingConfig,
     pub last_route_evaluation: Option<RouteEvaluation>,
@@ -349,6 +352,7 @@ impl WorkspaceState {
             ai_building: false,
             config_cards: default_config_cards(),
             schedules: default_schedules(),
+            schedule_runs: Vec::new(),
             specialists,
             routing,
             last_route_evaluation: None,
@@ -520,6 +524,11 @@ impl WorkspaceState {
     /// A clock rollback must not reverse recorded conversation order.
     pub fn observe_time(&mut self, at: Timestamp) {
         self.observed_at = self.observed_at.max(at);
+    }
+
+    /// Last wall time the workspace was told about. Labels and graphs use this.
+    pub fn now(&self) -> Timestamp {
+        self.observed_at
     }
 
     fn sync_active_thread(&mut self) {
@@ -738,45 +747,69 @@ impl WorkspaceState {
         cadence: &str,
         prompt: &str,
     ) -> Option<ScheduleItem> {
-        let name = name.trim();
-        let prompt = prompt.trim();
-        if name.is_empty() || prompt.is_empty() {
-            return None;
-        }
-        let cadence = if cadence.trim().is_empty() {
-            "Daily · 09:00 GST"
-        } else {
-            cadence.trim()
-        };
-        let slug: String = name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
-        let id = format!(
-            "sched-{}-{}",
-            slug.trim_matches('-'),
-            self.schedules.len() + 1
-        );
-        let item = ScheduleItem {
-            id,
-            name: name.to_owned(),
-            cadence: cadence.to_owned(),
-            next_run: "Scheduled".to_owned(),
-            last_result: "Ready · Never run".to_owned(),
-            prompt: prompt.to_owned(),
-            status: ScheduleStatus::Active,
-            runs_today: 0,
-        };
-        self.schedules.push(item.clone());
+        let mut book = self.schedule_book();
+        let item =
+            create_in_book(&mut book, name, cadence, prompt, None, self.observed_at, 0).ok()?;
+        self.apply_schedule_book(book);
         Some(item)
     }
 
     /// Deletes a schedule by `schedule_id`.
     pub fn delete_schedule(&mut self, schedule_id: &str) -> bool {
-        let before = self.schedules.len();
-        self.schedules.retain(|s| s.id != schedule_id);
-        self.schedules.len() < before
+        let mut book = self.schedule_book();
+        let removed = delete_in_book(&mut book, schedule_id);
+        self.apply_schedule_book(book);
+        removed
+    }
+
+    fn schedule_book(&self) -> crate::schedules::ScheduleBook {
+        crate::schedules::ScheduleBook {
+            next_seq: self
+                .schedules
+                .iter()
+                .filter_map(|item| item.id.rsplit('-').next()?.parse().ok())
+                .max()
+                .unwrap_or(0),
+            schedules: self.schedules.clone(),
+            runs: self.schedule_runs.clone(),
+        }
+    }
+
+    fn apply_schedule_book(&mut self, book: crate::schedules::ScheduleBook) {
+        self.schedules = book.schedules;
+        self.schedule_runs = book.runs;
+    }
+
+    fn apply_schedule_event(&mut self, event: &ScheduleEvent) {
+        match event {
+            ScheduleEvent::Snapshot { schedules, runs } => {
+                self.schedules.clone_from(schedules);
+                self.schedule_runs.clone_from(runs);
+            }
+            ScheduleEvent::Fired {
+                schedule_id,
+                session_id,
+                name,
+            } => {
+                if !self.threads.iter().any(|thread| thread.id == *session_id) {
+                    self.threads.push(ChatThread::new_scheduled(
+                        session_id.clone(),
+                        schedule_id.clone(),
+                        name,
+                        self.observed_at,
+                    ));
+                }
+            }
+            ScheduleEvent::RunRecorded { run } => {
+                if let Some(existing) = self.schedule_runs.iter_mut().find(|item| item.id == run.id)
+                {
+                    *existing = run.clone();
+                } else {
+                    self.schedule_runs.push(run.clone());
+                }
+            }
+            ScheduleEvent::Error(_) => {}
+        }
     }
 
     pub fn set_routing_mode(&mut self, mode: SelectionMode) {
@@ -937,27 +970,37 @@ impl WorkspaceState {
     }
 
     pub fn toggle_schedule(&mut self, schedule_id: &str) {
-        if let Some(item) = self.schedules.iter_mut().find(|s| s.id == schedule_id) {
-            item.status = match item.status {
-                ScheduleStatus::Active => ScheduleStatus::Paused,
-                ScheduleStatus::Paused => ScheduleStatus::Active,
-            };
+        let mut book = self.schedule_book();
+        let paused = book
+            .schedules
+            .iter()
+            .find(|item| item.id == schedule_id)
+            .is_some_and(|item| item.status == ScheduleStatus::Active);
+        if paused {
+            let _ = pause_in_book(&mut book, schedule_id);
+        } else {
+            let _ = resume_in_book(&mut book, schedule_id, self.observed_at);
         }
+        self.apply_schedule_book(book);
     }
 
     pub fn trigger_schedule(&mut self, schedule_id: &str) -> Option<String> {
-        let (schedule_name, prompt) = self
-            .schedules
-            .iter_mut()
-            .find(|s| s.id == schedule_id)
-            .map(|s| {
-                s.runs_today += 1;
-                "Running now in Chat...".clone_into(&mut s.last_result);
-                (
-                    s.name.clone(),
-                    format!("[Schedule: {}] {}", s.name, s.prompt),
-                )
-            })?;
+        let mut book = self.schedule_book();
+        let fire = run_now_in_book(
+            &mut book,
+            schedule_id,
+            Some(self.session_id.clone()),
+            self.observed_at,
+        )
+        .ok()
+        .flatten();
+        self.apply_schedule_book(book);
+        let item = self.schedules.iter().find(|item| item.id == schedule_id)?;
+        let schedule_name = item.name.clone();
+        let prompt = fire.map_or_else(
+            || format!("[Schedule: {}] {}", item.name, item.prompt),
+            |fire| fire.prompt,
+        );
         if let Some(thread) = self.threads.iter_mut().find(|t| t.id == self.session_id)
             && thread.messages.is_empty()
         {
@@ -971,12 +1014,16 @@ impl WorkspaceState {
     }
 
     pub fn schedule_stats(&self) -> ScheduleStats {
-        compute_stats(&self.schedules)
+        compute_stats(&self.schedule_book(), self.observed_at)
     }
 
     fn fold_event(&mut self, event: &Event) -> Option<String> {
         self.runtime_status.apply(event);
         match event {
+            Event::Schedule(event) => {
+                self.apply_schedule_event(event);
+                None
+            }
             Event::Development(event) => {
                 self.development.apply(event);
                 None
@@ -1283,9 +1330,15 @@ impl WorkspaceState {
     }
 
     /// A reply that came from a connected service. The speaker line names that service.
-    pub(crate) fn push_service_reply(&mut self, service_name: &str, text: &str) {
+    pub(crate) fn push_service_reply(
+        &mut self,
+        service_name: &str,
+        text: &str,
+        widget: Option<AgUiWidget>,
+    ) {
         let id = self.fresh_message_id("assistant");
-        let mut message = ChatMessage::assistant(id, text, "Just now", Vec::new());
+        let mut message =
+            ChatMessage::assistant(id, text, "Just now", widget.into_iter().collect());
         service_name.clone_into(&mut message.author);
         message.speaker = Some(crate::agui::Speaker {
             member_id: format!("service:{service_name}"),
@@ -1397,6 +1450,25 @@ impl WorkspaceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_workspace_starts_with_no_schedules() {
+        let mut state = WorkspaceState::new(0);
+        assert_eq!(state.schedules, Vec::new());
+        assert_eq!(state.schedule_stats().success_rate_pct, 0);
+        assert!(
+            state
+                .create_schedule(
+                    "Weekday briefing",
+                    "every weekday at 9",
+                    "Give me a short briefing of what's on today"
+                )
+                .is_some()
+        );
+        assert_eq!(state.schedules.len(), 1);
+        assert_eq!(state.schedules[0].name, "Weekday briefing");
+        assert_eq!(state.schedule_stats().active_schedules, 1);
+    }
 
     #[test]
     fn background_replies_and_queued_prompts_stay_with_their_original_conversation() {

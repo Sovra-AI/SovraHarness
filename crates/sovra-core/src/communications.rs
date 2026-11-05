@@ -14,6 +14,8 @@ pub const MAX_OUTBOUND_MESSAGES: usize = 40;
 pub const REVIEW_LIFETIME_MS: i64 = 10 * 60 * 1000;
 
 /// A tool cannot approve a message. Only the native review command can do that.
+/// A confirmed timed send stored on a schedule transmits at fire time without
+/// another review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessagingRequest {
     Status,
@@ -165,6 +167,52 @@ pub fn resolve_recipient(
     }
 }
 
+/// Recipients a timed send may store without a live people or chat lookup.
+/// Fire-time [`resolve_recipient`] still maps these to a chat id. A first name
+/// is refused here so a job cannot sit until due and then fail instantly.
+pub fn concrete_scheduled_recipient(channel: ChannelKind, input: &str) -> Result<(), ChannelError> {
+    let input = input.trim();
+    if input == "me" {
+        return Ok(());
+    }
+    if let Some(id) = input.strip_prefix("person:") {
+        if id.trim().is_empty() {
+            return Err(ChannelError::Failed(
+                "That saved person id is empty. Use person:<id> from a people lookup.".into(),
+            ));
+        }
+        return Ok(());
+    }
+    match channel {
+        ChannelKind::WhatsApp => {
+            if input.starts_with('+')
+                && input[1..]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || " ()-".contains(c))
+            {
+                let digits: String = input.chars().filter(char::is_ascii_digit).collect();
+                if (7..=15).contains(&digits.len()) && !digits.starts_with('0') {
+                    return Ok(());
+                }
+            }
+            if direct_chat(channel, input) {
+                return Ok(());
+            }
+            Err(ChannelError::Failed(
+                "For a timed WhatsApp, use the international phone number starting with +, me, an exact chat id, or person:<id> from a people lookup. A first name alone is not enough.".into(),
+            ))
+        }
+        ChannelKind::Telegram => {
+            if direct_chat(channel, input) {
+                return Ok(());
+            }
+            Err(ChannelError::Failed(
+                "For a timed Telegram text, use me, the numeric chat id, or person:<id> from a people lookup. A first name alone is not enough.".into(),
+            ))
+        }
+    }
+}
+
 fn direct_chat(channel: ChannelKind, chat: &str) -> bool {
     match channel {
         ChannelKind::WhatsApp => chat.split_once('@').is_some_and(|(user, server)| {
@@ -211,6 +259,23 @@ mod tests {
             );
         }
         assert!(resolve_recipient(&state, ChannelKind::Telegram, "123", "456").is_err());
+    }
+
+    #[test]
+    fn timed_send_stores_a_number_or_saved_id_not_a_first_name() {
+        assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "Ryan").is_err());
+        assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "Anna").is_err());
+        assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "447347529758").is_err());
+        assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "+44 7347 529758").is_ok());
+        assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "me").is_ok());
+        assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "person:abc").is_ok());
+        assert!(
+            concrete_scheduled_recipient(ChannelKind::WhatsApp, "447347529758@s.whatsapp.net")
+                .is_ok()
+        );
+        assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "Ryan").is_err());
+        assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "123456").is_ok());
+        assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "me").is_ok());
     }
 
     #[test]

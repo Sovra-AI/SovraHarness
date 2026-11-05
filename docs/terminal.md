@@ -23,6 +23,13 @@ model call ──► sovra-adk TerminalTool ──► TerminalAccess (port, sovr
         TerminalOutcome::report_for_model ──► tool result
 ```
 
+The assistant must call this tool and do the work on the computer. It must not
+paste a command in chat for you to copy or run, and it must not ask in chat
+whether it may run a command or change files. The card is how you approve
+(**Allow once** / **Always allow** / **Don't allow**); **Always allow** remembers
+the suggested rule (the program plus subcommand, or the program alone for
+file-taking tools such as `mkdir`).
+
 1. `parse::analyse` splits the command line into simple commands at `&&`, `||`,
    `;`, `|`, `|&`, `&` and newlines, removing quotes. It strips pass-through
    wrappers (`timeout 30`, `nice`, `time`, `nohup`, `stdbuf`, `command`) and
@@ -73,14 +80,23 @@ match. An approved command runs with the person's own rights.
   keep output plain and stop tools from waiting for input.
 - **Isolation from hangs.** stdin is closed, so a program asking a question
   fails at once instead of hanging. Each command runs in its own process group
-  (Unix) or new process group without a console window (Windows).
+  (Unix) or new process group without a console window (Windows). On Unix the
+  PTY used for output is not a controlling terminal, so a program that waits
+  for a keyboard still sees EOF on stdin.
 - **Stopping.** A timeout (default 120 s, at most 600 s), the Stop button,
-  switching terminal access off, or an interrupted conversation sends SIGTERM to
-  the whole group, then SIGKILL after two seconds (`taskkill /T /F` on Windows).
-  Dropping the tool future kills the tree too, so nothing outlives its turn. If
-  the shell exits while a background child still holds its output, Sovra waits
-  300 ms and then ends the group.
-- **Output.** Bytes are decoded incrementally: lossy UTF-8 across reads, ANSI
+  switching terminal access off, or an interrupted conversation *after the
+  command has started* sends SIGTERM to the whole group, then SIGKILL after two
+  seconds (`taskkill /T /F` on Windows). Dropping the tool future (the
+  model-response timeout, or Stop on the chat) kills a **running** process the
+  same way. A card that is still waiting stays decidable: a 60 s model-response
+  timeout does not expire it, and **Allow once** / **Always allow** still start
+  the process. The approval wait itself is ten minutes. If the shell exits while
+  a background child still holds its output, Sovra waits 300 ms and then ends the
+  group.
+- **Output.** On Unix, stdout and stderr are a terminal (PTY) so programs that
+  line-buffer on a tty flush as they print; the card can read both streams
+  while the command is still running. On Windows they are pipes (same live-card
+  contract). Bytes are decoded incrementally: lossy UTF-8 across reads, ANSI
   escape codes removed, carriage-return progress bars collapsed to their final
   state, and lines capped at 4 KiB. The chat receives batches every 80 ms (at
   most 500 lines per batch, extra lines counted) and keeps the last 500 lines per

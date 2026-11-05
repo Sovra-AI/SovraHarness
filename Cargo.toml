@@ -89,8 +89,9 @@ umap-rs = "=0.4.5"
 ndarray = "0.17.2"
 rayon = "1.12.0"
 memchr = "2.8.3"
-# Safe `killpg` so the terminal tool stops a command's whole process group (Unix only).
-nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
+# Safe `killpg` and `openpty` so the terminal tool stops a command's whole process
+# group and captures live libc output on a tty (Unix only). `fs` is F_SETFD/CLOEXEC.
+nix = { version = "0.31.3", default-features = false, features = ["signal", "process", "term", "fs"] }
 keyring = { version = "4.2.0", default-features = false, features = ["v1"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["json", "stream", "rustls-tls"] }
 # exact: GPUI has no semver promise; bump deliberately. `syntect` highlights chat code

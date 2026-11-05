@@ -3,6 +3,8 @@
 use super::*;
 use sovra_core::{Fact, MemoryDetail, Timestamp};
 
+use crate::design::FitsPane as _;
+
 pub(super) fn date(stamp: Timestamp) -> String {
     time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(stamp.millis()) * 1_000_000)
         .map_or_else(
@@ -81,50 +83,62 @@ impl MemoryView {
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let id = fact.id.clone();
-        v_flex()
+        let node = sovra_core::MemoryGraphNodeId::Detail(fact.id.clone());
+        let on_map = self.graph_selection.as_ref() == Some(&node);
+        let card = v_flex()
             .id(("memory-card", index))
             .test_support()
-            .w_full()
             .min_w_0()
             .p(t.space.medium)
             .gap(t.space.small)
             .sovra_surface(Surface::Subtle, cx)
-            .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_wrap()
-                    .gap(t.space.small)
-                    .child(
-                        div()
-                            .id(("memory-card-standing", index))
-                            .test_support()
-                            .sovra_text(TextRole::Caption, cx)
-                            .child(standing(fact)),
-                    )
-                    .child(
-                        div()
-                            .sovra_text(TextRole::Caption, cx)
-                            .child(format!("· Saved {}", date(fact.created_at))),
-                    ),
-            )
-            .child(
-                div()
-                    .id(("memory-card-text", index))
-                    .test_support()
-                    .aria_label(fact.content.clone())
-                    .min_w_0()
-                    .sovra_text(TextRole::Reading, cx)
-                    .child(fact.content.clone()),
-            )
-            .child(self.subject_buttons(fact, &format!("memory-card-subject-{index}"), cx))
-            .child(
-                design::button(("memory-open", index), "Explore detail", cx)
-                    .self_start()
-                    .max_w_full()
-                    .disabled(self.state.loading)
-                    .on_click(cx.listener(move |view, _, _, cx| view.inspect(id.clone(), cx))),
-            )
+            .when(on_map, |card| card.border_color(t.graph.detail))
+            // Pointing at a card lights the same detail up on the map above.
+            .on_hover(cx.listener(move |view, hovered: &bool, _, cx| {
+                view.preview_on_map(&node, *hovered, cx);
+            }));
+        let card = if self.width_class == design::WidthClass::Compact {
+            card.w_full()
+        } else {
+            card.prefer_width(t.layout.card_min_width)
+        };
+        card.child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .id(("memory-card-standing", index))
+                        .test_support()
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(standing(fact)),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(format!("· Saved {}", date(fact.created_at))),
+                ),
+        )
+        .child(
+            div()
+                .id(("memory-card-text", index))
+                .test_support()
+                .aria_label(fact.content.clone())
+                .min_w_0()
+                .flex_1()
+                .sovra_text(TextRole::Reading, cx)
+                .child(fact.content.clone()),
+        )
+        .child(self.subject_buttons(fact, &format!("memory-card-subject-{index}"), cx))
+        .child(
+            design::button(("memory-open", index), "Explore detail", cx)
+                .self_start()
+                .max_w_full()
+                .disabled(self.state.loading)
+                .on_click(cx.listener(move |view, _, _, cx| view.inspect(id.clone(), cx))),
+        )
     }
 
     pub(super) fn connected_details(

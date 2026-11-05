@@ -194,8 +194,8 @@ claims that a design system prescribes this exact palette or layout.
   gradients on every recommended model.
 - **Knowledge:** readable explanatory cards, no nested elevation. The optional
   inspector yields its width on compact windows.
-- **Schedules:** the same page/card rhythm, with explicit current behavior in the
-  subtitle. UI styling does not turn stored schedules into background automation.
+- **Schedules:** the same page/card rhythm, a swimlane of past and upcoming runs,
+  and a “now” marker. Repeating tasks run in the background; pause one anytime.
 - **Agent cards and forms:** shared matte surfaces, section typography and native
   actions inherit the same system. Reserve shadows for floating material, not
   every repeated row.

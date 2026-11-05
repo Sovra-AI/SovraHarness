@@ -27,7 +27,7 @@ use sovra_core::connections::{
 use sovra_core::models::ProviderKind;
 
 use crate::RuntimeClient;
-use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::models_view::{ModelsView, ShowLocalAi, caption, pill};
 use crate::settings_view::settings_section;
 
@@ -306,7 +306,7 @@ impl ModelsView {
                         .flex_wrap()
                         .gap(t.space.small)
                         .child(
-                            div().flex_1().min_w(t.layout.filter_width).child(
+                            div().prefer_width(t.layout.filter_width).child(
                                 Input::new(&self.whatsapp_form.telegram_token)
                                     .id("telegram-token-input")
                                     .aria_label("Telegram bot token")
@@ -551,8 +551,7 @@ impl ModelsView {
             .child(code_card)
             .child(
                 v_flex()
-                    .flex_1()
-                    .min_w(t.layout.card_min_width)
+                    .prefer_width(t.layout.card_min_width)
                     .gap(t.space.small)
                     .child(
                         v_flex()
@@ -574,7 +573,7 @@ impl ModelsView {
                                     .flex_wrap()
                                     .gap(t.space.small)
                                     .child(
-                                        div().flex_1().min_w(t.layout.filter_width).child(
+                                        div().prefer_width(t.layout.filter_width).child(
                                             Input::new(&self.whatsapp_form.phone)
                                                 .id("whatsapp-phone-input")
                                                 .aria_label("Phone number for the linking code")
@@ -785,9 +784,12 @@ impl ModelsView {
                     .test_support()
                     .child(
                         v_flex()
+                            .id("connections-column")
+                            .test_support()
                             .w_full()
                             .max_w(column)
                             .min_w_0()
+                            .mx_auto()
                             .gap(t.space.medium)
                             .child(body),
                     ),

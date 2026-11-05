@@ -71,6 +71,8 @@ struct Shared {
     next_call: AtomicU64,
     /// Serialises settings writes so the newest policy always lands last.
     saving: tokio::sync::Mutex<()>,
+    /// Owned tasks (approval wait that must outlive a dropped tool future).
+    handle: tokio::runtime::Handle,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -116,6 +118,7 @@ impl TerminalRuntime {
             },
             next_call: AtomicU64::new(1),
             saving: tokio::sync::Mutex::new(()),
+            handle: handle.clone(),
         });
         shared.emit(TerminalEvent::Ready { host, policy });
         // Resolve the login environment now so the first command does not wait for it.
@@ -309,14 +312,16 @@ impl LoginEnvironment {
 #[derive(Debug)]
 struct Access(Arc<Shared>);
 
-/// Marks an approval card expired if the turn is dropped while it waits.
-struct WaitGuard<'a> {
-    shared: &'a Shared,
-    call: &'a TerminalCall,
+/// Marks an approval card expired if the owned waiter is dropped (app shutdown)
+/// while it waits. Dropping the *tool future* (model-response timeout) must not
+/// expire a still-waiting card — Allow once / Always allow still run it.
+struct WaitGuard {
+    shared: Arc<Shared>,
+    call: TerminalCall,
     armed: bool,
 }
 
-impl Drop for WaitGuard<'_> {
+impl Drop for WaitGuard {
     fn drop(&mut self) {
         if self.armed {
             lock(&self.shared.waiting).remove(&self.call.call_id);
@@ -329,14 +334,14 @@ impl Drop for WaitGuard<'_> {
 
 /// Marks a running command stopped if the turn is dropped while it runs (the
 /// process tree itself is killed by `process::ProcessTree`).
-struct RunGuard<'a> {
-    shared: &'a Shared,
-    call: &'a TerminalCall,
+struct RunGuard {
+    shared: Arc<Shared>,
+    call: TerminalCall,
     started: Instant,
     armed: bool,
 }
 
-impl Drop for RunGuard<'_> {
+impl Drop for RunGuard {
     fn drop(&mut self) {
         lock(&self.shared.running).remove(&self.call.call_id);
         if self.armed {
@@ -347,6 +352,17 @@ impl Drop for RunGuard<'_> {
             self.shared.emit(TerminalEvent::Call(call));
         }
     }
+}
+
+/// Work that must keep going if the model turn is dropped while a card is waiting.
+struct OwnedCall {
+    shared: Arc<Shared>,
+    request: TerminalRequest,
+    call: TerminalCall,
+    dir: PathBuf,
+    needs_approval: bool,
+    parent_dead: oneshot::Receiver<()>,
+    outcome_tx: oneshot::Sender<TerminalOutcome>,
 }
 
 #[async_trait::async_trait]
@@ -387,91 +403,162 @@ impl TerminalAccess for Access {
             Err(message) => return settle(shared, call, CallStatus::FailedToStart { message }),
         };
 
-        match policy.evaluate(&request.command, shared.host.os) {
-            Verdict::Run(auto) => call.permission = Permission::Auto(auto),
+        let needs_approval = match policy.evaluate(&request.command, shared.host.os) {
+            Verdict::Run(auto) => {
+                call.permission = Permission::Auto(auto);
+                false
+            }
             Verdict::Ask(prompt) => {
                 call.prompt = prompt;
-                let (answer, decision) = oneshot::channel();
-                lock(&shared.waiting).insert(call_id.clone(), answer);
-                shared.emit(TerminalEvent::Call(call.clone()));
-                let mut guard = WaitGuard {
-                    shared,
-                    call: &call,
-                    armed: true,
-                };
-                let decided =
-                    tokio::time::timeout(Duration::from_secs(APPROVAL_WAIT_SECS), decision).await;
-                guard.armed = false;
-                drop(guard);
-                lock(&shared.waiting).remove(&call_id);
-                match decided {
-                    Ok(Ok(TerminalDecision::AlwaysAllow))
-                        if !call.prompt.suggested_rules.is_empty() =>
-                    {
-                        let rules = call.prompt.suggested_rules.clone();
-                        let changed = lock(&shared.policy).add_rules(&rules);
-                        if changed {
-                            shared.emit(TerminalEvent::PolicyChanged(lock(&shared.policy).clone()));
-                            shared.save().await;
-                        }
-                        call.permission = Permission::Saved(rules);
-                    }
-                    // "Always" with nothing to remember is the same as "once".
-                    Ok(Ok(TerminalDecision::AllowOnce | TerminalDecision::AlwaysAllow)) => {
-                        call.permission = Permission::Once;
-                    }
-                    Ok(Ok(TerminalDecision::Deny)) => {
-                        call.permission = Permission::Refused;
-                        let status = if lock(&shared.policy).enabled {
-                            CallStatus::Declined
-                        } else {
-                            CallStatus::Disabled
-                        };
-                        return settle(shared, call, status);
-                    }
-                    Ok(Err(_)) | Err(_) => return settle(shared, call, CallStatus::Expired),
-                }
+                true
             }
-        }
+        };
 
-        call.status = CallStatus::Running;
-        let (stop, stopped) = oneshot::channel();
-        lock(&shared.running).insert(call_id.clone(), stop);
+        // The waiter lives on the runtime handle so a model-response timeout (which
+        // drops this tool future) cannot expire a card the person has not answered.
+        let (parent_alive, parent_dead) = oneshot::channel();
+        let (outcome_tx, outcome_rx) = oneshot::channel();
+        drop(shared.handle.spawn(run_owned(OwnedCall {
+            shared: Arc::clone(&self.0),
+            request,
+            call,
+            dir,
+            needs_approval,
+            parent_dead,
+            outcome_tx,
+        })));
+        let _turn = parent_alive;
+        outcome_rx
+            .await
+            .unwrap_or(TerminalOutcome::NotRun(CallStatus::Expired))
+    }
+}
+
+async fn run_owned(owned: OwnedCall) {
+    let OwnedCall {
+        shared,
+        request,
+        call,
+        dir,
+        needs_approval,
+        parent_dead,
+        outcome_tx,
+    } = owned;
+    if let Some(outcome) =
+        execute_owned(shared, request, call, dir, needs_approval, parent_dead).await
+    {
+        let _ = outcome_tx.send(outcome);
+    }
+}
+
+async fn execute_owned(
+    shared: Arc<Shared>,
+    request: TerminalRequest,
+    mut call: TerminalCall,
+    dir: PathBuf,
+    needs_approval: bool,
+    mut parent_dead: oneshot::Receiver<()>,
+) -> Option<TerminalOutcome> {
+    if needs_approval {
+        let (answer, decision) = oneshot::channel();
+        lock(&shared.waiting).insert(call.call_id.clone(), answer);
         shared.emit(TerminalEvent::Call(call.clone()));
-        let mut guard = RunGuard {
-            shared,
-            call: &call,
-            started: Instant::now(),
+        let mut guard = WaitGuard {
+            shared: Arc::clone(&shared),
+            call: call.clone(),
             armed: true,
         };
-        let env = shared.login_env().await;
-        let (status, capture) = process::run(
-            process::Job {
-                host: &shared.host,
-                env,
-                command: &request.command,
-                dir: &dir,
-                timeout: Duration::from_secs(request.bounded_timeout_secs()),
-                call_id: &call_id,
-                events: &shared.events,
-            },
-            stopped,
-        )
-        .await;
+        let decided = tokio::time::timeout(Duration::from_secs(APPROVAL_WAIT_SECS), decision).await;
         guard.armed = false;
         drop(guard);
-        tracing::info!(%call_id, ?status, lines = capture.total_lines(), "terminal command settled");
-        call.status = status.clone();
-        shared.emit(TerminalEvent::Call(call));
-        match status {
-            CallStatus::FailedToStart { .. } => TerminalOutcome::NotRun(status),
-            _ => TerminalOutcome::Ran {
-                status,
-                output: capture.render(),
-                total_lines: capture.total_lines(),
-            },
+        lock(&shared.waiting).remove(&call.call_id);
+        match decided {
+            Ok(Ok(TerminalDecision::AlwaysAllow)) if !call.prompt.suggested_rules.is_empty() => {
+                let rules = call.prompt.suggested_rules.clone();
+                let changed = lock(&shared.policy).add_rules(&rules);
+                if changed {
+                    shared.emit(TerminalEvent::PolicyChanged(lock(&shared.policy).clone()));
+                    shared.save().await;
+                }
+                call.permission = Permission::Saved(rules);
+            }
+            // "Always" with nothing to remember is the same as "once".
+            Ok(Ok(TerminalDecision::AllowOnce | TerminalDecision::AlwaysAllow)) => {
+                call.permission = Permission::Once;
+            }
+            Ok(Ok(TerminalDecision::Deny)) => {
+                call.permission = Permission::Refused;
+                let status = if lock(&shared.policy).enabled {
+                    CallStatus::Declined
+                } else {
+                    CallStatus::Disabled
+                };
+                return Some(settle(&shared, call, status));
+            }
+            Ok(Err(_)) | Err(_) => return Some(settle(&shared, call, CallStatus::Expired)),
         }
     }
+
+    // A model timeout while the card was waiting must still run the command once
+    // the person allows it. A timeout after the process started still stops it.
+    let turn_already_ended = !matches!(
+        parent_dead.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    );
+
+    call.status = CallStatus::Running;
+    let (stop, stopped) = oneshot::channel();
+    lock(&shared.running).insert(call.call_id.clone(), stop);
+    shared.emit(TerminalEvent::Call(call.clone()));
+    let mut guard = RunGuard {
+        shared: Arc::clone(&shared),
+        call: call.clone(),
+        started: Instant::now(),
+        armed: true,
+    };
+    let env = shared.login_env().await;
+    let process_job = process::Job {
+        host: &shared.host,
+        env,
+        command: &request.command,
+        dir: &dir,
+        timeout: Duration::from_secs(request.bounded_timeout_secs()),
+        call_id: &call.call_id,
+        events: &shared.events,
+    };
+    let (status, capture) = if turn_already_ended {
+        tracing::info!(
+            call_id = %call.call_id,
+            "person allowed a command after the model turn ended; running it"
+        );
+        process::run(process_job, stopped).await
+    } else {
+        tokio::select! {
+            result = process::run(process_job, stopped) => result,
+            _ = parent_dead => {
+                // Dropping process::run kills the tree. RunGuard emits Stopped.
+                return None;
+            }
+        }
+    };
+    guard.armed = false;
+    drop(guard);
+    tracing::info!(
+        call_id = %call.call_id,
+        ?status,
+        lines = capture.total_lines(),
+        "terminal command settled"
+    );
+    call.status = status.clone();
+    shared.emit(TerminalEvent::Call(call));
+    Some(match status {
+        CallStatus::FailedToStart { .. } => TerminalOutcome::NotRun(status),
+        _ => TerminalOutcome::Ran {
+            status,
+            output: capture.render(),
+            total_lines: capture.total_lines(),
+        },
+    })
 }
 
 /// Shows a call that never ran and returns the matching outcome.

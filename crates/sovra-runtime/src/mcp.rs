@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
 use serde_json::{Value, json};
-use sovra_core::Event;
 use sovra_core::auth::{callback_page, constant_time_str_eq};
 use sovra_core::mcp::{
     ACCEPT_HEADER, AuthorizationServer, ConnectFailure, DraftSetup, ImportProblem,
@@ -32,11 +31,13 @@ use sovra_core::mcp::{
     header_field_value, initialize_request, initialized_notification, interpret_initialize,
     json_from_body, mirrored_name, name_for_program, parse_authorization_server,
     parse_protected_resource, parse_server_settings, parse_sign_in_callback, parse_tool_list,
-    parse_tool_text, program_display, program_id_for, protected_resource_well_known_urls,
-    request_origin, resource_metadata_parameter, rpc_result, s256_challenge, secret_storage_id,
-    service_id_for, token_may_be_sent, tools_call_request, tools_list_request,
+    parse_tool_text, parse_tool_widget, program_display, program_id_for,
+    protected_resource_well_known_urls, request_origin, resource_metadata_parameter, rpc_result,
+    s256_challenge, secret_storage_id, service_id_for, token_may_be_sent, tools_call_request,
+    tools_list_request,
 };
 use sovra_core::models::ModelSecret;
+use sovra_core::{AgUiWidget, Event};
 use sovra_providers::{ModelRepository, SignInProof};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
@@ -1560,10 +1561,20 @@ impl Actor {
             let (answer, answered) = tokio::sync::oneshot::channel();
             program.call(request.tool, arguments, answer);
             drop(self.handle.spawn(async move {
-                let text = answered
-                    .await
-                    .unwrap_or_else(|_| TOOL_FAILED_TEXT.to_owned());
-                finish_call(&events, snap, tool, text, session_id, reply).await;
+                let answer = answered.await.unwrap_or_else(|_| programs::ToolAnswer {
+                    text: TOOL_FAILED_TEXT.to_owned(),
+                    widget: None,
+                });
+                finish_call(
+                    &events,
+                    snap,
+                    tool,
+                    answer.text,
+                    answer.widget,
+                    session_id,
+                    reply,
+                )
+                .await;
             }));
             return;
         }
@@ -1584,7 +1595,7 @@ impl Actor {
             let session = (snap.protocol == PROTOCOL_LEGACY)
                 .then_some(snap.session.as_deref())
                 .flatten();
-            let reply_text = match post_mcp(
+            let (reply_text, widget) = match post_mcp(
                 &http,
                 &snap.address,
                 &snap.protocol,
@@ -1599,13 +1610,15 @@ impl Actor {
                 Ok(reply) if (200..300).contains(&reply.status) => json_from_body(&reply.body)
                     .as_ref()
                     .and_then(rpc_result)
-                    .map(parse_tool_text)
-                    .filter(|text| !text.is_empty())
-                    .unwrap_or_else(|| TOOL_FAILED_TEXT.to_owned()),
-                Ok(reply) if reply.status == 401 => ConnectFailure::SignIn.text().to_owned(),
-                _ => TOOL_FAILED_TEXT.to_owned(),
+                    .map(|result| (parse_tool_text(result), parse_tool_widget(result)))
+                    .filter(|(text, _)| !text.is_empty())
+                    .unwrap_or_else(|| (TOOL_FAILED_TEXT.to_owned(), None)),
+                Ok(reply) if reply.status == 401 => {
+                    (ConnectFailure::SignIn.text().to_owned(), None)
+                }
+                _ => (TOOL_FAILED_TEXT.to_owned(), None),
             };
-            finish_call(&events, snap, tool, reply_text, session_id, reply).await;
+            finish_call(&events, snap, tool, reply_text, widget, session_id, reply).await;
         }));
     }
 
@@ -1627,12 +1640,14 @@ impl Actor {
             service_name: name.clone(),
             tool: request.tool.clone(),
             text: text.clone(),
+            widget: None,
             session_id: Some(request.session_id.clone()).filter(|id| !id.is_empty()),
         })
         .await;
         Ok(RemoteOutput {
             service_name: name,
             text,
+            widget: None,
         })
     }
 
@@ -1916,12 +1931,14 @@ async fn finish_call(
     snap: Snap,
     tool: String,
     text: String,
+    widget: Option<AgUiWidget>,
     session_id: Option<String>,
     reply: Option<CallReply>,
 ) {
     let output = RemoteOutput {
         service_name: snap.name.clone(),
         text: text.clone(),
+        widget: widget.clone(),
     };
     let _ = events
         .send(Event::Mcp(McpEvent::ToolResult {
@@ -1929,6 +1946,7 @@ async fn finish_call(
             service_name: snap.name,
             tool,
             text,
+            widget,
             session_id,
         }))
         .await;

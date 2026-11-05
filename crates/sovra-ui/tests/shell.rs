@@ -68,13 +68,29 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
         assert!(window.try_find("agui-build-progress-card").is_none());
         assert!(window.try_find("sovra-inspector").is_none());
 
-        // Switch to Schedules tab -> renders Schedules Command Center.
+        // Switch to Schedules tab -> empty invite, then create one and run it.
         window.click("nav-schedules", cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Schedules);
         assert!(window.find("sovra-schedules-view").visible());
+        assert!(window.find("schedules-empty-placeholder").visible());
 
-        // Run a schedule in chat -> switches back to Chat and dispatches Command::RunPrompt.
+        window.click("schedule-empty-create-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("schedule-create-form").visible());
+        window.click("schedule-name-input", cx);
+        window.input("Weekday briefing", cx);
+        window.click("schedule-cadence-input", cx);
+        window.input("every weekday at 9", cx);
+        window.click("schedule-prompt-input", cx);
+        window.input("Give me a short briefing of what's on today", cx);
+        window.click("schedule-save-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().schedules.len(), 1);
+        assert!(window.find("schedules-timeline").visible());
+        assert!(window.find(("schedule-lane", 0usize)).visible());
+        assert!(window.find("schedules-now-marker").visible());
+
         window.click(("schedule-run", 0usize), cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
@@ -92,9 +108,17 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
     .unwrap();
 
     // Verify the schedule run dispatched a real Command::RunPrompt to the runtime.
-    let dispatched = commands.recv_blocking().unwrap();
-    assert!(matches!(dispatched, Command::RunPrompt { .. }));
-    let auth_commands: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+    let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(
+        sent.iter()
+            .any(|command| matches!(command, Command::RunPrompt { .. }))
+    );
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        Command::Schedule(sovra_core::ScheduleCommand::Create { .. })
+    )));
+    let auth_commands: Vec<_> = sent
+        .into_iter()
         .filter_map(|command| match command {
             Command::Auth(auth) => Some(auth),
             _ => None,
@@ -233,10 +257,13 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
 fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut TestAppContext) {
     let (client, commands, events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
     let window = cx.open_window(size(px(1000.), px(760.)), |window, cx| {
-        let shell = cx.new(|cx| Shell::new(0, window, cx));
-        Root::new(shell, window, cx)
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
     });
+    let shell = shell.unwrap();
     events
         .send_blocking(Event::AgUiSurface {
             session_id: sovra_core::WorkspaceState::new(0).session_id,
@@ -301,10 +328,29 @@ fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut Tes
         panic!("action must return to agent")
     };
     assert_eq!(session_id, sovra_core::WorkspaceState::new(0).session_id);
-    let action: serde_json::Value = serde_json::from_str(&prompt).unwrap();
-    assert_eq!(action["surface_ref"]["id"], "report");
-    assert_eq!(action["surface_ref"]["version"], 3);
-    assert_eq!(action["event"]["action_id"], "next");
+    assert!(
+        prompt.contains("Continue"),
+        "click must send the visible label, got {prompt}"
+    );
+    assert!(
+        !prompt.contains("surface_ref"),
+        "click must not dump JSON, got {prompt}"
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&prompt).is_err(),
+        "prompt must be human text, not JSON: {prompt}"
+    );
+    shell.read_with(cx, |shell, _| {
+        let user = shell
+            .workspace()
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == sovra_core::MessageRole::User)
+            .expect("button click stores a user turn");
+        assert_eq!(user.text, prompt);
+        assert_eq!(user.text, "Continue");
+    });
 }
 
 #[gpui_kit::test]
@@ -440,14 +486,6 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Schedules);
         assert!(window.find("sovra-schedules-view").visible());
-
-        // Delete all 3 seeded schedules -> verifies the Schedules Empty Placeholder ("No schedules yet") appears.
-        window.click(("schedule-delete", 0usize), cx);
-        window.render_frame(cx);
-        window.click(("schedule-delete", 0usize), cx);
-        window.render_frame(cx);
-        window.click(("schedule-delete", 0usize), cx);
-        window.render_frame(cx);
         assert!(window.find("schedules-empty-placeholder").visible());
 
         // Click "Create schedule" from the empty placeholder -> opens the schedule creation form and creates a schedule.
@@ -621,6 +659,24 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
                 && group_header_bounds.bottom() <= nav_models_bounds.top(),
             "Your AI & Setup section header must separate everyday workspace tabs from AI setup tabs"
         );
+        assert!(
+            window
+                .try_find(("nav-context-badge", NavTab::Schedules as usize))
+                .is_none(),
+            "Schedules tab has no count badge when the list is empty"
+        );
+        window.click("nav-schedules", cx);
+        window.render_frame(cx);
+        window.click("schedule-empty-create-btn", cx);
+        window.render_frame(cx);
+        window.click("schedule-name-input", cx);
+        window.input("Weekday briefing", cx);
+        window.click("schedule-prompt-input", cx);
+        window.input("Give me a short briefing of what's on today", cx);
+        window.click("schedule-save-btn", cx);
+        window.render_frame(cx);
+        window.click("nav-chat", cx);
+        window.render_frame(cx);
         assert!(
             window
                 .find(("nav-context-badge", NavTab::Schedules as usize))

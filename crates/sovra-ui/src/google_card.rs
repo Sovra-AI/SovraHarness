@@ -22,7 +22,7 @@ use sovra_core::google::{
 };
 
 use crate::RuntimeClient;
-use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::model_connection_editor::field;
 use crate::shell::Shell;
 
@@ -430,8 +430,7 @@ fn service_row(
         )
         .child(
             v_flex()
-                .flex_1()
-                .min_w(t.layout.card_min_width)
+                .prefer_width(t.layout.card_min_width)
                 .gap(t.space.hair)
                 .child(
                     div()

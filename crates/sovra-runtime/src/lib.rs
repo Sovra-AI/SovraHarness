@@ -21,12 +21,14 @@ mod model_priority;
 mod models;
 mod recalling;
 mod remembering;
+mod schedules;
 mod skills;
 mod terminal;
 pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
 mod teams;
 pub use models::ModelsConfig;
+pub use schedules::{JsonScheduleStore, MemoryScheduleStore};
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -284,6 +286,7 @@ pub fn start_with_auth(
             terminal: None,
             mcp_catalogue: None,
             mcp_sample_program: None,
+            schedules: None,
         },
     )
 }
@@ -315,6 +318,8 @@ pub struct RuntimeServices {
     /// Sovra's own executable, for the built-in sample MCP server (started with
     /// [`SAMPLE_SERVER_FLAG`]). `None` hides the sample.
     pub mcp_sample_program: Option<std::path::PathBuf>,
+    /// Recurring prompts. `None` keeps an in-memory book for the session.
+    pub schedules: Option<Arc<dyn sovra_core::ScheduleStore>>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -336,6 +341,9 @@ pub fn start_with_services(
     let commands_tx = client.commands.clone();
     let (stopped, completion) = async_channel::bounded(1);
     client.completion = Some(completion);
+    // Civil-time offset must be read before this thread starts tokio workers;
+    // `time::UtcOffset::current_local_offset` can fail once other threads exist.
+    let tz_offset_minutes = local_offset_minutes();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("sovra-runtime-worker")
@@ -354,6 +362,7 @@ pub fn start_with_services(
                 handle,
                 commands,
                 events.clone(),
+                tz_offset_minutes,
             ));
             // Adapters may schedule asynchronous cleanup when their final handle
             // drops. Keep the executor alive for that work before cancelling it.
@@ -381,6 +390,10 @@ async fn drain_adapter_tasks(metrics: tokio::runtime::RuntimeMetrics) {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the runtime thread owns adapters, channels, and the local civil-time offset"
+)]
 async fn serve(
     version: String,
     agent_config: AgentConfig,
@@ -390,6 +403,7 @@ async fn serve(
     handle: tokio::runtime::Handle,
     commands: Receiver<Command>,
     ui_events: Sender<Event>,
+    tz_offset_minutes: i32,
 ) {
     let RuntimeServices {
         memory: memory_factory,
@@ -406,6 +420,7 @@ async fn serve(
         terminal,
         mcp_catalogue,
         mcp_sample_program,
+        schedules: schedule_store,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
@@ -416,7 +431,7 @@ async fn serve(
     let connections = connections::ConnectionsRuntime::start(
         channels,
         ui_events.clone(),
-        commands_tx,
+        commands_tx.clone(),
         &handle,
         probes,
     );
@@ -527,6 +542,13 @@ async fn serve(
     let development = development
         .map(|config| development::DevelopmentRuntime::start(config, events.clone(), &handle));
     google.send(sovra_core::google::GoogleCommand::Load);
+    let (schedules, events) = schedules::SchedulesRuntime::start(
+        schedule_store,
+        events,
+        commands_tx,
+        tz_offset_minutes,
+        &handle,
+    );
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");
         // Protect setup and capture too: immediately dispatched extraction must
@@ -622,6 +644,7 @@ async fn serve(
             Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
             Command::Google(command) => google.send(command),
+            Command::Schedule(command) => schedules.send(command),
             Command::FileIndex(command) => file_index.send(command),
             Command::Teams(sovra_core::teams::TeamCommand::Run {
                 session_id,
@@ -692,6 +715,8 @@ async fn serve(
                 };
                 let google_tools = google.tools().await;
                 let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
+                let schedule_tools = schedules.tools();
+                let base = base.with_schedules(Some(&schedule_tools)).unwrap_or(base);
                 if let Some(previous) = runs.remove(&session_id) {
                     previous.interrupt(&session_id);
                     previous.task.abort();
@@ -962,6 +987,8 @@ async fn serve(
                         Some(access) => base.with_terminal(access).unwrap_or(base),
                         None => base,
                     };
+                    let schedule_tools = schedules.tools();
+                    let base = base.with_schedules(Some(&schedule_tools)).unwrap_or(base);
                     base.with_reply_input_observer(inputs.clone())
                         .unwrap_or(base)
                 });
@@ -1008,6 +1035,7 @@ async fn serve(
                 runs.insert(session_id, run);
             }
             Command::InterruptSession { session_id } => {
+                schedules.run_finished(session_id.clone(), false);
                 if let Some(run) = runs.remove(&session_id) {
                     run.interrupt(&session_id);
                     run.task.abort();
@@ -1116,6 +1144,10 @@ async fn open_memory(factory: Option<MemoryFactory>) -> Option<Arc<dyn MemorySto
         return None;
     }
     Some(store)
+}
+
+fn local_offset_minutes() -> i32 {
+    time::UtcOffset::current_local_offset().map_or(0, |offset| i32::from(offset.whole_minutes()))
 }
 
 fn now() -> Timestamp {

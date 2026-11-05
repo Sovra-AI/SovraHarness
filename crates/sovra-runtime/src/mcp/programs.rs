@@ -16,7 +16,10 @@ use rmcp::ServiceExt as _;
 use rmcp::model::{CallToolRequestParams, ClientCapabilities, ClientConfig, Implementation};
 use rmcp::transport::TokioChildProcess;
 use serde_json::{Value, json};
-use sovra_core::mcp::{McpToolInfo, TOOL_FAILED_TEXT, parse_tool_list, parse_tool_text};
+use sovra_core::AgUiWidget;
+use sovra_core::mcp::{
+    McpToolInfo, TOOL_FAILED_TEXT, parse_tool_list, parse_tool_text, parse_tool_widget,
+};
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::sync::{Mutex, oneshot};
 
@@ -53,11 +56,25 @@ pub(super) enum ProgramUpdate {
     Stopped { id: String, detail: String },
 }
 
+pub(super) struct ToolAnswer {
+    pub text: String,
+    pub widget: Option<AgUiWidget>,
+}
+
+impl ToolAnswer {
+    fn failed() -> Self {
+        Self {
+            text: TOOL_FAILED_TEXT.to_owned(),
+            widget: None,
+        }
+    }
+}
+
 enum Request {
     Call {
         tool: String,
         arguments: Value,
-        reply: oneshot::Sender<String>,
+        reply: oneshot::Sender<ToolAnswer>,
     },
 }
 
@@ -69,14 +86,14 @@ pub(super) struct ProgramHandle {
 
 impl ProgramHandle {
     /// Calls one tool; the answer is the tool's text or a plain failure sentence.
-    pub(super) fn call(&self, tool: String, arguments: Value, reply: oneshot::Sender<String>) {
+    pub(super) fn call(&self, tool: String, arguments: Value, reply: oneshot::Sender<ToolAnswer>) {
         if let Err(error) = self.requests.try_send(Request::Call {
             tool,
             arguments,
             reply,
         }) {
             let Request::Call { reply, .. } = error.into_inner();
-            let _ = reply.send(TOOL_FAILED_TEXT.to_owned());
+            let _ = reply.send(ToolAnswer::failed());
         }
     }
 }
@@ -249,19 +266,25 @@ async fn run(
                     Value::Object(map) => Some(map),
                     _ => None,
                 };
-                let text = match tokio::time::timeout(CALL_TIMEOUT, client.call_tool(params)).await {
+                let answer = match tokio::time::timeout(CALL_TIMEOUT, client.call_tool(params)).await {
                     Ok(Ok(result)) => serde_json::to_value(&result)
-                        .map(|value| parse_tool_text(&value))
                         .ok()
-                        .filter(|text| !text.is_empty())
-                        .unwrap_or_else(|| TOOL_FAILED_TEXT.to_owned()),
+                        .and_then(|value| {
+                            let text = parse_tool_text(&value);
+                            let widget = parse_tool_widget(&value);
+                            (!text.is_empty()).then_some(ToolAnswer { text, widget })
+                        })
+                        .unwrap_or_else(ToolAnswer::failed),
                     Ok(Err(error)) => {
                         tracing::warn!(service_id = %id, %error, "program tool call failed");
-                        TOOL_FAILED_TEXT.to_owned()
+                        ToolAnswer::failed()
                     }
-                    Err(_) => "The service took too long to answer.".to_owned(),
+                    Err(_) => ToolAnswer {
+                        text: "The service took too long to answer.".to_owned(),
+                        widget: None,
+                    },
                 };
-                let _ = reply.send(text);
+                let _ = reply.send(answer);
             }
             _ = health.tick() => {
                 if client.is_transport_closed() || client.is_closed() {

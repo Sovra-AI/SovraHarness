@@ -323,22 +323,36 @@ impl ModelsView {
         let recommendations = self.state.recommended_model_cards();
 
         let mut content = v_flex()
+            .id("models-home-column")
+            .test_support()
             .w_full()
+            .min_w_0()
             .max_w(t.layout.reading_width)
+            .mx_auto()
             .gap(spacing)
             .child(
                 h_flex()
+                    .w_full()
+                    .min_w_0()
                     .flex_wrap()
                     .justify_between()
                     .items_center()
                     .gap(t.space.small)
-                    .child(design::page_header(
-                        "Models",
-                        "Find the right AI for the way you work.",
-                        cx,
-                    ))
+                    .child(
+                        design::page_header(
+                            "Models",
+                            "Find the right AI for the way you work.",
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w_0(),
+                    )
                     .child(
                         h_flex()
+                            .min_w_0()
+                            .max_w_full()
+                            .flex_wrap()
+                            .justify_end()
                             .gap(t.space.compact)
                             .child(
                                 design::button("models-start-tour", "Take a tour", cx)

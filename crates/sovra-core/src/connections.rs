@@ -487,6 +487,14 @@ pub enum ConnectionCommand {
         recipient: String,
         text: String,
     },
+    /// Transmit a confirmed timed text. The runtime schedule tick issues this;
+    /// live chat still uses review plus native `Send`.
+    SendScheduled {
+        session_id: String,
+        channel: ChannelKind,
+        recipient: String,
+        text: String,
+    },
     /// Add a phone, email, `WhatsApp` number, or known Telegram chat to one person.
     AttachHandle {
         person_id: String,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use adk_core::{Tool, ToolContext};
 use serde_json::{Value, json};
-use sovra_core::skills::{Skill, SkillCatalog, SkillKind};
+use sovra_core::skills::{Skill, SkillCatalog};
 
 pub(super) struct LoadSkill {
     catalog: Arc<SkillCatalog>,
@@ -22,9 +22,7 @@ impl LoadSkill {
     }
 
     fn supports(&self, skill: &Skill) -> bool {
-        skill.enabled
-            && matches!(skill.kind, SkillKind::Procedure)
-            && skill.tools.iter().all(|tool| self.available.contains(tool))
+        skill.runnable_with(&self.available)
     }
 
     fn response(&self, args: &Value) -> Value {
@@ -57,7 +55,7 @@ impl LoadSkill {
             }
             Some(Value::String(name)) => {
                 match self.catalog.find(name).filter(|skill| self.supports(skill)) {
-                    Some(skill) => json!({"name":skill.name,"procedure":skill.instruction_block()}),
+                    Some(skill) => json!({"name":skill.name,"procedure":skill.applied_block()}),
                     None => {
                         json!({"error":"This skill is unavailable with the current tools. Omit name to list available skills."})
                     }
@@ -145,6 +143,122 @@ fn offset(args: &Value) -> Result<usize, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use adk_core::{Content, FinishReason, Llm, LlmRequest, LlmResponse, LlmResponseStream, Part};
+    use std::sync::Mutex;
+
+    /// Loads a skill only when the standing guide offers it, then answers.
+    #[derive(Default)]
+    struct ChoosingModel {
+        prompts: Mutex<Vec<String>>,
+        procedure: Mutex<Option<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Llm for ChoosingModel {
+        fn name(&self) -> &'static str {
+            "skill-choice-test"
+        }
+        async fn generate_content(
+            &self,
+            request: LlmRequest,
+            _: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            let seen = format!("{:?}{:?}", request.contents, request.config);
+            let loaded = request
+                .contents
+                .iter()
+                .flat_map(|content| &content.parts)
+                .find_map(|part| match part {
+                    Part::FunctionResponse {
+                        function_response, ..
+                    } => function_response.response["procedure"]
+                        .as_str()
+                        .map(str::to_owned),
+                    _ => None,
+                });
+            let offered = seen.contains("\\\"name\\\":\\\"meal-plan\\\"");
+            self.prompts.lock().unwrap().push(seen);
+            let part = match loaded {
+                Some(procedure) => {
+                    *self.procedure.lock().unwrap() = Some(procedure);
+                    Part::Text {
+                        text: "Here is the plan.".into(),
+                    }
+                }
+                None if offered => Part::FunctionCall {
+                    name: "load_skill".into(),
+                    args: json!({"name":"meal-plan"}),
+                    id: Some("choose".into()),
+                    thought_signature: None,
+                },
+                None => Part::Text {
+                    text: "Hello!".into(),
+                },
+            };
+            let response = LlmResponse {
+                content: Some(Content {
+                    role: "model".into(),
+                    parts: vec![part],
+                }),
+                finish_reason: Some(FinishReason::Stop),
+                partial: false,
+                turn_complete: true,
+                ..LlmResponse::default()
+            };
+            Ok(Box::pin(futures::stream::once(async move { Ok(response) })))
+        }
+    }
+
+    fn catalog_with_meal_plan() -> Arc<SkillCatalog> {
+        let mut skill = SkillCatalog::default().find("table").unwrap().clone();
+        skill.name = "meal-plan".into();
+        skill.aliases.clear();
+        skill.builtin = false;
+        skill.auto_apply = true;
+        skill.tools.clear();
+        skill.description = "Use when planning the family's meals for the week.".into();
+        skill.instructions = "Ask about allergies first, then plan seven dinners.".into();
+        let mut skills = sovra_core::skills::builtin_skills();
+        skills.push(skill);
+        Arc::new(SkillCatalog::new(skills).unwrap())
+    }
+
+    #[test]
+    fn the_model_applies_a_matching_skill_unasked_and_untrusted_turns_never_see_the_list() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let model = Arc::new(ChoosingModel::default());
+                let base = crate::AdkHarness::with_llm_and_tools(
+                    &crate::AgentConfig::default(),
+                    model.clone(),
+                    crate::native_ui::tools(),
+                )
+                .unwrap();
+                let harness = base.with_skill_catalog(catalog_with_meal_plan()).unwrap();
+                let (events, _received) = async_channel::unbounded();
+                harness
+                    .run_prompt("auto-skill", "Plan dinners for next week", &events)
+                    .await;
+                let procedure = model.procedure.lock().unwrap().clone().expect("loaded");
+                assert!(procedure.contains("allergies first"));
+                assert!(!procedure.contains("Active user-selected skill."));
+                let first = model.prompts.lock().unwrap()[0].clone();
+                assert!(first.contains("If nothing clearly matches"));
+                // The list names procedures but never discloses their bodies.
+                assert!(!first.contains("allergies first"));
+                // Rendering tools describe themselves, so their skills stay off the list.
+                assert!(!first.contains("\\\"name\\\":\\\"table\\\""));
+
+                model.prompts.lock().unwrap().clear();
+                let scoped = harness.for_untrusted_sender().unwrap();
+                scoped.run_prompt("stranger", "Plan dinners", &events).await;
+                let prompts = model.prompts.lock().unwrap();
+                assert!(!prompts.iter().any(|seen| seen.contains("meal-plan")));
+            });
+    }
 
     #[test]
     fn discovery_uses_real_capabilities_and_discloses_bodies_only_on_activation() {

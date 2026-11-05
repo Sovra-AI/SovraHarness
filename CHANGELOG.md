@@ -11,6 +11,34 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Terminal: while a command is still running, its stdout and stderr show on the
+  card and go into the helper's result — including programs that only flush when
+  they think they are talking to a terminal. Stdin stays closed, so a program
+  waiting for a keyboard still fails fast instead of hanging.
+
+- Terminal: if the helper's reply times out while a command card is still waiting
+  for your OK, **Allow once** and **Always allow** still run it. The card no
+  longer becomes "Not answered, so it didn't run" just because the model
+  connection timed out. The assistant is told to call `run_terminal_command` and
+  do the work, not paste a command in chat for you to copy.
+
+- Rolling a dice with the sample MCP server now shows a native card (the roll and
+  a **Roll again** button), not only the sentence in chat. Other MCP servers can
+  send the same AG-UI envelope in `structuredContent`.
+
+- When Sovra needs to run a command or change files, it calls the terminal tool
+  so you see **Allow once** / **Always allow** / **Don't allow** on a card. It no
+  longer asks "Should I go ahead?" in the chat. **Always allow** still remembers
+  that program (for example `mkdir`) so later similar commands can run without
+  asking.
+
+- Timed WhatsApp and Telegram jobs now need a concrete recipient when you create
+  them: the international number starting with +, me, an exact chat id, or
+  `person:<id>` from a people lookup. A first name such as Ryan is no longer
+  stored as the send target, so the job cannot sit until due and then fail
+  instantly. If a timed send still does not go out, Schedules shows why it
+  didn't finish.
+
 - Connections now has an **MCP servers** card, renamed from "A service you already use"
   and opened with **Add MCP server**. Every label is in plain words: "From a web
   address", "From a program on this computer", "Paste setup from instructions", "Server
@@ -57,6 +85,67 @@ move them under a version heading when the tag is cut.
   switches access off and removes saved rules. The terminal is never offered to
   WhatsApp or Telegram senders. Registered on the Skills page as “Do things on
   your computer for you”. See [docs/terminal.md](docs/terminal.md).
+
+- Clicking a button on an in-chat card now sends that button's label as your
+  next message, so the helper continues the flow. It no longer dumps a JSON
+  blob such as `surface_ref` / `button_click` into the transcript.
+
+- A confirmed timed WhatsApp or Telegram text now goes out at the scheduled
+  time. After you confirm who, which app, the exact words, and when, the job
+  sends on its own — you do not have to be there to press Send. Live chat
+  still prepares a review and waits for Send. Ask in chat, or use
+  **Set a one-time or repeating task, including a timed text** in Skills.
+
+- Knowledge and the other workspace pages follow the pane. About you, People,
+  Files, Guide, and a source opened from chat shrink on a small window, stay
+  centred inside the reading width on a wide one, and scroll inside the page.
+  The memory picture matches that column and shortens when there is no room
+  for a side column. Action rows wrap, and a 200% text size enlarges the
+  type and the controls together. Chat, My AI's, Schedules, Skills, Settings,
+  Connections, Models, and sign-in follow the same fit.
+
+- Repeating tasks on the Schedules page are real: a new workspace starts empty,
+  you describe how often in ordinary words (in 1 minute, just once, every
+  weekday at 9, Fridays at 4, every few hours), and Sovra runs them in the
+  background, pauses them, and skips a tick if one is already running. A
+  one-shot such as “in 1 minute” or “just once” fires once and then stops —
+  it is never saved as every day at a clock time. A confirmed WhatsApp or
+  Telegram text on that job goes out at the due time without pressing Send.
+  A swimlane shows past runs and the next one, with a line for now. Ask in
+  chat to set one up — the helper is always available, and Skills lists it as
+  **Set a one-time or repeating task, including a timed text**. “Fridays at
+  4pm” and “every day at 12:00” keep the afternoon and noon you asked for.
+  Stopping a run or restarting Sovra closes a leftover in-flight job so the
+  next due time can fire.
+
+- Dragging a text selection across a chat now highlights both your message and
+  Sovra's reply, instead of only theirs.
+
+- Skills now apply on their own when a request clearly fits, so you no longer
+  need to type `/`. Sovra sees a short list of skill names and when each helps.
+  It loads a skill's steps only for a real match, picks the single most
+  specific one, and leaves greetings and quick questions alone. The list holds
+  your own skills plus the built-in file and folder procedures. Web search,
+  helpers, and tables and cards already run without a skill, so they are not
+  listed. Untrusted message senders never see the list. A new **Use it on its
+  own when a request fits** checkbox in the skill editor, and
+  `disable-model-invocation: true` or `sovra-auto-apply: false` in `SKILL.md`,
+  keep a skill to the `/` menu. Typing `/` still forces a skill.
+
+- Chat recall listings no longer show `[memory:fact:…]` / `[source:episode:…]`
+  hashes in the bubble, labels or tooltips. Saved details appear as an in-chat
+  card with Open on each row; the original tokens stay in stored text so
+  checking a source still works.
+
+- Knowledge memories now draw a picture of real links between saved details:
+  an earlier version, the same original message, a shared subject, or the chat
+  a detail came from. Each chat uses the conversation's saved title, and two
+  conversations stay separate when the titles match. A note typed on the memory
+  screen is not shown as a chat. The words stay beside the picture. A check on
+  the same screen finds exact repeats and close wording without a model or a
+  network call. Exact repeats, and close wording you confirm, are stored as an
+  earlier version. Both details stay on the page after a refresh. Close wording
+  is not listed again once that link is stored. Nothing is deleted.
 
 - Compatible providers that omit a tool-call ID now receive a distinct local ID
   before execution, keeping memory lookup calls and results paired on the next

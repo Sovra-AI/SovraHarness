@@ -4,6 +4,36 @@ Implementation record for the 2026-10-25 request. This is an active implementati
 not a claim that the items below have shipped. The reference supplied with the request
 is `pasted-text-1.txt` (48,618 bytes), read in full before design work.
 
+## Automatic skill application (2026-11-03)
+
+Explicit `/skill` selection forces a procedure. Without it, the orchestrator gets a
+bounded standing list (`SkillCatalog::auto_apply_guide`, at most 6 KB, descriptions cut
+to 280 characters) of procedures it may load through `load_skill`. Progressive
+disclosure: the list holds only names and descriptions, and bodies load when the
+model picks one. Design choices:
+
+- **Only skills that add guidance are listed.** `Skill::auto_apply` defaults on for
+  user skills, the file procedures, and the terminal procedure (so file changes go
+  through the approval card rather than a chat question). It is off for specialists,
+  which routing already consults, for web search, which is routed, for save/presentation
+  tools, whose tool descriptions suffice, and for workspace actions. This keeps the
+  model from loading skills that change nothing.
+- **Precision over recall.** The guide says to load a skill only when the person
+  wants the outcome that skill produces, not when a word merely overlaps; to load
+  the single most specific match, or two for a request with two parts; and never
+  for chatter.
+- **Installed skills come first**, because they encode the person's own routines.
+  When the budget runs out, the guide says how many skills were left out and that
+  `load_skill` search covers them.
+- **Model-chosen loads are not user selections.** `Skill::applied_block` omits the
+  `Active user-selected skill.` marker, so a model's choice cannot trigger the
+  forced delegation a `/` command does. Descriptions are stripped of that marker
+  before they are listed.
+- **Capability-scoped.** A skill appears only when every tool it names is present in
+  the turn. Untrusted message senders get neither `load_skill` nor the list.
+- **Opt-out:** the skill editor's **Use it on its own when a request fits** checkbox,
+  `sovra-auto-apply: false`, or the Agent Skills `disable-model-invocation: true`.
+
 ## Scope and acceptance
 
 - [ ] One validated, extensible skill/capability catalogue drives slash discovery,

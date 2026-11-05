@@ -2,9 +2,10 @@
 
 use super::*;
 use sovra_core::{
-    Episode, EpisodeId, FactId, MemoryCandidate, MemoryClaim, MemoryError, MemoryEvent,
-    MemoryInput, MemoryJob, MemoryJobState, MemoryPolicy, MemoryStatus, MemoryStore, NewEpisode,
-    NewFact, RecallQuery, RecalledFact, Timestamp,
+    Episode, EpisodeId, EpisodeKind, FactId, MAX_MEMORY_CONTEXT_BYTES, MAX_MEMORY_CONTEXT_ITEMS,
+    MemoryCandidate, MemoryClaim, MemoryError, MemoryEvent, MemoryExtraction, MemoryInput,
+    MemoryJob, MemoryJobState, MemoryPolicy, MemoryStatus, MemoryStore, NewEpisode, NewFact,
+    RecallQuery, RecalledFact, Timestamp,
 };
 
 #[derive(Default)]
@@ -40,9 +41,12 @@ struct Store {
     enabled: AtomicBool,
 }
 impl Store {
+    fn episode_id(input: &MemoryInput) -> EpisodeId {
+        EpisodeId(format!("episode:{}", input.key))
+    }
     fn source(input: &MemoryInput) -> Episode {
         Episode {
-            id: EpisodeId("episode:test".into()),
+            id: Self::episode_id(input),
             session_id: input.episode.session_id.clone(),
             kind: input.episode.kind,
             content: input.episode.content.clone(),
@@ -211,8 +215,9 @@ impl MemoryStore for Store {
             let _ = gate.recv().await;
         }
         self.inputs.lock().unwrap().push(input.clone());
+        let id = Self::episode_id(&input);
         *self.pending.lock().unwrap() = Some(input);
-        Ok(EpisodeId("episode:test".into()))
+        Ok(id)
     }
     async fn claim_memory(&self, at: Timestamp) -> Result<Option<MemoryClaim>, MemoryError> {
         Ok(self
@@ -233,15 +238,46 @@ impl MemoryStore for Store {
     }
     async fn complete_memory(
         &self,
-        _claim: &MemoryClaim,
+        claim: &MemoryClaim,
         candidates: Vec<MemoryCandidate>,
-        _model: &str,
-        _at: Timestamp,
+        model: &str,
+        at: Timestamp,
     ) -> Result<Vec<FactId>, MemoryError> {
-        // Deliberately accepts any call: the test detects whether runtime cancellation
-        // prevents a late commit, without relying on an adapter's extra protection.
-        self.completed.lock().unwrap().push(candidates);
-        Ok(vec![FactId("fact:test".into())])
+        // Deliberately records every call: cancellation tests check that a late
+        // commit never arrives, without relying on an adapter's extra protection.
+        // Grounded candidates are also stored so a later turn can recall them.
+        self.completed.lock().unwrap().push(candidates.clone());
+        let grounded = !candidates.is_empty()
+            && candidates
+                .iter()
+                .all(|candidate| candidate.validate(&claim.episode).is_ok());
+        if !grounded {
+            return Ok(vec![FactId("fact:test".into())]);
+        }
+        self.sources.lock().unwrap().push(claim.episode.clone());
+        let mut ids = Vec::new();
+        let mut facts = self.facts.lock().unwrap();
+        for (index, candidate) in candidates.iter().enumerate() {
+            let id = FactId(format!("fact:{}:{index}", claim.episode.id.0));
+            ids.push(id.clone());
+            facts.push(sovra_core::Fact {
+                id,
+                content: candidate.content.clone(),
+                entities: candidate.entities.clone(),
+                source: Some(claim.episode.id.clone()),
+                replaces: candidate.replaces.clone(),
+                extraction: Some(MemoryExtraction {
+                    model: model.to_owned(),
+                    evidence: candidate.evidence.clone(),
+                }),
+                created_at: at,
+                valid_at: candidate.valid_at,
+                invalid_at: None,
+                expired_at: None,
+                stopped_at: None,
+            });
+        }
+        Ok(ids)
     }
     async fn save_memory_extraction(
         &self,
@@ -756,7 +792,7 @@ async fn saved_disabled_setting_prevents_startup_work() {
         key: "old".into(),
         episode: NewEpisode {
             session_id: "old".into(),
-            kind: sovra_core::EpisodeKind::UserMessage,
+            kind: EpisodeKind::UserMessage,
             content: "I live in Lisbon".into(),
             occurred_at: Timestamp(1),
         },
@@ -876,7 +912,7 @@ fn saved_tea(store: &Store) {
     let source = Episode {
         id: EpisodeId("episode:earlier".into()),
         session_id: "previous-conversation".into(),
-        kind: sovra_core::EpisodeKind::UserMessage,
+        kind: EpisodeKind::UserMessage,
         content: "I prefer jasmine tea".into(),
         occurred_at: Timestamp(100),
     };
@@ -886,7 +922,7 @@ fn saved_tea(store: &Store) {
         entities: vec![],
         source: Some(source.id.clone()),
         replaces: None,
-        extraction: Some(sovra_core::MemoryExtraction {
+        extraction: Some(MemoryExtraction {
             model: "previous-model".into(),
             evidence: source.content.clone(),
         }),
@@ -1004,7 +1040,8 @@ async fn memory_review_uses_the_storage_port_while_paused_and_drains_accepted_ed
             | MemoryReviewResult::Sources(_)
             | MemoryReviewResult::Retried(_)
             | MemoryReviewResult::Source(_)
-            | MemoryReviewResult::SourceStopped(_) => {
+            | MemoryReviewResult::SourceStopped(_)
+            | MemoryReviewResult::VersionLinked => {
                 panic!("no configuration or retry was requested")
             }
             MemoryReviewResult::Page(page) => assert_eq!(page.facts[0].id.0, "fact:tea"),
@@ -1472,7 +1509,7 @@ async fn unrelated_expired_future_and_assistant_evidence_never_enters_requests()
     store.sources.lock().unwrap().push(Episode {
         id: EpisodeId("episode:assistant".into()),
         session_id: "old".into(),
-        kind: sovra_core::EpisodeKind::AgentMessage,
+        kind: EpisodeKind::AgentMessage,
         content: "I prefer jasmine tea".into(),
         occurred_at: Timestamp(100),
     });
@@ -1641,6 +1678,214 @@ mod semantic;
 
 #[path = "memory/history.rs"]
 mod history;
+
+fn evidence_blobs(body: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    walk_evidence(body, &mut found);
+    found
+}
+
+fn evidence_documents(text: &str) -> Vec<Value> {
+    let mut documents = Vec::new();
+    for (index, _) in text.match_indices('{') {
+        let mut parser = serde_json::Deserializer::from_str(&text[index..]).into_iter::<Value>();
+        if let Some(Ok(value)) = parser.next()
+            && value.get("memories").is_some()
+        {
+            documents.push(value);
+        }
+    }
+    documents
+}
+
+fn walk_evidence(value: &Value, found: &mut Vec<String>) {
+    match value {
+        Value::String(text) if text.contains("\"memories\"") && text.contains("\"quote\"") => {
+            found.push(text.clone());
+        }
+        Value::Array(items) => {
+            for item in items {
+                walk_evidence(item, found);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values() {
+                walk_evidence(item, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[tokio::test]
+async fn personal_statement_is_recalled_in_a_later_chat_without_delaying_the_reply() {
+    let (release, waiting) = std::sync::mpsc::channel();
+    let waiting = Arc::new(Mutex::new(Some(waiting)));
+    let server = Server::new(move |request| {
+        if request.path == "/v1/models" {
+            return Reply::json(&json!({"data":[{"id":"memory-model"}]}));
+        }
+        if is_extraction(request) {
+            if let Some(waiting) = waiting.lock().unwrap().take() {
+                let _ = waiting.recv_timeout(Duration::from_secs(5));
+            }
+            let body = request.body.to_string();
+            if body.contains("I am vegan") {
+                return reply(
+                    r#"{"memories":[{"content":"User is vegan","evidence":"I am vegan","entities":["user"],"valid_at":null,"replaces":null}]}"#,
+                );
+            }
+            return reply(r#"{"memories":[]}"#);
+        }
+        attachment_reply("memory-model")
+    });
+    let store = Arc::new(Store::default());
+    let (_fixture, client) = start(&server, store.clone(), true).await;
+    client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "chat-vegan".into(),
+            prompt: "I am vegan".into(),
+        })
+        .unwrap();
+    event(
+        &client,
+        |event| matches!(event, Event::AgentCompleted { session_id } if session_id == "chat-vegan"),
+    )
+    .await;
+    assert!(
+        store.completed.lock().unwrap().is_empty(),
+        "the reply finished before fact extraction committed"
+    );
+    release.send(()).unwrap();
+    event(&client, |event| {
+        matches!(event, Event::Memory(MemoryEvent::Processed(_)))
+    })
+    .await;
+    let vegan = store
+        .facts
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|fact| fact.content == "User is vegan")
+        .cloned()
+        .unwrap();
+    let source_id = vegan.source.clone().unwrap();
+    let source = store.episode(&source_id).await.unwrap();
+    assert_eq!(source.session_id, "chat-vegan");
+    assert_eq!(source.content, "I am vegan");
+    assert_eq!(
+        vegan.extraction.as_ref().map(|item| item.evidence.as_str()),
+        Some("I am vegan")
+    );
+
+    client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "chat-weather".into(),
+            prompt: "The weather is lovely today".into(),
+        })
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while store.completed.lock().unwrap().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        store.facts.lock().unwrap().iter().all(|fact| {
+            !fact.content.to_lowercase().contains("weather")
+                && fact
+                    .extraction
+                    .as_ref()
+                    .is_none_or(|item| !item.evidence.to_lowercase().contains("lovely"))
+        }),
+        "chatter is not stored as a lasting fact"
+    );
+
+    for index in 0..20 {
+        let id = EpisodeId(format!("episode:pad-{index}"));
+        let content = "I am vegan".to_owned();
+        store.sources.lock().unwrap().push(Episode {
+            id: id.clone(),
+            session_id: "pad".into(),
+            kind: EpisodeKind::UserMessage,
+            content: content.clone(),
+            occurred_at: Timestamp(1),
+        });
+        store.facts.lock().unwrap().push(sovra_core::Fact {
+            id: FactId(format!("fact:pad-{index}")),
+            content: format!("User is vegan detail {index} {}", "note ".repeat(40)),
+            entities: vec!["user".into()],
+            source: Some(id),
+            replaces: None,
+            extraction: Some(MemoryExtraction {
+                model: "pad".into(),
+                evidence: content,
+            }),
+            created_at: Timestamp(2),
+            valid_at: None,
+            invalid_at: None,
+            expired_at: None,
+            stopped_at: None,
+        });
+    }
+    client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "chat-later".into(),
+            prompt: "Am I vegan?".into(),
+        })
+        .unwrap();
+    event(
+        &client,
+        |event| matches!(event, Event::AgentCompleted { session_id } if session_id == "chat-later"),
+    )
+    .await;
+    let request = server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|request| {
+            !is_extraction(request)
+                && request.body.to_string().contains("Am I vegan?")
+                && request.body.to_string().contains("User is vegan")
+        })
+        .cloned()
+        .unwrap();
+    let blobs = evidence_blobs(&request.body);
+    assert!(
+        !blobs.is_empty(),
+        "the later chat must receive saved evidence"
+    );
+    let mut saw_vegan = false;
+    for blob in &blobs {
+        let documents = evidence_documents(blob);
+        let _ = documents
+            .first()
+            .expect("saved evidence must include a memory document");
+        for parsed in documents {
+            assert!(serde_json::to_vec(&parsed).unwrap().len() <= MAX_MEMORY_CONTEXT_BYTES);
+            let memories = parsed["memories"].as_array().map_or(0, Vec::len);
+            let background = parsed["background"].as_array().map_or(0, Vec::len);
+            assert!(memories <= MAX_MEMORY_CONTEXT_ITEMS);
+            assert!(background <= 8);
+            let rendered = parsed.to_string();
+            if rendered.contains("I am vegan") && rendered.contains("chat-vegan") {
+                saw_vegan = true;
+            }
+            assert!(rendered.contains("memory:fact:"));
+            assert!(!rendered.to_lowercase().contains("lovely"));
+        }
+    }
+    assert!(
+        saw_vegan,
+        "the later chat must recall the vegan statement and its source chat"
+    );
+    stop(client).await;
+}
 
 #[path = "memory/related.rs"]
 mod related;

@@ -48,12 +48,17 @@ impl TerminalTool {
              {host} \
              Each command runs in a fresh shell with no keyboard input, so never use \
              interactive programs, editors, pagers, `sudo` or anything that asks for a \
-             password; pass flags such as `--yes` instead. The person sees every command \
-             and must approve anything that changes files, installs software or uses the \
-             internet, so prefer one clear command over many and explain it in \
-             `description`. Read-only commands (ls, cat, grep, git status) usually run \
-             straight away. If a command is declined, do not retry it or a variant: ask \
-             what they would like instead. Long output is shortened to its start and end.",
+             password; pass flags such as `--yes` instead. Never ask in the chat whether \
+             you may run a command or change files, and never paste a command in chat for \
+             the person to copy or run themselves: call this tool so they see Allow once, \
+             Always allow, and Don't allow on a card. Permission is that card, not a chat \
+             question. Always allow remembers that program (for example mkdir) so similar \
+             commands can run later without asking. The person sees every command and must \
+             approve anything that changes files, installs software or uses the internet, \
+             so prefer one clear command over many and explain it in `description`. \
+             Read-only commands (ls, cat, grep, git status) usually run straight away. If \
+             a command is declined, do not retry it or a variant: ask what they would like \
+             instead. Long output is shortened to its start and end.",
             host = access.host().describe_for_model()
         );
         Self {
@@ -254,6 +259,20 @@ mod tests {
         let tool = TerminalTool::new(recorder());
         assert!(tool.description().contains("Ubuntu 24.04"));
         assert!(tool.description().contains("bash"));
+        assert!(tool.description().contains("Always allow"));
+        assert!(tool.description().contains("mkdir"));
+        assert!(tool.description().contains("Never ask in the chat"));
+        assert!(
+            tool.description()
+                .contains("paste a command in chat for the person to copy or run"),
+            "{}",
+            tool.description()
+        );
+        assert!(
+            tool.description().contains("call this tool"),
+            "{}",
+            tool.description()
+        );
         let schema = tool.parameters_schema().expect("schema");
         assert_eq!(schema["required"], json!(["command", "description"]));
         assert!(is_terminal_tool(tool.name()));

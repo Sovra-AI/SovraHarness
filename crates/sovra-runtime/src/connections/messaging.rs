@@ -1,5 +1,6 @@
 //! Turn-bound messaging access and native approval. The connections actor owns
 //! drafts and send tasks, so neither model output nor a replay can approve a send.
+//! Confirmed timed jobs transmit without a fire-time review.
 
 use super::{Actor, ConnectionsRuntime, Input};
 use serde_json::{Value, json};
@@ -10,6 +11,7 @@ use sovra_core::communications::{
 use sovra_core::connections::{
     ChannelError, ChannelKind, ChannelSession, ConnectionEvent, channel_of_session,
 };
+use sovra_core::{Command, ScheduleCommand};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::{collections::BTreeMap, sync::Arc};
@@ -20,6 +22,8 @@ use tokio::task::JoinSet;
 pub(super) struct MessagingState {
     bindings: BTreeMap<String, (u64, Arc<dyn ChannelSession>)>,
     pub sends: JoinSet<(String, Result<String, ChannelError>)>,
+    /// Outbound id → schedule session id for confirmed timed sends.
+    scheduled: BTreeMap<String, String>,
 }
 
 struct Caller {
@@ -255,14 +259,7 @@ impl Actor {
             let removed = self.state.outbound_messages.remove(index);
             self.messaging.bindings.remove(&removed.id);
         }
-        let mut random = [0u8; 16];
-        getrandom::fill(&mut random)
-            .map_err(|_| unavailable("Could not prepare a message. Try again."))?;
-        let mut id = String::with_capacity(random.len() * 2);
-        for byte in random {
-            use std::fmt::Write as _;
-            let _ = write!(id, "{byte:02x}");
-        }
+        let id = new_outbound_id()?;
         let message = OutboundMessage {
             id: id.clone(),
             session_id: session_id.into(),
@@ -337,15 +334,107 @@ impl Actor {
             self.publish_message(message).await;
             return;
         }
+        self.spawn_send(message.id, message.recipient, message.text, session);
+    }
+
+    pub(super) async fn send_scheduled(
+        &mut self,
+        session_id: &str,
+        channel: ChannelKind,
+        recipient: &str,
+        text: String,
+    ) {
+        if let Err(error) = self
+            .start_scheduled_send(session_id, channel, recipient, text)
+            .await
+        {
+            tracing::warn!(session_id, error = %error, "scheduled send failed");
+            self.emit(ConnectionEvent::Notice(error.to_string())).await;
+            self.finish_scheduled_run(session_id, false, Some(error.to_string()))
+                .await;
+        }
+    }
+
+    async fn start_scheduled_send(
+        &mut self,
+        session_id: &str,
+        channel: ChannelKind,
+        recipient: &str,
+        text: String,
+    ) -> Result<(), ChannelError> {
+        validate_message(&text)?;
+        let (session, own) = self.connected(channel)?;
+        let (recipient, recipient_label) =
+            resolve_recipient(&self.state, channel, recipient, &own)?;
+        let now = crate::now();
+        let id = new_outbound_id()?;
+        let sender = match channel {
+            ChannelKind::WhatsApp => self
+                .state
+                .whatsapp
+                .linked_device()
+                .map_or(own, |device| device.phone_display.clone()),
+            ChannelKind::Telegram => format!(
+                "@{}",
+                self.state.telegram.bot_username().unwrap_or("your bot")
+            ),
+        };
+        let message = OutboundMessage {
+            id: id.clone(),
+            session_id: session_id.into(),
+            channel,
+            sender,
+            recipient: recipient.clone(),
+            recipient_label,
+            text: text.clone(),
+            delivery: MessageDelivery::Sending,
+            created_at: now,
+            expires_at: sovra_core::Timestamp(now.0.saturating_add(REVIEW_LIFETIME_MS)),
+        };
+        self.messaging
+            .bindings
+            .insert(id.clone(), (0, session.clone()));
+        self.messaging
+            .scheduled
+            .insert(id.clone(), session_id.to_owned());
+        if !self.publish_message(message).await {
+            self.messaging.bindings.remove(&id);
+            self.messaging.scheduled.remove(&id);
+            return Err(unavailable(
+                "The timed message could not be saved. Nothing was sent.",
+            ));
+        }
+        self.spawn_send(id, recipient, text, session);
+        Ok(())
+    }
+
+    fn spawn_send(
+        &mut self,
+        id: String,
+        recipient: String,
+        text: String,
+        session: Arc<dyn ChannelSession>,
+    ) {
         self.messaging.sends.spawn(async move {
             let result = tokio::time::timeout(
                 Duration::from_secs(30),
-                session.send_text(&message.recipient, &message.text),
+                session.send_text(&recipient, &text),
             )
             .await
             .unwrap_or_else(|_| Err(unavailable("Sending could not be confirmed.")));
-            (message.id, result)
+            (id, result)
         });
+    }
+
+    async fn finish_scheduled_run(&self, session_id: &str, succeeded: bool, error: Option<String>) {
+        let _ = self
+            .commands
+            .send(Command::Schedule(ScheduleCommand::FinishRun {
+                session_id: session_id.to_owned(),
+                succeeded,
+                error,
+            }))
+            .await;
     }
 
     pub(super) async fn sent_message(&mut self, id: &str, result: Result<String, ChannelError>) {
@@ -358,6 +447,7 @@ impl Actor {
         else {
             return;
         };
+        let error = result.as_ref().err().map(ToString::to_string);
         message.delivery = match result {
             Ok(message_id) => {
                 self.link(message.channel).remember_sent(message_id.clone());
@@ -365,7 +455,12 @@ impl Actor {
             }
             Err(_) => MessageDelivery::Uncertain,
         };
+        let succeeded = matches!(message.delivery, MessageDelivery::Accepted { .. });
         self.publish_message(message).await;
+        if let Some(session_id) = self.messaging.scheduled.remove(id) {
+            self.finish_scheduled_run(&session_id, succeeded, error)
+                .await;
+        }
     }
 
     async fn publish_message(&mut self, message: OutboundMessage) -> bool {
@@ -392,6 +487,18 @@ impl Actor {
             self.publish_message(message).await;
         }
     }
+}
+
+fn new_outbound_id() -> Result<String, ChannelError> {
+    let mut random = [0u8; 16];
+    getrandom::fill(&mut random)
+        .map_err(|_| unavailable("Could not prepare a message. Try again."))?;
+    let mut id = String::with_capacity(random.len() * 2);
+    for byte in random {
+        use std::fmt::Write as _;
+        let _ = write!(id, "{byte:02x}");
+    }
+    Ok(id)
 }
 
 fn message_result(message: &OutboundMessage) -> Value {
@@ -483,6 +590,57 @@ mod tests {
             contact_task: None,
         }
     }
+    #[tokio::test]
+    async fn scheduled_send_transmits_without_a_review_click() {
+        let session = Arc::new(Session::default());
+        let mut actor = actor(session.clone());
+        actor
+            .send_scheduled(
+                "sched-1-at-0",
+                ChannelKind::WhatsApp,
+                "+44 7347 529758",
+                "wake up from sovra".into(),
+            )
+            .await;
+        assert_eq!(
+            actor.state.outbound_messages[0].delivery,
+            MessageDelivery::Sending
+        );
+        let (id, result) = actor.messaging.sends.join_next().await.unwrap().unwrap();
+        actor.sent_message(&id, result).await;
+        assert!(matches!(
+            actor.state.outbound_messages[0].delivery,
+            MessageDelivery::Accepted { .. }
+        ));
+        assert_eq!(
+            session.sent.lock().unwrap().as_slice(),
+            &[(
+                "447347529758@s.whatsapp.net".into(),
+                "wake up from sovra".into()
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn scheduled_send_of_a_first_name_does_not_transmit() {
+        let session = Arc::new(Session::default());
+        let mut actor = actor(session.clone());
+        actor
+            .send_scheduled(
+                "sched-1-at-0",
+                ChannelKind::WhatsApp,
+                "Ryan",
+                "wake up from sovra".into(),
+            )
+            .await;
+        assert_eq!(actor.state.outbound_messages, []);
+        assert_eq!(
+            session.sent.lock().unwrap().as_slice(),
+            &[] as &[(String, String)]
+        );
+        assert_eq!(actor.messaging.sends.len(), 0);
+    }
+
     fn prepare(channel: ChannelKind) -> MessagingRequest {
         MessagingRequest::Prepare {
             channel,

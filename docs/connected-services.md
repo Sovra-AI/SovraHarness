@@ -9,7 +9,8 @@ server**). The code calls them "services".
 server inside Sovra's own binary. Its tools are harmless and use no files and no
 network:
 
-- `roll_dice`
+- `roll_dice` — returns the number as text and as a native AG-UI card (`structuredContent`
+  with `protocol: "ag_ui"`)
 - `tell_the_time`
 - `make_a_checklist`
 - `count_words`

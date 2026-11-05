@@ -7,18 +7,26 @@
 
 use super::{Fact, FactId, Timestamp, exploration::MAX_MEMORY_CONNECTIONS};
 
-/// Session name for one saved detail, when the original chat is known.
+/// Session id for a note typed on the memory screen. It is not a conversation.
+pub const MEMORY_REVIEW_SESSION: &str = "memory-review";
+
+/// One saved detail and the conversation it came from.
+///
+/// `session` is the conversation id. `title` is the name already stored for
+/// that conversation. Two conversations can share a title and stay two nodes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryFactChat {
     pub fact: FactId,
-    pub chat: String,
+    pub session: String,
+    pub title: String,
 }
 
-/// One saved detail, plus the chat it came from when that chat is known.
+/// One saved detail, plus the conversation it came from when that chat is known.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryGraphRecord {
     pub fact: Fact,
-    pub chat: Option<String>,
+    pub session: Option<String>,
+    pub title: Option<String>,
 }
 
 /// A point in the picture, in thousandths of the drawing area.
@@ -93,26 +101,143 @@ pub struct MemoryDuplicateReport {
     pub near: Vec<MemoryStatementPair>,
 }
 
-/// Places nodes on a ring. The same node list always produces the same points.
-pub fn layout_memory_graph(nodes: &[MemoryGraphNode]) -> Vec<MemoryPoint> {
-    let count = nodes.len();
-    (0..count).map(|index| place_node(index, count)).collect()
-}
+/// Square picture: `memory_graph` lays out for this until the view measures its pane.
+pub const MEMORY_GRAPH_SQUARE: u16 = 100;
+const ASPECT_RANGE: std::ops::RangeInclusive<u16> = 50..=400;
+const LAYOUT_STEPS: u16 = 360;
+/// Thousandths kept clear at each edge so a node and its ring stay inside the drawing.
+const LAYOUT_MARGIN: f64 = 70.0;
+const MAX_AXIS_STRETCH: f64 = 1.8;
+/// Pairs further apart than this many spacings stop pushing.
+const REPULSION_REACH: f64 = 2.5;
+const GRAVITY: f64 = 2.0;
 
-fn place_node(index: usize, count: usize) -> MemoryPoint {
+/// Force-directed placement: links pull their ends together, every pair pushes apart,
+/// and a weak pull to the middle keeps unlinked details beside the cluster.
+///
+/// `aspect_percent` is the drawing's width over its height, times 100. The result is in
+/// thousandths of each axis, so a wide pane gets a wide layout instead of a stretched
+/// circle. Deterministic: the same nodes, links and aspect always give the same points.
+pub fn layout_memory_graph(
+    nodes: &[MemoryGraphNode],
+    edges: &[MemoryGraphEdge],
+    aspect_percent: u16,
+) -> Vec<MemoryPoint> {
+    let count = nodes.len();
     if count <= 1 {
-        return MemoryPoint { x: 500, y: 500 };
+        return vec![MemoryPoint { x: 500, y: 500 }; count];
     }
+    let aspect =
+        f64::from(aspect_percent.clamp(*ASPECT_RANGE.start(), *ASPECT_RANGE.end())) / 100.0;
+    let (width, height) = (aspect.sqrt(), 1.0 / aspect.sqrt());
+    let links: Vec<(usize, usize)> = edges
+        .iter()
+        .filter_map(|edge| {
+            let from = nodes.iter().position(|node| node.id == edge.from)?;
+            let to = nodes.iter().position(|node| node.id == edge.to)?;
+            (from != to).then_some((from, to))
+        })
+        .collect();
     #[expect(
         clippy::cast_precision_loss,
-        reason = "a review picture has at most a few dozen nodes"
+        reason = "a picture has at most a few dozen nodes"
     )]
-    let turns = index as f64 / count as f64;
-    let angle = turns * std::f64::consts::TAU - std::f64::consts::FRAC_PI_2;
-    MemoryPoint {
-        x: thousand(500.0 + 380.0 * angle.cos()),
-        y: thousand(500.0 + 380.0 * angle.sin()),
+    let n = count as f64;
+    let spacing = (width * height / n).sqrt() * 0.9;
+    // Golden-angle spiral: evenly spread, and a pure function of the node order.
+    let mut spots: Vec<(f64, f64)> = (0..count)
+        .map(|index| {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a picture has at most a few dozen nodes"
+            )]
+            let i = index as f64 + 0.5;
+            let radius = (i / n).sqrt() * 0.45;
+            let angle = i * 2.399_963_229_728_653;
+            (radius * width * angle.cos(), radius * height * angle.sin())
+        })
+        .collect();
+    let mut heat = width.max(height) * 0.1;
+    let cooling = heat / f64::from(LAYOUT_STEPS);
+    for _ in 0..LAYOUT_STEPS {
+        let mut push = vec![(0.0_f64, 0.0_f64); count];
+        for a in 0..count {
+            for b in (a + 1)..count {
+                let (dx, dy) = separation(spots[a], spots[b], a, b);
+                let distance = dx.hypot(dy);
+                // Short-range push: separate groups pack beside each other instead of
+                // flying to the corners and shrinking every group when the picture fits.
+                if distance > spacing * REPULSION_REACH {
+                    continue;
+                }
+                let force = spacing * spacing / distance;
+                let (fx, fy) = (dx / distance * force, dy / distance * force);
+                push[a].0 += fx;
+                push[a].1 += fy;
+                push[b].0 -= fx;
+                push[b].1 -= fy;
+            }
+        }
+        for &(a, b) in &links {
+            let (dx, dy) = separation(spots[a], spots[b], a, b);
+            let distance = dx.hypot(dy);
+            let force = distance * distance / spacing;
+            let (fx, fy) = (dx / distance * force, dy / distance * force);
+            push[a].0 -= fx;
+            push[a].1 -= fy;
+            push[b].0 += fx;
+            push[b].1 += fy;
+        }
+        for (spot, force) in spots.iter_mut().zip(&mut push) {
+            force.0 -= spot.0 * spacing * GRAVITY;
+            force.1 -= spot.1 * spacing * GRAVITY * aspect;
+            let length = force.0.hypot(force.1);
+            if length > f64::EPSILON {
+                let step = length.min(heat);
+                spot.0 += force.0 / length * step;
+                spot.1 += force.1 / length * step;
+            }
+        }
+        heat = (heat - cooling).max(heat * 0.02);
     }
+    fit(&spots, width, height)
+}
+
+/// Offset between two spots; coincident spots get a fixed, order-based nudge.
+fn separation(a: (f64, f64), b: (f64, f64), first: usize, second: usize) -> (f64, f64) {
+    let (dx, dy) = (a.0 - b.0, a.1 - b.1);
+    if dx.hypot(dy) > 1e-9 {
+        return (dx, dy);
+    }
+    #[expect(clippy::cast_precision_loss, reason = "node indices are small")]
+    let angle = (first * 7 + second * 13) as f64;
+    (angle.cos() * 1e-6, angle.sin() * 1e-6)
+}
+
+/// Scales the settled layout into the drawing's thousandths, keeping its proportions.
+fn fit(spots: &[(f64, f64)], width: f64, height: f64) -> Vec<MemoryPoint> {
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for &(x, y) in spots {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    let usable = 1000.0 - 2.0 * LAYOUT_MARGIN;
+    // Fill both axes, but never squash one more than this against the other, so a
+    // long chain stays a line instead of becoming a smeared blob.
+    let mut scale_x = width / (max_x - min_x).max(1e-9);
+    let mut scale_y = height / (max_y - min_y).max(1e-9);
+    scale_x = scale_x.min(scale_y * MAX_AXIS_STRETCH);
+    scale_y = scale_y.min(scale_x * MAX_AXIS_STRETCH);
+    let (mid_x, mid_y) = (f64::midpoint(min_x, max_x), f64::midpoint(min_y, max_y));
+    spots
+        .iter()
+        .map(|&(x, y)| MemoryPoint {
+            x: thousand(500.0 + (x - mid_x) * scale_x / width * usable),
+            y: thousand(500.0 + (y - mid_y) * scale_y / height * usable),
+        })
+        .collect()
 }
 
 fn thousand(value: f64) -> i32 {
@@ -123,6 +248,47 @@ fn thousand(value: f64) -> i32 {
     )]
     {
         rounded as i32
+    }
+}
+
+impl MemoryGraph {
+    /// Positions of the nodes linked to `index`, each once, in node order.
+    pub fn neighbors(&self, index: usize) -> Vec<usize> {
+        let Some(node) = self.nodes.get(index) else {
+            return Vec::new();
+        };
+        let mut found: Vec<usize> = self
+            .edges
+            .iter()
+            .filter_map(|edge| {
+                let other = if edge.from == node.id {
+                    &edge.to
+                } else if edge.to == node.id {
+                    &edge.from
+                } else {
+                    return None;
+                };
+                self.nodes
+                    .iter()
+                    .position(|candidate| &candidate.id == other)
+            })
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
+    /// Links touching each node, in node order: how central a detail is.
+    pub fn degrees(&self) -> Vec<usize> {
+        self.nodes
+            .iter()
+            .map(|node| {
+                self.edges
+                    .iter()
+                    .filter(|edge| edge.from == node.id || edge.to == node.id)
+                    .count()
+            })
+            .collect()
     }
 }
 
@@ -161,11 +327,11 @@ pub fn memory_graph(
                 MemoryGraphEdgeKind::EarlierVersion,
             ));
         }
-        if let Some(chat) = record.chat.as_ref().filter(|chat| !chat.trim().is_empty()) {
+        if let Some(session) = chat_session(record) {
             candidates.push(candidate(
                 1,
                 MemoryGraphNodeId::Detail(record.fact.id.clone()),
-                MemoryGraphNodeId::Chat(chat.trim().to_owned()),
+                MemoryGraphNodeId::Chat(session),
                 MemoryGraphEdgeKind::SavedFromChat,
             ));
         }
@@ -248,9 +414,10 @@ pub fn memory_graph(
         fact_count += 1;
     }
     nodes.sort_by(|a, b| node_sort_key(&a.id).cmp(&node_sort_key(&b.id)));
-    let points = layout_memory_graph(&nodes);
+    let edges: Vec<_> = candidates.into_iter().map(|item| item.edge).collect();
+    let points = layout_memory_graph(&nodes, &edges, MEMORY_GRAPH_SQUARE);
     MemoryGraph {
-        edges: candidates.into_iter().map(|item| item.edge).collect(),
+        edges,
         nodes,
         points,
         omitted: omitted_edges || omitted_facts,
@@ -295,7 +462,7 @@ fn push_node(
         return;
     }
     let label = match &id {
-        MemoryGraphNodeId::Chat(name) => format!("Chat {name}"),
+        MemoryGraphNodeId::Chat(session) => chat_label(records, session),
         MemoryGraphNodeId::Detail(fact_id) => records
             .iter()
             .find(|record| &record.fact.id == fact_id)
@@ -317,6 +484,42 @@ fn clip_label(text: &str) -> String {
 fn generic_subject(name: &str) -> bool {
     let name = name.trim();
     name.eq_ignore_ascii_case("user") || name.eq_ignore_ascii_case("you")
+}
+
+fn review_bucket(session: &str) -> bool {
+    session == MEMORY_REVIEW_SESSION
+}
+
+/// Conversation id for the picture. A note typed on the memory screen is not a chat.
+fn chat_session(record: &MemoryGraphRecord) -> Option<String> {
+    let session = record.session.as_deref()?.trim();
+    if session.is_empty() || review_bucket(session) {
+        return None;
+    }
+    Some(session.to_owned())
+}
+
+fn chat_label(records: &[MemoryGraphRecord], session: &str) -> String {
+    let title = records.iter().find_map(|record| {
+        let same = record
+            .session
+            .as_deref()
+            .is_some_and(|id| id.trim() == session);
+        let title = record.title.as_deref().unwrap_or("").trim();
+        (same && !title.is_empty() && !review_bucket(title)).then(|| title.to_owned())
+    });
+    match title {
+        Some(title) => format!("Chat {title}"),
+        None => "Chat".to_owned(),
+    }
+}
+
+/// True when one of these details already points at the other as an earlier version.
+pub fn stored_version_link(facts: &[Fact], left: &FactId, right: &FactId) -> bool {
+    facts.iter().any(|fact| {
+        (fact.id == *left && fact.replaces.as_ref() == Some(right))
+            || (fact.id == *right && fact.replaces.as_ref() == Some(left))
+    })
 }
 
 /// Finds exact repeats and close wording in the details already loaded.
@@ -374,6 +577,9 @@ pub fn check_memory_duplicates(facts: &[Fact]) -> MemoryDuplicateReport {
                     .get(&newer.id)
                     .is_some_and(|id| id != &newer.id)
             {
+                continue;
+            }
+            if stored_version_link(&ordered, &older.id, &newer.id) {
                 continue;
             }
             if statements_are_close(&older.content, &newer.content) {
@@ -523,7 +729,8 @@ mod tests {
     fn record(fact: Fact, chat: Option<&str>) -> MemoryGraphRecord {
         MemoryGraphRecord {
             fact,
-            chat: chat.map(str::to_owned),
+            session: chat.map(str::to_owned),
+            title: chat.map(str::to_owned),
         }
     }
 
@@ -612,7 +819,7 @@ mod tests {
         );
         assert!(!confirm_memory_duplicate(&mut report, &other.id, &older.id));
         assert!(confirm_memory_duplicate(&mut report, &close.id, &older.id));
-        assert_eq!(report.near.len(), 0);
+        assert_eq!(report.near, vec![]);
         assert_eq!(report.exact.len(), 2);
         let graph = memory_graph(
             &[
@@ -662,9 +869,12 @@ mod tests {
                 .iter()
                 .all(|point| (0..=1000).contains(&point.x) && (0..=1000).contains(&point.y))
         );
-        let laid_out = layout_memory_graph(&graph.nodes);
+        let laid_out = layout_memory_graph(&graph.nodes, &graph.edges, MEMORY_GRAPH_SQUARE);
         assert_eq!(laid_out, graph.points);
-        assert_eq!(layout_memory_graph(&graph.nodes), laid_out);
+        assert_eq!(
+            layout_memory_graph(&graph.nodes, &graph.edges, MEMORY_GRAPH_SQUARE),
+            laid_out
+        );
         let empty = memory_graph(&[], &[]);
         assert_eq!(empty.nodes.len(), 0);
         assert!(!empty.omitted);
@@ -675,5 +885,188 @@ mod tests {
         assert_eq!(alone.nodes.len(), 1);
         assert_eq!(alone.edges.len(), 0);
         assert_eq!(alone.points, vec![MemoryPoint { x: 500, y: 500 }]);
+    }
+
+    fn distance(a: MemoryPoint, b: MemoryPoint) -> f64 {
+        f64::from(a.x - b.x).hypot(f64::from(a.y - b.y))
+    }
+
+    /// Two topics joined only through a chat, plus two details nobody links to.
+    fn two_topics() -> MemoryGraph {
+        let mut records = Vec::new();
+        for (index, (topic, names)) in [
+            ("Sam", &["Sam"][..]),
+            ("Sam", &["Sam"]),
+            ("Sam", &["Sam"]),
+            ("Garden", &["Garden"]),
+            ("Garden", &["Garden"]),
+            ("Garden", &["Garden"]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let chat = (index == 0 || index == 3).then_some("chat-bridge");
+            records.push(record(
+                fact(
+                    &format!("fact:{index}"),
+                    &format!("{topic} note {index}"),
+                    names,
+                    i64::try_from(index).unwrap(),
+                ),
+                chat,
+            ));
+        }
+        records.push(record(fact("fact:lone-a", "Lone detail.", &[], 9), None));
+        records.push(record(
+            fact("fact:lone-b", "Another lone detail.", &[], 10),
+            None,
+        ));
+        memory_graph(&records, &[])
+    }
+
+    #[test]
+    fn linked_details_settle_together_and_nothing_overlaps() {
+        let graph = two_topics();
+        let id = |name: &str| {
+            graph
+                .nodes
+                .iter()
+                .position(|node| node.id == MemoryGraphNodeId::Detail(FactId(name.into())))
+                .unwrap()
+        };
+        let at = |name: &str| graph.points[id(name)];
+        let within = f64::midpoint(
+            distance(at("fact:1"), at("fact:2")),
+            distance(at("fact:4"), at("fact:5")),
+        );
+        let across = f64::midpoint(
+            distance(at("fact:1"), at("fact:4")),
+            distance(at("fact:2"), at("fact:5")),
+        );
+        assert!(within < across, "within {within} across {across}");
+        for (a, first) in graph.points.iter().enumerate() {
+            assert!((0..=1000).contains(&first.x) && (0..=1000).contains(&first.y));
+            for second in &graph.points[a + 1..] {
+                assert!(distance(*first, *second) > 40.0, "{first:?} {second:?}");
+            }
+        }
+        let degrees = graph.degrees();
+        assert_eq!(degrees[id("fact:lone-a")], 0);
+        assert!(degrees[id("fact:0")] >= 3);
+        let neighbors = graph.neighbors(id("fact:0"));
+        assert!(neighbors.contains(&id("fact:1")));
+        assert!(!neighbors.contains(&id("fact:4")));
+        assert_eq!(graph.neighbors(graph.nodes.len()), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn a_wide_pane_gets_a_wide_layout_not_a_stretched_circle() {
+        let graph = two_topics();
+        let spread = |points: &[MemoryPoint], axis: fn(&MemoryPoint) -> i32| {
+            let values: Vec<i32> = points.iter().map(axis).collect();
+            values.iter().max().unwrap() - values.iter().min().unwrap()
+        };
+        let wide = layout_memory_graph(&graph.nodes, &graph.edges, 250);
+        assert_eq!(wide, layout_memory_graph(&graph.nodes, &graph.edges, 250));
+        // In thousandths of each axis a wide layout fills both; in real proportions it is wider.
+        assert!(
+            spread(&wide, |p| p.x) > 700 && spread(&wide, |p| p.y) > 500,
+            "{wide:?}"
+        );
+        assert_eq!(
+            layout_memory_graph(&graph.nodes, &graph.edges, 9_999),
+            layout_memory_graph(&graph.nodes, &graph.edges, 400)
+        );
+    }
+
+    #[test]
+    fn matching_chat_titles_stay_apart_and_a_review_note_is_not_a_chat() {
+        let school = fact("fact:school", "Sam likes mint tea at school.", &["Sam"], 1);
+        let home = fact("fact:home", "Sam keeps mint tea at home.", &["Sam"], 2);
+        let note = fact("fact:note", "I typed this on the memory screen.", &[], 3);
+        let graph = memory_graph(
+            &[
+                MemoryGraphRecord {
+                    fact: school,
+                    session: Some("chat-school-a".into()),
+                    title: Some("School pickup".into()),
+                },
+                MemoryGraphRecord {
+                    fact: home,
+                    session: Some("chat-school-b".into()),
+                    title: Some("School pickup".into()),
+                },
+                MemoryGraphRecord {
+                    fact: note,
+                    session: Some(MEMORY_REVIEW_SESSION.into()),
+                    title: Some(MEMORY_REVIEW_SESSION.into()),
+                },
+            ],
+            &[],
+        );
+        let chats: Vec<_> = graph
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.id, MemoryGraphNodeId::Chat(_)))
+            .collect();
+        assert_eq!(chats.len(), 2);
+        assert!(chats.iter().all(|node| node.label == "Chat School pickup"));
+        assert!(chats.iter().any(|node| {
+            matches!(&node.id, MemoryGraphNodeId::Chat(session) if session == "chat-school-a")
+        }));
+        assert!(chats.iter().any(|node| {
+            matches!(&node.id, MemoryGraphNodeId::Chat(session) if session == "chat-school-b")
+        }));
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| !node.label.contains(MEMORY_REVIEW_SESSION))
+        );
+        assert!(
+            graph
+                .edges
+                .iter()
+                .all(|edge| !matches!(&edge.to, MemoryGraphNodeId::Chat(session) if session == MEMORY_REVIEW_SESSION))
+        );
+    }
+
+    #[test]
+    fn a_stored_version_link_is_not_listed_as_waiting() {
+        let older = fact("fact:old", "Sam likes mint tea.", &["Sam"], 1);
+        let mut close = fact("fact:close", "Sam enjoys mint tea.", &["Sam"], 6);
+        close.replaces = Some(older.id.clone());
+        let report = check_memory_duplicates(&[older.clone(), close.clone()]);
+        assert_eq!(report.near, vec![]);
+        assert!(stored_version_link(
+            &[older.clone(), close],
+            &FactId("fact:close".into()),
+            &older.id
+        ));
+        let graph = memory_graph(
+            &[record(older, None), {
+                let mut linked = record(
+                    fact("fact:close", "Sam enjoys mint tea.", &["Sam"], 6),
+                    None,
+                );
+                linked.fact.replaces = Some(FactId("fact:old".into()));
+                linked
+            }],
+            &[],
+        );
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| matches!(edge.kind, MemoryGraphEdgeKind::EarlierVersion))
+        );
+        assert_eq!(
+            graph
+                .nodes
+                .iter()
+                .filter(|node| matches!(node.id, MemoryGraphNodeId::Detail(_)))
+                .count(),
+            2
+        );
     }
 }

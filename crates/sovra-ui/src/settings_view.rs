@@ -78,9 +78,12 @@ impl ModelsView {
     pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let mut page = v_flex()
+            .id("settings-column")
+            .test_support()
             .w_full()
             .max_w(t.layout.reading_width)
             .min_w_0()
+            .mx_auto()
             .flex_shrink_0()
             .gap(t.space.large)
             .child(
@@ -152,33 +155,44 @@ impl ModelsView {
             "Choose a light or dark workspace.",
             cx,
         )
-        .child(h_flex().gap(t.space.compact).children(
-            [(ThemeMode::Light, "Light"), (ThemeMode::Dark, "Dark")].map(|(mode, label)| {
-                design::button(
-                    match mode {
-                        ThemeMode::Light => "settings-theme-light",
-                        ThemeMode::Dark => "settings-theme-dark",
-                    },
-                    label,
-                    cx,
-                )
-                .accessibility_label(format!("{label} appearance"))
-                .selected(mode.is_dark() == dark)
-                .on_click(cx.listener(move |view, _, _, cx| {
-                    Theme::change(mode, None, cx);
-                    view.send(
-                        ModelCommand::SetAppearance {
-                            appearance: if mode.is_dark() {
-                                Appearance::Dark
-                            } else {
-                                Appearance::Light
-                            },
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .gap(t.space.compact)
+                .children(
+                    [(ThemeMode::Light, "Light"), (ThemeMode::Dark, "Dark")].map(
+                        |(mode, label)| {
+                            design::button(
+                                match mode {
+                                    ThemeMode::Light => "settings-theme-light",
+                                    ThemeMode::Dark => "settings-theme-dark",
+                                },
+                                label,
+                                cx,
+                            )
+                            .accessibility_label(format!("{label} appearance"))
+                            .selected(mode.is_dark() == dark)
+                            .on_click(cx.listener(
+                                move |view, _, _, cx| {
+                                    Theme::change(mode, None, cx);
+                                    view.send(
+                                        ModelCommand::SetAppearance {
+                                            appearance: if mode.is_dark() {
+                                                Appearance::Dark
+                                            } else {
+                                                Appearance::Light
+                                            },
+                                        },
+                                        cx,
+                                    );
+                                },
+                            ))
                         },
-                        cx,
-                    );
-                }))
-            }),
-        ))
+                    ),
+                ),
+        )
         .child(Self::render_text_size(cx))
     }
 

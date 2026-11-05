@@ -476,7 +476,7 @@ pub enum CallStatus {
     },
     /// The person chose "Don't allow".
     Declined,
-    /// Nobody answered in time, or the conversation moved on.
+    /// Nobody answered the approval card in time.
     Expired,
     /// The person turned terminal access off.
     Disabled,

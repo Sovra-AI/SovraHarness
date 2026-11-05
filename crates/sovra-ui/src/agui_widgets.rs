@@ -21,11 +21,9 @@ pub(crate) fn render_agui_widget(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     match widget {
-        AgUiWidget::Components {
-            surface_id,
-            version,
-            components,
-        } => crate::native_surface::render_surface(surface_id, *version, components, index, cx),
+        AgUiWidget::Components { components, .. } => {
+            crate::native_surface::render_surface(components, index, cx)
+        }
         AgUiWidget::BuildProgress {
             title,
             subtitle,
@@ -312,6 +310,100 @@ fn render_team_activity(
                         )
                 })),
         )
+}
+
+/// In-chat listing of recalled saved details, driven from parsed citation tokens.
+pub(crate) fn render_memory_recall_card(
+    refs: &[sovra_core::MemoryCitationRef],
+    message_index: usize,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    use sovra_core::{MemoryAction, MemoryCitationTarget};
+    let t = design::tokens(cx);
+    let primary = cx.theme().primary;
+    v_flex()
+        .id(("memory-recall-card", message_index))
+        .test_support()
+        .aria_label("Saved details")
+        .w_full()
+        .min_w_0()
+        .max_w(t.layout.card_max_width)
+        .sovra_surface(Surface::Matte, cx)
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .child(
+            h_flex()
+                .gap(t.space.small)
+                .items_center()
+                .child(Icon::new(IconName::Bookmark).small().text_color(primary))
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("Saved details"),
+                ),
+        )
+        .child(
+            div()
+                .id(("memory-recall-status", message_index))
+                .test_support()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("Open a row to check the original."),
+        )
+        .children(refs.iter().enumerate().map(|(number, item)| {
+            let action = match &item.target {
+                MemoryCitationTarget::Fact(id) => MemoryAction::Inspect(id.clone()),
+                MemoryCitationTarget::Source(id) => MemoryAction::InspectSource(id.clone()),
+            };
+            let title = if item.preview.is_empty() {
+                format!("Saved source {}", number + 1)
+            } else {
+                item.preview.clone()
+            };
+            let open_label = format!("Open saved source {}", number + 1);
+            h_flex()
+                .id(("memory-recall-row", message_index * 10 + number))
+                .test_support()
+                .aria_label(title.clone())
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .items_center()
+                .gap(t.space.small)
+                .px(t.space.small)
+                .py(t.space.compact)
+                .rounded(t.radius.card)
+                .border_1()
+                .border_color(t.material_border)
+                .bg(t.subtle)
+                .child(
+                    div()
+                        .id(("memory-recall-preview", message_index * 10 + number))
+                        .test_support()
+                        .aria_label(title.clone())
+                        .flex_1()
+                        .min_w_0()
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(title),
+                )
+                .child(
+                    design::button(
+                        (
+                            gpui_kit::SharedString::from(format!(
+                                "memory-citation-{message_index}"
+                            )),
+                            number,
+                        ),
+                        "Open",
+                        cx,
+                    )
+                    .small()
+                    .accessibility_label(open_label)
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        shell.open_memory_source(action.clone(), cx);
+                    })),
+                )
+        }))
 }
 
 /// An agent saved something with `save_artifact`: a card to open it.

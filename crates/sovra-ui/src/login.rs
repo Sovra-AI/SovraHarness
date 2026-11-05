@@ -54,6 +54,7 @@ pub(crate) fn render_login_screen(
                 .id("login-glass-card")
                 .test_support()
                 .w_full()
+                .min_w_0()
                 .flex_shrink_0()
                 .my_auto()
                 .max_w(t.layout.dialog_width)
@@ -64,11 +65,13 @@ pub(crate) fn render_login_screen(
                 .child(
                     h_flex()
                         .w_full()
+                        .min_w_0()
+                        .flex_wrap()
                         .items_center()
                         .gap(t.space.small)
                         .pb(t.space.small)
                         .child(logo("login-logo", t.layout.logo_hero))
-                        .child(design::page_header(title, subtitle, cx)),
+                        .child(design::page_header(title, subtitle, cx).flex_1().min_w_0()),
                 )
                 .map(|card| match &auth.phase {
                     AuthPhase::WaitingForGoogle { auth_url } => {

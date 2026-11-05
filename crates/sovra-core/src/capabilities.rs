@@ -113,6 +113,18 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_is_offered_with_only_the_local_schedules_capability() {
+        let roster = default_sovra_srx_agents();
+        let offered = available_specialists(&roster, &BTreeSet::from([Capability::Schedules]));
+        assert!(
+            ids(&offered).contains(&"SchedulerAgent"),
+            "the orchestrator must see the scheduler with only local schedules tools"
+        );
+        assert!(!ids(&offered).contains(&"GoogleWorkspace"));
+        assert!(!ids(&offered).contains(&"CommunicationsAgent"));
+    }
+
+    #[test]
     fn communications_requires_a_real_messaging_connection() {
         let roster = default_sovra_srx_agents();
         assert!(roster.iter().any(|spec| spec.id == "CommunicationsAgent"));

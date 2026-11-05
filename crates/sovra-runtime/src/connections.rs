@@ -572,6 +572,15 @@ impl Actor {
                     self.emit(ConnectionEvent::Notice(error.to_string())).await;
                 }
             }
+            ConnectionCommand::SendScheduled {
+                session_id,
+                channel,
+                recipient,
+                text,
+            } => {
+                self.send_scheduled(&session_id, channel, &recipient, text)
+                    .await;
+            }
             ConnectionCommand::AttachHandle {
                 person_id,
                 reach,
@@ -1061,6 +1070,7 @@ impl Actor {
             | Event::Google(_)
             | Event::Mcp(_)
             | Event::Terminal(_)
+            | Event::Schedule(_)
             | Event::ChatHistoryLoaded { .. }
             | Event::Ready { .. }
             | Event::Pong

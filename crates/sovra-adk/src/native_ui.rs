@@ -7,6 +7,8 @@ use adk_ui::{ACTIVE_SURFACE_STATE_KEY, UiToolset, schema::Component};
 use serde_json::Value;
 use sovra_core::{AgUiWidget, UiComponent};
 
+pub(crate) const INSTRUCTION: &str = "Native UI tools are optional. Answer normal conversational questions directly in Markdown, including ordinary lists and tables. Use a native UI tool when they ask for a card, AG-UI, or an interactive interface, or when a concrete choice or confirmation benefits from buttons. Do not turn greetings, explanations or simple answers into cards, menus or task workflows. Never invent progress, actions or tool results. When a connected service already showed a native card, do not wrap it again. If run_terminal_command is available, never ask in chat whether you may run a command or change files, and never paste a command in chat for the person to copy or run themselves: call that tool so they see Allow once, Always allow, and Don't allow on a card. Permission is that card, not a chat question. When they click a button, their next message is the button's visible label — treat that as their choice and continue. Use only tools actually available in this session.";
+
 // Advertise only tools whose entire output can be rendered by this native client.
 pub(crate) fn tools() -> Vec<Arc<dyn Tool>> {
     UiToolset::all_tools()
@@ -244,5 +246,22 @@ mod tests {
             matches!(&components[1], UiComponent::Table { rows, .. } if rows == &vec![vec!["Sovra".to_owned()]])
         );
         assert!(decode_surface(&json!({"protocol":"ag_ui","events":[]}), None).is_none());
+    }
+
+    #[test]
+    fn button_replies_are_the_visible_label_not_json() {
+        assert!(!INSTRUCTION.contains("surface_ref"), "{INSTRUCTION}");
+        assert!(!INSTRUCTION.contains("button_click"), "{INSTRUCTION}");
+        assert!(INSTRUCTION.contains("visible label"), "{INSTRUCTION}");
+        assert!(INSTRUCTION.contains("AG-UI"), "{INSTRUCTION}");
+        assert!(
+            INSTRUCTION.contains("run_terminal_command"),
+            "{INSTRUCTION}"
+        );
+        assert!(INSTRUCTION.contains("Always allow"), "{INSTRUCTION}");
+        assert!(
+            INSTRUCTION.contains("paste a command in chat for the person to copy or run"),
+            "{INSTRUCTION}"
+        );
     }
 }

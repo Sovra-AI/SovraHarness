@@ -267,6 +267,103 @@ async fn main_chat_delegates_to_messaging_but_only_native_review_can_send_once()
     stop(client).await;
 }
 
+#[tokio::test]
+async fn confirmed_timed_whatsapp_sends_on_tick_without_review() {
+    use sovra_core::communications::MessageDelivery;
+    use sovra_core::connections::ChannelKind;
+    use sovra_core::{ScheduleCommand, ScheduleEvent, ScheduledSend};
+
+    let channel = Arc::new(ScriptedChannel::default());
+    let client = sovra_runtime::start_with_channels(
+        "scheduled-send-test",
+        AgentConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(channel.clone()),
+    )
+    .unwrap();
+    event(&client, |e| matches!(e, Event::Ready { .. })).await;
+    client
+        .send(Command::Connections(
+            ConnectionCommand::StartWhatsAppPairing,
+        ))
+        .unwrap();
+    status(&client, |s| matches!(s, WhatsAppStatus::Connecting { .. })).await;
+    client
+        .send(Command::Connections(ConnectionCommand::Load))
+        .unwrap();
+    event(&client, |e| {
+        matches!(e, Event::Connections(ConnectionEvent::Loaded(_)))
+    })
+    .await;
+    channel.emit(ChannelEvent::Connected {
+        device: LinkedDevice {
+            phone_display: "+447700900123".into(),
+            device_jid: OWN_CHAT.into(),
+            companion_name: "fixture".into(),
+            linked_at: sovra_core::Timestamp(0),
+        },
+    });
+    status(&client, WhatsAppStatus::is_connected).await;
+
+    client
+        .send(Command::Schedule(ScheduleCommand::Create {
+            name: "Wake Ryan".into(),
+            cadence: "in 1 minute".into(),
+            prompt: "Send Ryan a WhatsApp: wake up from sovra".into(),
+            send: Some(ScheduledSend {
+                channel: ChannelKind::WhatsApp,
+                recipient: "+44 7347 529758".into(),
+                text: "wake up from sovra".into(),
+            }),
+        }))
+        .unwrap();
+    let created = event(&client, |e| {
+        matches!(
+            e,
+            Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) if schedules.len() == 1
+        )
+    })
+    .await;
+    let Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) = created else {
+        panic!("{created:?}")
+    };
+    let send = schedules[0].send.as_ref().expect("stored job is a send");
+    assert_eq!(send.channel, ChannelKind::WhatsApp);
+    assert_eq!(send.recipient, "+44 7347 529758");
+    assert_eq!(send.text, "wake up from sovra");
+    let due = schedules[0].next_run_at;
+
+    client
+        .send(Command::Schedule(ScheduleCommand::Tick { now: due }))
+        .unwrap();
+    let outbound = event(&client, |e| {
+        matches!(
+            e,
+            Event::Connections(ConnectionEvent::OutboundChanged(m))
+                if m.text == "wake up from sovra"
+                    && matches!(m.delivery, MessageDelivery::Accepted { .. })
+        )
+    })
+    .await;
+    let Event::Connections(ConnectionEvent::OutboundChanged(message)) = outbound else {
+        unreachable!()
+    };
+    assert_ne!(message.delivery, MessageDelivery::Review);
+    assert_eq!(message.recipient, "447347529758@s.whatsapp.net");
+    assert_eq!(
+        channel.session.sent.lock().unwrap().as_slice(),
+        &[(
+            "447347529758@s.whatsapp.net".into(),
+            "wake up from sovra".into()
+        )]
+    );
+    stop(client).await;
+}
+
 async fn status(client: &Client, matches: impl Fn(&WhatsAppStatus) -> bool) -> WhatsAppStatus {
     match event(
         client,

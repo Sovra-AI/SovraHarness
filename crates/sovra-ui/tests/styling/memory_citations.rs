@@ -127,6 +127,33 @@ fn reply_citations_open_saved_sources_at_every_size(cx: &mut TestAppContext) {
                     let button = window.find(id);
                     assert!(button.visible(), "{width}@{scale}: {button:?}");
                     assert!(button.bounds().right() <= px(width));
+                    if let Some(label) = button.label() {
+                        assert!(
+                            !label.contains("memory:fact:") && !label.contains("source:episode:"),
+                            "{width}@{scale} button: {label}"
+                        );
+                    }
+                    let card = window.find(("memory-recall-card", 0usize));
+                    assert!(card.visible(), "{width}@{scale}: {card:?}");
+                    if let Some(label) = card.label() {
+                        assert!(
+                            !label.contains("memory:fact:") && !label.contains("source:episode:"),
+                            "{width}@{scale} card: {label}"
+                        );
+                    }
+                    let preview = window.find(("memory-recall-preview", 0usize));
+                    if let Some(label) = preview.label() {
+                        assert!(
+                            !label.contains("memory:fact:") && !label.contains("source:episode:"),
+                            "{width}@{scale} preview: {label}"
+                        );
+                    }
+                    if let Some(label) = window.find(("assistant-answer", 0usize)).label() {
+                        assert!(
+                            !label.contains("memory:fact:") && !label.contains("source:episode:"),
+                            "{width}@{scale} answer: {label}"
+                        );
+                    }
                     window.click(id, cx);
                     window.render_frame(cx);
                     assert_eq!(
@@ -315,4 +342,122 @@ fn reply_citations_open_saved_sources_at_every_size(cx: &mut TestAppContext) {
             }
         }
     }
+}
+
+#[gpui_kit::test]
+fn recall_listing_uses_cards_and_hides_hash_tokens(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| {
+        sovra_ui::init(client, cx);
+        Theme::change(ThemeMode::Light, None, cx);
+        design::set_interface_scale(sovra_core::models::InterfaceScale::from_percent(100), cx);
+    });
+    let mut shell = None;
+    let window = cx.open_window(size(px(640.), px(420.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    let live_id = "memory_0565e570b3b344ef836475a27e4586b023fbc91d38c2818650159b612c2c5d57";
+    let mint_id = "memory_7fd3744a12b4969536e48da78e98170ba326edea02467a94156dd6dbd46c8d7f";
+    let reply_text = format!(
+        "Here's what I can see so far. It's not a complete picture, and some details may be missing.\n\
+         Where you live: You've mentioned living in Dubai with your girlfriend [memory:fact:{live_id}].\n\
+         Food you enjoy: You like mint sauce [memory:fact:{mint_id}].\n\
+         You can review and correct what I've saved in Knowledge."
+    );
+    let mut thread = sovra_core::ChatThread::new("recall-list", Timestamp(1));
+    thread.messages.push(ChatMessage::assistant(
+        "reply",
+        reply_text.clone(),
+        "Just now",
+        vec![],
+    ));
+    events
+        .send_blocking(Event::ChatHistoryLoaded {
+            threads: vec![thread],
+        })
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update(|cx| shell.update(cx, |shell, cx| shell.select_thread("recall-list", cx)));
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().messages[0].text,
+            reply_text,
+            "stored reply keeps citation tokens for navigation"
+        );
+        reveal(
+            window,
+            cx,
+            "chat-scroll-area",
+            ("memory-citation-0", 0usize),
+            420.,
+        );
+        assert!(window.find(("memory-recall-card", 0usize)).visible());
+        assert!(window.find(("memory-recall-status", 0usize)).visible());
+        for number in [0usize, 1] {
+            let preview = window.find(("memory-recall-preview", number));
+            assert!(preview.visible(), "row {number}");
+            let label = preview.label().unwrap_or_default();
+            assert!(
+                !label.contains("memory:fact:") && !label.contains("source:episode:"),
+                "preview {number}: {label}"
+            );
+            let open = window.find(("memory-citation-0", number));
+            assert!(open.visible(), "open {number}");
+            if let Some(open_label) = open.label() {
+                assert!(
+                    !open_label.contains("memory:fact:") && !open_label.contains("source:episode:"),
+                    "open {number}: {open_label}"
+                );
+            }
+        }
+        let dubai_row = window.find(("memory-recall-preview", 0usize));
+        let dubai = dubai_row.label().unwrap_or_default();
+        assert!(dubai.contains("Dubai"), "{dubai}");
+        if let Some(answer) = window.find(("assistant-answer", 0usize)).label() {
+            assert!(
+                !answer.contains("memory:fact:") && !answer.contains("source:episode:"),
+                "{answer}"
+            );
+        }
+        window.click(("memory-citation-0", 0usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().active_tab,
+            sovra_core::NavTab::Knowledge
+        );
+    })
+    .unwrap();
+    let inspect = MemoryAction::Inspect(FactId(format!("fact:{live_id}")));
+    let request = std::iter::from_fn(|| commands.try_recv().ok())
+        .find_map(|command| match command {
+            Command::Memory(command) if command.action == inspect => Some(command),
+            _ => None,
+        })
+        .expect("opening a row inspects the stored fact id");
+    events
+        .send_blocking(Event::Memory(MemoryEvent::Review(MemoryReviewEvent {
+            request_id: request.request_id,
+            result: Ok(MemoryReviewResult::Detail(Box::new(detail()))),
+        })))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        reveal(
+            window,
+            cx,
+            "sovra-memory-source-view",
+            "memory-source",
+            420.,
+        );
+        assert!(window.find("memory-source").visible());
+    })
+    .unwrap();
 }

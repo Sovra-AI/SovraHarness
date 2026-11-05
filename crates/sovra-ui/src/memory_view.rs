@@ -25,6 +25,7 @@ mod directory;
 mod exploration;
 mod graph;
 mod profile;
+mod repeats;
 mod source_browser;
 
 #[allow(
@@ -55,6 +56,10 @@ struct SupportingDetail {
     trail: Vec<FactId>,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent view flags; a state enum would be artificial"
+)]
 pub(crate) struct MemoryView {
     state: MemoryReviewState,
     navigation_request: Option<u64>,
@@ -85,8 +90,12 @@ pub(crate) struct MemoryView {
     width_class: design::WidthClass,
     /// Detail or chat chosen in the picture. Dropped when that detail leaves the page.
     graph_selection: Option<sovra_core::MemoryGraphNodeId>,
+    /// Pan, zoom, hover, dragged details and link filters for the knowledge map.
+    graph: graph::GraphState,
     /// Local repeat check. Empty until the person asks, and cleared when the page reloads.
     duplicates: Option<sovra_core::MemoryDuplicateReport>,
+    /// A same-detail link is being stored. The picture stays up while that write runs.
+    version_link: bool,
 }
 
 impl MemoryView {
@@ -177,11 +186,14 @@ impl MemoryView {
             notice: None,
             width_class: design::WidthClass::Compact,
             graph_selection: None,
+            graph: graph::GraphState::default(),
             duplicates: None,
+            version_link: false,
         }
     }
 
     fn send(&mut self, action: MemoryAction, cx: &mut Context<Self>) {
+        self.version_link = matches!(action, MemoryAction::KeepSameDetails(_));
         let navigates = matches!(
             action,
             MemoryAction::List(_)
@@ -385,6 +397,7 @@ impl MemoryView {
     /// A successful explicit navigation starts at the top; stale responses never scroll.
     pub(crate) fn apply(&mut self, event: &MemoryReviewEvent, cx: &mut Context<Self>) -> bool {
         if self.state.apply(event) {
+            self.version_link = false;
             let reset_scroll =
                 self.navigation_request.take() == Some(event.request_id) && event.result.is_ok();
             match &event.result {
@@ -430,6 +443,11 @@ impl MemoryView {
                         self.graph_selection = None;
                     }
                 }
+                Ok(MemoryReviewResult::VersionLinked) => {
+                    self.notice = Some(
+                        "These now count as the same statement. Both stay, with the older one as an earlier version.".into(),
+                    );
+                }
                 Ok(
                     MemoryReviewResult::Semantics(_)
                     | MemoryReviewResult::Subjects(_)
@@ -447,9 +465,9 @@ impl MemoryView {
 }
 
 impl Render for MemoryView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = design::tokens(cx);
-        let busy = self.state.loading;
+        let busy = self.state.loading && !self.version_link;
         let mut column = v_flex()
             .id("memory-browser")
             .test_support()
@@ -608,17 +626,21 @@ impl Render for MemoryView {
             );
         }
         if !self.source_only && self.state.detail.is_none() && !busy && self.state.error.is_none() {
-            column = column.child(self.memory_picture(cx));
+            column = column.child(self.memory_picture(window, cx));
         }
-        for (index, fact) in self
-            .state
-            .page
-            .facts
-            .iter()
-            .enumerate()
-            .filter(|_| self.state.detail.is_none() && !self.source_only)
-        {
-            column = column.child(self.saved_card(fact, index, cx));
+        if self.state.detail.is_none() && !self.source_only && !self.state.page.facts.is_empty() {
+            let mut cards = h_flex()
+                .id("memory-cards")
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .items_stretch()
+                .gap(t.space.small);
+            for (index, fact) in self.state.page.facts.iter().enumerate() {
+                cards = cards.child(self.saved_card(fact, index, cx));
+            }
+            column = column.child(cards);
         }
         if self.state.detail.is_none()
             && let Some(cursor) = self.state.page.next.clone()

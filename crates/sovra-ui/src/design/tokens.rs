@@ -148,6 +148,52 @@ pub struct MotionTokens {
     pub enter_distance: Pixels,
 }
 
+/// The knowledge map: an interactive force-directed picture of saved links.
+/// Link colours are a categorical set distinct in both themes; meaning is never
+/// carried by colour alone (each link kind is also named in the legend and labels).
+#[derive(Debug, Clone, Copy)]
+pub struct GraphTokens {
+    pub height: Rems,
+    /// Shorter drawing for compact panes, so the words below stay within reach.
+    pub compact_height: Rems,
+    /// Swimlane of past and upcoming runs on the Schedules page.
+    pub timeline_height: Rems,
+    pub timeline_compact_height: Rems,
+    pub timeline_lane: Rems,
+    pub timeline_dot: Rems,
+    pub timeline_label_width: Rems,
+    /// A detail nobody links to; well-linked details grow towards `node_max`.
+    pub node: Rems,
+    pub node_max: Rems,
+    pub chat_node: Rems,
+    /// Every node is at least this large to point at, whatever its drawn size.
+    pub hit: Rems,
+    pub link_marker: Rems,
+    pub label_width: Rems,
+    pub legend_swatch: Rems,
+    pub line: Pixels,
+    pub line_focus: Pixels,
+    pub ring: Pixels,
+    /// Opacity of everything outside the hovered or selected neighbourhood.
+    pub faded: f32,
+    pub zoom_min: f32,
+    pub zoom_max: f32,
+    pub zoom_step: f32,
+    /// Zoom at which every detail shows its words, not only hubs and the focus.
+    pub zoom_labels: f32,
+    pub backdrop: Hsla,
+    pub grid: Hsla,
+    pub detail: Hsla,
+    pub chat: Hsla,
+    pub focus: Hsla,
+    pub halo: Hsla,
+    pub label: Hsla,
+    pub subject: Hsla,
+    pub message: Hsla,
+    pub version: Hsla,
+    pub saved_from: Hsla,
+}
+
 #[derive(Debug, Clone)]
 pub struct SovraTokens {
     pub accent: AccentTokens,
@@ -156,6 +202,7 @@ pub struct SovraTokens {
     pub layout: LayoutTokens,
     pub motion: MotionTokens,
     pub chat: ChatTokens,
+    pub graph: GraphTokens,
     pub text_secondary: Hsla,
     pub canvas: Hsla,
     pub chrome: Hsla,
@@ -336,6 +383,49 @@ pub fn tokens(cx: &App) -> SovraTokens {
             welcome_width: rem(680.),
             chip_border: p.border,
             chip_height: rem(36.),
+        },
+        graph: GraphTokens {
+            height: rem(460.),
+            compact_height: rem(320.),
+            timeline_height: rem(168.),
+            timeline_compact_height: rem(72.),
+            timeline_lane: rem(32.),
+            timeline_dot: rem(8.),
+            timeline_label_width: rem(120.),
+            node: rem(12.),
+            node_max: rem(30.),
+            chat_node: rem(22.),
+            hit: rem(28.),
+            link_marker: rem(10.),
+            label_width: rem(200.),
+            legend_swatch: rem(10.),
+            line: px(1.5),
+            line_focus: px(2.5),
+            ring: px(2.),
+            faded: 0.16,
+            zoom_min: 0.5,
+            zoom_max: 3.0,
+            zoom_step: 1.25,
+            zoom_labels: 1.6,
+            backdrop: if dark {
+                canvas.blend(colour(INDIGO).alpha(0.07))
+            } else {
+                colour(0xfa_f8_ff)
+            },
+            grid: colour(if dark { WHITE } else { 0x4c_1d_95 }).alpha(if dark {
+                0.05
+            } else {
+                0.06
+            }),
+            detail: colour(if dark { VIOLET_LIGHT } else { VIOLET }),
+            chat: colour(0x0e_a5_e9),
+            focus: colour(if dark { WHITE } else { VIOLET_DEEP }),
+            halo: colour(VIOLET).alpha(if dark { 0.32 } else { 0.22 }),
+            label: if dark { colour(p.hover) } else { colour(WHITE) },
+            subject: colour(if dark { 0x34_d3_99 } else { 0x05_96_69 }),
+            message: colour(if dark { 0xfb_bf_24 } else { 0xd9_77_06 }),
+            version: colour(if dark { 0xf4_72_b6 } else { 0xdb_27_77 }),
+            saved_from: colour(if dark { 0x38_bd_f8 } else { 0x02_84_c7 }),
         },
         text_secondary: colour(p.secondary_text),
         canvas,

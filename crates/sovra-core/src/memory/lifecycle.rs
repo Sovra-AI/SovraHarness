@@ -113,6 +113,33 @@ pub enum MemoryAction {
     StopUsing(FactId),
     /// Remove every correction version and its supporting sources from recall.
     Remove(FactId),
+    /// Record that these current details are the same statement.
+    /// Both stay on the page. This does not edit or hide either record.
+    KeepSameDetails(Vec<MemorySameDetail>),
+}
+
+/// Two current details the person treats as one statement.
+/// `newer` was saved later. Linking does not set `invalid_at` or `expired_at`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemorySameDetail {
+    pub newer: FactId,
+    pub older: FactId,
+}
+
+impl MemorySameDetail {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        if self.newer == self.older
+            || self.newer.0.trim().is_empty()
+            || self.older.0.trim().is_empty()
+            || self.newer.0.len() > 512
+            || self.older.0.len() > 512
+        {
+            return Err(MemoryError::InvalidInput(
+                "Choose two different saved details.".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +166,8 @@ pub enum MemoryReviewResult {
     SourceStopped(super::EpisodeId),
     Changed(FactId),
     Retried(usize),
+    /// The earlier-version link was stored. The open page stays as it is.
+    VersionLinked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,6 +248,7 @@ impl MemoryReviewState {
                 self.detail = None;
                 self.source = None;
             }
+            Ok(MemoryReviewResult::VersionLinked) => {}
             Err(error) => self.error = Some(error.clone()),
         }
         true

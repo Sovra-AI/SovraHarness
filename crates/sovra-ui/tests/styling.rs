@@ -12,6 +12,8 @@ mod memory_citations;
 mod memory_directory;
 #[path = "styling/memory_exploration.rs"]
 mod memory_exploration;
+#[path = "styling/memory_graph.rs"]
+mod memory_graph;
 #[path = "styling/memory_sources.rs"]
 mod memory_sources;
 #[path = "styling/messaging.rs"]
@@ -20,6 +22,8 @@ mod messaging;
 mod research_board;
 #[path = "styling/terminal.rs"]
 mod terminal;
+#[path = "styling/workspace_fit.rs"]
+mod workspace_fit;
 
 use gpui_kit::component::{ActiveTheme as _, Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
@@ -242,6 +246,20 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-schedules", cx);
+        window.render_frame(cx);
+        window.click("schedule-create-toggle-btn", cx);
+        window.render_frame(cx);
+        window.click("schedule-name-input", cx);
+        window.input("Weekday briefing", cx);
+        window.click("schedule-prompt-input", cx);
+        window.input("Give me a short briefing of what's on today", cx);
+        window.click("schedule-save-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("schedules-timeline").visible());
+        assert!(window.find(("schedule-lane", 0usize)).visible());
+        assert!(window.find("schedules-now-marker").visible());
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             Theme::change(mode, Some(window), cx);
             window.render_frame(cx);

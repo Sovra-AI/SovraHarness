@@ -18,7 +18,7 @@ use sovra_core::{
     TreeNodeKind, WorkspaceState,
 };
 
-use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
 pub(crate) fn render_my_ais_view(
@@ -30,7 +30,10 @@ pub(crate) fn render_my_ais_view(
     let t = design::tokens(cx);
 
     let mut page = v_flex()
+        .id("my-ais-column")
+        .test_support()
         .w_full()
+        .min_w_0()
         .max_w(t.layout.page_width)
         .mx_auto()
         .gap(t.space.large)
@@ -160,8 +163,7 @@ fn render_mode_selector(
                     design::button(("routing-mode-btn", idx), "", cx)
                         .accessibility_label(title)
                         .selected(selected)
-                        .flex_1()
-                        .min_w(t.layout.card_min_width)
+                        .prefer_width(t.layout.card_min_width)
                         .h_auto()
                         .whitespace_normal()
                         .p(t.space.large)

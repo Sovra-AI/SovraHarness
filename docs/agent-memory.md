@@ -1,5 +1,9 @@
 # Agent memory: research and implementation contract
 
+How a chat turn is captured and how a later question recalls it is documented
+in [memory capture and recall](memory-capture-and-recall.md). This file is the
+audit history and the measured limits.
+
 ## Runtime input tracking — 2026-11-03
 
 New private ordinary and team replies record their actual visible conversation
@@ -800,7 +804,9 @@ The design uses these researched principles:
 
 - [NN/G: recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/): expose recognizable subject labels and readable statements so people need not remember search syntax or internal IDs.
 - [NN/G: progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/): start with readable cards, then reveal evidence, connections and correction controls in the detail reader.
-- [Li et al., Knowledge Graphs in Practice, version 4](https://arxiv.org/abs/2304.01311v4): the study identifies challenges with generic node-link diagrams for consumers and discusses knowledge cards, temporal views and discovery. Sovra uses labeled, navigable connection cards; a shared subject is explicitly distinguished from an asserted relationship.
+- [Li et al., Knowledge Graphs in Practice, version 4](https://arxiv.org/abs/2304.01311v4): the study identifies challenges with generic node-link diagrams for consumers and discusses knowledge cards, temporal views and discovery. Sovra keeps labeled, navigable connection cards; a shared subject is explicitly distinguished from an asserted relationship. The memories page also draws a bounded picture of those same stored links, with the words still readable beside it. A generic "you" or "user" label alone is not a link. When the bounded picture leaves links out, the screen says more exist. Browser graph engines were not embedded.
+
+**Check for repeats** on that page compares loaded wording on the device. It does not call a model or the network, and it does not delete or edit a record. Wording that normalizes to the same statement keeps both records and stores the older one as an earlier version. Close wording is listed in everyday words and is not joined until the person confirms. That confirmation stores the same non-deleting link, so both details stay on the page after a refresh and the close pair is not listed as waiting again. A genuinely different detail is not listed. The picture names a conversation by the title stored for that chat. Two conversations with the same title stay two nodes. A note typed on the memory screen is not drawn as a chat.
 
 These are design decisions, not usability-study results for Sovra. The browsing
 implementation and local verification audit are complete for the knowledge

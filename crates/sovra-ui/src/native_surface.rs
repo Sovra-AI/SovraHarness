@@ -12,8 +12,6 @@ use gpui_kit::{
 use sovra_core::UiComponent;
 
 pub(crate) fn render_surface(
-    id: &str,
-    version: u64,
     components: &[UiComponent],
     index: usize,
     cx: &mut Context<Shell>,
@@ -25,27 +23,22 @@ pub(crate) fn render_surface(
         .w_full()
         .min_w_0()
         .gap(t.space.small)
-        .children(components.iter().enumerate().map(|(i, component)| {
-            render_component(component, id, version, &format!("{index}-{i}"), cx)
-        }))
+        .children(
+            components
+                .iter()
+                .enumerate()
+                .map(|(i, component)| render_component(component, &format!("{index}-{i}"), cx)),
+        )
         .into_any_element()
 }
 
-fn render_component(
-    component: &UiComponent,
-    surface_id: &str,
-    version: u64,
-    path: &str,
-    cx: &mut Context<Shell>,
-) -> AnyElement {
+fn render_component(component: &UiComponent, path: &str, cx: &mut Context<Shell>) -> AnyElement {
     let t = design::tokens(cx);
     let children = |items: &[UiComponent], cx: &mut Context<Shell>| -> Vec<AnyElement> {
         items
             .iter()
             .enumerate()
-            .map(|(i, item)| {
-                render_component(item, surface_id, version, &format!("{path}-{i}"), cx)
-            })
+            .map(|(i, item)| render_component(item, &format!("{path}-{i}"), cx))
             .collect()
     };
     match component {
@@ -185,7 +178,11 @@ fn render_component(
                     }))
                     .into_any_element();
             }
-            let prompt = serde_json::json!({"surface_ref":{"id":surface_id,"version":version},"event":{"type":"button_click","action_id":action_id}}).to_string();
+            let prompt = if label.trim().is_empty() {
+                action_id.clone()
+            } else {
+                label.clone()
+            };
             design::button(
                 gpui_kit::SharedString::from(format!("surface-action-{path}")),
                 label.clone(),

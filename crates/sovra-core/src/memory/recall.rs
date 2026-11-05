@@ -673,4 +673,125 @@ mod tests {
         assert!(context.memories.len() < MAX_MEMORY_CONTEXT_ITEMS);
         assert!(serde_json::to_vec(&context).unwrap().len() <= MAX_MEMORY_CONTEXT_BYTES);
     }
+
+    #[test]
+    fn personal_statement_is_recalled_from_another_chat_and_chatter_is_not_saved() {
+        use super::super::{MemoryInput, NewEpisode, parse_memory_candidates};
+
+        let vegan = Episode {
+            id: EpisodeId("episode:vegan".into()),
+            session_id: "chat-a".into(),
+            kind: EpisodeKind::UserMessage,
+            content: "I am vegan".into(),
+            occurred_at: Timestamp(10),
+        };
+        let saved = parse_memory_candidates(
+            &vegan,
+            r#"{"memories":[{"content":"User is vegan","evidence":"I am vegan","entities":["user"],"valid_at":null,"replaces":null}]}"#,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].evidence, "I am vegan");
+
+        let weather = Episode {
+            id: EpisodeId("episode:weather".into()),
+            session_id: "chat-a".into(),
+            kind: EpisodeKind::UserMessage,
+            content: "The weather is lovely today".into(),
+            occurred_at: Timestamp(11),
+        };
+        let chatter = parse_memory_candidates(&weather, r#"{"memories":[]}"#, &[]).unwrap();
+        assert!(
+            chatter.is_empty(),
+            "a non-personal aside produces no lasting fact"
+        );
+        assert!(
+            parse_memory_candidates(
+                &weather,
+                r#"{"memories":[{"content":"User likes rain","evidence":"I love rain","entities":["user"],"valid_at":null,"replaces":null}]}"#,
+                &[],
+            )
+            .is_err(),
+            "a quote that is not in the message is refused"
+        );
+        let agent = MemoryInput {
+            key: "helper".into(),
+            episode: NewEpisode {
+                session_id: "chat-a".into(),
+                kind: EpisodeKind::AgentMessage,
+                content: "I am vegan".into(),
+                occurred_at: Timestamp(12),
+            },
+        };
+        assert!(agent.validate().is_err());
+
+        let fact = Fact {
+            id: FactId("fact:vegan".into()),
+            content: saved[0].content.clone(),
+            entities: saved[0].entities.clone(),
+            source: Some(vegan.id.clone()),
+            replaces: None,
+            extraction: Some(MemoryExtraction {
+                model: "test".into(),
+                evidence: saved[0].evidence.clone(),
+            }),
+            created_at: Timestamp(20),
+            valid_at: None,
+            invalid_at: None,
+            expired_at: None,
+            stopped_at: None,
+        };
+        let later = MemorySearch {
+            text: "Am I vegan?".into(),
+            ..Default::default()
+        };
+        assert!(later.terms().iter().any(|term| term == "vegan"));
+        assert!(later.accepts(&fact, Timestamp(30)));
+        let mut context = MemoryContext::default();
+        assert!(context.push(&fact, &vegan));
+        assert_eq!(context.memories[0].quote, "I am vegan");
+        assert_eq!(context.memories[0].conversation, "chat-a");
+        assert_eq!(context.memories[0].citation, "memory:fact:vegan");
+        assert_eq!(context.memories[0].source_id, "episode:vegan");
+
+        let mut crowded = context.clone();
+        let mut extra = fact.clone();
+        let mut extra_source = vegan.clone();
+        for index in 0..30 {
+            extra.id.0 = format!("fact:extra-{index}");
+            extra_source.id.0 = extra.id.0.clone();
+            extra.source = Some(extra_source.id.clone());
+            extra.content = format!("User is vegan note {index}");
+            extra.extraction = Some(MemoryExtraction {
+                model: "test".into(),
+                evidence: vegan.content.clone(),
+            });
+            extra_source.content = vegan.content.clone();
+            crowded.push(&extra, &extra_source);
+        }
+        assert!(crowded.memories.len() <= MAX_MEMORY_CONTEXT_ITEMS);
+        assert!(serde_json::to_vec(&crowded).unwrap().len() <= MAX_MEMORY_CONTEXT_BYTES);
+
+        let mut withdrawn = fact.clone();
+        withdrawn.stopped_at = Some(Timestamp(40));
+        assert!(!later.accepts(&withdrawn, Timestamp(50)));
+        assert!(!MemoryContext::default().push(&withdrawn, &vegan));
+
+        let corrected = parse_memory_candidates(
+            &vegan,
+            r#"{"memories":[{"content":"User is vegan","evidence":"I am vegan","entities":["user"],"valid_at":null,"replaces":"fact:vegan"}]}"#,
+            &[FactId("fact:vegan".into())],
+        )
+        .unwrap();
+        assert_eq!(
+            corrected[0].replaces.as_ref().map(|id| id.0.as_str()),
+            Some("fact:vegan")
+        );
+        let mut ended = fact.clone();
+        ended.invalid_at = Some(Timestamp(25));
+        ended.expired_at = Some(Timestamp(25));
+        assert!(!later.accepts(&ended, Timestamp(30)));
+        assert_eq!(fact.content, "User is vegan");
+    }
 }

@@ -663,7 +663,7 @@ mod tests {
     fn search_index_reuses_unicode_boundaries_and_handles_missing_sections() {
         let text = format!("{}invoice 93", "你好 ".repeat(6000));
         let index = FileSearchIndex::new(&text);
-        assert!(!index.is_empty());
+        assert_ne!(index.len(), 0);
         assert_eq!(index.len(), file_sections(&text).len());
         let numbers = index.search("invoice", 2);
         assert_eq!(numbers.len(), 1);

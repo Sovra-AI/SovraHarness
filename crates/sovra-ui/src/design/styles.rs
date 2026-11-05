@@ -90,6 +90,22 @@ pub trait SovraStyled: Styled + Sized {
 
 impl<T: Styled> SovraStyled for T {}
 
+/// A wrapping row's preferred width. The item may shrink to the pane, so a
+/// 200% text size on the minimum window does not force a horizontal overflow.
+/// A hard `min_w` of the same token cannot.
+pub trait FitsPane: Styled + Sized {
+    #[must_use]
+    fn prefer_width(self, width: impl Into<gpui_kit::Length>) -> Self {
+        self.flex_grow_1()
+            .flex_shrink_1()
+            .flex_basis(width)
+            .min_w_0()
+            .max_w_full()
+    }
+}
+
+impl<T: Styled> FitsPane for T {}
+
 /// Apply Sovra's geometry to a real GPUI button; variants still come from the theme.
 pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
     let t = tokens(cx);
@@ -102,6 +118,8 @@ pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App
         .cursor_pointer()
         .rounded(t.radius.button)
         .min_h(t.layout.control_height)
+        .max_w_full()
+        .min_w_0()
         .px(t.space.medium)
         .font_weight(FontWeight::MEDIUM)
 }
@@ -173,15 +191,23 @@ pub fn page_header(
     div()
         .flex()
         .flex_col()
+        .w_full()
         .min_w_0()
+        .max_w_full()
         .gap(t.space.small)
         .child(
             div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
                 .sovra_text(TextRole::PageTitle, cx)
                 .child(title.into()),
         )
         .child(
             div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
                 .child(description.into()),

@@ -82,9 +82,13 @@ impl Tool for ConnectedTool {
             })
             .await
             .map_err(adk_core::AdkError::tool)?;
-        Ok(json!({
+        let mut body = json!({
             "service": output.service_name,
             "text": output.text,
-        }))
+        });
+        if output.widget.is_some() {
+            body["native_ui"] = json!(true);
+        }
+        Ok(body)
     }
 }

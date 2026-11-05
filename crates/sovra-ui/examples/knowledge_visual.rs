@@ -84,6 +84,7 @@ fn respond(
                 | MemoryAction::StopUsing(_)
                 | MemoryAction::Remove(_)
                 | MemoryAction::StopSource(_)
+                | MemoryAction::KeepSameDetails(_)
                 | MemoryAction::ConfigureSemantic(_) => {
                     panic!("visual proof must not request mutations")
                 }

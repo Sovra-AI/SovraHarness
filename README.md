@@ -124,7 +124,8 @@ receive your standing instructions and can look up saved memories when rememberi
 is enabled. Delegated helpers can read files attached to the current message;
 old attachments are not silently carried forward. Removing a folder stops later
 reads. Independent delegated tasks overlap, with at most four running per turn;
-team discussions stay ordered so each reply can build on the previous one. See the
+team discussions stay ordered so each reply can build on the previous one. See
+[how capture and recall work](docs/memory-capture-and-recall.md) and the
 [context and concurrency audit](docs/agent-memory.md#helper-context-and-concurrency-audit-2026-11-01).
 
 Type `/` to browse skills. Arrow keys select, Tab or Enter chooses, and Escape
@@ -138,6 +139,15 @@ inspects recorded changes and reads historical text with source-version citation
 History starts with observations Sovra actually recorded; it is not a complete
 filesystem journal or a backup of original file bytes. `/web-search <question>` requests
 web research. Native presentation tools also have commands such as `/table` and `/card`.
+
+You don't have to type `/`. Sovra applies a skill on its own when your request
+clearly matches what the skill says it is for. It reads only names and
+descriptions until it picks one, loads the single best match, and answers
+greetings and quick questions directly. Your own skills and the file and folder
+procedures take part. Web search, helpers, and tables already run without a
+skill. To keep a skill to the `/` menu, untick **Use it on its own when a request
+fits** in the skill editor, or set `disable-model-invocation: true` in its
+`SKILL.md`. Typing `/` always forces the skill you pick.
 
 `/map-files <project or relationships>` proposes cited document, section, topic,
 person, organization, project and task relationships. Review the exact relationships,
@@ -265,6 +275,10 @@ phone number, WhatsApp, Telegram, and email. Each card shows those details, so
 two people with the same name stay easy to tell apart. You can prepare a WhatsApp
 message to a saved person before they have written to you. **Message on WhatsApp**
 opens the chat with that message ready. Nothing is sent until you press Send.
+A confirmed timed WhatsApp or Telegram text is different: once you have
+confirmed who, which app, the exact words, and when, it goes out at that time
+without another Send click. The job stores the international number (or me, a
+chat id, or a saved person id), not a first name on its own.
 **Guide** explains how Sovra remembers, with one worked example a
 new reader can follow: something happens, a record is kept, a current belief is
 formed, a later belief replaces it, and the earlier belief stays as history.
@@ -295,7 +309,14 @@ control. Completed ordinary and team replies are saved to the conversation that
 produced them, including when another chat is open.
 
 Conversation memory is being built separately from file knowledge. Its embedded
-browser presents readable saved-detail cards. Select a person or project to
+browser presents readable saved-detail cards and a picture of how those details
+connect. The picture draws only real links: an earlier version, the same original
+message, a shared subject, or the chat a detail came from. A chat is named with
+the conversation title, and a note typed on this screen is not a chat. A generic
+"you" label on its own is not a link. Select a point to read that detail's words.
+**Check for repeats** compares the details on the page locally: the same wording
+keeps both records and stores the older one as an earlier version; close wording
+is stored only after you confirm; both stay after a refresh; nothing is deleted. Select a person or project to
 filter the library, or choose **Explore detail** to read the original evidence
 and follow **Connected knowledge**. Each connection says whether it shares a
 source or subject, or is an earlier/updated version. Shared subjects are context,
@@ -434,7 +455,8 @@ accepted chat saves to finish.
 After workers finish, the runtime allows up to five seconds for storage and other
 adapter cleanup before tearing down its executor.
 Normal desktop quit requests this shutdown and waits after the UI loop exits.
-See the [implementation contract](docs/agent-memory.md) for scope and validation.
+See [how capture and recall work](docs/memory-capture-and-recall.md) and the
+[implementation contract](docs/agent-memory.md) for scope and validation.
 
 **Settings** keeps preferences: **Appearance** (Light or Dark, and **Text size** from 75% to 200%; also
 **View → Zoom In/Out**, ⌘= / ⌘- / ⌘0), development mode, always-on context, and how the helpers behave.
@@ -468,10 +490,17 @@ conversation and stays accurate after switching models. Streaming follows the la
 scrolling up pauses following until you return to the bottom or use **Jump to latest**.
 Visible model reasoning appears in a collapsible panel with an elapsed-time indicator.
 Enter sends and Shift+Enter adds a line. **Stop** also discards queued prompts.
-Native AG-UI cards and buttons are optional tools for interactive requests, and
-their actions return to the same session with the surface ID and revision.
-Routing simulation remains in **My AI's**. The **Schedules** tab groups recurring prompts and manual run actions; background
-scheduling is not active yet.
+Native AG-UI cards and buttons are optional tools for interactive requests.
+Clicking a button sends that button's label as your next message in the same
+session.
+Routing simulation remains in **My AI's**. Open **Schedules** — or ask in chat, or
+pick **Set a one-time or repeating task** in Skills — to set a task in ordinary
+words (in 1 minute, just once, every weekday at 9, Fridays at 4, every few
+hours). A one-shot fires once and then stops. A confirmed WhatsApp or Telegram
+text on that job goes out at the scheduled time — you do not press Send then.
+A new workspace starts with none.
+Sovra runs them in the background, pauses them, and skips a tick if one is
+already running. A swimlane shows past runs and the next one, with a line for now.
 
 ## Your team and Artifacts
 
@@ -548,7 +577,9 @@ writes commands that work on Windows (PowerShell), macOS or Linux.
   away.
 - Anything else shows a card with the exact command, a one-line explanation and
   plain warnings ("Deletes files", "Uses the internet"). Choose **Allow once**,
-  **Always allow “npm test”** or **Don't allow**.
+  **Always allow “npm test”** or **Don't allow**. If the helper's reply times out
+  while that card is still waiting, **Allow once** and **Always allow** still run
+  the command.
 - Commands that can run arbitrary code or are hard to undo (`rm`, `sudo`,
   `bash -c …`, `curl … | sh`, anything Sovra can't fully read) are asked every
   time and never remembered.
@@ -664,9 +695,9 @@ searching a database. Open **Connections** and choose **Add MCP server** on the 
 servers** card.
 
 **New to this? Choose "Try the sample MCP server".** It's built into Sovra, needs no
-setup and can't touch your files. It adds four tools: roll a dice, tell the time, make a
-checklist, and count words. Then ask in chat: "roll a dice" or "make a picnic checklist
-with bread, jam and lemonade".
+setup and can't touch your files. It adds four tools: roll a dice (shown as a native
+card), tell the time, make a checklist, and count words. Then ask in chat: "roll a dice"
+or "make a picnic checklist with bread, jam and lemonade".
 
 There are three ways to add your own:
 

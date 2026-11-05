@@ -126,6 +126,9 @@ fn main() -> anyhow::Result<()> {
                     .join("connected-services")
                     .join("services.json"),
             ),
+            schedules: Some(Arc::new(sovra_runtime::JsonScheduleStore::new(
+                dirs.data_local_dir().join("schedules.json"),
+            ))),
         },
     )
     .context("failed to start the runtime")?;

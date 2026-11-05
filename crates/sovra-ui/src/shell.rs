@@ -11,8 +11,8 @@ use gpui_kit::{
     Subscription, Task, TestSupportExt as _, Window, div, img,
 };
 use sovra_core::{
-    ChatHistoryFilter, Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScreenRoute,
-    SelectionMode, WorkspaceState,
+    ChatHistoryFilter, Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScheduleCommand,
+    ScheduleStatus, ScreenRoute, SelectionMode, TimelineRange, WorkspaceState,
 };
 
 use crate::RuntimeClient;
@@ -52,6 +52,7 @@ pub struct Shell {
     schedule_cadence_input: Entity<InputState>,
     schedule_prompt_input: Entity<InputState>,
     schedule_form_open: bool,
+    schedule_timeline_range: TimelineRange,
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
     sim_route_input: Entity<InputState>,
@@ -155,11 +156,11 @@ impl Shell {
             cx.new(|cx| InputState::new(window, cx).placeholder("Conversation title"));
         let schedule_name_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Morning Market Check"));
-        let schedule_cadence_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Daily · 08:00 GST"));
+        let schedule_cadence_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("in 1 minute, or every weekday at 9")
+        });
         let schedule_prompt_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Summarize overnight market moves and portfolio alerts.")
+            InputState::new(window, cx).placeholder("Give me a short briefing of what's on today")
         });
         let login_email_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("you@example.com"));
@@ -458,6 +459,7 @@ impl Shell {
                             let _ = client.send(Command::Mcp(sovra_core::mcp::McpCommand::Load));
                             // Restores a saved session or gates the app behind Login.
                             let _ = client.send(Command::Auth(sovra_core::AuthCommand::Load));
+                            let _ = client.send(Command::Schedule(ScheduleCommand::Load));
                         }
                         if let sovra_core::Event::Auth(
                             sovra_core::AuthEvent::GoogleSignInStarted { auth_url },
@@ -622,6 +624,7 @@ impl Shell {
             schedule_cadence_input,
             schedule_prompt_input,
             schedule_form_open: false,
+            schedule_timeline_range: TimelineRange::Hours24,
             login_email_input,
             login_password_input,
             sim_route_input,
@@ -713,11 +716,7 @@ impl Shell {
         self.refresh(cx);
     }
 
-    pub(crate) fn open_memory_source(
-        &mut self,
-        action: sovra_core::MemoryAction,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_memory_source(&mut self, action: sovra_core::MemoryAction, cx: &mut Context<Self>) {
         self.select_tab(NavTab::Knowledge, cx);
         self.memory_view
             .update(cx, |view, cx| view.open_source(action, cx));
@@ -1308,6 +1307,15 @@ impl Shell {
             .create_schedule(&name, &cadence, &prompt)
             .is_some()
         {
+            Self::send_schedule(
+                ScheduleCommand::Create {
+                    name,
+                    cadence,
+                    prompt,
+                    send: None,
+                },
+                cx,
+            );
             self.schedule_name_input.update(cx, |input, cx| {
                 input.set_value("", window, cx);
             });
@@ -1323,6 +1331,12 @@ impl Shell {
     }
 
     pub fn delete_schedule(&mut self, schedule_id: &str, cx: &mut Context<Self>) {
+        Self::send_schedule(
+            ScheduleCommand::Delete {
+                id: schedule_id.to_owned(),
+            },
+            cx,
+        );
         self.state.delete_schedule(schedule_id);
         self.refresh(cx);
     }
@@ -1481,6 +1495,24 @@ impl Shell {
 
     pub fn toggle_schedule(&mut self, schedule_id: &str, cx: &mut Context<Self>) {
         self.state.toggle_schedule(schedule_id);
+        let paused = self
+            .state
+            .schedules
+            .iter()
+            .find(|item| item.id == schedule_id)
+            .is_some_and(|item| item.status == ScheduleStatus::Paused);
+        Self::send_schedule(
+            if paused {
+                ScheduleCommand::Pause {
+                    id: schedule_id.to_owned(),
+                }
+            } else {
+                ScheduleCommand::Resume {
+                    id: schedule_id.to_owned(),
+                }
+            },
+            cx,
+        );
         self.refresh(cx);
     }
 
@@ -1491,11 +1523,31 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         self.state.observe_time(wall_time());
+        let session_id = self.state.session_id.clone();
         if let Some(dispatched) = self.state.trigger_schedule(schedule_id) {
             self.dispatch_runtime_prompt(&dispatched, cx);
             self.persist_active_thread(cx);
+            Self::send_schedule(
+                ScheduleCommand::RunNow {
+                    id: schedule_id.to_owned(),
+                    session_id: Some(session_id),
+                },
+                cx,
+            );
         }
         self.refresh(cx);
+    }
+
+    pub fn set_schedule_timeline_range(&mut self, range: TimelineRange, cx: &mut Context<Self>) {
+        self.schedule_timeline_range = range;
+        self.refresh(cx);
+    }
+
+    fn send_schedule(command: ScheduleCommand, cx: &mut Context<Self>) {
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Schedule(command));
     }
 
     fn dispatch_runtime_prompt(&self, prompt: &str, cx: &mut Context<Self>) {
@@ -1682,10 +1734,14 @@ impl Shell {
                     .into_any_element(),
                     NavTab::Schedules => render_schedules_view(
                         &self.state,
-                        &self.schedule_name_input,
-                        &self.schedule_cadence_input,
-                        &self.schedule_prompt_input,
-                        self.schedule_form_open,
+                        &crate::schedules_view::ScheduleForm {
+                            name: &self.schedule_name_input,
+                            cadence: &self.schedule_cadence_input,
+                            prompt: &self.schedule_prompt_input,
+                            open: self.schedule_form_open,
+                            compact: self.history_compact,
+                            range: self.schedule_timeline_range,
+                        },
                         cx,
                     )
                     .into_any_element(),

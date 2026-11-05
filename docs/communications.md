@@ -24,6 +24,16 @@ still needs a chat that has already written to the bot, or a chat added on that
 person. Sovra does not download a Telegram address book. Looking up people is a
 safe read. Preparing a message stays ordered and does not send.
 
+A confirmed timed WhatsApp or Telegram text is a schedule job with
+`send_channel`, `send_recipient`, and `send_text`. Consent is the create step
+(who, which app, exact wording, when). `send_recipient` is the international
+number starting with `+`, `me`, an exact chat id, or `person:<id>` from
+`find_people`. A first name is refused at create so the job cannot fail only
+when it is due. When that job fires, the runtime transmits on the same
+`send_text` path native Send uses. There is no fire-time review and no model
+approval tool. Live `prepare_message` is unchanged. A failed fire keeps the
+reason on the run so Schedules can show why it didn't finish.
+
 `prepare_message` validates a single text message of up to 4,096 characters and
 creates a native review in the originating chat. It does not send. Repeated
 identical requests in the same turn reuse a review that is still waiting or

@@ -164,6 +164,7 @@ pub(crate) fn tap(
                     | Event::Google(_)
                     | Event::Mcp(_)
                     | Event::Terminal(_)
+                    | Event::Schedule(_)
                     | Event::FilePrepared(_)
                     | Event::FileIndex(_)
                     | Event::ChatHistoryLoaded { .. }

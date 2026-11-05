@@ -71,18 +71,28 @@ pub(crate) fn render_knowledge_view(
             .id("sovra-memory-source-view").test_support()
             .flex_1().min_w_0().min_h_0().h_full().items_center().overflow_y_scroll()
             .p(t.space.medium)
-            .child(v_flex().w_full().min_w_0().flex_shrink_0().max_w(t.layout.reading_width).gap(t.space.small)
+            .child(v_flex().id("knowledge-column").test_support().w_full().min_w_0().flex_shrink_0().max_w(t.layout.reading_width).mx_auto().gap(t.space.small)
                 .child(design::button("memory-back-chat", "Back to conversation", cx)
                     .on_click(cx.listener(|shell, _, _, cx| shell.select_tab(sovra_core::NavTab::Chat, cx))))
                 .child(div().sovra_text(TextRole::Caption, cx).child("The saved record behind this reference. A reference alone does not prove the reply is correct."))
                 .child(shell.memory_view.clone()))
             .into_any_element();
     }
+    // The memory section is a card page with a map, so it gets the wider page measure;
+    // the other sections are prose and forms.
+    let measure = if shell.knowledge_section == KnowledgeSection::Memories {
+        t.layout.page_width
+    } else {
+        t.layout.reading_width
+    };
     let column = v_flex()
+        .id("knowledge-column")
+        .test_support()
         .flex_shrink_0()
         .w_full()
         .min_w_0()
-        .max_w(t.layout.reading_width)
+        .max_w(measure)
+        .mx_auto()
         .gap(t.space.medium);
     let column = match shell.knowledge_section {
         KnowledgeSection::Files => column.child(crate::file_index_view::render(shell, cx)),
@@ -114,7 +124,9 @@ pub(crate) fn render_knowledge_view(
         .id("knowledge-navigation")
         .test_support()
         .w_full()
-        .max_w(t.layout.reading_width)
+        .min_w_0()
+        .max_w(measure)
+        .mx_auto()
         .flex_wrap()
         .gap(t.space.small);
     for (id, label, section) in [

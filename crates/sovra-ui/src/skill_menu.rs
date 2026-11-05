@@ -764,6 +764,7 @@ mod tests {
             argument_hint: String::new(),
             requires_input: false,
             enabled: true,
+            auto_apply: true,
             builtin: false,
             license: None,
             compatibility: None,

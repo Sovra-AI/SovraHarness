@@ -20,6 +20,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use url::Url;
 
+use crate::agui::AgUiWidget;
+
 /// Model Context Protocol revision this client speaks first.
 pub const PROTOCOL_MODERN: &str = "2026-07-28";
 /// Previous Streamable HTTP revision, used only when a server rejects the modern one.
@@ -907,12 +909,14 @@ pub enum McpEvent {
         service_id: String,
         url: String,
     },
-    /// A real tool result. `text` is what the service returned.
+    /// A real tool result. `text` is what the service returned; `widget` is a
+    /// native AG-UI card when the service sent one as structured content.
     ToolResult {
         service_id: String,
         service_name: String,
         tool: String,
         text: String,
+        widget: Option<AgUiWidget>,
         session_id: Option<String>,
     },
 }
@@ -922,6 +926,7 @@ pub fn record_tool_result(state: &mut crate::WorkspaceState, event: &McpEvent) {
     let McpEvent::ToolResult {
         service_name,
         text,
+        widget,
         session_id,
         ..
     } = event
@@ -934,7 +939,7 @@ pub fn record_tool_result(state: &mut crate::WorkspaceState, event: &McpEvent) {
     if state.session_id != *session_id {
         return;
     }
-    state.push_service_reply(service_name, text);
+    state.push_service_reply(service_name, text, widget.clone());
 }
 
 /// Outcome of the first hello to a service.
@@ -1287,6 +1292,18 @@ pub fn parse_tool_text(result: &Value) -> String {
         .unwrap_or_default()
 }
 
+/// Native AG-UI surface a service returned as MCP `structuredContent`, if any.
+///
+/// The sample dice tool uses this so the roll is a card, not only chat text.
+/// Other servers may send the same `protocol: "ag_ui"` envelope.
+pub fn parse_tool_widget(result: &Value) -> Option<AgUiWidget> {
+    let structured = result.get("structuredContent")?;
+    if structured.get("protocol").and_then(Value::as_str) != Some("ag_ui") {
+        return None;
+    }
+    serde_json::from_value(structured.get("widget")?.clone()).ok()
+}
+
 /// A connected tool offered to one chat turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolOffer {
@@ -1309,6 +1326,8 @@ pub struct RemoteCall {
 pub struct RemoteOutput {
     pub service_name: String,
     pub text: String,
+    /// Present when the service returned a native AG-UI card.
+    pub widget: Option<AgUiWidget>,
 }
 
 /// The runtime implements this. The chat adapter calls it; it does not invent results.
@@ -1320,6 +1339,7 @@ pub trait RemoteToolCaller: Send + Sync + std::fmt::Debug {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agui::UiComponent;
 
     #[test]
     fn remote_https_is_accepted_and_other_remote_schemes_are_rejected() {
@@ -1659,6 +1679,7 @@ mod tests {
             service_name: "Recipe box".into(),
             tool: "echo".into(),
             text: "open-service-said-hello".into(),
+            widget: None,
             session_id: Some(session_id),
         }));
         assert_eq!(followed, None);
@@ -1668,5 +1689,49 @@ mod tests {
         let speaker = message.speaker.as_ref().expect("speaker");
         assert_eq!(speaker.name, "Recipe box");
         assert_eq!(speaker.role, "Connected service");
+        assert_eq!(message.widgets, Vec::<AgUiWidget>::new());
+    }
+
+    #[test]
+    fn a_structured_ag_ui_result_is_a_native_card_on_the_service_reply() {
+        let widget = AgUiWidget::Components {
+            surface_id: "sample-dice".into(),
+            version: 1,
+            components: vec![UiComponent::Card {
+                title: "Dice roll".into(),
+                description: "6-sided dice".into(),
+                children: vec![UiComponent::Text {
+                    text: "🎲 You rolled 1".into(),
+                    heading: true,
+                }],
+            }],
+        };
+        let encoded = json!({
+            "content": [{"type": "text", "text": "🎲 You rolled 1 (on a 6-sided dice)."}],
+            "structuredContent": {
+                "protocol": "ag_ui",
+                "widget": widget,
+            }
+        });
+        assert_eq!(
+            parse_tool_text(&encoded),
+            "🎲 You rolled 1 (on a 6-sided dice)."
+        );
+        assert_eq!(parse_tool_widget(&encoded), Some(widget.clone()));
+        assert!(parse_tool_widget(&json!({"structuredContent": {"roll": 1}})).is_none());
+
+        let mut workspace = crate::WorkspaceState::new(0);
+        let session_id = workspace.session_id.clone();
+        workspace.apply_event(&crate::Event::Mcp(McpEvent::ToolResult {
+            service_id: "svc-sample".into(),
+            service_name: "Sovra sample tools".into(),
+            tool: "roll_dice".into(),
+            text: "🎲 You rolled 1 (on a 6-sided dice).".into(),
+            widget: Some(widget.clone()),
+            session_id: Some(session_id),
+        }));
+        let message = workspace.messages.last().expect("reply");
+        assert_eq!(message.author, "Sovra sample tools");
+        assert_eq!(message.widgets, vec![widget]);
     }
 }
