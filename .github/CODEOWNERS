@@ -1,0 +1,3 @@
+# Default reviewers on every pull request.
+# Required-reviewer enforcement needs GitHub Team (see CONTRIBUTING.md).
+* @shaunbarney @pedroclem2

@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- GitHub CI now splits lint, tests and a Windows compile, keeps going on `main`
+  when a new push arrives, and asks every pull request to update the changelog.
+  Contribution workflow, PR template, Dependabot and CODEOWNERS are in the repo
+  so several people can work on it at once. See
+  [CONTRIBUTING.md](CONTRIBUTING.md).
+
 - Terminal: while a command is still running, its stdout and stderr show on the
   card and go into the helper's result — including programs that only flush when
   they think they are talking to a terminal. Stdin stays closed, so a program

@@ -1,0 +1,36 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "⬆️"
+      include: scope
+    labels:
+      - dependencies
+      - skip-changelog
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      rust-patches:
+        patterns: ["*"]
+        update-types: [patch]
+    commit-message:
+      prefix: "⬆️"
+      include: scope
+    labels:
+      - dependencies
+    ignore:
+      # Pinned exactly; bump in a dedicated PR after reading that version's source.
+      - dependency-name: gpui-kit

@@ -1,0 +1,34 @@
+name: Feature
+description: A new capability or a change to an existing one
+title: "✨ "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who is stuck, and what they cannot do today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What Sovra should do instead. User-facing words, not crate names.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chat
+        - Knowledge / memory
+        - Skills
+        - Connections / models
+        - Schedules
+        - Terminal
+        - Packaging / install
+        - Other
+    validations:
+      required: true

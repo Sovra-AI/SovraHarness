@@ -37,7 +37,7 @@ cargo xtask <command>
   dist         Build and verify a single native installer (requires pinned Velopack)
 ";
 
-/// Development tools; the CI subset matches `.github/workflows/ci.yml`.
+/// Development tools; versions match `.github/workflows/ci.yml`.
 const TOOLS: &[&str] = &[
     "cargo-deny@0.20.2",
     "cargo-nextest@0.9.149",

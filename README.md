@@ -752,7 +752,8 @@ in-app update action are not implemented yet.
 
 ## For contributors and AI agents
 
-Workflow and best practices: [`CONTRIBUTING.md`](CONTRIBUTING.md). Canonical rules:
+Day-to-day work goes through pull requests against `main`; CI must be green
+before merge. Workflow and best practices: [`CONTRIBUTING.md`](CONTRIBUTING.md). Canonical rules:
 [`AGENTS.md`](AGENTS.md) (read natively by Codex and Cursor; imported by `CLAUDE.md`
 for Claude Code), plus a short `AGENTS.md` per crate. Reasoning: [`docs/architecture.md`](docs/architecture.md).
 Edits are checked automatically by `cargo xtask hook` (Claude Code + Cursor hooks) and by CI.

@@ -1,49 +1,129 @@
+# Pull requests and pushes to main. Local definition of done remains `cargo xtask ci`.
+#
+# Layout (GitHub Free private-repo minutes; macOS is 10× Linux):
+#   lint     Ubuntu — fmt, layering, styles, deny, shear, clippy
+#   test     macOS  — nextest, including headless GPUI UI tests
+#   compile  Windows — cargo check so the shipped OS still builds
+#   changelog PR-only — CHANGELOG.md must change (label skip-changelog to skip)
+#   CI       aggregator — the single status to require once GitHub Team is on
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 env:
+  CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  gates:
-    name: Gates (fmt, clippy, layering, deny, shear, tests)
-    runs-on: macos-15
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
-      - run: rustup show # installs the toolchain pinned in rust-toolchain.toml
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - run: ./scripts/install-linux-deps.sh
+      - run: rustup show
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
-          tool: cargo-deny@0.20.2,cargo-nextest@0.9.149,cargo-shear@1.14.0
-      - run: cargo xtask ci
+          tool: cargo-deny@0.20.2,cargo-shear@1.14.0
+      - run: cargo fmt --all --check
+      - run: cargo xtask check-deps
+      - run: cargo xtask check-styles
+      - run: cargo deny --all-features check
+      - run: cargo shear
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  build:
-    name: Build + test (${{ matrix.os }})
+  test:
+    name: Test
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - run: rustup show
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-nextest@0.9.149
+      - run: cargo nextest run --workspace --locked --no-tests pass
+
+  compile:
+    name: Compile (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
-      - if: runner.os == 'Linux'
-        run: ./scripts/install-linux-deps.sh
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - run: rustup show
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@v2
+      - run: cargo check --workspace --locked --all-targets
+
+  changelog:
+    name: Changelog
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          tool: cargo-nextest@0.9.149
-      - run: cargo build --workspace --all-targets
-      - run: cargo nextest run --workspace --no-tests pass
+          fetch-depth: 0
+          persist-credentials: false
+      - name: CHANGELOG.md must change on this pull request
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.sha }}
+        run: |
+          if git diff --name-only "$BASE" "$HEAD" | grep -qx CHANGELOG.md; then
+            exit 0
+          fi
+          echo "::error title=Changelog::Update CHANGELOG.md under ## [Unreleased] (CONTRIBUTING.md). Add the skip-changelog label for a docs-only or CI-only change that has nothing to record."
+          exit 1
+
+  CI:
+    name: CI
+    if: always() && !cancelled()
+    needs: [lint, test, compile, changelog]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: All required jobs passed
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "test=${{ needs.test.result }}"
+          echo "compile=${{ needs.compile.result }}"
+          echo "changelog=${{ needs.changelog.result }}"
+          test "${{ needs.lint.result }}" = success
+          test "${{ needs.test.result }}" = success
+          test "${{ needs.compile.result }}" = success
+          case "${{ needs.changelog.result }}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
