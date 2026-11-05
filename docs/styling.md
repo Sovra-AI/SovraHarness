@@ -1,5 +1,8 @@
 # Sovra native styling
 
+The native design system: tokens, both themes, branding, and how layouts
+follow the pane at every window size.
+
 The product design lives in `crates/sovra-ui/src/design/`. GPUI Component receives
 registered **Sovra Dark** and **Sovra Light** themes during `sovra_ui::init`, before
 the first window. Dark is the initial mode, matching the source app. The

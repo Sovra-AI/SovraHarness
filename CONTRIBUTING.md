@@ -1,5 +1,7 @@
 # Contributing to SovraHarness
 
+How Sovra people open a branch, pass CI, and land a pull request on `main`.
+
 This repository is **closed source and proprietary to Sovra** (see
 [LICENSE](LICENSE)). Contributions come from Sovra personnel and authorized
 collaborators only. Do not share code, discussions, or artifacts outside
@@ -23,6 +25,7 @@ Read before writing code:
 - [docs/architecture.md](docs/architecture.md) — why the layering is what it is
 - [docs/development.md](docs/development.md) — the one-shot dev session
 - [docs/styling.md](docs/styling.md) — the native design system (required for UI work)
+- [docs/README.md](docs/README.md) — map of every top-level guide
 
 ## Best practices
 
@@ -79,7 +82,7 @@ plain-English title, description, and example prompt.
 
 | Job         | Runner        | What it proves                                      |
 | ----------- | ------------- | --------------------------------------------------- |
-| Lint        | Ubuntu        | fmt, layering, styles, deny, shear, clippy          |
+| Lint        | Ubuntu        | fmt, layering, styles, docs, deny, shear, clippy    |
 | Test        | macOS         | `cargo nextest` including headless GPUI UI tests    |
 | Compile     | Windows       | `cargo check --workspace --locked --all-targets`    |
 | Changelog   | Ubuntu        | `CHANGELOG.md` changed (pull requests only)         |

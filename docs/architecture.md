@@ -1,12 +1,15 @@
 # Architecture and decisions
 
-Why the repo looks the way it does. The binding, short version for agents is `AGENTS.md`.
-Research date: 2026-10-23; versions verified on crates.io / official release notes.
+Why the crates, the Command/Event protocol, and the adapters are shaped this way.
+The binding short version for agents is [`AGENTS.md`](../AGENTS.md). Graphs in this file match
+`xtask/src/deps.rs` and the [root README](../README.md). Research date: 2026-10-23;
+versions verified on crates.io / official release notes.
 
 ## Priorities
 
-1. **Ease of deployment and use** — one native binary, signed installers, silent auto-update,
-   a polished accessible UI, and `cargo xtask run` as the only onboarding step.
+1. **Ease of deployment and use** — one native binary, signed installers, Velopack
+   update feeds, a polished accessible UI, and `just dev` / `cargo xtask dev` as
+   the onboarding step (one-shot launch; re-run after edits).
 2. **Scalable without repetition** — boundaries enforced by tools, one obvious place for each
    kind of code, extension points that make "add a provider/tool" one struct + one impl.
 3. **Agent-proof** — the same rules for Codex, Cursor and Claude Code, enforced by the same
@@ -42,9 +45,48 @@ Following matklad's "Large Rust Workspaces" and the layout of Zed/uv: a virtual 
 flat `crates/sovra-*`, every dependency/lint/package field inherited from the workspace, and
 resolver 3 (MSRV-aware resolution).
 
+```mermaid
+flowchart TB
+  app["sovra-app<br/>composition root"]
+  ui["sovra-ui"]
+  runtime["sovra-runtime"]
+  core["sovra-core"]
+  subgraph adapters["adapters"]
+    adk["sovra-adk"]
+    files["sovra-files"]
+    skills["sovra-skills"]
+    google["sovra-google"]
+    providers["sovra-providers"]
+    store["sovra-store-surreal"]
+    wa["sovra-whatsapp"]
+    tg["sovra-telegram"]
+  end
+  app --> ui
+  app --> runtime
+  app --> files
+  app --> google
+  app --> providers
+  app --> skills
+  app --> store
+  app --> wa
+  app --> tg
+  ui --> runtime
+  ui --> core
+  runtime --> core
+  runtime --> adk
+  runtime --> providers
+  adk --> core
+  files --> core
+  skills --> core
+  google --> core
+  providers --> core
+  store --> core
+  wa --> core
+  tg --> core
+```
+
 - `sovra-core` is a functional core (no IO/async/GUI) so domain logic is deterministic and
-  trivially testable; adapters (`runtime`, `ui`, later `provider-*`, `store`, `secrets`, `mcp`)
-  surround it; `sovra-app` is the only composition root.
+  trivially testable; adapters surround it; `sovra-app` is the only composition root.
 - Crates are split for distinct dependency sets or real boundaries (compile-time isolation:
   only `sovra-ui` rebuilds when GPUI changes), not for tidiness.
 - Enforcement: `cargo xtask check-deps` (layering + external-crate ownership + lint
@@ -64,6 +106,14 @@ GPUI owns the main thread and has its own executor; tokio runs on a dedicated ba
 thread. They communicate only through `Command`/`Event` enums (defined in `sovra-core`) over
 `async-channel`, which works on any executor. Consequences: the UI never blocks, never sees
 tokio, and UI tests replace the runtime with `Client::loopback()`.
+
+```mermaid
+flowchart LR
+  ui["sovra-ui"] -->|"Command"| client["sovra_runtime::Client"]
+  client -->|"Event"| ui
+  client --> runtime["sovra-runtime"]
+  runtime --> core["sovra-core"]
+```
 
 ### Errors, logging
 
@@ -176,16 +226,13 @@ account worker and the loopback listener, and keeps sign-in events out of conver
 memory and messaging replies. `MemoryStore::load_auth` / `save_auth` persist accounts
 and the active session in SurrealDB's existing `team:auth` record; refresh tokens
 use the providers' credential store. The app reads optional Google client configuration
-at startup. Account creation, startup session restoration and the Google browser
-hand-off still need UI integration; see [development notes](development.md#sign-in-integration-status).
+at startup. The desktop sign-in flow is wired end to end; remaining polish is listed in
+[development notes](development.md#sign-in-integration-status).
 
-### Planned (create the crate when the first feature needs it)
-
-- Secrets: `keyring` v4 (`keyring-core` + native stores) — API keys in the OS keychain.
-- Providers: one `sovra-provider-*` crate per API behind a `sovra-core` trait.
-
-Connected services (MCP) live in `sovra-runtime/src/mcp*`: a hand-written Streamable HTTP
-client for web addresses and the `rmcp` client for programs on this computer. See
+OS keychain storage lives in `sovra-providers`. Catalog HTTP lives there too, behind the
+core `ModelProvider` port — not a family of `sovra-provider-*` crates. Connected services
+(MCP) live in `sovra-runtime/src/mcp*`: a hand-written Streamable HTTP client for web
+addresses and the `rmcp` client for programs on this computer. See
 [Connected services](connected-services.md).
 
 ### Agent rules: one source of truth

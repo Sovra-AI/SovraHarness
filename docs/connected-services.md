@@ -1,5 +1,8 @@
 # MCP servers (connected services)
 
+How extra tools are added from a web address, a program on this computer, or
+pasted setup, including the built-in sample server.
+
 In the app this is the **MCP servers** card in **Connections** (the button is **Add MCP
 server**). The code calls them "services".
 

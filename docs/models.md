@@ -1,5 +1,7 @@
 # Model library
 
+How the **Models** tab connects an AI service, lists the catalog, and picks a chat model.
+
 Start in **Models**. The setup screen uses a state-aware 2-step stepper (`1 · Connect an AI service` → `2 · Pick your AI` → chat) that only shows what is still needed for your saved setup:
 
 1. **Connect OpenRouter** opens the guided account-key form (with a 1-click **Get Free Key at openrouter.ai ↗** browser button). Paste and save your connection key; release builds store it in the OS credential store (`keyring`), and a masked preview (`sk-or-••••1234`) stays visible so you can verify, test, replace, or remove it anytime.
@@ -131,8 +133,8 @@ successful result and an error status. Full catalog responses are bounded at
 owns HTTP, keychain and metadata storage behind `ModelProvider`;
 `sovra-runtime` owns background tasks, cancellation and selected execution;
 `sovra-adk` configures provider clients; `sovra-ui` renders native controls.
-No network or keychain work runs on the UI thread. Development still uses the
-persistent [tmux live-reload session](development.md).
+No network or keychain work runs on the UI thread. Development uses the
+one-shot [native launch](development.md) (`cargo xtask dev`; re-run after edits).
 
 ## Primary references
 

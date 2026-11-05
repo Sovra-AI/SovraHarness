@@ -1,7 +1,9 @@
 # File understanding and live folder reading
 
 How Sovra decides **what a file is**, **what it is about**, and **what a person sees while a
-folder is being read**. Code: `crates/sovra-core/src/file_index/ontology.rs` (taxonomy),
+folder is being read**.
+
+Code: `crates/sovra-core/src/file_index/ontology.rs` (taxonomy),
 `crates/sovra-core/src/file_index/live.rs` (wording and estimates),
 `crates/sovra-files/src/index/scan*` (parallel reader), and
 `crates/sovra-ui/src/file_index_view/live.rs` (panel). Research checked 2026-10-31.

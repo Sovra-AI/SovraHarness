@@ -13,6 +13,7 @@ mod clean_cache;
 mod deps;
 mod dev;
 mod dist;
+mod docs;
 mod hook;
 mod styles;
 
@@ -29,10 +30,11 @@ cargo xtask <command>
   run          Run the desktop app (debug build, without SOVRA_DEV)
   clean-cache  Report / reclaim Cargo target (and optional ~/.cargo) disk use when idle
                Prefer `just clear-cache` to reclaim reclaimable build artefacts
-  ci           Every gate CI runs: fmt, clippy, check-deps, check-styles, deny, shear, tests
+  ci           Every gate CI runs: fmt, clippy, check-deps, check-styles, check-docs, deny, shear, tests
   fix          Auto-fix: cargo fmt + clippy --fix
   check-deps   Enforce the crate layering rules (see xtask/src/deps.rs)
   check-styles Enforce the UI colour boundary and single SVG brand asset
+  check-docs   Enforce README mermaid graphs and that docs markdown links resolve
   hook         Agent post-edit hook: reads hook JSON on stdin, checks the edited file
   dist         Build and verify a single native installer (requires pinned Velopack)
 ";
@@ -65,6 +67,7 @@ fn dispatch(args: &[String]) -> anyhow::Result<ExitCode> {
         Some("fix") => fix()?,
         Some("check-deps") => deps::check(&root()?)?,
         Some("check-styles") => styles::check(&root()?)?,
+        Some("check-docs") => docs::check(&root()?)?,
         Some("hook") => return Ok(hook::run(&root()?)),
         Some("dist") => dist::run(&root()?)?,
         Some("help" | "-h" | "--help") | None => print!("{HELP}"),
@@ -96,6 +99,7 @@ fn ci() -> anyhow::Result<()> {
     })?;
     step("check-deps", || deps::check(&root()?))?;
     step("check-styles", || styles::check(&root()?))?;
+    step("check-docs", || docs::check(&root()?))?;
     step("deny", || cargo(&["deny", "--all-features", "check"]))?;
     step("shear", || cargo(&["shear"]))?;
     step("test", || {

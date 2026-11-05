@@ -1,5 +1,8 @@
 # Test the running app through MCP
 
+How to inspect and operate the running native window from Codex or Claude Code
+after a one-shot `cargo xtask dev` launch.
+
 `cargo xtask dev` starts **Development mode** automatically in debug builds with
 `SOVRA_DEV=1`, as explicitly requested for this workspace. The top bar says
 **Development mode** and opens Settings when clicked. Turn it off there to revoke

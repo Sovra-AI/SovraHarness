@@ -1,8 +1,11 @@
 # Skills and local file knowledge
 
-Implementation record for the 2026-10-25 request. This is an active implementation,
-not a claim that the items below have shipped. The reference supplied with the request
-is `pasted-text-1.txt` (48,618 bytes), read in full before design work.
+What the Skills page, slash commands, folder indexing and file knowledge do,
+plus the dated implementation log from the 2026-10-25 request. Dated sections
+below are a log: they mention an old Watchexec session this repo no longer uses.
+Current launch: [development.md](development.md). Current file behavior:
+[files.md](files.md) and [file-ontology.md](file-ontology.md). The reference
+supplied with the original request was `pasted-text-1.txt` (48,618 bytes).
 
 ## Automatic skill application (2026-11-03)
 

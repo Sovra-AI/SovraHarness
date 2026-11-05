@@ -18,6 +18,7 @@ async, Velopack for install + auto-update. Rust 1.99.1 (pinned), edition 2024.
 | Auto-fix fmt + clippy   | `cargo xtask fix`           |
 | Layering check only     | `cargo xtask check-deps`    |
 | Styling check only      | `cargo xtask check-styles`  |
+| Docs links + mermaid    | `cargo xtask check-docs`    |
 | One crate's tests       | `cargo nextest run -p <crate>` (or `cargo test -p <crate>`) |
 | Install dev tools       | `cargo xtask setup`         |
 | Release build + package | `cargo xtask dist`          |

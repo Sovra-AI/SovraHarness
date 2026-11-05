@@ -1,5 +1,8 @@
 # Terminal access
 
+How Sovra runs commands on this computer, with Allow once / Always allow on a
+chat card.
+
 Sovra can run commands on the person's computer through one tool,
 `run_terminal_command`. The person stays in charge: anything that changes files,
 installs software or uses the internet waits for their answer on a card in the

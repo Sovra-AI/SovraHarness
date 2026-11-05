@@ -1,5 +1,8 @@
 # Messaging from chat
 
+How WhatsApp, Telegram, and sending a message from the desktop chat work, including
+who is answered and what stays private.
+
 The desktop orchestrator offers `CommunicationsAgent` when a messaging adapter is
 available. Its tools reach the existing connections actor through a core port
 bound to the desktop conversation. Normal chat and attachment turns both carry

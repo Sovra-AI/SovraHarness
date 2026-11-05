@@ -15,7 +15,7 @@ dev:
 run:
     cargo xtask run
 
-# Run all CI gates: fmt, clippy, check-deps, check-styles, deny, shear, tests
+# Run all CI gates: fmt, clippy, check-deps, check-styles, check-docs, deny, shear, tests
 ci:
     cargo xtask ci
 
@@ -30,6 +30,10 @@ check-deps:
 # Enforce UI colour boundary and single SVG brand asset
 check-styles:
     cargo xtask check-styles
+
+# Enforce README mermaid graphs and that docs markdown links resolve
+check-docs:
+    cargo xtask check-docs
 
 # Report Cargo target disk use (passthrough: status / reclaim / flags)
 clean-cache *args:

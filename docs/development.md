@@ -1,5 +1,8 @@
 # Native development
 
+How to build and launch SovraHarness locally: a one-shot `cargo xtask dev`,
+no file-watcher reload, and how Development mode stores keys.
+
 `cargo xtask dev` is a **manual, one-shot** debug launch. It builds and runs the
 app once with `SOVRA_DEV=1`. There is **no file watcher and no auto-reload**.
 After you edit Rust, manifests or assets, run `cargo xtask dev` again yourself

@@ -1,8 +1,8 @@
 # Agent memory: research and implementation contract
 
-How a chat turn is captured and how a later question recalls it is documented
-in [memory capture and recall](memory-capture-and-recall.md). This file is the
-audit history and the measured limits.
+Dated audit log and measured limits for memory. The current capture and recall
+contract is [memory capture and recall](memory-capture-and-recall.md). This file
+is the history of investigations, not the day-to-day guide.
 
 ## Runtime input tracking — 2026-11-03
 
@@ -1206,7 +1206,7 @@ Regression coverage includes:
 
 Verification on the shared macOS checkout: `NEXTEST_TEST_THREADS=4 cargo xtask ci`
 passed every gate, with **744 tests passed and seven opt-in tests skipped**.
-The [complete CI log](evaluations/helper-context-2026-11-01/ci.log) records the result,
+The complete CI log from that checkout (not retained in `docs/evaluations/`) recorded the result,
 including the concurrent document-tool changes. Four test workers avoided the
 startup timeout seen when multiple full CI suites competed for resources; test
 deadlines and assertions were unchanged. This supersedes the earlier shared-checkout
@@ -1289,7 +1289,7 @@ capture and recall in an isolated store, without adding test memories to your da
 
 `cargo xtask ci` passed every gate in the verification checkout based on `6e3185b`
 with these knowledge and build-runner changes, excluding the concurrent MCP work:
-**677 tests passed, six opt-in tests skipped**. The [complete CI log](evaluations/knowledge-2026-10-31/ci.log)
+**677 tests passed, six opt-in tests skipped**. The complete CI log from that checkout (not retained in `docs/evaluations/`)
 records formatting, Clippy, layering, styling, dependency policy, unused dependency
 checks and tests. The opt-in live smoke check above was run separately. All 100 UI
 tests also passed together with fail-fast disabled; the native renderer produced
@@ -1298,7 +1298,7 @@ tests also passed together with fail-fast disabled; the native renderer produced
 At that 2026-10-31 checkpoint, the shared checkout's `cargo xtask ci` reached Clippy but could not compile the
 separate MCP work: `Event::Mcp` is unhandled in `sovra-runtime/src/connections.rs`
 and `sovra-runtime/src/lib.rs`, and `Command::Mcp` is unhandled in the runtime
-command loop ([failed shared CI log](evaluations/knowledge-2026-10-31/shared-ci.log)).
+command loop (failed shared CI log from that checkout, not retained in `docs/evaluations/`).
 This also prevented the development watcher from launching that
 shared app. The existing `xtask dev` / Watchexec supervisor remained running; it was
 not replaced with a verification binary. At that checkpoint the combined checkout

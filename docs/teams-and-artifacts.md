@@ -1,5 +1,8 @@
 # Teams and artifacts
 
+How a group of helpers answers in chat, and how anything worth keeping is saved
+as an artifact.
+
 Two features that work together:
 
 - **Teams:** a group of AI helpers, each with a different speciality, who answer

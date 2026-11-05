@@ -1,5 +1,8 @@
 # File reading in chat
 
+How the paperclip attaches files to a chat message, what readers extract, and
+how the document-reader helper covers long documents.
+
 The native paperclip opens the system file picker. Users can select multiple files,
 watch preparation, remove a file, and send a question or just the files. There is
 no upload to a provider during preparation. The composer explains that sending

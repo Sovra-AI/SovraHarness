@@ -1,9 +1,8 @@
 # Memory capture and recall
 
 How one chat turn becomes a saved record, and how a later question gets that
-record back. This is the behavior of **this** desktop app. The audit history
-and measured limits live in [agent-memory.md](agent-memory.md). This document
-is the capture and recall reference.
+record back. This is the current contract for **this** desktop app. The audit
+history and measured limits live in [agent-memory.md](agent-memory.md) (a log).
 
 The questions below follow the personal-memory checklist in SovraSRX
 (`SovraSRXProduction/docs/memory/personal-memory-system.md`, capture, provenance,
@@ -46,6 +45,24 @@ Remembering can be off. `record_user` then returns without a receipt, and
 recall returns no reader.
 
 ## One ordinary chat turn
+
+```mermaid
+sequenceDiagram
+  participant Person
+  participant UI as sovra-ui
+  participant Runtime as sovra-runtime
+  participant Store as MemoryStore
+  participant Model as ADK / model
+  Person->>UI: Send message
+  UI->>Runtime: Command::RunPrompt
+  Runtime->>Store: record episode
+  Runtime->>Store: recall current facts
+  Runtime->>Model: generate reply
+  Model-->>Runtime: tokens
+  Runtime-->>UI: Event stream
+  UI-->>Person: reply
+  Runtime->>Store: extract fact later
+```
 
 Follow a private chat message such as "I am vegan".
 

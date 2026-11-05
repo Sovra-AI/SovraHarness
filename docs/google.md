@@ -1,5 +1,8 @@
 # Google in Sovra
 
+How a person connects their Google account from **Connections** and what each
+service switch allows.
+
 Sovra connects to a person's own Google account from the **Connections** tab: one
 **Connect Google** button, Google's own sign-in page in their browser, and a
 switch per service afterwards. The agent then gets tools for the services that

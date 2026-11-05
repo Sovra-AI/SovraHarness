@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- README is a short front door: quick start, command table, mermaid graphs of
+  crate layering, `Command`/`Event`, and one chat turn through memory, then a
+  map of the guides. Top-level docs each open with a purpose sentence.
+  `cargo xtask check-docs` fails if those graphs or relative markdown links
+  go missing.
+
 - GitHub CI now splits lint, tests and a Windows compile, keeps going on `main`
   when a new push arrives, and asks every pull request to update the changelog.
   Contribution workflow, PR template, Dependabot and CODEOWNERS are in the repo
