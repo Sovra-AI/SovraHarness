@@ -69,7 +69,7 @@ bzip2-rs = "0.1.2"
 lzma-rust2 = { version = "0.23.0", default-features = false, features = ["std", "xz", "lzip"] }
 ruzstd = "0.9.1"
 # HTML parsing for reading web pages the search helper opens (pure Rust, html5ever).
-scraper = { version = "0.27.0", default-features = false }
+scraper = { version = "0.29.0", default-features = false }
 # 0.39 (libsqlite3-sys 0.37): Cargo links one SQLite per binary, and the WhatsApp client's
 # credential store (`whatsapp-rust-sqlite-storage`, via diesel) pins libsqlite3-sys 0.37.
 rusqlite = { version = "0.39.0", default-features = false, features = ["bundled", "serialize", "limits", "hooks", "functions"] }
