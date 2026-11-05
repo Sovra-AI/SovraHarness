@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use sovra_core::communications::MessageDelivery;
 use sovra_core::connections::{
-    ChannelError, ChannelEvent, ChannelSession, ChannelSink, ChannelStartOptions,
-    ConnectionCommand, ConnectionEvent, LinkedDevice, MessagingChannel, TelegramStatus,
-    WhatsAppStatus,
+    AddressBookSnapshot, ChannelError, ChannelEvent, ChannelSession, ChannelSink,
+    ChannelStartOptions, ConnectionCommand, ConnectionEvent, LinkedDevice, MessagingChannel,
+    SyncedGroup, TelegramStatus, WhatsAppStatus,
 };
 use sovra_core::people::SyncedContact;
 use sovra_core::{AgentConfig, Command, Event, Timestamp};
@@ -58,15 +58,21 @@ impl MessagingChannel for ScriptedWhatsApp {
         Ok(())
     }
 
-    async fn pull_contacts(&self) -> Result<Vec<SyncedContact>, ChannelError> {
+    async fn pull_contacts(&self) -> Result<AddressBookSnapshot, ChannelError> {
         self.entered.store(true, Ordering::SeqCst);
         let _ = self.release.recv().await;
         self.finished.store(true, Ordering::SeqCst);
-        Ok(vec![SyncedContact {
-            name: "Sam Rivera".into(),
-            phone: "+447700900111".into(),
-            removed: false,
-        }])
+        Ok(AddressBookSnapshot {
+            contacts: vec![SyncedContact {
+                name: "Sam Rivera".into(),
+                phone: "+447700900111".into(),
+                removed: false,
+            }],
+            groups: vec![SyncedGroup {
+                id: "120363111@g.us".into(),
+                subject: "School Gate".into(),
+            }],
+        })
     }
 }
 
@@ -309,6 +315,14 @@ async fn synced_contact_can_be_prepared_before_they_write_and_a_stalled_pull_doe
             .any(|person| person.title() == "Sam Rivera")
     );
     assert!(whatsapp.finished.load(Ordering::SeqCst));
+    wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::GroupsChanged(groups))
+                if groups.iter().any(|group| group.subject == "School Gate")
+        )
+    })
+    .await;
 
     client
         .send(Command::Connections(ConnectionCommand::Load))
@@ -321,6 +335,19 @@ async fn synced_contact_can_be_prepared_before_they_write_and_a_stalled_pull_doe
         unreachable!()
     };
     assert_eq!(state.recent_messages.len(), 0);
+    assert!(
+        state
+            .people
+            .people
+            .iter()
+            .any(|person| person.title() == "Sam Rivera")
+    );
+    assert!(
+        state
+            .groups
+            .iter()
+            .any(|group| group.id == "120363111@g.us" && group.subject == "School Gate")
+    );
 
     client
         .send(Command::Connections(ConnectionCommand::PrepareMessage {
@@ -344,6 +371,30 @@ async fn synced_contact_can_be_prepared_before_they_write_and_a_stalled_pull_doe
     assert_eq!(draft.recipient_label, "Sam Rivera");
     assert_eq!(draft.delivery, MessageDelivery::Review);
     assert_eq!(draft.text, NOTE);
+    assert_eq!(whatsapp.session.sent.lock().expect("sent").len(), 0);
+
+    client
+        .send(Command::Connections(ConnectionCommand::PrepareMessage {
+            session_id: "desktop".into(),
+            channel: sovra_core::connections::ChannelKind::WhatsApp,
+            recipient: "School Gate".into(),
+            text: NOTE.into(),
+        }))
+        .expect("prepare group");
+    let group_prepared = wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::OutboundChanged(draft))
+                if draft.recipient == "120363111@g.us"
+        )
+    })
+    .await;
+    let Event::Connections(ConnectionEvent::OutboundChanged(group_draft)) = group_prepared else {
+        unreachable!()
+    };
+    assert_eq!(group_draft.recipient, "120363111@g.us");
+    assert_eq!(group_draft.recipient_label, "School Gate");
+    assert_eq!(group_draft.delivery, MessageDelivery::Review);
     assert_eq!(whatsapp.session.sent.lock().expect("sent").len(), 0);
 
     whatsapp.emit(ChannelEvent::Contacts(vec![SyncedContact {
@@ -389,12 +440,14 @@ async fn synced_contact_can_be_prepared_before_they_write_and_a_stalled_pull_doe
     let Event::Connections(ConnectionEvent::Loaded(state)) = loaded else {
         unreachable!()
     };
-    assert_eq!(state.outbound_messages.len(), 1);
+    assert_eq!(state.outbound_messages.len(), 2);
     assert_eq!(
         state.outbound_messages[0].recipient,
         "447700900111@s.whatsapp.net"
     );
     assert_eq!(state.outbound_messages[0].delivery, MessageDelivery::Review);
+    assert_eq!(state.outbound_messages[1].recipient, "120363111@g.us");
+    assert_eq!(state.outbound_messages[1].delivery, MessageDelivery::Review);
     assert!(matches!(
         state.whatsapp,
         WhatsAppStatus::Connected { online: true, .. }

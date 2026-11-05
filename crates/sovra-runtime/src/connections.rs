@@ -44,7 +44,7 @@ enum Input {
     /// A background contact pull finished. A stale generation is ignored.
     ContactsPulled {
         generation: u64,
-        pulled: Result<Vec<sovra_core::people::SyncedContact>, ChannelError>,
+        pulled: Result<sovra_core::connections::AddressBookSnapshot, ChannelError>,
     },
 }
 
@@ -344,13 +344,16 @@ impl Actor {
                 Input::ContactsPulled { generation, pulled } => {
                     if generation == self.contact_generation {
                         match pulled {
-                            Ok(contacts) if contacts.is_empty() => {
+                            Ok(snapshot) if snapshot.is_empty() => {
                                 if self.state.people.people.is_empty() {
                                     self.state.people.note_empty_sync();
                                     self.publish_people().await;
                                 }
                             }
-                            Ok(contacts) => self.fold_contacts(contacts).await,
+                            Ok(snapshot) => {
+                                self.fold_contacts(snapshot.contacts).await;
+                                self.fold_groups(snapshot.groups).await;
+                            }
                             Err(_) => {
                                 self.state.people.note_pull_failed();
                                 self.publish_people().await;
@@ -800,6 +803,7 @@ impl Actor {
             }
             ChannelEvent::Message(message) => self.whatsapp_message(message).await,
             ChannelEvent::Contacts(contacts) => self.fold_contacts(contacts).await,
+            ChannelEvent::Groups(groups) => self.fold_groups(groups).await,
         }
     }
 
@@ -835,7 +839,8 @@ impl Actor {
             | ChannelEvent::PairingCode { .. }
             | ChannelEvent::PairingCodeFailed { .. }
             | ChannelEvent::Scanned { .. }
-            | ChannelEvent::Contacts(_) => {}
+            | ChannelEvent::Contacts(_)
+            | ChannelEvent::Groups(_) => {}
             ChannelEvent::Connected { device } => {
                 let bot_username = device.phone_display.trim_start_matches('@').to_owned();
                 let status = match &self.state.telegram {
@@ -1177,8 +1182,23 @@ impl Actor {
         }
     }
 
+    async fn fold_groups(&mut self, groups: Vec<sovra_core::connections::SyncedGroup>) {
+        if groups.is_empty() {
+            return;
+        }
+        if self.state.upsert_groups(&groups) {
+            self.publish_groups().await;
+        }
+    }
+
     async fn publish_people(&mut self) {
         self.emit(ConnectionEvent::PeopleChanged(self.state.people.clone()))
+            .await;
+        self.save().await;
+    }
+
+    async fn publish_groups(&mut self) {
+        self.emit(ConnectionEvent::GroupsChanged(self.state.groups.clone()))
             .await;
         self.save().await;
     }

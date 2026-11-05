@@ -124,8 +124,9 @@ pub fn validate_message(text: &str) -> Result<(), ChannelError> {
 }
 
 /// Accept `self`, an exact observed direct-chat id, an explicit international
-/// `WhatsApp` phone number, or one saved person. A name that matches more than
-/// one person is never resolved to the first.
+/// `WhatsApp` phone number, one saved person, or a unique stored `WhatsApp`
+/// group (exact group id or unique subject). A name that matches more than
+/// one person or group is never resolved to the first.
 pub fn resolve_recipient(
     state: &ConnectionsState,
     channel: ChannelKind,
@@ -161,10 +162,36 @@ pub fn resolve_recipient(
             "More than one saved person matches that name. Say the full name instead of guessing."
                 .into(),
         )),
-        NameMatch::None => Err(ChannelError::Failed(
-            "Choose 'me' or an exact chat id from recent chats. For WhatsApp you may also give a phone number starting with + and its country code, or the full name of one saved person. Ask when more than one person matches. Telegram recipients must have contacted this bot first, unless you add that chat on the person.".into(),
-        )),
+        NameMatch::None => resolve_group_or_unknown(state, channel, input),
     }
+}
+
+fn resolve_group_or_unknown(
+    state: &ConnectionsState,
+    channel: ChannelKind,
+    input: &str,
+) -> Result<(String, String), ChannelError> {
+    if channel == ChannelKind::WhatsApp {
+        match state.resolve_group(input) {
+            crate::connections::GroupMatch::One(group) => {
+                let label = if group.subject.is_empty() {
+                    group.id.clone()
+                } else {
+                    group.subject.clone()
+                };
+                return Ok((group.id.clone(), label));
+            }
+            crate::connections::GroupMatch::Many => {
+                return Err(ChannelError::Failed(
+                    "More than one WhatsApp group matches that name. Use the exact group id instead of guessing.".into(),
+                ));
+            }
+            crate::connections::GroupMatch::None => {}
+        }
+    }
+    Err(ChannelError::Failed(
+        "Choose 'me' or an exact chat id from recent chats. For WhatsApp you may also give a phone number starting with + and its country code, the full name of one saved person, a unique WhatsApp group name, or the group's exact id. Ask when more than one person or group matches. Telegram recipients must have contacted this bot first, unless you add that chat on the person.".into(),
+    ))
 }
 
 /// Recipients a timed send may store without a live people or chat lookup.
@@ -195,11 +222,11 @@ pub fn concrete_scheduled_recipient(channel: ChannelKind, input: &str) -> Result
                     return Ok(());
                 }
             }
-            if direct_chat(channel, input) {
+            if direct_chat(channel, input) || crate::connections::is_whatsapp_group_id(input) {
                 return Ok(());
             }
             Err(ChannelError::Failed(
-                "For a timed WhatsApp, use the international phone number starting with +, me, an exact chat id, or person:<id> from a people lookup. A first name alone is not enough.".into(),
+                "For a timed WhatsApp, use the international phone number starting with +, me, an exact chat id, a WhatsApp group id, or person:<id> from a people lookup. A first name alone is not enough.".into(),
             ))
         }
         ChannelKind::Telegram => {
@@ -262,6 +289,37 @@ mod tests {
     }
 
     #[test]
+    fn a_unique_stored_group_is_a_review_recipient_and_an_ambiguous_subject_is_not() {
+        let mut state = ConnectionsState::default();
+        let own = "15550000000@s.whatsapp.net";
+        state.upsert_groups(&[crate::connections::SyncedGroup {
+            id: "120363111@g.us".into(),
+            subject: "School Gate".into(),
+        }]);
+        let (jid, label) =
+            resolve_recipient(&state, ChannelKind::WhatsApp, "School Gate", own).unwrap();
+        assert_eq!(jid, "120363111@g.us");
+        assert_eq!(label, "School Gate");
+        assert_eq!(
+            resolve_recipient(&state, ChannelKind::WhatsApp, "120363111@g.us", own)
+                .unwrap()
+                .0,
+            "120363111@g.us"
+        );
+        state.upsert_groups(&[crate::connections::SyncedGroup {
+            id: "120363222@g.us".into(),
+            subject: "School Gate".into(),
+        }]);
+        let ambiguous =
+            resolve_recipient(&state, ChannelKind::WhatsApp, "School Gate", own).unwrap_err();
+        assert!(
+            ambiguous.to_string().contains("More than one"),
+            "{ambiguous}"
+        );
+        assert!(resolve_recipient(&state, ChannelKind::WhatsApp, "120363222@g.us", own).is_ok());
+    }
+
+    #[test]
     fn timed_send_stores_a_number_or_saved_id_not_a_first_name() {
         assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "Ryan").is_err());
         assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "Anna").is_err());
@@ -273,6 +331,7 @@ mod tests {
             concrete_scheduled_recipient(ChannelKind::WhatsApp, "447347529758@s.whatsapp.net")
                 .is_ok()
         );
+        assert!(concrete_scheduled_recipient(ChannelKind::WhatsApp, "120363@g.us").is_ok());
         assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "Ryan").is_err());
         assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "123456").is_ok());
         assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "me").is_ok());

@@ -64,7 +64,7 @@ impl Skill {
             "presentation" => "Slide deck & talk outliner",
             "document-author" => "Polite letter & report writer",
             "spreadsheet" => "Household budget & table builder",
-            "communications" => "Send a WhatsApp or Telegram message",
+            "communications" => "Send a WhatsApp, Telegram, or group message",
             "google-workspace" => "Gmail, Calendar & Drive helper",
             "microsoft-workspace" => "Outlook, Word & Excel helper",
             "scheduler" => "Set a one-time or repeating task, including a timed text",

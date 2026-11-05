@@ -433,12 +433,55 @@ pub struct ConnectionsState {
     /// People this computer can message. A missing field on older saves starts empty.
     #[serde(default)]
     pub people: crate::people::PeopleBook,
+    /// `WhatsApp` groups this account is in. A group is a chat, not a person.
+    #[serde(default)]
+    pub groups: Vec<SyncedGroup>,
     /// Live probe results. Not saved: a restart reads each link again.
     #[serde(default, skip)]
     pub probed: std::collections::BTreeMap<
         crate::connection_catalogue::CatalogueKind,
         crate::connection_catalogue::LinkPhase,
     >,
+}
+
+/// A `WhatsApp` group the linked account participates in. Not a person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncedGroup {
+    /// Stable group id (`<id>@g.us`).
+    pub id: String,
+    /// The subject shown on the phone. Empty until the live session names it.
+    pub subject: String,
+}
+
+/// Contacts and groups known to a linked `WhatsApp` session.
+///
+/// An empty snapshot must not invent people or groups, and must not wipe
+/// anyone already saved.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AddressBookSnapshot {
+    pub contacts: Vec<crate::people::SyncedContact>,
+    pub groups: Vec<SyncedGroup>,
+}
+
+impl AddressBookSnapshot {
+    pub fn is_empty(&self) -> bool {
+        self.contacts.is_empty() && self.groups.is_empty()
+    }
+}
+
+/// What a typed `WhatsApp` group name or id means. More than one match is never
+/// collapsed to the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupMatch<'a> {
+    None,
+    One(&'a SyncedGroup),
+    Many,
+}
+
+/// True for a `WhatsApp` group chat id (`<id>@g.us`).
+pub fn is_whatsapp_group_id(chat: &str) -> bool {
+    chat.split_once('@')
+        .is_some_and(|(user, server)| !user.is_empty() && server == "g.us")
 }
 
 /// Commands sent from the UI to `sovra-runtime` for personal connections.
@@ -529,6 +572,8 @@ pub enum ConnectionEvent {
     KindProbed(crate::connection_catalogue::ProbeReport),
     /// The people list changed. Other connection rows are untouched.
     PeopleChanged(crate::people::PeopleBook),
+    /// Stored `WhatsApp` groups changed. People and other rows are untouched.
+    GroupsChanged(Vec<SyncedGroup>),
 }
 
 impl ConnectionsState {
@@ -608,8 +653,69 @@ impl ConnectionsState {
             ConnectionEvent::PeopleChanged(people) => {
                 self.people.clone_from(people);
             }
+            ConnectionEvent::GroupsChanged(groups) => {
+                self.groups.clone_from(groups);
+            }
         }
     }
+
+    /// Record participating groups by stable id. An empty list is not a wipe.
+    /// A group is never stored as a person.
+    pub fn upsert_groups(&mut self, groups: &[SyncedGroup]) -> bool {
+        let mut changed = false;
+        for incoming in groups {
+            if !is_whatsapp_group_id(&incoming.id) {
+                continue;
+            }
+            if let Some(saved) = self.groups.iter_mut().find(|saved| saved.id == incoming.id) {
+                if !incoming.subject.is_empty() && saved.subject != incoming.subject {
+                    saved.subject.clone_from(&incoming.subject);
+                    changed = true;
+                }
+            } else {
+                self.groups.push(SyncedGroup {
+                    id: incoming.id.clone(),
+                    subject: incoming.subject.clone(),
+                });
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Exact group id, or a unique subject. Several groups that share a subject
+    /// are never resolved to the first.
+    pub fn resolve_group(&self, input: &str) -> GroupMatch<'_> {
+        let input = input.trim();
+        if input.is_empty() {
+            return GroupMatch::None;
+        }
+        if let Some(group) = self.groups.iter().find(|group| group.id == input) {
+            return GroupMatch::One(group);
+        }
+        let query = normalize_group_subject(input);
+        if query.is_empty() {
+            return GroupMatch::None;
+        }
+        let mut found = None;
+        for group in &self.groups {
+            if normalize_group_subject(&group.subject) == query {
+                if found.is_some() {
+                    return GroupMatch::Many;
+                }
+                found = Some(group);
+            }
+        }
+        found.map_or(GroupMatch::None, GroupMatch::One)
+    }
+}
+
+fn normalize_group_subject(subject: &str) -> String {
+    subject
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 // ---------------------------------------------------------------------------
@@ -706,6 +812,8 @@ pub enum ChannelEvent {
     Message(IncomingMessage),
     /// Contacts the linked account synced. An empty list is not a wipe.
     Contacts(Vec<crate::people::SyncedContact>),
+    /// Groups the linked account participates in. An empty list is not a wipe.
+    Groups(Vec<SyncedGroup>),
 }
 
 /// Receives [`ChannelEvent`]s; adapters call it from their own tasks.
@@ -746,13 +854,15 @@ pub trait MessagingChannel: Send + Sync {
         Ok(false)
     }
 
-    /// Contacts already known to this link.
+    /// Contacts and participating groups already known to this link.
     ///
-    /// The default does not call the network and does not invent people. A linked
-    /// phone delivers its address book as later [`ChannelEvent::Contacts`]
-    /// while it syncs. Dropping the future cancels the pull.
-    async fn pull_contacts(&self) -> Result<Vec<crate::people::SyncedContact>, ChannelError> {
-        Ok(Vec::new())
+    /// The default does not call the network and does not invent people or
+    /// groups. An empty snapshot must not wipe anyone already saved. A linked
+    /// phone also delivers address-book rows as later [`ChannelEvent::Contacts`]
+    /// and [`ChannelEvent::Groups`] while it syncs. Dropping the future cancels
+    /// the pull.
+    async fn pull_contacts(&self) -> Result<AddressBookSnapshot, ChannelError> {
+        Ok(AddressBookSnapshot::default())
     }
 }
 
@@ -882,6 +992,12 @@ mod tests {
         let mut group = message("1234-5678@g.us", false, false);
         group.chat = ChatKind::Group;
         assert!(!should_record(&group));
+        assert!(!should_answer(&group, &WhatsAppSettings::default()));
+        let everyone = WhatsAppSettings {
+            only_self_chat: false,
+            auto_reply_enabled: true,
+        };
+        assert!(!should_answer(&group, &everyone));
         assert!(!should_record(&message("status@broadcast", false, false)));
         assert!(!should_record(&message("123@newsletter", false, false)));
         let mut empty = message("447700900999@s.whatsapp.net", false, false);
@@ -1018,6 +1134,7 @@ mod tests {
             outbound_messages: Vec::new(),
             notice: None,
             people: crate::people::PeopleBook::default(),
+            groups: Vec::new(),
             probed: std::collections::BTreeMap::new(),
         };
         let json = serde_json::to_string(&state).unwrap();

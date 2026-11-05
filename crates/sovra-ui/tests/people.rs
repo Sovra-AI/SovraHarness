@@ -4,7 +4,7 @@ use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, ScrollDelta, TestAppContext, point, px, size};
 use sovra_core::communications::{MessageDelivery, OutboundMessage};
-use sovra_core::connections::{ChannelKind, ConnectionCommand, ConnectionEvent};
+use sovra_core::connections::{ChannelKind, ConnectionCommand, ConnectionEvent, SyncedGroup};
 use sovra_core::models::InterfaceScale;
 use sovra_core::people::{PeopleBook, Reach};
 use sovra_core::{Command, Event, Timestamp};
@@ -202,6 +202,93 @@ fn people_list_uses_the_same_words_in_both_themes(cx: &mut TestAppContext) {
     }
 }
 
+#[gpui_kit::test]
+fn stored_whatsapp_group_shows_on_people_and_prepares_without_sending(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| {
+        sovra_ui::init(client, cx);
+        Theme::change(ThemeMode::Dark, None, cx);
+    });
+    let (book, _) = saved_person();
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.expect("shell");
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::PeopleChanged(book)))
+        .expect("people");
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::GroupsChanged(vec![
+            SyncedGroup {
+                id: "120363111@g.us".into(),
+                subject: "School Gate".into(),
+            },
+        ])))
+        .expect("groups");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.open_knowledge_people(cx);
+            shell.people_message_draft().update(cx, |input, cx| {
+                input.set_value("The school gate opens at 3.", window, cx);
+            });
+        });
+        window.render_frame(cx);
+        scroll_into(window, ("whatsapp-group-card", 0usize), cx);
+        let intro = window
+            .find("whatsapp-groups-intro")
+            .label()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        assert!(
+            intro.contains("does not answer group chats automatically"),
+            "{intro}"
+        );
+        let card = window.find(("whatsapp-group-card", 0usize));
+        assert!(card.visible());
+        let card_label = card.label().unwrap_or("").to_ascii_lowercase();
+        assert!(card_label.contains("school gate"), "{card_label}");
+        assert!(
+            window
+                .find(("whatsapp-group-id", 0usize))
+                .label()
+                .unwrap_or("")
+                .contains("120363111@g.us")
+        );
+        scroll_into(window, ("whatsapp-group-prepare", 0usize), cx);
+        let prepare = window.find(("whatsapp-group-prepare", 0usize));
+        assert!(prepare.visible());
+        assert!(prepare.label().unwrap_or("").contains("Message this group"));
+        window.click(("whatsapp-group-prepare", 0usize), cx);
+    })
+    .expect("groups");
+    let prepared: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(prepared.iter().any(|command| {
+        matches!(
+            command,
+            Command::Connections(ConnectionCommand::PrepareMessage {
+                recipient,
+                text,
+                channel: ChannelKind::WhatsApp,
+                ..
+            }) if recipient == "120363111@g.us"
+                && text == "The school gate opens at 3."
+        )
+    }));
+    assert!(
+        !prepared.iter().any(|command| matches!(
+            command,
+            Command::Connections(ConnectionCommand::ReviewMessage { send: true, .. })
+        )),
+        "preparing a group must not send"
+    );
+}
+
 fn labels_in(window: &gpui_kit::Window) -> Vec<String> {
     [
         "people-intro",
@@ -253,6 +340,14 @@ fn people_list_stays_usable_at_minimum_wide_and_double_text(cx: &mut TestAppCont
             events
                 .send_blocking(Event::Connections(ConnectionEvent::PeopleChanged(book)))
                 .expect("people");
+            events
+                .send_blocking(Event::Connections(ConnectionEvent::GroupsChanged(vec![
+                    SyncedGroup {
+                        id: "120363111@g.us".into(),
+                        subject: "School Gate".into(),
+                    },
+                ])))
+                .expect("groups");
             cx.executor()
                 .advance_clock(std::time::Duration::from_millis(16));
             cx.run_until_parked();
@@ -276,6 +371,19 @@ fn people_list_stays_usable_at_minimum_wide_and_double_text(cx: &mut TestAppCont
                 assert!(prepare.bounds().top() >= pane.top());
                 assert!(prepare.bounds().bottom() <= pane.bottom());
                 assert!(prepare.bounds().bottom() <= px(height));
+                scroll_into(window, ("whatsapp-group-prepare", 0usize), cx);
+                let group = window.find(("whatsapp-group-card", 0usize));
+                let group_prepare = window.find(("whatsapp-group-prepare", 0usize));
+                let pane = window.find("sovra-knowledge-view").bounds();
+                assert!(group.visible(), "{mode:?} {width} @{scale}");
+                assert!(group.bounds().left() >= px(0.));
+                assert!(group.bounds().right() <= px(width));
+                assert!(group_prepare.visible(), "{mode:?} {width} @{scale}");
+                assert!(group_prepare.bounds().left() >= px(0.));
+                assert!(group_prepare.bounds().right() <= px(width));
+                assert!(group_prepare.bounds().top() >= pane.top());
+                assert!(group_prepare.bounds().bottom() <= pane.bottom());
+                assert!(group_prepare.bounds().bottom() <= px(height));
             })
             .expect("layout");
         }

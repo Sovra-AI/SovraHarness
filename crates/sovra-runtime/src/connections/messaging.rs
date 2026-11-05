@@ -124,8 +124,17 @@ impl Actor {
                 let mut seen = std::collections::BTreeSet::new();
                 let chats: Vec<_> = self.state.recent_messages.iter().filter(|m| m.channel == channel && seen.insert(m.chat_jid.clone()))
                     .map(|m| json!({"chat":m.chat_jid,"name":m.sender_name,"last_seen":m.received_at})).collect();
+                let groups: Vec<_> = if channel == ChannelKind::WhatsApp {
+                    self.state
+                        .groups
+                        .iter()
+                        .map(|group| json!({"id":group.id,"subject":group.subject}))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 Ok(
-                    json!({"channel":channel,"chats":chats,"self_recipient":"me","complete_history":false,"scope":"Messages observed and retained locally while linked; not a contact book."}),
+                    json!({"channel":channel,"chats":chats,"groups":groups,"self_recipient":"me","complete_history":false,"scope":"Messages observed and retained locally while linked, plus stored WhatsApp groups; not a full phone history."}),
                 )
             }
             MessagingRequest::ReadChat { channel, chat } => {

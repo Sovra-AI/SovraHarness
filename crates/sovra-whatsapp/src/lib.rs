@@ -12,12 +12,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+mod map;
+
 use sovra_core::Timestamp;
 use sovra_core::connections::{
-    ChannelError, ChannelEvent, ChannelSession, ChannelSink, ChannelStartOptions, ChatKind,
-    IncomingMessage, LinkedDevice, MessagingChannel,
+    AddressBookSnapshot, ChannelError, ChannelEvent, ChannelSession, ChannelSink,
+    ChannelStartOptions, ChatKind, IncomingMessage, LinkedDevice, MessagingChannel,
 };
-use sovra_core::people::SyncedContact;
 use whatsapp_rust::Jid;
 use whatsapp_rust::bot::{Bot, BotHandle, EventDelivery};
 use whatsapp_rust::client::Client;
@@ -25,6 +26,7 @@ use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::proto_helpers::MessageExt as _;
 use whatsapp_rust::store::SqliteStore;
 use whatsapp_rust::types::events::Event;
+use whatsapp_rust::types::events::LazyHistorySync;
 
 /// File that holds the link's credentials and encryption state.
 const DB_FILE: &str = "session.sqlite";
@@ -40,19 +42,52 @@ const COMPANION_NAME: &str = "Sovra";
 const EVENT_MAILBOX: usize = 1024;
 
 /// A personal `WhatsApp` account linked through this app.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WhatsAppChannel {
     dir: PathBuf,
+    live: Arc<Mutex<Option<Arc<Client>>>>,
+}
+
+impl std::fmt::Debug for WhatsAppChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WhatsAppChannel")
+            .field("dir", &self.dir)
+            .finish_non_exhaustive()
+    }
 }
 
 impl WhatsAppChannel {
     /// `dir` is a private, app-owned directory (for example `<data>/whatsapp`).
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self {
+            dir: dir.into(),
+            live: Arc::new(Mutex::new(None)),
+        }
     }
 
     fn db_path(&self) -> PathBuf {
         self.dir.join(DB_FILE)
+    }
+
+    fn remember_client(&self, client: Arc<Client>) {
+        *self
+            .live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(client);
+    }
+
+    fn forget_client(&self) {
+        *self
+            .live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    fn live_client(&self) -> Option<Arc<Client>> {
+        self.live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -81,8 +116,6 @@ impl MessagingChannel for WhatsAppChannel {
             .with_event_delivery(EventDelivery::Ordered {
                 capacity: EVENT_MAILBOX,
             })
-            // The phone's chat history is not needed to answer new messages.
-            .skip_history_sync()
             .on_event(move |event, client| {
                 let sink = sink.clone();
                 async move {
@@ -102,6 +135,7 @@ impl MessagingChannel for WhatsAppChannel {
             .await
             .map_err(|error| ChannelError::Failed(format!("Could not start WhatsApp: {error}")))?;
         let client = bot.client();
+        self.remember_client(client.clone());
         let handle = bot.spawn();
         tracing::info!(path = %db_path.display(), "whatsapp link started");
         events(ChannelEvent::Connecting);
@@ -115,13 +149,32 @@ impl MessagingChannel for WhatsAppChannel {
         self.db_path().is_file()
     }
 
-    async fn pull_contacts(&self) -> Result<Vec<SyncedContact>, ChannelError> {
-        // The phone pushes address-book rows as contact app-state events.
-        // There is no separate download. An empty snapshot must not invent people.
-        Ok(Vec::new())
+    async fn pull_contacts(&self) -> Result<AddressBookSnapshot, ChannelError> {
+        // Contacts arrive as app-state and history metadata events. Groups are
+        // queried from the live session so they are known without waiting for a
+        // group message. An empty snapshot must not invent people or groups.
+        let Some(client) = self.live_client() else {
+            return Ok(AddressBookSnapshot::default());
+        };
+        let groups = match client.groups().get_participating().await {
+            Ok(found) => found
+                .into_iter()
+                .filter_map(|(jid, meta)| map::map_group(&jid.to_non_ad_string(), &meta.subject))
+                .collect(),
+            Err(error) => {
+                return Err(ChannelError::Failed(format!(
+                    "WhatsApp could not list groups: {error}"
+                )));
+            }
+        };
+        Ok(AddressBookSnapshot {
+            contacts: Vec::new(),
+            groups,
+        })
     }
 
     fn forget(&self) -> Result<(), ChannelError> {
+        self.forget_client();
         remove_if_present(&self.db_path())?;
         for name in DB_SIDE_FILES {
             remove_if_present(&self.dir.join(name))?;
@@ -299,39 +352,52 @@ fn map_event(event: &Event, client: &Client) -> Vec<ChannelEvent> {
                 .collect()
         }
         Event::ContactUpdate(update) => contacts_from_update(update),
+        Event::HistorySync(history) => events_from_history(history),
         _ => Vec::new(),
     }
 }
 
-/// A phone-number contact from app-state. Groups, LIDs, and other servers are skipped.
+/// A phone-number contact from app-state. LID rows that carry a phone number
+/// are kept. Groups and other servers are skipped.
 fn contacts_from_update(update: &whatsapp_rust::types::events::ContactUpdate) -> Vec<ChannelEvent> {
     let action = update.action.as_ref();
-    let phone = update
-        .jid
-        .is_pn()
-        .then(|| sovra_core::phone_digits(update.jid.user_base()))
-        .flatten()
-        .or_else(|| action.pn_jid.as_deref().and_then(sovra_core::phone_digits));
-    let Some(phone) = phone else {
-        return Vec::new();
-    };
-    let name = action
-        .full_name
-        .clone()
-        .filter(|name| !name.trim().is_empty())
-        .or_else(|| {
-            action
-                .first_name
-                .clone()
-                .filter(|name| !name.trim().is_empty())
-        })
-        .unwrap_or_default();
-    let removed = name.is_empty() && action.save_on_primary_addressbook == Some(false);
-    vec![ChannelEvent::Contacts(vec![SyncedContact {
-        name,
-        phone,
-        removed,
-    }])]
+    map::map_contact_row(map::ContactRow {
+        jid: &update.jid.to_non_ad_string(),
+        pn_jid: action.pn_jid.as_deref(),
+        full_name: action.full_name.as_deref(),
+        first_name: action.first_name.as_deref(),
+        save_on_primary_addressbook: action.save_on_primary_addressbook,
+    })
+    .map(|contact| vec![ChannelEvent::Contacts(vec![contact])])
+    .unwrap_or_default()
+}
+
+/// Conversation metadata from history bootstrap. Message bodies are not stored.
+fn events_from_history(history: &LazyHistorySync) -> Vec<ChannelEvent> {
+    let mut contacts = Vec::new();
+    let mut groups = Vec::new();
+    let mut stream = history.stream();
+    let mut conversation = whatsapp_rust::waproto::whatsapp::Conversation::default();
+    while let Ok(true) = stream.next_conversation_into(&mut conversation) {
+        match map::map_history_chat(map::HistoryChat {
+            id: &conversation.id,
+            name: conversation.name.as_deref(),
+            display_name: conversation.display_name.as_deref(),
+            pn_jid: conversation.pn_jid.as_deref(),
+        }) {
+            map::MappedChat::Contact(contact) => contacts.push(contact),
+            map::MappedChat::Group(group) => groups.push(group),
+            map::MappedChat::Skip => {}
+        }
+    }
+    let mut events = Vec::new();
+    if !contacts.is_empty() {
+        events.push(ChannelEvent::Contacts(contacts));
+    }
+    if !groups.is_empty() {
+        events.push(ChannelEvent::Groups(groups));
+    }
+    events
 }
 
 /// The user parts of this account's phone-number and LID addresses. Chats with either

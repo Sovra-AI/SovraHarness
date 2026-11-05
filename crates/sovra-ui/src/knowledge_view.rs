@@ -182,15 +182,17 @@ pub(crate) fn render_knowledge_view(
         .into_any_element()
 }
 
-const PEOPLE_INTRO: &str = "Everyone you can message, in one place. The same person can be on a phone number, WhatsApp, Telegram, and email.";
+const PEOPLE_INTRO: &str = "Everyone you can message, in one place. The same person can be on a phone number, WhatsApp, Telegram, and email. WhatsApp groups you are in are listed separately and are never answered automatically.";
 const PEOPLE_SAFETY: &str = "Nothing is sent until you press Send.";
 const PEOPLE_JOIN: &str = "A shared first name does not make two people the same. Join two cards only when you know they are one person.";
 const PEOPLE_TELEGRAM: &str =
     "Telegram only knows chats that have already written to your bot, or a chat you add here.";
+const GROUPS_INTRO: &str = "WhatsApp groups you are in. Sovra does not answer group chats automatically. Message this group opens a review; nothing is sent until you press Send.";
 
 fn render_people(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let book = shell.workspace().connections.people.clone();
+    let groups = shell.workspace().connections.groups.clone();
     let mut list = v_flex()
         .id("people-list")
         .test_support()
@@ -244,7 +246,75 @@ fn render_people(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
         }
         list = list.child(render_reach_editor(shell, &book, cx));
     }
+    if !groups.is_empty() {
+        list = list.child(
+            div()
+                .id("whatsapp-groups-intro")
+                .test_support()
+                .aria_label(GROUPS_INTRO)
+                .sovra_text(TextRole::Caption, cx)
+                .child(GROUPS_INTRO),
+        );
+        for (index, group) in groups.iter().enumerate() {
+            list = list.child(render_group(shell, group, index, cx));
+        }
+    }
     list
+}
+
+fn render_group(
+    _shell: &Shell,
+    group: &sovra_core::SyncedGroup,
+    index: usize,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let title = if group.subject.is_empty() {
+        group.id.clone()
+    } else {
+        group.subject.clone()
+    };
+    let summary = format!("{title}. WhatsApp group.");
+    let group_id = group.id.clone();
+    v_flex()
+        .id(("whatsapp-group-card", index))
+        .test_support()
+        .aria_label(summary)
+        .w_full()
+        .min_w_0()
+        .sovra_surface(Surface::Matte, cx)
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .child(div().min_w_0().sovra_text(TextRole::Body, cx).child(title))
+        .child(
+            div()
+                .id(("whatsapp-group-id", index))
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .aria_label(group.id.clone())
+                .sovra_text(TextRole::Caption, cx)
+                .child(group.id.clone()),
+        )
+        .child(
+            design::primary_button(("whatsapp-group-prepare", index), "Message this group", cx)
+                .accessibility_label("Message this group")
+                .on_click(cx.listener(move |shell, _, _, cx| {
+                    let text = shell.people_message_input.read(cx).value().to_string();
+                    shell.people_open_review = Some(text.clone());
+                    let session_id = shell.workspace().session_id.clone();
+                    send_people(
+                        ConnectionCommand::PrepareMessage {
+                            session_id,
+                            channel: ChannelKind::WhatsApp,
+                            recipient: group_id.clone(),
+                            text,
+                        },
+                        cx,
+                    );
+                })),
+        )
 }
 
 fn render_person(

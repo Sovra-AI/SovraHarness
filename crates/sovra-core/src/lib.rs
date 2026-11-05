@@ -64,10 +64,11 @@ pub use connection_catalogue::{
     first_screen_asks_for_secret, unavailable_phase, whatsapp_phase,
 };
 pub use connections::{
-    BridgedMessage, ChannelError, ChannelEvent, ChannelKind, ChannelSession, ChannelSink,
-    ChannelStartOptions, ChatKind, ConnectionCommand, ConnectionEvent, ConnectionsState,
-    IncomingMessage, LinkedDevice, MessagingChannel, PollOutcome, TelegramAction, TelegramSettings,
-    TelegramStatus, WhatsAppQrTicket, WhatsAppSettings, WhatsAppStatus, channel_of_session,
+    AddressBookSnapshot, BridgedMessage, ChannelError, ChannelEvent, ChannelKind, ChannelSession,
+    ChannelSink, ChannelStartOptions, ChatKind, ConnectionCommand, ConnectionEvent,
+    ConnectionsState, GroupMatch, IncomingMessage, LinkedDevice, MessagingChannel, PollOutcome,
+    SyncedGroup, TelegramAction, TelegramSettings, TelegramStatus, WhatsAppQrTicket,
+    WhatsAppSettings, WhatsAppStatus, channel_of_session, is_whatsapp_group_id,
     is_whatsapp_session, telegram_action, telegram_link_code, telegram_session_id,
     whatsapp_session_id,
 };

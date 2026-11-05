@@ -11,6 +11,15 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- After a linked WhatsApp Web session is online, contacts the phone shares
+  (including hidden-id rows that still carry a phone number) are stored in the
+  people book, and groups you are in are stored with their id and name without
+  waiting for a group message. An empty or failed pull does not wipe anyone
+  already saved. A unique saved person or a unique stored group can be prepared
+  as a review; nothing is sent until you press Send. Groups are listed separately
+  on Knowledge → People and are never answered automatically. The phone's
+  contact/chat bootstrap is processed instead of being acknowledged and discarded.
+
 - README is a short front door: quick start, command table, mermaid graphs of
   crate layering, `Command`/`Event`, and one chat turn through memory, then a
   map of the guides. Top-level docs each open with a purpose sentence.

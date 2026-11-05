@@ -677,7 +677,76 @@ mod tests {
     fn older_connections_json_without_a_book_starts_empty() {
         let mut value = serde_json::to_value(ConnectionsState::default()).unwrap();
         value.as_object_mut().unwrap().remove("people");
+        value.as_object_mut().unwrap().remove("groups");
         let state: ConnectionsState = serde_json::from_value(value).unwrap();
         assert_eq!(state.people.people.len(), 0);
+        assert_eq!(state.groups.len(), 0);
+    }
+
+    #[test]
+    fn applying_a_contact_and_group_snapshot_stores_both_and_an_empty_pull_does_not_wipe() {
+        use crate::connections::{SyncedGroup, is_whatsapp_group_id};
+
+        let mut state = ConnectionsState::default();
+        state.people.apply_synced(&SyncedContact {
+            name: "Sam Rivera".into(),
+            phone: "+447700900111".into(),
+            removed: false,
+        });
+        assert!(state.upsert_groups(&[SyncedGroup {
+            id: "120363111@g.us".into(),
+            subject: "School Gate".into(),
+        }]));
+        assert!(!is_whatsapp_group_id("447700900111@s.whatsapp.net"));
+        assert_eq!(state.people.people.len(), 1);
+        assert_eq!(state.people.people[0].name, "Sam Rivera");
+        assert_eq!(state.groups.len(), 1);
+        assert_eq!(state.groups[0].subject, "School Gate");
+
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: ConnectionsState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.people.people[0].name, "Sam Rivera");
+        assert_eq!(restored.groups[0].id, "120363111@g.us");
+        assert_eq!(restored.groups[0].subject, "School Gate");
+
+        let mut empty_pull = restored;
+        empty_pull.people.note_empty_sync();
+        assert!(!empty_pull.upsert_groups(&[]));
+        assert_eq!(empty_pull.people.people.len(), 1);
+        assert_eq!(empty_pull.groups.len(), 1);
+        assert!(empty_pull.people.note.is_none());
+
+        let mut vacant = ConnectionsState::default();
+        vacant.people.note_empty_sync();
+        assert!(vacant.people.note.is_some());
+        assert_eq!(vacant.people.people.len(), 0);
+        assert_eq!(vacant.groups.len(), 0);
+
+        assert!(!vacant.upsert_groups(&[SyncedGroup {
+            id: "447700900111@s.whatsapp.net".into(),
+            subject: "Not a group".into(),
+        }]));
+        assert_eq!(vacant.people.people.len(), 0);
+        assert_eq!(vacant.groups.len(), 0);
+    }
+
+    #[test]
+    fn a_group_is_not_stored_as_a_person() {
+        let mut state = ConnectionsState::default();
+        state.upsert_groups(&[crate::connections::SyncedGroup {
+            id: "120363111@g.us".into(),
+            subject: "School Gate".into(),
+        }]);
+        assert_eq!(state.people.people.len(), 0);
+        assert_eq!(state.groups.len(), 1);
+        assert!(
+            resolve_recipient(
+                &state,
+                ChannelKind::WhatsApp,
+                "School Gate",
+                "15550000000@s.whatsapp.net"
+            )
+            .is_ok()
+        );
     }
 }

@@ -14,24 +14,32 @@ capability-provider registry, preserving that integration's draft-only email API
 connection state and the bounded local recent-message snapshot. This is not a
 complete phone-history API. `find_people` looks up saved people by name. An empty
 question returns a count and does not list everyone. The same phone number or the
-same email joins one person. A shared first name never does. While `WhatsApp` is
-linked, contacts the phone has synced are collected in the background. There is no
-separate address-book download, and an empty or failed sync does not erase people
-already saved.
+same email joins one person. A shared first name never does. After `WhatsApp` is
+linked and online, contacts the phone shares — including hidden-id (LID) rows that
+still carry a phone number — are recorded in the people book. Groups the linked
+account participates in are stored with a stable group id and subject as soon as
+the live session can list them, without waiting for a group message. Conversation
+metadata from the phone's history bootstrap is processed; message bodies are not
+kept. There is no separate address-book download. An empty or failed sync does not
+invent people or groups and does not erase anyone already saved. A group is a chat,
+not a person: group participants are not turned into saved people.
 
 `prepare_message` accepts `me`, an exact recent chat id, an explicit international
-`WhatsApp` number, one saved person's full name, or `person:<id>` from a card the
-person chose. More than one match is refused so the helper asks. A phone number
-that is not a `WhatsApp` handle is not used as a `WhatsApp` recipient. Telegram
-still needs a chat that has already written to the bot, or a chat added on that
-person. Sovra does not download a Telegram address book. Looking up people is a
-safe read. Preparing a message stays ordered and does not send.
+`WhatsApp` number, one saved person's full name, `person:<id>` from a card the
+person chose, a unique stored `WhatsApp` group subject, or that group's exact id
+(`…@g.us`). More than one matching person or group is refused so the helper asks.
+A phone number that is not a `WhatsApp` handle is not used as a `WhatsApp`
+recipient. Telegram still needs a chat that has already written to the bot, or a
+chat added on that person. Sovra does not download a Telegram address book.
+`list_recent_chats` also returns stored `WhatsApp` groups. Looking up people is a
+safe read. Preparing a message stays ordered and does not send. Groups are never
+answered automatically.
 
 A confirmed timed WhatsApp or Telegram text is a schedule job with
 `send_channel`, `send_recipient`, and `send_text`. Consent is the create step
 (who, which app, exact wording, when). `send_recipient` is the international
-number starting with `+`, `me`, an exact chat id, or `person:<id>` from
-`find_people`. A first name is refused at create so the job cannot fail only
+number starting with `+`, `me`, an exact chat id, a `WhatsApp` group id, or
+`person:<id>` from `find_people`. A first name is refused at create so the job cannot fail only
 when it is due. When that job fires, the runtime transmits on the same
 `send_text` path native Send uses. There is no fire-time review and no model
 approval tool. Live `prepare_message` is unchanged. A failed fire keeps the
@@ -43,9 +51,11 @@ identical requests in the same turn reuse a review that is still waiting or
 sending. A cancelled, accepted, or expired review can be prepared again. The
 people list shows each phone number, email, and Telegram chat. Message on
 WhatsApp opens that chat so Send is on screen. The review shows
-the sender, recipient and exact text, and offers Send, Cancel and Save. No model
-tool can approve it or replace its content. Changing the message requires a new
-review. `message_receipt` is limited to the originating desktop conversation.
+the sender, recipient and exact text, and offers Send, Cancel and Save. Knowledge
+→ People lists stored `WhatsApp` groups separately from people; **Message this
+group** opens the same review. No model tool can approve it or replace its
+content. Changing the message requires a new review. `message_receipt` is limited
+to the originating desktop conversation.
 
 The runtime rechecks the conversation, ten-minute deadline, online status and
 exact linked session before consuming approval. It records Sending before IO;
