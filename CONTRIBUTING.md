@@ -94,6 +94,14 @@ Dependabot opens weekly grouped PRs for GitHub Actions and Rust patch
 updates. `gpui-kit` is ignored; bump it in a dedicated PR after reading that
 version's source.
 
+GitHub Free includes 2,000 Actions minutes per month on private repositories
+(Linux 1×, Windows 2×, macOS 10×). If every job fails in a few seconds with
+no runner, the month's minutes are used up or the spending limit is $0.
+Raise the limit at
+[Sovra-AI billing](https://github.com/organizations/Sovra-AI/settings/billing)
+or wait for the monthly reset. The split jobs above exist so a green `main`
+costs fewer minutes than a full three-OS `cargo xtask ci`.
+
 ## GitHub Team (branch protection)
 
 This organisation is on **GitHub Free**. Private repositories cannot require
