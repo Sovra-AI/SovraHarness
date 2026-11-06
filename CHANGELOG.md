@@ -12,12 +12,14 @@ move them under a version heading when the tag is cut.
 ## [Unreleased]
 
 - Investor pitch at [`docs/decks/pitch/`](docs/decks/pitch/index.html)
-  (Cinema, 16 slides, non-technical) in the classic investor order: purpose,
-  why now, the question, sovereign AI defined with Sovra as the desk layer,
-  the problem, the solution, five things that stay yours, the product, proof
-  through measured pilots, built today, a positioning map, the path, why
-  Sovra wins, and what investment unlocks. Diagrams: data leaving the
-  country, the national AI stack, and the two-question market map.
+  rebuilt as an 18-slide vision deck with a scene on every slide: the
+  national border the work leaks across (and then stays inside), the
+  isometric national stack with Sovra as the desk layer, the orbit of five
+  things that stay yours, a constellation from one desk to a nation, the
+  sealed national ledger with a residency report, lessons flowing into the
+  nation's own AI, and three.js globes. Dark cinema bars frame the 16:9
+  stage in any window. It tells the full vision without Today/Next labels;
+  limits stay in `docs/value-realisation/`.
 
 - Non-technical investor brief at
   [`docs/value-realisation/10-investor-brief.md`](docs/value-realisation/10-investor-brief.md):
