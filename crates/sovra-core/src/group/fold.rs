@@ -83,6 +83,9 @@ pub struct GroupState {
     pub people: BTreeMap<PersonId, Member>,
     pub removed_people: BTreeSet<PersonId>,
     pub removed_devices: BTreeSet<DeviceId>,
+    /// Computers that were in the group and are not now, with whose they were and
+    /// that person's name, so their past contributions stay attributable.
+    pub former_devices: BTreeMap<DeviceId, (PersonId, String)>,
     /// Applied operations, in fold order.
     pub applied: Vec<OpHash>,
     pub rejected: BTreeMap<OpHash, Rejection>,
@@ -104,6 +107,7 @@ impl GroupState {
             people: BTreeMap::new(),
             removed_people: BTreeSet::new(),
             removed_devices: BTreeSet::new(),
+            former_devices: BTreeMap::new(),
             applied: Vec::new(),
             rejected: BTreeMap::new(),
             pending: BTreeSet::new(),
@@ -584,6 +588,7 @@ fn apply_change(op: &MembershipOp, hash: OpHash, out: &mut Applied) -> Result<()
                 },
             );
             state.removed_devices.remove(device);
+            state.former_devices.remove(device);
             out.device_owner.insert(*device, *person);
             Ok(())
         }
@@ -597,6 +602,9 @@ fn apply_change(op: &MembershipOp, hash: OpHash, out: &mut Applied) -> Result<()
             }
             if let Some(member) = state.people.get_mut(&owner) {
                 member.devices.remove(device);
+                state
+                    .former_devices
+                    .insert(*device, (owner, member.name.clone()));
             }
             state.removed_devices.insert(*device);
             out.removals.push(Removal {
@@ -615,7 +623,12 @@ fn apply_change(op: &MembershipOp, hash: OpHash, out: &mut Applied) -> Result<()
                 return Err(Rejection::WouldLeaveNoAdmin);
             }
             if let Some(member) = state.people.remove(person) {
-                state.removed_devices.extend(member.devices.into_keys());
+                for device in member.devices.into_keys() {
+                    state
+                        .former_devices
+                        .insert(device, (member.person, member.name.clone()));
+                    state.removed_devices.insert(device);
+                }
             }
             state.removed_people.insert(*person);
             out.removals.push(Removal {

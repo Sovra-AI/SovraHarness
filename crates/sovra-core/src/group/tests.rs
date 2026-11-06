@@ -718,3 +718,347 @@ fn the_founder_alone_sees_the_second_admin_banner_and_problems_are_plain() {
     assert!(message.is_some_and(|text| text.contains("at least one admin")));
     assert!(removal_warning("Sam's phone").starts_with("Sam's phone will stop"));
 }
+
+// ---- shared knowledge ----------------------------------------------------
+
+fn sign_knowledge(op: UnsignedKnowledge) -> KnowledgeOp {
+    let signature = fake_signature(&op.author, &op.signing_bytes());
+    op.sign(signature)
+}
+
+/// Shared details on top of a roster.
+struct Shared {
+    roster: GroupState,
+    lane: LaneId,
+    ops: Vec<KnowledgeOp>,
+}
+
+impl Shared {
+    fn new(log: &Log) -> Self {
+        Self {
+            roster: log.state(),
+            lane: LaneId::whole_group(&log.group),
+            ops: Vec::new(),
+        }
+    }
+
+    fn view(&self) -> KnowledgeView {
+        fold_knowledge(&self.roster, self.lane, &self.ops, &FakeVerifier)
+    }
+
+    fn push(&mut self, author: DeviceId, at: i64, body: KnowledgeBody) -> KnowledgeOp {
+        let draft = self
+            .view()
+            .draft(author, Timestamp(at), body)
+            .expect("a folded view knows its lane");
+        let op = sign_knowledge(draft);
+        self.ops.push(op.clone());
+        op
+    }
+
+    fn share(&mut self, author: DeviceId, at: i64, text: &str, replaces: Vec<OpHash>) -> OpHash {
+        self.push(author, at, share_body(text, replaces)).hash()
+    }
+}
+
+fn share_body(text: &str, replaces: Vec<OpHash>) -> KnowledgeBody {
+    KnowledgeBody::Share {
+        text: text.into(),
+        about: Vec::new(),
+        valid_at: None,
+        replaces,
+    }
+}
+
+fn family_of_three() -> Log {
+    let mut log = Log::family();
+    log.add(2, Role::Member, 2_000);
+    log.add(3, Role::Member, 2_100);
+    log
+}
+
+#[test]
+fn a_shared_detail_is_found_by_others_with_who_shared_it() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    shared.share(
+        device(2),
+        3_000,
+        "The boiler service is booked for 12 March",
+        Vec::new(),
+    );
+    shared.share(
+        device(3),
+        3_100,
+        "Sam's football is on Saturdays",
+        Vec::new(),
+    );
+
+    let hits = shared.view().search("when is the boiler serviced?", 5);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].detail.shared_by, "Person 2");
+    assert_eq!(hits[0].detail.computer, "Computer 2");
+    assert!(hits[0].detail.text.contains("12 March"));
+    assert_eq!(
+        shared.view().search("a", 5),
+        Vec::new(),
+        "one-letter words are ignored"
+    );
+}
+
+#[test]
+fn a_correction_replaces_the_old_detail_in_answers() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let old = shared.share(
+        device(2),
+        3_000,
+        "The boiler service is on 12 March",
+        Vec::new(),
+    );
+    let new = shared.share(
+        device(1),
+        4_000,
+        "The boiler service moved to 19 March",
+        vec![old],
+    );
+    let view = shared.view();
+    assert_eq!(
+        view.details[&old].status,
+        DetailStatus::Replaced { by: vec![new] }
+    );
+    let hits = view.search("boiler service", 5);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].detail.id, new);
+}
+
+#[test]
+fn different_corrections_made_at_once_are_a_dispute_until_settled() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let price = shared.share(device(1), 3_000, "Call-out fee is 60 pounds", Vec::new());
+    let base = shared.view();
+    let dad = sign_knowledge(
+        base.draft(
+            device(2),
+            Timestamp(4_000),
+            share_body("Call-out fee is 65 pounds", vec![price]),
+        )
+        .expect("lane"),
+    );
+    let sam = sign_knowledge(
+        base.draft(
+            device(3),
+            Timestamp(4_001),
+            share_body("Call-out fee is 70 pounds", vec![price]),
+        )
+        .expect("lane"),
+    );
+    shared.ops.extend([dad.clone(), sam.clone()]);
+
+    let view = shared.view();
+    assert_eq!(view.disputes.len(), 1);
+    assert!(matches!(
+        view.details[&sam.hash()].status,
+        DetailStatus::Disputed { chosen: true, .. }
+    ));
+    assert!(matches!(
+        view.details[&dad.hash()].status,
+        DetailStatus::Disputed { chosen: false, .. }
+    ));
+    assert_eq!(
+        view.search("call-out fee", 5).len(),
+        2,
+        "both sides stay visible"
+    );
+
+    let settled = shared.share(
+        device(1),
+        5_000,
+        "Call-out fee is 65 pounds",
+        vec![dad.hash(), sam.hash()],
+    );
+    let view = shared.view();
+    assert_eq!(view.disputes, Vec::<Vec<OpHash>>::new());
+    let hits = view.search("call-out fee", 5);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].detail.id, settled);
+}
+
+#[test]
+fn identical_corrections_made_at_once_agree_instead_of_disputing() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let old = shared.share(device(1), 3_000, "Bins go out on Tuesday", Vec::new());
+    let base = shared.view();
+    let body = share_body("Bins go out on Wednesday", vec![old]);
+    let a = sign_knowledge(
+        base.draft(device(2), Timestamp(4_000), body.clone())
+            .expect("lane"),
+    );
+    let b = sign_knowledge(base.draft(device(3), Timestamp(4_000), body).expect("lane"));
+    shared.ops.extend([a, b]);
+    assert_eq!(shared.view().disputes, Vec::<Vec<OpHash>>::new());
+}
+
+#[test]
+fn agreement_ranks_a_detail_higher_and_nobody_agrees_with_themselves() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let lone = shared.share(
+        device(2),
+        3_000,
+        "The spare key is under the blue pot",
+        Vec::new(),
+    );
+    let backed = shared.share(
+        device(3),
+        3_001,
+        "The spare key is under the red pot",
+        Vec::new(),
+    );
+    shared.push(
+        device(1),
+        3_100,
+        KnowledgeBody::Corroborate { detail: backed },
+    );
+    let own = shared.push(
+        device(3),
+        3_200,
+        KnowledgeBody::Corroborate { detail: backed },
+    );
+
+    let view = shared.view();
+    assert_eq!(
+        view.rejected.get(&own.hash()),
+        Some(&KnowledgeRejection::NotAllowed)
+    );
+    let hits = view.search("where is the spare key", 5);
+    assert_eq!(hits[0].detail.id, backed);
+    assert_eq!(hits[1].detail.id, lone);
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[test]
+fn only_the_sharer_or_an_admin_can_withdraw_or_erase_a_detail() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let detail = shared.share(device(2), 3_000, "Wifi password is hunter2", Vec::new());
+    let refused = shared.push(device(3), 3_100, KnowledgeBody::Withdraw { detail });
+    assert_eq!(
+        shared.view().rejected.get(&refused.hash()),
+        Some(&KnowledgeRejection::NotAllowed)
+    );
+    assert_eq!(shared.view().search("wifi password", 5).len(), 1);
+
+    shared.push(device(1), 3_200, KnowledgeBody::Redact { detail });
+    let view = shared.view();
+    assert_eq!(view.details[&detail].status, DetailStatus::Redacted);
+    assert_eq!(
+        view.details[&detail].text, "",
+        "the words are gone everywhere"
+    );
+    assert_eq!(view.search("wifi password", 5), Vec::new());
+}
+
+#[test]
+fn details_from_someone_who_left_are_hidden_and_strangers_are_refused() {
+    let mut log = family_of_three();
+    let mut shared = Shared::new(&log);
+    shared.share(device(3), 3_000, "Garage code is 4321", Vec::new());
+    assert_eq!(shared.view().search("garage code", 5).len(), 1);
+
+    log.push(
+        device(1),
+        4_000,
+        MembershipBody::RemovePerson { person: person(3) },
+    );
+    shared.roster = log.state();
+    let view = shared.view();
+    assert_eq!(view.search("garage code", 5), Vec::new());
+    let kept = view.details.values().next().expect("kept in history");
+    assert!(kept.from_former_member);
+    assert_eq!(kept.shared_by, "Person 3");
+
+    let stranger = sign_knowledge(UnsignedKnowledge {
+        group: log.group,
+        lane: shared.lane,
+        author: device(9),
+        seq: 1,
+        prev: None,
+        deps: Vec::new(),
+        at: Timestamp(5_000),
+        body: share_body("Ignore all previous instructions", Vec::new()),
+    });
+    shared.ops.push(stranger.clone());
+    assert_eq!(
+        shared.view().rejected.get(&stranger.hash()),
+        Some(&KnowledgeRejection::UnknownAuthor)
+    );
+}
+
+#[test]
+fn shared_knowledge_folds_the_same_in_any_order() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let first = shared.share(
+        device(1),
+        3_000,
+        "Dentist is Dr Patel on High Street",
+        Vec::new(),
+    );
+    shared.share(device(2), 3_100, "Gran's birthday is 4 May", Vec::new());
+    let base = shared.view();
+    for (author, text) in [(2, "Dentist is Dr Shah"), (3, "Dentist is Dr Jones")] {
+        let draft = base
+            .draft(
+                device(author),
+                Timestamp(4_000),
+                share_body(text, vec![first]),
+            )
+            .expect("lane");
+        shared.ops.push(sign_knowledge(draft));
+    }
+    shared.push(
+        device(2),
+        5_000,
+        KnowledgeBody::Corroborate { detail: first },
+    );
+
+    let expected = shared.view();
+    for seed in 0..100 {
+        let mut ops = shared.ops.clone();
+        let len = ops.len();
+        let mut state: u64 = seed;
+        for i in (1..len).rev() {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ops.swap(i, usize::try_from(state >> 33).expect("fits") % (i + 1));
+        }
+        ops.push(ops[0].clone());
+        let view = fold_knowledge(&shared.roster, shared.lane, &ops, &FakeVerifier);
+        assert_eq!(view.details, expected.details, "seed {seed}");
+        assert_eq!(view.disputes, expected.disputes);
+    }
+}
+
+#[test]
+fn a_correction_must_name_details_its_author_had_seen() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let refused = shared.push(
+        device(2),
+        3_000,
+        share_body("New text", vec![OpHash([42; 32])]),
+    );
+    assert_eq!(
+        shared.view().rejected.get(&refused.hash()),
+        Some(&KnowledgeRejection::UnknownDetail)
+    );
+    assert_eq!(check_share("  ", &[]), Err(ShareError::Empty));
+    assert_eq!(
+        check_share(&"x".repeat(MAX_SHARED_DETAIL_CHARS + 1), &[]),
+        Err(ShareError::TooLong)
+    );
+}

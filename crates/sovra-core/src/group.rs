@@ -7,8 +7,10 @@
 //!
 //! "Group" is the user-facing word (roadmap decision D1); "team" stays the AI helpers.
 
+mod dag;
 mod fold;
 mod keys;
+mod knowledge;
 mod link;
 mod membership;
 mod pairing;
@@ -17,6 +19,11 @@ mod session;
 
 pub use fold::{DeviceEntry, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
 pub use keys::{DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, SignatureVerifier};
+pub use knowledge::{
+    DetailStatus, KnowledgeBody, KnowledgeOp, KnowledgeRejection, KnowledgeView, LaneId,
+    MAX_SHARED_DETAIL_CHARS, MAX_SHARED_TOPICS, ShareError, SharedDetail, SharedHit,
+    UnsignedKnowledge, check_share, fold_knowledge,
+};
 pub use link::{JOIN_LINK_PREFIX, JoinLink, LinkError, MAX_JOIN_LINK_CHARS};
 pub use membership::{MembershipBody, MembershipOp, Role, UnsignedOp};
 pub use pairing::{
