@@ -22,6 +22,12 @@ Re-check every item before it goes into a sales or compliance document.
 | At least 30% of GenAI projects will be abandoned after proof of concept by end-2025: poor data quality, inadequate risk controls, rising costs, unclear business value. **[prediction]** | Gartner press release — <https://www.gartner.com/en/newsroom/press-releases/2024-07-29-gartner-predicts-30-percent-of-generative-ai-projects-will-be-abandoned-after-proof-of-concept-by-end-of-2025> | 29 Jul 2024 |
 | Over 40% of agentic-AI projects will be cancelled by end-2027. **[prediction] [2nd]** | Gartner, via The Star — <https://www.thestar.com.my/tech/tech-news/2025/06/25/over-40-of-agentic-ai-projects-will-be-scrapped-by-2027-gartner-says> | Jun 2025 |
 
+## Sovereign AI, defined
+
+| Idea | Source |
+| --- | --- |
+| Sovereign AI is commonly defined as a nation's capability to build and run AI with its own infrastructure (compute), data and talent. Vendor and commentary sources; no single intergovernmental definition was found. | Iterate.ai glossary — <https://iterate.ai/ai-glossary/sovereign-ai>; Info-Tech — <https://www.infotech.com/research/a-sovereign-ai-strategy-has-become-a-national-imperative>; Accenture, *Sovereign AI* — <https://www.accenture.com/content/dam/accenture/final/accenture-com/document-4/Sovereign-AI-Report.pdf> |
+
 ## Value-realisation practice
 
 | Idea | Source |
@@ -63,7 +69,7 @@ Re-check every item before it goes into a sales or compliance document.
 | Falcon Arabic (TII). | Bloomberg — <https://www.bloomberg.com/news/articles/2025-05-21/uae-releases-falcon-arabic-ai-model-to-outcompete-mideast-rivals> | May 2025 |
 | Falcon-H1 Arabic, 3B / 7B / 34B, open-weight. Leaderboard claims are self-reported. | HPCwire — <https://www.hpcwire.com/off-the-wire/uaes-tii-launches-falcon-h1-arabic-models-in-3b-7b-and-34b-configurations/> | Jan 2026 |
 | K2 Think (MBZUAI with G42), 32B reasoning model, Apache 2.0. | Middle East AI News — <https://www.middleeastainews.com/p/k2-think-32b-rivals-reasoning-models> | Sep 2025 |
-| Stargate UAE: 1 GW cluster in the 5 GW UAE–US AI Campus; first 200 MW targeted for 2026. Live status **unverified**. | Gulf News — <https://gulfnews.com/business/markets/stargate-uae-first-phase-of-200mw-to-complete-by-2026-1.500310364> | May / Oct 2025 |
+| Stargate UAE: 1 GW cluster; G42 says construction is well under way and the first 200 MW is on track for 2026. Live status **unverified**. | G42 via PR Newswire — <https://www.prnewswire.com/news-releases/g42-provides-update-on-construction-of-stargate-uae-ai-infrastructure-cluster-302586430.html>; Gulf News — <https://gulfnews.com/business/markets/stargate-uae-first-phase-of-200mw-to-complete-by-2026-1.500310364> | May / Oct 2025 |
 
 Sovra has not tested any of these models in the app; see
 [08 — Limits and objections](08-limits-and-objections.md).

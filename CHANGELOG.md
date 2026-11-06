@@ -11,10 +11,13 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
-- Concise investor pitch at [`docs/decks/pitch/`](docs/decks/pitch/index.html)
-  (Cinema, 11 slides, non-technical): an AI-native UAE on its own terms,
-  five things that stay yours, proof through measured pilots, what is built
-  today, the path, and what investment unlocks.
+- Investor pitch at [`docs/decks/pitch/`](docs/decks/pitch/index.html)
+  (Cinema, 16 slides, non-technical) in the classic investor order: purpose,
+  why now, the question, sovereign AI defined with Sovra as the desk layer,
+  the problem, the solution, five things that stay yours, the product, proof
+  through measured pilots, built today, a positioning map, the path, why
+  Sovra wins, and what investment unlocks. Diagrams: data leaving the
+  country, the national AI stack, and the two-question market map.
 
 - Non-technical investor brief at
   [`docs/value-realisation/10-investor-brief.md`](docs/value-realisation/10-investor-brief.md):

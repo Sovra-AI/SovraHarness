@@ -45,10 +45,31 @@
   .cmeta{display:grid;grid-template-columns:repeat(3,auto);gap:44px;justify-content:start}
   .cmeta .k{font:500 14px var(--f-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
   .cmeta .v{font-size:22px;color:var(--ink-2);margin-top:8px}
+  .xlist{display:flex;flex-direction:column;gap:20px;margin-top:30px}
+  .xlist .it{display:flex;gap:20px;align-items:flex-start}
+  .xlist .x{width:46px;height:46px;border-radius:14px;flex:none;display:grid;place-items:center;background:rgba(190,18,60,.10);border:1px solid rgba(190,18,60,.32);color:var(--rose);font:700 21px var(--f-mono)}
+  .xlist h4{font:650 29px/1.15 var(--f-display);letter-spacing:-.015em}
+  .xlist p{font-size:20px;line-height:1.45;color:var(--muted);margin-top:4px}
+  .srcs{columns:2;column-gap:56px;margin-top:30px}
+  .srcs p{break-inside:avoid;font-size:19px;line-height:1.4;color:var(--muted);margin-bottom:14px}
+  .srcs p b{color:var(--ink-2)}
+  .srcs .u{font:400 15px var(--f-mono);color:var(--dim);word-break:break-all}
+  svg text{font-family:var(--f-sans)}
+  .t-ink{fill:var(--ink)} .t-ink2{fill:var(--ink-2)} .t-mut{fill:var(--muted)} .t-dim{fill:var(--dim)} .t-v{fill:var(--violet-3)} .t-c{fill:var(--cyan-2)} .t-r{fill:var(--rose)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body data-logo="../../../crates/sovra-ui/assets/branding/sovra-logo.svg" data-title="Investor pitch">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gV" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#9333ea"/></linearGradient>
+    <linearGradient id="gC" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#0891b2"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+    <radialGradient id="gGlow"><stop offset="0" stop-color="#8b5cf6" stop-opacity=".30"/><stop offset="1" stop-color="#7c3aed" stop-opacity="0"/></radialGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker>
+    <marker id="arrC" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0891b2"/></marker>
+  </defs>
+</svg>
 
 <div id="stage"><div id="deck">
 
@@ -56,35 +77,127 @@
 <section class="slide" data-section="Sovra" data-note="Sovra · sovereign AI for an AI-native UAE">
   <canvas class="bgcanvas" data-three data-fx="globe" data-x=".8" data-r=".40" data-ox="4.4" data-n="260"></canvas>
   <div class="grow col" style="justify-content:center;max-width:1100px;gap:0">
-    <span class="eyebrow rv">Investor pitch</span>
+    <span class="eyebrow rv">Investor pitch · United Arab Emirates</span>
     <div class="giant rv" style="margin-top:30px">AI-native.<br><span class="g">On UAE terms.</span></div>
     <p class="arline rv" lang="ar">ذكاء اصطناعي في كل عمل، وسيادة كاملة على بياناتك.</p>
-    <p class="lead rv" style="max-width:860px">Every person gets a team of AI helpers. The data, the knowledge and the decisions stay on computers the UAE owns.</p>
+    <p class="lead rv" style="max-width:880px">Every person gets a team of AI helpers. The data, the knowledge and the decisions stay on computers the UAE owns.</p>
   </div>
 </section>
 
-<!-- 2 · The decision is made -->
-<section class="slide flip" data-section="The moment" data-note="Sources: Abu Dhabi Digital Strategy 2025–27 · The National, 23 Apr 2026 · Microsoft AI Diffusion Report · WAM 2019">
-  <span class="eyebrow rv">The moment</span>
+<!-- 2 · Purpose -->
+<section class="slide flip" data-section="Purpose" data-note="One sentence">
+  <span class="eyebrow rv">Purpose</span>
+  <p class="quote rv" style="margin-top:36px;font-size:64px;max-width:1600px">“Sovra lets a nation become AI-native without giving away its data, its knowledge or its decisions — and proves the value as it goes.”</p>
+  <div class="cmeta rv mt-l">
+    <div><div class="k">What</div><div class="v">A team of AI helpers on computers you own</div></div>
+    <div><div class="k">For whom</div><div class="v">Governments and enterprises that cannot send data away</div></div>
+    <div><div class="k">Proof</div><div class="v">Measured pilots, not promises</div></div>
+  </div>
+</section>
+
+<!-- 3 · Why now -->
+<section class="slide" data-section="Why now" data-note="Sources: Abu Dhabi Digital Strategy 2025–27 · The National, 23 Apr 2026 · Microsoft AI Diffusion Report · WAM 2019 · G42, Oct 2025">
+  <span class="eyebrow rv">Why now</span>
   <h1 class="rv">The UAE has decided. <span class="g">AI-native.</span></h1>
   <div class="g4 mt">
-    <div class="glass tile rv"><div class="n g">2027</div><div class="l">AI-native government</div><div class="d">Abu Dhabi aims to be the world’s first, backed by AED 13 billion.</div><div class="src">Abu Dhabi Digital Strategy</div></div>
-    <div class="glass tile rv"><div class="n g">50%</div><div class="l">Of government on AI</div><div class="d">Cabinet plan for half of government work, within two years.</div><div class="src">The National · Apr 2026</div></div>
-    <div class="glass tile rv"><div class="n gc">70%</div><div class="l">Of people use AI</div><div class="d">First in the world, against about 18% globally.</div><div class="src">Microsoft · Q1 2026</div></div>
-    <div class="glass tile rv"><div class="n gc">2031</div><div class="l">National strategy</div><div class="d">World leadership in AI, with the first Minister of State for AI.</div><div class="src">WAM · 2019</div></div>
+    <div class="glass tile rv"><div class="n g" data-count="2027">2027</div><div class="l">AI-native government</div><div class="d">Abu Dhabi aims to be the world’s first, backed by AED 13 billion.</div><div class="src">Abu Dhabi Digital Strategy</div></div>
+    <div class="glass tile rv"><div class="n g" data-count="50" data-suffix="%">50%</div><div class="l">Of government on AI</div><div class="d">Cabinet plan for half of government work, within two years.</div><div class="src">The National · Apr 2026</div></div>
+    <div class="glass tile rv"><div class="n gc" data-count="70" data-suffix="%">70%</div><div class="l">Of people use AI</div><div class="d">First in the world, against about 18% globally.</div><div class="src">Microsoft · Q1 2026</div></div>
+    <div class="glass tile rv"><div class="n gc">1 GW</div><div class="l">National AI compute</div><div class="d">Stargate UAE: first 200 MW on track for 2026.</div><div class="src">G42 · Oct 2025</div></div>
+  </div>
+  <div class="bar rv mt"><span class="k">The gap</span><span class="t">The country is building the <b>compute</b> and the <b>models</b>. The work itself still happens on <b>rented AI</b>, at every desk.</span></div>
+</section>
+
+<!-- 4 · The question -->
+<section class="slide flip" data-section="The question" data-note="Source: MIT NANDA, The GenAI Divide, Jul 2025 (preliminary)">
+  <div class="split">
+    <div>
+      <span class="eyebrow rv">The question</span>
+      <div class="giant rv" style="margin-top:24px;font-size:104px">If AI does half the work,<br><span class="g">whose AI is it?</span></div>
+      <p class="lead rv" style="margin-top:30px">Rented AI takes the <b>data</b>, keeps the <b>knowledge</b>, owns the <b>AI</b>, acts without a <b>person</b>, and <b>learns</b> from your work.</p>
+      <div class="bar rv mt"><span class="k">And</span><span class="t">In one major study, <b>95%</b> of organisations saw no measurable return from it.</span></div>
+    </div>
+    <svg class="rv z" viewBox="0 0 820 760" style="width:100%;height:100%;max-height:760px" role="img" aria-label="Work from a ministry, a hospital and a bank flows up to someone else's computer abroad">
+      <ellipse cx="410" cy="200" rx="290" ry="150" fill="url(#gGlow)"/>
+      <rect x="240" y="90" width="340" height="200" rx="28" fill="#fff" stroke="#a855f7" stroke-width="2.5"/>
+      <text x="410" y="170" text-anchor="middle" class="t-ink" style="font:800 34px var(--f-display)">Someone else’s</text>
+      <text x="410" y="215" text-anchor="middle" class="t-ink" style="font:800 34px var(--f-display)">computer, abroad</text>
+      <g fill="none" stroke="rgba(190,18,60,.55)" stroke-width="2.4">
+        <path id="q1" d="M140 620 C140 420 300 360 340 290"/>
+        <path id="q2" d="M410 620 L410 290"/>
+        <path id="q3" d="M680 620 C680 420 520 360 480 290"/>
+      </g>
+      <g fill="#be123c">
+        <rect width="18" height="24" rx="3" x="-9" y="-12"><animateMotion dur="2.8s" repeatCount="indefinite"><mpath href="#q1"/></animateMotion></rect>
+        <rect width="18" height="24" rx="3" x="-9" y="-12"><animateMotion dur="2.4s" begin=".5s" repeatCount="indefinite"><mpath href="#q2"/></animateMotion></rect>
+        <rect width="18" height="24" rx="3" x="-9" y="-12"><animateMotion dur="3s" begin="1s" repeatCount="indefinite"><mpath href="#q3"/></animateMotion></rect>
+      </g>
+      <g fill="#fff" stroke="#8b5cf6" stroke-width="2.2">
+        <rect x="60" y="600" width="160" height="90" rx="12"/>
+        <rect x="330" y="600" width="160" height="90" rx="12"/>
+        <rect x="600" y="600" width="160" height="90" rx="12"/>
+      </g>
+      <text x="140" y="652" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Ministry</text>
+      <text x="410" y="652" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Hospital</text>
+      <text x="680" y="652" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Bank</text>
+      <text x="410" y="730" text-anchor="middle" class="t-mut mono" style="font-size:18px;letter-spacing:.14em">THE WORK GOES UP. IT DOES NOT COME HOME.</text>
+    </svg>
   </div>
 </section>
 
-<!-- 3 · The question -->
-<section class="slide" data-section="The question" data-note="Source: MIT NANDA, The GenAI Divide, Jul 2025 (preliminary)">
-  <span class="eyebrow rv">The question</span>
-  <div class="giant rv" style="margin-top:24px;max-width:1500px">If AI does half the work,<br><span class="g">whose AI is it?</span></div>
-  <p class="lead rv" style="max-width:1300px;margin-top:34px">Rented AI takes the <b>data</b>, keeps the <b>knowledge</b>, owns the <b>AI</b>, acts without a <b>person</b>, and <b>learns</b> from your work. And in one major study, <b>95%</b> of organisations saw no measurable return.</p>
+<!-- 5 · Sovereign AI, defined -->
+<section class="slide cool" data-section="Sovereign AI" data-note="Sovereign AI is usually defined as a nation's own compute, data and talent · Sovra adds the desk">
+  <div class="split">
+    <div>
+      <span class="eyebrow c rv">Sovereign AI, defined</span>
+      <h1 class="rv">The UAE is building the stack. <span class="gc">The desk is missing.</span></h1>
+      <p class="lead rv">Sovereign AI is usually defined as a nation’s own <b>compute</b>, <b>models</b> and <b>talent</b>. The UAE is building all three. But sovereignty is decided where the work happens: at every desk, with every file and every decision.</p>
+      <div class="bar c rv mt"><span class="k">Sovra</span><span class="t">The <b>desk layer</b>: helpers, memory and approvals on computers the nation owns, running the nation’s own models.</span></div>
+    </div>
+    <svg class="rv z" viewBox="0 0 820 700" style="width:100%;max-height:700px" role="img" aria-label="A stack: national compute, national models, talent, and on top the desk layer, Sovra">
+      <g fill="#fff" stroke="#c4b5fd" stroke-width="2">
+        <rect x="90" y="540" width="640" height="110" rx="20"/>
+        <rect x="120" y="410" width="580" height="110" rx="20"/>
+        <rect x="150" y="280" width="520" height="110" rx="20"/>
+      </g>
+      <text x="410" y="585" text-anchor="middle" class="t-ink" style="font:700 28px var(--f-display)">National compute</text>
+      <text x="410" y="620" text-anchor="middle" class="t-mut" style="font-size:19px">Stargate UAE · Khazna · sovereign clouds</text>
+      <text x="410" y="455" text-anchor="middle" class="t-ink" style="font:700 28px var(--f-display)">National models</text>
+      <text x="410" y="490" text-anchor="middle" class="t-mut" style="font-size:19px">Falcon · Jais · K2 Think</text>
+      <text x="410" y="325" text-anchor="middle" class="t-ink" style="font:700 28px var(--f-display)">Talent and policy</text>
+      <text x="410" y="360" text-anchor="middle" class="t-mut" style="font-size:19px">Chief AI Officers · AI Charter · staff training</text>
+      <ellipse cx="410" cy="160" rx="300" ry="110" fill="url(#gGlow)"/>
+      <rect x="180" y="90" width="460" height="130" rx="22" fill="#fff" stroke="#0891b2" stroke-width="3"/>
+      <text x="410" y="145" text-anchor="middle" class="t-c" style="font:800 32px var(--f-display)">The desk · Sovra</text>
+      <text x="410" y="185" text-anchor="middle" class="t-ink2" style="font-size:20px">helpers · memory · files · approvals</text>
+      <path d="M410 228 V276" stroke="#0891b2" stroke-width="3" fill="none" marker-end="url(#arrC)"/>
+    </svg>
+  </div>
 </section>
 
-<!-- 4 · Rented vs Sovra -->
-<section class="slide flip" data-section="The answer" data-note="Today · what Sovra does now">
-  <span class="eyebrow rv">The answer</span>
+<!-- 6 · The problem -->
+<section class="slide flip" data-section="The problem" data-note="Five things a country can lose with rented AI">
+  <div class="split">
+    <div>
+      <span class="eyebrow rv">The problem</span>
+      <h1 class="rv">Rented AI makes a nation AI-native on <span class="g">someone else’s terms.</span></h1>
+      <p class="lead rv">Five things leave quietly. Each is a sovereignty problem. Each also costs value.</p>
+    </div>
+    <div class="glass rv r" style="padding:30px 34px">
+      <div class="xlist" style="margin-top:0">
+        <div class="it"><div class="x">1</div><div><h4>The data leaves</h4><p>A patient letter pasted into a foreign chatbot. UAE law says health data stays in the country.</p></div></div>
+        <div class="it"><div class="x">2</div><div><h4>The knowledge leaks</h4><p>A senior officer retires. Everything she taught the AI is held abroad, or forgotten.</p></div></div>
+        <div class="it"><div class="x">3</div><div><h4>The AI is not yours</h4><p>One foreign supplier changes its prices or rules. Half the nation’s work depends on it.</p></div></div>
+        <div class="it"><div class="x">4</div><div><h4>Nobody pressed Send</h4><p>A message reaches a citizen that no person approved.</p></div></div>
+        <div class="it"><div class="x">5</div><div><h4>Your work trains their AI</h4><p>The value your people create flows to another company, unseen.</p></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · The solution -->
+<section class="slide" data-section="The solution" data-note="Today · what Sovra does now">
+  <span class="eyebrow rv">The solution</span>
   <h1 class="rv">Assistants in <span class="g">your own office.</span></h1>
   <div class="vs">
     <div class="glass bad rv">
@@ -100,8 +213,8 @@
   </div>
 </section>
 
-<!-- 5 · Five things stay yours -->
-<section class="slide" data-section="Sovereignty" data-note="Today = in the product · Next = designed · Later = direction">
+<!-- 8 · Five things stay yours -->
+<section class="slide flip" data-section="Sovereignty" data-note="Today = in the product · Later = direction">
   <span class="eyebrow rv">100% sovereign</span>
   <h1 class="rv">Five things <span class="g">stay yours.</span></h1>
   <div class="five">
@@ -111,22 +224,52 @@
     <div class="glass rv"><div class="k5 g">4</div><h3>Decisions</h3><p>The AI prepares. A person approves.</p><span class="pill today">Today</span></div>
     <div class="glass c rv"><div class="k5 gc">5</div><h3>Learning</h3><p>Train your own AI, on your own computers.</p><span class="pill warn">Later</span></div>
   </div>
-  <div class="bar rv mt"><span class="k">No server</span><span class="t">There is no Sovra server holding customer data, and nothing is reported back to us. By design, not by setting.</span></div>
+  <div class="bar rv mt"><span class="k">No server</span><span class="t">There is no Sovra server holding customer data, and nothing is reported back to us. <b>By design, not by setting.</b></span></div>
 </section>
 
-<!-- 6 · Proof -->
+<!-- 9 · The product -->
+<section class="slide" data-section="The product" data-note="Today · one ask, four things kept, nothing leaves without a person">
+  <div class="split">
+    <div>
+      <span class="eyebrow rv">The product · today</span>
+      <h1 class="rv">One ask. <span class="g">A team answers.</span></h1>
+      <p class="lead rv">Helpers with different jobs work together in one chat. Everything they find, write and learn stays on the computer, with a receipt.</p>
+      <div class="col mt" style="gap:14px">
+        <div class="bar rv"><span class="k">Found</span><span class="t">The clause, cited from <b>the file on this computer</b></span></div>
+        <div class="bar rv"><span class="k">Saved</span><span class="t">Talking points kept <b>with versions</b></span></div>
+        <div class="bar c rv"><span class="k">Learned</span><span class="t">A detail remembered <b>with its source</b></span></div>
+      </div>
+    </div>
+    <div class="app rv r" style="height:700px">
+      <div class="tb"><i></i><i></i><i></i><span class="ti">SOVRA · TEAM</span><span class="dev pill today" style="font-size:12px;padding:6px 12px">On this computer</span></div>
+      <div class="bd">
+        <div class="main" style="gap:18px">
+          <div class="msg me"><div class="bub">Prepare me for Thursday’s renewal meeting with the supplier.</div></div>
+          <div class="msg"><div class="av" style="background:#7c3aed">A</div><div class="bub"><div class="who">Alex · Team lead</div>Here’s your brief. One question: hold the price, or offer a two-year term?</div></div>
+          <div class="msg"><div class="av" style="background:#0891b2">P</div><div class="bub"><div class="who">Priya · Researcher</div>Clause 7.2 allows a 4% uplift. Notice is due 1 December.<br><span class="cite">⌕ files · Supplier contract.pdf</span></div></div>
+          <div class="msg"><div class="av" style="background:#9333ea">J</div><div class="bub"><div class="who">Jamie · Editor</div>One-page talking points, ready to share.<br><span class="cite">⤓ Save</span></div></div>
+          <div class="msg"><div class="av" style="background:#6d28d9">N</div><div class="bub"><div class="who">Noor · Curator</div>I’ll remember that this supplier prefers two-year terms.<br><span class="cite">◷ memory · from your message today</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 · Proof -->
 <section class="slide flip" data-section="Value realisation" data-note="The customer measures the result; we never invent the number">
   <span class="eyebrow rv">Value realisation</span>
   <h1 class="rv">Proof, <span class="g">not promises.</span></h1>
+  <p class="lead rv">Most AI pilots die because nobody agreed what success meant. Ours writes it down first.</p>
   <div class="g4 mt">
     <div class="glass step rv"><div class="sn g">1</div><h4>Measure today</h4><p>Three real tasks, timed before day 1.</p></div>
     <div class="glass step rv"><div class="sn g">2</div><h4>Agree the test</h4><p>Success, and stop, written down first.</p></div>
     <div class="glass step rv"><div class="sn g">3</div><h4>Short pilot</h4><p>A few people, about six weeks, own computers.</p></div>
     <div class="glass step rv"><div class="sn gc">4</div><h4>Decide on a date</h4><p>Grow, change or stop. The customer holds the numbers.</p></div>
   </div>
+  <div class="bar c rv mt"><span class="k">Why it sells</span><span class="t">Sovereignty gets a pilot <b>through risk review</b>. Measured value is what makes it <b>grow</b>.</span></div>
 </section>
 
-<!-- 7 · Built today -->
+<!-- 11 · Built today -->
 <section class="slide" data-section="Built today" data-note="Today · counted in the code">
   <span class="eyebrow rv">Built, not a slide</span>
   <h1 class="rv">A real product, <span class="g">today.</span></h1>
@@ -134,36 +277,83 @@
     <div class="stat rv"><div class="n g" data-count="12">12</div><div class="l">AI helpers</div><div class="d">A team that works together in one chat.</div></div>
     <div class="stat rv"><div class="n g" data-count="49">49</div><div class="l">Ready-made skills</div><div class="d">Plain words, a “Try an example” button.</div></div>
     <div class="stat rv"><div class="n gc" data-count="3">3</div><div class="l">Operating systems</div><div class="d">Windows, Mac and Linux, one codebase.</div></div>
-    <div class="stat rv"><div class="n gc">150k+</div><div class="l">Lines of checked code</div><div class="d">About a thousand automated tests.</div></div>
+    <div class="stat rv"><div class="n gc" data-count="150" data-suffix="k+">150k+</div><div class="l">Lines of checked code</div><div class="d">About a thousand automated tests.</div></div>
+  </div>
+  <div class="g2 mt" style="gap:24px">
+    <div class="bar rv"><span class="k">Zero</span><span class="t"><b>Sovra servers</b> holding customer data</span></div>
+    <div class="bar rv"><span class="k">Zero</span><span class="t"><b>Usage tracking.</b> Nothing is reported back to us</span></div>
   </div>
 </section>
 
-<!-- 8 · The path -->
-<section class="slide flip" data-section="The path" data-note="Only Today is in the product">
+<!-- 12 · Positioning -->
+<section class="slide flip cool" data-section="Where Sovra sits" data-note="Two questions: where does the work run, and who keeps the knowledge">
+  <div class="split">
+    <div>
+      <span class="eyebrow c rv">Where Sovra sits</span>
+      <h1 class="rv">Two questions sort the <span class="gc">whole market.</span></h1>
+      <p class="lead rv"><b>Where does the work run?</b> On their computers, or yours. <b>Who keeps what the AI learns?</b> Them, or you.</p>
+      <div class="bar c rv mt"><span class="k">Allies</span><span class="t">Sovereign clouds and national models are <b>guests</b> inside Sovra, not rivals.</span></div>
+    </div>
+    <svg class="rv z" viewBox="0 0 820 720" style="width:100%;max-height:720px" role="img" aria-label="Positioning map: Sovra is in the top right, where the work runs on your computers and you keep the knowledge">
+      <rect x="110" y="40" width="680" height="580" rx="24" fill="rgba(255,255,255,.35)" stroke="var(--line-2)" stroke-width="1.5"/>
+      <line x1="450" y1="40" x2="450" y2="620" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
+      <line x1="110" y1="330" x2="790" y2="330" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
+      <path d="M110 660 H780" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
+      <text x="110" y="700" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">WORK RUNS ON THEIR COMPUTERS</text>
+      <text x="780" y="700" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">ON YOURS</text>
+      <path d="M70 620 V50" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
+      <text x="40" y="620" transform="rotate(-90 40 620)" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">THEY KEEP THE KNOWLEDGE</text>
+      <text x="40" y="50" transform="rotate(-90 40 50)" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">YOU KEEP IT</text>
+      <g fill="#fff" stroke="#c4b5fd" stroke-width="1.8">
+        <rect x="150" y="400" width="260" height="150" rx="20"/>
+        <rect x="150" y="110" width="260" height="150" rx="20"/>
+        <rect x="490" y="400" width="260" height="150" rx="20"/>
+      </g>
+      <text x="280" y="462" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Rented chatbots</text>
+      <text x="280" y="498" text-anchor="middle" class="t-mut" style="font-size:18px">their computers · their notes</text>
+      <text x="280" y="172" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Sovereign cloud</text>
+      <text x="280" y="208" text-anchor="middle" class="t-mut" style="font-size:18px">in-country · still a vendor platform</text>
+      <text x="620" y="462" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Local chat tools</text>
+      <text x="620" y="498" text-anchor="middle" class="t-mut" style="font-size:18px">your computer · no memory</text>
+      <ellipse cx="620" cy="185" rx="200" ry="120" fill="url(#gGlow)"/>
+      <rect x="490" y="110" width="260" height="150" rx="20" fill="#fff" stroke="#0891b2" stroke-width="3"/>
+      <text x="620" y="172" text-anchor="middle" class="t-c" style="font:800 34px var(--f-display)">Sovra</text>
+      <text x="620" y="210" text-anchor="middle" class="t-ink2" style="font-size:18px">your computers · your knowledge</text>
+    </svg>
+  </div>
+</section>
+
+<!-- 13 · The path -->
+<section class="slide" data-section="The path" data-note="Only Today is in the product">
   <span class="eyebrow rv">The path</span>
   <h1 class="rv">One desk to a <span class="g">sovereign nation.</span></h1>
-  <div class="g4 mt">
+  <svg class="rv" viewBox="0 0 1680 60" style="width:100%;height:60px;margin-top:30px" aria-hidden="true">
+    <path d="M40 30 H1640" stroke="#a78bfa" stroke-width="4" fill="none" marker-end="url(#arr)"/>
+    <g fill="#fff" stroke="#7c3aed" stroke-width="3"><circle cx="210" cy="30" r="14"/><circle cx="630" cy="30" r="14"/><circle cx="1050" cy="30" r="14"/><circle cx="1470" cy="30" r="14"/></g>
+  </svg>
+  <div class="g4" style="margin-top:14px">
     <div class="glass phase rv" style="border-color:rgba(124,58,237,.35)"><span class="pill today" style="align-self:flex-start">Today</span><h3>A person</h3><p>A private team of AI helpers on one computer.</p></div>
-    <div class="glass phase rv" style="border-color:rgba(8,145,178,.35)"><span class="pill next" style="align-self:flex-start">Next</span><h3>A team</h3><p>Computers share helpers and knowledge, by choice. No central server.</p></div>
+    <div class="glass phase rv" style="border-color:rgba(8,145,178,.35)"><span class="pill next" style="align-self:flex-start">Next · designed</span><h3>A team</h3><p>Computers share helpers and knowledge, by choice. No central server.</p></div>
     <div class="glass phase rv"><span class="pill warn" style="align-self:flex-start">Later</span><h3>An organisation</h3><p>Proof of where data lives. Its own AI, trained at home.</p></div>
     <div class="glass phase rv"><span class="pill warn" style="align-self:flex-start">Later</span><h3>Government</h3><p>Full records, offline networks, security certificates.</p></div>
   </div>
+  <div class="bar rv mt"><span class="k">One foundation</span><span class="t">Memory that is never secretly rewritten today is the <b>same foundation</b> the nationwide record needs later. No rewrite.</span></div>
 </section>
 
-<!-- 9 · Why we win -->
-<section class="slide" data-section="Why Sovra wins" data-note="Why now, why here">
+<!-- 14 · Why we win -->
+<section class="slide flip" data-section="Why Sovra wins" data-note="Why now, why here">
   <span class="eyebrow rv">Why Sovra wins</span>
   <h1 class="rv">The right answer, <span class="g">at the right time.</span></h1>
   <div class="why">
-    <div class="glass rv"><h3>The clock is running</h3><p>AI-native targets are set, funded and staffed — with two-year deadlines.</p></div>
-    <div class="glass rv"><h3>It works with UAE AI</h3><p>Sovra is the desk layer. National models and clouds are its guests, not rivals.</p></div>
-    <div class="glass rv"><h3>It gets harder to leave</h3><p>Knowledge builds up on the customer’s own computers, week after week.</p></div>
+    <div class="glass rv"><h3>The clock is running</h3><p>AI-native targets are set, funded and staffed, with two-year deadlines.</p></div>
+    <div class="glass rv"><h3>It completes the national stack</h3><p>The UAE builds compute and models. Sovra is the desk layer that runs them for every employee.</p></div>
+    <div class="glass rv"><h3>It gets harder to leave</h3><p>Knowledge builds up on the customer’s own computers, week after week. No rented service can copy that without taking the data.</p></div>
     <div class="glass rv"><h3>Trust by design</h3><p>No data to hand over. Every limit written down. That is how governments buy.</p></div>
   </div>
 </section>
 
-<!-- 10 · Honest + the ask -->
-<section class="slide flip" data-section="Not yet, and the ask" data-note="Said on purpose">
+<!-- 15 · Not yet + the ask -->
+<section class="slide" data-section="Not yet, and the ask" data-note="Said on purpose · the funding amount is for the founder to add">
   <div class="split">
     <div>
       <span class="eyebrow rv">Not yet · said on purpose</span>
@@ -182,7 +372,7 @@
   </div>
 </section>
 
-<!-- 11 · Close -->
+<!-- 16 · Close -->
 <section class="slide" data-section="Sovra" data-note="Sovra · AI-native, on UAE terms">
   <canvas class="bgcanvas" data-fx="mesh"></canvas>
   <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
@@ -192,7 +382,7 @@
     <div class="cmeta rv mt-l">
       <div><div class="k">Today</div><div class="v">A real product, on your computers</div></div>
       <div><div class="k">Proof</div><div class="v">Measured pilots</div></div>
-      <div><div class="k">Detail</div><div class="v">docs/value-realisation</div></div>
+      <div><div class="k">Sources</div><div class="v">docs/value-realisation/09-sources.md</div></div>
     </div>
   </div>
 </section>
