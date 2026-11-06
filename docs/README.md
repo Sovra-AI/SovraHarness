@@ -25,5 +25,6 @@ Slide decks live under [`decks/`](decks/README.md):
 [investors](decks/investor/index.html),
 [company computers](decks/company-computers/index.html),
 [a family or small business](decks/group/index.html),
-[value you can count](decks/value/index.html).
+[value you can count](decks/value/index.html),
+[AI-native and 100% sovereign, for the UAE](decks/uae/index.html).
 Dated evaluation dumps live under `evaluations/`. Neither is a product contract.

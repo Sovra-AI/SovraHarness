@@ -11,6 +11,13 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- New UAE deck at [`docs/decks/uae/`](docs/decks/uae/index.html) (Cinema
+  1920×1080, plain words): AI-native and 100% sovereign, with value you can
+  count. Five things stay sovereign (data, knowledge, the AI itself,
+  decisions, learning), each marked Today or Direction; a value map, staged
+  time to value, a measured pilot, a shared success plan, honest limits and
+  dated sources for every outside figure.
+
 - New value-realisation deck at
   [`docs/decks/value/`](docs/decks/value/index.html) (Cinema 1920×1080):
   value is work that is finished, kept with versions, and easier the next

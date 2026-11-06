@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sovra · AI-native, 100% sovereign</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Sans+Arabic:wght@400;600&display=swap">
+<link rel="stylesheet" href="../shared/fonts/ibm-plex/fonts.css">
+<link rel="stylesheet" href="../shared/cinema.css">
+<style>
+  .ar{font-family:"IBM Plex Sans Arabic",var(--f-sans);direction:rtl;unicode-bidi:isolate}
+  .arline{font:600 40px/1.4 "IBM Plex Sans Arabic",var(--f-sans);color:var(--violet-3);margin-top:22px;text-align:left}
+  .cmeta{display:grid;grid-template-columns:repeat(3,auto);gap:44px;justify-content:start}
+  .cmeta .k{font:500 14px var(--f-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
+  .cmeta .v{font-size:21px;color:var(--ink-2);margin-top:8px}
+  .tile{padding:32px 30px;display:flex;flex-direction:column;gap:10px}
+  .tile .n{font:800 84px/.95 var(--f-display);letter-spacing:-.045em}
+  .tile .l{font:500 15px var(--f-mono);letter-spacing:.18em;text-transform:uppercase;color:var(--violet-3);margin-top:6px}
+  .tile .d{font-size:21px;line-height:1.45;color:var(--muted)}
+  .tile .src{margin-top:auto;padding-top:14px;font:500 14px var(--f-mono);letter-spacing:.06em;color:var(--dim)}
+  .step{padding:32px 30px;display:flex;flex-direction:column;gap:14px}
+  .step .sn{font:700 60px/1 var(--f-display);letter-spacing:-.04em}
+  .step h4{font:650 31px/1.15 var(--f-display);letter-spacing:-.015em}
+  .step p{font-size:21px;line-height:1.5;color:var(--muted)}
+  .step p b{color:var(--ink-2)}
+  .step .keep{margin-top:auto;font:500 15px var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--violet-3)}
+  .phase{padding:30px 30px 26px;display:flex;flex-direction:column;gap:12px}
+  .phase h3{font:700 36px/1.05 var(--f-display);letter-spacing:-.03em}
+  .phase ul{list-style:none;display:flex;flex-direction:column;gap:12px;margin-top:6px}
+  .phase li{font-size:21px;line-height:1.38;color:var(--ink-2);padding-left:24px;position:relative}
+  .phase li::before{content:"";position:absolute;left:0;top:12px;width:10px;height:10px;border-radius:3px;background:var(--violet-2)}
+  .phase.n li::before{background:var(--cyan)}
+  .phase.d li::before{background:var(--dim)}
+  .tbl{display:grid;margin-top:34px;border-radius:22px;overflow:hidden}
+  .tbl.c4{grid-template-columns:1.05fr 1.15fr 1.1fr 1fr}
+  .tbl.c3{grid-template-columns:1fr 1.5fr 1.2fr}
+  .tbl .h{padding:16px 24px;font:500 14px var(--f-mono);letter-spacing:.18em;text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--line-2)}
+  .tbl .c{padding:17px 24px;border-bottom:1px solid var(--line);font-size:21px;line-height:1.35;color:var(--ink-2)}
+  .tbl .c.m{color:var(--muted)}
+  .tbl .c.first{font:650 22px/1.3 var(--f-display);color:var(--ink)}
+  .tbl > .last{border-bottom:none}
+  .xlist{display:flex;flex-direction:column;gap:22px;margin-top:34px}
+  .xlist .it{display:flex;gap:20px;align-items:flex-start}
+  .xlist .x{width:44px;height:44px;border-radius:13px;flex:none;display:grid;place-items:center;background:rgba(190,18,60,.10);border:1px solid rgba(190,18,60,.32);color:var(--rose);font:700 20px var(--f-mono)}
+  .xlist .ok{background:rgba(124,58,237,.10);border-color:rgba(124,58,237,.35);color:var(--violet-3)}
+  .xlist h4{font:650 28px/1.15 var(--f-display);letter-spacing:-.015em}
+  .xlist p{font-size:20px;line-height:1.45;color:var(--muted);margin-top:5px}
+  .xlist p b{color:var(--ink-2)}
+  .five{display:grid;grid-template-columns:repeat(5,1fr);gap:20px;margin-top:40px}
+  .five .glass{padding:30px 26px;display:flex;flex-direction:column;gap:12px}
+  .five .k5{font:800 56px/1 var(--f-display);letter-spacing:-.04em}
+  .five h3{font:700 32px/1.1 var(--f-display);letter-spacing:-.02em}
+  .five p{font-size:20px;line-height:1.45;color:var(--muted)}
+  .five p b{color:var(--ink-2)}
+  .five .pill{align-self:flex-start;margin-top:auto}
+  .srcs{columns:2;column-gap:56px;margin-top:30px}
+  .srcs p{break-inside:avoid;font-size:19px;line-height:1.4;color:var(--muted);margin-bottom:14px}
+  .srcs p b{color:var(--ink-2)}
+  .srcs .u{font:400 15px var(--f-mono);color:var(--dim);word-break:break-all}
+  #deck .slide{justify-content:center}
+  svg text{font-family:var(--f-sans)}
+  .t-ink{fill:var(--ink)} .t-ink2{fill:var(--ink-2)} .t-mut{fill:var(--muted)} .t-dim{fill:var(--dim)} .t-v{fill:var(--violet-3)} .t-c{fill:var(--cyan-2)} .t-r{fill:var(--rose)}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body data-logo="../../../crates/sovra-ui/assets/branding/sovra-logo.svg" data-title="AI-native · 100% sovereign">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gV" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#9333ea"/></linearGradient>
+    <radialGradient id="gGlow"><stop offset="0" stop-color="#8b5cf6" stop-opacity=".30"/><stop offset="1" stop-color="#7c3aed" stop-opacity="0"/></radialGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0891b2"/></marker>
+  </defs>
+</svg>
+
+<div id="stage"><div id="deck">
+
+<!-- 1 · Title -->
+<section class="slide" data-section="United Arab Emirates" data-note="Sovra · AI in every job, with every piece kept in the UAE">
+  <canvas class="bgcanvas" data-three data-fx="globe" data-x=".8" data-r=".40" data-ox="4.4" data-n="260"></canvas>
+  <div class="grow col" style="justify-content:center;max-width:1180px;gap:0">
+    <span class="eyebrow rv">For an AI-native UAE</span>
+    <div class="giant rv" style="margin-top:30px">AI-native.<br><span class="g">100% sovereign.</span><br>Value you can <span class="gc">count.</span></div>
+    <p class="arline ar rv" lang="ar">ذكاء اصطناعي في كل عمل، وسيادة كاملة على بياناتك.</p>
+    <p class="lead rv" style="max-width:880px">Every person gets a team of AI helpers. The data, the knowledge, the decisions and the AI itself stay on computers you own. And each step is measured, so you know it was worth it.</p>
+    <div class="cmeta rv mt-l">
+      <div><div class="k">Who it is for</div><div class="v">Leaders making the UAE AI-native</div></div>
+      <div><div class="k">What we offer</div><div class="v">A measured, time-boxed pilot</div></div>
+      <div><div class="k">Our promise</div><div class="v">Every limit is on a slide</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 · The vision -->
+<section class="slide flip" data-section="The vision" data-note="Sources: Abu Dhabi Government Digital Strategy 2025–2027 · The National, 23 Apr 2026 · Microsoft AI Diffusion Report · WAM 2019">
+  <span class="eyebrow rv">The vision</span>
+  <h1 class="rv">The UAE has chosen to be <span class="g">AI-native.</span></h1>
+  <div class="g4 mt">
+    <div class="glass tile rv">
+      <div class="n g">2027</div>
+      <div class="l">AI-native government</div>
+      <div class="d">Abu Dhabi aims to be the world’s first fully AI-native government, backed by AED 13 billion.</div>
+      <div class="src">Abu Dhabi Digital Strategy 2025–27</div>
+    </div>
+    <div class="glass tile rv">
+      <div class="n g">50%</div>
+      <div class="l">Of government on AI helpers</div>
+      <div class="d">The Cabinet plans to run half of government services and work with AI that acts, within two years.</div>
+      <div class="src">The National · 23 Apr 2026</div>
+    </div>
+    <div class="glass tile rv">
+      <div class="n gc">70%</div>
+      <div class="l">Of working people use AI</div>
+      <div class="d">First in the world in early 2026, against about 18% globally.</div>
+      <div class="src">Microsoft AI Diffusion Report</div>
+    </div>
+    <div class="glass tile rv">
+      <div class="n gc">2031</div>
+      <div class="l">National AI Strategy</div>
+      <div class="d">A national goal of world leadership in AI, with the world’s first Minister of State for AI.</div>
+      <div class="src">WAM · 2019</div>
+    </div>
+  </div>
+  <div class="bar rv mt"><span class="k">The question</span><span class="t">If AI does half the work, <b>whose computers</b> does it run on, <b>who keeps what it learns</b>, and <b>how do we know it paid off?</b></span></div>
+</section>
+
+<!-- 3 · What AI-native means -->
+<section class="slide" data-section="What AI-native means" data-note="AI-native, in plain words">
+  <span class="eyebrow rv">In plain words</span>
+  <h1 class="rv">AI-native is not a chatbot <span class="g">on the side.</span></h1>
+  <p class="lead rv">It is how the work itself gets done. Three things have to be true at once.</p>
+  <div class="g3 mt">
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M18 19a5 5 0 0 0-3-4.6"/></svg></div>
+      <span class="num">01</span>
+      <h3>Everyone has helpers</h3>
+      <p>Each person has a small team of AI helpers that research, write, organise and follow up, in everyday words.</p>
+    </div>
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3 3 7 3s7-1.3 7-3V6"/></svg></div>
+      <span class="num">02</span>
+      <h3>The organisation remembers</h3>
+      <p>What people know is kept and can be checked. It does not leave when someone changes job, and nobody explains it twice.</p>
+    </div>
+    <div class="glass card c rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg></div>
+      <span class="num">03</span>
+      <h3>People still decide</h3>
+      <p>The AI prepares. A person approves. That is how trust, and the UAE’s AI Charter, stay intact.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4 · The problems -->
+<section class="slide flip" data-section="What goes wrong" data-note="Sources: MIT NANDA, The GenAI Divide, Jul 2025 (preliminary) · Federal Law 2/2019 Art. 13">
+  <div class="split">
+    <div>
+      <span class="eyebrow rv">What goes wrong</span>
+      <h1 class="rv">Rented AI makes a country AI-native on <span class="g">someone else’s terms.</span></h1>
+      <p class="lead rv">Five problems show up in almost every AI rollout. Each one is a sovereignty problem, and each one costs value.</p>
+    </div>
+    <div class="glass rv r" style="padding:30px 34px">
+      <div class="xlist" style="margin-top:0;gap:20px">
+        <div class="it"><div class="x">1</div><div><h4>The data leaves</h4><p>The work goes to computers abroad. For health data, UAE law says it must stay in the country.</p></div></div>
+        <div class="it"><div class="x">2</div><div><h4>The knowledge leaks</h4><p>Every chat starts from zero, or what staff explain ends up held by another company.</p></div></div>
+        <div class="it"><div class="x">3</div><div><h4>The training is not yours</h4><p>Your work can teach someone else’s AI. You cannot see what it learned, or take it back.</p></div></div>
+        <div class="it"><div class="x">4</div><div><h4>Nobody pressed Send</h4><p>AI that acts on its own, with no person approving, breaks trust.</p></div></div>
+        <div class="it"><div class="x">5</div><div><h4>The value never arrives</h4><p>In one major study, <b>95%</b> of organisations saw no measurable return from their AI spending.</p></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · Divider: 100% sovereign -->
+<section class="slide divider" data-section="Part one" data-note="What 100% sovereign means">
+  <div class="bignum">01</div>
+  <div class="grow col" style="justify-content:center;max-width:1400px">
+    <span class="eyebrow rv">100% sovereign</span>
+    <div class="giant rv" style="margin-top:24px">Five things must<br><span class="g">stay yours.</span></div>
+    <p class="lead rv" style="max-width:920px">Not just the data. Sovereignty also means the knowledge, the AI itself, the decisions, and what the AI learns.</p>
+  </div>
+</section>
+
+<!-- 6 · The five -->
+<section class="slide" data-section="The five" data-note="Today = in the desktop app now · Direction = planned, not built">
+  <span class="eyebrow rv">The sovereignty checklist</span>
+  <h1 class="rv">Five things that stay yours, and where Sovra <span class="g">is today.</span></h1>
+  <div class="five">
+    <div class="glass rv">
+      <div class="k5 g">1</div><h3>Data</h3>
+      <p>Files, messages and memory stay on <b>your computer</b>.</p>
+      <span class="pill today">Today</span>
+    </div>
+    <div class="glass rv">
+      <div class="k5 g">2</div><h3>Knowledge</h3>
+      <p>What the helpers learn is kept, <b>with its source</b>, and can be corrected.</p>
+      <span class="pill today">Today</span>
+    </div>
+    <div class="glass rv">
+      <div class="k5 g">3</div><h3>The AI itself</h3>
+      <p>Run the AI <b>on your own computer</b>, or choose who runs it.</p>
+      <span class="pill today">Today · your choice</span>
+    </div>
+    <div class="glass rv">
+      <div class="k5 g">4</div><h3>Decisions</h3>
+      <p>Nothing is sent or run until <b>a person approves</b> it.</p>
+      <span class="pill today">Today</span>
+    </div>
+    <div class="glass c rv">
+      <div class="k5 gc">5</div><h3>Learning</h3>
+      <p>The organisation <b>trains its own AI</b> on its own computers.</p>
+      <span class="pill warn">The direction</span>
+    </div>
+  </div>
+  <div class="bar rv mt"><span class="k">100%</span><span class="t">With the AI running on your own computer, all four of today’s parts stay in the UAE. Training your own AI is the direction, not today.</span></div>
+</section>
+
+<!-- 7 · Data -->
+<section class="slide flip" data-section="1 · Data" data-note="Today · checked in the code">
+  <span class="eyebrow rv">1 · Data · today</span>
+  <h1 class="rv">The data stays where the <span class="g">computer</span> is.</h1>
+  <div class="g4 mt">
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg></div>
+      <h3>A program, not a website</h3>
+      <p>Sovra is installed on the person’s own Windows, Mac or Linux computer.</p>
+    </div>
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3 3 7 3s7-1.3 7-3V6"/></svg></div>
+      <h3>Memory on that computer</h3>
+      <p>What the helpers remember is stored on that computer, not on our servers.</p>
+    </div>
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M9 5h6l4 4v6M5 9v10h10"/></svg></div>
+      <h3>Nothing sent back to us</h3>
+      <p>No usage tracking. Sovra does not report what people do.</p>
+    </div>
+    <div class="glass card c rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+      <h3>Passwords locked away</h3>
+      <p>Keys are kept in the computer’s own locked password store.</p>
+    </div>
+  </div>
+  <div class="bar rv mt"><span class="k">Files</span><span class="t">Folders are read <b>where they already are</b>. No upload, and no project to move the data somewhere else first.</span></div>
+</section>
+
+<!-- 8 · Knowledge -->
+<section class="slide cool" data-section="2 · Knowledge" data-note="Today on one computer · sharing across a group is next">
+  <div class="split">
+    <div>
+      <span class="eyebrow c rv">2 · Knowledge · today</span>
+      <h1 class="rv">Knowledge that stays, and can be <span class="gc">checked.</span></h1>
+      <p class="lead rv">Most AI forgets. The rest keeps your knowledge somewhere you cannot see. Sovra keeps it on the computer, with a receipt for every detail.</p>
+      <div class="col mt" style="gap:16px">
+        <div class="bar c rv"><span class="k">Source</span><span class="t">Every detail keeps <b>the message or file that taught it</b>.</span></div>
+        <div class="bar c rv"><span class="k">Correct</span><span class="t">A correction replaces the detail. <b>The old one stays as history.</b></span></div>
+        <div class="bar rv"><span class="k">Next</span><span class="t">Today this is one computer. Sharing knowledge across a team’s computers is next.</span></div>
+      </div>
+    </div>
+    <div class="app rv r" style="height:640px">
+      <div class="tb"><i></i><i></i><i></i><span class="ti">SOVRA · KNOWLEDGE</span><span class="dev pill today" style="font-size:12px;padding:6px 12px">On this computer</span></div>
+      <div class="bd">
+        <div class="main" style="gap:22px">
+          <div class="msg me"><div class="bub">The permit review now needs two signatures, not one.</div></div>
+          <div class="msg"><div class="av" style="background:#7c3aed">S</div><div class="bub"><div class="who">Helper</div>Noted. I’ll use two signatures from now on.<br><span class="cite">◷ saved · from your message today</span></div></div>
+          <div class="msg me"><div class="bub">What did the permit rule used to say?</div></div>
+          <div class="msg"><div class="av" style="background:#7c3aed">S</div><div class="bub"><div class="who">Helper</div>Until today it needed one signature. That is kept as history.<br><span class="cite">↺ replaced · old rule kept</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 · Training -->
+<section class="slide flip" data-section="3 & 5 · The AI and its learning" data-note="Today: nothing is sent for training · Direction: your own AI, trained on your own computers">
+  <span class="eyebrow rv">3 · The AI · 5 · Learning</span>
+  <h1 class="rv">Your knowledge should never train <span class="g">someone else’s AI.</span></h1>
+  <div class="g2 mt">
+    <div class="glass phase rv" style="border-color:rgba(124,58,237,.35)">
+      <span class="pill today" style="align-self:flex-start">Today</span>
+      <h3>The AI is a guest</h3>
+      <ul>
+        <li>The AI can run on the same computer, and keeps working with no internet</li>
+        <li>Then the work never leaves the building, so it cannot train anyone else’s AI</li>
+        <li>UAE-built open models, such as Falcon Arabic, Jais and K2 Think, can be brought in this way. We have not yet tested them in the app.</li>
+        <li>Swap the AI any time. The memory, files and helpers stay.</li>
+      </ul>
+    </div>
+    <div class="glass phase d rv">
+      <span class="pill warn" style="align-self:flex-start">The direction, not today</span>
+      <h3>Your own AI, trained at home</h3>
+      <ul>
+        <li>The organisation teaches its own AI using its own computers, when they are idle</li>
+        <li>The original files never leave; only the lessons are combined</li>
+        <li>Every lesson can be seen, tested before it is used, and undone</li>
+        <li>The organisation can show auditors what its AI learned, and from where</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 10 · Decisions -->
+<section class="slide" data-section="4 · Decisions" data-note="Today · the AI prepares, a person approves">
+  <span class="eyebrow rv">4 · Decisions · today</span>
+  <h1 class="rv">The AI prepares. <span class="g">A person approves.</span></h1>
+  <p class="lead rv">The UAE AI Charter puts human oversight first. In Sovra that is not a policy. It is the button a person presses.</p>
+  <div class="g3 mt">
+    <div class="glass card rv">
+      <span class="num">MESSAGES</span>
+      <h3>Ready to send</h3>
+      <p>WhatsApp and Telegram messages show who, to whom and the exact words. A person presses <b>Send</b>. The AI cannot approve itself.</p>
+    </div>
+    <div class="glass card rv">
+      <span class="num">EMAIL · CALENDAR</span>
+      <h3>Drafts only</h3>
+      <p>Emails are saved as drafts for a person to send. Calendar entries invite nobody.</p>
+    </div>
+    <div class="glass card rv">
+      <span class="num">THE COMPUTER</span>
+      <h3>Asked every time</h3>
+      <p>Before the AI changes anything on the computer, it asks. Risky changes are asked about every single time.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 11 · Divider: value -->
+<section class="slide divider cool" data-section="Part two" data-note="Value realisation">
+  <div class="bignum">02</div>
+  <div class="grow col" style="justify-content:center;max-width:1400px">
+    <span class="eyebrow c rv">Value you can count</span>
+    <div class="giant rv" style="margin-top:24px">Sovereignty lets you start.<br><span class="gc">Value</span> decides if you grow.</div>
+    <p class="lead rv" style="max-width:920px">We agree what “better” means before we start, measure today’s starting point, and let your team hold the numbers.</p>
+  </div>
+</section>
+
+<!-- 12 · Value map -->
+<section class="slide cool" data-section="The value map" data-note="Each row is something to test in the pilot, not a promise">
+  <span class="eyebrow c rv">The value map</span>
+  <h1 class="rv">Every part has to earn its place with <span class="gc">a number.</span></h1>
+  <div class="glass tbl c4 rv">
+    <div class="h">What Sovra does</div><div class="h">What changes</div><div class="h">How you see it each week</div><div class="h">What you measure at the end</div>
+    <div class="c first">Remembers, with a source</div><div class="c">Staff stop explaining the same things</div><div class="c m">Details learned and corrected</div><div class="c">Minutes per routine task</div>
+    <div class="c first">Reads files where they are</div><div class="c">No project to move data first</div><div class="c m">Folders connected</div><div class="c">Days until the first real use</div>
+    <div class="c first">A team of helpers</div><div class="c">Letters, briefs and tables finished, not suggested</div><div class="c m">Saved work per person</div><div class="c">Time to finish a document</div>
+    <div class="c first">A person approves</div><div class="c">No message or change without a person</div><div class="c m">Approved, edited, refused</div><div class="c">Mistakes that went out (aim: none)</div>
+    <div class="c first last">AI on your computer</div><div class="c last">Work that never leaves the UAE</div><div class="c m last">Share of work done locally</div><div class="c last">Data-transfer reviews no longer needed</div>
+  </div>
+  <div class="bar c rv mt"><span class="k">The rule</span><span class="t">“We expect <b>this</b> to move from <b>your starting point</b> to <b>a target</b> by <b>a date</b>.” Your team measures it. We never invent the number.</span></div>
+</section>
+
+<!-- 13 · Time to value -->
+<section class="slide flip" data-section="Time to value" data-note="Value arrives in stages">
+  <span class="eyebrow rv">Time to value</span>
+  <h1 class="rv">Value arrives in <span class="g">stages,</span> not at the end.</h1>
+  <div class="g4 mt">
+    <div class="glass step rv">
+      <div class="sn g">Day 1</div>
+      <h4>Something useful, kept</h4>
+      <p>Install. Open <b>Skills</b> and press <b>Try an example</b>. 49 ready-made skills, no commands to learn. Press <b>Save</b>.</p>
+      <div class="keep">First value</div>
+    </div>
+    <div class="glass step rv">
+      <div class="sn g">Week 2</div>
+      <h4>Real work</h4>
+      <p>Connect one work folder. Hand one weekly job to <b>Schedules</b>. The helpers start to know the work.</p>
+      <div class="keep">It starts to remember</div>
+    </div>
+    <div class="glass step rv">
+      <div class="sn g">Pilot end</div>
+      <h4>Measured change</h4>
+      <p>Compare with the starting point you measured before day 1. Only your team’s numbers count.</p>
+      <div class="keep">Proved, or not</div>
+    </div>
+    <div class="glass step rv">
+      <div class="sn gc">Then</div>
+      <h4>Grow what worked</h4>
+      <p>More people, each on their own computer. Sharing across a team’s computers is <b>next</b>.</p>
+      <div class="keep">AI-native, step by step</div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 · The pilot -->
+<section class="slide" data-section="The pilot" data-note="Most pilots fail because nobody agreed what success meant">
+  <div class="split">
+    <div>
+      <span class="eyebrow rv">What we offer</span>
+      <h1 class="rv">A pilot that ends in a <span class="g">clear decision.</span></h1>
+      <p class="lead rv">Most AI pilots stall because nobody agreed what success meant. This one writes it down first.</p>
+      <div class="bar rv mt"><span class="k">Size</span><span class="t">A fixed period, for example six weeks. A few named people, three real tasks each, on computers you own.</span></div>
+    </div>
+    <div class="glass rv r" style="padding:32px 36px">
+      <div class="xlist" style="margin-top:0">
+        <div class="it"><div class="x ok">1</div><div><h4>Measure today first</h4><p>Before day 1, time the three tasks the way they are done now.</p></div></div>
+        <div class="it"><div class="x ok">2</div><div><h4>Agree success, and stop</h4><p>Write down what counts as success, and what means <b>stop</b>.</p></div></div>
+        <div class="it"><div class="x ok">3</div><div><h4>Look every week</h4><p>Saved work, what it learned, what ran on schedule, and what people approved. All on the computer.</p></div></div>
+        <div class="it"><div class="x ok">4</div><div><h4>Security in the room</h4><p>Your security team sees where the data is and who approves, from day 1.</p></div></div>
+        <div class="it"><div class="x ok">5</div><div><h4>Decide on a date</h4><p>Grow, change, or stop. Any honest answer is a good one.</p></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 15 · Success plan -->
+<section class="slide flip" data-section="Shared success plan" data-note="One page, signed by both sides">
+  <span class="eyebrow rv">One page, both sides sign</span>
+  <h1 class="rv">A shared plan for <span class="g">success.</span></h1>
+  <div class="glass tbl c3 rv">
+    <div class="h">Item</div><div class="h">What it says</div><div class="h">Who owns it</div>
+    <div class="c first">Goals</div><div class="c">Two or three rows from the value map</div><div class="c m">Your sponsor, e.g. the Chief AI Officer</div>
+    <div class="c first">Starting point</div><div class="c">Today’s minutes, days and mistakes for the chosen tasks</div><div class="c m">Your team, with Sovra</div>
+    <div class="c first">Boundaries</div><div class="c">Which AI, which folders and which connections may be used</div><div class="c m">Your security and data team</div>
+    <div class="c first">Check-ins</div><div class="c">A short weekly look, and one mid-way review</div><div class="c m">Both sides</div>
+    <div class="c first last">Decision</div><div class="c last">The date, the test, and what “grow” means in people and teams</div><div class="c m last">Your sponsor</div>
+  </div>
+</section>
+
+<!-- 16 · Honest limits -->
+<section class="slide" data-section="Not yet" data-note="Said on purpose · your risk team would find these anyway">
+  <span class="eyebrow rv">Not yet · said on purpose</span>
+  <h1 class="rv">What Sovra <span class="g">does not</span> do today.</h1>
+  <p class="lead rv">Trust is part of the value. Here is the list your risk team would find anyway.</p>
+  <div class="g2 mt" style="gap:22px 40px">
+    <div class="col" style="gap:16px">
+      <div class="bar rv"><span class="k">Arabic</span><span class="t">The app is in English today. No Arabic screens yet.</span></div>
+      <div class="bar rv"><span class="k">AI</span><span class="t">No Arabic AI comes built in. You bring one and run it yourself.</span></div>
+      <div class="bar rv"><span class="k">Training</span><span class="t">Teaching your own AI on your own computers is the direction, not built.</span></div>
+      <div class="bar rv"><span class="k">Certificates</span><span class="t">No security certificates yet, such as ISO 27001.</span></div>
+    </div>
+    <div class="col" style="gap:16px">
+      <div class="bar rv"><span class="k">Offline</span><span class="t">The AI can run offline, but there is no tested version for fully cut-off networks.</span></div>
+      <div class="bar rv"><span class="k">Sharing</span><span class="t">Each computer works alone. Sharing knowledge across a team is next.</span></div>
+      <div class="bar rv"><span class="k">Updates</span><span class="t">The app cannot update itself yet.</span></div>
+      <div class="bar rv"><span class="k">Add-ons</span><span class="t">Some add-on tools do not yet ask before each use.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 17 · Path -->
+<section class="slide" data-section="The path" data-note="Only Today is in the product · Next and Direction are plans">
+  <span class="eyebrow rv">The path to AI-native</span>
+  <h1 class="rv">Prove it on one desk. <span class="g">Grow</span> what works.</h1>
+  <div class="g3 mt">
+    <div class="glass phase rv" style="border-color:rgba(124,58,237,.35)">
+      <span class="pill today" style="align-self:flex-start">Today</span>
+      <h3>One person, one computer</h3>
+      <ul>
+        <li>A team of helpers and 49 skills</li>
+        <li>Knowledge with a source, corrections kept as history</li>
+        <li>A person approves every action</li>
+        <li>AI on the computer, nothing sent back to us</li>
+      </ul>
+    </div>
+    <div class="glass phase n rv" style="border-color:rgba(8,145,178,.35)">
+      <span class="pill next" style="align-self:flex-start">Next</span>
+      <h3>A team of computers</h3>
+      <ul>
+        <li>Computers join with a link or a code</li>
+        <li>Knowledge shared only when someone chooses</li>
+        <li>A busy laptop hands work to a free computer</li>
+        <li>No central Sovra server</li>
+      </ul>
+    </div>
+    <div class="glass phase d rv">
+      <span class="pill warn" style="align-self:flex-start">The direction, not today</span>
+      <h3>A sovereign organisation</h3>
+      <ul>
+        <li>Each department’s data stays on its own computers in the UAE, with a report to prove it</li>
+        <li>A full record of what the AI did</li>
+        <li>Its own AI, trained at home</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 18 · Sources -->
+<section class="slide flip" data-section="Sources" data-note="Every outside figure in this deck, with its date">
+  <span class="eyebrow rv">Sources</span>
+  <h1 class="rv" style="font-size:64px">Every number has a <span class="g">source.</span></h1>
+  <div class="srcs rv">
+    <p><b>First fully AI-native government by 2027; AED 13bn</b> · Abu Dhabi Government Digital Strategy 2025–2027, as reported<br><span class="u">thenextweb.com/news/dubai-agentic-ai-private-sector-mandate</span></p>
+    <p><b>Half of government on AI that acts, within two years</b> · The National, 23 Apr 2026<br><span class="u">thenationalnews.com/news/uae/2026/04/23</span></p>
+    <p><b>About 70% of working-age people use AI (Q1 2026); about 18% globally</b> · Microsoft AI Diffusion Report, via Gulf News<br><span class="u">gulfnews.com/technology</span></p>
+    <p><b>National Strategy for AI 2031</b> · WAM, Apr 2019<br><span class="u">wam.ae/en/details/1395302757000</span></p>
+    <p><b>95% saw no measurable return</b> · MIT NANDA, The GenAI Divide, Jul 2025 (preliminary; 300+ projects, 52 interviews, 153 surveys)<br><span class="u">mlq.ai/media/quarterly_decks/v0.1_State_of_AI_in_Business_2025_Report.pdf</span></p>
+    <p><b>Health data stays in the UAE</b> · Federal Law 2/2019, Art. 13<br><span class="u">elaws.moj.gov.ae</span></p>
+    <p><b>Human oversight</b> · UAE Charter for the Development and Use of AI, 2024<br><span class="u">u.ae · ai.gov.ae</span></p>
+    <p><b>Falcon Arabic</b> · TII, 2025–26 · <b>Jais</b> · Inception and MBZUAI, 2023 · <b>K2 Think</b> · MBZUAI, 2025 · all open models<br><span class="u">tii.ae · huggingface.co/inceptionai · mbzuai.ac.ae</span></p>
+  </div>
+  <p class="small muted mt rv">Law summaries are not legal advice. Your counsel decides what applies.</p>
+</section>
+
+<!-- 19 · Close -->
+<section class="slide" data-section="Sovra" data-note="Sovra · AI-native, 100% sovereign, value you can count">
+  <canvas class="bgcanvas" data-fx="mesh"></canvas>
+  <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
+    <span class="eyebrow rv">The close</span>
+    <div class="giant rv" style="margin-top:30px">AI-native, on UAE terms.<br><span class="g">Proved on the desk.</span></div>
+    <p class="arline ar rv" lang="ar">بياناتك تبقى هنا، والقيمة تُقاس.</p>
+    <p class="lead rv" style="max-width:880px">Sovereignty keeps the data, the knowledge and the decisions yours. Measured value decides how far it grows. We write both down with you.</p>
+    <div class="cmeta rv mt-l">
+      <div><div class="k">Next step</div><div class="v">Choose three tasks and a sponsor</div></div>
+      <div><div class="k">Then</div><div class="v">A starting point, a test, a date</div></div>
+      <div><div class="k">Judge us</div><div class="v">By the numbers you measured</div></div>
+    </div>
+  </div>
+</section>
+
+</div></div>
+<script src="../shared/cinema.js"></script>
+</body>
+</html>
