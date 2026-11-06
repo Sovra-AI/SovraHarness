@@ -1651,8 +1651,45 @@ fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestApp
             window.find("settings-restart-tour").label(),
             Some(chrome(&UiLanguage::default(), ChromeKey::SettingsTour))
         );
-        assert!(window.find("settings-language").visible());
-        assert!(window.find("settings-language-choice-en").visible());
+        assert!(
+            window.find("settings-language").visible(),
+            "Settings must present a language chooser"
+        );
+        assert!(window.find("settings-language-choices").visible());
+        assert!(
+            window.find("settings-language-choice-ar").visible(),
+            "Arabic must be a choosable language"
+        );
+        assert!(
+            window.find("settings-language-choice-en").visible(),
+            "English must be a choosable language"
+        );
+        let arabic_choice = window
+            .find("settings-language-choice-ar")
+            .label()
+            .map(str::to_owned);
+        let english_choice = window
+            .find("settings-language-choice-en")
+            .label()
+            .map(str::to_owned);
+        assert_ne!(
+            arabic_choice, english_choice,
+            "the chooser must offer more than one distinct language: {arabic_choice:?} vs {english_choice:?}"
+        );
+        window.click("settings-language-choice-en", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("settings-restart-tour").label(),
+            Some(chrome(&UiLanguage::english(), ChromeKey::SettingsTour)),
+            "choosing English must update visible Settings chrome immediately"
+        );
+        window.click("settings-language-choice-ar", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("settings-restart-tour").label(),
+            Some(chrome(&UiLanguage::default(), ChromeKey::SettingsTour)),
+            "choosing Arabic must restore Arabic Settings chrome"
+        );
         window.click("settings-language-choice-en", cx);
         window.render_frame(cx);
         assert_eq!(
