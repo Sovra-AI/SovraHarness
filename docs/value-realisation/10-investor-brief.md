@@ -221,9 +221,8 @@ Present these as facts; they are true today.
 - **Connections to where people already work**: WhatsApp, Telegram, Gmail
   (drafts only), Calendar, Drive (read only), and more — each one waiting
   for a person to approve.
-- **Built like infrastructure**: well over 150,000 lines of carefully
-  checked code, about a thousand automated tests, strict safety rules, and
-  checks that run on every change.
+- **Dependable by design**: no Sovra server holding customer data, no usage
+  tracking, and every action that leaves the computer waits for a person.
 
 ---
 
