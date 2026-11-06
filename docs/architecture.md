@@ -60,6 +60,7 @@ flowchart TB
     store["sovra-store-surreal"]
     wa["sovra-whatsapp"]
     tg["sovra-telegram"]
+    mesh["sovra-mesh"]
   end
   app --> ui
   app --> runtime
@@ -70,6 +71,7 @@ flowchart TB
   app --> store
   app --> wa
   app --> tg
+  app --> mesh
   ui --> runtime
   ui --> core
   runtime --> core
@@ -83,6 +85,7 @@ flowchart TB
   store --> core
   wa --> core
   tg --> core
+  mesh --> core
 ```
 
 - `sovra-core` is a functional core (no IO/async/GUI) so domain logic is deterministic and

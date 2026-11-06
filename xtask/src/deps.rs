@@ -34,6 +34,10 @@ const LAYERS: &[(&str, &[&str])] = &[
     ("sovra-whatsapp", &["sovra-core"]),
     // Telegram's official Bot API over HTTPS; same core port, its own HTTP dependency set.
     ("sovra-telegram", &["sovra-core"]),
+    // Peer-to-peer groups: iroh (QUIC, hole punching, relays, Ed25519 device keys) is its
+    // own dependency set behind the core GroupTransport/GroupStore ports. It names no
+    // tokio: the runtime drives its futures and hands in the spawner (roadmap D2).
+    ("sovra-mesh", &["sovra-core"]),
     ("sovra-ui", &["sovra-core", "sovra-runtime"]),
     (
         "sovra-app",
@@ -41,6 +45,7 @@ const LAYERS: &[(&str, &[&str])] = &[
             "sovra-core",
             "sovra-files",
             "sovra-google",
+            "sovra-mesh",
             "sovra-providers",
             "sovra-runtime",
             "sovra-skills",
@@ -75,6 +80,11 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
         "qrcode",
         "sovra-whatsapp",
         "QR grids are produced by the WhatsApp adapter; the UI only paints the matrix",
+    ),
+    (
+        "iroh",
+        "sovra-mesh",
+        "peer-to-peer networking and the device key are confined to the mesh adapter",
     ),
     (
         "surrealdb",

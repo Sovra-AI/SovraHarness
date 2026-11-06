@@ -128,6 +128,7 @@ impl ModelsView {
                     .child(Self::render_appearance_section(cx))
                     .child(self.render_language_section(cx))
                     .child(Self::render_open_connections_section(cx))
+                    .child(self.render_groups_section(cx))
                     .child(self.render_development_section(cx))
                     .child(self.render_always_context_section(cx))
                     .child(self.render_agent_behavior_section(cx))

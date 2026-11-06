@@ -464,6 +464,15 @@ impl Shell {
                             // Restores a saved session or gates the app behind Login.
                             let _ = client.send(Command::Auth(sovra_core::AuthCommand::Load));
                             let _ = client.send(Command::Schedule(ScheduleCommand::Load));
+                            let _ =
+                                client.send(Command::Group(sovra_core::group::GroupCommand::Load));
+                        }
+                        // Settings → Groups renders this computer's group and its knowledge.
+                        if let sovra_core::Event::Group(event) = &event {
+                            shell.models.update(cx, |models, cx| {
+                                models.groups.apply((**event).clone());
+                                cx.notify();
+                            });
                         }
                         if let sovra_core::Event::Auth(
                             sovra_core::AuthEvent::GoogleSignInStarted { auth_url },

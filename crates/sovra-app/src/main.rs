@@ -126,6 +126,7 @@ fn main() -> anyhow::Result<()> {
                     .join("connected-services")
                     .join("services.json"),
             ),
+            groups: group_services(&dirs),
             schedules: Some(Arc::new(sovra_runtime::JsonScheduleStore::new(
                 dirs.data_local_dir().join("schedules.json"),
             ))),
@@ -299,6 +300,56 @@ impl sovra_google::SecretVault for CredentialVault {
     fn delete(&self, key: &str) -> Result<(), String> {
         self.0.delete(key).map_err(|e| e.0)
     }
+}
+
+/// The keychain entry holding this computer's group device key (32 bytes, hex).
+const GROUP_DEVICE_KEY: &str = "group-device-key";
+
+/// This computer's device key: read from the credential store, or made once and kept
+/// there. Groups stay off rather than keep the key anywhere less safe.
+fn group_device_key(credentials: &dyn sovra_providers::CredentialStore) -> Option<[u8; 32]> {
+    if let Ok(secret) = credentials.get(GROUP_DEVICE_KEY)
+        && let Ok(bytes) = sovra_core::group::DeviceId::from_hex(secret.0.trim())
+    {
+        return Some(bytes.0);
+    }
+    let mut bytes = [0u8; 32];
+    if getrandom::fill(&mut bytes).is_err() {
+        tracing::warn!("groups unavailable: no secure randomness for a device key");
+        return None;
+    }
+    let hex = sovra_core::group::DeviceId(bytes).to_hex();
+    match credentials.set(GROUP_DEVICE_KEY, &sovra_core::models::ModelSecret(hex)) {
+        Ok(()) => Some(bytes),
+        Err(error) => {
+            tracing::warn!(%error, "groups unavailable: the device key could not be kept safely");
+            None
+        }
+    }
+}
+
+/// Groups: the device key, where the group record lives, and how far the network
+/// reaches (`SOVRA_GROUP_REACH=local` keeps it to direct, same-network connections).
+fn group_services(dirs: &directories::ProjectDirs) -> Option<sovra_runtime::GroupServices> {
+    let secret = group_device_key(credential_store(dirs).as_ref())?;
+    let reach = if std::env::var("SOVRA_GROUP_REACH").is_ok_and(|value| value == "local") {
+        sovra_mesh::Reach::LocalOnly
+    } else {
+        sovra_mesh::Reach::Internet
+    };
+    Some(sovra_runtime::GroupServices {
+        transport: Box::new(move || {
+            Box::pin(async move {
+                sovra_mesh::Mesh::bind(secret, reach)
+                    .await
+                    .map(|mesh| Arc::new(mesh) as Arc<dyn sovra_core::group::GroupTransport>)
+                    .map_err(|error| error.to_string())
+            })
+        }),
+        store: Arc::new(sovra_mesh::FileGroupStore::new(
+            dirs.data_local_dir().join("groups"),
+        )),
+    })
 }
 
 /// `cargo xtask dev` sets `SOVRA_DEV`: every rebuild changes the binary's code

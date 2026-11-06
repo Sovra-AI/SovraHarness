@@ -15,6 +15,7 @@ pub mod design;
 mod development_view;
 mod file_index_view;
 mod google_card;
+mod groups_view;
 mod inspector;
 mod knowledge_review;
 mod knowledge_view;

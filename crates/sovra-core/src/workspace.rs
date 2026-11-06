@@ -306,6 +306,8 @@ pub struct WorkspaceState {
     pub config_cards: Vec<PersonalAiConfigCard>,
     pub schedules: Vec<ScheduleItem>,
     pub schedule_runs: Vec<ScheduleRun>,
+    /// This computer's group, folded from [`Event::Group`](crate::Event::Group).
+    pub groups: crate::group::GroupsView,
     pub specialists: Vec<SpecialistAgentSpec>,
     pub routing: RoutingConfig,
     pub last_route_evaluation: Option<RouteEvaluation>,
@@ -394,6 +396,7 @@ impl WorkspaceState {
             ai_building: false,
             config_cards: default_config_cards(),
             schedules: default_schedules(),
+            groups: crate::group::GroupsView::default(),
             schedule_runs: Vec::new(),
             specialists,
             routing,
@@ -1065,6 +1068,10 @@ impl WorkspaceState {
         match event {
             Event::Schedule(event) => {
                 self.apply_schedule_event(event);
+                None
+            }
+            Event::Group(event) => {
+                self.groups.apply((**event).clone());
                 None
             }
             Event::Development(event) => {

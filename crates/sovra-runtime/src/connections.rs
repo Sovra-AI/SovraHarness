@@ -1076,6 +1076,7 @@ impl Actor {
             | Event::Mcp(_)
             | Event::Terminal(_)
             | Event::Schedule(_)
+            | Event::Group(_)
             | Event::ChatHistoryLoaded { .. }
             | Event::Ready { .. }
             | Event::Pong

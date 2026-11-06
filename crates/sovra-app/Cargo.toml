@@ -18,6 +18,7 @@ getrandom = { workspace = true }
 sovra-core = { workspace = true }
 sovra-files = { workspace = true }
 sovra-google = { workspace = true }
+sovra-mesh = { workspace = true }
 sovra-providers = { workspace = true }
 sovra-runtime = { workspace = true }
 sovra-skills = { workspace = true }

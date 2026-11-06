@@ -91,6 +91,17 @@ move them under a version heading when the tag is cut.
   one computer; next is a group of people and their computers sharing helpers
   and memory, with no central Sovra server.
 
+- **Groups** (people and their computers sharing helpers and memory; see
+  `docs/roadmap/02-a-team.md`). Settings → Groups starts or joins a group
+  with a `sovra://join` link, shows people and computers, invites, removes
+  with a confirm step, and shares details everyone's helpers can use. Skills
+  has “Share with your family or team”. Helpers that already read personal
+  memory also see ranked group details with who shared them. Membership is a
+  signed hash-linked log every computer folds the same way (strong removal,
+  remove-wins, never-zero-admins, fork detection, pairing codes). Computers
+  talk over `sovra-mesh` (iroh QUIC, internet by default,
+  `SOVRA_GROUP_REACH=local` for the same network).
+
 - Linked Devices on your phone now names this computer **Sovra connection**
   (instead of "Unknown device"). An already-linked phone keeps its old label
   until you unlink and Connect WhatsApp again.

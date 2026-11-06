@@ -6,7 +6,9 @@
 Native Rust desktop app for the Sovra agent harness: a GPUI chat UI, a tokio
 runtime, local memory (vector + graph + full-text behind a `MemoryStore` port),
 and Velopack installers. Chrome defaults to Arabic, with a Settings language
-picker and right-to-left layout. macOS, Windows and Linux from one codebase.
+picker and right-to-left layout. Settings → Groups lets a family or small team
+share helpers and memory across their computers. macOS, Windows and Linux from
+one codebase.
 
 ## Quick start
 
@@ -64,6 +66,7 @@ flowchart TB
     store["sovra-store-surreal"]
     wa["sovra-whatsapp"]
     tg["sovra-telegram"]
+    mesh["sovra-mesh"]
   end
   app --> ui
   app --> runtime
@@ -74,6 +77,7 @@ flowchart TB
   app --> store
   app --> wa
   app --> tg
+  app --> mesh
   ui --> runtime
   ui --> core
   runtime --> core
@@ -87,6 +91,7 @@ flowchart TB
   store --> core
   wa --> core
   tg --> core
+  mesh --> core
 ```
 
 ## How the UI talks to the runtime

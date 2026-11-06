@@ -19,6 +19,7 @@ sovra-adk = { path = "crates/sovra-adk" }
 sovra-core = { path = "crates/sovra-core" }
 sovra-files = { path = "crates/sovra-files" }
 sovra-google = { path = "crates/sovra-google" }
+sovra-mesh = { path = "crates/sovra-mesh" }
 sovra-providers = { path = "crates/sovra-providers" }
 sovra-runtime = { path = "crates/sovra-runtime" }
 sovra-skills = { path = "crates/sovra-skills" }
@@ -46,6 +47,10 @@ async-trait = "0.1.89"
 # Google sign-in: PKCE verifier/state randomness and base64url (Gmail raw messages).
 base64 = "0.23.1"
 getrandom = "0.4.3"
+# Peer-to-peer QUIC dialled by public key, with hole punching and encrypted relay
+# fallback (MIT OR Apache-2.0, rustls over ring, no OpenSSL). Stable wire protocol and
+# API since 1.0; see docs/roadmap/02-a-team.md §8. Metrics off: nothing reports out.
+iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper"] }
 directories = "6.0.0"
 futures = "0.3.32"
 # Official MCP server SDK; stdio only, owned by sovra-runtime.

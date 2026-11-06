@@ -13,6 +13,7 @@ pub use development::{DevelopmentConfig, run_development_mcp};
 mod file_index;
 mod files;
 mod google;
+mod groups;
 mod mcp;
 mod memory_capture;
 mod memory_review;
@@ -27,6 +28,7 @@ mod terminal;
 pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
 mod teams;
+pub use groups::{GroupServices, TransportFactory, TransportFuture};
 pub use models::ModelsConfig;
 pub use schedules::{JsonScheduleStore, MemoryScheduleStore};
 
@@ -287,6 +289,7 @@ pub fn start_with_auth(
             mcp_catalogue: None,
             mcp_sample_program: None,
             schedules: None,
+            groups: None,
         },
     )
 }
@@ -320,6 +323,8 @@ pub struct RuntimeServices {
     pub mcp_sample_program: Option<std::path::PathBuf>,
     /// Recurring prompts. `None` keeps an in-memory book for the session.
     pub schedules: Option<Arc<dyn sovra_core::ScheduleStore>>,
+    /// Groups of computers sharing helpers and knowledge. `None` turns groups off.
+    pub groups: Option<GroupServices>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -421,6 +426,7 @@ async fn serve(
         mcp_catalogue,
         mcp_sample_program,
         schedules: schedule_store,
+        groups: group_services,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
@@ -444,6 +450,7 @@ async fn serve(
         &handle,
     );
     let google = google::GoogleRuntime::start(google, events.clone(), &handle);
+    let groups = groups::GroupRuntime::start(group_services, events.clone(), &handle);
     let terminal = terminal::TerminalRuntime::start(terminal, events.clone(), &handle).await;
     let mut file_index = file_index::IndexRuntime::start(
         index,
@@ -645,6 +652,7 @@ async fn serve(
             Command::Skills(command) => skills.send(command),
             Command::Google(command) => google.send(command),
             Command::Schedule(command) => schedules.send(command),
+            Command::Group(command) => groups.send(command),
             Command::FileIndex(command) => file_index.send(command),
             Command::Teams(sovra_core::teams::TeamCommand::Run {
                 session_id,
@@ -689,11 +697,11 @@ async fn serve(
                     .with_reply_input_observer(inputs.clone())
                     .and_then(|base| {
                         base.with_conversation_memory(
-                            inputs.reader(recalling::reader(
+                            inputs.reader(groups.knowledge.wrap(recalling::reader(
                                 memory.as_ref(),
                                 &memory_control,
                                 memory_semantic.service.clone(),
-                            )),
+                            ))),
                             &prompt,
                             now(),
                         )
@@ -832,11 +840,11 @@ async fn serve(
                         skills: skill_catalog.clone(),
                         skill_resources: skills.resources.clone(),
                         indexed_files: file_index.reader.clone(),
-                        memory_reader: recalling::reader(
+                        memory_reader: groups.knowledge.wrap(recalling::reader(
                             memory.as_ref(),
                             &memory_control,
                             memory_semantic.service.clone(),
-                        ),
+                        )),
                         models: models.file_models.clone(),
                         events: output,
                         web_search_enabled,
@@ -1022,11 +1030,11 @@ async fn serve(
                         },
                         remote_caller: mcp.caller(),
                         memory_reader: if private_access {
-                            inputs.reader(recalling::reader(
+                            inputs.reader(groups.knowledge.wrap(recalling::reader(
                                 memory.as_ref(),
                                 &memory_control,
                                 memory_semantic.service.clone(),
-                            ))
+                            )))
                         } else {
                             None
                         },

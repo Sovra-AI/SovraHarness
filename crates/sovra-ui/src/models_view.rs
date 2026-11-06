@@ -148,6 +148,9 @@ pub struct ModelsView {
     pub(crate) service_client_secret: Entity<InputState>,
     /// Form state for the connected services screen.
     pub(crate) services_screen: crate::service_connect_view::ServicesScreen,
+    /// Settings → Groups: this computer's group, folded from runtime events.
+    pub(crate) groups: sovra_core::group::GroupsView,
+    pub(crate) groups_form: crate::groups_view::GroupsForm,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -240,6 +243,7 @@ impl ModelsView {
                 .masked(true)
         });
         let services_screen = crate::service_connect_view::ServicesScreen::new(window, cx);
+        let groups_form = crate::groups_view::GroupsForm::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe_in(&search, window, |view, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -346,6 +350,8 @@ impl ModelsView {
             service_client_id,
             service_client_secret,
             services_screen,
+            groups: sovra_core::group::GroupsView::default(),
+            groups_form,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         }
