@@ -94,7 +94,7 @@
 
 <!-- 1 · Title -->
 <section class="slide" data-section="Sovra" data-note="Sovra · sovereign AI for an AI-native UAE">
-  <canvas class="bgcanvas" data-three data-fx="globe" data-x=".8" data-r=".40" data-ox="4.4" data-n="260"></canvas>
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1100px;gap:0">
     <span class="eyebrow rv">Investor pitch · United Arab Emirates</span>
     <div class="giant rv" style="margin-top:30px">AI-native.<br><span class="g">On UAE terms.</span></div>
@@ -573,7 +573,7 @@
 
 <!-- 18 · Close -->
 <section class="slide" data-section="Sovra" data-note="Sovra · AI-native, on UAE terms">
-  <canvas class="bgcanvas" data-three data-fx="globe" data-x=".8" data-r=".40" data-ox="4.4" data-n="260"></canvas>
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
     <span class="eyebrow rv">Sovra</span>
     <div class="giant rv" style="margin-top:30px">Keep it in the UAE.<br><span class="g">Prove it on the desk.</span></div>
@@ -588,5 +588,94 @@
 
 </div></div>
 <script src="../shared/cinema.js"></script>
+<script>
+/* Hero scene: a particle nation. Data arcs fly home to one glowing point on
+   the sphere. Runs only while its slide is open; falls back to the frame's
+   2D globe when three.js did not load. */
+(function () {
+  var canvases = document.querySelectorAll("canvas[data-hero]");
+  if (!canvases.length) return;
+  if (!window.THREE) { canvases.forEach(function (c) { c.setAttribute("data-fx", "globe"); c.setAttribute("data-x", ".8"); c.setAttribute("data-r", ".4"); }); return; }
+  var T = window.THREE;
+  var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function glowTexture(rgb) {
+    var c = document.createElement("canvas"); c.width = c.height = 128;
+    var g = c.getContext("2d"), grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grd.addColorStop(0, "rgba(" + rgb + ",.95)"); grd.addColorStop(.35, "rgba(" + rgb + ",.35)"); grd.addColorStop(1, "rgba(" + rgb + ",0)");
+    g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+    return new T.CanvasTexture(c);
+  }
+  canvases.forEach(function (cv) {
+    var W = 1920, H = 1080;
+    var r = new T.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); r.setSize(W, H, false);
+    var scene = new T.Scene(), cam = new T.PerspectiveCamera(40, W / H, 0.1, 100);
+    cam.position.set(0, 0, 10);
+    var group = new T.Group(); group.position.set(3.95, -0.1, 0); scene.add(group);
+    var R = 3.05;
+    /* particle shell, violet at the poles shading to cyan near the equator */
+    var N = 2600, pos = [], col = [], cv1 = new T.Color(0x7c3aed), cv2 = new T.Color(0x0891b2), tmp = new T.Color();
+    for (var i = 0; i < N; i++) {
+      var y = 1 - (i / (N - 1)) * 2, rad = Math.sqrt(1 - y * y), th = i * 2.399963;
+      pos.push(Math.cos(th) * rad * R, y * R, Math.sin(th) * rad * R);
+      tmp.copy(cv1).lerp(cv2, Math.pow(1 - Math.abs(y), 2.2) * 0.8); col.push(tmp.r, tmp.g, tmp.b);
+    }
+    var pg = new T.BufferGeometry();
+    pg.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    pg.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+    var dots = new T.Points(pg, new T.PointsMaterial({ size: 0.075, vertexColors: true, transparent: true, opacity: 0.9, map: glowTexture("124,58,237"), alphaTest: 0.02, depthWrite: false }));
+    group.add(dots);
+    /* meridians and parallels */
+    var lineMat = new T.LineBasicMaterial({ color: 0xc4b5fd, transparent: true, opacity: 0.45 });
+    function ring(rot, radius) {
+      var pts = []; for (var a = 0; a <= 96; a++) { var t = a / 96 * Math.PI * 2; pts.push(new T.Vector3(Math.cos(t) * radius, 0, Math.sin(t) * radius)); }
+      var l = new T.Line(new T.BufferGeometry().setFromPoints(pts), lineMat); l.rotation.set(rot[0], rot[1], rot[2]); return l;
+    }
+    for (var m = 0; m < 6; m++) group.add(ring([Math.PI / 2, 0, m * Math.PI / 6], R));
+    [-0.6, -0.3, 0, 0.3, 0.6].forEach(function (y) { var rr = ring([0, 0, 0], Math.sqrt(R * R - (y * R) * (y * R))); rr.position.y = y * R; group.add(rr); });
+    /* soft shell */
+    group.add(new T.Mesh(new T.SphereGeometry(R - 0.02, 48, 48), new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.38, depthWrite: false })));
+    /* home point: front-left of the sphere */
+    function onSphere(lat, lon) { var la = lat * Math.PI / 180, lo = lon * Math.PI / 180; return new T.Vector3(Math.cos(la) * Math.cos(lo) * R, Math.sin(la) * R, Math.cos(la) * Math.sin(lo) * R); }
+    var home = onSphere(22, 55);
+    var homeGlow = new T.Sprite(new T.SpriteMaterial({ map: glowTexture("8,145,178"), transparent: true, opacity: 0.95, depthWrite: false }));
+    homeGlow.position.copy(home).multiplyScalar(1.01); homeGlow.scale.set(1.3, 1.3, 1); group.add(homeGlow);
+    var homeDot = new T.Mesh(new T.SphereGeometry(0.075, 16, 16), new T.MeshBasicMaterial({ color: 0x0e7490 })); homeDot.position.copy(home).multiplyScalar(1.01); group.add(homeDot);
+    var ringGeo = new T.RingGeometry(0.16, 0.19, 48), rings = [];
+    for (var k = 0; k < 3; k++) { var rg = new T.Mesh(ringGeo, new T.MeshBasicMaterial({ color: 0x0891b2, transparent: true, opacity: 0.6, side: T.DoubleSide, depthWrite: false })); rg.position.copy(home).multiplyScalar(1.02); rg.lookAt(home.clone().multiplyScalar(2)); group.add(rg); rings.push(rg); }
+    /* arcs: data coming home */
+    var arcs = [], travellers = [], arcMat = new T.LineBasicMaterial({ color: 0xa855f7, transparent: true, opacity: 0.55 });
+    var starts = [[55, 120], [-20, 110], [40, -10], [-35, 30], [5, 160], [60, 60], [-50, 90], [15, -40], [70, 150], [-10, 70]];
+    starts.forEach(function (ll, i) {
+      var a = onSphere(ll[0], ll[1]), mid = a.clone().add(home).multiplyScalar(0.5).normalize().multiplyScalar(R * (1.25 + (i % 3) * 0.12));
+      var curve = new T.QuadraticBezierCurve3(a, mid, home);
+      group.add(new T.Line(new T.BufferGeometry().setFromPoints(curve.getPoints(64)), arcMat));
+      var tr = new T.Sprite(new T.SpriteMaterial({ map: glowTexture("168,85,247"), transparent: true, opacity: 1, depthWrite: false })); tr.scale.set(0.42, 0.42, 1); group.add(tr);
+      var sd = new T.Mesh(new T.SphereGeometry(0.03, 10, 10), new T.MeshBasicMaterial({ color: 0x6d28d9 })); sd.position.copy(a); group.add(sd);
+      arcs.push(curve); travellers.push({ s: tr, phase: i / starts.length, speed: 0.16 + (i % 4) * 0.03 });
+    });
+    /* far dust */
+    var dust = [], dg = new T.BufferGeometry();
+    for (var d = 0; d < 700; d++) dust.push((Math.random() - .5) * 40, (Math.random() - .5) * 24, -Math.random() * 18 - 6);
+    dg.setAttribute("position", new T.Float32BufferAttribute(dust, 3));
+    scene.add(new T.Points(dg, new T.PointsMaterial({ color: 0x8b5cf6, size: 0.04, transparent: true, opacity: 0.35 })));
+    group.rotation.set(0.22, -0.55, 0.05);
+    var slide = cv.closest(".slide"), last = 0;
+    function frame(ts) {
+      requestAnimationFrame(frame);
+      if (!slide.classList.contains("active") || document.hidden) return;
+      var t = ts / 1000, dt = Math.min(0.05, t - last); last = t;
+      if (!still) {
+        group.rotation.y = -0.55 + Math.sin(t * 0.12) * 0.28; group.rotation.x = 0.22 + Math.sin(t * 0.09) * 0.05;
+        travellers.forEach(function (tr, i) { var u = (t * tr.speed + tr.phase) % 1; tr.s.position.copy(arcs[i].getPoint(u)); tr.s.material.opacity = Math.sin(u * Math.PI); });
+        rings.forEach(function (rg, i) { var u = (t * 0.5 + i / 3) % 1; rg.scale.setScalar(1 + u * 5); rg.material.opacity = 0.65 * (1 - u); });
+        homeGlow.scale.setScalar(1.25 + Math.sin(t * 2.2) * 0.12);
+      }
+      r.render(scene, cam);
+    }
+    requestAnimationFrame(frame);
+  });
+})();
+</script>
 </body>
 </html>
