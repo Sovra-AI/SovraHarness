@@ -677,5 +677,26 @@
   });
 })();
 </script>
+<script>
+/* Parallax: scenes and the product mock-up tilt a few degrees towards the
+   pointer, and settle back when it leaves. Off when motion is reduced. */
+(function () {
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  var stage = document.getElementById("stage"); if (!stage) return;
+  var targets = Array.prototype.slice.call(document.querySelectorAll(".scene, .mock, .gcard.r"));
+  targets.forEach(function (el) { el.style.transition = "transform .6s cubic-bezier(.2,.7,.2,1)"; el.style.willChange = "transform"; });
+  var cur = null;
+  function active() { var s = document.querySelector(".slide.active"); if (!s) return null; return targets.filter(function (t) { return s.contains(t); }); }
+  stage.addEventListener("pointermove", function (e) {
+    var els = active(); if (!els || !els.length) return;
+    var nx = e.clientX / window.innerWidth - 0.5, ny = e.clientY / window.innerHeight - 0.5;
+    els.forEach(function (el) {
+      el.style.transform = "perspective(1600px) rotateY(" + (nx * 7).toFixed(2) + "deg) rotateX(" + (-ny * 6).toFixed(2) + "deg) translate3d(" + (nx * 10).toFixed(1) + "px," + (ny * 8).toFixed(1) + "px,0)";
+    });
+    cur = els;
+  });
+  stage.addEventListener("pointerleave", function () { (cur || []).forEach(function (el) { el.style.transform = ""; }); });
+})();
+</script>
 </body>
 </html>
