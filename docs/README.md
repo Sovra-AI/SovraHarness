@@ -21,5 +21,8 @@ Map of the top-level guides for SovraHarness. Start at the
 | [Teams and artifacts](teams-and-artifacts.md) | Helpers in chat and saveable work |
 | [Styling](styling.md) | Native design system and responsive layout |
 
-Investor and company slide decks live under [`decks/`](decks/README.md). Dated
-evaluation dumps live under `evaluations/`. Neither is a product contract.
+Slide decks live under [`decks/`](decks/README.md):
+[investors](decks/investor/index.html),
+[company computers](decks/company-computers/index.html),
+[a family or small business](decks/group/index.html).
+Dated evaluation dumps live under `evaluations/`. Neither is a product contract.

@@ -57,7 +57,7 @@ Mono.
 
 ## Sparse deck (one idea)
 
-1. Copy `company-computers/index.html` into a new folder.
+1. Copy `company-computers/index.html` or `group/index.html` into a new folder.
 2. Replace the `<section>` slides. Keep this shell:
    - `../shared/reveal/dist/reveal.css`
    - `../shared/reveal/dist/theme/white.css`
@@ -77,7 +77,10 @@ at the 1920×1080 stage.
 - A line that says **Today** is only for what the desktop app already does:
   a helper on the computer, memory you can open, a correction that replaces
   instead of erasing, and helpers that answer together.
-- A line that says **The direction, not today** is not current behaviour.
+- A line that says **Next** or **The direction, not today** is not current
+  behaviour. Use **Next** for the closer-in group of computers (join, lanes,
+  helper sharing, work handoff). Use **The direction, not today** for the
+  later company-fleet story.
 - Do not invent a market size, revenue, headcount, or a fundraising ask.
 - No tour of libraries.
 
@@ -93,4 +96,5 @@ its colours stay. Do not copy it and do not redraw it.
 | Folder | Frame | Audience |
 | --- | --- | --- |
 | `investor/` | Cinema | Investors. 31 slides: sovereignty, what ships today (with real counts and a real screenshot), then the direction: the organisation as a ledger, fleet search, and proof-of-learning training. |
-| `company-computers/` | Sparse | Company leaders. Keep the work on computers you already own. |
+| `company-computers/` | Sparse | Company leaders. Keep the work on computers you already own. Fleet, ledger, and in-place training are the direction, not today. |
+| `group/` | Sparse | A family or a 3–20 person business. [A few computers share helpers and memory](group/index.html). Next is a group of people and their computers: join, lanes, helper sharing, work handoff. No central Sovra server. People-and-computers are a **group**; **team** stays the AI helpers. |
