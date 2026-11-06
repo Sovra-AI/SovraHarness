@@ -65,6 +65,32 @@
   .pop{transform-box:fill-box;transform-origin:center;opacity:0}
   .slide.active .pop{animation:popin .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--d,0)*1ms)}
   .mock{position:relative}
+  /* ---------- no boxes: typography and hairlines, not cards ---------- */
+  #deck .glass,#deck .gcard{background:none;border:0;box-shadow:none;backdrop-filter:none;border-radius:0}
+  #deck .tile{padding:30px 0 0;border-top:2px solid var(--violet-2);gap:10px}
+  #deck .tile .n{font-size:132px}
+  #deck .tile .d{font-size:26px;color:var(--ink-2)}
+  #deck .tile .src{padding-top:18px}
+  #deck .five{gap:44px;margin-top:48px}
+  #deck .five .glass{padding:28px 0 0;border-top:2px solid var(--violet-2);min-height:0;gap:18px}
+  #deck .five p{color:var(--ink-2)}
+  #deck .step{padding:28px 0 0;border-top:2px solid var(--violet-2);min-height:0}
+  #deck .step p{color:var(--ink-2)}
+  #deck .why{gap:0 72px;margin-top:30px}
+  #deck .why .glass{padding:34px 0;border-top:1px solid var(--line-2);min-height:0}
+  #deck .why p{color:var(--ink-2)}
+  #deck .chips{gap:0;margin-top:34px}
+  #deck .chip{background:none;border:0;border-top:1px solid var(--line-2);border-radius:0;box-shadow:none;padding:22px 0;font-size:27px}
+  #deck .chip:last-child{border-bottom:1px solid var(--line-2)}
+  #deck .bar{background:none;border:0;border-left:3px solid var(--violet-2);border-radius:0;padding:10px 0 10px 30px}
+  #deck .bar.c{border-left-color:var(--cyan)}
+  #deck .stat .d{color:var(--ink-2);font-size:23px}
+  #deck .pill.today{display:none}
+  #deck .app .pill.today{display:inline-flex}
+  #deck .ask{display:flex;flex-direction:column;gap:22px;align-self:center}
+  #deck .ask .giant{font-size:110px}
+  #deck .ico{background:none;border:0;box-shadow:none;width:auto;height:auto;border-radius:0;place-items:start}
+  #deck .ico svg{width:44px;height:44px;stroke-width:1.6}
   .mock .shadow{position:absolute;inset:auto 6% -30px 6%;height:60px;border-radius:50%;background:radial-gradient(ellipse,rgba(124,58,237,.35),transparent 70%);filter:blur(14px)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -322,7 +348,7 @@
     <svg class="scene rv z" viewBox="0 0 900 760" role="img" aria-label="A chain of memory entries; a correction is appended and linked, the earlier entry remains">
       <ellipse cx="450" cy="380" rx="380" ry="200" fill="url(#gGlowC)" opacity=".8"/>
       <g class="pop" style="--d:100">
-        <rect x="70" y="300" width="230" height="160" rx="22" fill="#fff" stroke="#c4b5fd" stroke-width="2"/>
+        <line x1="70" y1="470" x2="300" y2="470" stroke="#c4b5fd" stroke-width="2"/>
         <text x="90" y="340" class="t-dim mono" style="font-size:13px;letter-spacing:.18em">12 MARCH</text>
         <text x="90" y="380" class="t-ink" style="font:650 21px var(--f-display)">Permit needs</text>
         <text x="90" y="408" class="t-ink" style="font:650 21px var(--f-display)">one signature</text>
@@ -330,7 +356,7 @@
       </g>
       <path d="M300 380 H360" stroke="#0891b2" stroke-width="3" marker-end="url(#arrC)"/>
       <g class="pop" style="--d:500">
-        <rect x="370" y="300" width="230" height="160" rx="22" fill="#fff" stroke="#c4b5fd" stroke-width="2"/>
+        <line x1="370" y1="470" x2="600" y2="470" stroke="#c4b5fd" stroke-width="2"/>
         <text x="390" y="340" class="t-dim mono" style="font-size:13px;letter-spacing:.18em">2 OCTOBER</text>
         <text x="390" y="380" class="t-ink" style="font:650 21px var(--f-display)">Permit needs</text>
         <text x="390" y="408" class="t-ink" style="font:650 21px var(--f-display)">two signatures</text>
@@ -338,7 +364,7 @@
       </g>
       <path d="M600 380 H660" stroke="#0891b2" stroke-width="3" marker-end="url(#arrC)"/>
       <g class="pop" style="--d:900">
-        <rect x="670" y="300" width="190" height="160" rx="22" fill="#ecfeff" stroke="#0891b2" stroke-width="3"/>
+        <line x1="670" y1="470" x2="860" y2="470" stroke="#0891b2" stroke-width="3"/>
         <text x="765" y="370" text-anchor="middle" class="t-c" style="font:800 22px var(--f-display)">Current</text>
         <text x="765" y="400" text-anchor="middle" class="t-ink2" style="font-size:16px">used from now on</text>
         <text x="765" y="428" text-anchor="middle" class="t-mut" style="font-size:14px">history kept</text>
@@ -414,7 +440,7 @@
       </g>
       <g stroke="rgba(8,145,178,.45)" stroke-width="2" fill="none" class="flow"><path d="M620 185 C 720 185 740 300 760 600"/><path d="M650 335 C 720 335 740 420 760 600"/><path d="M620 485 C 700 485 740 520 760 600"/></g>
       <g class="pop" style="--d:1300">
-        <rect x="610" y="600" width="270" height="130" rx="22" fill="#ecfeff" stroke="#0891b2" stroke-width="3"/>
+        <ellipse cx="745" cy="665" rx="170" ry="90" fill="url(#gGlowC)"/>
         <text x="745" y="650" text-anchor="middle" class="t-c" style="font:800 24px var(--f-display)">Residency report</text>
         <text x="745" y="684" text-anchor="middle" class="t-ink2" style="font-size:17px">every record · in-country · proven</text>
         <text x="745" y="710" text-anchor="middle" class="t-mut" style="font-size:14px">generated from the ledger</text>
@@ -495,28 +521,26 @@
       <div class="bar c rv mt"><span class="k">Allies</span><span class="t">Sovereign clouds and national models are <b>guests</b> inside Sovra, not rivals.</span></div>
     </div>
     <svg class="scene rv z" viewBox="0 0 820 720" role="img" aria-label="Positioning map: Sovra alone in the top right, where the work runs on your computers and you keep the knowledge">
-      <rect x="110" y="40" width="680" height="580" rx="24" fill="rgba(255,255,255,.35)" stroke="var(--line-2)" stroke-width="1.5"/>
-      <line x1="450" y1="40" x2="450" y2="620" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
-      <line x1="110" y1="330" x2="790" y2="330" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
+      <line x1="450" y1="60" x2="450" y2="620" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
+      <line x1="110" y1="340" x2="790" y2="340" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
       <path d="M110 660 H780" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
       <text x="110" y="700" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">WORK RUNS ON THEIR COMPUTERS</text>
       <text x="780" y="700" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">ON YOURS</text>
       <path d="M70 620 V50" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
       <text x="40" y="620" transform="rotate(-90 40 620)" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">THEY KEEP THE KNOWLEDGE</text>
       <text x="40" y="50" transform="rotate(-90 40 50)" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">YOU KEEP IT</text>
-      <g fill="#fff" stroke="#c4b5fd" stroke-width="1.8">
-        <rect x="150" y="400" width="260" height="150" rx="20"/><rect x="150" y="110" width="260" height="150" rx="20"/><rect x="490" y="400" width="260" height="150" rx="20"/>
-      </g>
-      <text x="280" y="462" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Rented chatbots</text>
-      <text x="280" y="498" text-anchor="middle" class="t-mut" style="font-size:18px">their computers · their notes</text>
-      <text x="280" y="172" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Sovereign cloud</text>
-      <text x="280" y="208" text-anchor="middle" class="t-mut" style="font-size:18px">in-country · still a vendor platform</text>
-      <text x="620" y="462" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Local chat tools</text>
-      <text x="620" y="498" text-anchor="middle" class="t-mut" style="font-size:18px">your computer · no memory</text>
-      <ellipse cx="620" cy="185" rx="200" ry="120" fill="url(#gGlowC)"/>
-      <rect x="490" y="110" width="260" height="150" rx="20" fill="#fff" stroke="#0891b2" stroke-width="3"/>
-      <text x="620" y="172" text-anchor="middle" class="t-c" style="font:800 34px var(--f-display)">Sovra</text>
-      <text x="620" y="210" text-anchor="middle" class="t-ink2" style="font-size:18px">your computers · your knowledge</text>
+      <g fill="#c4b5fd"><circle cx="280" cy="470" r="13"/><circle cx="280" cy="190" r="13"/><circle cx="620" cy="470" r="13"/></g>
+      <text x="280" y="520" text-anchor="middle" class="t-ink" style="font:700 27px var(--f-display)">Rented chatbots</text>
+      <text x="280" y="552" text-anchor="middle" class="t-mut" style="font-size:18px">their computers · their notes</text>
+      <text x="280" y="240" text-anchor="middle" class="t-ink" style="font:700 27px var(--f-display)">Sovereign cloud</text>
+      <text x="280" y="272" text-anchor="middle" class="t-mut" style="font-size:18px">in-country · still a vendor platform</text>
+      <text x="620" y="520" text-anchor="middle" class="t-ink" style="font:700 27px var(--f-display)">Local chat tools</text>
+      <text x="620" y="552" text-anchor="middle" class="t-mut" style="font-size:18px">your computer · no memory</text>
+      <ellipse cx="620" cy="190" rx="190" ry="120" fill="url(#gGlowC)"/>
+      <circle cx="620" cy="160" r="30" fill="#0891b2" class="pulse"/>
+      <circle cx="620" cy="160" r="46" fill="none" stroke="#0891b2" stroke-width="2" opacity=".5"/>
+      <text x="620" y="240" text-anchor="middle" class="t-c" style="font:800 40px var(--f-display)">Sovra</text>
+      <text x="620" y="274" text-anchor="middle" class="t-ink2" style="font-size:19px">your computers · your knowledge</text>
     </svg>
   </div>
 </section>
@@ -564,8 +588,8 @@
         <div class="chip"><span class="k">4</span><span><b>The ledger.</b> Sealed records and residency reports for whole organisations.</span></div>
       </div>
     </div>
-    <div class="gcard rv r" style="padding:52px 54px;display:flex;flex-direction:column;gap:24px;align-self:center">
-      <span class="pill today" style="align-self:flex-start">The ask</span>
+    <div class="ask rv r">
+      <span class="eyebrow">The ask</span>
       <div class="giant" style="font-size:96px"><span class="g">Arabic.</span><br>Teams.<br><span class="gc">Certified.</span></div>
       <p class="lead" style="margin:0">Four milestones that turn a sovereign desk into a sovereign nation, ready for UAE government.</p>
     </div>
