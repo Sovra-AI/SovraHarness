@@ -19,7 +19,7 @@ without them.
 
 ## Cinema deck (investor)
 
-1. Copy `investor/index.html` into a new folder.
+1. Copy `investor/index.html` or `group/index.html` into a new folder.
 2. Keep this shell: `../shared/cinema.css`, `../shared/cinema.js`, and the
    Google Fonts and three.js (cdnjs r128) links in the `<head>`.
 3. Each `<section class="slide">` takes `data-section` (top right) and
@@ -57,7 +57,7 @@ Mono.
 
 ## Sparse deck (one idea)
 
-1. Copy `company-computers/index.html` or `group/index.html` into a new folder.
+1. Copy `company-computers/index.html` into a new folder.
 2. Replace the `<section>` slides. Keep this shell:
    - `../shared/reveal/dist/reveal.css`
    - `../shared/reveal/dist/theme/white.css`
@@ -97,4 +97,4 @@ its colours stay. Do not copy it and do not redraw it.
 | --- | --- | --- |
 | `investor/` | Cinema | Investors. 31 slides: sovereignty, what ships today (with real counts and a real screenshot), then the direction: the organisation as a ledger, fleet search, and proof-of-learning training. |
 | `company-computers/` | Sparse | Company leaders. Keep the work on computers you already own. Fleet, ledger, and in-place training are the direction, not today. |
-| `group/` | Sparse | A family or a 3–20 person business. [A few computers share helpers and memory](group/index.html). Next is a group of people and their computers: join, lanes, helper sharing, work handoff. No central Sovra server. People-and-computers are a **group**; **team** stays the AI helpers. |
+| `group/` | Cinema | A family or a 3–20 person business. [A few computers share helpers and memory](group/index.html). Chrome, cards and diagrams. Today is the helper on one computer; next is a group of people and their computers: join, lanes, helper sharing, work handoff. No central Sovra server. People-and-computers are a **group**; **team** stays the AI helpers. |

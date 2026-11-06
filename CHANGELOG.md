@@ -11,10 +11,11 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
-- A Sparse slide deck for a family or a small business lives at
-  [`docs/decks/group/`](docs/decks/group/index.html): today is the helper on
-  one computer; next is a group of people and their computers sharing helpers
-  and memory, with no central Sovra server.
+- The family and small-business deck at
+  [`docs/decks/group/`](docs/decks/group/index.html) is a Cinema 1920×1080
+  deck (chrome, cards, diagrams): today is the helper on one computer; next
+  is a group of people and their computers sharing helpers and memory, with
+  no central Sovra server.
 
 - Linked Devices on your phone now names this computer **Sovra connection**
   (instead of "Unknown device"). An already-linked phone keeps its old label

@@ -1,98 +1,360 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>A few computers share helpers and memory — Sovra</title>
-  <link rel="stylesheet" href="../shared/reveal/dist/reveal.css">
-  <link rel="stylesheet" href="../shared/reveal/dist/theme/white.css">
-  <link rel="stylesheet" href="../shared/deck.css">
+<meta charset="utf-8">
+<title>Sovra · A few computers share helpers and memory</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../shared/fonts/ibm-plex/fonts.css">
+<link rel="stylesheet" href="../shared/cinema.css">
+<style>
+  .xlist{display:flex;flex-direction:column;gap:26px;margin-top:40px}
+  .xlist .it{display:flex;gap:22px;align-items:flex-start}
+  .xlist .x{width:46px;height:46px;border-radius:14px;flex:none;display:grid;place-items:center;background:rgba(190,18,60,.12);border:1px solid rgba(190,18,60,.35);color:var(--rose);font:700 22px var(--f-mono)}
+  .xlist h4{font:650 30px/1.15 var(--f-display);letter-spacing:-.015em}
+  .xlist p{font-size:21px;line-height:1.45;color:var(--muted);margin-top:6px}
+  .cmeta{display:grid;grid-template-columns:repeat(3,auto);gap:44px;justify-content:start}
+  .cmeta .k{font:500 14px var(--f-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
+  .cmeta .v{font-size:21px;color:var(--ink-2);margin-top:8px}
+  .step{padding:36px 34px;display:flex;flex-direction:column;gap:16px}
+  .step .sn{font:700 84px/1 var(--f-display);letter-spacing:-.04em}
+  .step h4{font:650 36px/1.15 var(--f-display);letter-spacing:-.015em}
+  .step p{font-size:23px;line-height:1.5;color:var(--muted)}
+  .step p b{color:var(--ink-2)}
+  .phase{padding:34px 34px 30px;display:flex;flex-direction:column;gap:14px}
+  .phase h3{font:700 40px/1.05 var(--f-display);letter-spacing:-.03em}
+  .phase ul{list-style:none;display:flex;flex-direction:column;gap:14px;margin-top:6px}
+  .phase li{font-size:22px;line-height:1.35;color:var(--ink-2);padding-left:26px;position:relative}
+  .phase li::before{content:"";position:absolute;left:0;top:13px;width:10px;height:10px;border-radius:3px;background:var(--violet-2)}
+  .phase.n li::before{background:var(--cyan)}
+  .chip{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:12px;font:500 17px var(--f-mono);color:var(--ink-2);background:#fff;border:1px solid var(--line-2)}
+  .consent{padding:0;overflow:hidden;display:flex;flex-direction:column}
+  .consent .hd{padding:24px 30px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;font:600 24px var(--f-display)}
+  .consent .bd2{padding:28px 30px;display:flex;flex-direction:column;gap:18px;flex:1}
+  .consent .meta2{font-size:21px;line-height:1.5;color:var(--muted)}
+  .consent .meta2 b{color:var(--ink-2)}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto}
+  .btn{padding:13px 20px;border-radius:12px;font:600 18px var(--f-sans);border:1px solid var(--line-2);color:var(--ink-2);background:#fff}
+  .btn.p{background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;border-color:transparent;box-shadow:0 10px 26px -8px rgba(168,85,247,.8)}
+  svg text{font-family:var(--f-sans)}
+  .t-ink{fill:var(--ink)} .t-ink2{fill:var(--ink-2)} .t-mut{fill:var(--muted)} .t-dim{fill:var(--dim)} .t-v{fill:var(--violet-3)} .t-c{fill:var(--cyan-2)}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
-<body>
-  <div class="reveal">
-    <div class="slides">
-      <span class="logo-frame deck-mark"><img class="logo" src="../../../crates/sovra-ui/assets/branding/sovra-logo.svg" alt="Sovra"></span>
-      <section data-title="A few computers share helpers and memory">
-        <span class="logo-frame logo-hero"><img class="logo" src="../../../crates/sovra-ui/assets/branding/sovra-logo.svg" alt="Sovra"></span>
-        <p class="mark">Sovra · For a family or a small business</p>
-        <h1>A few computers share helpers and memory.</h1>
-        <p>What the desktop helper does today. Then a direction for a small group of people and their computers. The direction is not in the product yet.</p>
-      </section>
+<body data-logo="../../../crates/sovra-ui/assets/branding/sovra-logo.svg" data-title="For a family or a small business">
 
-      <section data-title="A slow laptop should not send family notes away">
-        <p class="mark">The problem</p>
-        <h1>A slow laptop should not send family notes away.</h1>
-        <p>Cloud helpers take the files. A second computer in the house could have done the work.</p>
-      </section>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gV" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#9333ea"/></linearGradient>
+    <linearGradient id="gC" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#0891b2"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+    <radialGradient id="gGlow"><stop offset="0" stop-color="#8b5cf6" stop-opacity=".30"/><stop offset="1" stop-color="#7c3aed" stop-opacity="0"/></radialGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker>
+    <marker id="arrC" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0891b2"/></marker>
+  </defs>
+</svg>
 
-      <section data-title="The helper already runs on the computer">
-        <p class="mark">Today</p>
-        <h1>The helper already runs on the computer.</h1>
-        <p>Sovra is a program on the person’s own machine. People ask it in everyday words.</p>
-      </section>
+<div id="stage"><div id="deck">
 
-      <section data-title="A saved detail can be opened">
-        <p class="mark">Today</p>
-        <h1>A saved detail can be opened.</h1>
-        <p>A correction replaces it. The old detail is not erased. It stays as history.</p>
-      </section>
-
-      <section data-title="Helpers can answer together as a team">
-        <p class="mark">Today</p>
-        <h1>Helpers can answer together as a team.</h1>
-        <p>Each helper has a different job. You ask them in one chat, and they answer together.</p>
-      </section>
-
-      <section data-title="Each computer still works alone">
-        <p class="mark">Today</p>
-        <h1>Each computer still works alone.</h1>
-        <p>Memory and helpers stay on that machine. A slow laptop cannot borrow a free one nearby.</p>
-      </section>
-
-      <section data-title="Make a group of people and their computers">
-        <p class="mark">Next</p>
-        <h1>Make a group of people and their computers.</h1>
-        <p>A family, or a small business. Nothing is shared until someone chooses to share it.</p>
-      </section>
-
-      <section data-title="Join with a link or a code">
-        <p class="mark">Next</p>
-        <h1>Join with a link or a code.</h1>
-        <p>Scan a code, or type six digits in the same room. No Sovra server has to introduce the computers.</p>
-      </section>
-
-      <section data-title="Memory has lanes">
-        <p class="mark">Next</p>
-        <h1>Memory has lanes.</h1>
-        <p>Only me, the group, or you and one person. A private note stays private.</p>
-      </section>
-
-      <section data-title="A helper you share still waits until they switch it on">
-        <p class="mark">Next</p>
-        <h1>A helper you share still waits until they switch it on.</h1>
-        <p>They see what it will be told and which tools it asks for. Grants stay on their computer.</p>
-      </section>
-
-      <section data-title="A busy laptop can hand heavy work to a free computer">
-        <p class="mark">Next</p>
-        <h1>A busy laptop can hand heavy work to a free computer.</h1>
-        <p>Gran’s old laptop still gets an answer from a computer nearby. The computer that did the work is named on the reply.</p>
-      </section>
-
-      <section data-title="Nothing needs a central Sovra server">
-        <p class="mark">Next</p>
-        <h1>Nothing needs a central Sovra server.</h1>
-        <p>The computers talk in private. If one turns off, the others keep going.</p>
-      </section>
-
-      <section data-title="The helper is here. The group of computers is next.">
-        <p class="mark">Today and next</p>
-        <h1>The helper is here. The group of computers is next.</h1>
-        <p>Today is the helper, memory you can open, and helpers that answer together. Next is a small group sharing those, without a central Sovra server.</p>
-      </section>
+<section class="slide" data-section="A family or a small business" data-note="Sovra · helpers and memory on computers you already own">
+  <canvas class="bgcanvas" data-fx="net" data-x=".72" data-r=".42"></canvas>
+  <div class="grow col" style="justify-content:center;max-width:1180px;gap:0">
+    <span class="eyebrow rv">For a family, or a small business</span>
+    <div class="giant rv" style="margin-top:34px">A few computers<br>share <span class="g">helpers</span><br>and <span class="gc">memory.</span></div>
+    <p class="lead rv" style="max-width:820px">What the desktop helper does today. Then a direction for a small <b>group of people and their computers</b>. The direction is not in the product yet.</p>
+    <div class="cmeta rv mt-l">
+      <div><div class="k">Today</div><div class="v">A helper on one computer</div></div>
+      <div><div class="k">Next</div><div class="v">A group, with no Sovra server</div></div>
+      <div><div class="k">Not this deck</div><div class="v">Company fleets and training</div></div>
     </div>
   </div>
-  <script src="../shared/reveal/dist/reveal.js"></script>
-  <script src="../shared/deck.js"></script>
+</section>
+
+<section class="slide" data-section="The problem" data-note="Cloud helpers take the files">
+  <div class="split">
+    <div>
+      <span class="eyebrow rv">The problem</span>
+      <h1 class="rv">A slow laptop should not send family notes <span class="g">away.</span></h1>
+      <div class="xlist">
+        <div class="it rv"><div class="x">✕</div><div><h4>The files leave the house</h4><p>To be useful, a cloud helper takes the notes, the photos, the quotes.</p></div></div>
+        <div class="it rv"><div class="x">✕</div><div><h4>The slow machine does all the work</h4><p>A second computer in the house could have answered. It never gets asked.</p></div></div>
+        <div class="it rv"><div class="x">✕</div><div><h4>Each person starts from scratch</h4><p>Dad books the boiler. Mum’s helper does not know, unless someone types it again.</p></div></div>
+      </div>
+    </div>
+    <svg class="rv z" viewBox="0 0 820 760" style="width:100%;height:100%;max-height:780px">
+      <ellipse cx="410" cy="200" rx="280" ry="150" fill="url(#gGlow)"/>
+      <rect x="250" y="90" width="320" height="200" rx="28" fill="#fff" stroke="#a855f7" stroke-width="2.5"/>
+      <text x="410" y="175" text-anchor="middle" class="t-ink" style="font:800 34px var(--f-display)">Someone else’s</text>
+      <text x="410" y="220" text-anchor="middle" class="t-ink" style="font:800 34px var(--f-display)">computer</text>
+      <g fill="none" stroke="rgba(190,18,60,.55)" stroke-width="2.4" class="flow">
+        <path id="u1" d="M140 620 C140 420 300 360 340 290"/>
+        <path id="u2" d="M410 620 L410 290"/>
+        <path id="u3" d="M680 620 C680 420 520 360 480 290"/>
+      </g>
+      <g fill="#be123c">
+        <rect width="18" height="24" rx="3" x="-9" y="-12"><animateMotion dur="2.8s" repeatCount="indefinite"><mpath href="#u1"/></animateMotion></rect>
+        <rect width="18" height="24" rx="3" x="-9" y="-12"><animateMotion dur="2.4s" begin=".5s" repeatCount="indefinite"><mpath href="#u2"/></animateMotion></rect>
+        <rect width="18" height="24" rx="3" x="-9" y="-12"><animateMotion dur="3s" begin="1s" repeatCount="indefinite"><mpath href="#u3"/></animateMotion></rect>
+      </g>
+      <g fill="#fff" stroke="#8b5cf6" stroke-width="2.2">
+        <rect x="70" y="600" width="140" height="90" rx="12"/>
+        <rect x="340" y="600" width="140" height="90" rx="12"/>
+        <rect x="610" y="600" width="140" height="90" rx="12"/>
+      </g>
+      <text x="140" y="652" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Mum</text>
+      <text x="410" y="652" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Dad</text>
+      <text x="680" y="652" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Gran</text>
+      <text x="410" y="730" text-anchor="middle" class="t-mut mono" style="font-size:18px;letter-spacing:.14em">THE NOTES GO UP. THEY DO NOT COME HOME.</text>
+    </svg>
+  </div>
+</section>
+
+<section class="slide flip" data-section="Today" data-note="Today · the desktop app already does this">
+  <span class="eyebrow rv">Today</span>
+  <h1 class="rv">The helper already runs on <span class="g">the computer.</span></h1>
+  <p class="lead rv">Sovra is a program on the person’s own machine. People ask it in everyday words. Nothing below is a future claim.</p>
+  <div class="g3 mt" style="flex:1;min-height:0">
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg></div>
+      <span class="pill today">Today</span>
+      <h3>On this computer</h3>
+      <p>macOS, Windows or Linux. The helper lives here. Files stay here unless you send them.</p>
+    </div>
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3 3 7 3s7-1.3 7-3V6"/></svg></div>
+      <span class="pill today">Today</span>
+      <h3>Memory you can open</h3>
+      <p>A saved detail can be opened. A correction replaces it. The old words stay as history.</p>
+    </div>
+    <div class="glass card rv">
+      <div class="ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M18 19a5 5 0 0 0-3-4.6"/></svg></div>
+      <span class="pill today">Today</span>
+      <h3>Helpers as a team</h3>
+      <p>Each helper has a different job. You ask them in one chat, and they answer together.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-section="Today · memory" data-note="Today · a correction replaces, it does not erase">
+  <div class="split">
+    <div>
+      <span class="eyebrow rv">Today · memory</span>
+      <h1 class="rv">A saved detail can be <span class="g">opened.</span></h1>
+      <p class="lead rv">You can read the original words. The old detail is not erased. It stays as history, so the helper can say what changed, and when.</p>
+      <div class="bar rv mt"><span class="k">Today</span><span class="t">This is how memory already works on <b>one</b> computer. Sharing it across a group is next.</span></div>
+    </div>
+    <div class="app rv r" style="height:640px">
+      <div class="tb"><i></i><i></i><i></i><span class="ti">SOVRA · KNOWLEDGE</span><span class="dev pill today" style="font-size:12px;padding:6px 12px">On this computer</span></div>
+      <div class="bd">
+        <div class="main" style="gap:22px">
+          <div class="msg me"><div class="bub">The boiler service is booked for 12 March.</div></div>
+          <div class="msg"><div class="av" style="background:#7c3aed">S</div><div class="bub"><div class="who">Helper</div>I’ll remember that.<br><span class="cite">◷ saved · from your message today</span></div></div>
+          <div class="msg me"><div class="bub">Move it to 19 March instead.</div></div>
+          <div class="msg"><div class="av" style="background:#7c3aed">S</div><div class="bub"><div class="who">Helper</div>Updated. 12 March is still in the history if you need it.<br><span class="cite">↺ replaced · old date kept</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide flip" data-section="Today · the gap" data-note="Today · each computer still works alone">
+  <span class="eyebrow rv">Today · the gap</span>
+  <h1 class="rv">Each computer still works <span class="g">alone.</span></h1>
+  <p class="lead rv">Memory and helpers stay on that machine. A slow laptop cannot borrow a free one nearby. That is the honest limit of what ships today.</p>
+  <div class="g3 mt">
+    <div class="glass card rv">
+      <h3>Mum’s laptop</h3>
+      <p>Knows the boiler date. Cannot tell Dad’s computer unless someone copies it by hand.</p>
+    </div>
+    <div class="glass card rv">
+      <h3>Dad’s desktop</h3>
+      <p>Has a graphics card sitting idle. Gran’s old laptop never gets to use it.</p>
+    </div>
+    <div class="glass card rv">
+      <h3>Gran’s laptop</h3>
+      <p>Asks a long question and waits. The free computer in the house is not in the conversation.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide divider cool" data-section="Next" data-note="Direction, not in the product yet">
+  <div class="bignum">02</div>
+  <div class="grow col" style="justify-content:center;max-width:1400px">
+    <span class="eyebrow c rv">Next · not today</span>
+    <div class="giant rv" style="margin-top:24px">A group of people<br>and their <span class="gc">computers.</span></div>
+    <p class="lead rv" style="max-width:900px">A family, or a small business. They share helpers and memory when they choose to. Nothing needs a central Sovra server.</p>
+  </div>
+</section>
+
+<section class="slide cool" data-section="Next · a group" data-note="Next · people and computers, not a Sovra account">
+  <span class="eyebrow c rv">Next</span>
+  <h1 class="rv">Make a <span class="gc">group.</span> People and their computers.</h1>
+  <p class="lead rv">Nothing is shared until someone chooses to share it. “Team” stays the AI helpers. This is a group of people.</p>
+  <div class="g2 mt" style="flex:1;min-height:0">
+    <div class="glass card c rv">
+      <span class="pill next">Next</span>
+      <h3>Family</h3>
+      <p>Mum creates “Family” on her laptop, adds the iMac with a code, and sends Gran a link. Sam’s notes stay <b>only me</b> unless Sam shares them.</p>
+    </div>
+    <div class="glass card c rv">
+      <span class="pill next">Next</span>
+      <h3>A small business</h3>
+      <p>The office manager creates “Smith Plumbing” and invites six people. Two admins, so nobody is locked out. A shared quote writer is switched on by each person.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide cool flip" data-section="Next · join" data-note="Next · a link, a code, or six digits in the same room">
+  <span class="eyebrow c rv">Next · joining</span>
+  <h1 class="rv">Join with a <span class="gc">link</span> or a <span class="gc">code.</span></h1>
+  <div class="g3 mt" style="flex:1;min-height:0">
+    <div class="glass step rv">
+      <div class="sn g">1</div>
+      <h4>Show a code</h4>
+      <p>On a computer already in the group: a QR code and a copyable link. Both expire, and each can be used once.</p>
+    </div>
+    <div class="glass step rv">
+      <div class="sn g">2</div>
+      <h4>Same room</h4>
+      <p>No camera? Six digits on one screen, typed on the other. Both then show four emoji. Tap “They match”.</p>
+    </div>
+    <div class="glass step rv">
+      <div class="sn gc">3</div>
+      <h4>No Sovra server</h4>
+      <p>The computers find each other. No central switchboard has to introduce them, and there is no Sovra account to join.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide cool" data-section="Next · lanes" data-note="Next · only me, the group, or you and one person">
+  <span class="eyebrow c rv">Next · memory lanes</span>
+  <h1 class="rv">Memory has <span class="gc">lanes.</span></h1>
+  <p class="lead rv">A private note stays private. A shared note can be opened, and a correction replaces it the same way it does today.</p>
+  <div class="g3 mt">
+    <div class="glass card rv">
+      <span class="num">LANE</span>
+      <h3>Only me</h3>
+      <p>Default. My own computers can see it. Nobody else holds it. Sam’s notes stay here unless Sam shares them.</p>
+    </div>
+    <div class="glass card c rv">
+      <span class="num">LANE</span>
+      <h3>The group</h3>
+      <p>Dad taps <b>Share with Family</b>. Mum’s helper can later answer “when is the boiler being serviced?” with who taught it.</p>
+    </div>
+    <div class="glass card rv">
+      <span class="num">LANE</span>
+      <h3>You and one person</h3>
+      <p>A note for Mum and Sam only. Not the whole family. Sharing is a copy into the lane, never a move.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide cool flip" data-section="Next · helpers" data-note="Next · they switch it on themselves">
+  <div class="split">
+    <div>
+      <span class="eyebrow c rv">Next · shared helpers</span>
+      <h1 class="rv">A helper you share still waits until they <span class="gc">switch it on.</span></h1>
+      <p class="lead rv">They see what it will be told and which tools it asks for. Grants stay on their computer. An update that asks for more tools asks again.</p>
+    </div>
+    <div class="glass consent rv r" style="min-height:560px">
+      <div class="hd">Quote writer · from the office manager</div>
+      <div class="bd2">
+        <p class="meta2">This helper will be told how you write quotes, and it asks to <b>read files you pick</b> and <b>save a document</b>.</p>
+        <div class="tagrow">
+          <span class="chip">Read files you pick</span>
+          <span class="chip">Save a document</span>
+          <span class="chip">Lane · Smith Plumbing</span>
+        </div>
+        <p class="meta2">It does nothing until you switch it on. Tools it does not have stay off.</p>
+        <div class="btns">
+          <span class="btn p">Switch on</span>
+          <span class="btn">Not now</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide cool" data-section="Next · handoff" data-note="Next · a busy laptop hands work to a free computer">
+  <div class="split">
+    <div>
+      <span class="eyebrow c rv">Next · work</span>
+      <h1 class="rv">A busy laptop can hand heavy work to a <span class="gc">free computer.</span></h1>
+      <p class="lead rv">Gran’s old laptop still gets an answer. The computer that did the work is named on the reply. Model ports stay on that computer; they are never opened to the internet.</p>
+      <div class="bar c rv mt"><span class="k">Named</span><span class="t"><b>Answered by Mum’s iMac</b> — so you always know who did the work.</span></div>
+    </div>
+    <svg class="rv z" viewBox="0 0 820 640" style="width:100%;max-height:640px">
+      <ellipse cx="410" cy="300" rx="360" ry="220" fill="url(#gGlow)" opacity=".7"/>
+      <rect x="40" y="180" width="260" height="170" rx="18" fill="#fff" stroke="#8b5cf6" stroke-width="2.4"/>
+      <text x="170" y="250" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Gran’s laptop</text>
+      <text x="170" y="288" text-anchor="middle" class="t-mut" style="font-size:18px">busy · on battery</text>
+      <path d="M320 265 H500" stroke="url(#gC)" stroke-width="4" fill="none" marker-end="url(#arrC)"/>
+      <text x="410" y="248" text-anchor="middle" class="t-c mono" style="font-size:16px;letter-spacing:.12em">WHOLE REQUEST</text>
+      <rect x="520" y="150" width="260" height="220" rx="18" fill="#fff" stroke="#0891b2" stroke-width="2.4"/>
+      <text x="650" y="230" text-anchor="middle" class="t-ink" style="font:700 26px var(--f-display)">Mum’s iMac</text>
+      <text x="650" y="268" text-anchor="middle" class="t-c" style="font-size:18px">plugged in · idle</text>
+      <text x="650" y="310" text-anchor="middle" class="t-mut" style="font-size:17px">runs the model here</text>
+      <rect x="200" y="430" width="420" height="70" rx="16" fill="#ecfeff" stroke="rgba(8,145,178,.4)" stroke-width="1.8"/>
+      <text x="410" y="474" text-anchor="middle" class="t-c" style="font:650 22px var(--f-display)">Answered by Mum’s iMac</text>
+    </svg>
+  </div>
+</section>
+
+<section class="slide cool flip" data-section="Next · no server" data-note="Next · nothing needs a central Sovra server">
+  <span class="eyebrow c rv">Next</span>
+  <h1 class="rv">Nothing needs a central <span class="gc">Sovra server.</span></h1>
+  <div class="col mt" style="gap:20px">
+    <div class="bar c rv"><span class="k">Talk</span><span class="t">The computers talk in private. No switchboard has to introduce them.</span></div>
+    <div class="bar c rv"><span class="k">Stay</span><span class="t">If one turns off, the others keep going. When it comes back, it catches up.</span></div>
+    <div class="bar c rv"><span class="k">Choose</span><span class="t">Nothing is shared until someone chooses. Sharing is a copy into a lane, never a move.</span></div>
+    <div class="bar rv"><span class="k">Honest</span><span class="t">A computer you remove keeps what it already had. The app says so in plain words.</span></div>
+  </div>
+</section>
+
+<section class="slide" data-section="Today and next" data-note="What is built, and what is not">
+  <span class="eyebrow rv">Today and next</span>
+  <h1 class="rv">The helper is here. The <span class="g">group</span> of computers is next.</h1>
+  <div class="g2 mt" style="flex:1;min-height:0">
+    <div class="glass phase rv" style="border-color:rgba(124,58,237,.35)">
+      <span class="pill today" style="align-self:flex-start">Today</span>
+      <h3>On one computer</h3>
+      <ul>
+        <li>A helper on the machine you own</li>
+        <li>Memory you can open; a correction replaces, it does not erase</li>
+        <li>Helpers that answer together as a team</li>
+        <li>Each computer still works alone</li>
+      </ul>
+    </div>
+    <div class="glass phase n rv" style="border-color:rgba(8,145,178,.35)">
+      <span class="pill next" style="align-self:flex-start">Next</span>
+      <h3>A small group</h3>
+      <ul>
+        <li>People and their computers, joined with a link or a code</li>
+        <li>Lanes: only me, the group, or you and one person</li>
+        <li>A shared helper waits until they switch it on</li>
+        <li>A busy laptop hands work to a free computer nearby</li>
+        <li>No central Sovra server</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-section="Sovra" data-note="Sovra · a family or a small business">
+  <canvas class="bgcanvas" data-fx="mesh"></canvas>
+  <div class="grow col" style="justify-content:center;max-width:1200px;gap:0">
+    <span class="eyebrow rv">The close</span>
+    <div class="giant rv" style="margin-top:34px">Keep it in the house.<br><span class="g">Share it when you choose.</span></div>
+    <p class="lead rv" style="max-width:820px">Today: a helper, memory you can open, and helpers that answer together. Next: a small <b>group</b> sharing those, without a central Sovra server.</p>
+    <div class="cmeta rv mt-l">
+      <div><div class="k">Audience</div><div class="v">A family, or a 3–20 person business</div></div>
+      <div><div class="k">Today</div><div class="v">Run it on a computer you own</div></div>
+      <div><div class="k">Next</div><div class="v">A group, when we build it</div></div>
+    </div>
+  </div>
+</section>
+
+</div></div>
+<script src="../shared/cinema.js"></script>
 </body>
 </html>
