@@ -34,6 +34,7 @@ impl Skill {
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
             "connections" => "Link the things Sovra can use",
+            "groups" => "Share with your family or team",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -145,6 +146,10 @@ impl Skill {
                 "Opens Connections, where you link an AI, WhatsApp, Telegram, Google, or a service from a web address."
                     .to_owned(),
                 "/connections ".to_owned(),
+            ),
+            "groups" => (
+                "Opens Groups, where your family or team's computers join together. Share a detail like “the boiler service is on 12 March” and everyone's helpers can answer with it, saying who shared it.".to_owned(),
+                "/groups ".to_owned(),
             ),
             "connect-service" => sample_pair(
                 "connect-service",
@@ -391,6 +396,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Connections to link an AI, WhatsApp, Telegram, Google, or a service you already use.",
             SkillAction::Connections,
             &["whatsapp"],
+        ),
+        action(
+            "groups",
+            "Groups",
+            "Open Settings → Groups to start or join a group, invite family or teammates, and share details everyone's helpers can use.",
+            SkillAction::Settings,
+            &["family", "share-with-group"],
         ),
         action(
             "connect-service",
