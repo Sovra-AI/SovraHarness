@@ -359,11 +359,16 @@ body =
   then HLC, then hash.
 - **Remove wins over Add** for the same device or person.
 - **Strong removal**: ops by an actor who was removed concurrently are
-  invalid, and anything that depends on them is invalid too. This is
-  p2panda-auth's default `StrongRemove` resolver
-  (<https://docs.rs/crate/p2panda-auth/0.7.0/source/README.md>).
-- Two admins who remove each other concurrently are **both** removed. The UI
-  warns before an admin removes another admin.
+  invalid. This follows p2panda-auth's default `StrongRemove` resolver
+  (<https://docs.rs/crate/p2panda-auth/0.7.0/source/README.md>). Ops that come
+  causally *after* a removal are simply unauthorised, so someone added back
+  can act again.
+- **Never zero admins** (as built, 2026-11-06): two admins who remove each
+  other concurrently do **not** both leave. The first removal in the fixed
+  order applies, and the second fails because its author is gone, so the
+  group always keeps an admin. This deliberately differs from p2panda's
+  "both removed" to avoid locking a family out. The UI still warns before an
+  admin removes another admin.
 
 ### 6.3 Recovery
 
@@ -832,11 +837,16 @@ instances**, Skills-page cards, and CHANGELOG/README updates.
 
 **Core**
 
-- [ ] `MembershipOp` types, `validate(op, state)`, `fold(ops) ->
-  GroupState`, strong removal, the two-admin invariant and fork detection, all
-  with unit tests and property tests for convergence.
-- [ ] Pairing state machine `Pairing{Idle, InviteShown, Connecting,
-  SasPending, Joined, Failed}` and SAS derivation (pure; test vectors).
+- [x] `MembershipOp` types, `fold(ops) -> GroupState`, strong removal,
+  remove-wins, the never-zero-admins rule (plus `needs_second_admin` for the
+  UI banner) and fork detection. Built in `sovra-core/src/group/`, with
+  unit tests and a convergence test over 300 shuffled orders with
+  duplicates. *Not yet:* a second admin's co-signature for removing an
+  admin.
+- [x] Pairing state machine (`PairingStage` / `PairingStep`), single-use
+  10-minute invites with a transcript-bound proof (`InviteBook`), the
+  one-guess short-code window, and SAS derivation (4 emoji with spoken
+  names, plus 6 digits).
 - [ ] `GroupCommand` / `GroupEvent` and the `GroupState` reducer.
 
 **Mesh**

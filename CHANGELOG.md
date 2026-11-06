@@ -11,6 +11,15 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Groundwork for **Groups** (people and their computers sharing helpers and
+  memory; see `docs/roadmap/02-a-team.md`). `sovra-core` gains a pure
+  `group` module: device, person and group ids; a signed, hash-linked
+  membership log; and a fold that every computer computes identically,
+  whatever order operations arrive in. The fold handles strong removal,
+  remove-wins, never-zero-admins and fork detection. The module also adds
+  single-use pairing invites, the one-guess short code, and the four-emoji
+  check both screens show. Nothing is user-visible yet.
+
 - Linked Devices on your phone now names this computer **Sovra connection**
   (instead of "Unknown device"). An already-linked phone keeps its old label
   until you unlink and Connect WhatsApp again.

@@ -20,6 +20,7 @@ pub mod document_reading;
 pub mod file_index;
 pub mod files;
 pub mod google;
+pub mod group;
 mod knowledge;
 pub mod mcp;
 mod memory;
