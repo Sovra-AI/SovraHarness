@@ -469,6 +469,7 @@ impl ModelsView {
                 Theme::change(mode, None, cx);
             }
             design::set_interface_scale(preferences.interface_scale, cx);
+            design::set_ui_language(preferences.language.clone(), cx);
         }
         if matches!(
             event,

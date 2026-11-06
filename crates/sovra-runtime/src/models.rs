@@ -522,6 +522,19 @@ impl ModelActor {
                 ))
                 .await;
             }
+            ModelCommand::SetLanguage { language } => {
+                let mut saved = self.saved.clone();
+                saved.preferences.language = language;
+                self.persist(saved.clone()).await?;
+                self.saved = saved;
+                if let Some(active) = self.saved.preferences.active.clone() {
+                    let _ = self.activate(&active, false).await;
+                }
+                self.emit(ModelEvent::PreferencesChanged(
+                    self.saved.preferences.clone(),
+                ))
+                .await;
+            }
             ModelCommand::SetInterfaceScale { scale } => {
                 let mut saved = self.saved.clone();
                 saved.preferences.interface_scale = scale;
@@ -685,7 +698,7 @@ impl ModelActor {
             .saved
             .preferences
             .agent_settings
-            .compose_system_instruction(&self.agent.instruction);
+            .compose_system_instruction(&self.agent.instruction, &self.saved.preferences.language);
         let mut effective_model = model.clone();
         if !self.saved.preferences.agent_settings.tools_enabled {
             effective_model

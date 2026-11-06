@@ -17,6 +17,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _,
 };
 use sovra_core::auth::{AuthPhase, AuthState};
+use sovra_core::models::ChromeKey;
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::{Shell, logo};
@@ -33,11 +34,14 @@ pub(crate) fn render_login_screen(
     let creating = !auth.has_accounts && !matches!(auth.phase, AuthPhase::Unknown);
     let (title, subtitle) = if creating {
         (
-            "Create your account",
-            "Everything stays on this computer — no cloud account needed.",
+            design::chrome(cx, ChromeKey::LoginCreateTitle),
+            design::chrome(cx, ChromeKey::LoginCreateSubtitle),
         )
     } else {
-        ("Welcome back", "Sign in to continue to Sovra.")
+        (
+            design::chrome(cx, ChromeKey::LoginWelcomeTitle),
+            design::chrome(cx, ChromeKey::LoginWelcomeSubtitle),
+        )
     };
 
     v_flex()
@@ -62,17 +66,26 @@ pub(crate) fn render_login_screen(
                 .items_center()
                 .gap(t.space.small)
                 .p(t.space.large)
-                .child(
-                    h_flex()
+                .child({
+                    let mut row = h_flex()
                         .w_full()
                         .min_w_0()
                         .flex_wrap()
                         .items_center()
                         .gap(t.space.small)
-                        .pb(t.space.small)
-                        .child(logo("login-logo", t.layout.logo_hero))
-                        .child(design::page_header(title, subtitle, cx).flex_1().min_w_0()),
-                )
+                        .pb(t.space.small);
+                    if design::is_rtl(cx) {
+                        row = row.flex_row_reverse();
+                    }
+                    row.child(logo("login-logo", t.layout.logo_hero)).child(
+                        design::page_header(title, subtitle, cx)
+                            .id("login-welcome-title")
+                            .test_support()
+                            .aria_label(title)
+                            .flex_1()
+                            .min_w_0(),
+                    )
+                })
                 .map(|card| match &auth.phase {
                     AuthPhase::WaitingForGoogle { auth_url } => {
                         card.child(google_waiting(auth_url, cx))
@@ -97,10 +110,10 @@ fn login_form(
     let t = design::tokens(cx);
     let busy = auth.busy();
     let submit_label = match (busy, creating) {
-        (true, true) => "Creating your account…",
-        (true, false) => "Signing in…",
-        (false, true) => "Create account & start",
-        (false, false) => "Sign in to Sovra",
+        (true, true) => design::chrome(cx, ChromeKey::LoginCreating),
+        (true, false) => design::chrome(cx, ChromeKey::LoginSigningIn),
+        (false, true) => design::chrome(cx, ChromeKey::LoginCreateStart),
+        (false, false) => design::chrome(cx, ChromeKey::LoginSignIn),
     };
 
     v_flex()
@@ -109,7 +122,7 @@ fn login_form(
         .child(
             Input::new(email_input)
                 .id("login-email-input")
-                .aria_label("Email address")
+                .aria_label(design::chrome(cx, ChromeKey::LoginEmail))
                 .prefix(
                     Icon::new(IconName::Mail)
                         .small()
@@ -119,7 +132,7 @@ fn login_form(
         .child(
             Input::new(password_input)
                 .id("login-password-input")
-                .aria_label("Password")
+                .aria_label(design::chrome(cx, ChromeKey::LoginPassword))
                 .mask_toggle()
                 .prefix(
                     Icon::new(IconName::Lock)
@@ -147,12 +160,16 @@ fn login_form(
                 })),
         )
         .child(
-            design::button("login-google-btn", "Continue with Google", cx)
-                .w_full()
-                .disabled(busy)
-                .on_click(cx.listener(|shell, _, _, cx| {
-                    shell.start_google_signin(cx);
-                })),
+            design::button(
+                "login-google-btn",
+                design::chrome(cx, ChromeKey::LoginGoogle),
+                cx,
+            )
+            .w_full()
+            .disabled(busy)
+            .on_click(cx.listener(|shell, _, _, cx| {
+                shell.start_google_signin(cx);
+            })),
         )
         .child(
             div()
@@ -160,9 +177,9 @@ fn login_form(
                 .text_color(t.text_secondary)
                 .sovra_text(TextRole::Caption, cx)
                 .child(if creating {
-                    "Your password is protected on this computer and never leaves it."
+                    design::chrome(cx, ChromeKey::LoginHintCreate)
                 } else {
-                    "First time here? Enter an email and password to create your account."
+                    design::chrome(cx, ChromeKey::LoginHintSignIn)
                 }),
         )
 }
@@ -181,13 +198,13 @@ fn google_waiting(auth_url: &str, cx: &mut Context<Shell>) -> impl IntoElement +
         .child(
             div()
                 .sovra_text(TextRole::Body, cx)
-                .child("Finish signing in with Google in your browser."),
+                .child(design::chrome(cx, ChromeKey::LoginGoogleWaiting)),
         )
         .child(
             div()
                 .text_color(t.text_secondary)
                 .sovra_text(TextRole::Caption, cx)
-                .child("Approve there and come back — this screen updates by itself."),
+                .child(design::chrome(cx, ChromeKey::LoginGoogleWaitingHint)),
         )
         .child(
             h_flex()
@@ -196,17 +213,24 @@ fn google_waiting(auth_url: &str, cx: &mut Context<Shell>) -> impl IntoElement +
                 .gap(t.space.small)
                 .justify_center()
                 .child(
-                    design::button("login-google-open-again-btn", "Open the page again", cx)
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            cx.open_url(&auth_url);
-                        })),
+                    design::button(
+                        "login-google-open-again-btn",
+                        design::chrome(cx, ChromeKey::LoginOpenAgain),
+                        cx,
+                    )
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.open_url(&auth_url);
+                    })),
                 )
                 .child(
-                    design::button("login-google-cancel-btn", "Cancel", cx).on_click(cx.listener(
-                        |shell, _, _, cx| {
-                            shell.cancel_google_signin(cx);
-                        },
-                    )),
+                    design::button(
+                        "login-google-cancel-btn",
+                        design::chrome(cx, ChromeKey::LoginCancel),
+                        cx,
+                    )
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.cancel_google_signin(cx);
+                    })),
                 ),
         )
 }

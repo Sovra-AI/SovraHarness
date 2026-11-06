@@ -6,8 +6,8 @@ use gpui_kit::{
     AppContext as _, Entity, ScrollDelta, TestAppContext, WindowHandle, point, px, size,
 };
 use sovra_core::models::{
-    CatalogSnapshot, InterfaceScale, ModelCommand, ModelConnection, ModelEvent, ModelInfo,
-    ModelPreferences, ProviderKind,
+    CatalogSnapshot, ChromeKey, InterfaceScale, ModelCommand, ModelConnection, ModelEvent,
+    ModelInfo, ModelPreferences, ProviderKind, UiLanguage, chrome,
 };
 use sovra_core::{Command, Event};
 use sovra_runtime::Client;
@@ -1549,6 +1549,187 @@ fn appearance_choice_is_saved_and_restored(cx: &mut TestAppContext) {
     };
     assert_eq!(saved, Appearance::Dark);
     cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+}
+
+#[gpui_kit::test]
+fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    let (window, shell) = open_shell(cx, client, 1000., 760.);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("chat-welcome").visible());
+        let name = shell
+            .read(cx)
+            .workspace()
+            .user
+            .full_name
+            .split_whitespace()
+            .next()
+            .unwrap_or(chrome(&UiLanguage::default(), ChromeKey::ChatWelcomeGuest));
+        let welcome =
+            chrome(&UiLanguage::default(), ChromeKey::ChatWelcomeTitle).replace("{name}", name);
+        assert_eq!(
+            window.find("chat-welcome-title").label(),
+            Some(welcome.as_str())
+        );
+        assert!(
+            welcome
+                .chars()
+                .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c)),
+            "default chat welcome is Arabic script: {welcome}"
+        );
+        assert_eq!(
+            window.find("chat-welcome-subtitle").label(),
+            Some(chrome(
+                &UiLanguage::default(),
+                ChromeKey::ChatWelcomeSubtitle
+            ))
+        );
+        assert_eq!(
+            window.find(("chat-starter", 1usize)).label(),
+            Some(chrome(&UiLanguage::default(), ChromeKey::ChatStarterEmail))
+        );
+        assert_eq!(
+            window.find("composer-hint").label(),
+            Some(chrome(&UiLanguage::default(), ChromeKey::ChatHintIdle))
+        );
+        assert_eq!(
+            shell.read(cx).composer_placeholder(cx),
+            chrome(&UiLanguage::default(), ChromeKey::ChatComposerPlaceholder)
+        );
+        assert_eq!(
+            shell.read(cx).login_password_placeholder(cx),
+            chrome(&UiLanguage::default(), ChromeKey::LoginPasswordPlaceholder)
+        );
+        window.click("sidebar-user-profile", cx);
+        window.render_frame(cx);
+        assert!(window.find("sovra-login-screen").visible());
+        assert_eq!(
+            window.find("login-welcome-title").label(),
+            Some(chrome(&UiLanguage::default(), ChromeKey::LoginWelcomeTitle))
+        );
+        assert_eq!(
+            window.find("login-submit-btn").label(),
+            Some(chrome(&UiLanguage::default(), ChromeKey::LoginSignIn))
+        );
+        assert_eq!(
+            shell.read(cx).login_password_placeholder(cx),
+            chrome(&UiLanguage::default(), ChromeKey::LoginPasswordPlaceholder)
+        );
+    })
+    .unwrap();
+    events
+        .send_blocking(Event::Auth(sovra_core::AuthEvent::SignedIn {
+            session: sovra_core::AuthSession {
+                account_id: "test-account".into(),
+                email: "test@example.com".into(),
+                full_name: "Ahmed Al Mansoori".into(),
+                provider: sovra_core::auth::AuthProvider::Password,
+                signed_in_at: sovra_core::Timestamp(1),
+            },
+            new_account: false,
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-settings", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("nav-settings").label(),
+            Some(chrome(&UiLanguage::default(), ChromeKey::NavSettings))
+        );
+        assert!(
+            chrome(&UiLanguage::default(), ChromeKey::NavSettings)
+                .chars()
+                .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c)),
+            "default nav Settings is Arabic script"
+        );
+        assert_eq!(
+            window.find("settings-restart-tour").label(),
+            Some(chrome(&UiLanguage::default(), ChromeKey::SettingsTour))
+        );
+        assert!(window.find("settings-language").visible());
+        assert!(window.find("settings-language-choice-en").visible());
+        window.click("settings-language-choice-en", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("settings-restart-tour").label(),
+            Some(chrome(&UiLanguage::english(), ChromeKey::SettingsTour))
+        );
+    })
+    .unwrap();
+    let saved = loop {
+        if let Command::Models(ModelCommand::SetLanguage { language }) =
+            commands.try_recv().expect("language saved")
+        {
+            break language;
+        }
+    };
+    assert_eq!(saved, UiLanguage::english());
+    events
+        .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
+            ModelPreferences {
+                language: UiLanguage::english(),
+                ..ModelPreferences::default()
+            },
+        )))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("nav-settings").label(),
+            Some(chrome(&UiLanguage::english(), ChromeKey::NavSettings))
+        );
+        assert_eq!(
+            window.find("chat-new-btn").label(),
+            Some(chrome(&UiLanguage::english(), ChromeKey::NavNewChatHint))
+        );
+        window.click("nav-chat", cx);
+        window.render_frame(cx);
+        let name = shell
+            .read(cx)
+            .workspace()
+            .user
+            .full_name
+            .split_whitespace()
+            .next()
+            .unwrap_or(chrome(&UiLanguage::english(), ChromeKey::ChatWelcomeGuest));
+        let welcome =
+            chrome(&UiLanguage::english(), ChromeKey::ChatWelcomeTitle).replace("{name}", name);
+        assert_eq!(
+            window.find("chat-welcome-title").label(),
+            Some(welcome.as_str())
+        );
+        assert_eq!(
+            window.find("composer-hint").label(),
+            Some(chrome(&UiLanguage::english(), ChromeKey::ChatHintIdle))
+        );
+        assert_eq!(
+            shell.read(cx).composer_placeholder(cx),
+            chrome(&UiLanguage::english(), ChromeKey::ChatComposerPlaceholder)
+        );
+        assert_eq!(
+            shell.read(cx).login_password_placeholder(cx),
+            chrome(&UiLanguage::english(), ChromeKey::LoginPasswordPlaceholder)
+        );
+        window.click("sidebar-user-profile", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("login-submit-btn").label(),
+            Some(chrome(&UiLanguage::english(), ChromeKey::LoginSignIn))
+        );
+        assert_eq!(
+            shell.read(cx).login_password_placeholder(cx),
+            chrome(&UiLanguage::english(), ChromeKey::LoginPasswordPlaceholder)
+        );
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]

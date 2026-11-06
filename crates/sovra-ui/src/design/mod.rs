@@ -10,9 +10,10 @@ mod tokens;
 
 use std::rc::Rc;
 
-use gpui_kit::App;
 use gpui_kit::base::{Easing, Spring};
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode, highlighter::HighlightTheme};
+use gpui_kit::{App, Global};
+use sovra_core::models::{ChromeKey, UiLanguage};
 
 pub use responsive::{
     WidthClass, initial_window_bounds, interface_scale, set_interface_scale, width_probe,
@@ -26,7 +27,33 @@ pub use tokens::{
     SpaceTokens, tokens,
 };
 
+struct UiLanguageState(UiLanguage);
+
+impl Global for UiLanguageState {}
+
+/// Current chrome/agent language. Defaults to Arabic before preferences load.
+#[must_use]
+pub fn ui_language(cx: &App) -> UiLanguage {
+    cx.try_global::<UiLanguageState>()
+        .map_or_else(UiLanguage::default, |state| state.0.clone())
+}
+
+pub fn set_ui_language(language: UiLanguage, cx: &mut App) {
+    cx.set_global(UiLanguageState(language));
+}
+
+#[must_use]
+pub fn chrome(cx: &App, key: ChromeKey) -> &'static str {
+    sovra_core::models::chrome(&ui_language(cx), key)
+}
+
+#[must_use]
+pub fn is_rtl(cx: &App) -> bool {
+    ui_language(cx).is_rtl()
+}
+
 pub(crate) fn init(cx: &mut App) {
+    cx.set_global(UiLanguageState(UiLanguage::default()));
     let config = |mode| {
         Rc::new(ThemeConfig {
             name: match mode {

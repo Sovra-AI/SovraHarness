@@ -6,10 +6,11 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _,
     Subscription, Task, TestSupportExt as _, Window, div, img,
 };
+use sovra_core::models::ChromeKey;
 use sovra_core::{
     ChatHistoryFilter, Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScheduleCommand,
     ScheduleStatus, ScreenRoute, SelectionMode, TimelineRange, WorkspaceState,
@@ -110,9 +111,12 @@ impl Shell {
         // has been clicked. The shell itself stays outside the tab order.
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
+        let composer_placeholder = design::chrome(cx, ChromeKey::ChatComposerPlaceholder);
+        let login_email_placeholder = design::chrome(cx, ChromeKey::LoginEmailPlaceholder);
+        let login_password_placeholder = design::chrome(cx, ChromeKey::LoginPasswordPlaceholder);
         let composer_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Message Sovra…")
+                .placeholder(composer_placeholder)
                 .auto_grow(1, 6)
                 .submit_on_enter(true)
         });
@@ -163,10 +167,10 @@ impl Shell {
             InputState::new(window, cx).placeholder("Give me a short briefing of what's on today")
         });
         let login_email_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("you@example.com"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(login_email_placeholder));
         let login_password_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Enter your password")
+                .placeholder(login_password_placeholder)
                 .masked(true)
         });
         let sim_route_input = cx.new(|cx| {
@@ -684,6 +688,26 @@ impl Shell {
 
     pub fn workspace(&self) -> &WorkspaceState {
         &self.state
+    }
+
+    /// Chat composer placeholder currently held by the input (follows UI language).
+    #[must_use]
+    pub fn composer_placeholder(&self, cx: &App) -> String {
+        self.composer_input
+            .read(cx)
+            .presentation()
+            .placeholder()
+            .to_string()
+    }
+
+    /// Login password placeholder currently held by the input (follows UI language).
+    #[must_use]
+    pub fn login_password_placeholder(&self, cx: &App) -> String {
+        self.login_password_input
+            .read(cx)
+            .presentation()
+            .placeholder()
+            .to_string()
     }
 
     /// The draft used by Message on `WhatsApp` in Knowledge → People.
@@ -1571,6 +1595,7 @@ impl Render for Shell {
         let muted_foreground = theme.muted_foreground;
         let t = design::tokens(cx);
         self.sync_window_title(window);
+        self.sync_chrome_placeholders(window, cx);
         let body_view = self.render_body(cx);
         let title_bar = (Self::app_owns_titlebar(window) || self.state.development.enabled)
             .then(|| self.render_title_bar(cx));
@@ -1632,12 +1657,37 @@ impl Shell {
     }
 
     fn sync_window_title(&mut self, window: &mut Window) {
-        let title =
-            sovra_core::window_title(self.state.route, self.state.active_tab, crate::WINDOW_BRAND);
+        let title = sovra_core::window_title(
+            self.state.route,
+            self.state.active_tab,
+            crate::WINDOW_BRAND,
+            &self.state.language,
+        );
         if title != self.window_title {
             window.set_window_title(&title);
             self.window_title = title;
         }
+    }
+
+    fn sync_chrome_placeholders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let composer = design::chrome(cx, ChromeKey::ChatComposerPlaceholder);
+        self.composer_input.update(cx, |input, cx| {
+            if input.presentation().placeholder().as_ref() != composer {
+                input.set_placeholder(composer, window, cx);
+            }
+        });
+        let email = design::chrome(cx, ChromeKey::LoginEmailPlaceholder);
+        self.login_email_input.update(cx, |input, cx| {
+            if input.presentation().placeholder().as_ref() != email {
+                input.set_placeholder(email, window, cx);
+            }
+        });
+        let password = design::chrome(cx, ChromeKey::LoginPasswordPlaceholder);
+        self.login_password_input.update(cx, |input, cx| {
+            if input.presentation().placeholder().as_ref() != password {
+                input.set_placeholder(password, window, cx);
+            }
+        });
     }
 
     /// A drag strip in the chrome colour that names the open page, centred so it
@@ -1645,7 +1695,7 @@ impl Shell {
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let page = match self.state.route {
             ScreenRoute::Login => crate::WINDOW_BRAND,
-            ScreenRoute::MainWorkspace => self.state.active_tab.label(),
+            ScreenRoute::MainWorkspace => self.state.active_tab.label_in(&self.state.language),
         };
         let border = cx.theme().border;
         let muted_foreground = cx.theme().muted_foreground;
@@ -1778,7 +1828,11 @@ impl Shell {
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .overflow_hidden()
+                    .overflow_hidden();
+                if design::is_rtl(cx) {
+                    body = body.flex_row_reverse();
+                }
+                body = body
                     .child(render_sidebar(
                         &self.state,
                         &self.history_search_input,
@@ -1789,15 +1843,19 @@ impl Shell {
                     .child(center)
                     .children(
                         (self.history_compact && self.history_overlay_open).then(|| {
-                            div().absolute().top_0().left_0().h_full().occlude().child(
-                                render_sidebar(
-                                    &self.state,
-                                    &self.history_search_input,
-                                    &self.rename_thread_input,
-                                    false,
-                                    cx,
-                                ),
-                            )
+                            let mut overlay = div().absolute().top_0().h_full().occlude();
+                            overlay = if design::is_rtl(cx) {
+                                overlay.right_0()
+                            } else {
+                                overlay.left_0()
+                            };
+                            overlay.child(render_sidebar(
+                                &self.state,
+                                &self.history_search_input,
+                                &self.rename_thread_input,
+                                false,
+                                cx,
+                            ))
                         }),
                     );
                 if self.state.active_tab == NavTab::Knowledge && self.inspector_docked {

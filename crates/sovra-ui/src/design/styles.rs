@@ -188,13 +188,17 @@ pub fn page_header(
     cx: &App,
 ) -> Div {
     let t = tokens(cx);
-    div()
+    let mut header = div()
         .flex()
         .flex_col()
         .w_full()
         .min_w_0()
         .max_w_full()
-        .gap(t.space.small)
+        .gap(t.space.small);
+    if super::is_rtl(cx) {
+        header = header.text_right();
+    }
+    header
         .child(
             div()
                 .w_full()

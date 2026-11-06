@@ -167,7 +167,11 @@ adopted over mem0-style flat memories:
 vector indexes in the same query — no Postgres+vector-DB+graph-DB stitching — and
 `engine::any` makes deployment a connection string: `mem://` (tests), `surrealkv://dir`
 (desktop default), `ws://host` (future remote server, an app-config change only). Pinned
-≥ 3.3.4: earlier 3.x HNSW silently dropped near-duplicate vectors.
+≥ 3.3.4: earlier 3.x HNSW silently dropped near-duplicate vectors. Known issue:
+`surrealdb-core` 3.3.4 / `surrealkv` 0.21.4 carry RUSTSEC-2026-0454 (reblessive
+`Send`/`Sync`) and RUSTSEC-2026-0452 (short-key read). Both are patched only in
+SurrealDB 4.0.0 and ignored in `deny.toml` with a reason; remove the ignores on
+the 4.x bump.
 
 **Abstraction:** everything outside the adapter holds `Arc<dyn MemoryStore>` (the port in
 `sovra-core`). `sovra-store-surreal` is the only crate naming SurrealDB (enforced by

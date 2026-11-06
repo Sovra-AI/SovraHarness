@@ -11,6 +11,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::files::AttachmentState;
+use sovra_core::models::ChromeKey;
 
 use crate::design::{self, SovraStyled as _, TextRole};
 use crate::shell::Shell;
@@ -49,12 +50,15 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
     if chat.composer_focused {
         bar = bar.shadow(vec![c.composer_focus_glow.clone()]);
     }
+    if design::is_rtl(cx) {
+        bar = bar.flex_row_reverse();
+    }
     let send = design::round_icon_button("composer-send-btn", c.send_size)
         .icon(IconName::ArrowUp)
         .accessibility_label(if generating {
-            "Queue message"
+            design::chrome(cx, ChromeKey::ChatQueue)
         } else {
-            "Send message"
+            design::chrome(cx, ChromeKey::ChatSend)
         })
         .disabled(!can_send)
         .on_click(cx.listener(|shell, _, window, cx| shell.submit_composer(window, cx)));
@@ -229,7 +233,7 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
                     .icon(gpui_kit::component::Icon::new(
                         gpui_kit::assets::IconName::Paperclip,
                     ))
-                    .accessibility_label("Add files")
+                    .accessibility_label(design::chrome(cx, ChromeKey::ChatAddFiles))
                     .on_click(cx.listener(|shell, _, window, cx| shell.choose_files(window, cx))),
             )
             .child(
@@ -241,7 +245,7 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
                     .py(t.space.compact)
                     .child(
                         Textarea::new(composer_input)
-                            .aria_label("Message Sovra")
+                            .aria_label(design::chrome(cx, ChromeKey::ChatComposerA11y))
                             .appearance(false)
                             .bordered(false),
                     ),
@@ -250,27 +254,29 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
             .children(generating.then(|| {
                 design::round_icon_button("composer-stop-btn", c.send_size)
                     .icon(IconName::Square)
-                    .accessibility_label("Stop generating")
+                    .accessibility_label(design::chrome(cx, ChromeKey::ChatStop))
                     .bg(cx.theme().danger)
                     .text_color(cx.theme().danger_foreground)
                     .on_click(cx.listener(|shell, _, _, cx| shell.interrupt_active_session(cx)))
             }))
             .child(send),
         )
-        .child(
-            h_flex().justify_center().child(
-                div()
-                    .sovra_text(TextRole::Caption, cx)
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if has_files && generating {
-                        "Send these files after this reply finishes"
-                    } else if has_files {
-                        "Up to 8 files · 20 MB each · Sent to your chosen AI when you send"
-                    } else if generating {
-                        "Type ahead — Enter queues it for when Sovra is done"
-                    } else {
-                        "Type / for skills · Enter to send · Shift+Enter for a new line"
-                    }),
-            ),
-        )
+        .child(h_flex().justify_center().child({
+            let hint = if has_files && generating {
+                design::chrome(cx, ChromeKey::ChatHintFilesGenerating)
+            } else if has_files {
+                design::chrome(cx, ChromeKey::ChatHintFiles)
+            } else if generating {
+                design::chrome(cx, ChromeKey::ChatHintGenerating)
+            } else {
+                design::chrome(cx, ChromeKey::ChatHintIdle)
+            };
+            div()
+                .id("composer-hint")
+                .test_support()
+                .aria_label(hint)
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(cx.theme().muted_foreground)
+                .child(hint)
+        }))
 }

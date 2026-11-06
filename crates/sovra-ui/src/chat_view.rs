@@ -24,6 +24,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription,
     TestSupportExt as _, WeakEntity, Window, div, list, px, relative,
 };
+use sovra_core::models::ChromeKey;
 use sovra_core::{AgUiWidget, ChatMessage, MessageRole, ResponseModel, WorkspaceState};
 
 use crate::agui_widgets::render_agui_widget;
@@ -569,22 +570,19 @@ pub(crate) fn render_chat_column(
 }
 
 /// Starters for people who don't know what to ask an AI yet.
-const STARTERS: [(&str, &str); 4] = [
+const STARTERS: [(ChromeKey, ChromeKey); 4] = [
     (
-        "Understand something",
-        "Explain this to me simply, like I'm new to it: ",
+        ChromeKey::ChatStarterUnderstand,
+        ChromeKey::ChatStarterUnderstandDraft,
     ),
     (
-        "Draft an email",
-        "Help me write a short, friendly email about ",
+        ChromeKey::ChatStarterEmail,
+        ChromeKey::ChatStarterEmailDraft,
     ),
+    (ChromeKey::ChatStarterPlan, ChromeKey::ChatStarterPlanDraft),
     (
-        "Plan my week",
-        "Help me plan my week. Here's what I need to get done: ",
-    ),
-    (
-        "Summarize a document",
-        "Summarize this in a few bullet points:\n\n",
+        ChromeKey::ChatStarterSummarize,
+        ChromeKey::ChatStarterSummarizeDraft,
     ),
 ];
 
@@ -592,13 +590,32 @@ const STARTERS: [(&str, &str); 4] = [
 /// composer (they never send on their own).
 fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    let guest = design::chrome(cx, ChromeKey::ChatWelcomeGuest);
     let first_name = state
         .user
         .full_name
         .split_whitespace()
         .next()
-        .unwrap_or("there")
-        .to_owned();
+        .unwrap_or(guest);
+    let title = design::chrome(cx, ChromeKey::ChatWelcomeTitle).replace("{name}", first_name);
+    let subtitle = design::chrome(cx, ChromeKey::ChatWelcomeSubtitle);
+    let mut title_el = div()
+        .id("chat-welcome-title")
+        .test_support()
+        .aria_label(title.clone())
+        .sovra_text(TextRole::Display, cx)
+        .child(title);
+    let mut subtitle_el = div()
+        .id("chat-welcome-subtitle")
+        .test_support()
+        .aria_label(subtitle)
+        .sovra_text(TextRole::Body, cx)
+        .text_color(t.text_secondary)
+        .child(subtitle);
+    if design::is_rtl(cx) {
+        title_el = title_el.w_full().text_right();
+        subtitle_el = subtitle_el.w_full().text_right();
+    }
     // Scrolls inside its pane in short windows, so the composer always fits.
     h_flex()
         .id("chat-welcome")
@@ -615,24 +632,16 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
                 .max_w(t.chat.welcome_width)
                 .gap(t.space.medium)
                 .child(logo("chat-welcome-logo", t.layout.logo_hero))
-                .child(
-                    div()
-                        .sovra_text(TextRole::Display, cx)
-                        .child(format!("What’s on your mind, {first_name}?")),
-                )
-                .child(
-                    div()
-                        .sovra_text(TextRole::Body, cx)
-                        .text_color(t.text_secondary)
-                        .child("A question, an idea, a little help getting started."),
-                )
+                .child(title_el)
+                .child(subtitle_el)
                 .child(
                     h_flex()
                         .flex_wrap()
                         .gap(t.space.compact)
                         .pt(t.space.small)
                         .children(STARTERS.iter().enumerate().map(|(index, (label, draft))| {
-                            design::button(("chat-starter", index), *label, cx)
+                            let draft = *draft;
+                            design::button(("chat-starter", index), design::chrome(cx, *label), cx)
                                 .ghost()
                                 .small()
                                 .min_h(t.chat.chip_height)
@@ -641,7 +650,11 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
                                 .border_1()
                                 .border_color(t.chat.chip_border)
                                 .on_click(cx.listener(move |shell, _, window, cx| {
-                                    shell.fill_composer_draft(draft, window, cx);
+                                    shell.fill_composer_draft(
+                                        design::chrome(cx, draft),
+                                        window,
+                                        cx,
+                                    );
                                 }))
                         })),
                 ),
@@ -1303,6 +1316,7 @@ mod tests {
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{ScrollDelta, TestAppContext, point, px, size};
     use sovra_core::Event;
+    use sovra_core::models::{UiLanguage, chrome};
     use sovra_runtime::Client;
 
     #[gpui_kit::test]
@@ -1319,6 +1333,27 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(window.find("chat-welcome").visible());
+            let name = shell
+                .read(cx)
+                .state
+                .user
+                .full_name
+                .split_whitespace()
+                .next()
+                .unwrap_or(chrome(&UiLanguage::default(), ChromeKey::ChatWelcomeGuest));
+            let title =
+                chrome(&UiLanguage::default(), ChromeKey::ChatWelcomeTitle).replace("{name}", name);
+            assert_eq!(
+                window.find("chat-welcome-title").label(),
+                Some(title.as_str())
+            );
+            assert_eq!(
+                window.find("chat-welcome-subtitle").label(),
+                Some(chrome(
+                    &UiLanguage::default(),
+                    ChromeKey::ChatWelcomeSubtitle
+                ))
+            );
             window.click(("chat-starter", 1usize), cx);
             window.render_frame(cx);
             assert!(
@@ -1331,8 +1366,10 @@ mod tests {
             assert!(window.try_find("chat-welcome").is_none());
         })
         .unwrap();
-        assert!(std::iter::from_fn(|| commands.try_recv().ok())
-            .any(|command| matches!(command, sovra_core::Command::RunPrompt { prompt, .. } if prompt.starts_with("Help me write"))));
+        let expected_draft = chrome(&UiLanguage::default(), ChromeKey::ChatStarterEmailDraft);
+        assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(
+            |command| matches!(command, sovra_core::Command::RunPrompt { prompt, .. } if prompt.starts_with(expected_draft.trim()))
+        ));
     }
 
     #[gpui_kit::test]

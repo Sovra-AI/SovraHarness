@@ -160,7 +160,10 @@ fn appearance_lives_in_settings_at_minimum_and_default_window_sizes(cx: &mut Tes
             }
             assert_eq!(
                 window.find("settings-theme-light").label(),
-                Some("Light appearance")
+                Some(sovra_core::models::chrome(
+                    &sovra_core::models::UiLanguage::default(),
+                    sovra_core::models::ChromeKey::SettingsLightA11y,
+                ))
             );
             window.click("settings-theme-light", cx);
             assert!(!cx.theme().is_dark());

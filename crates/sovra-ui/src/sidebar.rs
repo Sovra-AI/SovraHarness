@@ -14,6 +14,7 @@ use gpui_kit::{
     Context, ElementId, Entity, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
+use sovra_core::models::ChromeKey;
 use sovra_core::{NavTab, WorkspaceState};
 
 use crate::chat_history_view::render_chat_history_section;
@@ -48,7 +49,7 @@ pub(crate) fn render_sidebar(
     }
     let t = design::tokens(cx);
     let border = cx.theme().border;
-    v_flex()
+    let mut sidebar = v_flex()
         .id("sovra-sidebar")
         .test_support()
         .w(t.layout.sidebar_width)
@@ -58,8 +59,13 @@ pub(crate) fn render_sidebar(
         .justify_between()
         .p(t.space.small)
         .gap(t.space.small)
-        .sovra_surface(Surface::Chrome, cx)
-        .border_r_1()
+        .sovra_surface(Surface::Chrome, cx);
+    sidebar = if design::is_rtl(cx) {
+        sidebar.border_l_1()
+    } else {
+        sidebar.border_r_1()
+    };
+    sidebar
         .border_color(border)
         .overflow_hidden()
         .child(
@@ -104,22 +110,26 @@ fn render_sidebar_footer(
         .border_t_1()
         .border_color(cx.theme().border)
         .child(
-            design::button("sidebar-tour-btn", "Take a guided tour", cx)
-                .icon(IconName::Sparkles)
-                .tooltip("Step-by-step walkthrough of how Sovra works")
-                .accessibility_label("Take a guided tour")
-                .small()
-                .ghost()
-                .w_full()
-                .on_click(cx.listener(|shell, _, _, cx| shell.start_system_tour(cx))),
+            design::button(
+                "sidebar-tour-btn",
+                design::chrome(cx, ChromeKey::NavTour),
+                cx,
+            )
+            .icon(IconName::Sparkles)
+            .tooltip(design::chrome(cx, ChromeKey::NavTourHint))
+            .accessibility_label(design::chrome(cx, ChromeKey::NavTour))
+            .small()
+            .ghost()
+            .w_full()
+            .on_click(cx.listener(|shell, _, _, cx| shell.start_system_tour(cx))),
         )
         .child(render_user_profile(state, cx))
 }
 
 fn rail_btn(
     id: impl Into<ElementId>,
-    tip: &'static str,
-    label: &'static str,
+    tip: impl Into<gpui_kit::SharedString>,
+    label: impl Into<gpui_kit::SharedString>,
     cx: &Context<Shell>,
 ) -> Button {
     let t = design::tokens(cx);
@@ -140,8 +150,8 @@ fn render_collapsed_sidebar(
     let link = cx.theme().link;
     let expand = rail_btn(
         "chat-history-expand-btn",
-        "Open full sidebar",
-        "Expand sidebar and chat history",
+        design::chrome(cx, ChromeKey::NavExpand),
+        design::chrome(cx, ChromeKey::NavExpand),
         cx,
     )
     .child(
@@ -152,8 +162,8 @@ fn render_collapsed_sidebar(
     .on_click(cx.listener(|shell, _, _, cx| shell.toggle_history_rail(cx)));
     let new_chat = rail_btn(
         "chat-new-btn-collapsed",
-        "Start a new chat",
-        "Start a new chat",
+        design::chrome(cx, ChromeKey::NavNewChatHint),
+        design::chrome(cx, ChromeKey::NavNewChatHint),
         cx,
     )
     .child(Icon::new(IconName::Plus).small().text_color(link))
@@ -176,7 +186,7 @@ fn render_collapsed_sidebar(
     )
     .on_click(cx.listener(|shell, _, _, cx| shell.logout(cx)));
 
-    v_flex()
+    let mut collapsed_sidebar = v_flex()
         .id("sovra-sidebar")
         .test_support()
         .w(t.layout.history_compact_width)
@@ -186,8 +196,13 @@ fn render_collapsed_sidebar(
         .justify_between()
         .p(t.space.compact)
         .items_center()
-        .sovra_surface(Surface::Chrome, cx)
-        .border_r_1()
+        .sovra_surface(Surface::Chrome, cx);
+    collapsed_sidebar = if design::is_rtl(cx) {
+        collapsed_sidebar.border_l_1()
+    } else {
+        collapsed_sidebar.border_r_1()
+    };
+    collapsed_sidebar
         .border_color(cx.theme().border)
         .child(
             v_flex()
@@ -202,17 +217,22 @@ fn render_collapsed_sidebar(
                 .child(new_chat)
                 .children(NavTab::ALL.into_iter().map(|tab| {
                     let is_active = state.active_tab == tab;
-                    let (id, icon, tooltip) = nav_tab_meta(tab);
+                    let (id, icon) = nav_tab_meta(tab);
                     let color = if is_active { link } else { t.text_secondary };
-                    rail_btn(id, tooltip, tab.label(), cx)
-                        .selected(is_active)
-                        .child(
-                            div()
-                                .id(("nav-icon", tab as usize))
-                                .test_support()
-                                .child(Icon::new(icon).small().text_color(color)),
-                        )
-                        .on_click(cx.listener(move |shell, _, _, cx| shell.select_tab(tab, cx)))
+                    rail_btn(
+                        id,
+                        design::chrome(cx, tab.tooltip_key()),
+                        tab.label_in(&state.language),
+                        cx,
+                    )
+                    .selected(is_active)
+                    .child(
+                        div()
+                            .id(("nav-icon", tab as usize))
+                            .test_support()
+                            .child(Icon::new(icon).small().text_color(color)),
+                    )
+                    .on_click(cx.listener(move |shell, _, _, cx| shell.select_tab(tab, cx)))
                 })),
         )
         .child(profile)
@@ -234,8 +254,8 @@ fn render_brand_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
         )
         .child(
             design::button("chat-history-collapse-btn", "", cx)
-                .tooltip("Hide sidebar")
-                .accessibility_label("Collapse sidebar")
+                .tooltip(design::chrome(cx, ChromeKey::NavCollapse))
+                .accessibility_label(design::chrome(cx, ChromeKey::NavCollapse))
                 .ghost()
                 .small()
                 .min_h(t.layout.compact_control_height)
@@ -251,76 +271,41 @@ fn render_brand_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
 
 fn render_new_chat_button(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    design::primary_button("chat-new-btn", "New Chat", cx)
-        .icon(IconName::Plus)
-        .tooltip("Start a fresh conversation")
-        .accessibility_label("Start a new chat")
-        .small()
-        .w_full()
-        .rounded(t.radius.input)
-        .on_click(cx.listener(|shell, _, window, cx| shell.start_new_chat(window, cx)))
+    design::primary_button(
+        "chat-new-btn",
+        design::chrome(cx, ChromeKey::NavNewChat),
+        cx,
+    )
+    .icon(IconName::Plus)
+    .tooltip(design::chrome(cx, ChromeKey::NavNewChatHint))
+    .accessibility_label(design::chrome(cx, ChromeKey::NavNewChatHint))
+    .small()
+    .w_full()
+    .rounded(t.radius.input)
+    .on_click(cx.listener(|shell, _, window, cx| shell.start_new_chat(window, cx)))
 }
 
-fn nav_tab_meta(tab: NavTab) -> (&'static str, IconName, &'static str) {
+fn nav_tab_meta(tab: NavTab) -> (&'static str, IconName) {
     match tab {
-        NavTab::Chat => (
-            "nav-chat",
-            IconName::MessageCircle,
-            "Chat naturally with Sovra",
-        ),
-        NavTab::Team => (
-            "nav-team",
-            IconName::Users,
-            "Ask your team of AI specialists",
-        ),
-        NavTab::Artifacts => (
-            "nav-artifacts",
-            IconName::LibraryBig,
-            "Saved documents, code, tables & notes",
-        ),
-        NavTab::Schedules => (
-            "nav-schedules",
-            IconName::Calendar,
-            "Saved tasks & briefings to run anytime",
-        ),
-        NavTab::Models => (
-            "nav-models",
-            IconName::Box,
-            "Connect & choose which AI model to use",
-        ),
-        NavTab::MyAis => (
-            "nav-my-ais",
-            IconName::User,
-            "Choose how Sovra picks the best AI for each task",
-        ),
-        NavTab::Knowledge => (
-            "nav-knowledge",
-            IconName::Database,
-            "See how Sovra remembers facts & reads your files",
-        ),
-        NavTab::Skills => (
-            "nav-skills",
-            IconName::BookOpen,
-            "Reusable /slash shortcuts & workflows",
-        ),
-        NavTab::Settings => (
-            "nav-settings",
-            IconName::Settings,
-            "Appearance, text size, and how Sovra talks to you",
-        ),
-        NavTab::Connections => (
-            "nav-connections",
-            IconName::Link,
-            "Link an AI, WhatsApp, Telegram, Google, or a service you already use",
-        ),
+        NavTab::Chat => ("nav-chat", IconName::MessageCircle),
+        NavTab::Team => ("nav-team", IconName::Users),
+        NavTab::Artifacts => ("nav-artifacts", IconName::LibraryBig),
+        NavTab::Schedules => ("nav-schedules", IconName::Calendar),
+        NavTab::Models => ("nav-models", IconName::Box),
+        NavTab::MyAis => ("nav-my-ais", IconName::User),
+        NavTab::Knowledge => ("nav-knowledge", IconName::Database),
+        NavTab::Skills => ("nav-skills", IconName::BookOpen),
+        NavTab::Settings => ("nav-settings", IconName::Settings),
+        NavTab::Connections => ("nav-connections", IconName::Link),
     }
 }
 
 fn nav_context_badge(tab: NavTab, state: &WorkspaceState) -> Option<(String, bool)> {
     match tab {
-        NavTab::Models if state.models_loaded && !state.has_active_llm => {
-            Some(("Setup".to_owned(), true))
-        }
+        NavTab::Models if state.models_loaded && !state.has_active_llm => Some((
+            sovra_core::models::chrome(&state.language, ChromeKey::NavSetupBadge).to_owned(),
+            true,
+        )),
         NavTab::Artifacts if !state.artifacts.artifacts.is_empty() => {
             Some((state.artifacts.artifacts.len().to_string(), false))
         }
@@ -360,7 +345,7 @@ fn render_nav_list(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl Into
             .pb(t.space.hair)
             .sovra_text(TextRole::Caption, cx)
             .text_color(cx.theme().muted_foreground)
-            .child("Your AI & Setup"),
+            .child(design::chrome(cx, ChromeKey::NavGroupAiSetup)),
     );
     for tab in AI_SETUP_TABS {
         let spot = tour
@@ -406,7 +391,9 @@ fn render_nav_item(
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let (fg, link) = (cx.theme().foreground, cx.theme().link);
-    let (id, icon, tooltip) = nav_tab_meta(tab);
+    let (id, icon) = nav_tab_meta(tab);
+    let tooltip = design::chrome(cx, tab.tooltip_key());
+    let label = design::chrome(cx, tab.chrome_key());
     let text_fg = if is_active { fg } else { t.text_secondary };
     let icon_color = if is_active || spotlight_badge.is_some() {
         link
@@ -438,7 +425,7 @@ fn render_nav_item(
 
     design::button(id, "", cx)
         .tooltip(tooltip)
-        .accessibility_label(tab.label())
+        .accessibility_label(label)
         .ghost()
         .small()
         .min_h(t.layout.navigation_height)
@@ -450,29 +437,32 @@ fn render_nav_item(
         .gap(t.space.small)
         .rounded(t.radius.input)
         .text_color(text_fg)
-        .child(
-            h_flex()
+        .child({
+            let mut row = h_flex()
                 .w_full()
                 .justify_start()
                 .items_center()
-                .gap(t.space.small)
-                .child(
-                    div()
-                        .id(("nav-icon", idx))
-                        .test_support()
-                        .child(Icon::new(icon).small().text_color(icon_color)),
-                )
-                .child(
-                    div()
-                        .id(("nav-label", idx))
-                        .test_support()
-                        .flex_1()
-                        .truncate()
-                        .child(tab.label()),
-                )
-                .children(spot_pill)
-                .children(ctx_pill),
-        )
+                .gap(t.space.small);
+            if design::is_rtl(cx) {
+                row = row.flex_row_reverse();
+            }
+            row.child(
+                div()
+                    .id(("nav-icon", idx))
+                    .test_support()
+                    .child(Icon::new(icon).small().text_color(icon_color)),
+            )
+            .child(
+                div()
+                    .id(("nav-label", idx))
+                    .test_support()
+                    .flex_1()
+                    .truncate()
+                    .child(label),
+            )
+            .children(spot_pill)
+            .children(ctx_pill)
+        })
         .on_click(cx.listener(move |shell, _, _, cx| shell.select_tab(tab, cx)))
 }
 

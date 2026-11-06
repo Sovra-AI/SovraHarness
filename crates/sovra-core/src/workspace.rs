@@ -74,14 +74,54 @@ impl NavTab {
             Self::Connections => "Connections",
         }
     }
+
+    pub fn chrome_key(self) -> crate::models::ChromeKey {
+        match self {
+            Self::Chat => crate::models::ChromeKey::NavChat,
+            Self::MyAis => crate::models::ChromeKey::NavMyAis,
+            Self::Knowledge => crate::models::ChromeKey::NavKnowledge,
+            Self::Models => crate::models::ChromeKey::NavModels,
+            Self::Schedules => crate::models::ChromeKey::NavSchedules,
+            Self::Settings => crate::models::ChromeKey::NavSettings,
+            Self::Skills => crate::models::ChromeKey::NavSkills,
+            Self::Team => crate::models::ChromeKey::NavTeam,
+            Self::Artifacts => crate::models::ChromeKey::NavArtifacts,
+            Self::Connections => crate::models::ChromeKey::NavConnections,
+        }
+    }
+
+    pub fn tooltip_key(self) -> crate::models::ChromeKey {
+        match self {
+            Self::Chat => crate::models::ChromeKey::NavChatTooltip,
+            Self::MyAis => crate::models::ChromeKey::NavMyAisTooltip,
+            Self::Knowledge => crate::models::ChromeKey::NavKnowledgeTooltip,
+            Self::Models => crate::models::ChromeKey::NavModelsTooltip,
+            Self::Schedules => crate::models::ChromeKey::NavSchedulesTooltip,
+            Self::Settings => crate::models::ChromeKey::NavSettingsTooltip,
+            Self::Skills => crate::models::ChromeKey::NavSkillsTooltip,
+            Self::Team => crate::models::ChromeKey::NavTeamTooltip,
+            Self::Artifacts => crate::models::ChromeKey::NavArtifactsTooltip,
+            Self::Connections => crate::models::ChromeKey::NavConnectionsTooltip,
+        }
+    }
+
+    #[must_use]
+    pub fn label_in(self, language: &crate::models::UiLanguage) -> &'static str {
+        crate::models::chrome(language, self.chrome_key())
+    }
 }
 
 /// The OS window title: the page first so taskbars, Alt-Tab and tiling window
 /// managers stay distinguishable when the product name is truncated.
-pub fn window_title(route: ScreenRoute, tab: NavTab, product: &str) -> String {
+pub fn window_title(
+    route: ScreenRoute,
+    tab: NavTab,
+    product: &str,
+    language: &crate::models::UiLanguage,
+) -> String {
     match route {
         ScreenRoute::Login => product.to_owned(),
-        ScreenRoute::MainWorkspace => format!("{} — {product}", tab.label()),
+        ScreenRoute::MainWorkspace => format!("{} — {product}", tab.label_in(language)),
     }
 }
 
@@ -282,6 +322,8 @@ pub struct WorkspaceState {
     pub tour_step: Option<TourStep>,
     /// Whether the user has completed or dismissed the guided onboarding tutorial.
     pub onboarding_completed: bool,
+    /// Chrome and agent reply language. Defaults to Arabic until preferences load.
+    pub language: crate::models::UiLanguage,
     /// Session IDs for which the user explicitly renamed the title (prevents auto-title overwrite).
     user_renamed_threads: std::collections::BTreeSet<String>,
     /// Session IDs that have already requested or received an LLM-generated title.
@@ -363,6 +405,7 @@ impl WorkspaceState {
             llm_setup_hint: None,
             tour_step: None,
             onboarding_completed: false,
+            language: crate::models::UiLanguage::default(),
             user_renamed_threads: std::collections::BTreeSet::new(),
             titled_threads: std::collections::BTreeSet::new(),
             model_connections: Vec::new(),
@@ -1062,6 +1105,7 @@ impl WorkspaceState {
                     } => {
                         self.models_loaded = true;
                         self.onboarding_completed = preferences.onboarding_completed;
+                        self.language.clone_from(&preferences.language);
                         self.model_connections.clone_from(connections);
                         self.routing.global_model.clone_from(&preferences.active);
                         self.refresh_llm_readiness();
@@ -1077,6 +1121,7 @@ impl WorkspaceState {
                     }
                     crate::models::ModelEvent::PreferencesChanged(preferences) => {
                         self.onboarding_completed = preferences.onboarding_completed;
+                        self.language.clone_from(&preferences.language);
                         self.routing.global_model.clone_from(&preferences.active);
                         self.refresh_llm_readiness();
                         if let Some(active) = &preferences.active {
@@ -2171,11 +2216,30 @@ mod tests {
     #[test]
     fn window_title_names_the_page_before_the_product() {
         assert_eq!(
-            window_title(ScreenRoute::MainWorkspace, NavTab::Knowledge, "Sovra"),
+            window_title(
+                ScreenRoute::MainWorkspace,
+                NavTab::Knowledge,
+                "Sovra",
+                &crate::models::UiLanguage::english(),
+            ),
             "Knowledge — Sovra"
         );
         assert_eq!(
-            window_title(ScreenRoute::Login, NavTab::Knowledge, "Sovra"),
+            window_title(
+                ScreenRoute::MainWorkspace,
+                NavTab::Knowledge,
+                "Sovra",
+                &crate::models::UiLanguage::default(),
+            ),
+            "المعرفة — Sovra"
+        );
+        assert_eq!(
+            window_title(
+                ScreenRoute::Login,
+                NavTab::Knowledge,
+                "Sovra",
+                &crate::models::UiLanguage::default(),
+            ),
             "Sovra"
         );
     }

@@ -55,6 +55,12 @@ pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
     if !errors.is_empty() {
         bail!("{}", errors.join("\n"));
     }
+    let pitch = root.join("docs/decks/pitch/index.html");
+    if pitch.exists()
+        && let Err(error) = check_pitch_slide4(&pitch)
+    {
+        bail!("{error}");
+    }
     let doc_count = fs::read_dir(docs)?
         .filter_map(Result::ok)
         .filter(|entry| {
@@ -62,7 +68,7 @@ pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
         })
         .count();
     println!(
-        "check-docs: mermaid graphs in README, architecture, and memory-capture-and-recall; {doc_count} top-level docs/*.md links resolve"
+        "check-docs: mermaid graphs in README, architecture, and memory-capture-and-recall; {doc_count} top-level docs/*.md links resolve; pitch slide 4 names the sovereign-stack play"
     );
     Ok(())
 }
@@ -219,6 +225,99 @@ fn read(path: impl AsRef<Path>) -> anyhow::Result<String> {
     fs::read_to_string(path).with_context(|| format!("read {}", path.display()))
 }
 
+/// Fourth Cinema slide of the investor pitch: owning the sovereign stack is the play.
+fn check_pitch_slide4(path: &Path) -> anyhow::Result<()> {
+    let html = read(path)?;
+    let slide = nth_slide(&html, 4).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{}: missing fourth <section class=\"slide\">",
+            path.display()
+        )
+    })?;
+    pitch_slide4_play_holds(slide)
+}
+
+fn nth_slide(html: &str, n: usize) -> Option<&str> {
+    let mut rest = html;
+    let mut found = 0usize;
+    while let Some(start) = rest.find("<section") {
+        let after = &rest[start..];
+        let end = after.find("</section>")? + "</section>".len();
+        let block = &after[..end];
+        rest = &after[end..];
+        if block.contains("class=\"slide") || block.contains("class='slide") {
+            found += 1;
+            if found == n {
+                return Some(block);
+            }
+        }
+    }
+    None
+}
+
+fn visible_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                out.push(' ');
+            }
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn contains_own_word(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let mut word = String::new();
+    for ch in lower.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphabetic() {
+            word.push(ch);
+            continue;
+        }
+        if matches!(word.as_str(), "own" | "owns" | "owned" | "owning") {
+            return true;
+        }
+        word.clear();
+    }
+    false
+}
+
+fn pitch_slide4_play_holds(slide: &str) -> anyhow::Result<()> {
+    let visible = visible_text(slide);
+    let lower = visible.to_ascii_lowercase();
+    if !lower.contains("sovereign stack") {
+        bail!("pitch slide 4 must name the sovereign stack in visible copy; got: {visible}");
+    }
+    if !contains_own_word(&lower) {
+        bail!("pitch slide 4 must say own/owning the sovereign stack; got: {visible}");
+    }
+    if !(lower.contains("the play")
+        || lower.contains("this is the bet")
+        || lower.contains("the bet after"))
+    {
+        bail!("pitch slide 4 must call owning the stack the play (or the bet); got: {visible}");
+    }
+    for layer in ["compute", "models", "talent", "policy", "desk"] {
+        if !lower.contains(layer) {
+            bail!("pitch slide 4 must name stack layer `{layer}`; got: {visible}");
+        }
+    }
+    if !visible.contains("Sovra") {
+        bail!("pitch slide 4 must name Sovra on the desk layer; got: {visible}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +446,31 @@ mod tests {
         )
         .unwrap();
         check(&root).expect("fragment after a real path still resolves");
+    }
+
+    #[test]
+    fn pitch_slide_4_states_owning_the_sovereign_stack_is_the_play() {
+        let html = fs::read_to_string(workspace_root().join("docs/decks/pitch/index.html"))
+            .expect("shipped pitch deck");
+        let slide = nth_slide(&html, 4).expect("fourth <section class=\"slide\">");
+        pitch_slide4_play_holds(slide)
+            .expect("slide 4 visible copy must name owning the sovereign stack as the play");
+        let visible = visible_text(slide);
+        assert!(
+            visible.contains("National compute"),
+            "compute layer missing: {visible}"
+        );
+        assert!(
+            visible.contains("National models"),
+            "models layer missing: {visible}"
+        );
+        assert!(
+            visible.contains("Talent and policy"),
+            "talent/policy layer missing: {visible}"
+        );
+        assert!(
+            visible.contains("The desk") && visible.contains("Sovra"),
+            "desk/Sovra layer missing: {visible}"
+        );
     }
 }

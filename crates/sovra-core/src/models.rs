@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 mod destination;
+mod language;
 pub use destination::{ModelDestination, ModelWork, model_destinations};
+pub use language::{ChromeKey, LanguageInfo, UiLanguage, chrome, world_languages};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ProviderKind {
@@ -573,11 +575,16 @@ impl Default for AgentSettings {
 }
 
 impl AgentSettings {
-    /// Combines the base system instruction with the user's response style, safety
-    /// confirmation policy, and standing `always_context`.
-    pub fn compose_system_instruction(&self, base_instruction: &str) -> String {
+    /// Combines the base system instruction with the chosen reply language, the
+    /// user's response style, safety confirmation policy, and standing `always_context`.
+    pub fn compose_system_instruction(
+        &self,
+        base_instruction: &str,
+        language: &UiLanguage,
+    ) -> String {
         let mut out = format!(
-            "{base_instruction}\n\nResponse style preference: {}",
+            "{base_instruction}\n\n{}\n\nResponse style preference: {}",
+            language.reply_instruction(),
             self.response_style.instruction_clause()
         );
         if self.confirm_actions {
@@ -606,6 +613,9 @@ pub struct ModelPreferences {
     /// `default` keeps files written before this field existed loadable.
     #[serde(default)]
     pub appearance: Appearance,
+    /// Chrome and agent reply language. Missing saved field loads as Arabic.
+    #[serde(default)]
+    pub language: UiLanguage,
     #[serde(default)]
     pub interface_scale: InterfaceScale,
     /// Standing context, tone, memory, tool, and safety preferences for the agent.
@@ -1337,6 +1347,9 @@ pub enum ModelCommand {
     CancelPull,
     SetAppearance {
         appearance: Appearance,
+    },
+    SetLanguage {
+        language: UiLanguage,
     },
     SetInterfaceScale {
         scale: InterfaceScale,

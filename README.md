@@ -5,7 +5,8 @@
 
 Native Rust desktop app for the Sovra agent harness: a GPUI chat UI, a tokio
 runtime, local memory (vector + graph + full-text behind a `MemoryStore` port),
-and Velopack installers. macOS, Windows and Linux from one codebase.
+and Velopack installers. Chrome defaults to Arabic, with a Settings language
+picker and right-to-left layout. macOS, Windows and Linux from one codebase.
 
 ## Quick start
 

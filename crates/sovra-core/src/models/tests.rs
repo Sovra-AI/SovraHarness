@@ -506,7 +506,7 @@ fn masked_key_preview_and_agent_settings_compose_instructions() {
         web_search_enabled: true,
         confirm_actions: true,
     };
-    let composed = settings.compose_system_instruction("Base instruction.");
+    let composed = settings.compose_system_instruction("Base instruction.", &UiLanguage::english());
     assert!(composed.contains("Base instruction."));
     assert!(composed.contains("numbered steps"));
     assert!(composed.contains("retired teacher who loves gardening"));

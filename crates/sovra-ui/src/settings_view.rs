@@ -11,8 +11,8 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, div,
 };
 use sovra_core::models::{
-    AgentSettings, Appearance, Authentication, CredentialChange, InterfaceScale, ModelCommand,
-    ProviderKind, ResponseStyle,
+    AgentSettings, Appearance, Authentication, ChromeKey, CredentialChange, InterfaceScale,
+    ModelCommand, ProviderKind, ResponseStyle, UiLanguage, world_languages,
 };
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
@@ -48,7 +48,13 @@ pub(crate) fn settings_section(
         .p(t.space.medium)
         .gap(t.space.small)
         .sovra_surface(Surface::Matte, cx)
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
+        .child({
+            let mut title_el = div().sovra_text(TextRole::SectionTitle, cx);
+            if design::is_rtl(cx) {
+                title_el = title_el.text_right();
+            }
+            title_el.child(title)
+        })
         .child(caption(description, cx))
 }
 
@@ -93,16 +99,20 @@ impl ModelsView {
                     .flex_wrap()
                     .gap(t.space.small)
                     .child(design::page_header(
-                        "Settings",
-                        "Make Sovra feel like your own.",
+                        design::chrome(cx, ChromeKey::SettingsTitle),
+                        design::chrome(cx, ChromeKey::SettingsSubtitle),
                         cx,
                     ))
                     .child(
-                        design::button("settings-restart-tour", "Take a tour", cx)
-                            .small()
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.emit(crate::models_view::StartSystemTour);
-                            })),
+                        design::button(
+                            "settings-restart-tour",
+                            design::chrome(cx, ChromeKey::SettingsTour),
+                            cx,
+                        )
+                        .small()
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            cx.emit(crate::models_view::StartSystemTour);
+                        })),
                     ),
             );
         if let Some(error) = &self.state.error {
@@ -116,6 +126,7 @@ impl ModelsView {
                     .w_full()
                     .gap(t.space.small)
                     .child(Self::render_appearance_section(cx))
+                    .child(self.render_language_section(cx))
                     .child(Self::render_open_connections_section(cx))
                     .child(self.render_development_section(cx))
                     .child(self.render_always_context_section(cx))
@@ -131,18 +142,22 @@ impl ModelsView {
     fn render_open_connections_section(cx: &mut Context<Self>) -> impl IntoElement + use<> {
         settings_section(
             "settings-open-connections",
-            "Connections",
-            "AI, WhatsApp, Telegram, Google, and services you already use live on their own page.",
+            design::chrome(cx, ChromeKey::SettingsConnectionsTitle),
+            design::chrome(cx, ChromeKey::SettingsConnectionsDesc),
             cx,
         )
         .child(
-            design::primary_button("settings-open-connections-btn", "Open Connections", cx)
-                .on_click(cx.listener(|_, _, _, cx| {
-                    cx.emit(crate::models_view::OpenConnections {
-                        kind: None,
-                        keep_editor: false,
-                    });
-                })),
+            design::primary_button(
+                "settings-open-connections-btn",
+                design::chrome(cx, ChromeKey::SettingsOpenConnections),
+                cx,
+            )
+            .on_click(cx.listener(|_, _, _, cx| {
+                cx.emit(crate::models_view::OpenConnections {
+                    kind: None,
+                    keep_editor: false,
+                });
+            })),
         )
     }
 
@@ -151,8 +166,8 @@ impl ModelsView {
         let dark = cx.theme().is_dark();
         settings_section(
             "settings-appearance",
-            "Appearance",
-            "Choose a light or dark workspace.",
+            design::chrome(cx, ChromeKey::SettingsAppearanceTitle),
+            design::chrome(cx, ChromeKey::SettingsAppearanceDesc),
             cx,
         )
         .child(
@@ -162,38 +177,87 @@ impl ModelsView {
                 .flex_wrap()
                 .gap(t.space.compact)
                 .children(
-                    [(ThemeMode::Light, "Light"), (ThemeMode::Dark, "Dark")].map(
-                        |(mode, label)| {
-                            design::button(
-                                match mode {
-                                    ThemeMode::Light => "settings-theme-light",
-                                    ThemeMode::Dark => "settings-theme-dark",
+                    [
+                        (
+                            ThemeMode::Light,
+                            design::chrome(cx, ChromeKey::SettingsLight),
+                            design::chrome(cx, ChromeKey::SettingsLightA11y),
+                        ),
+                        (
+                            ThemeMode::Dark,
+                            design::chrome(cx, ChromeKey::SettingsDark),
+                            design::chrome(cx, ChromeKey::SettingsDarkA11y),
+                        ),
+                    ]
+                    .map(|(mode, label, a11y)| {
+                        design::button(
+                            match mode {
+                                ThemeMode::Light => "settings-theme-light",
+                                ThemeMode::Dark => "settings-theme-dark",
+                            },
+                            label,
+                            cx,
+                        )
+                        .accessibility_label(a11y)
+                        .selected(mode.is_dark() == dark)
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            Theme::change(mode, None, cx);
+                            view.send(
+                                ModelCommand::SetAppearance {
+                                    appearance: if mode.is_dark() {
+                                        Appearance::Dark
+                                    } else {
+                                        Appearance::Light
+                                    },
                                 },
-                                label,
                                 cx,
-                            )
-                            .accessibility_label(format!("{label} appearance"))
-                            .selected(mode.is_dark() == dark)
-                            .on_click(cx.listener(
-                                move |view, _, _, cx| {
-                                    Theme::change(mode, None, cx);
-                                    view.send(
-                                        ModelCommand::SetAppearance {
-                                            appearance: if mode.is_dark() {
-                                                Appearance::Dark
-                                            } else {
-                                                Appearance::Light
-                                            },
-                                        },
-                                        cx,
-                                    );
-                                },
-                            ))
-                        },
-                    ),
+                            );
+                        }))
+                    }),
                 ),
         )
         .child(Self::render_text_size(cx))
+    }
+
+    fn render_language_section(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let current = self.state.preferences.language.tag().to_owned();
+        settings_section(
+            "settings-language",
+            design::chrome(cx, ChromeKey::SettingsLanguageTitle),
+            design::chrome(cx, ChromeKey::SettingsLanguageDesc),
+            cx,
+        )
+        .child(
+            h_flex()
+                .id("settings-language-choices")
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .gap(t.space.compact)
+                .max_h(t.layout.command_menu_height)
+                .overflow_y_scroll()
+                .children(world_languages().iter().copied().map(|info| {
+                    let tag = info.tag;
+                    let selected = current == tag;
+                    design::button(
+                        format!("settings-language-choice-{tag}"),
+                        info.picker_label(),
+                        cx,
+                    )
+                    .small()
+                    .selected(selected)
+                    .accessibility_label(info.english_name)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        let language = UiLanguage::from_tag(tag);
+                        design::set_ui_language(language.clone(), cx);
+                        view.state.preferences.language = language.clone();
+                        view.send(ModelCommand::SetLanguage { language }, cx);
+                        cx.notify();
+                    }))
+                })),
+        )
     }
 
     /// Interface size (zoom); the same levels as View → Zoom In/Out and ⌘=/⌘-/⌘0.
@@ -209,12 +273,12 @@ impl ModelsView {
                 div()
                     .sovra_text(TextRole::Body, cx)
                     .text_color(t.text_secondary)
-                    .child("Text size"),
+                    .child(design::chrome(cx, ChromeKey::SettingsTextSize)),
             )
             .child(
                 design::button("settings-text-smaller", "A−", cx)
-                    .accessibility_label("Make text smaller")
-                    .tooltip("Make text smaller (⌘−)")
+                    .accessibility_label(design::chrome(cx, ChromeKey::SettingsTextSmaller))
+                    .tooltip(design::chrome(cx, ChromeKey::SettingsTextSmaller))
                     .disabled(scale == InterfaceScale::SMALLEST)
                     .on_click(cx.listener(move |_, _, _, cx| {
                         crate::app_menu::zoom(scale.smaller(), cx);
@@ -230,8 +294,8 @@ impl ModelsView {
             )
             .child(
                 design::button("settings-text-larger", "A+", cx)
-                    .accessibility_label("Make text larger")
-                    .tooltip("Make text larger (⌘=)")
+                    .accessibility_label(design::chrome(cx, ChromeKey::SettingsTextLarger))
+                    .tooltip(design::chrome(cx, ChromeKey::SettingsTextLarger))
                     .disabled(scale == InterfaceScale::LARGEST)
                     .on_click(cx.listener(move |_, _, _, cx| {
                         crate::app_menu::zoom(scale.larger(), cx);

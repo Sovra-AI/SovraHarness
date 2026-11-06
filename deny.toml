@@ -21,6 +21,10 @@ ignore = [
   { id = "RUSTSEC-2026-0194", reason = "quick-xml via surrealdb's object_store (S3/GCS) backend; we never configure a remote object store or parse untrusted XML" },
   { id = "RUSTSEC-2026-0195", reason = "quick-xml via surrealdb's object_store backend; same as above" },
   { id = "RUSTSEC-2023-0071", reason = "rsa Marvin timing side-channel via surrealdb's jsonwebtoken auth; embedded engine has no network auth surface and no patched rsa exists" },
+  # Patched only in SurrealDB 4.0.0. We pin 3.3.4 as the embedded memory engine
+  # (HNSW near-duplicate behaviour; see docs/architecture.md). Remove on the 4.x bump.
+  { id = "RUSTSEC-2026-0454", reason = "reblessive unsound Send/Sync inside surrealdb-core 3.3.4; patched only in surrealdb >= 4.0.0. We drive the public SDK, not TreeStack/Runner. Remove when we move to surrealdb >= 4.0.0." },
+  { id = "RUSTSEC-2026-0452", reason = "surrealkv 0.21.4 short-key OOB read; patched in surrealkv >= 1.2.0 which ships with surrealdb 4.0.0. SurrealKV files are written by our own embedded engine in the app data directory; we do not ingest untrusted SSTables. Remove when we move to surrealdb >= 4.0.0." },
   # User-approved 2026-11-04: calamine's CFB parser can panic or over-allocate on a crafted
   # .xls/.xlsb (denial of service only, no memory unsafety). xberg 1.3.10, the latest,
   # pins calamine ^0.36; the fix is in 0.38. Remove when xberg moves to calamine >= 0.38.

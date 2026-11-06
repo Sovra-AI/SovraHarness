@@ -302,16 +302,33 @@ fn sidebar_alignment_and_native_surface_actions_work_in_both_themes(cx: &mut Tes
         ] {
             gpui_kit::component::Theme::change(mode, Some(window), cx);
             window.render_frame(cx);
-            let left = window.find(("nav-icon", 0usize)).bounds().left();
-            let text_left = window.find(("nav-label", 0usize)).bounds().left();
-            let button_left = window.find("nav-chat").bounds().left();
-            assert!(
-                left - button_left < px(20.),
-                "nav content must start at left padding"
-            );
+            let icon = window.find(("nav-icon", 0usize)).bounds();
+            let text = window.find(("nav-label", 0usize)).bounds();
+            let button = window.find("nav-chat").bounds();
+            if sovra_ui::design::is_rtl(cx) {
+                assert!(
+                    button.right() - icon.right() < px(20.),
+                    "nav content must start at inline-start padding"
+                );
+                assert!(
+                    text.left() < icon.left(),
+                    "label sits toward the start in RTL"
+                );
+            } else {
+                assert!(
+                    icon.left() - button.left() < px(20.),
+                    "nav content must start at left padding"
+                );
+            }
             for index in 1..NavTab::ALL.len() {
-                assert_eq!(window.find(("nav-icon", index)).bounds().left(), left);
-                assert_eq!(window.find(("nav-label", index)).bounds().left(), text_left);
+                assert_eq!(
+                    window.find(("nav-icon", index)).bounds().left(),
+                    icon.left()
+                );
+                assert_eq!(
+                    window.find(("nav-label", index)).bounds().left(),
+                    text.left()
+                );
             }
             assert!(window.find(("native-surface", 0usize)).visible());
             assert!(window.find("surface-action-0-0-2").visible());
@@ -683,10 +700,17 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
                 .visible(),
             "Schedules tab must display live count badge when schedules exist"
         );
-        assert!(
-            (chat_main_bounds.left() - sidebar_bounds.right()).abs() < px(4.),
-            "chat column must sit directly beside the single sidebar with no second sidebar in between"
-        );
+        if sovra_ui::design::is_rtl(cx) {
+            assert!(
+                (sidebar_bounds.left() - chat_main_bounds.right()).abs() < px(4.),
+                "chat column must sit directly beside the single sidebar with no second sidebar in between"
+            );
+        } else {
+            assert!(
+                (chat_main_bounds.left() - sidebar_bounds.right()).abs() < px(4.),
+                "chat column must sit directly beside the single sidebar with no second sidebar in between"
+            );
+        }
 
         // Send first user prompt
         shell.update(cx, |shell, cx| {

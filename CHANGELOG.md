@@ -11,6 +11,14 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Pitch slide 4 (`docs/decks/pitch/index.html#4`) now leads with the play:
+  owning the sovereign stack. The isometric layers stay on the poster
+  (national compute, national models, talent and policy, the desk / Sovra).
+- Record deny exceptions for `RUSTSEC-2026-0454` (reblessive `Send`/`Sync` in
+  `surrealdb-core` 3.3.4) and `RUSTSEC-2026-0452` (short-key read in
+  `surrealkv` 0.21.4). Both are patched only in SurrealDB 4.0.0; the embedded
+  engine stays on 3.3.4. Remove when we move to `surrealdb` >= 4.0.0.
+
 - The value and UAE decks take the pitch deck's rhythm: deep-ink slides for
   the title, section dividers, the problem and the honest-limits slide, with
   the particle-nation hero on the title and close; light scene and number
@@ -69,11 +77,19 @@ move them under a version heading when the tag is cut.
   compounds, sovereignty as how the value stays yours, and where to count it
   in the app. No invented ROI figures.
 
-- The family and small-business deck at
-  [`docs/decks/group/`](docs/decks/group/index.html) is a Cinema 1920×1080
-  deck (chrome, cards, diagrams): today is the helper on one computer; next
-  is a group of people and their computers sharing helpers and memory, with
-  no central Sovra server.
+- Arabic is the default language for chrome (login, navigation, Settings, chat
+  welcome, starters, composer) and for the helper's replies. Settings has a
+  world-language picker; the choice is saved like appearance and restored after
+  restart. Right-to-left layout is used for Arabic. A language without its own
+  chrome catalog still changes the helper's reply language and never shows empty
+  labels or raw keys.
+
+- The family and small-business Cinema deck
+  ([`docs/decks/group/`](docs/decks/group/index.html)) is a light 1920×1080
+  stage: paper `#fbfaff`, dark ink, product violet, Today/Next pills, on-stage
+  arrows, and reduced-motion that holds copy at rest. Today is the helper on
+  one computer; next is a group of people and their computers sharing helpers
+  and memory, with no central Sovra server.
 
 - Linked Devices on your phone now names this computer **Sovra connection**
   (instead of "Unknown device"). An already-linked phone keeps its old label

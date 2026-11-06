@@ -840,6 +840,43 @@ async fn appearance_choice_survives_restart() {
 }
 
 #[tokio::test]
+async fn language_defaults_to_arabic_and_survives_restart() {
+    let server = Server::new(|_| Reply::json(&json!({"data":[]})));
+    let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
+    connection.base_url = format!("{}/api/v1", server.url());
+    let fixture = Fixture::new(connection, None);
+    let client = fixture.start();
+    let loaded = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
+    assert!(
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::default() && preferences.language.tag() == "ar")
+    );
+    catalog(&client).await;
+    send(
+        &client,
+        ModelCommand::SetLanguage {
+            language: UiLanguage::english(),
+        },
+    );
+    event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::PreferencesChanged(p)) if p.language == UiLanguage::english())
+    })
+    .await;
+    stop(client).await;
+    let client = fixture.start();
+    let loaded = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
+    assert!(
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::english())
+    );
+    stop(client).await;
+}
+
+#[tokio::test]
 async fn interface_scale_survives_restart() {
     let server = Server::new(|_| Reply::json(&json!({"data":[]})));
     let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
