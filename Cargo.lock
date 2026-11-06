@@ -11945,6 +11945,7 @@ dependencies = [
  "sovra-core",
  "sovra-files",
  "sovra-google",
+ "sovra-mesh",
  "sovra-providers",
  "sovra-runtime",
  "sovra-skills",

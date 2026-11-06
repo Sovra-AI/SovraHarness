@@ -71,6 +71,7 @@ async fn two_computers_talk_directly_and_see_each_others_keys() {
         group: GroupId([9; 32]),
         membership: wanted.clone(),
         knowledge: BTreeSet::new(),
+        from: a.address(),
     };
     let address = b.address();
     assert!(
@@ -131,6 +132,7 @@ async fn a_computer_that_is_not_the_one_dialled_never_answers() {
                 group: GroupId([0; 32]),
                 membership: BTreeSet::new(),
                 knowledge: BTreeSet::new(),
+                from: a.address(),
             },
         ),
     )

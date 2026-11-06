@@ -45,11 +45,14 @@ pub enum PeerRequest {
         person: PersonId,
         person_name: String,
         computer_name: String,
+        /// How to reach the joiner, so the group can sync with it.
+        from: PeerAddress,
     },
     Sync {
         group: GroupId,
         membership: BTreeSet<OpHash>,
         knowledge: BTreeSet<OpHash>,
+        from: PeerAddress,
     },
     Push {
         group: GroupId,

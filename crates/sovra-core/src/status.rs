@@ -33,6 +33,7 @@ impl RuntimeStatus {
             | Event::Artifacts(_)
             | Event::Google(_)
             | Event::Schedule(_)
+            | Event::Group(_)
             | Event::AgUi { .. }
             | Event::FilePrepared(_)
             | Event::ChatHistoryLoaded { .. }

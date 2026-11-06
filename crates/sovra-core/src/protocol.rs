@@ -28,6 +28,8 @@ pub enum Command {
     /// Terminal approvals and settings.
     Terminal(crate::terminal::TerminalCommand),
     Schedule(crate::schedules::ScheduleCommand),
+    /// Groups of people and their computers.
+    Group(crate::group::GroupCommand),
     RunWithFiles {
         /// Explicit earlier text replaces in-process history; `None` keeps that history.
         context: Option<crate::ConversationContext>,
@@ -103,6 +105,8 @@ pub enum Event {
     /// call names its own conversation, so cards for background chats are kept too.
     Terminal(crate::terminal::TerminalEvent),
     Schedule(crate::schedules::ScheduleEvent),
+    /// Groups of people and their computers.
+    Group(crate::group::GroupEvent),
     /// An AG-UI protocol event for `session_id` (team runs stream through these).
     AgUi {
         session_id: String,
@@ -191,6 +195,7 @@ impl Event {
             | Self::Mcp(_)
             | Self::Terminal(_)
             | Self::Schedule(_)
+            | Self::Group(_)
             | Self::ChatHistoryLoaded { .. }
             | Self::Ready { .. }
             | Self::Pong

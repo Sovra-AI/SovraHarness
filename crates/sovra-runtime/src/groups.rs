@@ -1,0 +1,1159 @@
+//! Groups: this computer's place in a group of people and their computers.
+//!
+//! Rules live in `sovra_core::group`; this module only does the IO around them:
+//! signing with the transport's device key, saving the record, serving requests from
+//! other computers, pushing new operations as soon as they exist, and syncing in the
+//! background so a computer that was asleep catches up. Every local change is folded
+//! *before* it is kept, so anything the rules reject is reported, never stored.
+//! The shared state lock is never held across a network call.
+
+use std::collections::BTreeSet;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_channel::Sender;
+use sovra_core::group::{
+    DeviceId, GroupCommand, GroupEvent, GroupId, GroupProblem, GroupRecord, GroupState, GroupStore,
+    GroupTransport, Invite, InviteBook, InviteKind, JoinLink, KnowledgeBody, KnowledgeOp,
+    KnowledgeRejection, KnowledgeView, LaneId, LinkError, MembershipBody, MembershipOp,
+    PairingFailure, PairingStep, PeerAddress, PeerHandler, PeerRequest, PeerResponse, PersonId,
+    RedeemError, Refusal, Rejection, SharedDetail, SharedHit, SignatureVerifier, Spawn, UnsignedOp,
+    admits_request, check_share, fold, fold_knowledge, invite_proof, join_transcript,
+};
+use sovra_core::{Event, Timestamp};
+use tokio::sync::{Mutex, RwLock};
+
+/// Builds the transport once the runtime's reactor is running (iroh needs it).
+pub type TransportFuture =
+    Pin<Box<dyn Future<Output = Result<Arc<dyn GroupTransport>, String>> + Send>>;
+pub type TransportFactory = Box<dyn FnOnce() -> TransportFuture + Send>;
+
+/// The adapters groups need, supplied by the composition root.
+pub struct GroupServices {
+    pub transport: TransportFactory,
+    pub store: Arc<dyn GroupStore>,
+}
+
+impl std::fmt::Debug for GroupServices {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GroupServices").finish_non_exhaustive()
+    }
+}
+
+/// How often a computer asks the others what it missed.
+const SYNC_EVERY: Duration = Duration::from_secs(20);
+/// A request to another computer gives up after this long.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// What helpers may read: the group's usable shared details.
+#[derive(Clone, Default)]
+pub(crate) struct GroupKnowledge(Arc<RwLock<KnowledgeView>>);
+
+impl GroupKnowledge {
+    pub(crate) async fn search(&self, question: &str, limit: usize) -> Vec<SharedHit> {
+        self.0.read().await.search(question, limit)
+    }
+}
+
+pub(crate) struct GroupRuntime {
+    commands: Sender<GroupCommand>,
+    pub(crate) knowledge: GroupKnowledge,
+    /// Owns every group task; dropping the runtime cancels them all.
+    _tasks: Arc<std::sync::Mutex<tokio::task::JoinSet<()>>>,
+}
+
+fn spawner(
+    tasks: &Arc<std::sync::Mutex<tokio::task::JoinSet<()>>>,
+    handle: &tokio::runtime::Handle,
+) -> Spawn {
+    let tasks = Arc::downgrade(tasks);
+    let handle = handle.clone();
+    Arc::new(move |task| {
+        if let Some(tasks) = tasks.upgrade() {
+            tasks
+                .lock()
+                .expect("group task set lock is never poisoned")
+                .spawn_on(task, &handle);
+        }
+    })
+}
+
+impl GroupRuntime {
+    pub(crate) fn start(
+        services: Option<GroupServices>,
+        events: Sender<Event>,
+        handle: &tokio::runtime::Handle,
+    ) -> Self {
+        let (commands, receiver) = async_channel::bounded::<GroupCommand>(32);
+        let knowledge = GroupKnowledge::default();
+        let tasks = Arc::new(std::sync::Mutex::new(tokio::task::JoinSet::new()));
+        let spawn = spawner(&tasks, handle);
+        let readers = knowledge.clone();
+        let launch = spawn.clone();
+        launch(Box::pin(async move {
+            let Some(services) = services else {
+                while let Ok(command) = receiver.recv().await {
+                    if !matches!(command, GroupCommand::Load) {
+                        problem(&events, unavailable()).await;
+                    }
+                }
+                return;
+            };
+            let transport = match (services.transport)().await {
+                Ok(transport) => transport,
+                Err(error) => {
+                    tracing::warn!(%error, "group network unavailable");
+                    while let Ok(command) = receiver.recv().await {
+                        if !matches!(command, GroupCommand::Load) {
+                            problem(
+                                &events,
+                                GroupProblem::Other(format!(
+                                    "Groups can't connect on this computer right now: {error}"
+                                )),
+                            )
+                            .await;
+                        }
+                    }
+                    return;
+                }
+            };
+            let groups = Arc::new(
+                Groups::open(transport, services.store, events, readers, spawn.clone()).await,
+            );
+            let serving = groups.clone();
+            spawn(Box::pin(async move {
+                let handler: Arc<dyn PeerHandler> = Arc::new(GroupHandler(serving.clone()));
+                serving
+                    .transport
+                    .serve(handler, serving.spawn.clone())
+                    .await;
+            }));
+            let syncing = groups.clone();
+            spawn(Box::pin(async move {
+                loop {
+                    syncing.sync_all().await;
+                    tokio::time::sleep(SYNC_EVERY).await;
+                }
+            }));
+            while let Ok(command) = receiver.recv().await {
+                groups.command(command).await;
+            }
+            groups.transport.close().await;
+        }));
+        Self {
+            commands,
+            knowledge,
+            _tasks: tasks,
+        }
+    }
+
+    pub(crate) fn send(&self, command: GroupCommand) {
+        if self.commands.try_send(command).is_err() {
+            tracing::warn!("group command dropped: the groups worker is busy or stopped");
+        }
+    }
+}
+
+fn unavailable() -> GroupProblem {
+    GroupProblem::Other("Groups aren't available in this session.".into())
+}
+
+async fn problem(events: &Sender<Event>, problem: GroupProblem) {
+    let _ = events
+        .send(Event::Group(GroupEvent::Problem(problem)))
+        .await;
+}
+
+fn now() -> Timestamp {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis());
+    Timestamp(i64::try_from(millis).unwrap_or(i64::MAX))
+}
+
+fn random<const N: usize>() -> Option<[u8; N]> {
+    let mut bytes = [0u8; N];
+    getrandom::fill(&mut bytes).ok().map(|()| bytes)
+}
+
+struct Inner {
+    record: GroupRecord,
+    roster: Option<GroupState>,
+    view: KnowledgeView,
+    invites: InviteBook,
+}
+
+struct Groups {
+    transport: Arc<dyn GroupTransport>,
+    verifier: Arc<dyn SignatureVerifier + Send + Sync>,
+    store: Arc<dyn GroupStore>,
+    events: Sender<Event>,
+    knowledge: GroupKnowledge,
+    spawn: Spawn,
+    inner: Mutex<Inner>,
+}
+
+impl Groups {
+    async fn open(
+        transport: Arc<dyn GroupTransport>,
+        store: Arc<dyn GroupStore>,
+        events: Sender<Event>,
+        knowledge: GroupKnowledge,
+        spawn: Spawn,
+    ) -> Self {
+        let record = match store.load().await {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::warn!(%error, "saved group could not be read; starting without one");
+                GroupRecord::default()
+            }
+        };
+        let verifier = transport.verifier();
+        let groups = Self {
+            transport,
+            verifier,
+            store,
+            events,
+            knowledge,
+            spawn,
+            inner: Mutex::new(Inner {
+                record,
+                roster: None,
+                view: KnowledgeView::default(),
+                invites: InviteBook::default(),
+            }),
+        };
+        {
+            let mut inner = groups.inner.lock().await;
+            groups.refold(&mut inner).await;
+        }
+        groups.publish_loaded().await;
+        groups
+    }
+
+    fn me(&self) -> DeviceId {
+        self.transport.this_device()
+    }
+
+    async fn emit(&self, event: GroupEvent) {
+        let _ = self.events.send(Event::Group(event)).await;
+    }
+
+    async fn refold(&self, inner: &mut Inner) {
+        let verifier = self.verifier.as_ref();
+        inner.roster = inner
+            .record
+            .group
+            .map(|group| fold(group, &inner.record.membership, verifier));
+        inner.view = match &inner.roster {
+            Some(roster) => fold_knowledge(
+                roster,
+                LaneId::whole_group(&roster.group),
+                &inner.record.knowledge,
+                verifier,
+            ),
+            None => KnowledgeView::default(),
+        };
+        inner.view.clone_into(&mut *self.knowledge.0.write().await);
+    }
+
+    async fn persist(&self, inner: &Inner) {
+        if let Err(error) = self.store.save(&inner.record).await {
+            tracing::warn!(%error, "group record not saved");
+            self.emit(GroupEvent::Problem(GroupProblem::Other(error.to_string())))
+                .await;
+        }
+    }
+
+    fn details(view: &KnowledgeView) -> Vec<SharedDetail> {
+        let mut details: Vec<SharedDetail> = view.details.values().cloned().collect();
+        details.sort_by(|a, b| b.shared_at.cmp(&a.shared_at).then(b.id.cmp(&a.id)));
+        details
+    }
+
+    async fn publish_loaded(&self) {
+        let (roster, details) = {
+            let inner = self.inner.lock().await;
+            (inner.roster.clone(), Self::details(&inner.view))
+        };
+        self.emit(GroupEvent::Loaded {
+            this_computer: self.me(),
+            group: roster,
+        })
+        .await;
+        self.emit(GroupEvent::Knowledge(details)).await;
+    }
+
+    async fn publish_changed(&self, roster: Option<GroupState>, details: Vec<SharedDetail>) {
+        if let Some(roster) = roster {
+            self.emit(GroupEvent::Changed(roster)).await;
+        }
+        self.emit(GroupEvent::Knowledge(details)).await;
+    }
+
+    fn address_of(record: &GroupRecord, device: DeviceId) -> PeerAddress {
+        record
+            .addresses
+            .iter()
+            .find(|address| address.device == device)
+            .cloned()
+            .unwrap_or(PeerAddress {
+                device,
+                relay: None,
+                addrs: Vec::new(),
+            })
+    }
+
+    fn remember(record: &mut GroupRecord, address: PeerAddress) {
+        record
+            .addresses
+            .retain(|known| known.device != address.device);
+        record.addresses.push(address);
+    }
+
+    /// Other computers currently in the roster, with the best known address.
+    fn peers(&self, inner: &Inner) -> Vec<PeerAddress> {
+        let me = self.me();
+        inner
+            .roster
+            .iter()
+            .flat_map(|roster| roster.people.values())
+            .flat_map(|member| member.devices.keys().copied())
+            .filter(|device| *device != me)
+            .map(|device| Self::address_of(&inner.record, device))
+            .collect()
+    }
+
+    async fn ask(&self, to: &PeerAddress, request: PeerRequest) -> Result<PeerResponse, String> {
+        match tokio::time::timeout(REQUEST_TIMEOUT, self.transport.request(to, request)).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(error)) => Err(error.to_string()),
+            Err(_) => Err("no answer in time".into()),
+        }
+    }
+
+    /// Sends new operations to every other computer, each on its own owned task.
+    fn broadcast(
+        self: &Arc<Self>,
+        group: GroupId,
+        peers: Vec<PeerAddress>,
+        membership: Vec<MembershipOp>,
+        knowledge: Vec<KnowledgeOp>,
+    ) {
+        for peer in peers {
+            let groups = self.clone();
+            let request = PeerRequest::Push {
+                group,
+                membership: membership.clone(),
+                knowledge: knowledge.clone(),
+            };
+            (self.spawn)(Box::pin(async move {
+                if let Err(error) = groups.ask(&peer, request).await {
+                    tracing::debug!(%error, peer = %peer.device.fingerprint(), "push not delivered; sync will retry");
+                }
+            }));
+        }
+    }
+
+    /// Adds operations this computer did not have. Returns whether anything changed.
+    async fn merge(&self, membership: Vec<MembershipOp>, knowledge: Vec<KnowledgeOp>) -> bool {
+        let mut inner = self.inner.lock().await;
+        let have_membership: BTreeSet<_> = inner
+            .record
+            .membership
+            .iter()
+            .map(MembershipOp::hash)
+            .collect();
+        let have_knowledge: BTreeSet<_> = inner
+            .record
+            .knowledge
+            .iter()
+            .map(KnowledgeOp::hash)
+            .collect();
+        let mut changed = false;
+        for op in membership {
+            if !have_membership.contains(&op.hash())
+                && Some(op.unsigned.group) == inner.record.group
+            {
+                inner.record.membership.push(op);
+                changed = true;
+            }
+        }
+        for op in knowledge {
+            if !have_knowledge.contains(&op.hash()) && Some(op.unsigned.group) == inner.record.group
+            {
+                inner.record.knowledge.push(op);
+                changed = true;
+            }
+        }
+        if !changed {
+            return false;
+        }
+        self.refold(&mut inner).await;
+        let removed = inner
+            .roster
+            .as_ref()
+            .is_some_and(|roster| !roster.admits(&self.me()));
+        if removed {
+            Self::forget_group(&mut inner.record);
+            self.refold(&mut inner).await;
+        }
+        self.persist(&inner).await;
+        let roster = inner.roster.clone();
+        let details = Self::details(&inner.view);
+        drop(inner);
+        if removed {
+            self.emit(GroupEvent::LeftGroup).await;
+            self.emit(GroupEvent::Knowledge(Vec::new())).await;
+        } else {
+            self.publish_changed(roster, details).await;
+        }
+        true
+    }
+
+    fn forget_group(record: &mut GroupRecord) {
+        record.group = None;
+        record.membership.clear();
+        record.knowledge.clear();
+        record.addresses.clear();
+    }
+
+    /// Asks every other computer what this one missed, and sends what they missed.
+    async fn sync_all(self: &Arc<Self>) {
+        let (group, peers, membership, knowledge) = {
+            let inner = self.inner.lock().await;
+            let Some(group) = inner.record.group else {
+                return;
+            };
+            (
+                group,
+                self.peers(&inner),
+                inner
+                    .record
+                    .membership
+                    .iter()
+                    .map(MembershipOp::hash)
+                    .collect::<BTreeSet<_>>(),
+                inner
+                    .record
+                    .knowledge
+                    .iter()
+                    .map(KnowledgeOp::hash)
+                    .collect::<BTreeSet<_>>(),
+            )
+        };
+        for peer in peers {
+            let request = PeerRequest::Sync {
+                group,
+                membership: membership.clone(),
+                knowledge: knowledge.clone(),
+                from: self.transport.address(),
+            };
+            match self.ask(&peer, request).await {
+                Ok(PeerResponse::Synced {
+                    membership: theirs,
+                    knowledge: their_knowledge,
+                    want_membership,
+                    want_knowledge,
+                }) => {
+                    self.merge(theirs, their_knowledge).await;
+                    if !want_membership.is_empty() || !want_knowledge.is_empty() {
+                        let (wanted, wanted_knowledge) = {
+                            let inner = self.inner.lock().await;
+                            (
+                                inner
+                                    .record
+                                    .membership
+                                    .iter()
+                                    .filter(|op| want_membership.contains(&op.hash()))
+                                    .cloned()
+                                    .collect::<Vec<_>>(),
+                                inner
+                                    .record
+                                    .knowledge
+                                    .iter()
+                                    .filter(|op| want_knowledge.contains(&op.hash()))
+                                    .cloned()
+                                    .collect::<Vec<_>>(),
+                            )
+                        };
+                        self.broadcast(group, vec![peer], wanted, wanted_knowledge);
+                    }
+                }
+                Ok(other) => tracing::debug!(?other, "unexpected sync answer"),
+                Err(error) => {
+                    tracing::debug!(%error, peer = %peer.device.fingerprint(), "sync skipped")
+                }
+            }
+        }
+    }
+
+    async fn command(self: &Arc<Self>, command: GroupCommand) {
+        match command {
+            GroupCommand::Load => {
+                self.publish_loaded().await;
+                // Opening Groups is also "catch me up now", not in up to 20 seconds.
+                let groups = self.clone();
+                (self.spawn)(Box::pin(async move { groups.sync_all().await }));
+            }
+            GroupCommand::Create {
+                name,
+                your_name,
+                computer_name,
+            } => self.create(name, your_name, computer_name).await,
+            GroupCommand::InviteComputer => self.invite(InviteKind::OwnDevice).await,
+            GroupCommand::InvitePerson { name, role } => {
+                self.invite(InviteKind::Person { name, role }).await;
+            }
+            GroupCommand::Join {
+                link,
+                computer_name,
+            } => self.join(&link, computer_name).await,
+            GroupCommand::ShowShortCode | GroupCommand::JoinWithCode { .. } => {
+                self.emit(GroupEvent::Problem(GroupProblem::Other(
+                    "Same-room codes aren't ready yet. Use the link or QR code instead.".into(),
+                )))
+                .await;
+            }
+            GroupCommand::ConfirmCode { .. } => {}
+            GroupCommand::CancelPairing => {
+                self.emit(GroupEvent::Pairing(PairingStep::Cancel)).await
+            }
+            GroupCommand::Rename { name } => self.membership(MembershipBody::Rename { name }).await,
+            GroupCommand::ChangeRole { person, role } => {
+                self.membership(MembershipBody::ChangeRole { person, role })
+                    .await;
+            }
+            GroupCommand::RemoveComputer { device } => {
+                self.membership(MembershipBody::RemoveDevice { device })
+                    .await;
+            }
+            GroupCommand::RemovePerson { person } => {
+                self.membership(MembershipBody::RemovePerson { person })
+                    .await;
+            }
+            GroupCommand::Leave => {
+                let person = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .roster
+                        .as_ref()
+                        .and_then(|roster| roster.owner_of(&self.me()))
+                        .map(|member| member.person)
+                };
+                match person {
+                    Some(person) => {
+                        self.membership(MembershipBody::RemovePerson { person })
+                            .await
+                    }
+                    None => self.emit(GroupEvent::LeftGroup).await,
+                }
+            }
+            GroupCommand::Share { text, about } => {
+                self.knowledge(KnowledgeBody::Share {
+                    text,
+                    about,
+                    valid_at: None,
+                    replaces: Vec::new(),
+                })
+                .await;
+            }
+            GroupCommand::Correct { details, text } => {
+                self.knowledge(KnowledgeBody::Share {
+                    text,
+                    about: Vec::new(),
+                    valid_at: None,
+                    replaces: details,
+                })
+                .await;
+            }
+            GroupCommand::Agree { detail } => {
+                self.knowledge(KnowledgeBody::Corroborate { detail }).await;
+            }
+            GroupCommand::Withdraw { detail } => {
+                self.knowledge(KnowledgeBody::Withdraw { detail }).await;
+            }
+            GroupCommand::Erase { detail } => {
+                self.knowledge(KnowledgeBody::Redact { detail }).await
+            }
+        }
+    }
+
+    async fn create(&self, name: String, your_name: String, computer_name: String) {
+        let mut inner = self.inner.lock().await;
+        if inner.record.group.is_some() {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer is already in a group. Leave it first.".into(),
+            )))
+            .await;
+            return;
+        }
+        let (Some(nonce), Some(person)) = (random::<16>(), random::<32>()) else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer couldn't make a secure group key. Try again.".into(),
+            )))
+            .await;
+            return;
+        };
+        let me = self.me();
+        let group = GroupId::derive(&me, &nonce);
+        let person = PersonId(person);
+        let unsigned = UnsignedOp {
+            group,
+            author: me,
+            seq: 1,
+            prev: None,
+            deps: Vec::new(),
+            at: now(),
+            body: MembershipBody::Genesis {
+                name,
+                nonce,
+                founder: person,
+                founder_name: your_name.clone(),
+                device_name: computer_name.clone(),
+            },
+        };
+        let op = unsigned
+            .clone()
+            .sign(self.transport.sign(&unsigned.signing_bytes()));
+        let trial = fold(group, [&op], self.verifier.as_ref());
+        if let Some(rejection) = trial.rejected.get(&op.hash()) {
+            drop(inner);
+            self.emit(GroupEvent::Problem(membership_problem(*rejection)))
+                .await;
+            return;
+        }
+        inner.record = GroupRecord {
+            person: Some(person),
+            person_name: your_name,
+            computer_name,
+            group: Some(group),
+            membership: vec![op],
+            knowledge: Vec::new(),
+            addresses: Vec::new(),
+        };
+        self.refold(&mut inner).await;
+        self.persist(&inner).await;
+        drop(inner);
+        self.publish_loaded().await;
+    }
+
+    async fn invite(&self, kind: InviteKind) {
+        let mut inner = self.inner.lock().await;
+        let me = self.me();
+        let Some(roster) = inner.roster.clone() else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "Create or join a group first.".into(),
+            )))
+            .await;
+            return;
+        };
+        if matches!(kind, InviteKind::Person { .. })
+            && !roster
+                .role_of(&me)
+                .is_some_and(sovra_core::group::Role::manages)
+        {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::NotAllowed))
+                .await;
+            return;
+        }
+        let Some(secret) = random::<16>() else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer couldn't make a secure invite. Try again.".into(),
+            )))
+            .await;
+            return;
+        };
+        let at = now();
+        inner.invites.prune(at);
+        let invite = Invite::new(roster.group, kind.clone(), secret, at);
+        let expires_at = invite.expires_at;
+        inner.invites.issue(invite);
+        let address = self.transport.address();
+        let link = JoinLink::new(
+            roster.group,
+            roster.name.clone(),
+            me,
+            roster
+                .owner_of(&me)
+                .map(|member| member.name.clone())
+                .unwrap_or_default(),
+            kind,
+            secret,
+            expires_at,
+            address.relay,
+            address.addrs,
+        )
+        .encode();
+        drop(inner);
+        self.emit(GroupEvent::InviteReady { link, expires_at })
+            .await;
+    }
+
+    async fn join(&self, link: &str, computer_name: String) {
+        let link = match JoinLink::parse(link, now()) {
+            Ok(link) => link,
+            Err(error) => {
+                let problem = match error {
+                    LinkError::Expired => GroupProblem::InviteExpired,
+                    LinkError::NotALink | LinkError::TooLong | LinkError::Damaged => {
+                        GroupProblem::BadInvite
+                    }
+                    LinkError::NewerVersion => GroupProblem::Other(error.to_string()),
+                };
+                self.emit(GroupEvent::Problem(problem)).await;
+                return;
+            }
+        };
+        if self.inner.lock().await.record.group.is_some() {
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer is already in a group. Leave it first.".into(),
+            )))
+            .await;
+            return;
+        }
+        let Some(person) = random::<32>() else {
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer couldn't make a secure key. Try again.".into(),
+            )))
+            .await;
+            return;
+        };
+        let me = self.me();
+        let person_name = match &link.kind {
+            InviteKind::Person { name, .. } => name.clone(),
+            InviteKind::OwnDevice => link.inviter_name.clone(),
+        };
+        let inviter = PeerAddress {
+            device: link.inviter,
+            relay: link.relay.clone(),
+            addrs: link.addrs.clone(),
+        };
+        self.emit(GroupEvent::Pairing(PairingStep::PeerConnected))
+            .await;
+        let request = PeerRequest::Join {
+            group: link.group,
+            proof: invite_proof(
+                &link.secret,
+                &join_transcript(&link.inviter, &me, &link.group),
+            ),
+            person: PersonId(person),
+            person_name,
+            computer_name: computer_name.clone(),
+            from: self.transport.address(),
+        };
+        match self.ask(&inviter, request).await {
+            Ok(PeerResponse::Joined {
+                membership,
+                knowledge,
+            }) => {
+                let mut inner = self.inner.lock().await;
+                inner.record.group = Some(link.group);
+                inner.record.membership = membership;
+                inner.record.knowledge = knowledge;
+                Self::remember(&mut inner.record, inviter);
+                self.refold(&mut inner).await;
+                let member = inner
+                    .roster
+                    .as_ref()
+                    .and_then(|roster| roster.owner_of(&me))
+                    .map(|member| (member.person, member.name.clone()));
+                let Some((person, name)) = member else {
+                    Self::forget_group(&mut inner.record);
+                    self.refold(&mut inner).await;
+                    drop(inner);
+                    self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                        PairingFailure::Refused,
+                    )))
+                    .await;
+                    self.emit(GroupEvent::Problem(GroupProblem::Other(
+                        "The other computer didn't add this one. Ask for a new invite.".into(),
+                    )))
+                    .await;
+                    return;
+                };
+                inner.record.person = Some(person);
+                inner.record.person_name = name;
+                inner.record.computer_name = computer_name;
+                self.persist(&inner).await;
+                drop(inner);
+                self.emit(GroupEvent::Pairing(PairingStep::SkipCode)).await;
+                self.emit(GroupEvent::Pairing(PairingStep::Admitted {
+                    group: link.group,
+                }))
+                .await;
+                self.publish_loaded().await;
+            }
+            Ok(PeerResponse::Refused { reason }) => {
+                self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                    PairingFailure::Refused,
+                )))
+                .await;
+                self.emit(GroupEvent::Problem(refusal_problem(reason)))
+                    .await;
+            }
+            Ok(other) => {
+                tracing::debug!(?other, "unexpected join answer");
+                self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                    PairingFailure::Refused,
+                )))
+                .await;
+                self.emit(GroupEvent::Problem(GroupProblem::BadInvite))
+                    .await;
+            }
+            Err(error) => {
+                tracing::info!(%error, "join request not delivered");
+                self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                    PairingFailure::Unreachable,
+                )))
+                .await;
+                self.emit(GroupEvent::Problem(GroupProblem::Unreachable))
+                    .await;
+            }
+        }
+    }
+
+    /// Signs a membership change, keeps it only if the rules accept it, and sends it.
+    async fn membership(self: &Arc<Self>, body: MembershipBody) {
+        let mut inner = self.inner.lock().await;
+        let Some(roster) = inner.roster.clone() else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "Create or join a group first.".into(),
+            )))
+            .await;
+            return;
+        };
+        let unsigned = roster.draft(self.me(), now(), body);
+        let op = unsigned
+            .clone()
+            .sign(self.transport.sign(&unsigned.signing_bytes()));
+        let mut trial_ops = inner.record.membership.clone();
+        trial_ops.push(op.clone());
+        let trial = fold(roster.group, &trial_ops, self.verifier.as_ref());
+        if !trial.applied.contains(&op.hash()) {
+            let rejection = trial
+                .rejected
+                .get(&op.hash())
+                .copied()
+                .unwrap_or(Rejection::NotAllowed);
+            drop(inner);
+            self.emit(GroupEvent::Problem(membership_problem(rejection)))
+                .await;
+            return;
+        }
+        let peers = self.peers(&inner);
+        inner.record.membership.push(op.clone());
+        self.refold(&mut inner).await;
+        let left = inner
+            .roster
+            .as_ref()
+            .is_some_and(|roster| !roster.admits(&self.me()));
+        if left {
+            Self::forget_group(&mut inner.record);
+            self.refold(&mut inner).await;
+        }
+        self.persist(&inner).await;
+        let roster_now = inner.roster.clone();
+        let details = Self::details(&inner.view);
+        drop(inner);
+        self.broadcast(roster.group, peers, vec![op], Vec::new());
+        if left {
+            self.emit(GroupEvent::LeftGroup).await;
+            self.emit(GroupEvent::Knowledge(Vec::new())).await;
+        } else {
+            self.publish_changed(roster_now, details).await;
+        }
+    }
+
+    /// Signs a knowledge change, keeps it only if the rules accept it, and sends it.
+    async fn knowledge(self: &Arc<Self>, body: KnowledgeBody) {
+        if let KnowledgeBody::Share { text, about, .. } = &body
+            && let Err(error) = check_share(text, about)
+        {
+            self.emit(GroupEvent::Problem(GroupProblem::Other(error.to_string())))
+                .await;
+            return;
+        }
+        let mut inner = self.inner.lock().await;
+        let Some(roster) = inner.roster.clone() else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "Create or join a group first.".into(),
+            )))
+            .await;
+            return;
+        };
+        let Some(unsigned) = inner.view.draft(self.me(), now(), body) else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "Create or join a group first.".into(),
+            )))
+            .await;
+            return;
+        };
+        let op = unsigned
+            .clone()
+            .sign(self.transport.sign(&unsigned.signing_bytes()));
+        let mut trial_ops = inner.record.knowledge.clone();
+        trial_ops.push(op.clone());
+        let lane = LaneId::whole_group(&roster.group);
+        let trial = fold_knowledge(&roster, lane, &trial_ops, self.verifier.as_ref());
+        if let Some(rejection) = trial.rejected.get(&op.hash()) {
+            drop(inner);
+            self.emit(GroupEvent::Problem(knowledge_problem(*rejection)))
+                .await;
+            return;
+        }
+        let peers = self.peers(&inner);
+        inner.record.knowledge.push(op.clone());
+        self.refold(&mut inner).await;
+        self.persist(&inner).await;
+        let roster_now = inner.roster.clone();
+        let details = Self::details(&inner.view);
+        drop(inner);
+        self.broadcast(roster.group, peers, Vec::new(), vec![op]);
+        self.publish_changed(roster_now, details).await;
+    }
+
+    /// Admits a computer holding a live invite: signs its addition and hands it the history.
+    async fn admit(
+        self: &Arc<Self>,
+        from: DeviceId,
+        group: GroupId,
+        proof: [u8; 32],
+        person: PersonId,
+        computer_name: String,
+        address: PeerAddress,
+    ) -> PeerResponse {
+        let mut inner = self.inner.lock().await;
+        let me = self.me();
+        let invite = match inner
+            .invites
+            .redeem(&proof, &join_transcript(&me, &from, &group), now())
+        {
+            Ok(invite) => invite,
+            Err(error) => {
+                return PeerResponse::Refused {
+                    reason: match error {
+                        RedeemError::Unknown => Refusal::InviteUnknown,
+                        RedeemError::Expired => Refusal::InviteExpired,
+                        RedeemError::AlreadyUsed => Refusal::InviteUsed,
+                    },
+                };
+            }
+        };
+        let Some(roster) = inner.roster.clone() else {
+            return PeerResponse::Refused {
+                reason: Refusal::WrongGroup,
+            };
+        };
+        let Some(my_person) = roster.owner_of(&me).map(|member| member.person) else {
+            return PeerResponse::Refused {
+                reason: Refusal::NotAMember,
+            };
+        };
+        let bodies = match invite.kind {
+            InviteKind::OwnDevice => vec![MembershipBody::AddDevice {
+                person: my_person,
+                device: from,
+                name: computer_name,
+            }],
+            InviteKind::Person { name, role } => vec![
+                MembershipBody::AddPerson { person, name, role },
+                MembershipBody::AddDevice {
+                    person,
+                    device: from,
+                    name: computer_name,
+                },
+            ],
+        };
+        let peers: Vec<PeerAddress> = self.peers(&inner);
+        let mut added = Vec::new();
+        let mut state = roster;
+        for body in bodies {
+            let unsigned = state.draft(me, now(), body);
+            let op = unsigned
+                .clone()
+                .sign(self.transport.sign(&unsigned.signing_bytes()));
+            let mut trial_ops = inner.record.membership.clone();
+            trial_ops.extend(added.iter().cloned());
+            trial_ops.push(op.clone());
+            let trial = fold(group, &trial_ops, self.verifier.as_ref());
+            if !trial.applied.contains(&op.hash()) {
+                tracing::info!(rejection = ?trial.rejected.get(&op.hash()), "invited computer could not be added");
+                return PeerResponse::Refused {
+                    reason: Refusal::NotAMember,
+                };
+            }
+            state = trial;
+            added.push(op);
+        }
+        inner.record.membership.extend(added.iter().cloned());
+        Self::remember(&mut inner.record, address);
+        self.refold(&mut inner).await;
+        self.persist(&inner).await;
+        let response = PeerResponse::Joined {
+            membership: inner.record.membership.clone(),
+            knowledge: inner.record.knowledge.clone(),
+        };
+        let roster_now = inner.roster.clone();
+        let details = Self::details(&inner.view);
+        drop(inner);
+        self.broadcast(
+            group,
+            peers
+                .into_iter()
+                .filter(|peer| peer.device != from)
+                .collect(),
+            added,
+            Vec::new(),
+        );
+        self.emit(GroupEvent::Pairing(PairingStep::PeerConnected))
+            .await;
+        self.emit(GroupEvent::Pairing(PairingStep::SkipCode)).await;
+        self.emit(GroupEvent::Pairing(PairingStep::Admitted { group }))
+            .await;
+        self.publish_changed(roster_now, details).await;
+        response
+    }
+}
+
+/// Serves other computers. Holds the shared handle because admitting a computer
+/// broadcasts its addition on owned tasks.
+struct GroupHandler(Arc<Groups>);
+
+#[async_trait::async_trait]
+impl PeerHandler for GroupHandler {
+    async fn handle(&self, from: DeviceId, request: PeerRequest) -> PeerResponse {
+        let groups = &self.0;
+        let admitted = {
+            let inner = groups.inner.lock().await;
+            admits_request(inner.roster.as_ref(), &from, &request)
+        };
+        if let Err(reason) = admitted {
+            return PeerResponse::Refused { reason };
+        }
+        match request {
+            PeerRequest::Join {
+                group,
+                proof,
+                person,
+                computer_name,
+                from: address,
+                ..
+            } => {
+                groups
+                    .admit(from, group, proof, person, computer_name, address)
+                    .await
+            }
+            other => groups.serve_peer(other).await,
+        }
+    }
+}
+
+impl Groups {
+    async fn serve_peer(&self, request: PeerRequest) -> PeerResponse {
+        match request {
+            PeerRequest::Sync {
+                membership,
+                knowledge,
+                from: address,
+                ..
+            } => {
+                let mut inner = self.inner.lock().await;
+                Self::remember(&mut inner.record, address);
+                let mine_membership: BTreeSet<_> = inner
+                    .record
+                    .membership
+                    .iter()
+                    .map(MembershipOp::hash)
+                    .collect();
+                let mine_knowledge: BTreeSet<_> = inner
+                    .record
+                    .knowledge
+                    .iter()
+                    .map(KnowledgeOp::hash)
+                    .collect();
+                PeerResponse::Synced {
+                    membership: inner
+                        .record
+                        .membership
+                        .iter()
+                        .filter(|op| !membership.contains(&op.hash()))
+                        .cloned()
+                        .collect(),
+                    knowledge: inner
+                        .record
+                        .knowledge
+                        .iter()
+                        .filter(|op| !knowledge.contains(&op.hash()))
+                        .cloned()
+                        .collect(),
+                    want_membership: membership.difference(&mine_membership).copied().collect(),
+                    want_knowledge: knowledge.difference(&mine_knowledge).copied().collect(),
+                }
+            }
+            PeerRequest::Push {
+                membership,
+                knowledge,
+                ..
+            } => {
+                self.merge(membership, knowledge).await;
+                PeerResponse::Accepted
+            }
+            PeerRequest::Join { .. } => PeerResponse::Refused {
+                reason: Refusal::Malformed,
+            },
+        }
+    }
+}
+
+fn membership_problem(rejection: Rejection) -> GroupProblem {
+    match rejection {
+        Rejection::NotAllowed => GroupProblem::NotAllowed,
+        Rejection::WouldLeaveNoAdmin => GroupProblem::LastAdmin,
+        Rejection::InvalidName => GroupProblem::Other(format!(
+            "Names need 1 to {} characters.",
+            sovra_core::group::MAX_NAME_CHARS
+        )),
+        Rejection::AlreadyPresent => GroupProblem::Other("That's already in the group.".into()),
+        Rejection::UnknownTarget => {
+            GroupProblem::Other("That person or computer isn't in the group any more.".into())
+        }
+        other => GroupProblem::Other(format!("That change wasn't accepted ({other:?}).")),
+    }
+}
+
+fn knowledge_problem(rejection: KnowledgeRejection) -> GroupProblem {
+    match rejection {
+        KnowledgeRejection::NotAllowed => {
+            GroupProblem::Other("Only the person who shared it, or an admin, can do that.".into())
+        }
+        KnowledgeRejection::UnknownDetail => {
+            GroupProblem::Other("That shared detail isn't on this computer yet.".into())
+        }
+        KnowledgeRejection::InvalidDetail => {
+            GroupProblem::Other("That detail is empty or too long.".into())
+        }
+        other => GroupProblem::Other(format!("That wasn't shared ({other:?}).")),
+    }
+}
+
+fn refusal_problem(reason: Refusal) -> GroupProblem {
+    match reason {
+        Refusal::InviteExpired => GroupProblem::InviteExpired,
+        Refusal::InviteUsed => GroupProblem::InviteUsed,
+        Refusal::InviteUnknown | Refusal::WrongGroup | Refusal::Malformed => {
+            GroupProblem::BadInvite
+        }
+        Refusal::NotAMember => GroupProblem::NotAllowed,
+    }
+}

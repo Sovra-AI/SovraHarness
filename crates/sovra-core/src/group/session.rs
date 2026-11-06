@@ -3,7 +3,8 @@
 //! "device"; "group", not "mesh".
 
 use super::fold::GroupState;
-use super::keys::{DeviceId, PersonId};
+use super::keys::{DeviceId, OpHash, PersonId};
+use super::knowledge::SharedDetail;
 use super::membership::Role;
 use super::pairing::{PairingStage, PairingStep};
 use crate::Timestamp;
@@ -57,6 +58,28 @@ pub enum GroupCommand {
         person: PersonId,
     },
     Leave,
+    /// Share a detail with the whole group.
+    Share {
+        text: String,
+        about: Vec<String>,
+    },
+    /// Correct one or more shared details (settles a dispute when it names several).
+    Correct {
+        details: Vec<OpHash>,
+        text: String,
+    },
+    /// "I agree" with someone else's detail.
+    Agree {
+        detail: OpHash,
+    },
+    /// Stop helpers using a detail; it stays in history.
+    Withdraw {
+        detail: OpHash,
+    },
+    /// Erase a detail's words on every computer.
+    Erase {
+        detail: OpHash,
+    },
 }
 
 /// Something went wrong, in words a person can act on.
@@ -115,6 +138,8 @@ pub enum GroupEvent {
         expires_at: Timestamp,
     },
     Pairing(PairingStep),
+    /// Everything shared in the group, newest first (usable and historical).
+    Knowledge(Vec<SharedDetail>),
     /// This computer was removed from, or left, its group.
     LeftGroup,
     Problem(GroupProblem),
@@ -166,6 +191,8 @@ pub struct GroupsView {
     pub short_code: Option<(String, Timestamp)>,
     pub problem: Option<GroupProblem>,
     pub loaded: bool,
+    /// Shared details, newest first.
+    pub knowledge: Vec<SharedDetail>,
 }
 
 impl Default for GroupsView {
@@ -178,6 +205,7 @@ impl Default for GroupsView {
             short_code: None,
             problem: None,
             loaded: false,
+            knowledge: Vec::new(),
         }
     }
 }
@@ -228,6 +256,7 @@ impl GroupsView {
                     self.short_code = None;
                 }
             }
+            GroupEvent::Knowledge(details) => self.knowledge = details,
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
         }
@@ -235,6 +264,7 @@ impl GroupsView {
 
     fn leave(&mut self) {
         self.group = None;
+        self.knowledge.clear();
         self.invite = None;
         self.short_code = None;
         self.pairing = PairingStage::Idle;
