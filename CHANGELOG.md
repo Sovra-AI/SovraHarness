@@ -11,6 +11,11 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Concise investor pitch at [`docs/decks/pitch/`](docs/decks/pitch/index.html)
+  (Cinema, 11 slides, non-technical): an AI-native UAE on its own terms,
+  five things that stay yours, proof through measured pilots, what is built
+  today, the path, and what investment unlocks.
+
 - Non-technical investor brief at
   [`docs/value-realisation/10-investor-brief.md`](docs/value-realisation/10-investor-brief.md):
   the UAE's AI-native goal, sovereignty as five things that stay yours,
