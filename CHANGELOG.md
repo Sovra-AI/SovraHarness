@@ -91,6 +91,9 @@ move them under a version heading when the tag is cut.
   one computer; next is a group of people and their computers sharing helpers
   and memory, with no central Sovra server.
 
+- Group recall guidance is only added when a turn actually has shared group
+  details, so personal sources still fit in the helper's request.
+
 - **Groups** (people and their computers sharing helpers and memory; see
   `docs/roadmap/02-a-team.md`). Settings → Groups starts or joins a group
   with a `sovra://join` link, shows people and computers, invites, removes

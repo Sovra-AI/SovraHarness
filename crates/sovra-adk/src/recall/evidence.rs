@@ -57,7 +57,8 @@ pub(super) fn encode(queries: Vec<MemorySearch>, contexts: Vec<MemoryContext>) -
             .lookups
             .iter_mut()
             .filter(|entry| {
-                !entry.evidence.background.is_empty()
+                !entry.evidence.group.is_empty()
+                    || !entry.evidence.background.is_empty()
                     || !entry.evidence.sources.is_empty()
                     || !entry.evidence.memories.is_empty()
             })
@@ -68,7 +69,10 @@ pub(super) fn encode(queries: Vec<MemorySearch>, contexts: Vec<MemoryContext>) -
             return unavailable();
         };
         // Drop whole low-priority records, never cut a quote or alter its meaning.
-        if entry.evidence.background.pop().is_none() && entry.evidence.sources.pop().is_none() {
+        if entry.evidence.group.pop().is_none()
+            && entry.evidence.background.pop().is_none()
+            && entry.evidence.sources.pop().is_none()
+        {
             entry.evidence.memories.pop();
         }
         entry.evidence.notice = Some(
