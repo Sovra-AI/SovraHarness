@@ -11,6 +11,13 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- The investor pitch has a visual rhythm instead of one repeated layout:
+  deep-ink slides for the title, the question, the problem, the proof, why
+  Sovra wins and the close; light poster slides where the scene fills the
+  stage; a one-giant-number slide for why now; an editorial numbered list; a
+  section divider; and a giant-type ask. The particle-nation hero now has an
+  ink variant.
+
 - The value and UAE decks share the pitch deck's look: dark cinema bars
   around the stage, larger type, and no boxes. Cards, tiles, steps, phases,
   pills, bars and table panels are typography on hairlines; diagrams use
