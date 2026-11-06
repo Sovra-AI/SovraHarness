@@ -11,6 +11,11 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- The value and UAE decks take the pitch deck's rhythm: deep-ink slides for
+  the title, section dividers, the problem and the honest-limits slide, with
+  the particle-nation hero on the title and close; light scene and number
+  slides in between.
+
 - The investor pitch has a visual rhythm instead of one repeated layout:
   deep-ink slides for the title, the question, the problem, the proof, why
   Sovra wins and the close; light poster slides where the scene fills the

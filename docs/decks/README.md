@@ -85,8 +85,10 @@ at the 1920×1080 stage.
 - No tour of libraries.
 
 The `pitch/`, `value/` and `uae/` decks add a deck-local layer on top of the
-Cinema frame: deep-ink bars outside the 16:9 stage, larger type, and **no
-boxes** (cards, chips, tiles and bars become typography on hairlines; diagrams
+Cinema frame: deep-ink bars outside the 16:9 stage, larger type, **ink slides**
+(`class="slide ink"`, a deep-purple stage for titles, dividers and the moments
+that matter, with the particle-nation hero via `<canvas data-hero data-ink>`),
+and **no boxes** (cards, chips, tiles and bars become typography on hairlines; diagrams
 use dots, rings and glows). Copy that layer rather than re-inventing it.
 
 Every frame uses the light paper theme, not a near-black canvas. The first
