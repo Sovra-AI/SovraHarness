@@ -1028,7 +1028,7 @@ impl WorkspaceState {
                 None
             }
             Event::Group(event) => {
-                self.groups.apply(event.clone());
+                self.groups.apply((**event).clone());
                 None
             }
             Event::Development(event) => {

@@ -105,8 +105,9 @@ pub enum Event {
     /// call names its own conversation, so cards for background chats are kept too.
     Terminal(crate::terminal::TerminalEvent),
     Schedule(crate::schedules::ScheduleEvent),
-    /// Groups of people and their computers.
-    Group(crate::group::GroupEvent),
+    /// Groups of people and their computers. Boxed: a roster is large next to the
+    /// other events, and every event is queued by value.
+    Group(Box<crate::group::GroupEvent>),
     /// An AG-UI protocol event for `session_id` (team runs stream through these).
     AgUi {
         session_id: String,

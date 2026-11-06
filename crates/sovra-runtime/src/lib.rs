@@ -697,11 +697,11 @@ async fn serve(
                     .with_reply_input_observer(inputs.clone())
                     .and_then(|base| {
                         base.with_conversation_memory(
-                            inputs.reader(recalling::reader(
+                            inputs.reader(groups.knowledge.wrap(recalling::reader(
                                 memory.as_ref(),
                                 &memory_control,
                                 memory_semantic.service.clone(),
-                            )),
+                            ))),
                             &prompt,
                             now(),
                         )
@@ -840,11 +840,11 @@ async fn serve(
                         skills: skill_catalog.clone(),
                         skill_resources: skills.resources.clone(),
                         indexed_files: file_index.reader.clone(),
-                        memory_reader: recalling::reader(
+                        memory_reader: groups.knowledge.wrap(recalling::reader(
                             memory.as_ref(),
                             &memory_control,
                             memory_semantic.service.clone(),
-                        ),
+                        )),
                         models: models.file_models.clone(),
                         events: output,
                         web_search_enabled,
@@ -1030,11 +1030,11 @@ async fn serve(
                         },
                         remote_caller: mcp.caller(),
                         memory_reader: if private_access {
-                            inputs.reader(recalling::reader(
+                            inputs.reader(groups.knowledge.wrap(recalling::reader(
                                 memory.as_ref(),
                                 &memory_control,
                                 memory_semantic.service.clone(),
-                            ))
+                            )))
                         } else {
                             None
                         },

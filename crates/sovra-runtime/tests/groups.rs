@@ -164,7 +164,7 @@ impl Computer {
         }
     }
 
-    async fn send(&self, command: GroupCommand) {
+    fn send(&self, command: GroupCommand) {
         self.client
             .send(Command::Group(command))
             .expect("runtime accepts commands");
@@ -175,13 +175,7 @@ impl Computer {
         tokio::time::timeout(WAIT, async {
             loop {
                 if let Event::Group(event) = self.events.recv().await.expect("runtime running") {
-                    if let GroupEvent::Problem(problem) = &event {
-                        eprintln!(
-                            "problem on {:?}: {}",
-                            self.device.fingerprint(),
-                            problem.message()
-                        );
-                    }
+                    let event = *event;
                     if let Some(found) = pred(event) {
                         return found;
                     }
@@ -242,8 +236,7 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
         name: "Family".into(),
         your_name: "Mum".into(),
         computer_name: "Mum's laptop".into(),
-    })
-    .await;
+    });
     let founded = mum.roster(|state| state.name == "Family").await;
     assert_eq!(founded.role_of(&mum.device), Some(Role::Admin));
 
@@ -251,27 +244,23 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
     mum.send(GroupCommand::InvitePerson {
         name: "Dad".into(),
         role: Role::Member,
-    })
-    .await;
+    });
     let link = mum.link().await;
     dad.send(GroupCommand::Join {
         link,
         computer_name: "Dad's desktop".into(),
-    })
-    .await;
+    });
     let joined = dad.roster(|state| state.people.len() == 2).await;
     assert_eq!(joined.role_of(&dad.device), Some(Role::Member));
     mum.roster(|state| state.admits(&dad.device)).await;
 
     // Mum adds her own second computer; it joins as Mum, not as a new person.
-    mum.send(GroupCommand::InviteComputer).await;
+    mum.send(GroupCommand::InviteComputer);
     let link = mum.link().await;
-    mum_imac
-        .send(GroupCommand::Join {
-            link,
-            computer_name: "Mum's iMac".into(),
-        })
-        .await;
+    mum_imac.send(GroupCommand::Join {
+        link,
+        computer_name: "Mum's iMac".into(),
+    });
     let roster = mum_imac
         .roster(|state| state.admits(&mum_imac.device))
         .await;
@@ -286,8 +275,7 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
     dad.send(GroupCommand::Share {
         text: "The boiler service is booked for 12 March".into(),
         about: vec!["boiler".into()],
-    })
-    .await;
+    });
     let mut boiler = None;
     for computer in [&mum, &mum_imac] {
         let details = computer.knowledge(|details| has(details, "12 March")).await;
@@ -309,14 +297,13 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
     dad.send(GroupCommand::Share {
         text: "Gran arrives on Friday by train".into(),
         about: Vec::new(),
-    })
-    .await;
+    });
     mum.knowledge(|details| has(details, "Gran arrives")).await;
     net.off
         .lock()
         .expect("not poisoned")
         .remove(&mum_imac.device);
-    mum_imac.send(GroupCommand::Load).await;
+    mum_imac.send(GroupCommand::Load);
     mum_imac
         .knowledge(|details| has(details, "Gran arrives"))
         .await;
@@ -325,8 +312,7 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
     mum.send(GroupCommand::Correct {
         details: vec![boiler],
         text: "The boiler service moved to 19 March".into(),
-    })
-    .await;
+    });
     let details = dad.knowledge(|details| has(details, "19 March")).await;
     let old = details
         .iter()
@@ -337,8 +323,7 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
 
     // Mum removes Dad: his computer leaves the group and can no longer share.
     let dad_person = joined.owner_of(&dad.device).expect("member").person;
-    mum.send(GroupCommand::RemovePerson { person: dad_person })
-        .await;
+    mum.send(GroupCommand::RemovePerson { person: dad_person });
     dad.wait(|event| matches!(event, GroupEvent::LeftGroup).then_some(()))
         .await;
     let after = mum.roster(|state| !state.admits(&dad.device)).await;
@@ -361,29 +346,24 @@ async fn a_used_or_foreign_invite_is_refused_and_members_cannot_invite_people() 
         name: "Family".into(),
         your_name: "Mum".into(),
         computer_name: "Laptop".into(),
-    })
-    .await;
-    mum.roster(|state| state.name == "Family").await;
+    });
+    let family = mum.roster(|state| state.name == "Family").await;
     mum.send(GroupCommand::InvitePerson {
         name: "Dad".into(),
         role: Role::Member,
-    })
-    .await;
+    });
     let link = mum.link().await;
     dad.send(GroupCommand::Join {
         link: link.clone(),
         computer_name: "Desktop".into(),
-    })
-    .await;
+    });
     dad.roster(|state| state.people.len() == 2).await;
 
     // The same link a second time: refused.
-    stranger
-        .send(GroupCommand::Join {
-            link,
-            computer_name: "Unknown".into(),
-        })
-        .await;
+    stranger.send(GroupCommand::Join {
+        link,
+        computer_name: "Unknown".into(),
+    });
     stranger
         .wait(|event| {
             matches!(
@@ -401,8 +381,7 @@ async fn a_used_or_foreign_invite_is_refused_and_members_cannot_invite_people() 
     dad.send(GroupCommand::InvitePerson {
         name: "Friend".into(),
         role: Role::Member,
-    })
-    .await;
+    });
     dad.wait(|event| {
         matches!(
             event,
@@ -413,17 +392,18 @@ async fn a_used_or_foreign_invite_is_refused_and_members_cannot_invite_people() 
     .await;
 
     // A stranger pushing knowledge is refused at the door.
-    let response = net
+    let handler = net
         .handlers
         .lock()
         .expect("not poisoned")
         .get(&mum.device)
         .cloned()
-        .expect("mum listening")
+        .expect("mum listening");
+    let response = handler
         .handle(
             stranger.device,
             PeerRequest::Push {
-                group: mum.roster(|_| true).await.group,
+                group: family.group,
                 membership: Vec::new(),
                 knowledge: Vec::new(),
             },

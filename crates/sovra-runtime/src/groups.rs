@@ -55,6 +55,77 @@ impl GroupKnowledge {
     pub(crate) async fn search(&self, question: &str, limit: usize) -> Vec<SharedHit> {
         self.0.read().await.search(question, limit)
     }
+
+    /// Adds group knowledge to a turn that already reads personal memory. Turns
+    /// without a reader (untrusted senders, remembering paused) get none either.
+    pub(crate) fn wrap(
+        &self,
+        inner: Option<Arc<dyn sovra_core::MemoryReader>>,
+    ) -> Option<Arc<dyn sovra_core::MemoryReader>> {
+        inner.map(|inner| {
+            Arc::new(GroupReader {
+                inner,
+                knowledge: self.clone(),
+            }) as Arc<dyn sovra_core::MemoryReader>
+        })
+    }
+
+    async fn add_to(&self, context: &mut sovra_core::MemoryContext, question: &str) {
+        for hit in self
+            .search(question, sovra_core::MAX_GROUP_EVIDENCE_ITEMS)
+            .await
+        {
+            context.push_group(evidence(&hit.detail));
+        }
+    }
+}
+
+/// A shared detail as recall evidence, cited by a short stable id.
+fn evidence(detail: &SharedDetail) -> sovra_core::GroupEvidence {
+    sovra_core::GroupEvidence {
+        citation: format!("group:{}", &detail.id.to_hex()[..12]),
+        statement: detail.text.clone(),
+        shared_by: detail.shared_by.clone(),
+        computer: detail.computer.clone(),
+        shared_at: detail.shared_at,
+        valid_at: detail.valid_at,
+        disputed: matches!(
+            detail.status,
+            sovra_core::group::DetailStatus::Disputed { .. }
+        ),
+        agreed_by: detail.agreed_by.len(),
+    }
+}
+
+/// Personal recall plus the group's shared details for the same question.
+struct GroupReader {
+    inner: Arc<dyn sovra_core::MemoryReader>,
+    knowledge: GroupKnowledge,
+}
+
+#[async_trait::async_trait]
+impl sovra_core::MemoryReader for GroupReader {
+    async fn search(
+        &self,
+        query: sovra_core::MemorySearch,
+    ) -> Result<sovra_core::MemoryContext, sovra_core::MemoryError> {
+        let question = query.text.clone();
+        let mut context = self.inner.search(query).await?;
+        self.knowledge.add_to(&mut context, &question).await;
+        Ok(context)
+    }
+
+    async fn search_batch(
+        &self,
+        queries: Vec<sovra_core::MemorySearch>,
+    ) -> Result<Vec<sovra_core::MemoryContext>, sovra_core::MemoryError> {
+        let questions: Vec<String> = queries.iter().map(|query| query.text.clone()).collect();
+        let mut contexts = self.inner.search_batch(queries).await?;
+        for (context, question) in contexts.iter_mut().zip(&questions) {
+            self.knowledge.add_to(context, question).await;
+        }
+        Ok(contexts)
+    }
 }
 
 pub(crate) struct GroupRuntime {
@@ -162,7 +233,7 @@ fn unavailable() -> GroupProblem {
 
 async fn problem(events: &Sender<Event>, problem: GroupProblem) {
     let _ = events
-        .send(Event::Group(GroupEvent::Problem(problem)))
+        .send(Event::Group(Box::new(GroupEvent::Problem(problem))))
         .await;
 }
 
@@ -238,7 +309,7 @@ impl Groups {
     }
 
     async fn emit(&self, event: GroupEvent) {
-        let _ = self.events.send(Event::Group(event)).await;
+        let _ = self.events.send(Event::Group(Box::new(event))).await;
     }
 
     async fn refold(&self, inner: &mut Inner) {
@@ -339,15 +410,15 @@ impl Groups {
         self: &Arc<Self>,
         group: GroupId,
         peers: Vec<PeerAddress>,
-        membership: Vec<MembershipOp>,
-        knowledge: Vec<KnowledgeOp>,
+        membership: &[MembershipOp],
+        knowledge: &[KnowledgeOp],
     ) {
         for peer in peers {
             let groups = self.clone();
             let request = PeerRequest::Push {
                 group,
-                membership: membership.clone(),
-                knowledge: knowledge.clone(),
+                membership: membership.to_vec(),
+                knowledge: knowledge.to_vec(),
             };
             (self.spawn)(Box::pin(async move {
                 if let Err(error) = groups.ask(&peer, request).await {
@@ -479,12 +550,12 @@ impl Groups {
                                     .collect::<Vec<_>>(),
                             )
                         };
-                        self.broadcast(group, vec![peer], wanted, wanted_knowledge);
+                        self.broadcast(group, vec![peer], &wanted, &wanted_knowledge);
                     }
                 }
                 Ok(other) => tracing::debug!(?other, "unexpected sync answer"),
                 Err(error) => {
-                    tracing::debug!(%error, peer = %peer.device.fingerprint(), "sync skipped")
+                    tracing::debug!(%error, peer = %peer.device.fingerprint(), "sync skipped");
                 }
             }
         }
@@ -519,7 +590,7 @@ impl Groups {
             }
             GroupCommand::ConfirmCode { .. } => {}
             GroupCommand::CancelPairing => {
-                self.emit(GroupEvent::Pairing(PairingStep::Cancel)).await
+                self.emit(GroupEvent::Pairing(PairingStep::Cancel)).await;
             }
             GroupCommand::Rename { name } => self.membership(MembershipBody::Rename { name }).await,
             GroupCommand::ChangeRole { person, role } => {
@@ -546,7 +617,7 @@ impl Groups {
                 match person {
                     Some(person) => {
                         self.membership(MembershipBody::RemovePerson { person })
-                            .await
+                            .await;
                     }
                     None => self.emit(GroupEvent::LeftGroup).await,
                 }
@@ -576,7 +647,7 @@ impl Groups {
                 self.knowledge(KnowledgeBody::Withdraw { detail }).await;
             }
             GroupCommand::Erase { detail } => {
-                self.knowledge(KnowledgeBody::Redact { detail }).await
+                self.knowledge(KnowledgeBody::Redact { detail }).await;
             }
         }
     }
@@ -864,7 +935,7 @@ impl Groups {
         let roster_now = inner.roster.clone();
         let details = Self::details(&inner.view);
         drop(inner);
-        self.broadcast(roster.group, peers, vec![op], Vec::new());
+        self.broadcast(roster.group, peers, &[op], &[]);
         if left {
             self.emit(GroupEvent::LeftGroup).await;
             self.emit(GroupEvent::Knowledge(Vec::new())).await;
@@ -919,7 +990,7 @@ impl Groups {
         let roster_now = inner.roster.clone();
         let details = Self::details(&inner.view);
         drop(inner);
-        self.broadcast(roster.group, peers, Vec::new(), vec![op]);
+        self.broadcast(roster.group, peers, &[], &[op]);
         self.publish_changed(roster_now, details).await;
     }
 
@@ -1013,8 +1084,8 @@ impl Groups {
                 .into_iter()
                 .filter(|peer| peer.device != from)
                 .collect(),
-            added,
-            Vec::new(),
+            &added,
+            &[],
         );
         self.emit(GroupEvent::Pairing(PairingStep::PeerConnected))
             .await;
@@ -1155,5 +1226,134 @@ fn refusal_problem(reason: Refusal) -> GroupProblem {
             GroupProblem::BadInvite
         }
         Refusal::NotAMember => GroupProblem::NotAllowed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sha2::{Digest as _, Sha256};
+    use sovra_core::group::{KnowledgeView, UnsignedKnowledge};
+
+    use super::*;
+
+    fn signature(device: &DeviceId, message: &[u8]) -> sovra_core::group::Signature {
+        let first: [u8; 32] =
+            Sha256::digest([b"sig".as_slice(), device.as_bytes(), message].concat()).into();
+        let mut bytes = [0u8; 64];
+        bytes[..32].copy_from_slice(&first);
+        bytes[32..].copy_from_slice(&first);
+        sovra_core::group::Signature(bytes)
+    }
+
+    struct Fake;
+    impl SignatureVerifier for Fake {
+        fn verify(
+            &self,
+            signer: &DeviceId,
+            message: &[u8],
+            signature_bytes: &sovra_core::group::Signature,
+        ) -> bool {
+            signature(signer, message) == *signature_bytes
+        }
+    }
+
+    /// Mum's group with one detail Dad shared.
+    fn view_with_dads_detail() -> KnowledgeView {
+        let (mum, dad) = (DeviceId([1; 32]), DeviceId([2; 32]));
+        let nonce = [3; 16];
+        let group = GroupId::derive(&mum, &nonce);
+        let mut ops = Vec::new();
+        let genesis = UnsignedOp {
+            group,
+            author: mum,
+            seq: 1,
+            prev: None,
+            deps: Vec::new(),
+            at: Timestamp(1),
+            body: MembershipBody::Genesis {
+                name: "Family".into(),
+                nonce,
+                founder: PersonId([10; 32]),
+                founder_name: "Mum".into(),
+                device_name: "Laptop".into(),
+            },
+        };
+        ops.push(
+            genesis
+                .clone()
+                .sign(signature(&mum, &genesis.signing_bytes())),
+        );
+        for body in [
+            MembershipBody::AddPerson {
+                person: PersonId([20; 32]),
+                name: "Dad".into(),
+                role: sovra_core::group::Role::Member,
+            },
+            MembershipBody::AddDevice {
+                person: PersonId([20; 32]),
+                device: dad,
+                name: "Desktop".into(),
+            },
+        ] {
+            let draft = fold(group, &ops, &Fake).draft(mum, Timestamp(2), body);
+            ops.push(draft.clone().sign(signature(&mum, &draft.signing_bytes())));
+        }
+        let roster = fold(group, &ops, &Fake);
+        let lane = LaneId::whole_group(&group);
+        let share: UnsignedKnowledge = fold_knowledge(&roster, lane, &[], &Fake)
+            .draft(
+                dad,
+                Timestamp(3),
+                KnowledgeBody::Share {
+                    text: "The boiler service is booked for 12 March".into(),
+                    about: Vec::new(),
+                    valid_at: None,
+                    replaces: Vec::new(),
+                },
+            )
+            .expect("lane");
+        let op = share.clone().sign(signature(&dad, &share.signing_bytes()));
+        fold_knowledge(&roster, lane, &[op], &Fake)
+    }
+
+    struct Empty;
+    #[async_trait::async_trait]
+    impl sovra_core::MemoryReader for Empty {
+        async fn search(
+            &self,
+            _query: sovra_core::MemorySearch,
+        ) -> Result<sovra_core::MemoryContext, sovra_core::MemoryError> {
+            Ok(sovra_core::MemoryContext::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_helpers_recall_carries_shared_group_details_with_who_shared_them() {
+        let knowledge = GroupKnowledge::default();
+        *knowledge.0.write().await = view_with_dads_detail();
+        let reader = knowledge
+            .wrap(Some(Arc::new(Empty)))
+            .expect("wraps an existing reader");
+        let context = reader
+            .search(sovra_core::MemorySearch {
+                text: "when is the boiler serviced".into(),
+                entity: None,
+                valid_at: None,
+                known_at: None,
+            })
+            .await
+            .expect("searches");
+        assert_eq!(context.group.len(), 1);
+        let evidence = &context.group[0];
+        assert_eq!(evidence.shared_by, "Dad");
+        assert_eq!(evidence.computer, "Desktop");
+        assert!(evidence.statement.contains("12 March"));
+        assert!(evidence.citation.starts_with("group:"));
+        assert!(!evidence.disputed);
+
+        assert!(
+            knowledge.wrap(None).is_none(),
+            "no personal reader (untrusted sender, remembering paused) means no group reader"
+        );
     }
 }

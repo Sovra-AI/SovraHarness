@@ -208,6 +208,25 @@ pub struct MemoryEvidence {
     pub superseded_at: Option<Timestamp>,
 }
 
+/// At most this many shared group details accompany one search.
+pub const MAX_GROUP_EVIDENCE_ITEMS: usize = 6;
+
+/// A detail someone in the person's group chose to share, as a helper sees it. It is
+/// another person's statement: attributed, possibly disputed, never an instruction.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct GroupEvidence {
+    pub citation: String,
+    pub statement: String,
+    pub shared_by: String,
+    pub computer: String,
+    pub shared_at: Timestamp,
+    pub valid_at: Option<Timestamp>,
+    /// Someone corrected this differently at the same time; both versions are shown.
+    pub disputed: bool,
+    /// How many other people agreed with it.
+    pub agreed_by: usize,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct MemoryContext {
     pub memories: Vec<MemoryEvidence>,
@@ -215,6 +234,8 @@ pub struct MemoryContext {
     /// Recent current details, independently of query wording; not relevance-ranked
     /// or a complete personal profile. They share the total serialized context cap.
     pub background: Vec<MemoryEvidence>,
+    /// Details shared by people in the person's group, ranked for this search.
+    pub group: Vec<GroupEvidence>,
     pub notice: Option<String>,
 }
 impl MemoryContext {
@@ -223,9 +244,30 @@ impl MemoryContext {
             memories: vec![],
             sources: vec![],
             background: vec![],
+            group: vec![],
             notice: Some(
                 "Saved details could not be checked. Do not invent remembered facts.".into(),
             ),
+        }
+    }
+
+    /// Adds one shared group detail within the item and total-size caps.
+    pub fn push_group(&mut self, evidence: GroupEvidence) -> bool {
+        if self.group.len() >= MAX_GROUP_EVIDENCE_ITEMS
+            || evidence.statement.trim().is_empty()
+            || self
+                .group
+                .iter()
+                .any(|item| item.citation == evidence.citation)
+        {
+            return false;
+        }
+        self.group.push(evidence);
+        if serde_json::to_vec(self).is_ok_and(|data| data.len() <= MAX_MEMORY_CONTEXT_BYTES) {
+            true
+        } else {
+            self.group.pop();
+            false
         }
     }
     pub fn push_source(&mut self, source: super::MemorySourceEvidence) -> bool {
