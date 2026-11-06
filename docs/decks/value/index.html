@@ -42,6 +42,48 @@
   .ask .w{font-size:20px;line-height:1.45;color:var(--muted)}
   .ask .w b{color:var(--ink-2)}
   .ask .where{margin-top:auto;font:500 15px var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--violet-3)}
+  /* ---------- frame and no boxes: typography and hairlines, not cards ---------- */
+  html,body{background:#110a1f}
+  #deck{box-shadow:0 60px 160px -40px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.06)}
+  #deck .slide{justify-content:center}
+  #deck .lead{font-size:34px;line-height:1.42;margin-top:30px}
+  #deck .split{gap:84px}
+  #deck .g4,#deck .g3,#deck .g2{gap:36px}
+  #deck .glass,#deck .card{background:none;border:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;border-radius:0}
+  #deck .card{padding:28px 0 0;border-top:2px solid var(--violet-2);overflow:visible;gap:16px}
+  #deck .card.c{border-top-color:var(--cyan)}
+  #deck .card::after{display:none}
+  #deck .card h3{font-size:38px}
+  #deck .card p{font-size:25px;color:var(--ink-2)}
+  #deck .card .ico{background:none;border:0;box-shadow:none;width:auto;height:auto;border-radius:0;place-items:start}
+  #deck .card .ico svg{width:42px;height:42px;stroke-width:1.6}
+  #deck .tile,#deck .step,#deck .phase,#deck .ask{padding:28px 0 0;border-top:2px solid var(--violet-2);min-height:0;gap:14px}
+  #deck .phase.n{border-top-color:var(--cyan)}
+  #deck .phase.d{border-top-color:var(--dim)}
+  #deck .tile .n{font-size:120px}
+  #deck .tile .d,#deck .step p,#deck .phase li,#deck .ask .w{color:var(--ink-2);font-size:24px}
+  #deck .step .sn{font-size:72px}
+  #deck .step h4,#deck .ask .q{font-size:34px}
+  #deck .five .glass{padding:28px 0 0;border-top:2px solid var(--violet-2);min-height:0;gap:16px}
+  #deck .five .glass.c{border-top-color:var(--cyan)}
+  #deck .five p{color:var(--ink-2);font-size:24px}
+  #deck .bar{background:none;border:0;border-left:3px solid var(--violet-2);border-radius:0;padding:10px 0 10px 30px}
+  #deck .bar.c{border-left-color:var(--cyan)}
+  #deck .bar .t{font-size:27px}
+  #deck .xlist .x{background:none;border:0;width:auto;height:auto;border-radius:0;padding-top:6px;font-size:26px;place-items:start}
+  #deck .xlist h4{font-size:32px}
+  #deck .xlist p{font-size:23px;color:var(--ink-2)}
+  #deck .moments,#deck .tbl{background:none;border-radius:0;border-top:2px solid var(--violet-2)}
+  #deck .moments .a,#deck .moments .k2,#deck .tbl .c{font-size:24px}
+  #deck .pill{border:0;background:none;padding:0;border-radius:0}
+  #deck .app .pill{border:1px solid var(--line-2);padding:6px 12px;border-radius:999px}
+  #deck .chip{background:none;border:0;border-top:1px solid var(--line-2);border-radius:0;box-shadow:none;padding:16px 0}
+  #deck .consent{background:none;border:0;box-shadow:none}
+  #deck .consent .hd{border-bottom:2px solid var(--violet-2);padding-left:0}
+  #deck .consent .bd2{padding-left:0}
+  #deck .btn{border-radius:0;border:0;border-bottom:2px solid var(--violet-2);background:none;padding:10px 0;margin-right:28px}
+  #deck .btn.p{background:none;color:var(--violet-3);box-shadow:none}
+  #deck .cmeta .v{font-size:24px}
   svg text{font-family:var(--f-sans)}
   .t-ink{fill:var(--ink)} .t-ink2{fill:var(--ink-2)} .t-mut{fill:var(--muted)} .t-dim{fill:var(--dim)} .t-v{fill:var(--violet-3)} .t-c{fill:var(--cyan-2)} .t-r{fill:var(--rose)}
 </style>
@@ -91,10 +133,8 @@
     </div>
     <svg class="rv z" viewBox="0 0 820 760" style="width:100%;height:100%;max-height:780px" role="img" aria-label="Each week the same explanation is typed again and the answer is lost">
       <ellipse cx="410" cy="380" rx="330" ry="260" fill="url(#gGlow)" opacity=".7"/>
-      <g fill="#fff" stroke="#c4b5fd" stroke-width="2">
-        <rect x="80" y="110" width="660" height="120" rx="20"/>
-        <rect x="80" y="300" width="660" height="120" rx="20"/>
-        <rect x="80" y="490" width="660" height="120" rx="20"/>
+      <g stroke="#c4b5fd" stroke-width="2">
+        <line x1="100" y1="230" x2="740" y2="230"/><line x1="100" y1="420" x2="740" y2="420"/><line x1="100" y1="610" x2="740" y2="610"/>
       </g>
       <text x="120" y="160" class="t-dim mono" style="font-size:16px;letter-spacing:.16em">MONDAY</text>
       <text x="120" y="200" class="t-ink2" style="font:600 24px var(--f-display)">“My landlord is… the boiler is… by Friday…”</text>
@@ -297,24 +337,15 @@
     </div>
     <svg class="rv z" viewBox="0 0 820 680" style="width:100%;max-height:680px" role="img" aria-label="Memory, files, saved work and helpers stay on your computer; models plug in and can be swapped">
       <ellipse cx="410" cy="300" rx="360" ry="250" fill="url(#gGlow)" opacity=".8"/>
-      <rect x="150" y="120" width="520" height="340" rx="30" fill="#fff" stroke="#8b5cf6" stroke-width="2.6"/>
+      <circle cx="410" cy="300" r="250" fill="none" stroke="#8b5cf6" stroke-width="3" stroke-dasharray="14 12"/>
       <text x="410" y="170" text-anchor="middle" class="t-dim mono" style="font-size:16px;letter-spacing:.16em">YOUR COMPUTER · STAYS</text>
-      <g fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.6">
-        <rect x="190" y="200" width="200" height="100" rx="16"/>
-        <rect x="430" y="200" width="200" height="100" rx="16"/>
-        <rect x="190" y="320" width="200" height="100" rx="16"/>
-        <rect x="430" y="320" width="200" height="100" rx="16"/>
-      </g>
+      <g fill="#a855f7"><circle cx="290" cy="215" r="9"/><circle cx="530" cy="215" r="9"/><circle cx="290" cy="335" r="9"/><circle cx="530" cy="335" r="9"/></g>
       <text x="290" y="258" text-anchor="middle" class="t-ink" style="font:650 24px var(--f-display)">Memory</text>
       <text x="530" y="258" text-anchor="middle" class="t-ink" style="font:650 24px var(--f-display)">Your files</text>
       <text x="290" y="378" text-anchor="middle" class="t-ink" style="font:650 24px var(--f-display)">Saved work</text>
       <text x="530" y="378" text-anchor="middle" class="t-ink" style="font:650 24px var(--f-display)">Helpers</text>
       <path d="M410 470 V540" stroke="#0891b2" stroke-width="4" fill="none" marker-start="url(#arrC)"/>
-      <g fill="#fff" stroke="#0891b2" stroke-width="2" stroke-dasharray="8 6">
-        <rect x="150" y="560" width="160" height="70" rx="14"/>
-        <rect x="330" y="560" width="160" height="70" rx="14"/>
-        <rect x="510" y="560" width="160" height="70" rx="14"/>
-      </g>
+      <g fill="#0891b2"><circle cx="230" cy="575" r="8"/><circle cx="410" cy="575" r="8"/><circle cx="590" cy="575" r="8"/></g>
       <text x="230" y="602" text-anchor="middle" class="t-c" style="font:600 20px var(--f-display)">Local model</text>
       <text x="410" y="602" text-anchor="middle" class="t-c" style="font:600 20px var(--f-display)">Cloud you pick</text>
       <text x="590" y="602" text-anchor="middle" class="t-c" style="font:600 20px var(--f-display)">Next year’s</text>

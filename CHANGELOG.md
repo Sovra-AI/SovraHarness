@@ -11,6 +11,11 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- The value and UAE decks share the pitch deck's look: dark cinema bars
+  around the stage, larger type, and no boxes. Cards, tiles, steps, phases,
+  pills, bars and table panels are typography on hairlines; diagrams use
+  dots, rings and glows instead of rectangles.
+
 - Investor pitch at [`docs/decks/pitch/`](docs/decks/pitch/index.html)
   rebuilt as an 18-slide vision deck with a scene on every slide: the
   national border the work leaks across (and then stays inside), the

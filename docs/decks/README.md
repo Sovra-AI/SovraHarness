@@ -84,6 +84,11 @@ at the 1920×1080 stage.
 - Do not invent a market size, revenue, headcount, or a fundraising ask.
 - No tour of libraries.
 
+The `pitch/`, `value/` and `uae/` decks add a deck-local layer on top of the
+Cinema frame: deep-ink bars outside the 16:9 stage, larger type, and **no
+boxes** (cards, chips, tiles and bars become typography on hairlines; diagrams
+use dots, rings and glows). Copy that layer rather than re-inventing it.
+
 Every frame uses the light paper theme, not a near-black canvas. The first
 Cinema cut was dark; it is in git history (`e4142d1`) if it is ever wanted.
 
