@@ -11,6 +11,13 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- New value-realisation deck at
+  [`docs/decks/value/`](docs/decks/value/index.html) (Cinema 1920×1080):
+  value is work that is finished, kept with versions, and easier the next
+  time. It covers the first day, everyday value moments, why memory
+  compounds, sovereignty as how the value stays yours, and where to count it
+  in the app. No invented ROI figures.
+
 - The family and small-business deck at
   [`docs/decks/group/`](docs/decks/group/index.html) is a Cinema 1920×1080
   deck (chrome, cards, diagrams): today is the helper on one computer; next
