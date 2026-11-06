@@ -11,6 +11,16 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- New [`docs/value-realisation/`](docs/value-realisation/README.md): the
+  enterprise case for Sovra. Sovereignty in seven layers (data, knowledge,
+  model, decisions, learning, operations, jurisdiction) with a scorecard; an
+  evidence register citing the code for every Today claim, including every
+  network destination and a fully local setup; value drivers mapped to
+  measures; a value-measurement and pilot method; the person → group →
+  company → regulated vision; regulated and UAE markets (not legal advice);
+  limits and objections; dated sources. The UAE deck now says a fully local
+  setup also needs web search off.
+
 - New UAE deck at [`docs/decks/uae/`](docs/decks/uae/index.html) (Cinema
   1920×1080, plain words): AI-native and 100% sovereign, with value you can
   count. Five things stay sovereign (data, knowledge, the AI itself,

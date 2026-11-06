@@ -21,6 +21,11 @@ Map of the top-level guides for SovraHarness. Start at the
 | [Teams and artifacts](teams-and-artifacts.md) | Helpers in chat and saveable work |
 | [Styling](styling.md) | Native design system and responsive layout |
 
+The enterprise case — sovereignty layer by layer with code evidence, value
+drivers, how value is measured, and the vision from one computer to a
+sovereign organisation — lives in
+[`value-realisation/`](value-realisation/README.md).
+
 Slide decks live under [`decks/`](decks/README.md):
 [investors](decks/investor/index.html),
 [company computers](decks/company-computers/index.html),

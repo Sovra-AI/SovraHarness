@@ -93,6 +93,9 @@ its colours stay. Do not copy it and do not redraw it.
 
 ## Decks
 
+The written source behind the `value/` and `uae/` decks, with code evidence
+for every Today claim, is [`docs/value-realisation/`](../value-realisation/README.md).
+
 | Folder | Frame | Audience |
 | --- | --- | --- |
 | `investor/` | Cinema | Investors. 31 slides: sovereignty, what ships today (with real counts and a real screenshot), then the direction: the organisation as a ledger, fleet search, and proof-of-learning training. |
