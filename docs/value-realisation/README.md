@@ -12,6 +12,7 @@ draw on.
 
 | Reader | Start with | Then |
 | --- | --- | --- |
+| Investor, non-technical audience | [10 — Investor brief](10-investor-brief.md) | [01 — Executive summary](01-executive-summary.md), [09 — Sources](09-sources.md) |
 | Executive or sponsor | [01 — Executive summary](01-executive-summary.md) | [05 — Enterprise vision](05-enterprise-vision.md), [06 — Measuring value](06-measuring-value.md) |
 | Security, data protection, CISO | [02 — Sovereignty model](02-sovereignty-model.md) | [03 — Sovereignty evidence](03-sovereignty-evidence.md), [08 — Limits and objections](08-limits-and-objections.md) |
 | Chief AI Officer, operations | [04 — Value drivers](04-value-drivers.md) | [06 — Measuring value](06-measuring-value.md), [05 — Enterprise vision](05-enterprise-vision.md) |
@@ -43,6 +44,7 @@ flowchart TD
 | [07-regulated-and-sovereign-markets.md](07-regulated-and-sovereign-markets.md) | What local-first removes and what must still ship; sectors; the UAE in detail. Not legal advice. |
 | [08-limits-and-objections.md](08-limits-and-objections.md) | Everything Sovra does not do today, the objection each raises, and the answer. |
 | [09-sources.md](09-sources.md) | Every outside fact, with its date. |
+| [10-investor-brief.md](10-investor-brief.md) | **Non-technical investor brief**: the UAE's AI-native goal, sovereignty in plain words, value realisation, a 10-minute talk track, investor questions and a glossary. |
 
 ## Rules this folder follows
 

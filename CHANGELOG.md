@@ -11,6 +11,13 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Non-technical investor brief at
+  [`docs/value-realisation/10-investor-brief.md`](docs/value-realisation/10-investor-brief.md):
+  the UAE's AI-native goal, sovereignty as five things that stay yours,
+  value realisation through measured pilots, a 10-minute talk track,
+  investor questions and a plain-English glossary. Business model and ask
+  are left for the founder.
+
 - New [`docs/value-realisation/`](docs/value-realisation/README.md): the
   enterprise case for Sovra. Sovereignty in seven layers (data, knowledge,
   model, decisions, learning, operations, jurisdiction) with a scorecard; an
