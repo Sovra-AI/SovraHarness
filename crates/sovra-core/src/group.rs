@@ -16,6 +16,7 @@ mod membership;
 mod pairing;
 mod sas;
 mod session;
+mod wire;
 
 pub use fold::{DeviceEntry, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
 pub use keys::{DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, SignatureVerifier};
@@ -34,6 +35,11 @@ pub use sas::{SAS_EMOJI, ShortAuthString, short_auth_string};
 pub use session::{
     ComputerRow, GroupCommand, GroupEvent, GroupProblem, GroupsView, PersonRow, removal_warning,
     role_label,
+};
+pub use wire::{
+    GroupRecord, GroupStore, GroupStoreError, GroupTransport, MAX_PEER_MESSAGE_BYTES, PEER_ALPN,
+    PeerAddress, PeerHandler, PeerRequest, PeerResponse, Refusal, Spawn, TransportError,
+    admits_request, join_transcript,
 };
 
 #[cfg(test)]

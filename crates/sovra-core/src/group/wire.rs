@@ -1,0 +1,202 @@
+//! What computers in a group say to each other, and the ports that carry it.
+//!
+//! Three requests are enough for a working group:
+//!
+//! - **Join**: a computer holding an invite proves it (bound to both computers' keys,
+//!   so a captured proof is useless elsewhere) and receives the group's history.
+//! - **Sync**: "here is what I have"; the answer carries what the asker lacks and lists
+//!   what the answerer lacks, which the asker then **Push**es. Sets of immutable,
+//!   hash-addressed operations make this order-free and idempotent.
+//! - **Push**: new operations, sent as soon as they are made.
+//!
+//! Only computers in the roster may sync or push; joining needs a live invite. The
+//! transport authenticates who is speaking (the QUIC handshake proves the key), so
+//! handlers receive a trusted [`DeviceId`] and decide everything else here, purely.
+
+use std::collections::BTreeSet;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+/// Work the transport needs run in the background (one task per connection). The
+/// runtime provides this so every task has an owner and is cancelled on shutdown.
+pub type Spawn = Arc<dyn Fn(Pin<Box<dyn Future<Output = ()> + Send>>) + Send + Sync>;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+
+use super::fold::GroupState;
+use super::keys::{DeviceId, GroupId, OpHash, PersonId, Signature, SignatureVerifier};
+use super::knowledge::KnowledgeOp;
+use super::membership::MembershipOp;
+
+/// The application protocol name negotiated in the QUIC handshake. Versioned so
+/// computers on different releases can be told apart.
+pub const PEER_ALPN: &[u8] = b"sovra/group/1";
+/// Largest single message either way; a group's whole history fits comfortably.
+pub const MAX_PEER_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "request", rename_all = "snake_case")]
+pub enum PeerRequest {
+    Join {
+        group: GroupId,
+        proof: [u8; 32],
+        person: PersonId,
+        person_name: String,
+        computer_name: String,
+    },
+    Sync {
+        group: GroupId,
+        membership: BTreeSet<OpHash>,
+        knowledge: BTreeSet<OpHash>,
+    },
+    Push {
+        group: GroupId,
+        membership: Vec<MembershipOp>,
+        knowledge: Vec<KnowledgeOp>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "response", rename_all = "snake_case")]
+pub enum PeerResponse {
+    /// The joiner's history: everything it needs to fold the group itself.
+    Joined {
+        membership: Vec<MembershipOp>,
+        knowledge: Vec<KnowledgeOp>,
+    },
+    /// Operations the asker lacked, and hashes the answerer lacks.
+    Synced {
+        membership: Vec<MembershipOp>,
+        knowledge: Vec<KnowledgeOp>,
+        want_membership: BTreeSet<OpHash>,
+        want_knowledge: BTreeSet<OpHash>,
+    },
+    Accepted,
+    Refused {
+        reason: Refusal,
+    },
+}
+
+/// Why a request was turned down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Refusal {
+    NotAMember,
+    WrongGroup,
+    InviteUnknown,
+    InviteExpired,
+    InviteUsed,
+    Malformed,
+}
+
+/// The bytes a join proof is bound to: both computers and the group.
+pub fn join_transcript(inviter: &DeviceId, joiner: &DeviceId, group: &GroupId) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"sovra-join-v1");
+    hasher.update(inviter.as_bytes());
+    hasher.update(joiner.as_bytes());
+    hasher.update(group.as_bytes());
+    hasher.finalize().to_vec()
+}
+
+/// Whether a request from `from` may be served at all. Joining is the only request a
+/// computer outside the roster may make.
+pub fn admits_request(
+    roster: Option<&GroupState>,
+    from: &DeviceId,
+    request: &PeerRequest,
+) -> Result<(), Refusal> {
+    let group = match request {
+        PeerRequest::Join { group, .. } => {
+            return match roster {
+                Some(state) if state.group == *group => Ok(()),
+                _ => Err(Refusal::WrongGroup),
+            };
+        }
+        PeerRequest::Sync { group, .. } | PeerRequest::Push { group, .. } => group,
+    };
+    match roster {
+        Some(state) if state.group != *group => Err(Refusal::WrongGroup),
+        Some(state) if state.admits(from) => Ok(()),
+        Some(_) => Err(Refusal::NotAMember),
+        None => Err(Refusal::WrongGroup),
+    }
+}
+
+/// Where to reach a computer: its key plus hints. Hints are optional; with relays and
+/// address lookup the key alone is enough once a computer is online.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerAddress {
+    pub device: DeviceId,
+    pub relay: Option<String>,
+    pub addrs: Vec<String>,
+}
+
+/// Why a request could not be delivered.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TransportError {
+    #[error("couldn't reach that computer: {0}")]
+    Unreachable(String),
+    #[error("the other computer answered something unexpected: {0}")]
+    Protocol(String),
+    #[error("the transport has shut down")]
+    Closed,
+}
+
+/// Serves requests from other computers. Implemented by the runtime.
+#[async_trait::async_trait]
+pub trait PeerHandler: Send + Sync {
+    async fn handle(&self, from: DeviceId, request: PeerRequest) -> PeerResponse;
+}
+
+/// The network as the runtime sees it. Implemented by the mesh adapter, which owns
+/// this computer's device key and never lets it out.
+#[async_trait::async_trait]
+pub trait GroupTransport: Send + Sync {
+    fn this_device(&self) -> DeviceId;
+    fn sign(&self, message: &[u8]) -> Signature;
+    fn verifier(&self) -> Arc<dyn SignatureVerifier + Send + Sync>;
+    /// How others can reach this computer right now (for join links).
+    fn address(&self) -> PeerAddress;
+    /// Accepts connections and hands each request to `handler`, until [`Self::close`].
+    /// Each connection runs on `spawn`.
+    async fn serve(&self, handler: Arc<dyn PeerHandler>, spawn: Spawn);
+    async fn request(
+        &self,
+        to: &PeerAddress,
+        request: PeerRequest,
+    ) -> Result<PeerResponse, TransportError>;
+    async fn close(&self);
+}
+
+/// Everything this computer keeps about its group.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct GroupRecord {
+    /// This computer's person, once it has founded or joined a group.
+    pub person: Option<PersonId>,
+    pub person_name: String,
+    pub computer_name: String,
+    pub group: Option<GroupId>,
+    pub membership: Vec<MembershipOp>,
+    pub knowledge: Vec<KnowledgeOp>,
+    /// Last known way to reach each computer, learned from links and sync.
+    pub addresses: Vec<PeerAddress>,
+}
+
+/// Why the group record could not be read or written.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GroupStoreError {
+    #[error("couldn't read saved group details: {0}")]
+    Read(String),
+    #[error("couldn't save group details: {0}")]
+    Write(String),
+}
+
+/// Durable storage for [`GroupRecord`]. Implemented by an adapter.
+#[async_trait::async_trait]
+pub trait GroupStore: Send + Sync {
+    async fn load(&self) -> Result<GroupRecord, GroupStoreError>;
+    async fn save(&self, record: &GroupRecord) -> Result<(), GroupStoreError>;
+}

@@ -1,0 +1,24 @@
+[package]
+name = "sovra-mesh"
+description = "Peer-to-peer adapter: computers in a group dial each other by key over iroh."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+iroh = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sovra-core = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# Tests need a reactor for iroh; library code never names tokio — the runtime owns it.
+tokio = { workspace = true }
+
+[lints]
+workspace = true
