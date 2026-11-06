@@ -332,7 +332,7 @@ fn group_device_key(credentials: &dyn sovra_providers::CredentialStore) -> Optio
 /// reaches (`SOVRA_GROUP_REACH=local` keeps it to direct, same-network connections).
 fn group_services(dirs: &directories::ProjectDirs) -> Option<sovra_runtime::GroupServices> {
     let secret = group_device_key(credential_store(dirs).as_ref())?;
-    let reach = if std::env::var("SOVRA_GROUP_REACH").is_ok_and(|value| value == "local") {
+    let reach = if std::env::var_os("SOVRA_GROUP_REACH").is_some_and(|value| value == "local") {
         sovra_mesh::Reach::LocalOnly
     } else {
         sovra_mesh::Reach::Internet
