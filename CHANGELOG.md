@@ -22,9 +22,9 @@ move them under a version heading when the tag is cut.
   works from `file://`. The pitch, value and UAE decks carry an **All decks**
   pill (`shared/decknav.js`) that returns to the site.
 
-- Pitch slide 4 (`docs/decks/pitch/index.html#4`) now leads with the play:
-  owning the sovereign stack. The isometric layers stay on the poster
-  (national compute, national models, talent and policy, the desk / Sovra).
+- Pitch slide 4 (`docs/decks/pitch/index.html#4`) states the play in type —
+  own the sovereign stack — then four readable layers: the desk / Sovra,
+  talent and policy, national models, and national compute.
 - Record deny exceptions for `RUSTSEC-2026-0454` (reblessive `Send`/`Sync` in
   `surrealdb-core` 3.3.4) and `RUSTSEC-2026-0452` (short-key read in
   `surrealkv` 0.21.4). Both are patched only in SurrealDB 4.0.0; the embedded
@@ -50,7 +50,7 @@ move them under a version heading when the tag is cut.
 - Investor pitch at [`docs/decks/pitch/`](docs/decks/pitch/index.html)
   rebuilt as an 18-slide vision deck with a scene on every slide: the
   national border the work leaks across (and then stays inside), the
-  isometric national stack with Sovra as the desk layer, the orbit of five
+  sovereign stack with Sovra as the desk layer, the orbit of five
   things that stay yours, a constellation from one desk to a nation, the
   sealed national ledger with a residency report, lessons flowing into the
   nation's own AI, and three.js globes. Dark cinema bars frame the 16:9
