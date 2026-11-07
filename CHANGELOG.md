@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Knowledge map: clearer guidance, readable clickable labels, keyboard-accessible
+  connection filters, and named zoom and reading controls. Labels try several
+  positions to avoid covering other details; the map has more room to explore.
+  Focus on a detail to see only its direct connections, then use Show all to
+  return to the complete map.
+
 - Every deck and the decks site use the light colour scheme only. The
   deep-ink slides are gone from the pitch, value and UAE decks, the bars
   around the stage are pale lavender, and the site's list and viewer bar are

@@ -233,6 +233,7 @@ fn main() -> gpui_kit::Result<()> {
         ("standard", 1280., 820., 100),
         ("wide", 2560., 1440., 100),
         ("minimum", 640., 420., 100),
+        ("enlarged", 640., 420., 200),
     ] {
         for (theme, mode) in [("dark", ThemeMode::Dark), ("light", ThemeMode::Light)] {
             let mut cx = HeadlessAppContext::with_platform(
@@ -320,6 +321,19 @@ fn main() -> gpui_kit::Result<()> {
                 window,
                 &output.join(format!("{name}-{theme}-selected.png")),
             )?;
+            if name == "standard" || name == "wide" {
+                reveal(&mut cx, window, "memory-graph-focus")?;
+                cx.update_window(window, |_, window, cx| {
+                    window.click("memory-graph-focus", cx);
+                })?;
+                settle(&cx);
+                reveal(&mut cx, window, "memory-graph-canvas")?;
+                capture(
+                    &mut cx,
+                    window,
+                    &output.join(format!("{name}-{theme}-focused.png")),
+                )?;
+            }
         }
     }
     Ok(())

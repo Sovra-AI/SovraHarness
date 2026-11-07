@@ -10,6 +10,12 @@ picker and right-to-left layout. Settings → Groups lets a family or small team
 share helpers and memory across their computers. macOS, Windows and Linux from
 one codebase.
 
+The Knowledge page includes an interactive map of saved details and their
+connections. Select a label to read its story, filter the kinds of connections,
+or choose **Read as a list**. **Focus on these connections** opens a smaller
+map around the selected detail; **Show all** restores the overview. The map
+renders natively inside the app, with no extra runtime or browser dependency.
+
 ## Quick start
 
 ```sh

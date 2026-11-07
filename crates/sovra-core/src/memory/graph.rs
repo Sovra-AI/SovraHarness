@@ -83,6 +83,38 @@ pub struct MemoryGraph {
     pub omitted: bool,
 }
 
+impl MemoryGraph {
+    /// A reading view of one detail and its direct connections. No inferred links
+    /// are added, and the source graph remains available to return to the overview.
+    #[must_use]
+    pub fn around(&self, selected: &MemoryGraphNodeId) -> Self {
+        let edges: Vec<_> = self
+            .edges
+            .iter()
+            .filter(|edge| &edge.from == selected || &edge.to == selected)
+            .cloned()
+            .collect();
+        let nodes: Vec<_> = self
+            .nodes
+            .iter()
+            .filter(|node| {
+                &node.id == selected
+                    || edges
+                        .iter()
+                        .any(|edge| edge.from == node.id || edge.to == node.id)
+            })
+            .cloned()
+            .collect();
+        let points = layout_memory_graph(&nodes, &edges, MEMORY_GRAPH_SQUARE);
+        Self {
+            nodes,
+            edges,
+            points,
+            omitted: self.omitted,
+        }
+    }
+}
+
 /// Two saved details whose wording matches or nearly matches.
 /// `newer` was saved later. Both records stay.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -732,6 +764,41 @@ mod tests {
             session: chat.map(str::to_owned),
             title: chat.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn focused_map_keeps_only_direct_evidence_and_preserves_the_overview() {
+        let graph = memory_graph(
+            &[
+                record(fact("a", "Maya lives in Oslo", &["Maya", "Oslo"], 1), None),
+                record(fact("b", "Maya likes tea", &["Maya"], 2), None),
+                record(fact("c", "Oslo trip in May", &["Oslo"], 3), None),
+                record(fact("d", "Garden needs water", &["Garden"], 4), None),
+            ],
+            &[],
+        );
+        let id = MemoryGraphNodeId::Detail(FactId("b".into()));
+        let focused = graph.around(&id);
+        assert_eq!(focused.nodes.len(), 2);
+        assert_eq!(focused.edges.len(), 1);
+        assert_eq!(focused.points.len(), focused.nodes.len());
+        assert!(
+            focused
+                .edges
+                .iter()
+                .all(|edge| edge.from == id || edge.to == id)
+        );
+        assert_eq!(graph.nodes.len(), 4);
+        let isolated = graph.around(&MemoryGraphNodeId::Detail(FactId("d".into())));
+        assert_eq!(isolated.nodes.len(), 1);
+        assert_eq!(isolated.edges.len(), 0);
+        assert_eq!(
+            graph
+                .around(&MemoryGraphNodeId::Detail(FactId("missing".into())))
+                .nodes
+                .len(),
+            0
+        );
     }
 
     #[test]

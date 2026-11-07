@@ -4,7 +4,7 @@
 //! neighbours, drag a detail to move it, drag the background to pan, and pinch or
 //! Ctrl/⌘ + scroll to zoom. The legend doubles as a filter. Links are only the ones
 //! the domain stored or the person confirmed. Words stay in the inspector and in an
-//! optional list, so the drawing is never the only way to read or reach a detail.
+//! optional list; clickable labels also keep the map reachable by keyboard.
 
 mod viewport;
 
@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use gpui_kit::component::{
     ActiveTheme as _, Selectable as _, Sizable as _, button::ButtonVariants as _, h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Bounds, Context, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
     PathBuilder, Pixels, Point, ScrollDelta, StatefulInteractiveElement as _, Styled,
@@ -115,6 +116,7 @@ pub(super) struct GraphState {
     pinned: HashMap<MemoryGraphNodeId, (f32, f32)>,
     hidden: [bool; 4],
     list_open: bool,
+    focused: bool,
     layout: RefCell<Option<CachedLayout>>,
 }
 
@@ -181,7 +183,7 @@ impl MemoryView {
                     .min_w_0()
                     .whitespace_normal()
                     .sovra_text(TextRole::Caption, cx)
-                    .child("Lines join a shared subject, the same original message, an earlier version, or the chat a detail came from. The word you, on its own, is not a link."),
+                    .child("See how your saved details fit together. Choose a detail to read it and discover what connects to it."),
             );
         let facts = &self.state.page.facts;
         if facts.is_empty() {
@@ -218,7 +220,14 @@ impl MemoryView {
             .as_ref()
             .map_or(&[][..], |report| report.exact.as_slice());
         let records = graph_records(facts, &self.state.page.chats);
-        let graph = memory_graph(&records, versions);
+        let overview = memory_graph(&records, versions);
+        let graph = if self.graph.focused {
+            self.graph_selection
+                .as_ref()
+                .map_or_else(|| overview.clone(), |id| overview.around(id))
+        } else {
+            overview
+        };
         let selected = self
             .graph_selection
             .clone()
@@ -226,6 +235,15 @@ impl MemoryView {
         column = column
             .child(self.graph_toolbar(&graph, cx))
             .child(self.graph_body(&graph, selected.as_ref(), window, cx));
+        if self.graph.focused {
+            column = column.child(div()
+                .id("memory-graph-focus-status")
+                .test_support()
+                .aria_label("Showing one detail and its direct connections. Choose Show all to return to the whole map.")
+                .sovra_text(TextRole::Caption, cx)
+                .whitespace_normal()
+                .child("Showing one detail and its direct connections. Choose Show all to return to the whole map."));
+        }
         if graph.omitted {
             column = column.child(
                 div()
@@ -276,26 +294,13 @@ impl MemoryView {
                 .bg(kind.ink(&t.graph))
                 .when_chat(kind == LinkKind::Chat, t.radius.small, t.radius.pill);
             legend = legend.child(
-                h_flex()
-                    .id(("memory-graph-filter", index))
-                    .test_support()
-                    .aria_label(label)
-                    .cursor_pointer()
-                    .min_w_0()
-                    .items_center()
-                    .gap(t.space.snug)
-                    .px(t.space.small)
-                    .py(t.space.compact)
+                design::button(("memory-graph-filter", index), "", cx)
+                    .accessibility_label(label)
+                    .small()
+                    .selected(shown)
                     .rounded(t.radius.pill)
-                    .border_1()
-                    .border_color(if shown {
-                        t.material_border_strong
-                    } else {
-                        t.material_border
-                    })
-                    .bg(if shown { t.elevated } else { t.subtle })
-                    .opacity(if shown { 1.0 } else { 0.55 })
-                    .hover(|style| style.bg(cx.theme().list_hover))
+                    .px(t.space.small)
+                    .gap(t.space.snug)
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.graph.hidden[index] = !view.graph.hidden[index];
                         view.graph.hovered_link = None;
@@ -314,13 +319,13 @@ impl MemoryView {
         legend
     }
 
-    /// Map-style controls floating in the drawing's corner, always in reach.
+    /// Keep controls outside the drawing so they cannot cover a detail.
     fn graph_controls(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let zoom = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
             design::button(id, label, cx).small().ghost()
         };
-        // Pinned to the drawing so the controls wrap inside a narrow pane.
+        // Controls wrap inside narrow panes and at enlarged text sizes.
         let list_open = self.graph.list_open;
         let pill = h_flex()
             .max_w_full()
@@ -335,6 +340,7 @@ impl MemoryView {
             .shadow(vec![t.button_shadow])
             .child(
                 zoom("memory-graph-zoom-out", "−", cx)
+                    .accessibility_label("Zoom out")
                     .tooltip("Zoom out")
                     .on_click(cx.listener(|view, _, _, cx| {
                         view.zoom_map(1. / design::tokens(cx).graph.zoom_step, cx);
@@ -342,22 +348,26 @@ impl MemoryView {
             )
             .child(
                 zoom("memory-graph-zoom-in", "+", cx)
+                    .accessibility_label("Zoom in")
                     .tooltip("Zoom in")
                     .on_click(cx.listener(|view, _, _, cx| {
                         view.zoom_map(design::tokens(cx).graph.zoom_step, cx);
                     })),
             )
             .child(
-                zoom("memory-graph-fit", "Fit", cx)
+                zoom("memory-graph-fit", "Show all", cx)
                     .tooltip("Show the whole map again")
                     .on_click(cx.listener(|view, _, _, cx| {
                         view.graph.view = Viewport::default();
                         view.graph.pinned.clear();
+                        view.graph.focused = false;
+                        view.graph.hovered = None;
+                        view.graph.hovered_link = None;
                         cx.notify();
                     })),
             )
             .child(
-                zoom("memory-graph-list-toggle", "List", cx)
+                zoom("memory-graph-list-toggle", "Read as a list", cx)
                     .tooltip("Read the map as a list")
                     .selected(list_open)
                     .on_click(cx.listener(|view, _, _, cx| {
@@ -368,14 +378,10 @@ impl MemoryView {
         h_flex()
             .id("memory-graph-controls")
             .test_support()
-            .absolute()
-            .top(t.space.small)
-            .left(t.space.small)
-            .right(t.space.small)
+            .w_full()
+            .min_w_0()
             .justify_end()
             .cursor_default()
-            // Pressing a control must not start a pan or put the selection down.
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(pill)
     }
 
@@ -414,7 +420,12 @@ impl MemoryView {
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let t = design::tokens(cx);
-        let map = self.graph_canvas(graph, selected, window, cx);
+        let map = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.small)
+            .child(self.graph_controls(cx))
+            .child(self.graph_canvas(graph, selected, window, cx));
         let inspector = self.graph_inspector(graph, selected, cx);
         if self.width_class.fits_detail_pane() {
             h_flex()
@@ -707,9 +718,8 @@ impl MemoryView {
                 cx.stop_propagation();
             }));
 
-        let controls = self.graph_controls(cx);
         let Some(frame) = self.graph.frame else {
-            return area.child(controls);
+            return area;
         };
         let origin = frame.bounds.origin;
         let screen: Vec<Point<Pixels>> = spots
@@ -729,7 +739,12 @@ impl MemoryView {
             }
         }
         let hit = closest.max(small);
-        let label_width = ink.label_width.to_pixels(rem);
+        let label_width = if self.graph.focused {
+            ink.focused_label_width
+        } else {
+            ink.label_width
+        }
+        .to_pixels(rem);
         let marker = ink.link_marker.to_pixels(rem);
 
         // Link markers sit under the nodes so a node always wins the pointer.
@@ -782,61 +797,113 @@ impl MemoryView {
                 2
             } else if ranked.contains(&index) {
                 3
-            } else if self.graph.view.zoom >= ink.zoom_labels {
-                4
             } else {
-                u8::MAX
+                4
             }
         };
         let mut order: Vec<usize> = (0..graph.nodes.len())
-            .filter(|index| node_shown[*index] && rank(*index) != u8::MAX)
+            .filter(|index| node_shown[*index])
             .collect();
         order.sort_by_key(|index| rank(*index));
-        let line = rem * 1.6;
+        let base_line = t.layout.compact_control_height.to_pixels(rem);
         let mut placed: Vec<Bounds<Pixels>> = Vec::new();
         for index in order {
             let node = &graph.nodes[index];
             let spot = screen[index];
+            if !frame.bounds.contains(&spot) {
+                continue;
+            }
             #[expect(
                 clippy::cast_precision_loss,
                 reason = "labels are clipped to a few dozen characters"
             )]
             let chars = node.label.chars().count() as f32;
-            let estimate = (rem * 0.55 * chars + t.space.snug.to_pixels(rem) * 2.).min(label_width);
-            let top = spot.y + nodes[index].diameter / 2. + t.space.hair.to_pixels(rem);
-            let rect = Bounds::new(point(spot.x - estimate / 2., top), size(estimate, line));
+            let estimate = (rem * 0.55 * chars + t.space.snug.to_pixels(rem) * 2.)
+                .min(label_width)
+                .min(frame.bounds.size.width);
+            let line = if self.graph.focused {
+                base_line * (rem * 0.5 * chars / estimate).ceil().clamp(1.0, 3.0)
+            } else {
+                base_line
+            };
+            let gap = nodes[index].diameter / 2. + t.space.compact.to_pixels(rem);
+            let candidates = [
+                point(spot.x - estimate / 2., spot.y + gap),
+                point(spot.x - estimate / 2., spot.y - gap - line),
+                point(spot.x + gap, spot.y - line / 2.),
+                point(spot.x - gap - estimate, spot.y - line / 2.),
+            ];
             let focus_label = rank(index) == 0;
-            if !focus_label && placed.iter().any(|other| other.intersects(&rect)) {
-                continue;
-            }
+            let rect = candidates
+                .into_iter()
+                .map(|position| {
+                    let x = position.x.clamp(
+                        frame.bounds.left(),
+                        (frame.bounds.right() - estimate).max(frame.bounds.left()),
+                    );
+                    let y = position.y.clamp(
+                        frame.bounds.top(),
+                        (frame.bounds.bottom() - line).max(frame.bounds.top()),
+                    );
+                    Bounds::new(point(x, y), size(estimate, line))
+                })
+                .find(|rect| {
+                    !placed.iter().any(|other| other.intersects(rect))
+                        && !screen.iter().enumerate().any(|(other, centre)| {
+                            other != index
+                                && node_shown[other]
+                                && rect.intersects(&Bounds::new(
+                                    point(centre.x - hit / 2., centre.y - hit / 2.),
+                                    size(hit, hit),
+                                ))
+                        })
+                });
+            let Some(rect) = rect else { continue };
             placed.push(rect);
+            let target = node.id.clone();
             area = area.child(
-                div()
-                    .absolute()
-                    .left(spot.x - origin.x - label_width / 2.)
-                    .top(top - origin.y)
-                    .w(label_width)
-                    .flex()
-                    .justify_center()
-                    .opacity(nodes[index].alpha)
-                    .child(
+                design::button(
+                    ("memory-graph-label", index),
+                    if self.graph.focused {
+                        String::new()
+                    } else {
+                        node.label.clone()
+                    },
+                    cx,
+                )
+                .small()
+                .ghost()
+                .bg(ink.label)
+                .border_1()
+                .border_color(t.material_border)
+                .accessibility_label(node.label.clone())
+                .absolute()
+                .left(rect.left() - origin.x)
+                .top(rect.top() - origin.y)
+                .w(rect.size.width)
+                .h(line)
+                .min_h(t.layout.compact_control_height)
+                .px(t.space.snug)
+                .rounded(t.radius.small)
+                .selected(focus_label)
+                .tooltip(node.label.clone())
+                .sovra_text(TextRole::Caption, cx)
+                .when(self.graph.focused, |button| {
+                    button.child(
                         div()
-                            .max_w_full()
-                            .truncate()
-                            .px(t.space.snug)
-                            .rounded(t.radius.small)
-                            .bg(ink.label)
-                            .border_1()
-                            .border_color(if focus_label {
-                                ink.focus
-                            } else {
-                                t.material_border
-                            })
-                            .when_shadow(focus_label, t.button_shadow.clone())
-                            .sovra_text(TextRole::Caption, cx)
-                            .text_color(cx.theme().foreground)
+                            .w_full()
+                            .min_w_0()
+                            .whitespace_normal()
+                            .sovra_text(TextRole::Body, cx)
                             .child(node.label.clone()),
-                    ),
+                    )
+                })
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.graph_selection = Some(target.clone());
+                    view.graph.hovered = None;
+                    cx.notify();
+                })),
             );
         }
 
@@ -911,7 +978,7 @@ impl MemoryView {
                     ),
             );
         }
-        area.child(controls)
+        area
     }
 
     fn drag_map(&mut self, at: Point<Pixels>, pressed: bool, cx: &mut Context<Self>) {
@@ -951,6 +1018,7 @@ impl MemoryView {
         // A click on empty space, rather than a pan, puts the selection down.
         if let Some(Drag::Pan { moved: false, .. }) = self.graph.drag {
             self.graph_selection = None;
+            self.graph.focused = false;
         }
         if self.graph.drag.take().is_some() {
             cx.notify();
@@ -980,7 +1048,7 @@ impl MemoryView {
         let heading = match selected {
             Some(MemoryGraphNodeId::Detail(_)) => "Saved detail",
             Some(MemoryGraphNodeId::Chat(_)) => "Chat",
-            None => "The words",
+            None => "Start exploring",
         };
         let mut panel = v_flex()
             .id("memory-graph-inspector")
@@ -1032,6 +1100,20 @@ impl MemoryView {
                         .child("Point at a detail to see what it links to. Click to read it here and follow its links. Drag to move around; pinch or hold Ctrl and scroll to zoom."),
                 );
         };
+        if !self.graph.focused {
+            panel = panel.child(
+                design::button("memory-graph-focus", "Focus on these connections", cx).on_click(
+                    cx.listener(|view, _, _, cx| {
+                        view.graph.focused = true;
+                        view.graph.view = Viewport::default();
+                        view.graph.pinned.clear();
+                        view.graph.hovered = None;
+                        view.graph.hovered_link = None;
+                        cx.notify();
+                    }),
+                ),
+            );
+        }
         let Some(focus) = graph.nodes.iter().position(|node| &node.id == selected) else {
             return panel;
         };
@@ -1085,6 +1167,7 @@ impl MemoryView {
                     .h_auto()
                     .py(t.space.snug)
                     .px(t.space.small)
+                    .accessibility_label(format!("{}: {}", graph.nodes[*node].label, reasons))
                     .tooltip(reasons.clone())
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.graph_selection = Some(target.clone());
@@ -1222,14 +1305,6 @@ trait ChatShape: Styled + Sized {
     fn when_chat(self, chat: bool, square: Pixels, round: Pixels) -> Self {
         self.rounded(if chat { square } else { round })
     }
-
-    fn when_shadow(self, raised: bool, shadow: gpui_kit::BoxShadow) -> Self {
-        if raised {
-            self.shadow(vec![shadow])
-        } else {
-            self
-        }
-    }
 }
 
 impl<T: Styled> ChatShape for T {}
@@ -1291,7 +1366,7 @@ fn reading_words(
     match selected {
         Some(MemoryGraphNodeId::Detail(id)) => {
             facts.iter().find(|fact| &fact.id == id).map_or_else(
-                || "Select a detail in the picture to read it here.".into(),
+                || "Choose any detail to see its story and connections.".into(),
                 |fact| fact.content.clone(),
             )
         }
@@ -1306,7 +1381,7 @@ fn reading_words(
                 None => "These details were saved from this chat.".into(),
             }
         }
-        None => "Select a detail in the picture to read it here.".into(),
+        None => "Choose any detail to see its story and connections.".into(),
     }
 }
 

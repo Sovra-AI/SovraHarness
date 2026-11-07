@@ -197,8 +197,12 @@ fn memory_graph_is_readable_at_every_size(cx: &mut TestAppContext) {
                         .unwrap()
                         .contains("One saved detail")
                 );
-                reveal(window, ("memory-graph-node", 0usize), cx);
-                window.click(("memory-graph-node", 0usize), cx);
+                reveal(window, ("memory-graph-label", 0usize), cx);
+                assert_eq!(
+                    window.find(("memory-graph-label", 0usize)).label(),
+                    Some("Sam likes mint tea.")
+                );
+                window.click(("memory-graph-label", 0usize), cx);
                 window.render_frame(cx);
                 reveal(window, "memory-graph-reading", cx);
                 assert_eq!(
@@ -214,6 +218,35 @@ fn memory_graph_is_readable_at_every_size(cx: &mut TestAppContext) {
                 assert_eq!(
                     window.find("memory-graph-canvas").label(),
                     Some("Picture of saved links")
+                );
+                reveal(window, ("memory-graph-filter", 0usize), cx);
+                window.click(("memory-graph-filter", 0usize), cx);
+                window.render_frame(cx);
+                assert!(
+                    window
+                        .find(("memory-graph-filter", 0usize))
+                        .label()
+                        .unwrap()
+                        .ends_with("hidden")
+                );
+                for _ in 0..200 {
+                    window.press("tab", cx);
+                    if window.find(("memory-graph-filter", 0usize)).focused() == Some(true) {
+                        break;
+                    }
+                }
+                assert_eq!(
+                    window.find(("memory-graph-filter", 0usize)).focused(),
+                    Some(true)
+                );
+                window.press("space", cx);
+                window.render_frame(cx);
+                assert!(
+                    window
+                        .find(("memory-graph-filter", 0usize))
+                        .label()
+                        .unwrap()
+                        .ends_with("shown")
                 );
                 let nodes = node_labels(window);
                 assert_eq!(
@@ -265,8 +298,20 @@ fn memory_graph_is_readable_at_every_size(cx: &mut TestAppContext) {
                 reveal(window, "memory-graph-reading", cx);
                 assert_eq!(
                     window.find("memory-graph-reading").label(),
-                    Some("These details were saved from the chat School pickup.")
+                    Some("These details were saved from the chat School pickup."),
+                    "chat click at {width}x{height}, scale {scale}, mode {mode:?}"
                 );
+                let overview_count = node_labels(window).len();
+                reveal(window, "memory-graph-focus", cx);
+                window.click("memory-graph-focus", cx);
+                window.render_frame(cx);
+                assert!(node_labels(window).len() < overview_count);
+                assert!(window.try_find("memory-graph-focus-status").is_some());
+                reveal(window, "memory-graph-fit", cx);
+                window.click("memory-graph-fit", cx);
+                window.render_frame(cx);
+                assert_eq!(node_labels(window).len(), overview_count);
+                assert!(window.try_find("memory-graph-focus-status").is_none());
                 assert!(window.try_find("memory-duplicate-exact").is_none());
                 reveal(window, "memory-duplicate-check", cx);
                 window.click("memory-duplicate-check", cx);
