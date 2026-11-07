@@ -12,15 +12,15 @@
   /* One site for every deck. A hash router: #/ lists the decks, #/pitch opens
      one, #/pitch/7 opens slide 7. Classic script only, so file:// works. */
   :root{
-    --ink:#f5f3ff;--ink-2:#ddd6fe;--dim:#8b7bb3;--line:rgba(255,255,255,.12);
-    --violet:#a78bfa;--violet-2:#c4b5fd;--cyan:#67e8f9;
+    --ink:#2e0854;--ink-2:#4c1d95;--dim:#8a7aa8;--line:rgba(76,29,149,.16);
+    --violet:#7c3aed;--violet-2:#a855f7;--cyan:#0e7490;
     --f-display:"Inter Tight","IBM Plex Sans",Inter,system-ui,sans-serif;
     --f-sans:Inter,"IBM Plex Sans",system-ui,sans-serif;
     --f-mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
-  body{background:radial-gradient(70% 90% at 82% 10%,#3b0a6b 0%,#22083f 45%,#140627 100%) fixed;color:var(--ink);font-family:var(--f-sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  body{background:radial-gradient(60% 70% at 85% 5%,#f3e8ff 0%,#fbfaff 55%,#f5f0fc 100%) fixed;color:var(--ink);font-family:var(--f-sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
   a{color:inherit;text-decoration:none}
   .mono{font-family:var(--f-mono);letter-spacing:.18em;text-transform:uppercase;font-size:.78rem;color:var(--dim)}
 
@@ -36,24 +36,24 @@
   .keys{margin-top:18px}
   .decks{margin-top:56px;border-top:1px solid var(--line)}
   .deck{display:grid;grid-template-columns:72px 1fr 420px;gap:40px;align-items:center;padding:28px 0;border-bottom:1px solid var(--line);cursor:pointer;transition:background .25s}
-  .deck:hover{background:rgba(255,255,255,.03)}
+  .deck:hover{background:rgba(124,58,237,.04)}
   .deck .n{font-family:var(--f-display);font-weight:800;font-size:56px;letter-spacing:-.05em;color:transparent;-webkit-text-stroke:2px var(--violet)}
   .deck h2{font-family:var(--f-display);font-weight:700;font-size:clamp(26px,2.6vw,40px);letter-spacing:-.025em;line-height:1.05}
   .deck p{font-size:clamp(15px,1.2vw,20px);line-height:1.45;color:var(--ink-2);margin-top:8px;max-width:760px}
   .deck .meta{margin-top:12px;display:flex;gap:26px;flex-wrap:wrap}
-  .thumb{position:relative;width:420px;height:236px;border-radius:14px;overflow:hidden;background:#1a0b33;box-shadow:0 30px 70px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.08)}
+  .thumb{position:relative;width:420px;height:236px;border-radius:14px;overflow:hidden;background:#fbfaff;box-shadow:0 30px 70px -30px rgba(76,29,149,.45),0 0 0 1px rgba(76,29,149,.12)}
   .thumb iframe{position:absolute;left:0;top:0;width:1920px;height:1080px;transform:scale(.21875);transform-origin:0 0;border:0;pointer-events:none;background:#fbfaff}
-  .thumb .open{position:absolute;inset:0;display:grid;place-items:center;opacity:0;background:rgba(20,6,39,.55);font-family:var(--f-mono);font-size:.8rem;letter-spacing:.2em;transition:opacity .25s}
+  .thumb .open{position:absolute;inset:0;display:grid;place-items:center;opacity:0;background:rgba(124,58,237,.55);color:#fff;font-family:var(--f-mono);font-size:.8rem;letter-spacing:.2em;transition:opacity .25s}
   .deck:hover .thumb .open{opacity:1}
   @media (max-width:1100px){.deck{grid-template-columns:52px 1fr}.thumb{display:none}.deck .n{font-size:40px}}
 
   /* ---------- viewer ---------- */
-  #viewer{position:fixed;inset:0;display:none;flex-direction:column;background:#0d0719}
+  #viewer{position:fixed;inset:0;display:none;flex-direction:column;background:#e3dbf0}
   #viewer.on{display:flex}
-  #bar{height:52px;flex:none;display:flex;align-items:center;gap:6px;padding:0 14px;background:#140627;border-bottom:1px solid var(--line);font-family:var(--f-mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);overflow-x:auto}
+  #bar{height:52px;flex:none;display:flex;align-items:center;gap:6px;padding:0 14px;background:#fbfaff;border-bottom:1px solid var(--line);font-family:var(--f-mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);overflow-x:auto}
   #bar a,#bar button{color:var(--dim);background:none;border:0;font:inherit;letter-spacing:inherit;text-transform:inherit;padding:8px 12px;border-radius:8px;cursor:pointer;white-space:nowrap}
-  #bar a:hover,#bar button:hover{color:var(--ink);background:rgba(255,255,255,.06)}
-  #bar a.cur{color:var(--ink);background:rgba(167,139,250,.18)}
+  #bar a:hover,#bar button:hover{color:var(--ink);background:rgba(124,58,237,.08)}
+  #bar a.cur{color:var(--ink);background:rgba(124,58,237,.14)}
   #bar .sp{flex:1}
   #bar .home{color:var(--violet)}
   #frame{flex:1;border:0;width:100%;background:#fbfaff}

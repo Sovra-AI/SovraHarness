@@ -61,8 +61,8 @@
   .srcs .u{font:400 15px var(--f-mono);color:var(--dim);word-break:break-all}
   #deck .slide{justify-content:center}
   /* ---------- frame and no boxes: typography and hairlines, not cards ---------- */
-  html,body{background:#110a1f}
-  #deck{box-shadow:0 60px 160px -40px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.06)}
+  html,body{background:#e3dbf0}
+  #deck{box-shadow:0 50px 140px -50px rgba(46,8,84,.55),0 0 0 1px rgba(76,29,149,.10)}
   #deck .slide{justify-content:center}
   #deck .lead{font-size:34px;line-height:1.42;margin-top:30px}
   #deck .split{gap:84px}
@@ -102,28 +102,6 @@
   #deck .btn{border-radius:0;border:0;border-bottom:2px solid var(--violet-2);background:none;padding:10px 0;margin-right:28px}
   #deck .btn.p{background:none;color:var(--violet-3);box-shadow:none}
   #deck .cmeta .v{font-size:24px}
-  /* ---------- ink slides: deep purple, for the moments that matter ---------- */
-  html,body{background:#0d0719}
-  #deck .slide.ink{background:radial-gradient(70% 90% at 82% 18%,#3b0a6b 0%,#22083f 45%,#140627 100%);color:#f5f3ff}
-  #deck .slide.ink::before{opacity:.35}
-  #deck .ink .chrome,#deck .ink .foot{color:#a78bfa}
-  #deck .ink .chrome .brand b{color:#f5f3ff}
-  #deck .ink h1,#deck .ink h3,#deck .ink h4,#deck .ink .giant,#deck .ink .mega,#deck .ink .quote{color:#f5f3ff}
-  #deck .ink .g{color:#c4b5fd} #deck .ink .gc{color:#67e8f9}
-  #deck .ink .lead,#deck .ink p,#deck .ink li,#deck .ink .bar .t,#deck .ink .d,#deck .ink .w,#deck .ink .v,#deck .ink .tbl .c,#deck .ink .moments .a,#deck .ink .moments .k2{color:#ddd6fe}
-  #deck .ink .lead b,#deck .ink .bar .t b,#deck .ink p b{color:#fff}
-  #deck .ink .eyebrow,#deck .ink .arline,#deck .ink .bar .k,#deck .ink .l,#deck .ink .num,#deck .ink .src,#deck .ink .where,#deck .ink .keep,#deck .ink .cmeta .k,#deck .ink .h,#deck .ink .sn,#deck .ink .k5,#deck .ink .stat .l{color:#a78bfa}
-  #deck .ink .eyebrow::before{background:#a78bfa}
-  #deck .ink .cmeta .v,#deck .ink .stat .n,#deck .ink .tile .n{color:#fff}
-  #deck .ink .card,#deck .ink .tile,#deck .ink .step,#deck .ink .phase,#deck .ink .ask,#deck .ink .five .glass,#deck .ink .moments,#deck .ink .tbl{border-top-color:rgba(255,255,255,.18)}
-  #deck .ink .chip,#deck .ink .tbl .c,#deck .ink .moments .a,#deck .ink .moments .k2,#deck .ink .moments .h,#deck .ink .tbl .h{border-color:rgba(255,255,255,.12)}
-  #deck .ink .bar{border-left-color:#a855f7}
-  #deck .ink .divider .bignum{-webkit-text-stroke:2px rgba(196,181,253,.22)}
-  #deck .ink .xlist .x{color:#c4b5fd}
-  #deck .ink .pill{color:#c4b5fd}
-  #deck .ink .phase li::before{background:#a78bfa}
-  #deck .ink .stat .d{color:#ddd6fe}
-  #deck .ink .srcs p{color:#ddd6fe} #deck .ink .srcs .u{color:#8b7bb3}
   #deck .divider .giant{font-size:140px}
   svg text{font-family:var(--f-sans)}
   .t-ink{fill:var(--ink)} .t-ink2{fill:var(--ink-2)} .t-mut{fill:var(--muted)} .t-dim{fill:var(--dim)} .t-v{fill:var(--violet-3)} .t-c{fill:var(--cyan-2)} .t-r{fill:var(--rose)}
@@ -143,8 +121,8 @@
 <div id="stage"><div id="deck">
 
 <!-- 1 · Title -->
-<section class="slide ink" data-section="United Arab Emirates" data-note="Sovra · AI in every job, with every piece kept in the UAE">
-  <canvas class="bgcanvas" data-hero data-ink></canvas>
+<section class="slide" data-section="United Arab Emirates" data-note="Sovra · AI in every job, with every piece kept in the UAE">
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1180px;gap:0">
     <span class="eyebrow rv">For an AI-native UAE</span>
     <div class="giant rv" style="margin-top:30px">AI-native.<br><span class="g">100% sovereign.</span><br>Value you can <span class="gc">count.</span></div>
@@ -219,7 +197,7 @@
 </section>
 
 <!-- 4 · The problems -->
-<section class="slide flip ink" data-section="What goes wrong" data-note="Sources: MIT NANDA, The GenAI Divide, Jul 2025 (preliminary) · Federal Law 2/2019 Art. 13">
+<section class="slide flip" data-section="What goes wrong" data-note="Sources: MIT NANDA, The GenAI Divide, Jul 2025 (preliminary) · Federal Law 2/2019 Art. 13">
   <div class="split">
     <div>
       <span class="eyebrow rv">What goes wrong</span>
@@ -239,7 +217,7 @@
 </section>
 
 <!-- 5 · Divider: 100% sovereign -->
-<section class="slide divider ink" data-section="Part one" data-note="What 100% sovereign means">
+<section class="slide divider" data-section="Part one" data-note="What 100% sovereign means">
   <div class="bignum">01</div>
   <div class="grow col" style="justify-content:center;max-width:1400px">
     <span class="eyebrow rv">100% sovereign</span>
@@ -391,7 +369,7 @@
 </section>
 
 <!-- 11 · Divider: value -->
-<section class="slide divider cool ink" data-section="Part two" data-note="Value realisation">
+<section class="slide divider cool" data-section="Part two" data-note="Value realisation">
   <div class="bignum">02</div>
   <div class="grow col" style="justify-content:center;max-width:1400px">
     <span class="eyebrow c rv">Value you can count</span>
@@ -483,7 +461,7 @@
 </section>
 
 <!-- 16 · Honest limits -->
-<section class="slide ink" data-section="Not yet" data-note="Said on purpose · your risk team would find these anyway">
+<section class="slide" data-section="Not yet" data-note="Said on purpose · your risk team would find these anyway">
   <span class="eyebrow rv">Not yet · said on purpose</span>
   <h1 class="rv">What Sovra <span class="g">does not</span> do today.</h1>
   <p class="lead rv">Trust is part of the value. Here is the list your risk team would find anyway.</p>
@@ -558,8 +536,8 @@
 </section>
 
 <!-- 19 · Close -->
-<section class="slide ink" data-section="Sovra" data-note="Sovra · AI-native, 100% sovereign, value you can count">
-  <canvas class="bgcanvas" data-hero data-ink></canvas>
+<section class="slide" data-section="Sovra" data-note="Sovra · AI-native, 100% sovereign, value you can count">
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
     <span class="eyebrow rv">The close</span>
     <div class="giant rv" style="margin-top:30px">AI-native, on UAE terms.<br><span class="g">Proved on the desk.</span></div>

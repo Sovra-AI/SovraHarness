@@ -43,8 +43,8 @@
   .ask .w b{color:var(--ink-2)}
   .ask .where{margin-top:auto;font:500 15px var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--violet-3)}
   /* ---------- frame and no boxes: typography and hairlines, not cards ---------- */
-  html,body{background:#110a1f}
-  #deck{box-shadow:0 60px 160px -40px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.06)}
+  html,body{background:#e3dbf0}
+  #deck{box-shadow:0 50px 140px -50px rgba(46,8,84,.55),0 0 0 1px rgba(76,29,149,.10)}
   #deck .slide{justify-content:center}
   #deck .lead{font-size:34px;line-height:1.42;margin-top:30px}
   #deck .split{gap:84px}
@@ -84,28 +84,6 @@
   #deck .btn{border-radius:0;border:0;border-bottom:2px solid var(--violet-2);background:none;padding:10px 0;margin-right:28px}
   #deck .btn.p{background:none;color:var(--violet-3);box-shadow:none}
   #deck .cmeta .v{font-size:24px}
-  /* ---------- ink slides: deep purple, for the moments that matter ---------- */
-  html,body{background:#0d0719}
-  #deck .slide.ink{background:radial-gradient(70% 90% at 82% 18%,#3b0a6b 0%,#22083f 45%,#140627 100%);color:#f5f3ff}
-  #deck .slide.ink::before{opacity:.35}
-  #deck .ink .chrome,#deck .ink .foot{color:#a78bfa}
-  #deck .ink .chrome .brand b{color:#f5f3ff}
-  #deck .ink h1,#deck .ink h3,#deck .ink h4,#deck .ink .giant,#deck .ink .mega,#deck .ink .quote{color:#f5f3ff}
-  #deck .ink .g{color:#c4b5fd} #deck .ink .gc{color:#67e8f9}
-  #deck .ink .lead,#deck .ink p,#deck .ink li,#deck .ink .bar .t,#deck .ink .d,#deck .ink .w,#deck .ink .v,#deck .ink .tbl .c,#deck .ink .moments .a,#deck .ink .moments .k2{color:#ddd6fe}
-  #deck .ink .lead b,#deck .ink .bar .t b,#deck .ink p b{color:#fff}
-  #deck .ink .eyebrow,#deck .ink .arline,#deck .ink .bar .k,#deck .ink .l,#deck .ink .num,#deck .ink .src,#deck .ink .where,#deck .ink .keep,#deck .ink .cmeta .k,#deck .ink .h,#deck .ink .sn,#deck .ink .k5,#deck .ink .stat .l{color:#a78bfa}
-  #deck .ink .eyebrow::before{background:#a78bfa}
-  #deck .ink .cmeta .v,#deck .ink .stat .n,#deck .ink .tile .n{color:#fff}
-  #deck .ink .card,#deck .ink .tile,#deck .ink .step,#deck .ink .phase,#deck .ink .ask,#deck .ink .five .glass,#deck .ink .moments,#deck .ink .tbl{border-top-color:rgba(255,255,255,.18)}
-  #deck .ink .chip,#deck .ink .tbl .c,#deck .ink .moments .a,#deck .ink .moments .k2,#deck .ink .moments .h,#deck .ink .tbl .h{border-color:rgba(255,255,255,.12)}
-  #deck .ink .bar{border-left-color:#a855f7}
-  #deck .ink .divider .bignum{-webkit-text-stroke:2px rgba(196,181,253,.22)}
-  #deck .ink .xlist .x{color:#c4b5fd}
-  #deck .ink .pill{color:#c4b5fd}
-  #deck .ink .phase li::before{background:#a78bfa}
-  #deck .ink .stat .d{color:#ddd6fe}
-  #deck .ink .srcs p{color:#ddd6fe} #deck .ink .srcs .u{color:#8b7bb3}
   #deck .divider .giant{font-size:140px}
   svg text{font-family:var(--f-sans)}
   .t-ink{fill:var(--ink)} .t-ink2{fill:var(--ink-2)} .t-mut{fill:var(--muted)} .t-dim{fill:var(--dim)} .t-v{fill:var(--violet-3)} .t-c{fill:var(--cyan-2)} .t-r{fill:var(--rose)}
@@ -128,8 +106,8 @@
 <div id="stage"><div id="deck">
 
 <!-- 1 · Title -->
-<section class="slide ink" data-section="Value you can count" data-note="Sovra · the value of a helper that stays on your computer">
-  <canvas class="bgcanvas" data-hero data-ink></canvas>
+<section class="slide" data-section="Value you can count" data-note="Sovra · the value of a helper that stays on your computer">
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
     <span class="eyebrow rv">Value realisation</span>
     <div class="giant rv" style="margin-top:34px">Owning it is the <span class="g">promise.</span><br>Using it is the <span class="gc">value.</span></div>
@@ -203,7 +181,7 @@
 </section>
 
 <!-- 4 · Divider: the first day -->
-<section class="slide divider ink" data-section="Part one" data-note="Time to first value">
+<section class="slide divider" data-section="Part one" data-note="Time to first value">
   <div class="bignum">01</div>
   <div class="grow col" style="justify-content:center;max-width:1400px">
     <span class="eyebrow rv">Today · time to first value</span>
@@ -288,7 +266,7 @@
 </section>
 
 <!-- 8 · Divider: compounding -->
-<section class="slide divider cool ink" data-section="Part two" data-note="Value that compounds">
+<section class="slide divider cool" data-section="Part two" data-note="Value that compounds">
   <div class="bignum">02</div>
   <div class="grow col" style="justify-content:center;max-width:1400px">
     <span class="eyebrow c rv">Today · value that compounds</span>
@@ -378,7 +356,7 @@
 </section>
 
 <!-- 12 · Divider: measure -->
-<section class="slide divider ink" data-section="Part three" data-note="Measure it yourself">
+<section class="slide divider" data-section="Part three" data-note="Measure it yourself">
   <div class="bignum">03</div>
   <div class="grow col" style="justify-content:center;max-width:1400px">
     <span class="eyebrow rv">Today · measure it yourself</span>
@@ -474,7 +452,7 @@
 </section>
 
 <!-- 16 · Honest limits -->
-<section class="slide flip ink" data-section="Honesty" data-note="Not yet · said on purpose">
+<section class="slide flip" data-section="Honesty" data-note="Not yet · said on purpose">
   <span class="eyebrow rv">Not yet</span>
   <h1 class="rv">What gets in the way of value <span class="g">today.</span></h1>
   <p class="lead rv">Value claims are only useful if the limits are said out loud.</p>
@@ -487,8 +465,8 @@
 </section>
 
 <!-- 17 · Close -->
-<section class="slide ink" data-section="Sovra" data-note="Sovra · value you can count">
-  <canvas class="bgcanvas" data-hero data-ink></canvas>
+<section class="slide" data-section="Sovra" data-note="Sovra · value you can count">
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
     <span class="eyebrow rv">The close</span>
     <div class="giant rv" style="margin-top:34px">Own the house.<br><span class="g">Count what it gets done.</span></div>

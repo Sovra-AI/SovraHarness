@@ -11,6 +11,11 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Every deck and the decks site use the light colour scheme only. The
+  deep-ink slides are gone from the pitch, value and UAE decks, the bars
+  around the stage are pale lavender, and the site's list and viewer bar are
+  light.
+
 - The decks are one site: [`docs/decks/index.html`](docs/decks/index.html)
   lists every deck with a live preview, routes with the URL hash (`#/pitch`,
   `#/pitch/7`), shows a deck inside the site with a bar to switch decks, and

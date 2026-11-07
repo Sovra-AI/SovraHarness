@@ -11,8 +11,8 @@
 <link rel="stylesheet" href="../shared/cinema.css">
 <style>
   /* ---------- frame ---------- */
-  html,body{background:#0d0719}
-  #deck{box-shadow:0 60px 160px -40px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.06)}
+  html,body{background:#e3dbf0}
+  #deck{box-shadow:0 50px 140px -50px rgba(46,8,84,.55),0 0 0 1px rgba(76,29,149,.10)}
   #deck .slide{justify-content:center}
   #deck .lead{font-size:34px;line-height:1.42;margin-top:30px}
   #deck .split{gap:84px}
@@ -21,21 +21,6 @@
   .cmeta .k{font:500 14px var(--f-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
   .cmeta .v{font-size:24px;color:var(--ink-2);margin-top:8px}
 
-  /* ---------- ink slides: deep purple, for the moments that matter ---------- */
-  #deck .slide.ink{background:radial-gradient(70% 90% at 82% 18%,#3b0a6b 0%,#22083f 45%,#140627 100%);color:#f5f3ff}
-  #deck .slide.ink::before{opacity:.35}
-  #deck .ink .chrome,#deck .ink .foot{color:#a78bfa}
-  #deck .ink .chrome .brand b{color:#f5f3ff}
-  #deck .ink h1,#deck .ink .giant,#deck .ink .mega,#deck .ink .quote{color:#f5f3ff}
-  #deck .ink .g{color:#c4b5fd} #deck .ink .gc{color:#67e8f9}
-  #deck .ink .lead{color:#ddd6fe} #deck .ink .lead b{color:#fff}
-  #deck .ink .eyebrow{color:#c4b5fd}
-  #deck .ink .arline{color:#c4b5fd}
-  #deck .ink .cmeta .k{color:#8b7bb3} #deck .ink .cmeta .v{color:#ede9fe}
-  #deck .ink .ed .n{color:#c4b5fd;-webkit-text-stroke:0} #deck .ink .ed h3{color:#fff} #deck .ink .ed p{color:#ddd6fe} #deck .ink .ed .row{border-top-color:rgba(255,255,255,.14)}
-  #deck .ink .line{border-top-color:rgba(255,255,255,.14)} #deck .ink .line h3{color:#fff} #deck .ink .line p{color:#ddd6fe}
-  #deck .ink .steps > div{border-top-color:rgba(255,255,255,.18)} #deck .ink .steps .sn{color:#c4b5fd} #deck .ink .steps h4{color:#fff} #deck .ink .steps p{color:#ddd6fe}
-  #deck .ink .foot-note{color:#a78bfa}
 
   /* ---------- templates ---------- */
   .statement{align-items:center;text-align:center}
@@ -116,8 +101,8 @@
 <div id="stage"><div id="deck">
 
 <!-- 1 · Title · ink hero -->
-<section class="slide ink" data-section="Sovra" data-note="Sovra · sovereign AI for an AI-native UAE">
-  <canvas class="bgcanvas" data-hero data-ink></canvas>
+<section class="slide" data-section="Sovra" data-note="Sovra · sovereign AI for an AI-native UAE">
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1100px;gap:0">
     <span class="eyebrow rv">Investor pitch · United Arab Emirates</span>
     <div class="giant rv" style="margin-top:30px;font-size:150px">AI-native.<br><span class="g">On UAE terms.</span></div>
@@ -145,7 +130,7 @@
 </section>
 
 <!-- 3 · The question · ink statement -->
-<section class="slide ink statement" data-section="The question" data-note="Source: MIT NANDA, The GenAI Divide, Jul 2025">
+<section class="slide statement" data-section="The question" data-note="Source: MIT NANDA, The GenAI Divide, Jul 2025">
   <canvas class="bgcanvas" data-fx="net" data-x=".5" data-r="1"></canvas>
   <span class="eyebrow rv">The question</span>
   <div class="mega rv" style="margin-top:40px">If AI does half the work,<br><span class="g">whose AI is it?</span></div>
@@ -195,7 +180,7 @@
 </section>
 
 <!-- 5 · The problem · ink editorial -->
-<section class="slide ink" data-section="The problem" data-note="Five things a nation loses with rented AI">
+<section class="slide" data-section="The problem" data-note="Five things a nation loses with rented AI">
   <span class="eyebrow rv">The problem</span>
   <h1 class="rv" style="font-size:66px;margin-top:14px">Rented AI makes a nation AI-native on <span class="g">someone else’s terms.</span></h1>
   <div class="ed">
@@ -444,7 +429,7 @@
 </section>
 
 <!-- 14 · Proof · ink with steps -->
-<section class="slide ink" data-section="Value realisation" data-note="The customer measures the result">
+<section class="slide" data-section="Value realisation" data-note="The customer measures the result">
   <span class="eyebrow rv">Value realisation</span>
   <div class="giant rv" style="margin-top:20px">Proof, <span class="g">not promises.</span></div>
   <p class="lead rv" style="max-width:1300px">Most AI pilots die because nobody agreed what success meant. Ours writes it down first, and the customer holds the numbers.</p>
@@ -506,7 +491,7 @@
 </section>
 
 <!-- 17 · Why Sovra wins · ink lines -->
-<section class="slide ink" data-section="Why Sovra wins" data-note="Why now, why here">
+<section class="slide" data-section="Why Sovra wins" data-note="Why now, why here">
   <span class="eyebrow rv">Why Sovra wins</span>
   <h1 class="rv">The right answer, <span class="g">at the right time.</span></h1>
   <div class="lines">
@@ -530,8 +515,8 @@
 </section>
 
 <!-- 19 · Close · ink hero -->
-<section class="slide ink" data-section="Sovra" data-note="Sovra · AI-native, on UAE terms">
-  <canvas class="bgcanvas" data-hero data-ink></canvas>
+<section class="slide" data-section="Sovra" data-note="Sovra · AI-native, on UAE terms">
+  <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
     <span class="eyebrow rv">Sovra</span>
     <div class="giant rv" style="margin-top:30px">Keep it in the UAE.<br><span class="g">Prove it on the desk.</span></div>
