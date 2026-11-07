@@ -1,5 +1,15 @@
 # Decks
 
+**One site for every deck:** open [`index.html`](index.html) in a browser. It
+lists the decks with a live preview of each title slide and routes with the
+URL hash: `#/` is the list, `#/pitch` opens a deck inside the site with a bar
+to switch decks, and `#/pitch/7` opens slide 7. Keys: `1`–`6` open a deck,
+`Esc` returns to the list, `[` and `]` move between decks, and the deck's own
+keys (arrows, `F`, `O`) work inside it. Each Cinema deck that includes
+`shared/decknav.js` shows an **All decks** pill that returns to the site.
+Adding a deck is one row in the `DECKS` list in `index.html`. Classic scripts
+only, so `file://` works.
+
 Shared presentation frames for Sovra pitches. Each deck is its own folder with
 one `index.html`. Three frames exist; pick the one that matches the audience.
 

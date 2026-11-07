@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- The decks are one site: [`docs/decks/index.html`](docs/decks/index.html)
+  lists every deck with a live preview, routes with the URL hash (`#/pitch`,
+  `#/pitch/7`), shows a deck inside the site with a bar to switch decks, and
+  works from `file://`. The pitch, value and UAE decks carry an **All decks**
+  pill (`shared/decknav.js`) that returns to the site.
+
 - Pitch slide 4 (`docs/decks/pitch/index.html#4`) now leads with the play:
   owning the sovereign stack. The isometric layers stay on the poster
   (national compute, national models, talent and policy, the desk / Sovra).
