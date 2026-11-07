@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sovra · Decks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="shared/fonts/ibm-plex/fonts.css">
+<style>
+  /* One site for every deck. A hash router: #/ lists the decks, #/pitch opens
+     one, #/pitch/7 opens slide 7. Classic script only, so file:// works. */
+  :root{
+    --ink:#f5f3ff;--ink-2:#ddd6fe;--dim:#8b7bb3;--line:rgba(255,255,255,.12);
+    --violet:#a78bfa;--violet-2:#c4b5fd;--cyan:#67e8f9;
+    --f-display:"Inter Tight","IBM Plex Sans",Inter,system-ui,sans-serif;
+    --f-sans:Inter,"IBM Plex Sans",system-ui,sans-serif;
+    --f-mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:radial-gradient(70% 90% at 82% 10%,#3b0a6b 0%,#22083f 45%,#140627 100%) fixed;color:var(--ink);font-family:var(--f-sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  .mono{font-family:var(--f-mono);letter-spacing:.18em;text-transform:uppercase;font-size:.78rem;color:var(--dim)}
+
+  /* ---------- list ---------- */
+  #list{min-height:100%;padding:clamp(24px,5vw,80px) clamp(20px,6vw,120px) 80px;max-width:1600px;margin:0 auto}
+  #list.hidden{display:none}
+  .brand{display:flex;align-items:center;gap:14px;color:var(--violet)}
+  .brand img{width:34px;height:34px}
+  .brand b{color:var(--ink);font-weight:600;letter-spacing:.18em;font-family:var(--f-mono);font-size:.85rem}
+  h1{font-family:var(--f-display);font-weight:800;font-size:clamp(48px,7vw,120px);line-height:.95;letter-spacing:-.045em;margin-top:40px;text-wrap:balance}
+  h1 .g{color:var(--violet-2)} h1 .gc{color:var(--cyan)}
+  .lead{font-size:clamp(18px,1.6vw,26px);line-height:1.45;color:var(--ink-2);max-width:900px;margin-top:22px;font-weight:300}
+  .keys{margin-top:18px}
+  .decks{margin-top:56px;border-top:1px solid var(--line)}
+  .deck{display:grid;grid-template-columns:72px 1fr 420px;gap:40px;align-items:center;padding:28px 0;border-bottom:1px solid var(--line);cursor:pointer;transition:background .25s}
+  .deck:hover{background:rgba(255,255,255,.03)}
+  .deck .n{font-family:var(--f-display);font-weight:800;font-size:56px;letter-spacing:-.05em;color:transparent;-webkit-text-stroke:2px var(--violet)}
+  .deck h2{font-family:var(--f-display);font-weight:700;font-size:clamp(26px,2.6vw,40px);letter-spacing:-.025em;line-height:1.05}
+  .deck p{font-size:clamp(15px,1.2vw,20px);line-height:1.45;color:var(--ink-2);margin-top:8px;max-width:760px}
+  .deck .meta{margin-top:12px;display:flex;gap:26px;flex-wrap:wrap}
+  .thumb{position:relative;width:420px;height:236px;border-radius:14px;overflow:hidden;background:#1a0b33;box-shadow:0 30px 70px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.08)}
+  .thumb iframe{position:absolute;left:0;top:0;width:1920px;height:1080px;transform:scale(.21875);transform-origin:0 0;border:0;pointer-events:none;background:#fbfaff}
+  .thumb .open{position:absolute;inset:0;display:grid;place-items:center;opacity:0;background:rgba(20,6,39,.55);font-family:var(--f-mono);font-size:.8rem;letter-spacing:.2em;transition:opacity .25s}
+  .deck:hover .thumb .open{opacity:1}
+  @media (max-width:1100px){.deck{grid-template-columns:52px 1fr}.thumb{display:none}.deck .n{font-size:40px}}
+
+  /* ---------- viewer ---------- */
+  #viewer{position:fixed;inset:0;display:none;flex-direction:column;background:#0d0719}
+  #viewer.on{display:flex}
+  #bar{height:52px;flex:none;display:flex;align-items:center;gap:6px;padding:0 14px;background:#140627;border-bottom:1px solid var(--line);font-family:var(--f-mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);overflow-x:auto}
+  #bar a,#bar button{color:var(--dim);background:none;border:0;font:inherit;letter-spacing:inherit;text-transform:inherit;padding:8px 12px;border-radius:8px;cursor:pointer;white-space:nowrap}
+  #bar a:hover,#bar button:hover{color:var(--ink);background:rgba(255,255,255,.06)}
+  #bar a.cur{color:var(--ink);background:rgba(167,139,250,.18)}
+  #bar .sp{flex:1}
+  #bar .home{color:var(--violet)}
+  #frame{flex:1;border:0;width:100%;background:#fbfaff}
+</style>
+</head>
+<body>
+
+<main id="list">
+  <div class="brand"><img src="../../crates/sovra-ui/assets/branding/sovra-logo.svg" alt="Sovra"><b>SOVRA · DECKS</b></div>
+  <h1>Every Sovra deck, <span class="g">one site.</span></h1>
+  <p class="lead">Open a deck, move through it with the arrow keys, and switch decks from the bar at the top without leaving the site. Links to a slide inside a deck work too: <span class="mono" style="color:var(--violet-2)">#/pitch/7</span>.</p>
+  <p class="keys mono">1–6 open a deck · Esc back to this list · [ ] previous / next deck · F fullscreen inside a deck</p>
+  <div class="decks" id="decks"></div>
+</main>
+
+<div id="viewer" aria-live="polite">
+  <nav id="bar">
+    <a class="home" href="#/">← All decks</a>
+    <span id="tabs" style="display:contents"></span>
+    <span class="sp"></span>
+    <button id="prev" title="Previous deck ([)">‹ prev deck</button>
+    <button id="next" title="Next deck (])">next deck ›</button>
+    <button id="full" title="Fullscreen (F in the bar)">⛶ fullscreen</button>
+  </nav>
+  <iframe id="frame" title="Deck" allowfullscreen></iframe>
+</div>
+
+<script>
+(function () {
+  var DECKS = [
+    { slug: "pitch", title: "Investor pitch", slides: 19, frame: "Cinema", who: "Investors, non-technical", blurb: "AI-native, on UAE terms. The question, the problem, five things that stay yours, the national ledger, training at home, proof not promises, the ask." },
+    { slug: "uae", title: "AI-native, 100% sovereign", slides: 19, frame: "Cinema", who: "UAE leaders and Chief AI Officers", blurb: "The UAE’s AI-native goal, the five things that must stay sovereign, a value map, a measured pilot, honest limits and sources." },
+    { slug: "value", title: "Value you can count", slides: 17, frame: "Cinema", who: "Anyone judging whether Sovra is worth using", blurb: "Value is work that is finished, kept with versions, and easier the next time. The first day, why memory compounds, where to count it." },
+    { slug: "group", title: "A few computers share helpers and memory", slides: 14, frame: "Cinema", who: "A family or a 3–20 person business", blurb: "Today the helper is on one computer; next, a group of people and their computers share helpers and memory with no central server." },
+    { slug: "investor", title: "Own your intelligence · Investor brief", slides: 31, frame: "Cinema", who: "Investors, long form", blurb: "Sovereignty, what ships today with real counts, then the direction: the organisation as a ledger, fleet search, proof-of-learning training." },
+    { slug: "company-computers", title: "Keep the work on the computers you already own", slides: 15, frame: "Sparse", who: "Company leaders", blurb: "One idea per slide. Fleet, ledger and in-place training are the direction, not today." }
+  ];
+  var list = document.getElementById("list"), decksEl = document.getElementById("decks");
+  var viewer = document.getElementById("viewer"), frame = document.getElementById("frame"), tabs = document.getElementById("tabs");
+  var current = -1;
+
+  function href(d, n) { return "#/" + d.slug + (n ? "/" + n : ""); }
+  function deckUrl(d, n) { return d.slug + "/index.html" + (n ? "#" + n : "#1"); }
+
+  // list rows with a live, scaled preview of each deck's first slide
+  DECKS.forEach(function (d, i) {
+    var row = document.createElement("a"); row.className = "deck"; row.href = href(d);
+    row.innerHTML =
+      '<div class="n">' + String(i + 1).padStart(2, "0") + '</div>' +
+      '<div><h2>' + d.title + '</h2><p>' + d.blurb + '</p>' +
+      '<div class="meta"><span class="mono">' + d.who + '</span><span class="mono">' + d.slides + ' slides</span><span class="mono">' + d.frame + '</span></div></div>' +
+      '<div class="thumb"><iframe loading="lazy" tabindex="-1" src="' + deckUrl(d) + '" title="' + d.title + ' preview"></iframe><div class="open">OPEN · ' + (i + 1) + '</div></div>';
+    decksEl.appendChild(row);
+    var t = document.createElement("a"); t.href = href(d); t.textContent = d.title; t.dataset.i = i; tabs.appendChild(t);
+  });
+
+  function show(i, n) {
+    var d = DECKS[i]; current = i;
+    list.classList.add("hidden"); viewer.classList.add("on");
+    var url = deckUrl(d, n);
+    if (frame.getAttribute("src") !== url) frame.setAttribute("src", url);
+    Array.prototype.forEach.call(tabs.children, function (t, k) { t.classList.toggle("cur", k === i); });
+    document.title = "Sovra · " + d.title;
+    setTimeout(function () { try { frame.focus(); frame.contentWindow.focus(); } catch (e) {} }, 60);
+  }
+  function home() {
+    current = -1; viewer.classList.remove("on"); list.classList.remove("hidden");
+    frame.setAttribute("src", "about:blank"); document.title = "Sovra · Decks";
+  }
+  function route() {
+    var m = /^#\/([a-z-]+)(?:\/(\d+))?/.exec(location.hash || "");
+    if (!m) return home();
+    var i = DECKS.findIndex(function (d) { return d.slug === m[1]; });
+    if (i < 0) return home();
+    show(i, m[2] ? parseInt(m[2], 10) : 0);
+  }
+  function go(i) { location.hash = href(DECKS[(i + DECKS.length) % DECKS.length]); }
+  document.getElementById("prev").onclick = function () { go(current - 1); };
+  document.getElementById("next").onclick = function () { go(current + 1); };
+  document.getElementById("full").onclick = function () {
+    var el = frame; (el.requestFullscreen || el.webkitRequestFullscreen || function () {}).call(el);
+    setTimeout(function () { try { frame.contentWindow.focus(); } catch (e) {} }, 60);
+  };
+  window.addEventListener("hashchange", route);
+  window.addEventListener("keydown", function (e) {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    if (e.key === "Escape" && current >= 0) { location.hash = "#/"; return; }
+    if (e.key === "[" && current >= 0) { go(current - 1); return; }
+    if (e.key === "]" && current >= 0) { go(current + 1); return; }
+    var k = parseInt(e.key, 10);
+    if (k >= 1 && k <= DECKS.length && current < 0) location.hash = href(DECKS[k - 1]);
+  });
+  route();
+})();
+</script>
+</body>
+</html>

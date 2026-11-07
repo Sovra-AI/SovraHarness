@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- The decks are one site: [`docs/decks/index.html`](docs/decks/index.html)
+  lists every deck with a live preview, routes with the URL hash (`#/pitch`,
+  `#/pitch/7`), shows a deck inside the site with a bar to switch decks, and
+  works from `file://`. The pitch, value and UAE decks carry an **All decks**
+  pill (`shared/decknav.js`) that returns to the site.
+
 - The value and UAE decks take the pitch deck's rhythm: deep-ink slides for
   the title, section dividers, the problem and the honest-limits slide, with
   the particle-nation hero on the title and close; light scene and number

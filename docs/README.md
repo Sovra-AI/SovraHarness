@@ -26,7 +26,8 @@ drivers, how value is measured, and the vision from one computer to a
 sovereign organisation — lives in
 [`value-realisation/`](value-realisation/README.md).
 
-Slide decks live under [`decks/`](decks/README.md):
+Slide decks live under [`decks/`](decks/README.md) and open as one site from
+[`decks/index.html`](decks/index.html):
 [investors](decks/investor/index.html),
 [company computers](decks/company-computers/index.html),
 [a family or small business](decks/group/index.html),
