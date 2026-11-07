@@ -11,6 +11,16 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Investor pitch slide 9 shows the permit history as three readable receipts
+  — 12 March, 2 October, and what is current — then the question and the
+  memo. The old timeline no longer crashes the lines together.
+- Investor pitch beats no longer share one side-by-side spread. The answer
+  is a full-width border under the claim, 100% sovereign is five columns,
+  the path is a centered constellation, learning puts the diagram over the
+  type, and the market map sits under its question. Only the product and the
+  ledger keep the headline beside the picture. Slide 4 stays the play: own
+  the sovereign stack, then the four named layers.
+
 - Knowledge map: clearer guidance, readable clickable labels, keyboard-accessible
   connection filters, and named zoom and reading controls. Labels try several
   positions to avoid covering other details; the map has more room to explore.

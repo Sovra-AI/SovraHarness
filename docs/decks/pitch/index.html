@@ -31,6 +31,37 @@
   .poster .over{position:relative;z-index:3;max-width:700px}
   .poster .cap{position:relative;z-index:3;max-width:660px;margin-top:36px;padding-left:30px;border-left:3px solid var(--violet-2);font-size:24px;line-height:1.45;color:var(--ink-2)}
   .poster .cap b{color:var(--ink)}
+  /* Pitch-only rhythms. Side-by-side (.split) stays on the product and the ledger. */
+  .punch{margin-top:22px;padding-left:22px;border-left:3px solid var(--violet-2);font-size:24px;line-height:1.4;color:var(--ink-2);max-width:1500px}
+  .punch b{color:var(--ink)}
+  .punch.mid{margin-left:auto;margin-right:auto;text-align:center;border-left:0;border-top:3px solid var(--violet-2);padding:16px 8px 0;max-width:1180px}
+  .stackpic{width:100%;height:390px;max-height:390px;margin-top:16px}
+  .overpic{width:100%;height:300px;max-height:300px}
+  .quint{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:26px;margin-top:48px}
+  .quint > div{min-width:0;padding-top:18px;border-top:3px solid var(--violet-2);display:flex;flex-direction:column}
+  .quint > div.home{border-top-color:var(--cyan-2)}
+  .quint .num{font:800 104px/1 var(--f-display);letter-spacing:-.06em;color:transparent;-webkit-text-stroke:2px var(--violet-2)}
+  .quint > div.home .num{-webkit-text-stroke-color:var(--cyan-2)}
+  .quint b{display:block;margin-top:36px;font:700 36px/1.05 var(--f-display);letter-spacing:-.03em}
+  .quint span{display:block;margin-top:12px;font-size:22px;line-height:1.35;color:var(--ink-2)}
+  .centerpiece{align-items:center;text-align:center}
+  .centerpiece h1{margin-left:auto;margin-right:auto;text-align:center;font-size:76px;max-width:1480px}
+  .centerpiece .lead{text-align:center;margin-left:auto;margin-right:auto;font-size:26px;line-height:1.35;max-width:1100px}
+  .figure{display:flex;justify-content:center;align-items:center;width:100%;margin-top:2px}
+  .figure .scene{width:500px;height:430px;max-height:430px}
+  .receipts{display:grid;grid-template-columns:minmax(0,1fr) 56px minmax(0,1fr) 56px minmax(0,1fr);gap:8px;margin-top:36px;align-items:stretch}
+  .rec{min-width:0;padding:26px 8px 8px;border-top:3px solid var(--violet-2)}
+  .rec.now{border-top-color:var(--cyan-2)}
+  .rec .when{font:600 18px var(--f-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--violet-3)}
+  .rec.now .when{color:var(--cyan-2)}
+  .rec h3{font:700 40px/1.08 var(--f-display);letter-spacing:-.03em;margin-top:18px}
+  .rec.now h3{color:var(--cyan-2)}
+  .rec p{font-size:24px;line-height:1.35;color:var(--ink-2);margin-top:14px;max-width:460px}
+  .receipts .go{display:flex;align-items:center;justify-content:center;color:var(--cyan-2);font:600 40px/1 var(--f-display);padding-top:8px}
+  .heard{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:48px;align-items:baseline;margin-top:36px;padding-top:26px;border-top:1px solid var(--line-2)}
+  .heard .q{font-family:var(--f-serif);font-style:italic;font-weight:400;font-size:34px;line-height:1.25;color:var(--ink)}
+  .heard .a{font-size:28px;line-height:1.35;color:var(--cyan-2)}
+  .bigstat h1.what{margin-top:0;max-width:none}
   .layers{display:flex;flex-direction:column;margin-top:44px}
   .layers .ly{display:grid;grid-template-columns:minmax(420px,.85fr) 1.25fr;gap:48px;align-items:baseline;padding:22px 24px 22px 28px;border-top:1px solid var(--line-2);border-left:4px solid transparent}
   .layers .ly:last-child{border-bottom:1px solid var(--line-2)}
@@ -77,8 +108,10 @@
   .t-ink{fill:var(--ink)} .t-ink2{fill:var(--ink-2)} .t-mut{fill:var(--muted)} .t-dim{fill:var(--dim)} .t-v{fill:var(--violet-3)} .t-c{fill:var(--cyan-2)} .t-r{fill:var(--rose)}
   .mono{font-family:var(--f-mono)}
   .scene{width:100%;height:100%;max-height:800px;overflow:visible}
+  .scene.stackpic{width:100%;height:440px;max-height:440px;margin-top:12px}
+  .scene.overpic{width:100%;height:340px;max-height:340px;margin-top:0}
   @keyframes orbit{to{transform:rotate(360deg)}}
-  .orb{transform-origin:410px 400px;animation:orbit linear infinite}
+  .orb{transform-origin:410px 400px}
   .orb.o1{animation-duration:14s} .orb.o2{animation-duration:20s;animation-direction:reverse} .orb.o3{animation-duration:26s} .orb.o4{animation-duration:32s;animation-direction:reverse} .orb.o5{animation-duration:40s}
   @keyframes glow{0%,100%{opacity:.55}50%{opacity:1}}
   .pulse{animation:glow 2.6s ease-in-out infinite}
@@ -124,7 +157,7 @@
   <div class="bigstat">
     <div class="n rv" data-count="50" data-suffix="%">50%</div>
     <div>
-      <div class="what rv">of UAE government work is to run on AI that acts, within two years.</div>
+      <h1 class="what rv">of UAE government work is to run on AI that acts, within two years.</h1>
       <div class="src rv">The National · Cabinet decision · 23 Apr 2026</div>
       <div class="statrow rv">
         <div><div class="n" data-count="2027">2027</div><div class="l">Abu Dhabi: first AI-native government</div></div>
@@ -181,63 +214,45 @@
   </div>
 </section>
 
-<!-- 6 · The answer · poster -->
-<section class="slide poster" data-section="The answer" data-note="Sovra keeps the work inside the border">
-  <div class="fill">
-    <svg class="scene rv z" viewBox="0 0 900 800" role="img" aria-label="Inside the national border, work circulates between desks and never crosses it">
-      <use href="#border" fill="rgba(8,145,178,.07)" stroke="#0891b2" stroke-width="3"/>
-      <text x="440" y="60" text-anchor="middle" class="t-c mono" style="font-size:16px;letter-spacing:.22em">INSIDE THE COUNTRY · NOTHING CROSSES</text>
-      <ellipse cx="445" cy="400" rx="240" ry="200" fill="url(#gGlowC)"/>
-      <g fill="none" stroke="rgba(8,145,178,.45)" stroke-width="2.2">
-        <path id="S1" d="M300 320 C 380 240 520 260 600 340"/>
-        <path id="S2" d="M600 340 C 640 440 560 560 470 540"/>
-        <path id="S3" d="M470 540 C 360 540 290 440 300 320"/>
-      </g>
-      <g>
-        <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3s" repeatCount="indefinite"><mpath href="#S1"/></animateMotion></use>
-        <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3s" begin="1s" repeatCount="indefinite"><mpath href="#S2"/></animateMotion></use>
-        <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3s" begin="2s" repeatCount="indefinite"><mpath href="#S3"/></animateMotion></use>
-      </g>
-      <use href="#pc" x="245" y="268" width="110" height="94"/><text x="300" y="398" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Ministry</text>
-      <use href="#pc" x="545" y="290" width="110" height="94"/><text x="600" y="420" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Hospital</text>
-      <use href="#pc" x="415" y="490" width="110" height="94"/><text x="470" y="620" text-anchor="middle" class="t-ink2" style="font:650 20px var(--f-display)">Bank</text>
-      <g transform="translate(700 90)"><use href="#lock" width="54" height="54"/></g>
-    </svg>
-  </div>
-  <div class="over">
-    <span class="eyebrow rv">The answer</span>
-    <h1 class="rv">Assistants in <span class="g">your own office.</span></h1>
-    <p class="lead rv">Rented AI is a consultant abroad: you send the files, they keep the notes, you explain everything again. Sovra is a team of assistants <b>at your own desk</b>.</p>
-  </div>
-  <div class="cap rv"><b>The files stay. The notes stay. The decisions stay.</b> A person approves anything that leaves.</div>
+<!-- 6 · The answer · headline, then the border as a full-width band -->
+<section class="slide" data-section="The answer" data-note="Sovra keeps the work inside the border">
+  <span class="eyebrow rv">The answer</span>
+  <h1 class="rv" style="font-size:72px;max-width:1680px">Assistants in <span class="g">your own office.</span></h1>
+  <p class="lead rv" style="max-width:1560px;margin-top:14px">Rented AI is a consultant abroad: you send the files, they keep the notes, you explain everything again. Sovra is a team of assistants <b>at your own desk</b>.</p>
+  <p class="punch rv"><b>The files stay. The notes stay. The decisions stay.</b> A person approves anything that leaves.</p>
+  <svg class="scene stackpic rv z" viewBox="0 0 1680 420" role="img" aria-label="Inside the national border, work circulates between desks and never crosses it">
+    <path d="M48 200 C48 70 250 36 520 58 C830 16 1140 32 1400 72 C1610 108 1648 200 1596 286 C1516 372 1160 384 840 368 C460 350 48 328 48 200 Z" fill="rgba(8,145,178,.07)" stroke="#0891b2" stroke-width="3"/>
+    <text x="840" y="118" text-anchor="middle" class="t-c mono" style="font-size:16px;letter-spacing:.22em">INSIDE THE COUNTRY · NOTHING CROSSES</text>
+    <ellipse cx="840" cy="250" rx="620" ry="110" fill="url(#gGlowC)"/>
+    <g fill="none" stroke="rgba(8,145,178,.45)" stroke-width="2.2">
+      <path id="S1" d="M390 250 C 520 180 640 180 760 240"/>
+      <path id="S2" d="M920 240 C 1060 176 1180 184 1320 246"/>
+      <path id="S3" d="M1280 210 C 1100 150 980 150 900 200"/>
+    </g>
+    <g>
+      <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#S1"/></animateMotion></use>
+      <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3.4s" begin="1s" repeatCount="indefinite"><mpath href="#S2"/></animateMotion></use>
+      <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3.6s" begin="1.8s" repeatCount="indefinite"><mpath href="#S3"/></animateMotion></use>
+    </g>
+    <use href="#pc" x="230" y="168" width="120" height="102"/><text x="290" y="300" text-anchor="middle" class="t-ink2" style="font:650 22px var(--f-display)">Ministry</text>
+    <use href="#pc" x="760" y="160" width="120" height="102"/><text x="820" y="292" text-anchor="middle" class="t-ink2" style="font:650 22px var(--f-display)">Hospital</text>
+    <use href="#pc" x="1220" y="168" width="120" height="102"/><text x="1280" y="300" text-anchor="middle" class="t-ink2" style="font:650 22px var(--f-display)">Bank</text>
+    <g transform="translate(1492 168)"><use href="#lock" width="52" height="52"/></g>
+  </svg>
 </section>
 
-<!-- 7 · Five things stay yours · poster, orbit -->
-<section class="slide poster" data-section="100% sovereign" data-note="Data · knowledge · the AI · decisions · learning">
-  <div class="fill">
-    <svg class="scene rv z" viewBox="0 0 820 820" role="img" aria-label="Five labelled orbits circle a desk inside a national border ring">
-      <circle cx="410" cy="400" r="370" fill="none" stroke="#a855f7" stroke-width="3" stroke-dasharray="14 12"/>
-      <text x="410" y="806" text-anchor="middle" class="t-v mono" style="font-size:15px;letter-spacing:.22em">THE NATIONAL BORDER</text>
-      <circle cx="410" cy="400" r="330" fill="url(#gGlow)"/>
-      <g fill="none" stroke="rgba(124,58,237,.22)" stroke-width="1.5">
-        <circle cx="410" cy="400" r="110"/><circle cx="410" cy="400" r="165"/><circle cx="410" cy="400" r="220"/><circle cx="410" cy="400" r="275"/><circle cx="410" cy="400" r="330"/>
-      </g>
-      <g class="orb o1"><g transform="translate(410 290)"><circle r="34" fill="#fff" stroke="#7c3aed" stroke-width="2.5"/><text y="7" text-anchor="middle" class="t-v" style="font:700 17px var(--f-display)">Data</text></g></g>
-      <g class="orb o2"><g transform="translate(575 400)"><circle r="46" fill="#fff" stroke="#7c3aed" stroke-width="2.5"/><text y="6" text-anchor="middle" class="t-v" style="font:700 16px var(--f-display)">Knowledge</text></g></g>
-      <g class="orb o3"><g transform="translate(410 620)"><circle r="38" fill="#fff" stroke="#7c3aed" stroke-width="2.5"/><text y="6" text-anchor="middle" class="t-v" style="font:700 17px var(--f-display)">The AI</text></g></g>
-      <g class="orb o4"><g transform="translate(135 400)"><circle r="46" fill="#fff" stroke="#7c3aed" stroke-width="2.5"/><text y="6" text-anchor="middle" class="t-v" style="font:700 16px var(--f-display)">Decisions</text></g></g>
-      <g class="orb o5"><g transform="translate(410 70)"><circle r="42" fill="#fff" stroke="#0891b2" stroke-width="2.5"/><text y="6" text-anchor="middle" class="t-c" style="font:700 16px var(--f-display)">Learning</text></g></g>
-      <circle cx="410" cy="400" r="74" fill="#fff" stroke="#0891b2" stroke-width="3"/>
-      <use href="#pc" x="378" y="372" width="64" height="54"/>
-      <text x="410" y="500" text-anchor="middle" class="t-ink" style="font:800 24px var(--f-display)">Your desk</text>
-    </svg>
+<!-- 7 · 100% sovereign · five columns across the stage, no side picture -->
+<section class="slide" data-section="100% sovereign" data-note="Data · knowledge · the AI · decisions · learning">
+  <span class="eyebrow rv">100% sovereign</span>
+  <h1 class="rv" style="font-size:76px;max-width:1680px">Five things <span class="g">stay yours.</span></h1>
+  <div class="quint">
+    <div class="rv"><div class="num">01</div><b>Data</b><span>On your own computers.</span></div>
+    <div class="rv"><div class="num">02</div><b>Knowledge</b><span>Kept in your building, with a receipt for every detail.</span></div>
+    <div class="rv"><div class="num">03</div><b>The AI</b><span>A swappable guest. A UAE-built one if you choose.</span></div>
+    <div class="rv"><div class="num">04</div><b>Decisions</b><span>A person approves.</span></div>
+    <div class="rv home"><div class="num">05</div><b>Learning</b><span>Trains your own AI, at home.</span></div>
   </div>
-  <div class="over">
-    <span class="eyebrow rv">100% sovereign</span>
-    <h1 class="rv" style="font-size:104px">Five things <span class="g">stay yours.</span></h1>
-    <p class="lead rv"><b>Data</b> on your own computers. <b>Knowledge</b> kept in your building, with a receipt for every detail. <b>The AI</b> as a swappable guest, a UAE-built one if you choose. <b>Decisions</b> a person approves. <b>Learning</b> that trains your own AI, at home.</p>
-  </div>
-  <div class="cap rv"><b>No Sovra server holds customer data.</b> Nothing is reported back to us. By design, not by setting.</div>
+  <p class="punch mid rv"><b>No Sovra server holds customer data.</b> Nothing is reported back to us. By design, not by setting.</p>
 </section>
 
 <!-- 8 · The product · mock-up large -->
@@ -266,36 +281,34 @@
   </div>
 </section>
 
-<!-- 9 · Knowledge with receipts · full-width timeline -->
+<!-- 9 · Knowledge with receipts · three dated entries, then the question -->
 <section class="slide" data-section="Knowledge" data-note="Every detail keeps its source; a correction adds, it never erases">
   <span class="eyebrow rv">Knowledge with receipts</span>
-  <h1 class="rv">Nothing is ever <span class="g">secretly rewritten.</span></h1>
-  <svg class="rv z" viewBox="0 0 1680 420" style="width:100%;height:420px;margin-top:30px" role="img" aria-label="A chain of memory entries; a correction is appended and linked, the earlier entry remains">
-    <ellipse cx="840" cy="210" rx="760" ry="170" fill="url(#gGlowC)" opacity=".7"/>
-    <g class="pop" style="--d:100">
-      <text x="120" y="120" class="t-dim mono" style="font-size:15px;letter-spacing:.18em">12 MARCH</text>
-      <text x="120" y="178" class="t-ink" style="font:700 38px var(--f-display)">Permit needs one signature</text>
-      <text x="120" y="218" class="t-mut" style="font-size:20px">◷ from the policy memo</text>
-      <line x1="120" y1="250" x2="620" y2="250" stroke="#c4b5fd" stroke-width="2"/>
-    </g>
-    <path d="M640 185 H700" stroke="#0891b2" stroke-width="3" marker-end="url(#arrC)"/>
-    <g class="pop" style="--d:500">
-      <text x="730" y="120" class="t-dim mono" style="font-size:15px;letter-spacing:.18em">2 OCTOBER</text>
-      <text x="730" y="178" class="t-ink" style="font:700 38px var(--f-display)">Permit needs two signatures</text>
-      <text x="730" y="218" class="t-mut" style="font-size:20px">◷ from the director’s message</text>
-      <line x1="730" y1="250" x2="1250" y2="250" stroke="#c4b5fd" stroke-width="2"/>
-    </g>
-    <path d="M1270 185 H1330" stroke="#0891b2" stroke-width="3" marker-end="url(#arrC)"/>
-    <g class="pop" style="--d:900">
-      <text x="1360" y="120" class="t-c mono" style="font-size:15px;letter-spacing:.18em">NOW</text>
-      <text x="1360" y="178" class="t-c" style="font:800 38px var(--f-display)">Current</text>
-      <text x="1360" y="218" class="t-ink2" style="font-size:20px">used from now on · history kept</text>
-      <line x1="1360" y1="250" x2="1600" y2="250" stroke="#0891b2" stroke-width="3"/>
-    </g>
-    <text x="840" y="340" text-anchor="middle" class="t-ink2" style="font:600 28px var(--f-display)">“What did the permit rule used to say?”</text>
-    <text x="840" y="385" text-anchor="middle" class="t-c" style="font:500 26px var(--f-sans)">“Until 2 October it needed one signature. Here is the memo.”</text>
-  </svg>
-  <p class="lead rv" style="max-width:1400px">Every detail the helpers remember keeps the exact words it came from. A correction adds a new entry; the old one stays as history. Memory that cannot be quietly changed is the foundation of a <b>national record</b> that cannot be quietly changed.</p>
+  <h1 class="rv" style="font-size:84px;max-width:1600px">Nothing is ever<br><span class="g">secretly rewritten.</span></h1>
+  <div class="receipts">
+    <article class="rec rv">
+      <div class="when">12 March</div>
+      <h3>Permit needs one signature</h3>
+      <p>From the policy memo.</p>
+    </article>
+    <div class="go rv" aria-hidden="true">→</div>
+    <article class="rec rv">
+      <div class="when">2 October</div>
+      <h3>Permit needs two signatures</h3>
+      <p>From the director’s message.</p>
+    </article>
+    <div class="go rv" aria-hidden="true">→</div>
+    <article class="rec now rv">
+      <div class="when">Now</div>
+      <h3>Current</h3>
+      <p>Used from now on. History kept.</p>
+    </article>
+  </div>
+  <div class="heard rv">
+    <p class="q">“What did the permit rule used to say?”</p>
+    <p class="a">“Until 2 October it needed one signature. Here is the memo.”</p>
+  </div>
+  <p class="punch rv">Every detail the helpers remember keeps the exact words it came from. A correction adds a new entry; the old one stays as history. That is a <b>national record</b> that cannot be quietly changed.</p>
 </section>
 
 <!-- 10 · Divider -->
@@ -308,9 +321,11 @@
   </div>
 </section>
 
-<!-- 11 · The path · poster -->
-<section class="slide poster" data-section="The path" data-note="One desk · a team · an organisation · the nation">
-  <div class="fill">
+<!-- 11 · The path · centered constellation, caption underneath -->
+<section class="slide centerpiece" data-section="The path" data-note="One desk · a team · an organisation · the nation">
+  <span class="eyebrow rv">The path</span>
+  <h1 class="rv">A desk. A team. <span class="g">A nation.</span></h1>
+  <div class="figure">
     <svg class="scene rv z" viewBox="0 0 900 800" role="img" aria-label="A constellation grows from one computer to many, all inside the national border">
       <use href="#border" fill="rgba(168,85,247,.06)" stroke="#a855f7" stroke-width="3" stroke-dasharray="14 12"/>
       <circle cx="440" cy="400" r="300" fill="url(#gGlow)"/>
@@ -328,14 +343,11 @@
         <circle cx="440" cy="390" r="60" fill="#fff" stroke="#0891b2" stroke-width="3"/>
         <use href="#pc" x="412" y="366" width="56" height="48"/>
       </g>
+      <text x="440" y="470" text-anchor="middle" class="t-c mono" style="font-size:15px;letter-spacing:.16em">ONE DESK</text>
     </svg>
   </div>
-  <div class="over">
-    <span class="eyebrow rv">The path</span>
-    <h1 class="rv">A desk. A team. <span class="g">A nation.</span></h1>
-    <p class="lead rv">One person’s computer. Then a team’s computers find each other and share helpers and knowledge, by choice, with <b>no central server</b>. Then whole organisations that remember, prove and learn, at home.</p>
-  </div>
-  <div class="cap rv"><b>No central Sovra server.</b> Every computer keeps its own.</div>
+  <p class="lead rv">One person’s computer. Then a team’s computers find each other and share helpers and knowledge, by choice, with <b>no central server</b>. Then whole organisations that remember, prove and learn, at home.</p>
+  <p class="punch mid rv"><b>No central Sovra server.</b> Every computer keeps its own.</p>
 </section>
 
 <!-- 12 · The national ledger · split -->
@@ -377,44 +389,40 @@
   </div>
 </section>
 
-<!-- 13 · Learning · poster -->
-<section class="slide poster" data-section="Learning" data-note="The nation's own AI, trained on its own computers; the files never move">
-  <div class="fill">
-    <svg class="scene rv z" viewBox="0 0 900 800" role="img" aria-label="Many computers inside the border send small glowing lessons to a shared model; the files stay locked in place">
-      <use href="#border" fill="rgba(168,85,247,.06)" stroke="#a855f7" stroke-width="3" stroke-dasharray="14 12"/>
-      <circle cx="450" cy="400" r="120" fill="url(#gGlow)"/>
-      <circle cx="450" cy="400" r="78" fill="#fff" stroke="#7c3aed" stroke-width="3" class="pulse"/>
-      <text x="450" y="392" text-anchor="middle" class="t-ink" style="font:800 20px var(--f-display)">The nation’s</text>
-      <text x="450" y="418" text-anchor="middle" class="t-ink" style="font:800 20px var(--f-display)">own AI</text>
-      <g fill="none" stroke="rgba(124,58,237,.4)" stroke-width="2">
-        <path id="T1" d="M260 230 C 330 300 380 340 420 370"/>
-        <path id="T2" d="M640 240 C 580 300 530 340 490 370"/>
-        <path id="T3" d="M250 560 C 330 500 380 460 420 430"/>
-        <path id="T4" d="M650 570 C 580 510 530 470 490 430"/>
-        <path id="T5" d="M450 640 C 450 580 450 520 450 480"/>
-      </g>
-      <g fill="#a855f7">
-        <circle r="7"><animateMotion dur="2.4s" repeatCount="indefinite"><mpath href="#T1"/></animateMotion></circle>
-        <circle r="7"><animateMotion dur="2.8s" begin=".4s" repeatCount="indefinite"><mpath href="#T2"/></animateMotion></circle>
-        <circle r="7"><animateMotion dur="2.6s" begin=".9s" repeatCount="indefinite"><mpath href="#T3"/></animateMotion></circle>
-        <circle r="7"><animateMotion dur="3s" begin="1.3s" repeatCount="indefinite"><mpath href="#T4"/></animateMotion></circle>
-        <circle r="7"><animateMotion dur="2.2s" begin="1.7s" repeatCount="indefinite"><mpath href="#T5"/></animateMotion></circle>
-      </g>
-      <g>
-        <use href="#pc" x="200" y="180" width="96" height="82"/><use href="#lock" x="276" y="168" width="34" height="34"/>
-        <use href="#pc" x="600" y="190" width="96" height="82"/><use href="#lock" x="676" y="178" width="34" height="34"/>
-        <use href="#pc" x="190" y="520" width="96" height="82"/><use href="#lock" x="266" y="508" width="34" height="34"/>
-        <use href="#pc" x="610" y="530" width="96" height="82"/><use href="#lock" x="686" y="518" width="34" height="34"/>
-        <use href="#pc" x="402" y="610" width="96" height="82"/><use href="#lock" x="478" y="598" width="34" height="34"/>
-      </g>
-    </svg>
-  </div>
-  <div class="over">
-    <span class="eyebrow rv">Learning</span>
-    <h1 class="rv">Your own AI, <span class="g">trained at home.</span></h1>
-    <p class="lead rv">The organisation teaches its own AI using its own computers, when they are idle. The original files never move. Only the <b>lessons</b> are combined. Every lesson can be seen, tested before it is used, and undone.</p>
-  </div>
-  <div class="cap rv"><b>Use → remember → agree → train → better every day</b>, without a single file leaving the country.</div>
+<!-- 13 · Learning · the lesson diagram first, the claim underneath -->
+<section class="slide" data-section="Learning" data-note="The nation's own AI, trained on its own computers; the files never move">
+  <svg class="scene overpic rv z" viewBox="0 0 1680 340" role="img" aria-label="Many computers inside the border send small glowing lessons to a shared model; the files stay locked in place">
+    <path d="M40 176 C40 48 240 22 520 40 C860 8 1180 18 1460 52 C1630 78 1660 160 1620 230 C1560 318 1240 332 900 318 C480 300 40 286 40 176 Z" fill="rgba(168,85,247,.06)" stroke="#a855f7" stroke-width="3" stroke-dasharray="14 12"/>
+    <circle cx="840" cy="150" r="96" fill="url(#gGlow)"/>
+    <circle cx="840" cy="150" r="64" fill="#fff" stroke="#7c3aed" stroke-width="3" class="pulse"/>
+    <text x="840" y="144" text-anchor="middle" class="t-ink" style="font:800 20px var(--f-display)">The nation’s</text>
+    <text x="840" y="168" text-anchor="middle" class="t-ink" style="font:800 20px var(--f-display)">own AI</text>
+    <g fill="none" stroke="rgba(124,58,237,.4)" stroke-width="2">
+      <path id="T1" d="M210 150 C 360 120 560 140 760 168"/>
+      <path id="T2" d="M210 230 C 380 250 560 230 760 190"/>
+      <path id="T3" d="M1470 150 C 1320 118 1120 140 930 168"/>
+      <path id="T4" d="M1470 230 C 1300 252 1120 230 930 190"/>
+      <path id="T5" d="M840 292 C 840 250 840 230 840 216"/>
+    </g>
+    <g fill="#a855f7">
+      <circle r="7"><animateMotion dur="2.4s" repeatCount="indefinite"><mpath href="#T1"/></animateMotion></circle>
+      <circle r="7"><animateMotion dur="2.8s" begin=".4s" repeatCount="indefinite"><mpath href="#T2"/></animateMotion></circle>
+      <circle r="7"><animateMotion dur="2.6s" begin=".9s" repeatCount="indefinite"><mpath href="#T3"/></animateMotion></circle>
+      <circle r="7"><animateMotion dur="3s" begin="1.3s" repeatCount="indefinite"><mpath href="#T4"/></animateMotion></circle>
+      <circle r="7"><animateMotion dur="2.2s" begin="1.7s" repeatCount="indefinite"><mpath href="#T5"/></animateMotion></circle>
+    </g>
+    <g>
+      <use href="#pc" x="90" y="78" width="96" height="82"/><use href="#lock" x="166" y="66" width="34" height="34"/>
+      <use href="#pc" x="90" y="188" width="96" height="82"/><use href="#lock" x="166" y="176" width="34" height="34"/>
+      <use href="#pc" x="1488" y="78" width="96" height="82"/><use href="#lock" x="1564" y="66" width="34" height="34"/>
+      <use href="#pc" x="1488" y="188" width="96" height="82"/><use href="#lock" x="1564" y="176" width="34" height="34"/>
+      <use href="#pc" x="792" y="236" width="96" height="82"/><use href="#lock" x="868" y="224" width="34" height="34"/>
+    </g>
+  </svg>
+  <span class="eyebrow rv" style="margin-top:16px">Learning</span>
+  <h1 class="rv" style="font-size:68px;max-width:1680px;margin-top:10px">Your own AI, <span class="g">trained at home.</span></h1>
+  <p class="lead rv" style="margin-top:12px;max-width:1560px">The organisation teaches its own AI using its own computers, when they are idle. The original files never move. Only the <b>lessons</b> are combined. Every lesson can be seen, tested before it is used, and undone.</p>
+  <p class="punch rv"><b>Use → remember → agree → train → better every day</b>, without a single file leaving the country.</p>
 </section>
 
 <!-- 14 · Proof · ink with steps -->
@@ -431,38 +439,34 @@
   <div class="foot-note rv">Sovereignty gets a pilot through risk review · Measured value makes it grow</div>
 </section>
 
-<!-- 15 · Where Sovra sits · poster map -->
-<section class="slide poster cool" data-section="Where Sovra sits" data-note="Where does the work run · who keeps the knowledge">
-  <div class="fill">
-    <svg class="scene rv z" viewBox="0 0 820 720" role="img" aria-label="Positioning map: Sovra alone in the top right, where the work runs on your computers and you keep the knowledge">
-      <line x1="450" y1="60" x2="450" y2="620" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
-      <line x1="110" y1="340" x2="790" y2="340" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
-      <path d="M110 660 H780" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
-      <text x="110" y="700" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">WORK RUNS ON THEIR COMPUTERS</text>
-      <text x="780" y="700" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">ON YOURS</text>
-      <path d="M70 620 V50" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
-      <text x="40" y="620" transform="rotate(-90 40 620)" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">THEY KEEP THE KNOWLEDGE</text>
-      <text x="40" y="50" transform="rotate(-90 40 50)" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">YOU KEEP IT</text>
-      <g fill="#c4b5fd"><circle cx="280" cy="470" r="13"/><circle cx="280" cy="190" r="13"/><circle cx="620" cy="470" r="13"/></g>
-      <text x="280" y="520" text-anchor="middle" class="t-ink" style="font:700 27px var(--f-display)">Rented chatbots</text>
-      <text x="280" y="552" text-anchor="middle" class="t-mut" style="font-size:18px">their computers · their notes</text>
-      <text x="280" y="240" text-anchor="middle" class="t-ink" style="font:700 27px var(--f-display)">Sovereign cloud</text>
-      <text x="280" y="272" text-anchor="middle" class="t-mut" style="font-size:18px">in-country · still a vendor platform</text>
-      <text x="620" y="520" text-anchor="middle" class="t-ink" style="font:700 27px var(--f-display)">Local chat tools</text>
-      <text x="620" y="552" text-anchor="middle" class="t-mut" style="font-size:18px">your computer · no memory</text>
-      <ellipse cx="620" cy="190" rx="190" ry="120" fill="url(#gGlowC)"/>
-      <circle cx="620" cy="160" r="30" fill="#0891b2" class="pulse"/>
-      <circle cx="620" cy="160" r="46" fill="none" stroke="#0891b2" stroke-width="2" opacity=".5"/>
-      <text x="620" y="240" text-anchor="middle" class="t-c" style="font:800 40px var(--f-display)">Sovra</text>
-      <text x="620" y="274" text-anchor="middle" class="t-ink2" style="font-size:19px">your computers · your knowledge</text>
-    </svg>
-  </div>
-  <div class="over">
-    <span class="eyebrow c rv">Where Sovra sits</span>
-    <h1 class="rv">Two questions sort the <span class="gc">whole market.</span></h1>
-    <p class="lead rv"><b>Where does the work run?</b> On their computers, or yours. <b>Who keeps what the AI learns?</b> Them, or you.</p>
-  </div>
-  <div class="cap rv">Sovereign clouds and national models are <b>guests inside Sovra</b>, not rivals.</div>
+<!-- 15 · Where Sovra sits · short claim, then the map across the stage -->
+<section class="slide cool" data-section="Where Sovra sits" data-note="Where does the work run · who keeps the knowledge">
+  <span class="eyebrow c rv">Where Sovra sits</span>
+  <h1 class="rv" style="font-size:68px;max-width:1680px;margin-top:10px">Two questions sort the <span class="gc">whole market.</span></h1>
+  <p class="lead rv" style="margin-top:10px;max-width:1560px"><b>Where does the work run?</b> On their computers, or yours. <b>Who keeps what the AI learns?</b> Them, or you.</p>
+  <svg class="scene stackpic rv z" viewBox="0 0 1680 460" role="img" aria-label="Positioning map: Sovra alone in the top right, where the work runs on your computers and you keep the knowledge">
+    <line x1="860" y1="28" x2="860" y2="360" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
+    <line x1="150" y1="196" x2="1600" y2="196" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
+    <path d="M120 400 H1580" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
+    <text x="120" y="438" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">WORK RUNS ON THEIR COMPUTERS</text>
+    <text x="1580" y="438" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">ON YOURS</text>
+    <path d="M100 390 V24" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
+    <text x="64" y="372" transform="rotate(-90 64 372)" class="t-dim mono" style="font-size:13px;letter-spacing:.08em">THEY KEEP THE KNOWLEDGE</text>
+    <text x="64" y="36" transform="rotate(-90 64 36)" text-anchor="end" class="t-dim mono" style="font-size:13px;letter-spacing:.1em">YOU KEEP IT</text>
+    <g fill="#c4b5fd"><circle cx="480" cy="290" r="12"/><circle cx="480" cy="100" r="12"/><circle cx="1240" cy="290" r="12"/></g>
+    <text x="480" y="330" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Rented chatbots</text>
+    <text x="480" y="362" text-anchor="middle" class="t-mut" style="font-size:18px">their computers · their notes</text>
+    <text x="480" y="132" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Sovereign cloud</text>
+    <text x="480" y="164" text-anchor="middle" class="t-mut" style="font-size:18px">in-country · still a vendor platform</text>
+    <text x="1240" y="330" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Local chat tools</text>
+    <text x="1240" y="362" text-anchor="middle" class="t-mut" style="font-size:18px">your computer · no memory</text>
+    <ellipse cx="1240" cy="108" rx="250" ry="78" fill="url(#gGlowC)"/>
+    <circle cx="1240" cy="78" r="22" fill="#0891b2" class="pulse"/>
+    <circle cx="1240" cy="78" r="36" fill="none" stroke="#0891b2" stroke-width="2" opacity=".5"/>
+    <text x="1240" y="128" text-anchor="middle" class="t-c" style="font:800 40px var(--f-display)">Sovra</text>
+    <text x="1240" y="158" text-anchor="middle" class="t-ink2" style="font-size:18px">your computers · your knowledge</text>
+  </svg>
+  <p class="punch rv">Sovereign clouds and national models are <b>guests inside Sovra</b>, not rivals.</p>
 </section>
 
 <!-- 16 · Built · huge numbers -->
@@ -494,7 +498,7 @@
 <!-- 18 · The ask · giant type -->
 <section class="slide" data-section="The plan" data-note="The funding amount is for the founder to add">
   <span class="eyebrow rv">What investment accelerates</span>
-  <div class="mega rv" style="margin-top:20px;font-size:190px"><span class="g">Arabic.</span> Teams.<br><span class="gc">Certified.</span> The ledger.</div>
+  <div class="mega rv" style="margin-top:20px;font-size:132px;max-width:1600px"><span class="g">Arabic.</span> Teams.<br><span class="gc">Certified.</span> The ledger.</div>
   <div class="steps" style="margin-top:50px">
     <div class="rv"><h4>Arabic-first</h4><p>Screens, helpers and UAE-built models, native from day one.</p></div>
     <div class="rv"><h4>Teams</h4><p>Computers that share helpers and knowledge, with no central server.</p></div>
