@@ -459,4 +459,25 @@ mod tests {
         assert!(state.is_generating);
         assert_eq!(state.messages.len(), 1);
     }
+
+    #[test]
+    fn without_an_ai_a_prompt_still_goes_out_when_the_group_can_answer() {
+        let mut state = WorkspaceState::new(1);
+        state.models_loaded = true;
+        state.has_active_llm = false;
+        assert_eq!(
+            state.submit_prompt("What's for dinner?"),
+            None,
+            "waits for setup"
+        );
+
+        let mut state = WorkspaceState::new(1);
+        state.models_loaded = true;
+        state.has_active_llm = false;
+        state.group_can_answer = true;
+        assert!(
+            state.submit_prompt("What's for dinner?").is_some(),
+            "a free computer in the group answers instead"
+        );
+    }
 }

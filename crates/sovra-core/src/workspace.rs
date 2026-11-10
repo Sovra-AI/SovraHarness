@@ -316,6 +316,10 @@ pub struct WorkspaceState {
     pub models_loaded: bool,
     /// Whether an active chat LLM is selected and has required credentials.
     pub has_active_llm: bool,
+    /// This computer has no AI of its own but its group can answer (work handoff:
+    /// in a group with "Use a free computer's AI" on). Prompts then go to the runtime
+    /// instead of waiting for setup; the runtime says so if nobody is free.
+    pub group_can_answer: bool,
     /// Current deterministic setup progression stage.
     pub setup_stage: crate::models::SetupStage,
     /// Plain-language hint explaining what is needed to finish LLM setup when `!has_active_llm`.
@@ -404,6 +408,7 @@ impl WorkspaceState {
             search_query: String::new(),
             models_loaded: false,
             has_active_llm: false,
+            group_can_answer: false,
             setup_stage: crate::models::SetupStage::Loading,
             llm_setup_hint: None,
             tour_step: None,
@@ -935,7 +940,7 @@ impl WorkspaceState {
         if prompt.is_empty() {
             return None;
         }
-        if self.models_loaded && !self.has_active_llm {
+        if self.models_loaded && !self.has_active_llm && !self.group_can_answer {
             self.append_user_turn(prompt);
             self.is_generating = false;
             self.prompt_awaiting_setup = Some((self.session_id.clone(), prompt.to_owned()));

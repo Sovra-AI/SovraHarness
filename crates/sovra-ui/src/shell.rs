@@ -469,10 +469,12 @@ impl Shell {
                         }
                         // Settings → Groups renders this computer's group and its knowledge.
                         if let sovra_core::Event::Group(event) = &event {
-                            shell.models.update(cx, |models, cx| {
+                            let can_answer = shell.models.update(cx, |models, cx| {
                                 models.groups.apply((**event).clone());
                                 cx.notify();
+                                models.groups.group.is_some() && models.groups.work.use_group
                             });
+                            shell.state.group_can_answer = can_answer;
                         }
                         if let sovra_core::Event::Auth(
                             sovra_core::AuthEvent::GoogleSignInStarted { auth_url },

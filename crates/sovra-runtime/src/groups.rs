@@ -395,9 +395,17 @@ impl GroupRuntime {
     /// A way to hand a chat turn to a free computer in the group, when this computer's
     /// owner turned that on and it is in a group.
     pub(crate) async fn work_peer(&self) -> Option<Arc<dyn sovra_core::group::WorkPeer>> {
-        let groups = self.knowledge.groups()?;
+        let Some(groups) = self.knowledge.groups() else {
+            tracing::debug!("work handoff unavailable: groups are not running");
+            return None;
+        };
         let wanted = {
             let inner = groups.inner.lock().await;
+            tracing::debug!(
+                use_group = inner.record.work.use_group,
+                in_group = inner.roster.is_some(),
+                "work handoff check"
+            );
             inner.record.work.use_group && inner.roster.is_some()
         };
         wanted.then(|| Arc::new(GroupWork(groups)) as Arc<dyn sovra_core::group::WorkPeer>)
