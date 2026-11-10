@@ -892,7 +892,10 @@ Status checked against the code on 2026-11-10.
 **Acceptance criteria** (not yet measured on two real computers)
 
 - Two dev instances on different networks (one behind NAT) pair by link in
-  under 30 s.
+  under 30 s. *(Same machine, real iroh, direct connections: the
+  `sovra-app` `two_computers` test pairs by link, shares a detail and an
+  artifact, edits it back and removes a person, all well under a second.
+  Across NAT is still unmeasured.)*
 - On the same LAN, they pair by 6-digit code.
 - Removal takes effect on all online computers within 10 s.
 - Offline computers converge on reconnect. *(Covered by the runtime test

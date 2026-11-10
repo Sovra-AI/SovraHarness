@@ -32,7 +32,11 @@ tracing-subscriber = { workspace = true }
 velopack = { workspace = true }
 
 [dev-dependencies]
+async-channel = { workspace = true }
 serde_json = { workspace = true }
+# The two-computer test waits on runtime events with a deadline; the app itself never
+# names tokio (the runtime owns it).
+tokio = { workspace = true }
 
 [lints]
 workspace = true

@@ -28,6 +28,8 @@ move them under a version heading when the tag is cut.
 - Groups sync large histories in rounds (at most 6 MB per message), so a
   computer that joins a group with many shared artifacts still receives all of
   them. Viewers can read but no longer add to the group, on every computer.
+- `rmcp` 3.8.0 → 3.9.0 (RUSTSEC-2026-0462: unbounded HTTP response
+  buffering in its Streamable HTTP clients).
 - Debug builds started with `SOVRA_DEV=1` may set `SOVRA_DATA_DIR` to run a
   second Sovra (its own device key and group) beside the first; release builds
   always use the system data folder.
