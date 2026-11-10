@@ -427,6 +427,78 @@ impl GroupRuntime {
     }
 }
 
+/// How long the helper holds a `WorkNext` waiting for new words.
+const WORK_POLL: Duration = Duration::from_secs(1);
+/// Finished jobs are forgotten this long after they started.
+const JOB_KEEP_MS: i64 = 10 * 60 * 1_000;
+
+/// One chat job running on this computer for someone else.
+#[derive(Clone)]
+struct RunningJob {
+    owner: DeviceId,
+    started: Timestamp,
+    buffer: Arc<std::sync::Mutex<sovra_core::group::JobBuffer>>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    changed: Arc<tokio::sync::Notify>,
+}
+
+impl RunningJob {
+    fn new(owner: DeviceId) -> Self {
+        Self {
+            owner,
+            started: now(),
+            buffer: Arc::default(),
+            cancelled: Arc::default(),
+            changed: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    fn push(&self, text: &str) {
+        self.buffer
+            .lock()
+            .expect("job buffer lock is never poisoned")
+            .text
+            .push_str(text);
+        self.changed.notify_waiters();
+    }
+
+    fn finish(&self, failed: Option<String>) {
+        {
+            let mut buffer = self
+                .buffer
+                .lock()
+                .expect("job buffer lock is never poisoned");
+            buffer.done = true;
+            buffer.failed = failed;
+        }
+        self.changed.notify_waiters();
+    }
+
+    fn progress(&self, from: usize) -> sovra_core::group::WorkProgress {
+        self.buffer
+            .lock()
+            .expect("job buffer lock is never poisoned")
+            .since(from)
+    }
+
+    fn has_words(&self) -> bool {
+        !self
+            .buffer
+            .lock()
+            .expect("job buffer lock is never poisoned")
+            .text
+            .trim()
+            .is_empty()
+    }
+
+    fn finished(&self) -> bool {
+        self.buffer
+            .lock()
+            .expect("job buffer lock is never poisoned")
+            .done
+    }
+}
+
 /// How long a helping computer may take to answer one chat job.
 const JOB_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -436,10 +508,11 @@ struct GroupWork(Arc<Groups>);
 
 #[async_trait::async_trait]
 impl sovra_core::group::WorkPeer for GroupWork {
-    async fn run(
+    async fn start(
         &self,
         job: sovra_core::group::ChatJob,
-    ) -> Result<sovra_core::group::JobAnswer, sovra_core::group::WorkError> {
+        avoid: &[DeviceId],
+    ) -> Result<sovra_core::group::WorkTicket, sovra_core::group::WorkError> {
         sovra_core::group::check_job(&job)?;
         let groups = &self.0;
         let (group, candidates) = {
@@ -448,7 +521,11 @@ impl sovra_core::group::WorkPeer for GroupWork {
                 return Err(sovra_core::group::WorkError::NobodyFree);
             };
             let order = sovra_core::group::helper_order(
-                groups.peers(&inner).into_iter().map(|peer| peer.device),
+                groups
+                    .peers(&inner)
+                    .into_iter()
+                    .map(|peer| peer.device)
+                    .filter(|device| !avoid.contains(device)),
                 &inner.last_seen,
                 &groups.me(),
             );
@@ -468,26 +545,73 @@ impl sovra_core::group::WorkPeer for GroupWork {
                 .collect();
             (roster.group, candidates)
         };
-        for (peer, helper, computer) in candidates {
+        for (peer, helper_name, computer) in candidates {
+            let Some(id) = random::<16>().map(sovra_core::group::JobId) else {
+                return Err(sovra_core::group::WorkError::Failed(
+                    "this computer couldn't make a job id".into(),
+                ));
+            };
             let request = PeerRequest::Work {
                 group,
+                id,
                 job: job.clone(),
             };
-            let answer = tokio::time::timeout(
-                JOB_TIMEOUT + REQUEST_TIMEOUT,
-                groups.transport.request(&peer, request),
-            )
-            .await;
-            if let Ok(Ok(PeerResponse::Worked { text })) = answer {
-                groups.saw(peer.device).await;
-                return Ok(sovra_core::group::JobAnswer {
-                    text,
-                    helper,
+            if let Ok(PeerResponse::WorkStarted) = groups.ask(&peer, request).await {
+                return Ok(sovra_core::group::WorkTicket {
+                    id,
+                    helper: peer.device,
+                    helper_name,
                     computer,
                 });
             }
         }
         Err(sovra_core::group::WorkError::NobodyFree)
+    }
+
+    async fn next(
+        &self,
+        ticket: &sovra_core::group::WorkTicket,
+        from: usize,
+    ) -> Result<sovra_core::group::WorkProgress, sovra_core::group::WorkError> {
+        let groups = &self.0;
+        let (group, peer) = {
+            let inner = groups.inner.lock().await;
+            let Some(group) = inner.record.group else {
+                return Err(sovra_core::group::WorkError::NobodyFree);
+            };
+            (group, Groups::address_of(&inner.record, ticket.helper))
+        };
+        let request = PeerRequest::WorkNext {
+            group,
+            id: ticket.id,
+            from,
+        };
+        match groups.ask(&peer, request).await {
+            Ok(PeerResponse::WorkProgress { progress }) => Ok(progress),
+            Ok(other) => Err(sovra_core::group::WorkError::Failed(format!("{other:?}"))),
+            Err(error) => Err(sovra_core::group::WorkError::Failed(error)),
+        }
+    }
+
+    fn cancel(&self, ticket: &sovra_core::group::WorkTicket) {
+        let groups = self.0.clone();
+        let ticket = ticket.clone();
+        (self.0.spawn)(Box::pin(async move {
+            let (group, peer) = {
+                let inner = groups.inner.lock().await;
+                let Some(group) = inner.record.group else {
+                    return;
+                };
+                (group, Groups::address_of(&inner.record, ticket.helper))
+            };
+            let request = PeerRequest::WorkCancel {
+                group,
+                id: ticket.id,
+            };
+            if let Err(error) = groups.ask(&peer, request).await {
+                tracing::debug!(%error, "job cancel not delivered");
+            }
+        }));
     }
 }
 
@@ -538,6 +662,8 @@ struct Inner {
     /// Chat jobs this computer answered for others, newest first (not saved).
     work_log: Vec<sovra_core::group::WorkRecord>,
     work_limiter: AskLimiter,
+    /// Chat jobs running (or recently run) here for other computers.
+    jobs: std::collections::BTreeMap<sovra_core::group::JobId, RunningJob>,
     /// Lane keys this computer holds (opened from its grants, or made here).
     lane_keys: std::collections::BTreeMap<OpHash, [u8; 32]>,
     /// Plaintext of sealed operations already opened, by operation hash.
@@ -631,6 +757,7 @@ impl Groups {
                 last_seen: std::collections::BTreeMap::new(),
                 work_log: Vec::new(),
                 work_limiter: AskLimiter::default(),
+                jobs: std::collections::BTreeMap::new(),
                 lane_keys: std::collections::BTreeMap::new(),
                 opened: std::collections::BTreeMap::new(),
                 short: None,
@@ -902,9 +1029,15 @@ impl Groups {
         self.emit(GroupEvent::Work { settings, recent }).await;
     }
 
-    /// Helping side: answers a group member's chat job with this computer's AI, if
-    /// the owner turned helping on. No tools; logged for the owner.
-    async fn work(&self, from: DeviceId, job: sovra_core::group::ChatJob) -> PeerResponse {
+    /// Helping side: starts answering a group member's chat job with this computer's
+    /// AI, if the owner turned helping on. No tools; the answer grows in a buffer the
+    /// asker reads with `WorkNext`; logged for the owner when it ends.
+    async fn work(
+        self: &Arc<Self>,
+        from: DeviceId,
+        id: sovra_core::group::JobId,
+        job: sovra_core::group::ChatJob,
+    ) -> PeerResponse {
         let refused = PeerResponse::Refused {
             reason: Refusal::NotHelping,
         };
@@ -913,28 +1046,6 @@ impl Groups {
                 reason: Refusal::Malformed,
             };
         }
-        let (asked_by, computer) = {
-            let mut inner = self.inner.lock().await;
-            let Some(roster) = inner.roster.clone() else {
-                return refused;
-            };
-            if !inner.record.work.help_others
-                || !roster.admits(&from)
-                || !inner
-                    .work_limiter
-                    .allow_up_to(from, now(), sovra_core::group::JOBS_PER_MINUTE)
-            {
-                return refused;
-            }
-            let member = roster.owner_of(&from);
-            (
-                member.map(|m| m.name.clone()).unwrap_or_default(),
-                member
-                    .and_then(|m| m.devices.get(&from))
-                    .map(|entry| entry.name.clone())
-                    .unwrap_or_default(),
-            )
-        };
         let open = self
             .knowledge
             .3
@@ -945,30 +1056,108 @@ impl Groups {
             Some(open) => open().await,
             None => None,
         };
-        let answer = match model {
-            Some(model) => tokio::time::timeout(JOB_TIMEOUT, model.answer(job))
-                .await
-                .ok()
-                .and_then(Result::ok),
-            None => None,
+        let Some(model) = model else {
+            return refused;
         };
-        {
+        let (asked_by, computer, running) = {
             let mut inner = self.inner.lock().await;
-            sovra_core::group::log_work(
-                &mut inner.work_log,
-                sovra_core::group::WorkRecord {
-                    asked_by,
-                    computer,
-                    at: now(),
-                    answered: answer.is_some(),
-                },
-            );
+            let Some(roster) = inner.roster.clone() else {
+                return refused;
+            };
+            if !inner.record.work.help_others
+                || !roster.admits(&from)
+                || inner.jobs.contains_key(&id)
+                || !inner
+                    .work_limiter
+                    .allow_up_to(from, now(), sovra_core::group::JOBS_PER_MINUTE)
+            {
+                return refused;
+            }
+            // Forget finished jobs nobody read for a while.
+            let stale = now().0.saturating_sub(JOB_KEEP_MS);
+            inner
+                .jobs
+                .retain(|_, job| !(job.finished() && job.started.0 < stale));
+            let member = roster.owner_of(&from);
+            let running = RunningJob::new(from);
+            inner.jobs.insert(id, running.clone());
+            (
+                member.map(|m| m.name.clone()).unwrap_or_default(),
+                member
+                    .and_then(|m| m.devices.get(&from))
+                    .map(|entry| entry.name.clone())
+                    .unwrap_or_default(),
+                running,
+            )
+        };
+        let groups = self.clone();
+        (self.spawn)(Box::pin(async move {
+            let out = |text: &str| running.push(text);
+            let result =
+                tokio::time::timeout(JOB_TIMEOUT, model.answer(job, &out, &running.cancelled))
+                    .await;
+            let failed = match result {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(error.to_string()),
+                Err(_) => Some("it took too long".to_owned()),
+            };
+            let answered = failed.is_none() && running.has_words();
+            running.finish(failed);
+            {
+                let mut inner = groups.inner.lock().await;
+                sovra_core::group::log_work(
+                    &mut inner.work_log,
+                    sovra_core::group::WorkRecord {
+                        asked_by,
+                        computer,
+                        at: now(),
+                        answered,
+                    },
+                );
+            }
+            groups.publish_work().await;
+        }));
+        PeerResponse::WorkStarted
+    }
+
+    /// Helping side: the answer's words after `from`, waiting up to a second for more.
+    async fn work_next(
+        &self,
+        from: DeviceId,
+        id: sovra_core::group::JobId,
+        offset: usize,
+    ) -> PeerResponse {
+        let running = {
+            let inner = self.inner.lock().await;
+            match inner.jobs.get(&id) {
+                Some(job) if job.owner == from => job.clone(),
+                _ => {
+                    return PeerResponse::Refused {
+                        reason: Refusal::NotHelping,
+                    };
+                }
+            }
+        };
+        let changed = running.changed.notified();
+        let progress = running.progress(offset);
+        let progress = if progress.text.is_empty() && !progress.done {
+            let _ = tokio::time::timeout(WORK_POLL, changed).await;
+            running.progress(offset)
+        } else {
+            progress
+        };
+        PeerResponse::WorkProgress { progress }
+    }
+
+    /// Helping side: the asker stopped; stop generating at once.
+    async fn work_cancel(&self, from: DeviceId, id: sovra_core::group::JobId) -> PeerResponse {
+        let inner = self.inner.lock().await;
+        if let Some(job) = inner.jobs.get(&id).filter(|job| job.owner == from) {
+            job.cancelled
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            job.changed.notify_waiters();
         }
-        self.publish_work().await;
-        match answer {
-            Some(text) => PeerResponse::Worked { text },
-            None => refused,
-        }
+        PeerResponse::Accepted
     }
 
     async fn publish_changed(&self, roster: Option<GroupState>, shared: SharedNow) {
@@ -2442,7 +2631,11 @@ impl PeerHandler for GroupHandler {
                     .await
             }
             PeerRequest::ConfirmJoin { matches } => groups.confirm_join(from, matches).await,
-            PeerRequest::Work { job, .. } => groups.work(from, job).await,
+            PeerRequest::Work { id, job, .. } => groups.work(from, id, job).await,
+            PeerRequest::WorkNext {
+                id, from: offset, ..
+            } => groups.work_next(from, id, offset).await,
+            PeerRequest::WorkCancel { id, .. } => groups.work_cancel(from, id).await,
             other => groups.serve_peer(from, other).await,
         }
     }
@@ -2512,7 +2705,9 @@ impl Groups {
             | PeerRequest::Ask { .. }
             | PeerRequest::JoinByCode { .. }
             | PeerRequest::ConfirmJoin { .. }
-            | PeerRequest::Work { .. } => PeerResponse::Refused {
+            | PeerRequest::Work { .. }
+            | PeerRequest::WorkNext { .. }
+            | PeerRequest::WorkCancel { .. } => PeerResponse::Refused {
                 reason: Refusal::Malformed,
             },
         }

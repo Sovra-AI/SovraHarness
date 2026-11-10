@@ -2049,3 +2049,20 @@ fn helpers_heard_from_recently_are_asked_first_and_work_settings_start_off() {
     assert_eq!(log.len(), MAX_WORK_LOG);
     assert_eq!(log[0].asked_by, format!("Person {}", MAX_WORK_LOG + 2));
 }
+
+#[test]
+fn a_growing_answer_is_read_in_pieces_without_splitting_a_character() {
+    let mut buffer = JobBuffer::default();
+    buffer.text.push_str("Pasta é ");
+    let first = buffer.since(0);
+    assert_eq!(first.text, "Pasta é ");
+    assert!(!first.done);
+    buffer.text.push_str("ready.");
+    buffer.done = true;
+    let rest = buffer.since(first.text.len());
+    assert_eq!(rest.text, "ready.");
+    assert!(rest.done);
+    // An offset inside "é" moves back to its start instead of panicking.
+    assert_eq!(buffer.since(7).text, "é ready.");
+    assert_eq!(buffer.since(999).text, "");
+}

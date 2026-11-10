@@ -124,16 +124,75 @@ pub struct WorkSettings {
     pub use_group: bool,
 }
 
-/// Runs a job on this computer's own AI, with no tools. Implemented by the harness.
-#[async_trait::async_trait]
-pub trait WorkModel: Send + Sync {
-    async fn answer(&self, job: ChatJob) -> Result<String, WorkError>;
+/// One handed-off job, named by the asking computer (random, so not guessable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct JobId(pub [u8; 16]);
+
+/// What a job produced since the asker last looked.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WorkProgress {
+    /// New words since the asked-for offset.
+    pub text: String,
+    /// The answer is complete (or was stopped).
+    pub done: bool,
+    /// Why it stopped early, in plain words.
+    pub failed: Option<String>,
 }
 
-/// Hands a job to a free computer in the group. Implemented by the runtime.
+/// A job's answer as it grows on the helping computer.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct JobBuffer {
+    pub text: String,
+    pub done: bool,
+    pub failed: Option<String>,
+}
+
+impl JobBuffer {
+    /// The words after byte `from` (clamped to a character boundary), and the state.
+    pub fn since(&self, from: usize) -> WorkProgress {
+        let mut start = from.min(self.text.len());
+        while !self.text.is_char_boundary(start) {
+            start -= 1;
+        }
+        WorkProgress {
+            text: self.text[start..].to_owned(),
+            done: self.done,
+            failed: self.failed.clone(),
+        }
+    }
+}
+
+/// A job that a helping computer accepted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkTicket {
+    pub id: JobId,
+    pub helper: DeviceId,
+    pub helper_name: String,
+    pub computer: String,
+}
+
+/// Runs a job on this computer's own AI, with no tools, streaming its words to
+/// `out` and stopping soon after `cancelled` turns true. Implemented by the harness.
+#[async_trait::async_trait]
+pub trait WorkModel: Send + Sync {
+    async fn answer(
+        &self,
+        job: ChatJob,
+        out: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), WorkError>;
+}
+
+/// Hands a job to a free computer in the group and follows its answer.
+/// Implemented by the runtime.
 #[async_trait::async_trait]
 pub trait WorkPeer: Send + Sync {
-    async fn run(&self, job: ChatJob) -> Result<JobAnswer, WorkError>;
+    /// Starts the job on the first free computer, skipping `avoid`.
+    async fn start(&self, job: ChatJob, avoid: &[DeviceId]) -> Result<WorkTicket, WorkError>;
+    /// The answer's words after byte `from`; waits up to about a second for more.
+    async fn next(&self, ticket: &WorkTicket, from: usize) -> Result<WorkProgress, WorkError>;
+    /// Asks the helping computer to stop now. Returns at once.
+    fn cancel(&self, ticket: &WorkTicket);
 }
 
 /// The order to try helpers in: computers heard from most recently first (most

@@ -11,9 +11,8 @@ and a subject; it is never turned into a saved person and it is never answered
 automatically.
 
 This page is the current behaviour of the app. What is still planned —
-streaming and instant cancel for handed-off answers, handing off embedding and
-indexing work, production relays, and an external security review — stays in
-the [group roadmap](roadmap/02-a-team.md). The roadmap's own checklist is an acceptance plan for that
+handing off embedding and indexing work, production relays, and an external
+security review — stays in the [group roadmap](roadmap/02-a-team.md). The roadmap's own checklist is an acceptance plan for that
 design; where it still has an open box for something this page describes, the
 code and this page are the ones to trust.
 
@@ -546,7 +545,7 @@ Present in core or in the roadmap, and not what the Groups screen does:
 | --- | --- |
 | Viewer and Contributor | The fold refuses additions from Viewers. No screen control sets either role yet. |
 | Correct a detail from the screen | `GroupCommand::Correct` and the dispute fold exist. The screen has no correction button, and Share does not set `replaces` or `valid_at`. |
-| Handed-off answers | Whole answers, not streamed; no instant cancel; chat only (no embedding or indexing jobs); no tools on the helping computer. |
+| Handed-off answers | Streamed, stoppable within a second, handed to the next free computer if the helper vanishes first. Chat only: no embedding or indexing jobs (another computer's vectors are not comparable), and no tools on the helping computer. |
 | Same-room codes | Need both computers on one network (mDNS). No SPAKE2: one guess per code plus the picture check. |
 | A second admin's extra signature to remove an admin | Not required. One admin's signature is enough. The last admin cannot be removed or demoted. |
 | Person recovery codes | Mentioned on the `PersonId` comment only. |

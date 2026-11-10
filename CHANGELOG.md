@@ -11,6 +11,10 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Answers from a free computer in your group now stream in as they are
+  written, **Stop** stops the helping computer's AI within a second, and if
+  the helping computer goes away before answering, the next free one takes
+  over.
 - **Let a free computer in your group answer.** Settings → Groups → *Share
   this computer's AI*: on a computer with an AI, *Let my group use this
   computer's AI*; on one without, *Use a free computer's AI when this one has

@@ -1002,23 +1002,36 @@ impl sovra_core::group::WorkModel for EchoAi {
     async fn answer(
         &self,
         job: sovra_core::group::ChatJob,
-    ) -> Result<String, sovra_core::group::WorkError> {
+        out: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+        _cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), sovra_core::group::WorkError> {
         assert!(job.turns.last().is_some_and(|turn| turn.from_person));
-        Ok(format!(
-            "Mum's computer says: {}",
-            job.turns.last().map_or("", |turn| turn.text.as_str())
-        ))
+        out("Mum's computer says: ");
+        out(job.turns.last().map_or("", |turn| turn.text.as_str()));
+        Ok(())
     }
 }
 
-async fn reply(computer: &Computer, session: &str) -> Event {
+/// The whole streamed answer for `session` (pieces joined), or its error.
+async fn reply(computer: &Computer, session: &str) -> Result<String, String> {
     tokio::time::timeout(WAIT, async {
+        let mut text = String::new();
         loop {
             match computer.events.recv().await.expect("runtime running") {
-                event @ (Event::AgentChunk { .. } | Event::AgentError { .. })
-                    if matches!(&event, Event::AgentChunk { session_id, .. } | Event::AgentError { session_id, .. } if session_id == session) =>
-                {
-                    return event;
+                Event::AgentChunk {
+                    session_id,
+                    text: piece,
+                } if session_id == session => {
+                    text.push_str(&piece);
+                }
+                Event::AgentError {
+                    session_id,
+                    message,
+                } if session_id == session => {
+                    return Err(message);
+                }
+                Event::AgentCompleted { session_id } if session_id == session => {
+                    return Ok(text);
                 }
                 _ => {}
             }
@@ -1067,10 +1080,7 @@ async fn a_computer_without_ai_gets_its_answer_from_a_free_computer_in_the_group
             prompt: "What's for dinner?".into(),
         })
         .expect("accepted");
-    assert!(matches!(
-        reply(&dad, "before").await,
-        Event::AgentError { .. }
-    ));
+    assert!(reply(&dad, "before").await.is_err(), "nobody is free yet");
 
     mum.send(GroupCommand::SetWork(sovra_core::group::WorkSettings {
         help_others: true,
@@ -1088,10 +1098,10 @@ async fn a_computer_without_ai_gets_its_answer_from_a_free_computer_in_the_group
             prompt: "What's for dinner?".into(),
         })
         .expect("accepted");
-    let answer = reply(&dad, "after").await;
+    let answer = reply(&dad, "after").await.expect("answered");
     assert!(
-        matches!(&answer, Event::AgentChunk { text, .. } if text.contains("Mum's computer says: What's for dinner?")),
-        "{answer:?}"
+        answer.contains("Mum's computer says: What's for dinner?"),
+        "streamed in pieces and joined: {answer:?}"
     );
     let log = mum
         .wait(|event| match event {
@@ -1102,4 +1112,111 @@ async fn a_computer_without_ai_gets_its_answer_from_a_free_computer_in_the_group
     assert_eq!(log[0].asked_by, "Dad");
     assert_eq!(log[0].computer, "Old laptop");
     assert!(log[0].answered);
+}
+
+/// A slow helper AI: one word, then it keeps going until it is told to stop, and
+/// reports how long the stop took to arrive.
+struct SlowAi(async_channel::Sender<Duration>);
+
+#[async_trait::async_trait]
+impl sovra_core::group::WorkModel for SlowAi {
+    async fn answer(
+        &self,
+        _job: sovra_core::group::ChatJob,
+        out: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), sovra_core::group::WorkError> {
+        out("Once upon a time ");
+        let wrote = std::time::Instant::now();
+        let mut stopped = None;
+        for _ in 0..300 {
+            if cancelled.load(std::sync::atomic::Ordering::SeqCst) {
+                stopped = Some(wrote.elapsed());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        if let Some(after) = stopped {
+            let _ = self.0.send(after).await;
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stopping_a_handed_off_chat_stops_the_helping_computer_within_a_second() {
+    let net = Arc::new(Network::default());
+    let (stops, stopped) = async_channel::bounded(1);
+    let mum = Computer::start_with(&net, 121, Some(Arc::new(SlowAi(stops))));
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Desktop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+    let dad = Computer::start(&net, 122);
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Old laptop".into(),
+    });
+    dad.roster(|state| state.admits(&dad.device)).await;
+    mum.send(GroupCommand::SetWork(sovra_core::group::WorkSettings {
+        help_others: true,
+        use_group: false,
+    }));
+    dad.send(GroupCommand::SetWork(sovra_core::group::WorkSettings {
+        help_others: false,
+        use_group: true,
+    }));
+    for computer in [&mum, &dad] {
+        computer
+            .wait(|event| match event {
+                GroupEvent::Work { settings, .. } if settings.help_others || settings.use_group => {
+                    Some(())
+                }
+                _ => None,
+            })
+            .await;
+    }
+
+    dad.client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "story".into(),
+            prompt: "Tell me a long story".into(),
+        })
+        .expect("accepted");
+    // The first words arrive while the helper is still writing…
+    tokio::time::timeout(WAIT, async {
+        loop {
+            if let Event::AgentChunk { session_id, text } =
+                dad.events.recv().await.expect("runtime running")
+                && session_id == "story"
+            {
+                assert!(text.contains("Once upon a time"));
+                return;
+            }
+        }
+    })
+    .await
+    .expect("streamed words");
+    // …and pressing Stop on Dad's computer stops Mum's AI.
+    dad.client
+        .send(Command::InterruptSession {
+            session_id: "story".into(),
+        })
+        .expect("accepted");
+    let after = tokio::time::timeout(WAIT, stopped.recv())
+        .await
+        .expect("the helper was told to stop")
+        .expect("reported");
+    assert!(
+        after < Duration::from_millis(1_500),
+        "stopped {after:?} after writing"
+    );
 }

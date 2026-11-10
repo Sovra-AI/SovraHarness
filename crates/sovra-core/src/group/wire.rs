@@ -95,10 +95,22 @@ pub enum PeerRequest {
     /// Same room: the joining person's answer to "do the pictures match?". The
     /// inviting computer answers only once its own person has answered too.
     ConfirmJoin { matches: bool },
-    /// Work handoff: "answer this chat turn with your AI" (no tools travel).
+    /// Work handoff: "start answering this chat turn with your AI" (no tools travel).
     Work {
         group: GroupId,
+        id: super::work::JobId,
         job: super::work::ChatJob,
+    },
+    /// "The answer's words after byte `from`" (answered within about a second).
+    WorkNext {
+        group: GroupId,
+        id: super::work::JobId,
+        from: usize,
+    },
+    /// "Stop that job now."
+    WorkCancel {
+        group: GroupId,
+        id: super::work::JobId,
     },
 }
 
@@ -122,9 +134,11 @@ pub enum PeerResponse {
     Answered {
         items: Vec<super::federated::FederatedItem>,
     },
-    /// A helping computer's answer to a chat job.
-    Worked {
-        text: String,
+    /// A helping computer accepted a chat job.
+    WorkStarted,
+    /// New words of a chat job's answer.
+    WorkProgress {
+        progress: super::work::WorkProgress,
     },
     /// The code was right: compare pictures now. Carries what the joiner needs to
     /// derive them and to know what it is joining.
@@ -187,7 +201,9 @@ pub fn admits_request(
         PeerRequest::Sync { group, .. }
         | PeerRequest::Push { group, .. }
         | PeerRequest::Ask { group, .. }
-        | PeerRequest::Work { group, .. } => group,
+        | PeerRequest::Work { group, .. }
+        | PeerRequest::WorkNext { group, .. }
+        | PeerRequest::WorkCancel { group, .. } => group,
     };
     match roster {
         Some(state) if state.group != *group => Err(Refusal::WrongGroup),

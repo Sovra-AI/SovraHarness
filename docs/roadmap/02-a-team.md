@@ -963,9 +963,14 @@ Status checked against the code on 2026-11-10.
 
 ### T4 — Hand off work
 
-- [x] Job protocol, first slice: `PeerRequest::Work` carries a text-only chat
-  job (`sovra-core/src/group/work.rs`); helpers are tried most-recently-seen
-  first. *Not yet:* streaming tokens, cancel within 1 s, embedding/indexing jobs.
+- [x] Job protocol: `Work` starts a text-only chat job, `WorkNext` long-polls
+  its growing answer (streamed to the chat), `WorkCancel` stops it
+  (`sovra-core/src/group/work.rs`); helpers are tried most-recently-seen first,
+  and a helper that vanishes before answering hands over to the next.
+- [ ] Embedding and indexing jobs. Deliberately not handed off yet: vectors made
+  by another computer's embedding model are not comparable with this
+  computer's, so search would silently degrade. Needs a shared-model rule
+  (same model id and dimensions, checked per job) first.
 - [ ] Capability advertisement in heartbeats: models from `/api/tags` and
   `/api/ps`, memory, AC, idle, queue, sharing policy.
 - [x] An `Llm` forwarder (`sovra-adk/src/group_work.rs`, `GroupLlm`) used when
@@ -982,9 +987,12 @@ Status checked against the code on 2026-11-10.
 - [ ] Skills page: "Let a free computer do the heavy work".
 - **Acceptance criteria:**
   - A laptop on battery gets a streamed answer from a plugged-in desktop.
-  - Cancel stops generation on the worker within 1 s.
+  - Cancel stops generation on the worker within 1 s. *(Runtime test
+    `stopping_a_handed_off_chat_stops_the_helping_computer_within_a_second`.)*
   - Kill the worker mid-stream and the job falls back locally without
-    duplicating side effects.
+    duplicating side effects. *(A helper that vanishes before answering hands
+    over to the next free computer; jobs carry no tools, so nothing repeats.
+    Mid-answer the chat says the helper went away.)*
 
 ### T5 — People-to-people and calm change
 

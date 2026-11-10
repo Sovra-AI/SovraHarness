@@ -32,7 +32,9 @@ impl PeerHandler for Recorder {
             | PeerRequest::Ask { .. }
             | PeerRequest::JoinByCode { .. }
             | PeerRequest::ConfirmJoin { .. }
-            | PeerRequest::Work { .. } => PeerResponse::Refused {
+            | PeerRequest::Work { .. }
+            | PeerRequest::WorkNext { .. }
+            | PeerRequest::WorkCancel { .. } => PeerResponse::Refused {
                 reason: Refusal::NotAMember,
             },
         }

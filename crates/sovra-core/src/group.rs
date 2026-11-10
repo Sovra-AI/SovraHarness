@@ -65,8 +65,9 @@ pub use wire::{
     Refusal, Spawn, TransportError, admits_request, join_transcript, within_budget,
 };
 pub use work::{
-    ChatJob, JOBS_PER_MINUTE, JobAnswer, JobTurn, MAX_JOB_BYTES, MAX_JOB_TURNS, MAX_WORK_LOG,
-    WorkError, WorkModel, WorkPeer, WorkRecord, WorkSettings, check_job, helper_order, log_work,
+    ChatJob, JOBS_PER_MINUTE, JobAnswer, JobBuffer, JobId, JobTurn, MAX_JOB_BYTES, MAX_JOB_TURNS,
+    MAX_WORK_LOG, WorkError, WorkModel, WorkPeer, WorkProgress, WorkRecord, WorkSettings,
+    WorkTicket, check_job, helper_order, log_work,
 };
 
 #[cfg(test)]
