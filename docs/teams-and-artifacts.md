@@ -41,7 +41,9 @@ What changes:
 
 - `MAX_ROUNDS` is 3, not 6, because the user pays for every reply on their own key.
 - Every member uses the user's selected model.
-- Memory for each member is not ported yet.
+- Separate persistent memory stores for individual members are not ported. Team
+  prompts use the shared capture path, and visible member replies are saved with
+  their authorship and dependency records; see [team memory](memory-capture-and-recall.md#one-team-turn).
 
 Artifacts follow what AI clients have converged on:
 

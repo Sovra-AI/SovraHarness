@@ -5,7 +5,7 @@ teams. Each claim names the code or document that supports it, so it can be
 checked independently. Paths are relative to the repository root. Line
 numbers drift; search for the named symbol if a line has moved.
 
-Checked against the source on 2026-11-06.
+Baseline checked on 2026-11-06; group networking and storage updated on 2026-11-10.
 
 ## 1. Where data lives
 
@@ -17,6 +17,7 @@ The app data folder is chosen with
 | Item | Location | Evidence |
 | --- | --- | --- |
 | Memory database (SurrealDB, SurrealKV engine) | `memory/` | `crates/sovra-app/src/main.rs`; `Cargo.toml` (surrealdb with `kv-surrealkv`) |
+| Group records and device identity | `groups/`; device key in credential store | `crates/sovra-app/src/main.rs`; `crates/sovra-mesh/src/lib.rs` |
 | Logs (daily rolling) | `logs/` | `crates/sovra-app/src/logging.rs` |
 | Model connections and catalogue cache | `models/` | `crates/sovra-providers/src/storage.rs` |
 | File index | `file-index/` | `crates/sovra-app/src/main.rs` |
@@ -58,6 +59,7 @@ messages.
 | `api.telegram.org` | Background poll once a bot is linked | No | Yes | Unlink |
 | WhatsApp Web servers | Persistent connection once paired | No | Yes | Unlink |
 | Google sign-in and APIs (Gmail, Calendar, Drive, People, Tasks) | Once connected; tool use | No | Drafts, events, tasks, read files | Disconnect Google |
+| Group peers and n0 discovery/relays | Group transport starts with runtime when device credentials are available | Yes, Internet reach by default | Encrypted shared records to peers; discovery/relay metadata | `SOVRA_GROUP_REACH=local` removes Internet discovery/relay; direct peer traffic remains possible |
 | Remote MCP servers | Reconnect at launch once added | No | Tool arguments | Disable or remove the service |
 | `cdn.jsdelivr.net` (Mermaid script) | The **browser** loads it when a diagram is opened in the browser | No | No; diagram source stays in the local page | Do not open diagrams in the browser |
 
@@ -80,10 +82,12 @@ To run with **no traffic beyond the computer itself**:
 5. Leave `GEMINI_API_KEY`, `GOOGLE_API_KEY` and `SOVRA_SEARXNG_URL` unset.
 6. Do not link WhatsApp, Telegram, Google or remote add-on tools.
 7. If search by meaning is wanted, point it at the local Ollama.
+8. Set `SOVRA_GROUP_REACH=local` before launch and do not join or create a group.
+   Local reach alone can still communicate with other computers directly.
 
-What remains is traffic to `localhost` only. This is a supported
-configuration, but it is **not the default**, and it has not been packaged as
-a tested offline or air-gapped edition ([08](08-limits-and-objections.md)).
+These settings avoid the listed external services. Verify actual egress in the
+deployment environment before claiming a network-isolated installation. This is
+**not the default**, and it has not been packaged as a tested offline or air-gapped edition ([08](08-limits-and-objections.md)).
 
 ## 4. Knowledge integrity
 

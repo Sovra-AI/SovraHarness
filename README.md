@@ -7,11 +7,12 @@ Native Rust desktop app for the Sovra agent harness: a GPUI chat UI, a tokio
 runtime, local memory (vector + graph + full-text behind a `MemoryStore` port),
 and Velopack installers. Chrome defaults to Arabic, with a Settings language
 picker and right-to-left layout. Settings → Groups lets a family or small team
-share memories, documents and lists across their computers: **Share with my
-group** on an artifact or a saved detail, **Keep a copy** of what others
-shared, and edits come back as new versions. **Ask my group** asks the
-memories of computers whose owners allow it, without copying those memories. macOS, Windows and Linux from one
-codebase.
+share memories, documents, lists, helpers and schedules across their computers:
+**Share with my group** (or *Just Dad*) on an artifact, a saved detail, a helper or
+a schedule, **Keep a copy** of what others shared, and edits come back as new
+versions. **Ask my group** asks the memories of computers whose owners allow it,
+without copying those memories. Work handoff remains planned; see
+[Groups](docs/groups.md). macOS, Windows and Linux from one codebase.
 
 The Knowledge page includes an interactive map of saved details and their
 connections. Select a label to read its story, filter the kinds of connections,
@@ -33,7 +34,9 @@ cargo xtask dev
 ```
 
 On Linux, install system packages once with `./scripts/install-linux-deps.sh`.
-No Node, no Python, and no extra packages on macOS or Windows.
+The native app does not require Node or Python. Install Rust and the platform
+build tools first; packaging additionally requires .NET and Velopack. See
+[development](docs/development.md) and [releasing](docs/releasing.md).
 
 `cargo xtask dev` is a **one-shot** debug launch with `SOVRA_DEV=1`. There is no
 file watcher and no save-triggered reload — run it again after you edit. Details:
@@ -148,9 +151,16 @@ sequenceDiagram
 
 | Guide | What it covers |
 | ----- | -------------- |
+| [Getting started](docs/getting-started.md) | First launch, first chat and finding features |
+| [Configuration and local data](docs/configuration.md) | Startup variables, data paths and troubleshooting |
+| [Schedules](docs/schedules.md) | Repeating prompts and confirmed timed messages |
+| [Groups](docs/groups.md) | People, computers and explicitly shared knowledge |
+| [Release guide](docs/releasing.md) | Packaging, signing and release verification |
+| [Roadmap](docs/roadmap/README.md) | Implemented foundations and planned stages |
 | [Architecture](docs/architecture.md) | Crate layering, Command/Event, why each dependency |
 | [Native development](docs/development.md) | One-shot `cargo xtask dev`, cache, sign-in status |
 | [Development MCP](docs/development-mcp.md) | Drive the running app from Codex or Claude Code |
+| [Reviewing knowledge](docs/knowledge.md) | Check sources, explore connections and stop recall |
 | [Memory capture and recall](docs/memory-capture-and-recall.md) | One chat turn through save and later recall |
 | [Agent memory log](docs/agent-memory.md) | Dated audits and measured limits |
 | [Models](docs/models.md) | Connect a service, pick a chat model |

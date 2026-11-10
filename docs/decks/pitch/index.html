@@ -14,6 +14,18 @@
   html,body{background:#e3dbf0}
   #deck{box-shadow:0 50px 140px -50px rgba(46,8,84,.55),0 0 0 1px rgba(76,29,149,.10)}
   #deck .slide{justify-content:center}
+  /* Four light skins. A neighbour never repeats the one before it. The icons are decoration; the sentences stay in the page. */
+  #deck .slide.wash-paper{background:#fbfaff}
+  #deck .slide.wash-mist{background:#dff6f3;--cyan-amt:.16;--ax:18%;--ay:12%}
+  #deck .slide.wash-lilac{background:#f0e6ff;--ax:82%;--ay:8%;--bx:8%;--by:88%}
+  #deck .slide.wash-sand{background:#fff1e0;--ax:70%;--ay:86%;--bx:12%;--by:10%}
+  #deck .eyebrow.marked::before{display:none}
+  #deck .eyebrow.marked{gap:12px}
+  #deck .chip{width:34px;height:34px;flex:none;display:inline-grid;place-items:center;border-radius:11px;background:#5b21b6}
+  #deck .wash-mist .chip{border-radius:50%;background:#0e7490}
+  #deck .wash-lilac .chip{border-radius:8px;background:#7c3aed}
+  #deck .wash-sand .chip{border-radius:6px;background:#b45309}
+  #deck img.mark{width:20px;height:20px;display:block;filter:brightness(0) invert(1)}
   #deck .lead{font-size:34px;line-height:1.42;margin-top:30px}
   #deck .split{gap:84px}
   .arline{font:600 40px/1.4 "IBM Plex Sans Arabic",var(--f-sans);color:var(--violet-3);margin-top:22px;direction:rtl;unicode-bidi:isolate;text-align:left}
@@ -62,14 +74,16 @@
   .heard .q{font-family:var(--f-serif);font-style:italic;font-weight:400;font-size:34px;line-height:1.25;color:var(--ink)}
   .heard .a{font-size:28px;line-height:1.35;color:var(--cyan-2)}
   .bigstat h1.what{margin-top:0;max-width:none}
-  .layers{display:flex;flex-direction:column;margin-top:44px}
-  .layers .ly{display:grid;grid-template-columns:minmax(420px,.85fr) 1.25fr;gap:48px;align-items:baseline;padding:22px 24px 22px 28px;border-top:1px solid var(--line-2);border-left:4px solid transparent}
-  .layers .ly:last-child{border-bottom:1px solid var(--line-2)}
-  .layers .ly.desk{border-left-color:var(--cyan-2);padding-top:28px;padding-bottom:28px;background:rgba(8,145,178,.08)}
-  .layers .ly h3{font:700 40px/1.05 var(--f-display);letter-spacing:-.025em}
-  .layers .ly.desk h3{font-size:46px;color:var(--cyan-2)}
-  .layers .ly p{font-size:26px;line-height:1.35;color:var(--ink-2)}
-  .layers .ly.desk p{font-size:28px;color:var(--ink)}
+  .scene.playstack{width:100%;height:auto;aspect-ratio:1680/580;max-height:580px;margin-top:4px}
+  /* Selection boxes follow the font’s em square (~1.21× the size) and ignore a tight line-height, so neighbouring lines were intersecting. */
+  #deck h1{line-height:1.32}
+  #deck .giant{line-height:1.32}
+  #deck .mega{line-height:1.32}
+  #deck .bigstat .what{line-height:1.4}
+  #deck .bigstat .n{line-height:1.26}
+  #deck .huge .n{line-height:1.26}
+  #deck .huge .l{margin-top:20px}
+  #deck .divider .bignum{bottom:108px;right:88px;font-size:148px;line-height:1.2}
   .bigstat{display:grid;grid-template-columns:1.1fr 1fr;gap:60px;align-items:center;margin-top:10px}
   .bigstat .n{font:800 430px/.82 var(--f-display);letter-spacing:-.07em;background:linear-gradient(135deg,#7c3aed,#a855f7 60%,#0891b2);-webkit-background-clip:text;background-clip:text;color:transparent}
   .bigstat .what{font:700 54px/1.1 var(--f-display);letter-spacing:-.03em;color:var(--ink)}
@@ -120,6 +134,12 @@
   .slide.active .pop{animation:popin .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--d,0)*1ms)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script>
+  /* Classic script, not a module. The icons on the slides are real images;
+     this only records that the shared icon script loaded. Words do not depend on it. */
+  if (window.lucide && lucide.icons) document.documentElement.dataset.iconScript = "lucide";
+</script>
 </head>
 <body data-logo="../../../crates/sovra-ui/assets/branding/sovra-logo.svg" data-title="Investor pitch">
 
@@ -140,7 +160,7 @@
 <div id="stage"><div id="deck">
 
 <!-- 1 · Title · ink hero -->
-<section class="slide" data-section="Sovra" data-note="Sovra · sovereign AI for an AI-native UAE">
+<section class="slide wash-paper" data-section="Sovra" data-note="Sovra · sovereign AI for an AI-native UAE">
   <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1100px;gap:0">
     <span class="eyebrow rv">Investor pitch · United Arab Emirates</span>
@@ -151,7 +171,7 @@
 </section>
 
 <!-- 2 · Why now · one giant number -->
-<section class="slide" data-section="Why now" data-note="Sources: The National, 23 Apr 2026 · Abu Dhabi Digital Strategy 2025–27 · Microsoft AI Diffusion Report · G42, Oct 2025">
+<section class="slide wash-mist" data-section="Why now" data-note="Sources: The National, 23 Apr 2026 · Abu Dhabi Digital Strategy 2025–27 · Microsoft AI Diffusion Report · G42, Oct 2025">
   <canvas class="bgcanvas" data-fx="net" data-x=".2" data-r=".9"></canvas>
   <span class="eyebrow rv">Why now</span>
   <div class="bigstat">
@@ -169,41 +189,104 @@
 </section>
 
 <!-- 3 · The question · ink statement -->
-<section class="slide statement" data-section="The question" data-note="Source: MIT NANDA, The GenAI Divide, Jul 2025">
+<section class="slide statement wash-lilac" data-section="The question" data-note="Source: MIT NANDA, The GenAI Divide, Jul 2025">
   <canvas class="bgcanvas" data-fx="net" data-x=".5" data-r="1"></canvas>
   <span class="eyebrow rv">The question</span>
   <div class="mega rv" style="margin-top:40px">If AI does half the work,<br><span class="g">whose AI is it?</span></div>
   <p class="lead rv" style="max-width:1200px">Rented AI takes the <b>data</b>, keeps the <b>knowledge</b>, owns the <b>AI</b>, acts without a <b>person</b>, and <b>learns</b> from your work. And in one major study, <b>95%</b> of organisations saw no measurable return.</p>
 </section>
 
-<!-- 4 · The play · layers -->
-<section class="slide cool" data-section="The play" data-note="Owning the sovereign stack is the play — national compute, models, talent and policy, and the desk">
-  <span class="eyebrow c rv">The play</span>
-  <h1 class="rv" style="font-size:100px;max-width:1600px;margin-top:18px">Own the sovereign stack.<br><span class="gc">That’s the play.</span></h1>
-  <p class="lead rv" style="max-width:1480px">The nation owns every layer. Sovra is the desk where the work happens.</p>
-  <div class="layers">
-    <div class="ly desk rv" style="--i:3">
-      <h3>The desk · Sovra</h3>
-      <p>Helpers, memory, files and approvals on computers the nation owns.</p>
-    </div>
-    <div class="ly rv" style="--i:4">
-      <h3>Talent and policy</h3>
-      <p>Chief AI Officers · AI Charter</p>
-    </div>
-    <div class="ly rv" style="--i:5">
-      <h3>National models</h3>
-      <p>Falcon · Jais · K2 Think</p>
-    </div>
-    <div class="ly rv" style="--i:6">
-      <h3>National compute</h3>
-      <p>Stargate UAE · Khazna · sovereign clouds</p>
-    </div>
-  </div>
+<!-- 4 · The play · drawn stack under the headline -->
+<section class="slide cool wash-sand" data-section="The play" data-note="Owning the sovereign stack is the play — national compute, models, talent and policy, and the desk">
+  <span class="eyebrow c rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/building.svg"></span>The play</span>
+  <h1 class="rv" style="font-size:72px;max-width:1600px;margin-top:18px;line-height:1">
+    <span style="display:block;line-height:1">Own the sovereign stack.</span>
+    <span class="gc" style="display:block;line-height:1;margin-top:18px">That’s the play.</span>
+  </h1>
+  <p class="lead rv" style="max-width:1500px;margin-top:20px;font-size:26px">The nation owns every layer. Sovra is the desk where the work happens.</p>
+  <svg class="scene playstack rv z" viewBox="0 0 1680 580" role="img" aria-label="The sovereign stack: national compute at the base, then national models, talent and policy, and the Sovra desk on top">
+    <text x="28" y="118" class="t-c" style="font:800 36px var(--f-display)">The desk · Sovra</text>
+    <text x="28" y="160" class="t-ink" style="font:500 22px var(--f-sans)">Helpers, memory, files and approvals on computers the nation owns.</text>
+    <text x="28" y="248" class="t-ink" style="font:800 36px var(--f-display)">Talent and policy</text>
+    <text x="28" y="290" class="t-ink2" style="font:500 22px var(--f-sans)">Chief AI Officers · AI Charter</text>
+    <text x="28" y="378" class="t-ink" style="font:800 36px var(--f-display)">National models</text>
+    <text x="28" y="420" class="t-ink2" style="font:500 22px var(--f-sans)">Falcon · Jais · K2 Think</text>
+    <text x="28" y="508" class="t-ink" style="font:800 36px var(--f-display)">National compute</text>
+    <text x="28" y="548" class="t-ink2" style="font:500 22px var(--f-sans)">Stargate UAE · Khazna · sovereign clouds</text>
+
+    <ellipse cx="1240" cy="568" rx="420" ry="10" fill="rgba(46,8,84,.12)"/>
+    <path d="M860 455 H1648 V556 Q1648 572 1632 572 H876 Q860 572 860 556 Z" fill="#2e0854"/>
+    <path d="M940 64 H1568 V455 H940 Z" fill="#fffbff" stroke="#2e0854" stroke-width="3"/>
+    <path d="M908 64 H1600 L1564 18 H944 Z" fill="#0891b2"/>
+    <rect x="1188" y="30" width="150" height="20" rx="3" fill="#ecfeff"/>
+    <rect x="1516" y="64" width="52" height="391" fill="#cffafe" stroke="#0891b2" stroke-width="2"/>
+    <g stroke="#0e7490" stroke-width="2" opacity=".55">
+      <path d="M1542 64 V455"/>
+      <path d="M1516 150 H1568"/><path d="M1516 250 H1568"/><path d="M1516 350 H1568"/>
+    </g>
+    <path d="M940 210 H1516" stroke="#ddd6fe" stroke-width="3"/>
+    <path d="M940 330 H1516" stroke="#ddd6fe" stroke-width="3"/>
+
+    <rect x="1088" y="156" width="300" height="16" rx="3" fill="#ddd6fe"/>
+    <rect x="1148" y="92" width="210" height="64" rx="8" fill="#083344" stroke="#ffffff" stroke-width="4"/>
+    <rect x="1164" y="106" width="96" height="14" rx="7" fill="#67e8f9"/>
+    <rect x="1272" y="128" width="68" height="14" rx="7" fill="#ffffff" opacity=".9"/>
+    <path d="M1240 172 V190 M1204 190 H1288" stroke="#2e0854" stroke-width="5" stroke-linecap="round"/>
+
+    <g fill="#6d28d9">
+      <circle cx="1104" cy="258" r="16"/>
+      <path d="M1076 314 c3-26 14-36 28-36 s25 10 28 36z"/>
+      <circle cx="1196" cy="250" r="18"/>
+      <path d="M1164 318 c3-30 15-42 32-42 s29 12 32 42z"/>
+    </g>
+    <rect x="1320" y="246" width="110" height="78" rx="8" fill="#ffffff" stroke="#7c3aed" stroke-width="3"/>
+    <path d="M1340 270 h62 M1340 288 h74 M1340 306 h48" stroke="#c4b5fd" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="1404" cy="300" r="12" fill="none" stroke="#7c3aed" stroke-width="3"/>
+    <path d="M1398 300 l4 4 l8 -9" fill="none" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round"/>
+
+    <rect x="1064" y="428" width="78" height="12" rx="2" fill="#ddd6fe"/>
+    <path d="M1103 428 L1078 356 L1128 356 Z" fill="#7c3aed"/>
+    <rect x="1224" y="424" width="86" height="12" rx="2" fill="#ddd6fe"/>
+    <path d="M1267 348 L1304 392 L1267 436 L1230 392 Z" fill="#6d28d9"/>
+    <rect x="1388" y="422" width="78" height="12" rx="2" fill="#ddd6fe"/>
+    <circle cx="1427" cy="388" r="30" fill="none" stroke="#0891b2" stroke-width="4"/>
+    <circle cx="1412" cy="380" r="5" fill="#0891b2"/>
+    <circle cx="1442" cy="380" r="5" fill="#0891b2"/>
+    <circle cx="1427" cy="404" r="5" fill="#7c3aed"/>
+    <path d="M1412 380 L1442 380 L1427 404 Z" fill="none" stroke="#0891b2" stroke-width="2"/>
+
+    <g fill="#14081f" stroke="#c4b5fd" stroke-width="1.4">
+      <rect x="980" y="478" width="46" height="78" rx="3"/>
+      <rect x="1036" y="478" width="46" height="78" rx="3"/>
+      <rect x="1092" y="478" width="46" height="78" rx="3"/>
+      <rect x="1148" y="478" width="46" height="78" rx="3"/>
+      <rect x="1204" y="478" width="46" height="78" rx="3"/>
+      <rect x="1260" y="478" width="46" height="78" rx="3"/>
+      <rect x="1316" y="478" width="46" height="78" rx="3"/>
+      <rect x="1372" y="478" width="46" height="78" rx="3"/>
+      <rect x="1428" y="478" width="46" height="78" rx="3"/>
+      <rect x="1484" y="478" width="46" height="78" rx="3"/>
+      <rect x="1540" y="478" width="46" height="78" rx="3"/>
+    </g>
+    <g fill="#67e8f9">
+      <rect x="988" y="488" width="30" height="6" rx="1"/>
+      <rect x="1044" y="488" width="30" height="6" rx="1"/>
+      <rect x="1100" y="488" width="30" height="6" rx="1"/>
+      <rect x="1156" y="488" width="30" height="6" rx="1"/>
+      <rect x="1212" y="488" width="30" height="6" rx="1"/>
+      <rect x="1268" y="488" width="30" height="6" rx="1"/>
+      <rect x="1324" y="488" width="30" height="6" rx="1"/>
+      <rect x="1380" y="488" width="30" height="6" rx="1"/>
+      <rect x="1436" y="488" width="30" height="6" rx="1"/>
+      <rect x="1492" y="488" width="30" height="6" rx="1"/>
+      <rect x="1548" y="488" width="30" height="6" rx="1"/>
+    </g>
+  </svg>
 </section>
 
 <!-- 5 · The problem · ink editorial -->
-<section class="slide" data-section="The problem" data-note="Five things a nation loses with rented AI">
-  <span class="eyebrow rv">The problem</span>
+<section class="slide wash-paper" data-section="The problem" data-note="Five things a nation loses with rented AI">
+  <span class="eyebrow rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/globe.svg"></span>The problem</span>
   <h1 class="rv" style="font-size:66px;margin-top:14px">Rented AI makes a nation AI-native on <span class="g">someone else’s terms.</span></h1>
   <div class="ed">
     <div class="row rv"><div class="n">01</div><div><h3>The data leaves</h3><p>A patient letter pasted into a foreign chatbot. UAE law says it must stay here.</p></div></div>
@@ -215,35 +298,71 @@
 </section>
 
 <!-- 6 · The answer · headline, then the border as a full-width band -->
-<section class="slide" data-section="The answer" data-note="Sovra keeps the work inside the border">
-  <span class="eyebrow rv">The answer</span>
+<section class="slide wash-mist" data-section="The answer" data-note="Sovra keeps the work inside the border">
+  <span class="eyebrow rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/people.svg"></span>The answer</span>
   <h1 class="rv" style="font-size:72px;max-width:1680px">Assistants in <span class="g">your own office.</span></h1>
   <p class="lead rv" style="max-width:1560px;margin-top:14px">Rented AI is a consultant abroad: you send the files, they keep the notes, you explain everything again. Sovra is a team of assistants <b>at your own desk</b>.</p>
   <p class="punch rv"><b>The files stay. The notes stay. The decisions stay.</b> A person approves anything that leaves.</p>
   <svg class="scene stackpic rv z" viewBox="0 0 1680 420" role="img" aria-label="Inside the national border, work circulates between desks and never crosses it">
-    <path d="M48 200 C48 70 250 36 520 58 C830 16 1140 32 1400 72 C1610 108 1648 200 1596 286 C1516 372 1160 384 840 368 C460 350 48 328 48 200 Z" fill="rgba(8,145,178,.07)" stroke="#0891b2" stroke-width="3"/>
-    <text x="840" y="118" text-anchor="middle" class="t-c mono" style="font-size:16px;letter-spacing:.22em">INSIDE THE COUNTRY · NOTHING CROSSES</text>
-    <ellipse cx="840" cy="250" rx="620" ry="110" fill="url(#gGlowC)"/>
-    <g fill="none" stroke="rgba(8,145,178,.45)" stroke-width="2.2">
-      <path id="S1" d="M390 250 C 520 180 640 180 760 240"/>
-      <path id="S2" d="M920 240 C 1060 176 1180 184 1320 246"/>
-      <path id="S3" d="M1280 210 C 1100 150 980 150 900 200"/>
+    <rect x="36" y="28" width="1608" height="364" rx="28" fill="#f0fdfa" stroke="#0e7490" stroke-width="10"/>
+    <text x="840" y="72" text-anchor="middle" class="t-c mono" style="font-size:16px;letter-spacing:.22em">INSIDE THE COUNTRY · NOTHING CROSSES</text>
+    <g>
+      <rect x="78" y="100" width="430" height="250" rx="18" fill="#ffffff" stroke="#0891b2" stroke-width="3"/>
+      <rect x="625" y="100" width="430" height="250" rx="18" fill="#ffffff" stroke="#0891b2" stroke-width="3"/>
+      <rect x="1172" y="100" width="430" height="250" rx="18" fill="#ffffff" stroke="#0891b2" stroke-width="3"/>
+    </g>
+    <g stroke="#0891b2" stroke-width="4" fill="none" stroke-linecap="round">
+      <path d="M508 230 H625"/><path d="M1055 230 H1172"/>
+    </g>
+    <g fill="#ffffff" stroke="#7c3aed" stroke-width="2">
+      <rect x="528" y="210" width="36" height="44" rx="4"/>
+      <rect x="572" y="198" width="36" height="44" rx="4"/>
+      <rect x="1076" y="210" width="36" height="44" rx="4"/>
+      <rect x="1120" y="198" width="36" height="44" rx="4"/>
+    </g>
+    <g fill="#ede9fe">
+      <path d="M536 222 h20 M536 232 h20 M536 242 h14" stroke="#c4b5fd" stroke-width="2"/>
+      <path d="M580 210 h20 M580 220 h20 M580 230 h14" stroke="#c4b5fd" stroke-width="2"/>
+      <path d="M1084 222 h20 M1084 232 h20 M1084 242 h14" stroke="#c4b5fd" stroke-width="2"/>
+      <path d="M1128 210 h20 M1128 220 h20 M1128 230 h14" stroke="#c4b5fd" stroke-width="2"/>
     </g>
     <g>
-      <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#S1"/></animateMotion></use>
-      <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3.4s" begin="1s" repeatCount="indefinite"><mpath href="#S2"/></animateMotion></use>
-      <use href="#doc" width="26" height="32" x="-13" y="-16"><animateMotion dur="3.6s" begin="1.8s" repeatCount="indefinite"><mpath href="#S3"/></animateMotion></use>
+      <text x="293" y="142" text-anchor="middle" class="t-ink" style="font:700 28px var(--f-display)">Ministry</text>
+      <rect x="128" y="250" width="200" height="16" rx="3" fill="#ddd6fe"/>
+      <rect x="168" y="176" width="150" height="74" rx="8" fill="#083344" stroke="#ffffff" stroke-width="4"/>
+      <rect x="182" y="190" width="70" height="12" rx="6" fill="#67e8f9"/>
+      <rect x="182" y="212" width="108" height="12" rx="6" fill="#ffffff" opacity=".85"/>
+      <circle cx="400" cy="210" r="22" fill="#ffffff" stroke="#7c3aed" stroke-width="3"/>
+      <path d="M366 292 c4-32 16-44 34-44 s30 12 34 44z" fill="#7c3aed"/>
     </g>
-    <use href="#pc" x="230" y="168" width="120" height="102"/><text x="290" y="300" text-anchor="middle" class="t-ink2" style="font:650 22px var(--f-display)">Ministry</text>
-    <use href="#pc" x="760" y="160" width="120" height="102"/><text x="820" y="292" text-anchor="middle" class="t-ink2" style="font:650 22px var(--f-display)">Hospital</text>
-    <use href="#pc" x="1220" y="168" width="120" height="102"/><text x="1280" y="300" text-anchor="middle" class="t-ink2" style="font:650 22px var(--f-display)">Bank</text>
-    <g transform="translate(1492 168)"><use href="#lock" width="52" height="52"/></g>
+    <g>
+      <text x="840" y="142" text-anchor="middle" class="t-ink" style="font:700 28px var(--f-display)">Hospital</text>
+      <rect x="675" y="250" width="200" height="16" rx="3" fill="#ddd6fe"/>
+      <rect x="715" y="176" width="150" height="74" rx="8" fill="#083344" stroke="#ffffff" stroke-width="4"/>
+      <rect x="729" y="190" width="70" height="12" rx="6" fill="#67e8f9"/>
+      <rect x="729" y="212" width="108" height="12" rx="6" fill="#ffffff" opacity=".85"/>
+      <circle cx="947" cy="210" r="22" fill="#ffffff" stroke="#7c3aed" stroke-width="3"/>
+      <path d="M913 292 c4-32 16-44 34-44 s30 12 34 44z" fill="#7c3aed"/>
+    </g>
+    <g>
+      <text x="1387" y="142" text-anchor="middle" class="t-ink" style="font:700 28px var(--f-display)">Bank</text>
+      <rect x="1222" y="250" width="200" height="16" rx="3" fill="#ddd6fe"/>
+      <rect x="1262" y="176" width="150" height="74" rx="8" fill="#083344" stroke="#ffffff" stroke-width="4"/>
+      <rect x="1276" y="190" width="70" height="12" rx="6" fill="#67e8f9"/>
+      <rect x="1276" y="212" width="108" height="12" rx="6" fill="#ffffff" opacity=".85"/>
+      <circle cx="1494" cy="210" r="22" fill="#ffffff" stroke="#7c3aed" stroke-width="3"/>
+      <path d="M1460 292 c4-32 16-44 34-44 s30 12 34 44z" fill="#7c3aed"/>
+    </g>
+    <g transform="translate(1568 48)">
+      <rect x="0" y="18" width="36" height="28" rx="4" fill="#ffffff" stroke="#0e7490" stroke-width="3"/>
+      <path d="M8 18 V12 a10 10 0 0 1 20 0 V18" fill="none" stroke="#0e7490" stroke-width="3"/>
+    </g>
   </svg>
 </section>
 
 <!-- 7 · 100% sovereign · five columns across the stage, no side picture -->
-<section class="slide" data-section="100% sovereign" data-note="Data · knowledge · the AI · decisions · learning">
-  <span class="eyebrow rv">100% sovereign</span>
+<section class="slide wash-lilac" data-section="100% sovereign" data-note="Data · knowledge · the AI · decisions · learning">
+  <span class="eyebrow rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/shield-check.svg"></span>100% sovereign</span>
   <h1 class="rv" style="font-size:76px;max-width:1680px">Five things <span class="g">stay yours.</span></h1>
   <div class="quint">
     <div class="rv"><div class="num">01</div><b>Data</b><span>On your own computers.</span></div>
@@ -256,7 +375,7 @@
 </section>
 
 <!-- 8 · The product · mock-up large -->
-<section class="slide cool" data-section="The product" data-note="One ask · a team answers · everything stays on the computer">
+<section class="slide cool wash-sand" data-section="The product" data-note="One ask · a team answers · everything stays on the computer">
   <div class="split" style="grid-template-columns:.8fr 1.4fr">
     <div>
       <span class="eyebrow c rv">The product</span>
@@ -282,8 +401,8 @@
 </section>
 
 <!-- 9 · Knowledge with receipts · three dated entries, then the question -->
-<section class="slide" data-section="Knowledge" data-note="Every detail keeps its source; a correction adds, it never erases">
-  <span class="eyebrow rv">Knowledge with receipts</span>
+<section class="slide wash-paper" data-section="Knowledge" data-note="Every detail keeps its source; a correction adds, it never erases">
+  <span class="eyebrow rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/receipt.svg"></span>Knowledge with receipts</span>
   <h1 class="rv" style="font-size:84px;max-width:1600px">Nothing is ever<br><span class="g">secretly rewritten.</span></h1>
   <div class="receipts">
     <article class="rec rv">
@@ -312,7 +431,7 @@
 </section>
 
 <!-- 10 · Divider -->
-<section class="slide divider cool" data-section="Part two" data-note="From one desk to a sovereign nation">
+<section class="slide divider cool wash-mist" data-section="Part two" data-note="From one desk to a sovereign nation">
   <div class="bignum">02</div>
   <div class="grow col" style="justify-content:center;max-width:1400px">
     <span class="eyebrow c rv">Part two</span>
@@ -322,8 +441,8 @@
 </section>
 
 <!-- 11 · The path · centered constellation, caption underneath -->
-<section class="slide centerpiece" data-section="The path" data-note="One desk · a team · an organisation · the nation">
-  <span class="eyebrow rv">The path</span>
+<section class="slide centerpiece wash-lilac" data-section="The path" data-note="One desk · a team · an organisation · the nation">
+  <span class="eyebrow rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/diagram-3.svg"></span>The path</span>
   <h1 class="rv">A desk. A team. <span class="g">A nation.</span></h1>
   <div class="figure">
     <svg class="scene rv z" viewBox="0 0 900 800" role="img" aria-label="A constellation grows from one computer to many, all inside the national border">
@@ -351,7 +470,7 @@
 </section>
 
 <!-- 12 · The national ledger · split -->
-<section class="slide cool" data-section="The national ledger" data-note="A record that cannot be secretly changed, and proof of where every record lives">
+<section class="slide cool wash-sand" data-section="The national ledger" data-note="A record that cannot be secretly changed, and proof of where every record lives">
   <div class="split">
     <div>
       <span class="eyebrow c rv">The national ledger</span>
@@ -390,7 +509,7 @@
 </section>
 
 <!-- 13 · Learning · the lesson diagram first, the claim underneath -->
-<section class="slide" data-section="Learning" data-note="The nation's own AI, trained on its own computers; the files never move">
+<section class="slide wash-paper" data-section="Learning" data-note="The nation's own AI, trained on its own computers; the files never move">
   <svg class="scene overpic rv z" viewBox="0 0 1680 340" role="img" aria-label="Many computers inside the border send small glowing lessons to a shared model; the files stay locked in place">
     <path d="M40 176 C40 48 240 22 520 40 C860 8 1180 18 1460 52 C1630 78 1660 160 1620 230 C1560 318 1240 332 900 318 C480 300 40 286 40 176 Z" fill="rgba(168,85,247,.06)" stroke="#a855f7" stroke-width="3" stroke-dasharray="14 12"/>
     <circle cx="840" cy="150" r="96" fill="url(#gGlow)"/>
@@ -419,15 +538,15 @@
       <use href="#pc" x="792" y="236" width="96" height="82"/><use href="#lock" x="868" y="224" width="34" height="34"/>
     </g>
   </svg>
-  <span class="eyebrow rv" style="margin-top:16px">Learning</span>
+  <span class="eyebrow rv marked" style="margin-top:16px"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/mortarboard.svg"></span>Learning</span>
   <h1 class="rv" style="font-size:68px;max-width:1680px;margin-top:10px">Your own AI, <span class="g">trained at home.</span></h1>
   <p class="lead rv" style="margin-top:12px;max-width:1560px">The organisation teaches its own AI using its own computers, when they are idle. The original files never move. Only the <b>lessons</b> are combined. Every lesson can be seen, tested before it is used, and undone.</p>
   <p class="punch rv"><b>Use → remember → agree → train → better every day</b>, without a single file leaving the country.</p>
 </section>
 
 <!-- 14 · Proof · ink with steps -->
-<section class="slide" data-section="Value realisation" data-note="The customer measures the result">
-  <span class="eyebrow rv">Value realisation</span>
+<section class="slide wash-mist" data-section="Value realisation" data-note="The customer measures the result">
+  <span class="eyebrow rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/graph-up.svg"></span>Value realisation</span>
   <div class="giant rv" style="margin-top:20px">Proof, <span class="g">not promises.</span></div>
   <p class="lead rv" style="max-width:1300px">Most AI pilots die because nobody agreed what success meant. Ours writes it down first, and the customer holds the numbers.</p>
   <div class="steps">
@@ -440,37 +559,54 @@
 </section>
 
 <!-- 15 · Where Sovra sits · short claim, then the map across the stage -->
-<section class="slide cool" data-section="Where Sovra sits" data-note="Where does the work run · who keeps the knowledge">
+<section class="slide cool wash-lilac" data-section="Where Sovra sits" data-note="Where does the work run · who keeps the knowledge">
   <span class="eyebrow c rv">Where Sovra sits</span>
   <h1 class="rv" style="font-size:68px;max-width:1680px;margin-top:10px">Two questions sort the <span class="gc">whole market.</span></h1>
   <p class="lead rv" style="margin-top:10px;max-width:1560px"><b>Where does the work run?</b> On their computers, or yours. <b>Who keeps what the AI learns?</b> Them, or you.</p>
   <svg class="scene stackpic rv z" viewBox="0 0 1680 460" role="img" aria-label="Positioning map: Sovra alone in the top right, where the work runs on your computers and you keep the knowledge">
-    <line x1="860" y1="28" x2="860" y2="360" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
-    <line x1="150" y1="196" x2="1600" y2="196" stroke="var(--line-2)" stroke-width="1.5" stroke-dasharray="6 8"/>
+    <rect x="160" y="36" width="660" height="146" rx="18" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="2"/>
+    <rect x="900" y="28" width="700" height="158" rx="20" fill="#ecfeff" stroke="#0891b2" stroke-width="3"/>
+    <rect x="160" y="214" width="660" height="166" rx="18" fill="#fafafa" stroke="#e7e5e4" stroke-width="2"/>
+    <rect x="900" y="214" width="700" height="166" rx="18" fill="#faf5ff" stroke="#e9d5ff" stroke-width="2"/>
     <path d="M120 400 H1580" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
     <text x="120" y="438" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">WORK RUNS ON THEIR COMPUTERS</text>
     <text x="1580" y="438" text-anchor="end" class="t-dim mono" style="font-size:15px;letter-spacing:.14em">ON YOURS</text>
     <path d="M100 390 V24" stroke="#7c3aed" stroke-width="3" fill="none" marker-end="url(#arr)"/>
     <text x="64" y="372" transform="rotate(-90 64 372)" class="t-dim mono" style="font-size:13px;letter-spacing:.08em">THEY KEEP THE KNOWLEDGE</text>
     <text x="64" y="36" transform="rotate(-90 64 36)" text-anchor="end" class="t-dim mono" style="font-size:13px;letter-spacing:.1em">YOU KEEP IT</text>
-    <g fill="#c4b5fd"><circle cx="480" cy="290" r="12"/><circle cx="480" cy="100" r="12"/><circle cx="1240" cy="290" r="12"/></g>
-    <text x="480" y="330" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Rented chatbots</text>
-    <text x="480" y="362" text-anchor="middle" class="t-mut" style="font-size:18px">their computers · their notes</text>
-    <text x="480" y="132" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Sovereign cloud</text>
-    <text x="480" y="164" text-anchor="middle" class="t-mut" style="font-size:18px">in-country · still a vendor platform</text>
-    <text x="1240" y="330" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Local chat tools</text>
-    <text x="1240" y="362" text-anchor="middle" class="t-mut" style="font-size:18px">your computer · no memory</text>
-    <ellipse cx="1240" cy="108" rx="250" ry="78" fill="url(#gGlowC)"/>
-    <circle cx="1240" cy="78" r="22" fill="#0891b2" class="pulse"/>
-    <circle cx="1240" cy="78" r="36" fill="none" stroke="#0891b2" stroke-width="2" opacity=".5"/>
-    <text x="1240" y="128" text-anchor="middle" class="t-c" style="font:800 40px var(--f-display)">Sovra</text>
-    <text x="1240" y="158" text-anchor="middle" class="t-ink2" style="font-size:18px">your computers · your knowledge</text>
+    <g fill="none" stroke="#7c3aed" stroke-width="3">
+      <path d="M210 118 h70 v28 h-24 v22 h-22 v-22 h-24z"/>
+      <path d="M248 90 h18 v28"/>
+    </g>
+    <text x="520" y="108" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Sovereign cloud</text>
+    <text x="520" y="146" text-anchor="middle" class="t-mut" style="font-size:18px">in-country · still a vendor platform</text>
+    <g fill="none" stroke="#a8a29e" stroke-width="3">
+      <ellipse cx="230" cy="270" rx="46" ry="28"/>
+      <path d="M196 270 v18 h68 v-18"/>
+      <path d="M210 288 v16 M250 288 v16"/>
+    </g>
+    <text x="500" y="292" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Rented chatbots</text>
+    <text x="500" y="330" text-anchor="middle" class="t-mut" style="font-size:18px">their computers · their notes</text>
+    <g fill="none" stroke="#7c3aed" stroke-width="3">
+      <rect x="1448" y="268" width="92" height="62" rx="8"/>
+      <path d="M1468 348 h52"/>
+    </g>
+    <text x="1180" y="292" text-anchor="middle" class="t-ink" style="font:700 30px var(--f-display)">Local chat tools</text>
+    <text x="1180" y="330" text-anchor="middle" class="t-mut" style="font-size:18px">your computer · no memory</text>
+    <g>
+      <rect x="1428" y="58" width="130" height="78" rx="8" fill="#ffffff" stroke="#0891b2" stroke-width="3"/>
+      <rect x="1440" y="70" width="106" height="52" rx="4" fill="#083344"/>
+      <rect x="1452" y="82" width="48" height="10" rx="5" fill="#67e8f9"/>
+      <rect x="1452" y="98" width="78" height="10" rx="5" fill="#ffffff" opacity=".85"/>
+    </g>
+    <text x="1120" y="96" text-anchor="middle" class="t-c" style="font:800 40px var(--f-display)">Sovra</text>
+    <text x="1120" y="136" text-anchor="middle" class="t-ink2" style="font-size:18px">your computers · your knowledge</text>
   </svg>
   <p class="punch rv">Sovereign clouds and national models are <b>guests inside Sovra</b>, not rivals.</p>
 </section>
 
 <!-- 16 · Built · huge numbers -->
-<section class="slide" data-section="Built" data-note="What people can use today">
+<section class="slide wash-sand" data-section="Built" data-note="What people can use today">
   <canvas class="bgcanvas" data-fx="mesh"></canvas>
   <span class="eyebrow rv">Built, not a slide</span>
   <h1 class="rv">A real product, <span class="g">on real computers.</span></h1>
@@ -484,8 +620,8 @@
 </section>
 
 <!-- 17 · Why Sovra wins · ink lines -->
-<section class="slide" data-section="Why Sovra wins" data-note="Why now, why here">
-  <span class="eyebrow rv">Why Sovra wins</span>
+<section class="slide wash-paper" data-section="Why Sovra wins" data-note="Why now, why here">
+  <span class="eyebrow rv marked"><span class="chip"><img class="mark" alt="" width="20" height="20" src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/clock.svg"></span>Why Sovra wins</span>
   <h1 class="rv">The right answer, <span class="g">at the right time.</span></h1>
   <div class="lines">
     <div class="line rv"><h3>The clock is running</h3><p>AI-native targets are set, funded and staffed, with two-year deadlines.</p></div>
@@ -496,7 +632,7 @@
 </section>
 
 <!-- 18 · The ask · giant type -->
-<section class="slide" data-section="The plan" data-note="The funding amount is for the founder to add">
+<section class="slide wash-mist" data-section="The plan" data-note="The funding amount is for the founder to add">
   <span class="eyebrow rv">What investment accelerates</span>
   <div class="mega rv" style="margin-top:20px;font-size:132px;max-width:1600px"><span class="g">Arabic.</span> Teams.<br><span class="gc">Certified.</span> The ledger.</div>
   <div class="steps" style="margin-top:50px">
@@ -508,7 +644,7 @@
 </section>
 
 <!-- 19 · Close · ink hero -->
-<section class="slide" data-section="Sovra" data-note="Sovra · AI-native, on UAE terms">
+<section class="slide wash-lilac" data-section="Sovra" data-note="Sovra · AI-native, on UAE terms">
   <canvas class="bgcanvas" data-hero></canvas>
   <div class="grow col" style="justify-content:center;max-width:1240px;gap:0">
     <span class="eyebrow rv">Sovra</span>

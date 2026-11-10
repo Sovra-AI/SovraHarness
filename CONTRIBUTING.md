@@ -43,9 +43,9 @@ Read before writing code:
 - **Dependencies** are declared once in root `[workspace.dependencies]`.
   No OpenSSL (rustls only), no git dependencies, no wildcard versions;
   remove unused deps (cargo-shear fails CI).
-- **Secrets never land in the repo.** API keys go in the OS keychain
-  (keyring), never in files, logs, or commit history. See
-  [SECURITY.md](SECURITY.md).
+- **Secrets never land in the repo or logs.** Installed/release API keys use
+  the OS keychain. Debug `SOVRA_DEV=1` uses separate owner-only development
+  files outside the checkout; see [SECURITY.md](SECURITY.md).
 
 ## Branches, commits, and review
 
@@ -97,22 +97,17 @@ Dependabot opens weekly grouped PRs for GitHub Actions and Rust patch
 updates. `gpui-kit` is ignored; bump it in a dedicated PR after reading that
 version's source.
 
-GitHub Free includes 2,000 Actions minutes per month on private repositories
-(Linux 1×, Windows 2×, macOS 10×). If every job fails in a few seconds with
-no runner, the month's minutes are used up or the spending limit is $0.
-Raise the limit at
-[Sovra-AI billing](https://github.com/organizations/Sovra-AI/settings/billing)
-or wait for the monthly reset. The split jobs above exist so a green `main`
-costs fewer minutes than a full three-OS `cargo xtask ci`.
+Runner availability, billing limits and private-repository protection depend on
+this organisation's current GitHub plan and settings. Check those settings when
+jobs cannot acquire a runner; the workflow files do not prove the account's plan.
 
-## GitHub Team (branch protection)
+## Branch protection
 
-This organisation is on **GitHub Free**. Private repositories cannot require
-pull requests, status checks, or CODEOWNERS. Until the org is on
-[GitHub Team](https://github.com/pricing) (~$4/user/month), those rules are
-social: follow this file, and treat a red **CI** check as a blocked merge.
+Where the organisation's plan supports it, configure a ruleset on `main`.
+Until protection is enabled, follow these rules during review and treat a red
+**CI** check as a blocked merge.
 
-Once Team is enabled, turn on a ruleset (or classic branch protection) on
+Turn on a ruleset (or classic branch protection) on
 `main`:
 
 - Require a pull request before merging, 1 approving review
@@ -130,4 +125,6 @@ Once Team is enabled, turn on a ruleset (or classic branch protection) on
 Bump `version` in the root `Cargo.toml`, move the **Unreleased** changelog
 entries under the new version, and push a `vX.Y.Z` tag.
 `.github/workflows/release.yml` builds, signs, packages (Velopack), and
-publishes the release that installed apps auto-update from.
+publishes installers and update feeds. Signing is conditional on configured
+credentials; in-app update checks are not implemented. Follow the
+[release guide](docs/releasing.md) before publishing.

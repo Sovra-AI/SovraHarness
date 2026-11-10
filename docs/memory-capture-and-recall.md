@@ -3,6 +3,7 @@
 How one chat turn becomes a saved record, and how a later question gets that
 record back. This is the current contract for **this** desktop app. The audit
 history and measured limits live in [agent-memory.md](agent-memory.md) (a log).
+For the user-facing controls, start with [Reviewing knowledge](knowledge.md).
 
 The questions below follow the personal-memory checklist in SovraSRX
 (`SovraSRXProduction/docs/memory/personal-memory-system.md`, capture, provenance,

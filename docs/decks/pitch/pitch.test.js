@@ -75,6 +75,64 @@ assert.ok(
 });
 assert.ok(slide4.indexOf("Sovra") >= 0, "slide 4 names Sovra");
 
+var LOCKED = [
+  "Own the sovereign stack.",
+  "That\u2019s the play.",
+  "The nation owns every layer. Sovra is the desk where the work happens.",
+  "The desk \u00b7 Sovra",
+  "Helpers, memory, files and approvals on computers the nation owns.",
+  "Talent and policy",
+  "Chief AI Officers \u00b7 AI Charter",
+  "National models",
+  "Falcon \u00b7 Jais \u00b7 K2 Think",
+  "National compute",
+  "Stargate UAE \u00b7 Khazna \u00b7 sovereign clouds"
+];
+LOCKED.forEach(function (line) {
+  assert.ok(slide4.indexOf(line) >= 0, "slide 4 keeps locked line: " + line);
+});
+
+function hasContentPicture(slide) {
+  if (/<svg\b/.test(slide)) return true;
+  var tags = slide.match(/<canvas\b[^>]*>/g) || [];
+  return tags.some(function (tag) {
+    return !/\b(?:bgcanvas|background)\b/i.test(tag);
+  });
+}
+assert.ok(
+  hasContentPicture(nthSlide(html, 4)),
+  "slide 4 contains a content picture (svg or non-background canvas)"
+);
+
+var HEADLINES = [
+  "AI-native. On UAE terms.",
+  "of UAE government work is to run on AI that acts, within two years.",
+  "If AI does half the work, whose AI is it?",
+  "Own the sovereign stack. That\u2019s the play.",
+  "Rented AI makes a nation AI-native on someone else\u2019s terms.",
+  "Assistants in your own office.",
+  "Five things stay yours.",
+  "One ask. A team answers.",
+  "Nothing is ever secretly rewritten.",
+  "From one desk to a sovereign nation.",
+  "A desk. A team. A nation.",
+  "Prove where every record lives.",
+  "Your own AI, trained at home.",
+  "Proof, not promises.",
+  "Two questions sort the whole market.",
+  "A real product, on real computers.",
+  "The right answer, at the right time.",
+  "Arabic. Teams. Certified. The ledger.",
+  "Keep it in the UAE. Prove it on the desk."
+];
+function headlineText(slide) {
+  var m = slide.match(/<h1\b[^>]*>[\s\S]*?<\/h1>|<div\b[^>]*class="[^"]*\b(?:giant|mega)\b[^>]*>[\s\S]*?<\/div>/);
+  return m ? visibleText(m[0]) : "";
+}
+slides.forEach(function (block, n) {
+  assert.strictEqual(headlineText(block), HEADLINES[n], "slide " + (n + 1) + " headline changed");
+});
+
 var sovereign = slides.filter(function (slide) {
   return visibleText(slide).indexOf("100% sovereign") >= 0;
 });
@@ -186,5 +244,101 @@ for (var i = 0; i < arrangements.length - 2; i++) {
   );
 }
 console.log("arrangements: " + arrangements.join(" | "));
+
+function tagAttr(tag, name) {
+  var m = tag.match(new RegExp("\\b" + name + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "i"));
+  return m ? m[2] : "";
+}
+function extraCdnAssets(doc) {
+  var assets = [];
+  var scriptRe = /<script\b[^>]*>/gi;
+  var found;
+  while ((found = scriptRe.exec(doc))) {
+    var script = found[0];
+    if (/\btype\s*=\s*["']module["']/i.test(script)) continue;
+    var src = tagAttr(script, "src");
+    if (!/^https:\/\//i.test(src)) continue;
+    if (/three(?:\.min)?\.js/i.test(src) && /r128/.test(src)) continue;
+    if (/fonts\.googleapis\.com/i.test(src)) continue;
+    assets.push(src);
+  }
+  return assets;
+}
+function graphicHosts(slide) {
+  var hosts = [];
+  var re = /<(?:img|use|object|svg)\b[^>]*>/gi;
+  var found;
+  while ((found = re.exec(slide))) {
+    var tag = found[0];
+    var url = tagAttr(tag, "src") || tagAttr(tag, "href") || tagAttr(tag, "data") || tagAttr(tag, "xlink:href");
+    if (!url) continue;
+    var abs;
+    try { abs = new URL(url, "https://placeholder.invalid/"); } catch (err) { continue; }
+    if (abs.host && abs.host !== "placeholder.invalid") hosts.push(abs.host);
+  }
+  return hosts;
+}
+function pageStyle(doc) {
+  var m = doc.match(/<style>([\s\S]*?)<\/style>/);
+  return m ? m[1] : "";
+}
+function fillOf(slide, css) {
+  var cls = (slide.match(/<section[^>]*\bclass="([^"]*)"/) || ["", ""])[1].split(/\s+/);
+  var foundFill = "";
+  cls.forEach(function (name) {
+    if (!name || name === "slide") return;
+    var rule = css.match(new RegExp("#deck\\s+\\.slide\\." + name + "\\s*\\{([^}]*)\\}"));
+    if (!rule) return;
+    var bg = rule[1].match(/background\s*:\s*(#[0-9a-fA-F]{6})\b/);
+    if (bg) foundFill = bg[1].toLowerCase();
+  });
+  return foundFill;
+}
+function luminance(hex) {
+  function chan(pair) {
+    var c = parseInt(pair, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }
+  return 0.2126 * chan(hex.slice(1, 3)) + 0.7152 * chan(hex.slice(3, 5)) + 0.0722 * chan(hex.slice(5, 7));
+}
+
+assert.ok(!/type\s*=\s*["']module["']/i.test(html), "pitch stays on classic scripts");
+var cdnAssets = extraCdnAssets(html);
+assert.strictEqual(cdnAssets.length, 1, "one extra CDN stylesheet or classic script, got " + cdnAssets.join(" | "));
+var cdnHost = new URL(cdnAssets[0]).host;
+var cdnSlides = slides.filter(function (block) {
+  return graphicHosts(block).indexOf(cdnHost) >= 0;
+}).length;
+assert.ok(cdnSlides >= 8, "at least eight slides use a " + cdnHost + " graphic, got " + cdnSlides);
+
+var css = pageStyle(html);
+var fills = slides.map(function (block, n) {
+  var fill = fillOf(block, css);
+  assert.ok(fill, "slide " + (n + 1) + " has a page-local light fill");
+  assert.ok(luminance(fill) >= 0.8, "slide " + (n + 1) + " fill is light (" + fill + ")");
+  return fill;
+});
+var fillSet = {};
+fills.forEach(function (fill) { fillSet[fill] = true; });
+assert.ok(Object.keys(fillSet).length >= 4, "at least four fills, got " + Object.keys(fillSet).join(", "));
+for (var f = 1; f < fills.length; f++) {
+  assert.notStrictEqual(fills[f], fills[f - 1], "slides " + f + " and " + (f + 1) + " share fill " + fills[f]);
+}
+var treatments = slides.map(function (block, n) {
+  var art = graphicHosts(block).indexOf(cdnHost) >= 0 ? "cdn" : "plain";
+  return arrangements[n] + "+" + art;
+});
+var treatmentSet = {};
+treatments.forEach(function (name) { treatmentSet[name] = true; });
+assert.ok(Object.keys(treatmentSet).length >= 6, "at least six treatments: " + treatments.join(" | "));
+for (var t = 1; t < treatments.length; t++) {
+  assert.notStrictEqual(
+    treatments[t],
+    treatments[t - 1],
+    "slides " + t + " and " + (t + 1) + " share treatment " + treatments[t]
+  );
+}
+console.log("fills: " + fills.join(" | "));
+console.log("treatments: " + treatments.join(" | "));
 
 console.log("pitch.test.js: ok");

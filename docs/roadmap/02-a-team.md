@@ -1,12 +1,14 @@
 # Stage 2 — A team (Next)
 
-> **Next, not today.** A few computers share helpers and memory. A busy laptop
-> hands heavy work to a free one.
+> **Partly implemented; full design remains Next.** [Groups](../groups.md)
+> documents current creation, membership, peer sync and shared text knowledge.
+> Helper bundles, encrypted private lanes and work handoff below remain planned.
 
 This is the build-ready plan for the next stage. It is deliberately detailed:
 every milestone lists the files, types, protocols and tests it needs. The
-first milestone is **creating a group** (T1). Memory sharing, helper sharing
-and work handoff build on it.
+first milestone is **creating a group** (T1), whose foundation now exists.
+The checklist below remains the acceptance plan for the full design, not proof
+that every listed interaction or transport dependency has shipped.
 
 Research date: 2026-11-05. Crate versions and licences come from crates.io on
 that date. Sources are linked inline and collected in §19.

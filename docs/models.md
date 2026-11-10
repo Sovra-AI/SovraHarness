@@ -64,6 +64,31 @@ The catalog is not an image/video generation interface. Servers that do not
 advertise capabilities can be tried explicitly; the server ultimately determines
 what the model supports. Switching models starts fresh provider history.
 
+## My AI's and routing
+
+**My AI's** exposes **One AI for everything**, **Choose per task**, and
+**Automatic**, plus Quick/Balanced/Thorough effort choices. Under **Show details**
+you can inspect the routing tree and test a sample prompt without running the
+answer model.
+
+Routing evaluation and actual provider selection are separate. The current
+ordinary-chat runtime emits a route evaluation, then runs the harness built from
+the saved Models selection. A route's suggested model or tier does not prove that
+a different provider model answered. Use **Models** to change the execution model.
+Routing settings and specialist overrides currently live in runtime state and
+reset at restart.
+
+The default decision backend is Laya at `127.0.0.1:8011`. The optional OpenJev
+backend sends the routing prompt to OpenRouter's decisions endpoint. Failures
+fall back to embedded evaluation after a bounded 1.2-second request. Selecting
+**Embedded Rust Heuristic** avoids that decision request; merely selecting
+**One AI for everything** does not disable the backend request. Route simulation
+also contacts the selected backend. See the [network inventory](value-realisation/03-sovereignty-evidence.md#2-every-network-destination).
+
+Implementation: `sovra-core/src/routing_tree.rs`,
+`sovra-adk/src/decision_client.rs`, `sovra-runtime/src/lib.rs`, and
+`sovra-ui/src/my_ais_view.rs`.
+
 ## Connections
 
 Open **Connections** and choose **Another compatible service**. Service type (protocol),
@@ -96,8 +121,9 @@ deployment/model ID, optional context and explicit tool capability. A manual
 entry overrides discovered metadata for the same ID. Removing it restores normal
 discovery. Removing a connection never deletes models from its server.
 
-Keys are masked in forms and stored through the operating system credential
-store (`keyring`); configuration and cached catalogs contain no API keys. A blank
+Keys are masked in forms. Installed/release builds use the operating system
+credential store (`keyring`); debug `SOVRA_DEV=1` uses separate development files
+([storage details](configuration.md)). Configuration and cached catalogs contain no API keys. A blank
 key keeps the saved key. A replacement overwrites it; **Clear the saved key**
 removes the saved override. Save errors keep the draft available for correction.
 Changing protocol, destination or authentication requires re-entering or clearing

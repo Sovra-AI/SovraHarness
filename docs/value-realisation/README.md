@@ -53,8 +53,9 @@ The same rules as [`docs/decks/README.md`](../decks/README.md) and
 
 - **Today** describes only what the desktop app does now. Each claim is backed
   by a file in [03](03-sovereignty-evidence.md).
-- **Next** is stage 2, a group of people and their computers. It is
-  build-ready and not shipped.
+- **Next** is the remaining stage-2 design. Basic [Groups](../groups.md)
+  membership and shared text knowledge are implemented; private encrypted lanes,
+  helper bundles and work handoff remain planned.
 - **Direction** (also written "the direction, not today") is stages 3–4, the
   company fleet and regulated work. These are outlines that will change.
 - No invented market size, revenue, return on investment or headcount. Value is
