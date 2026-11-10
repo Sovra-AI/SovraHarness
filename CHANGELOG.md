@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Same-room codes now work when the code was already showing before the other
+  person pressed *Join with code*: each computer keeps a live list of nearby
+  Sovra computers instead of listening only after Join. Found by driving two
+  real Sovra windows through Development mode. Groups' text boxes now have
+  stable ids and spoken labels, and group problems are announced as status
+  messages.
 - **Share helpers, skills and schedules with your group.** Helpers you made
   (Team page), your own skills (Skills page) and schedules (Schedules page)
   have *Share with my group*. Groups → *Shared helpers and schedules* shows

@@ -105,6 +105,8 @@ impl ModelsView {
             section = section.child(
                 div()
                     .id("groups-problem")
+                    .role(gpui_kit::Role::Status)
+                    .aria_label(problem.message().to_owned())
                     .test_support()
                     .whitespace_normal()
                     .sovra_text(TextRole::Caption, cx)
@@ -185,9 +187,21 @@ impl ModelsView {
             .p(t.space.compact)
             .sovra_surface(Surface::Subtle, cx)
             .child(div().sovra_text(TextRole::Body, cx).child("Start a group"))
-            .child(Input::new(&form.group_name))
-            .child(Input::new(&form.your_name))
-            .child(Input::new(&form.computer_name))
+            .child(
+                Input::new(&form.group_name)
+                    .id("groups-start-name")
+                    .aria_label("Group name"),
+            )
+            .child(
+                Input::new(&form.your_name)
+                    .id("groups-start-your-name")
+                    .aria_label("Your name"),
+            )
+            .child(
+                Input::new(&form.computer_name)
+                    .id("groups-start-computer-name")
+                    .aria_label("This computer's name"),
+            )
             .child(h_flex().child(
                 design::primary_button("groups-create", "Start the group", cx).on_click(
                     cx.listener(|view, _, _, cx| {
@@ -219,8 +233,16 @@ impl ModelsView {
                 "Ask someone in the group for an invite link, then paste it here.",
                 cx,
             ))
-            .child(Input::new(&form.join_link))
-            .child(Input::new(&form.computer_name))
+            .child(
+                Input::new(&form.join_link)
+                    .id("groups-join-link")
+                    .aria_label("Invite link"),
+            )
+            .child(
+                Input::new(&form.computer_name)
+                    .id("groups-join-computer-name")
+                    .aria_label("This computer's name"),
+            )
             .child(
                 h_flex()
                     .gap(t.space.small)
@@ -503,7 +525,11 @@ impl ModelsView {
             .child(div().sovra_text(TextRole::Body, cx).child("Invite"));
         if manage {
             invites = invites
-                .child(Input::new(&self.groups_form.invite_name))
+                .child(
+                    Input::new(&self.groups_form.invite_name)
+                        .id("groups-invite-name")
+                        .aria_label("Their name"),
+                )
                 .child(
                     h_flex()
                         .flex_wrap()
@@ -727,7 +753,11 @@ impl ModelsView {
                 );
             }
             section = section
-                .child(Input::new(&self.groups_form.share))
+                .child(
+                    Input::new(&self.groups_form.share)
+                        .id("groups-share-input")
+                        .aria_label("Something to share with your group"),
+                )
                 .child(audience)
                 .child(h_flex().child(
                     design::primary_button("groups-share", "Share", cx).on_click(cx.listener(

@@ -286,8 +286,17 @@ async fn a_computer_showing_a_code_is_found_on_the_same_network() {
     let showing = Mesh::bind([51; 32], Reach::LocalOnly).await.expect("binds");
     let typing = Mesh::bind([52; 32], Reach::LocalOnly).await.expect("binds");
     let bystander = Mesh::bind([53; 32], Reach::LocalOnly).await.expect("binds");
+    // As in the app: the group service is running, and the code is shown first.
+    let listening = Arc::new(Recorder {
+        seen_from: std::sync::Mutex::new(Vec::new()),
+        calls: AtomicUsize::new(0),
+    });
+    let mut server = serve(&typing, listening);
     showing.set_pairing_open(Some(5));
     bystander.set_pairing_open(Some(6));
+    // The person reads the code aloud before the other presses Join: discovery has
+    // already reported the computer by then, and must not need to report it again.
+    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
 
     let mut found = Vec::new();
     for _ in 0..4 {
@@ -319,4 +328,5 @@ async fn a_computer_showing_a_code_is_found_on_the_same_network() {
     showing.close().await;
     typing.close().await;
     bystander.close().await;
+    while server.join_next().await.is_some() {}
 }

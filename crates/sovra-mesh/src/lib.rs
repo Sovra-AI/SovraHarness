@@ -62,6 +62,17 @@ pub struct Mesh {
     /// Finds Sovra computers on the same network (same-room codes). `None` when the
     /// network allows no multicast; codes then say nobody is nearby.
     nearby: Option<iroh_mdns_address_lookup::MdnsAddressLookup>,
+    /// Computers heard on this network and the tag each announces, kept up to date
+    /// from the moment the group service starts. Discovery only reports new or
+    /// changed computers, so a code shown before someone presses Join is still here.
+    heard: Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, Heard>>>,
+}
+
+/// One computer heard on this network.
+#[derive(Debug, Clone)]
+struct Heard {
+    address: PeerAddress,
+    tag: Option<String>,
 }
 
 /// The mDNS service Sovra computers announce under (not iroh's shared default).
@@ -98,6 +109,7 @@ impl Mesh {
             secret,
             cipher,
             nearby,
+            heard: Arc::default(),
         })
     }
 
@@ -131,6 +143,48 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, TransportEr
 
 fn encode<T: serde::Serialize>(value: &T) -> Vec<u8> {
     serde_json::to_vec(value).expect("peer messages are plain serialisable data")
+}
+
+/// Records every computer discovery reports, with its announced tag, until shutdown.
+async fn listen_nearby(
+    nearby: iroh_mdns_address_lookup::MdnsAddressLookup,
+    heard: Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, Heard>>>,
+    me: DeviceId,
+) {
+    use n0_future::StreamExt as _;
+    let mut events = nearby.subscribe().await;
+    while let Some(event) = events.next().await {
+        let mut table = heard.lock().expect("nearby table lock is never poisoned");
+        match event {
+            iroh_mdns_address_lookup::DiscoveryEvent::Discovered { endpoint_info, .. } => {
+                let device = DeviceId(*endpoint_info.endpoint_id.as_bytes());
+                if device == me {
+                    continue;
+                }
+                let tag = endpoint_info
+                    .data
+                    .user_data()
+                    .map(|tag| tag.as_ref().to_owned());
+                let addr = endpoint_info.to_endpoint_addr();
+                table.insert(
+                    device,
+                    Heard {
+                        address: PeerAddress {
+                            device,
+                            relay: addr.relay_urls().next().map(ToString::to_string),
+                            addrs: addr.ip_addrs().map(ToString::to_string).collect(),
+                        },
+                        tag,
+                    },
+                );
+            }
+            iroh_mdns_address_lookup::DiscoveryEvent::Expired { endpoint_id } => {
+                table.remove(&DeviceId(*endpoint_id.as_bytes()));
+            }
+            // Newer kinds of discovery news carry nothing a code needs.
+            _ => {}
+        }
+    }
 }
 
 /// Serves every stream on one accepted connection until the peer closes it.
@@ -189,43 +243,26 @@ impl GroupTransport for Mesh {
     }
 
     async fn nearby_pairing(&self, hint: u8, listen_ms: u64) -> Vec<PeerAddress> {
-        use n0_future::StreamExt as _;
-        let wanted = format!("{PAIRING_TAG}{hint:x}");
-        let Some(nearby) = &self.nearby else {
+        const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+        if self.nearby.is_none() {
             return Vec::new();
-        };
-        let mut events = nearby.subscribe().await;
-        let mut found: std::collections::BTreeMap<DeviceId, PeerAddress> =
-            std::collections::BTreeMap::new();
-        let me = self.this_device();
-        let listen = async {
-            while let Some(event) = events.next().await {
-                let iroh_mdns_address_lookup::DiscoveryEvent::Discovered { endpoint_info, .. } =
-                    event
-                else {
-                    continue;
-                };
-                let pairing = endpoint_info
-                    .data
-                    .user_data()
-                    .is_some_and(|tag| tag.as_ref() == wanted);
-                let device = DeviceId(*endpoint_info.endpoint_id.as_bytes());
-                if !pairing || device == me {
-                    continue;
-                }
-                let addr = endpoint_info.to_endpoint_addr();
-                found.insert(
-                    device,
-                    PeerAddress {
-                        device,
-                        relay: addr.relay_urls().next().map(ToString::to_string),
-                        addrs: addr.ip_addrs().map(ToString::to_string).collect(),
-                    },
-                );
+        }
+        let wanted = format!("{PAIRING_TAG}{hint:x}");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(listen_ms);
+        loop {
+            let found: Vec<PeerAddress> = self
+                .heard
+                .lock()
+                .expect("nearby table lock is never poisoned")
+                .values()
+                .filter(|heard| heard.tag.as_deref() == Some(wanted.as_str()))
+                .map(|heard| heard.address.clone())
+                .collect();
+            if !found.is_empty() || std::time::Instant::now() >= deadline {
+                return found;
             }
-        };
-        let _ = n0_future::time::timeout(std::time::Duration::from_millis(listen_ms), listen).await;
-        found.into_values().collect()
+            n0_future::time::sleep(POLL).await;
+        }
     }
 
     fn address(&self) -> PeerAddress {
@@ -238,6 +275,12 @@ impl GroupTransport for Mesh {
     }
 
     async fn serve(&self, handler: Arc<dyn PeerHandler>, spawn: Spawn) {
+        // Keep the nearby table current on the runtime's own task.
+        if let Some(nearby) = self.nearby.clone() {
+            let heard = self.heard.clone();
+            let me = self.this_device();
+            spawn(Box::pin(listen_nearby(nearby, heard, me)));
+        }
         while let Some(incoming) = self.endpoint.accept().await {
             spawn(Box::pin(serve_connection(incoming, handler.clone())));
         }

@@ -899,7 +899,12 @@ Status checked against the code on 2026-11-10.
   `sovra-app` `two_computers` test pairs by link, shares a detail and an
   artifact, edits it back and removes a person, all well under a second.
   Across NAT is still unmeasured.)*
-- On the same LAN, they pair by 6-digit code.
+- On the same LAN, they pair by 6-digit code. *(Verified 2026-11-10 with two
+  real Sovra windows driven through Development mode on one machine: code
+  shown, typed on the other, same four pictures on both, both confirmed,
+  joined; then a group share and a "Just Dad" share arrived, with no shared
+  words in either `group.json`. Also covered by the `sovra-app`
+  `two_computers` tests.)*
 - Removal takes effect on all online computers within 10 s.
 - Offline computers converge on reconnect. *(Covered by the runtime test
   with a switched-off computer.)*
