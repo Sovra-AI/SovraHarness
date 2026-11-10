@@ -470,8 +470,7 @@ impl Shell {
                         // Settings → Groups renders this computer's group and its knowledge.
                         if let sovra_core::Event::Group(event) = &event {
                             let can_answer = shell.models.update(cx, |models, cx| {
-                                models.groups.apply((**event).clone());
-                                cx.notify();
+                                models.apply_group_event((**event).clone(), cx);
                                 models.groups.group.is_some() && models.groups.work.use_group
                             });
                             shell.state.group_can_answer = can_answer;

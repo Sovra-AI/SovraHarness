@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use gpui_kit::component::Root;
+use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
 use sovra_core::artifacts::{
@@ -11,8 +11,8 @@ use sovra_core::artifacts::{
 };
 use sovra_core::group::{
     AskRecord, DetailStatus, DeviceId, FederatedSettings, GroupAnswer, GroupCommand, GroupEvent,
-    GroupId, GroupState, MembershipBody, OpHash, PersonId, Role, SharedArtifact, SharedDetail,
-    Signature, SignatureVerifier, UnsignedOp, fold,
+    GroupId, GroupProblem, GroupState, MembershipBody, OpHash, PersonId, Role, SharedArtifact,
+    SharedDetail, Signature, SignatureVerifier, UnsignedOp, fold,
 };
 use sovra_core::models::InterfaceScale;
 use sovra_core::{Command, Event, NavTab, Timestamp};
@@ -214,46 +214,74 @@ fn the_group_shows_who_is_in_it_and_what_was_shared(cx: &mut TestAppContext) {
             window.find("groups-invite-qr").visible(),
             "the link as a QR code"
         );
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("sovra://join/example".into()),
+            "the confirmed invite is copied automatically"
+        );
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("other text".into()));
+        window.click("groups-copy-link", cx);
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("sovra://join/example".into())
+        );
     })
     .expect("window open");
 }
 
 #[gpui_kit::test]
 fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppContext) {
-    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
-        let (window, shell, _commands, events) = open(cx, width, height);
-        group_event(
-            &events,
-            GroupEvent::Loaded {
-                this_computer: MUM,
-                group: Some(family()),
-            },
-        );
-        group_event(&events, GroupEvent::Knowledge(vec![dads_detail()]));
-        settle(cx);
-        cx.update(|cx| design::set_interface_scale(InterfaceScale::from_percent(scale), cx));
-        cx.update_window(window.into(), |_, window, cx| {
-            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
-            window.render_frame(cx);
-            let column = window.find("settings-column").bounds();
-            for id in [
-                "settings-groups",
-                "groups-roster",
-                "groups-knowledge",
-                "groups-federated",
-            ] {
-                let bounds = window.find(id).bounds();
-                assert!(
-                    bounds.size.width <= column.size.width + px(1.),
-                    "{width}x{height}@{scale}: {id} is wider than the settings column"
-                );
-                assert!(
-                    bounds.origin.x >= column.origin.x - px(1.),
-                    "{width}x{height}@{scale}: {id} starts outside the settings column"
-                );
-            }
-        })
-        .expect("window open");
+    for mode in [ThemeMode::Dark, ThemeMode::Light] {
+        for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+            let (window, shell, _commands, events) = open(cx, width, height);
+            group_event(
+                &events,
+                GroupEvent::Loaded {
+                    this_computer: MUM,
+                    group: Some(family()),
+                },
+            );
+            group_event(&events, GroupEvent::Knowledge(vec![dads_detail()]));
+            settle(cx);
+            group_event(
+                &events,
+                GroupEvent::InviteReady {
+                    link: format!("sovra://join/{}", "a".repeat(1000)),
+                    expires_at: Timestamp(i64::MAX / 2),
+                    qr: Vec::new(),
+                },
+            );
+            settle(cx);
+            cx.update(|cx| {
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            });
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+                window.render_frame(cx);
+                let column = window.find("settings-column").bounds();
+                for id in [
+                    "settings-groups",
+                    "groups-roster",
+                    "groups-knowledge",
+                    "groups-invites",
+                    "groups-copy-link",
+                    "groups-invite-member",
+                    "groups-federated",
+                ] {
+                    let bounds = window.find(id).bounds();
+                    assert!(
+                        bounds.size.width <= column.size.width + px(1.),
+                        "{width}x{height}@{scale}: {id} is wider than the settings column"
+                    );
+                    assert!(
+                        bounds.origin.x >= column.origin.x - px(1.),
+                        "{width}x{height}@{scale}: {id} starts outside the settings column"
+                    );
+                }
+            })
+            .expect("window open");
+        }
     }
 }
 
@@ -779,4 +807,75 @@ fn this_computers_ai_can_be_offered_to_the_group_and_its_jobs_are_listed(cx: &mu
             }
         )))
     );
+}
+
+#[gpui_kit::test]
+fn member_invite_copies_only_after_confirmation_and_recovers_from_errors(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("keep me".into()));
+        window.click("groups-invite-name", cx);
+        window.input("Sam", cx);
+        window.render_frame(cx);
+        window.click("groups-invite-member", cx);
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("keep me".into())
+        );
+        window.render_frame(cx);
+        assert_eq!(window.find("groups-invite-member").disabled(), Some(true));
+    })
+    .expect("window");
+    assert!(
+        drain(&commands).contains(&Command::Group(GroupCommand::InvitePerson {
+            name: "Sam".into(),
+            role: Role::Member
+        }))
+    );
+    group_event(&events, GroupEvent::Problem(GroupProblem::Unreachable));
+    settle(cx);
+    group_event(
+        &events,
+        GroupEvent::InviteReady {
+            link: "sovra://join/unrequested".into(),
+            expires_at: Timestamp(i64::MAX / 2),
+            qr: Vec::new(),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_ne!(window.find("groups-invite-member").disabled(), Some(true));
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("keep me".into())
+        );
+        window.click("groups-invite-member", cx);
+    })
+    .expect("retry");
+    group_event(
+        &events,
+        GroupEvent::InviteReady {
+            link: "sovra://join/confirmed".into(),
+            expires_at: Timestamp(i64::MAX / 2),
+            qr: Vec::new(),
+        },
+    );
+    settle(cx);
+    cx.update(|cx| {
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("sovra://join/confirmed".into())
+        );
+    });
 }

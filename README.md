@@ -20,6 +20,9 @@ or choose **Read as a list**. **Focus on these connections** opens a smaller
 map around the selected detail; **Show all** restores the overview. The map
 renders natively inside the app, with no extra runtime or browser dependency.
 
+In **Settings → Groups**, use **Create and copy invite link** to generate a
+one-time link and copy it to your clipboard for sharing.
+
 ## Quick start
 
 ```sh
