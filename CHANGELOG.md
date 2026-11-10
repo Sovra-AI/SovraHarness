@@ -11,15 +11,26 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Add first-use, knowledge review, schedules, groups, configuration/local-data and release guides;
+  expand the docs index and reconcile credential, update, group-roadmap and
+  network-isolation descriptions with the implementation.
+
+- Investor pitch slides no longer share one paper fill. Four light washes
+  alternate down the deck, and nine slides carry a Bootstrap Icon from
+  jsDelivr. The deck also loads the classic Lucide script from that host.
+  The headlines stay in the page if that artwork does not load.
 - Investor pitch slide 9 shows the permit history as three readable receipts
   — 12 March, 2 October, and what is current — then the question and the
   memo. The old timeline no longer crashes the lines together.
+- Investor pitch slide 4 draws the sovereign stack as one building, with
+  the desk under the roof and national compute in the base. Slide 6 draws
+  three offices inside a solid border. Slide 15 draws the market as four
+  filled quadrants. The words on those slides stay.
 - Investor pitch beats no longer share one side-by-side spread. The answer
   is a full-width border under the claim, 100% sovereign is five columns,
   the path is a centered constellation, learning puts the diagram over the
   type, and the market map sits under its question. Only the product and the
-  ledger keep the headline beside the picture. Slide 4 stays the play: own
-  the sovereign stack, then the four named layers.
+  ledger keep the headline beside the picture. Slide 4 stays the play.
 
 - Knowledge map: clearer guidance, readable clickable labels, keyboard-accessible
   connection filters, and named zoom and reading controls. Labels try several

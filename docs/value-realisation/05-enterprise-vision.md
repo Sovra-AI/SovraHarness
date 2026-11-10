@@ -5,9 +5,9 @@ each stage adds to sovereignty, and what value it is meant to unlock. This is
 an enterprise reading of [`docs/roadmap/`](../roadmap/README.md); the roadmap
 documents are the authority and win any disagreement.
 
-> **Only stage 1 ships today.** Stage 2 is labelled **Next** and is
-> build-ready. Stages 3 and 4 are **the direction, not today**: outlines that
-> will change after stage 2.
+> Stage 1 and the [group foundation](../groups.md) are implemented. Stage 2
+> below describes the fuller **Next** design, including private lanes and work
+> handoff. Stages 3 and 4 are **the direction, not today**.
 
 ## One idea that carries every stage
 

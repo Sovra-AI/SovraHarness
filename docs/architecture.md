@@ -143,6 +143,9 @@ debuginfo; unwinding kept so tool execution can be isolated with `catch_unwind` 
 
 ### Distribution: Velopack
 
+Local packaging and the tag-triggered release procedure are in [releasing.md](releasing.md).
+Install hooks and update feeds exist; in-app update checking is not implemented.
+
 One tool for installers and signed delta auto-update: `.pkg` (macOS, signed + notarized with
 `codesign`/`notarytool`), `Setup.exe` (Windows, Azure Artifact Signing), AppImage (Linux).
 `VelopackApp::build().run()` is the first line of `main`. Alternatives: `cargo-packager`

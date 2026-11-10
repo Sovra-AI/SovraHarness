@@ -134,7 +134,7 @@ yours"** framing; it maps directly onto the five problems above.
 | What stays yours | Where Sovra is | How to say it |
 | --- | --- | --- |
 | **Data** | **Today** | "Your files and records stay on your own computers. Sovra the company never receives them." |
-| **Knowledge** | **Today** on each computer · **Next** shared across a team | "What the AI learns is kept in your building, with a receipt for every detail, and you can correct it." |
+| **Knowledge** | **Today** on each computer and explicitly shared group details · **Next** private lanes | "What the AI learns is kept in your building, with a receipt for every detail, and you can correct it." |
 | **The AI itself** | **Today**, by your choice | "The AI brain is a guest. Run it on your own machines — even a UAE-built one — and swap it any time." |
 | **Decisions** | **Today** | "The AI prepares; a person approves. That is the UAE AI Charter's human oversight, built into the product." |
 | **Learning** | **Later** | "Your work never trains someone else's AI. Later, your organisation trains its own AI on its own computers." |
@@ -238,9 +238,13 @@ flowchart LR
 | Stage | Status | What it means in plain words |
 | --- | --- | --- |
 | **One person** | **Today** | A private team of AI helpers on one computer that remembers that person's work. |
-| **A team** | **Next** — designed in detail | A few computers in an office or family share helpers and knowledge, only when people choose to. A busy laptop can ask a free computer nearby to do heavy work. No central Sovra server. |
+| **A group** | Foundation today; full design **Next** | A few computers in an office or family share helpers and knowledge, only when people choose to. A busy laptop can ask a free computer nearby to do heavy work. No central Sovra server. |
 | **An organisation** | **Later** | Each department's knowledge kept on its own computers, with a record that cannot be secretly changed. The organisation can show **where its data lives**, and can **train its own AI** on its own computers, with every lesson visible and reversible. |
 | **Regulated and government work** | **Later** | The controls that hospitals, courts, banks and ministries require: locked-down storage, full records of what the AI did, a version for networks cut off from the internet, and formal security certificates. |
+
+The [group foundation](../groups.md) already supports membership, peer sync and
+explicitly shared text. Helper bundles, private encrypted lanes and work handoff
+in this vision remain planned.
 
 **The key insight for investors:** the way Sovra stores memory today —
 nothing ever secretly rewritten, every change kept as history — is the same

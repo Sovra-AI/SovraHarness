@@ -1,7 +1,7 @@
 # sovra-runtime
 
-Async engine. Owns the tokio runtime (dedicated thread), command dispatch, and later the agent
-loop, provider calls and tool execution.
+Async engine. Owns the tokio runtime (dedicated thread), command dispatch, agent
+execution, provider calls and tool execution.
 
 - The only crate that may use `tokio`. Its public API stays runtime-agnostic: `Client` with
   `async-channel` endpoints, so the UI and tests never touch tokio.

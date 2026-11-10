@@ -68,8 +68,9 @@ itself, and which jurisdiction all of that sits in.
 **Caveat.** Extraction uses the person's chosen chat model. With a cloud
 model, the message being remembered goes to that provider.
 
-**Gap.** Knowledge is per computer. Sharing it in encrypted **lanes** across
-a group is **Next** (stage 2). Per-fact approval before saving is not built.
+**Gap.** [Groups](../groups.md) can share explicit text details. Private encrypted
+**lanes** across a group remain **Next** (stage 2). Per-fact approval before
+private memory capture is not built.
 
 ## Layer 3 — The model
 

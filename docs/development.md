@@ -22,7 +22,15 @@ cargo xtask setup   # pinned CI tools (cargo-deny, nextest, shear)
 cargo xtask dev     # one-shot build + launch; re-run to reload
 ```
 
+Install Rust with rustup; `rust-toolchain.toml` pins the workspace toolchain.
 On Linux, install system packages once first with `./scripts/install-linux-deps.sh`.
+On macOS, install the Xcode command-line build tools. On Windows, use the MSVC
+Rust target with the Visual Studio C++ build tools and Windows SDK.
+`just` is optional: it delegates to the same xtask commands.
+
+For first-launch steps see [Getting started](getting-started.md); startup
+variables and local paths are in [Configuration](configuration.md). Packaging
+has additional prerequisites in [Releasing](releasing.md).
 
 `cargo xtask setup` prefers cargo-binstall when available. Watchexec is **not**
 part of the supported workflow and is not installed by setup.

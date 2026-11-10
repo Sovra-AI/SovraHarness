@@ -67,9 +67,13 @@ it shareable and auditable later
 | Stage | Status | In one line |
 | --- | --- | --- |
 | A person | **Today** | A private team of helpers on one computer. |
-| A group | **Next** | A few computers share helpers and knowledge in encrypted lanes, with no central server. |
+| A group | Foundation today; full design **Next** | A few computers share helpers and knowledge in encrypted lanes, with no central server. |
 | A company | **Direction** | Ledger memory, residency reports, company search, and the organisation's own AI trained on its own computers. |
 | Regulated work | **Direction** | Encryption at rest, audit logs, legal hold, an air-gapped edition and certifications. |
+
+The [group foundation](../groups.md) already supports membership, peer sync and
+explicitly shared text. Helper bundles, private encrypted lanes and work handoff
+in this vision remain planned.
 
 ## Honest limits
 

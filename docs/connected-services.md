@@ -36,9 +36,11 @@ as they like (up to `MAX_SERVICES`, 100) and manage each one from its own card i
 | Web address | Streamable HTTP (hand-written client in `sovra-runtime/src/mcp.rs`) | OAuth 2.1 + PKCE with discovery and dynamic registration, or a static secret, or saved headers | Keychain (`SecretKind::Access`, `Static`, `Settings`) |
 | Program on this computer | stdio, via the `rmcp` client (`sovra-runtime/src/mcp/programs.rs`) | Environment variables, per the MCP spec | Keychain (`SecretKind::Settings`) |
 
-Only names (environment variable names, header names) appear in the saved list,
-events and logs. Values never leave the keychain except when they go to the program
-or the exact web address they were saved for.
+The table describes installed/release storage. Debug `SOVRA_DEV=1` uses the
+same separate development credential files as model connections; see
+[Configuration](configuration.md). Only names (environment variable names, header
+names) appear in the saved list, events and logs. Secret values are loaded from
+the credential store for the program or exact web address they were saved for.
 
 ## Adding
 

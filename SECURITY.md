@@ -36,3 +36,23 @@ outside Sovra at any point.
   packages with Velopack and signs when signing credentials are configured.
   Unsigned local installers are for testing; automatic update checks are not yet
   implemented in the app.
+
+## Data and execution boundaries
+
+The OS keychain protects credentials, not the whole workspace. Memory, attached
+files, schedules and group records live in app data; WhatsApp pairing keys live
+in its local session database. Development and installed launches share the
+app-data root, apart from their separate credential stores. See
+[Configuration and local data](docs/configuration.md).
+
+Local account sign-in does not establish per-account data isolation. Terminal
+commands and approved local MCP programs run with the person's OS rights; they
+are not sandboxes. Remote model and tool connections can receive content needed
+for the request. Group Internet reach uses discovery and encrypted relays by
+default. Review the [network inventory](docs/value-realisation/03-sovereignty-evidence.md)
+when assessing an offline deployment.
+
+Development-control access is authenticated and local, with a visible indicator
+and revocation in Settings. Debug `cargo xtask dev` starts it on; ordinary and
+release launches start it off. The bridge cannot enable its own access. See
+[Development MCP](docs/development-mcp.md) for the control boundary.

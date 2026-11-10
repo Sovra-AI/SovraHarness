@@ -1,7 +1,9 @@
 # Roadmap: from one laptop to a whole company
 
-Status: planning document, researched 2026-11-05. Only stage 1 ships today.
-Everything under stages 2–4 is **direction, not current behaviour**. Use the same
+Status: planning document, researched 2026-11-05; implementation status updated
+2026-11-10. Stage 1 and the group foundation are implemented: membership, peer
+sync and explicitly shared text knowledge. See [Groups](../groups.md). The full
+stage-2 design and stages 3–4 remain **direction, not current behaviour**. Use the same
 labelling rule as `docs/decks/README.md`: a line that says *Today* describes
 only what the desktop app already does.
 
@@ -10,14 +12,14 @@ The investor deck presents four sizes of the same program:
 | Stage | Label | One line | Document | Depth |
 | --- | --- | --- | --- | --- |
 | 1 | **Today** | **A person.** A private team of helpers on their own laptop that remembers their life and keeps their files at home. | [`01-a-person.md`](01-a-person.md) | Baseline + groundwork to start now |
-| 2 | **Next** | **A team.** A few computers share helpers and memory. A busy laptop hands heavy work to a free one. | [`02-a-team.md`](02-a-team.md) | **Build-ready, very detailed** |
+| 2 | Foundation implemented; **Next** for the full design | **A group.** A few computers share helpers and memory. A busy laptop hands heavy work to a free one. | [`02-a-team.md`](02-a-team.md) | **Build-ready, very detailed** |
 | 3 | Direction | **A company.** A private fleet with ledger memory, lanes for each team, and a model trained on its own computers. | [`03-a-company.md`](03-a-company.md) | Outline (likely to change) |
 | 4 | Direction | **Regulated work.** Health, law, finance, government: data that must not leave. Here, it never has to. | [`04-regulated-work.md`](04-regulated-work.md) | Outline (likely to change) |
 
 Stage 2 gets the deepest treatment because it is the next thing to build and
 because every later stage reuses its parts: device identity, signed logs, lanes,
-peer-to-peer transport and work handoff. The first milestone is the one the
-product needs before anything else: **being able to create a team**.
+peer-to-peer transport and work handoff. The group foundation now supports creation and membership; remaining milestones
+extend that foundation rather than introducing the Groups page for the first time.
 
 ## One idea runs through all four stages
 
@@ -69,8 +71,8 @@ reason in the same change that alters it.
 | # | Decision | Decided | Gates |
 | --- | --- | --- | --- |
 | D1 | User-facing name for a group of *people and computers*. "Team" already means the AI helpers (`teams.rs`, the Team page). | **"Group"** in the UI (e.g. "Family", "Smith Plumbing") and `group` in code. "Team" stays the helpers. | Team T1 |
-| D2 | Which crate owns peer-to-peer networking, and how it gets an async runtime, given that `tokio` is owned by `sovra-runtime` only (`xtask/src/deps.rs`). | New adapter crate **`sovra-mesh`**, the only crate naming `iroh`/`p2panda`. It gets `tokio` as a second owner, with the reason written in `deps.rs`: iroh requires tokio, and mesh tasks are spawned from a runtime-provided handle. | Team T0 |
-| D3 | Log and sync layer: adopt p2panda (Rust, on iroh, pre-1.0) or build our own envelope on iroh plus Negentropy. | **Own envelope and port in core, p2panda behind it.** Pin `=0.7.x` exactly. The swap to Keyhive/Subduction or Negentropy stays possible. | Team T2 |
+| D2 | Which crate owns peer-to-peer networking, and how it gets an async runtime, given that `tokio` is owned by `sovra-runtime` only (`xtask/src/deps.rs`). | New adapter crate **`sovra-mesh`**, the only crate naming `iroh`/`p2panda`. Implementation refinement: the library does not directly depend on `tokio`; runtime supplies the reactor and spawner. `tokio` is a mesh dev-dependency for tests only. See `xtask/src/deps.rs`. | Team T0 |
+| D3 | Log and sync layer: adopt p2panda (Rust, on iroh, pre-1.0) or build our own envelope on iroh plus Negentropy. | **Own envelope and port in core; p2panda was the planned backend.** The current foundation uses signed core operations over iroh directly; no p2panda dependency is present. A future adoption must be reviewed and pinned. The swap to Keyhive/Subduction or Negentropy stays possible. | Team T2 |
 | D4 | Relays for NAT traversal in production. n0's public relays are for development only. | Sovra-run `iroh-relay` in two or more regions, plus a per-group override (self-host, or a member's always-on computer). | Team T1 beta |
 | D5 | Stable ids. Several ids today are counters or timestamps (`art-{millis}-{seq}`, `account-{n}-{millis}`, `sched-{slug}-{n}`) and will collide across computers. | ULID/UUIDv7 for local records, content hashes (BLAKE3) for shared records. | Person P2 |
 | D6 | SurrealDB's role once data is shared. | Each computer's **local projection and index**, rebuildable from the log. Never a sync layer. Pin the version (4.0.0 shipped 2026-11-03). | Team T2 |

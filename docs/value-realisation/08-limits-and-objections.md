@@ -27,7 +27,7 @@ Labels: **Today** (ships), **Next** (stage 2, build-ready), **Direction**
 | **Scheduled messages are approved when created, not when they fire.** | "Could a timed message go out unchecked?" | The person approves the recipient, app, exact words and time at creation; a bare first name is refused. There is no second review at send time. |
 | **Add-on (MCP) tools**: no approval per call; programs not sandboxed. | "Third-party tools are a risk." | Programs need **Run it** first and re-ask on any change; each tool can be switched off. Per-call approval is not built — keep add-on tools off in sensitive pilots. |
 | **Google**: Gmail and Drive capped at 100 users with an "unverified app" warning until Google verification. | "Can we roll out Gmail to everyone?" | Not until verification completes. Gmail is drafts only and Drive read-only regardless. |
-| **Each computer works alone.** | "We need shared knowledge." | Sharing across a group of computers is **Next** (stage 2), build-ready. |
+| **Group sharing is a foundation, not the full stage-2 design.** | "We need shared knowledge." | [Groups](../groups.md) supports membership and explicitly shared text. Private encrypted lanes, helper bundles and work handoff remain **Next**. |
 | **No company model.** | "We want our own AI." | **Direction** (stage 3): only if evaluation shows it is needed; federated training on the organisation's computers with lineage and rollback. |
 
 ## Business objections
@@ -36,7 +36,7 @@ Labels: **Today** (ships), **Next** (stage 2, build-ready), **Direction**
 | --- | --- |
 | "We already have a sovereign cloud and national models." | Sovra is the layer on the desk. It can use a UAE-hosted or local UAE-built model as its guest, and keeps memory, files and approvals on the organisation's computers. It complements sovereign infrastructure. |
 | "Show us the ROI." | We do not quote one. We run a pilot with your baseline and your measurements ([06](06-measuring-value.md)). |
-| "AI pilots never scale." | The pilot is built to end in a decision, with stop criteria agreed up front. Scaling to a group of computers is Next; to a company is Direction. |
+| "AI pilots never scale." | The pilot is built to end in a decision, with stop criteria agreed up front. The fuller group design is Next; company deployment is Direction. |
 | "Local AI is less capable than the best cloud models." | Often true for the largest tasks. The choice is per helper and per organisation: local for sensitive work, a chosen cloud for the rest, with that choice made visibly. |
 | "Who supports it?" | Not covered in this folder; agree it in the success plan. |
 

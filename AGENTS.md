@@ -5,7 +5,7 @@ files in each crate add crate-specific rules; the closest file wins. Reasoning a
 `docs/architecture.md`.
 
 Native Rust desktop app (a local LLM agent harness). GPUI via `gpui-kit` for UI, tokio for
-async, Velopack for install + auto-update. Rust 1.99.1 (pinned), edition 2024.
+async, Velopack for installers and update feeds (in-app update checks are not wired). Rust 1.99.1 (pinned), edition 2024.
 
 ## Commands
 
@@ -85,6 +85,9 @@ crates/
   sovra-core      pure domain: types, protocol (Command/Event), state reducers, ports
                   (MemoryStore). No IO/async runtime/GUI; async port *traits* are fine.
   sovra-adk       ADK agent harness adapter.
+  sovra-files     Attachment readers, folder indexing and local file IO.
+  sovra-skills    Imported skill packages and bounded YAML parsing.
+  sovra-google    Google OAuth and REST behind the core GoogleConnector port.
   sovra-providers  HTTP catalogs, connection validation, OS credentials and model metadata.
   sovra-runtime   tokio on a background thread; serves the UI over channels (Client).
   sovra-store-surreal  SurrealDB adapter for MemoryStore. The only crate naming surrealdb.

@@ -5,9 +5,16 @@ Map of the top-level guides for SovraHarness. Start at the
 
 | Guide | Purpose |
 | ----- | ------- |
+| [Getting started](getting-started.md) | First launch, first chat and finding features |
+| [Configuration and local data](configuration.md) | Startup variables, data paths and troubleshooting |
+| [Schedules](schedules.md) | Repeating prompts and confirmed timed messages |
+| [Groups](groups.md) | People, computers and explicitly shared knowledge |
+| [Release guide](releasing.md) | Packaging, signing and release verification |
+| [Roadmap](roadmap/README.md) | Implemented foundations and planned stages |
 | [Architecture](architecture.md) | Why the crates, Command/Event, and adapters are shaped this way |
 | [Native development](development.md) | One-shot `cargo xtask dev`, cache reclaim, sign-in status |
 | [Development MCP](development-mcp.md) | Inspect and operate the running native window |
+| [Reviewing knowledge](knowledge.md) | Check sources, explore connections and stop recall |
 | [Memory capture and recall](memory-capture-and-recall.md) | Current contract for saving and recalling a chat turn |
 | [Agent memory log](agent-memory.md) | Dated audits and measured limits; not the day-to-day contract |
 | [Models](models.md) | Connect an AI service and pick a chat model |
@@ -35,3 +42,22 @@ Slide decks live under [`decks/`](decks/README.md) and open as one site from
 [AI-native and 100% sovereign, for the UAE](decks/uae/index.html),
 [the concise investor pitch](decks/pitch/index.html).
 Dated evaluation dumps live under `evaluations/`. Neither is a product contract.
+
+## Current guides and historical material
+
+The guides above describe current behavior. The [roadmap](roadmap/README.md)
+describes remaining work; implemented group foundations are covered in
+[Groups](groups.md). Dated sections in the agent-memory and file-knowledge logs
+record observations at that time and must not be read as current guarantees.
+
+The [guided setup design](superpowers/specs/2026-10-24-guided-setup-and-system-tutorial-design.md)
+and [implementation plan](superpowers/plans/2026-10-24-guided-setup-and-system-tutorial.md)
+are historical design records. [Models](models.md) is the current setup guide.
+
+For contributors: [workflow](../CONTRIBUTING.md), [security](../SECURITY.md),
+[agent rules](../AGENTS.md), and [changelog](../CHANGELOG.md).
+
+`cargo xtask check-docs` checks relative file links in the root README and
+**top-level** `docs/*.md`, required Mermaid fences/names, and pitch slide 4 copy.
+It does not render diagrams, validate anchors, check external URLs, or recursively
+check the roadmap, decks and other nested Markdown. Review those separately.
