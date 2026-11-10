@@ -36,6 +36,28 @@ pub const PEER_ALPN: &[u8] = b"sovra/group/1";
 /// Largest single message either way; a group's whole history fits comfortably.
 pub const MAX_PEER_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 
+/// Most shared-knowledge bytes one message carries. Shared artifacts make a history
+/// larger than one message; whatever does not fit follows on the next sync round.
+pub const MAX_REPLY_KNOWLEDGE_BYTES: usize = 6 * 1024 * 1024;
+
+/// Keeps operations, in order, until `budget` bytes of JSON are used. The first one
+/// is always kept so every round makes progress. Returns whether any were left out.
+pub fn within_budget(ops: Vec<KnowledgeOp>, budget: usize) -> (Vec<KnowledgeOp>, bool) {
+    let mut used = 0usize;
+    let mut kept = Vec::with_capacity(ops.len());
+    let total = ops.len();
+    for op in ops {
+        let size = serde_json::to_vec(&op).map_or(usize::MAX, |bytes| bytes.len());
+        if !kept.is_empty() && used.saturating_add(size) > budget {
+            break;
+        }
+        used = used.saturating_add(size);
+        kept.push(op);
+    }
+    let trimmed = kept.len() < total;
+    (kept, trimmed)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case")]
 pub enum PeerRequest {

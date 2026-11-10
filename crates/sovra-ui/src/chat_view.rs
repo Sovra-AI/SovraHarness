@@ -1087,6 +1087,7 @@ fn render_assistant_segment(
                 .speaker
                 .as_ref()
                 .map_or_else(|| "Sovra".to_owned(), |speaker| speaker.name.clone()),
+            shared_from: String::new(),
         };
         let view = TextView::new(&part.state)
             .selectable(true)
@@ -1176,6 +1177,7 @@ fn render_assistant_segment(
                     .speaker
                     .as_ref()
                     .map_or_else(|| "Sovra".to_owned(), |speaker| speaker.name.clone()),
+                shared_from: String::new(),
             };
             content = content.child(
                 h_flex()

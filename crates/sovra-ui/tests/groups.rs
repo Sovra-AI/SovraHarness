@@ -6,9 +6,12 @@ use std::collections::BTreeSet;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
+use sovra_core::artifacts::{
+    Artifact, ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactKind,
+};
 use sovra_core::group::{
     DetailStatus, DeviceId, GroupCommand, GroupEvent, GroupId, GroupState, MembershipBody, OpHash,
-    PersonId, Role, SharedDetail, Signature, SignatureVerifier, UnsignedOp, fold,
+    PersonId, Role, SharedArtifact, SharedDetail, Signature, SignatureVerifier, UnsignedOp, fold,
 };
 use sovra_core::models::InterfaceScale;
 use sovra_core::{Command, Event, NavTab, Timestamp};
@@ -237,6 +240,135 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
                     "{width}x{height}@{scale}: {id} starts outside the settings column"
                 );
             }
+        })
+        .expect("window open");
+    }
+}
+
+fn dads_list() -> SharedArtifact {
+    SharedArtifact {
+        id: OpHash([8; 32]),
+        title: "Shopping list".into(),
+        kind: ArtifactKind::Checklist,
+        language: String::new(),
+        content: "- milk\n- eggs".into(),
+        author: DAD,
+        person: Some(PersonId([20; 32])),
+        shared_by: "Dad".into(),
+        computer: "Dad's desktop".into(),
+        shared_at: Timestamp(4),
+        replaces: Vec::new(),
+        status: DetailStatus::Current,
+        from_former_member: false,
+        origin: "art-dad".into(),
+    }
+}
+
+fn mums_letter() -> Artifact {
+    Artifact::from_draft(
+        "art-letter".into(),
+        ArtifactDraft {
+            title: "Letter to the school".into(),
+            kind: ArtifactKind::Document,
+            language: String::new(),
+            content: "Dear Ms Smith,".into(),
+            source: sovra_core::artifacts::ArtifactSource::default(),
+        },
+        Timestamp(5),
+    )
+}
+
+fn in_group_with_artifacts(events: &async_channel::Sender<Event>) {
+    group_event(
+        events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(events, GroupEvent::Artifacts(vec![dads_list()]));
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![mums_letter()])))
+        .expect("headless test fixture is available");
+}
+
+#[gpui_kit::test]
+fn artifacts_can_be_shared_with_the_group_and_shared_ones_kept(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 1600.);
+    in_group_with_artifacts(&events);
+    settle(cx);
+    drain(&commands);
+
+    // Dad's shared list shows under "Shared in Family"; Mum keeps a copy.
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Artifacts, cx));
+        window.render_frame(cx);
+        assert!(window.find("shared-artifacts").visible());
+        window.click(("shared-artifact-open", 0usize), cx);
+    })
+    .expect("window open");
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("shared-artifact-detail").visible());
+        assert!(
+            window.find("shared-artifact-withdraw").visible(),
+            "Dad or an admin may stop sharing, and Mum is an admin"
+        );
+        window.click("shared-artifact-keep", cx);
+    })
+    .expect("window open");
+    let sent = drain(&commands);
+    let kept = sent.iter().find_map(|command| match command {
+        Command::Artifacts(ArtifactCommand::Save(draft)) => Some(draft.clone()),
+        _ => None,
+    });
+    let kept = kept.expect("Keep a copy saves to the library");
+    assert_eq!(kept.title, "Shopping list");
+    assert_eq!(kept.source.author, "Dad");
+    assert_eq!(kept.source.shared_from, OpHash([8; 32]).to_hex());
+
+    // Mum's own letter offers "Share with Family" and sends it with its library id.
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("art-letter", cx));
+        window.render_frame(cx);
+        window.click("artifact-share-group", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    let sent = drain(&commands);
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        Command::Group(GroupCommand::ShareArtifact {
+            local_id,
+            new_version_of: None,
+            ..
+        }) if local_id == "art-letter"
+    )));
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("artifact-share-feedback").visible());
+    })
+    .expect("window open");
+}
+
+#[gpui_kit::test]
+fn shared_artifacts_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppContext) {
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+        let (window, shell, _commands, events) = open(cx, width, height);
+        in_group_with_artifacts(&events);
+        settle(cx);
+        cx.update(|cx| design::set_interface_scale(InterfaceScale::from_percent(scale), cx));
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Artifacts, cx));
+            window.render_frame(cx);
+            let page = window.find("sovra-artifacts-view").bounds();
+            let shared = window.find("shared-artifacts").bounds();
+            assert!(
+                shared.size.width <= page.size.width + px(1.),
+                "{width}x{height}@{scale}: shared artifacts overflow the page"
+            );
+            assert!(shared.origin.x >= page.origin.x - px(1.));
         })
         .expect("window open");
     }

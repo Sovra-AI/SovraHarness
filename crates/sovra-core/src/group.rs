@@ -16,6 +16,7 @@ mod membership;
 mod pairing;
 mod sas;
 mod session;
+mod shared_artifact;
 mod wire;
 
 pub use fold::{DeviceEntry, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
@@ -34,12 +35,17 @@ pub use pairing::{
 pub use sas::{SAS_EMOJI, ShortAuthString, short_auth_string};
 pub use session::{
     ComputerRow, GroupCommand, GroupEvent, GroupProblem, GroupsView, PersonRow, removal_warning,
-    role_label,
+    role_label, shareable_text, shareable_topics,
+};
+pub use shared_artifact::{
+    ArtifactShareError, MAX_ORIGIN_CHARS, MAX_SHARED_ARTIFACT_BYTES, MAX_SHARED_LANGUAGE_CHARS,
+    MAX_SHARED_TITLE_CHARS, SharedArtifact, SharingState, check_artifact, lineage_ids,
+    sharing_state,
 };
 pub use wire::{
-    GroupRecord, GroupStore, GroupStoreError, GroupTransport, MAX_PEER_MESSAGE_BYTES, PEER_ALPN,
-    PeerAddress, PeerHandler, PeerRequest, PeerResponse, Refusal, Spawn, TransportError,
-    admits_request, join_transcript,
+    GroupRecord, GroupStore, GroupStoreError, GroupTransport, MAX_PEER_MESSAGE_BYTES,
+    MAX_REPLY_KNOWLEDGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler, PeerRequest, PeerResponse,
+    Refusal, Spawn, TransportError, admits_request, join_transcript, within_budget,
 };
 
 #[cfg(test)]

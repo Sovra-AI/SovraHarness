@@ -12,7 +12,7 @@ use sha2::{Digest as _, Sha256};
 use sovra_core::group::{
     DetailStatus, DeviceId, GroupCommand, GroupEvent, GroupRecord, GroupState, GroupStore,
     GroupStoreError, GroupTransport, PeerAddress, PeerHandler, PeerRequest, PeerResponse, Role,
-    SharedDetail, Signature, SignatureVerifier, Spawn, TransportError,
+    SharedArtifact, SharedDetail, Signature, SignatureVerifier, Spawn, TransportError,
 };
 use sovra_core::{AgentConfig, Command, Event};
 use sovra_runtime::{Client, GroupServices, RuntimeServices};
@@ -204,6 +204,14 @@ impl Computer {
     async fn knowledge(&self, pred: impl Fn(&[SharedDetail]) -> bool) -> Vec<SharedDetail> {
         self.wait(|event| match event {
             GroupEvent::Knowledge(details) if pred(&details) => Some(details),
+            _ => None,
+        })
+        .await
+    }
+
+    async fn artifacts(&self, pred: impl Fn(&[SharedArtifact]) -> bool) -> Vec<SharedArtifact> {
+        self.wait(|event| match event {
+            GroupEvent::Artifacts(artifacts) if pred(&artifacts) => Some(artifacts),
             _ => None,
         })
         .await
@@ -415,4 +423,92 @@ async fn a_used_or_foreign_invite_is_refused_and_members_cannot_invite_people() 
             reason: sovra_core::group::Refusal::NotAMember
         }
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shared_artifacts_reach_a_new_member_in_rounds_and_edits_become_new_versions() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 21);
+    let dad = Computer::start(&net, 22);
+
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Laptop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+
+    // More than one message can carry: 20 artifacts of 400 KB each.
+    let big = "x".repeat(400 * 1024);
+    for n in 0..20 {
+        mum.send(GroupCommand::ShareArtifact {
+            title: format!("Recipe {n}"),
+            kind: sovra_core::artifacts::ArtifactKind::Document,
+            language: String::new(),
+            content: format!("{n}{big}"),
+            new_version_of: None,
+            local_id: String::new(),
+        });
+        mum.artifacts(|artifacts| artifacts.len() == n + 1).await;
+    }
+    mum.send(GroupCommand::ShareArtifact {
+        title: "Shopping list".into(),
+        kind: sovra_core::artifacts::ArtifactKind::Checklist,
+        language: String::new(),
+        content: "- milk".into(),
+        new_version_of: None,
+        local_id: String::new(),
+    });
+    let list = mum
+        .artifacts(|artifacts| artifacts.len() == 21)
+        .await
+        .into_iter()
+        .find(|artifact| artifact.title == "Shopping list")
+        .expect("shared");
+    assert_eq!(list.shared_by, "Mum");
+
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Desktop".into(),
+    });
+    let received = dad.artifacts(|artifacts| artifacts.len() == 21).await;
+    assert!(received.iter().all(SharedArtifact::is_latest));
+
+    // Dad edits his copy of the list and shares it back as its newest version.
+    dad.send(GroupCommand::ShareArtifact {
+        title: "Shopping list".into(),
+        kind: sovra_core::artifacts::ArtifactKind::Checklist,
+        language: String::new(),
+        content: "- milk\n- bread".into(),
+        new_version_of: Some(list.id),
+        local_id: String::new(),
+    });
+    let seen = mum
+        .artifacts(|artifacts| artifacts.iter().any(|a| a.content.contains("bread")))
+        .await;
+    let newest = seen
+        .iter()
+        .find(|a| a.content.contains("bread"))
+        .expect("new version");
+    assert_eq!(newest.shared_by, "Dad");
+    assert_eq!(newest.replaces, vec![list.id]);
+    let old = seen.iter().find(|a| a.id == list.id).expect("kept");
+    assert!(matches!(old.status, DetailStatus::Replaced { .. }));
+
+    // Too big to share: refused before anything is signed.
+    mum.send(GroupCommand::ShareArtifact {
+        title: "Huge".into(),
+        kind: sovra_core::artifacts::ArtifactKind::Data,
+        language: String::new(),
+        content: "x".repeat(sovra_core::group::MAX_SHARED_ARTIFACT_BYTES + 1),
+        new_version_of: None,
+        local_id: String::new(),
+    });
+    mum.wait(|event| matches!(event, GroupEvent::Problem(_)).then_some(()))
+        .await;
 }

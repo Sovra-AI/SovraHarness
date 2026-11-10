@@ -7,7 +7,9 @@ use super::keys::{DeviceId, OpHash, PersonId};
 use super::knowledge::SharedDetail;
 use super::membership::Role;
 use super::pairing::{PairingStage, PairingStep};
+use super::shared_artifact::SharedArtifact;
 use crate::Timestamp;
+use crate::artifacts::ArtifactKind;
 
 /// A request from the UI about groups.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,9 +78,20 @@ pub enum GroupCommand {
     Withdraw {
         detail: OpHash,
     },
-    /// Erase a detail's words on every computer.
+    /// Erase a detail's (or shared artifact's) words on every computer.
     Erase {
         detail: OpHash,
+    },
+    /// Share a saved artifact with the whole group. `new_version_of` names the shared
+    /// artifact it was copied from, so it becomes that artifact's newest version.
+    ShareArtifact {
+        title: String,
+        kind: ArtifactKind,
+        language: String,
+        content: String,
+        new_version_of: Option<OpHash>,
+        /// This computer's library id for it, so later edits find their way back.
+        local_id: String,
     },
 }
 
@@ -140,6 +153,8 @@ pub enum GroupEvent {
     Pairing(PairingStep),
     /// Everything shared in the group, newest first (usable and historical).
     Knowledge(Vec<SharedDetail>),
+    /// Every shared artifact version, latest versions first.
+    Artifacts(Vec<SharedArtifact>),
     /// This computer was removed from, or left, its group.
     LeftGroup,
     Problem(GroupProblem),
@@ -193,6 +208,8 @@ pub struct GroupsView {
     pub loaded: bool,
     /// Shared details, newest first.
     pub knowledge: Vec<SharedDetail>,
+    /// Shared artifact versions, latest versions first.
+    pub artifacts: Vec<SharedArtifact>,
 }
 
 impl Default for GroupsView {
@@ -206,6 +223,7 @@ impl Default for GroupsView {
             problem: None,
             loaded: false,
             knowledge: Vec::new(),
+            artifacts: Vec::new(),
         }
     }
 }
@@ -257,6 +275,7 @@ impl GroupsView {
                 }
             }
             GroupEvent::Knowledge(details) => self.knowledge = details,
+            GroupEvent::Artifacts(artifacts) => self.artifacts = artifacts,
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
         }
@@ -265,6 +284,7 @@ impl GroupsView {
     fn leave(&mut self) {
         self.group = None;
         self.knowledge.clear();
+        self.artifacts.clear();
         self.invite = None;
         self.short_code = None;
         self.pairing = PairingStage::Idle;
@@ -324,4 +344,66 @@ impl GroupsView {
         });
         rows
     }
+}
+
+/// A personal memory reworded for the group: "the user" / "User" becomes the
+/// sharer's name, so "User's dentist is Dr Patel" reaches others as
+/// "Mum's dentist is Dr Patel". People still check the words before sharing.
+pub fn shareable_text(statement: &str, your_name: &str) -> String {
+    let name = your_name.trim();
+    if name.is_empty() {
+        return statement.trim().to_owned();
+    }
+    let mut out = String::with_capacity(statement.len());
+    let mut rest = statement.trim();
+    while !rest.is_empty() {
+        let word_end = rest
+            .find(|c: char| !c.is_alphanumeric())
+            .unwrap_or(rest.len());
+        if word_end == 0 {
+            let c = rest.chars().next().expect("rest is not empty");
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+            continue;
+        }
+        let word = &rest[..word_end];
+        let after = &rest[word_end..];
+        // `get` never splits a character, so non-English words pass through safely.
+        let the_user = word.eq_ignore_ascii_case("the")
+            && after.starts_with(' ')
+            && after
+                .get(1..5)
+                .is_some_and(|next| next.eq_ignore_ascii_case("user"))
+            && after
+                .get(5..)
+                .is_some_and(|tail| !tail.starts_with(|c: char| c.is_alphanumeric()));
+        if the_user {
+            out.push_str(name);
+            rest = &after[5..];
+        } else if word.eq_ignore_ascii_case("user") {
+            out.push_str(name);
+            rest = after;
+        } else {
+            out.push_str(word);
+            rest = after;
+        }
+    }
+    out
+}
+
+/// Topics for a shared memory: its subjects, with "user" named, at most the limit.
+pub fn shareable_topics(entities: &[String], your_name: &str) -> Vec<String> {
+    let mut topics: Vec<String> = Vec::new();
+    for entity in entities {
+        let topic = if entity.trim().eq_ignore_ascii_case("user") {
+            your_name.trim().to_owned()
+        } else {
+            entity.trim().to_owned()
+        };
+        if !topic.is_empty() && !topics.contains(&topic) {
+            topics.push(topic);
+        }
+    }
+    topics.truncate(super::knowledge::MAX_SHARED_TOPICS);
+    topics
 }

@@ -66,6 +66,7 @@ pub(crate) fn render(
         session_id: message.session_id.clone(),
         message_id: message.id.clone(),
         author: "Sovra".into(),
+        shared_from: String::new(),
     };
     actions = actions.child(
         design::button(("message-review-save", index), "Save", cx)

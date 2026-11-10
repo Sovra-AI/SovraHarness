@@ -817,21 +817,23 @@ instances**, Skills-page cards, and CHANGELOG/README updates.
 
 ### T0 — Foundations (after stage 1 P1–P4 and P6)
 
+Status checked against the code on 2026-11-10.
+
 - [x] Decisions D1–D6 approved by the owner (2026-11-05): "Group",
   `sovra-mesh`, own envelope with p2panda behind it, Sovra-run relays,
   ULID/UUIDv7 and content-hash ids, SurrealDB as projection only.
-- [ ] Create the `sovra-mesh` crate (lib, `//!` doc, `[lints] workspace = true`).
-  Add the `LAYERS` and `EXTERNAL_OWNERS` changes from §5.1, with reasons in
-  `xtask/src/deps.rs`.
-- [ ] Add `sovra-core/src/group/` with `identity.rs`, `membership.rs`,
-  `lane.rs`, `envelope.rs` and `ports.rs`. Pure, serde, no IO.
-- [ ] Add a `Spawner` handle from the runtime, so mesh tasks have owners and
+- [x] Create the `sovra-mesh` crate (lib, `//!` doc, `[lints] workspace = true`),
+  with its `LAYERS` and `EXTERNAL_OWNERS` rows in `xtask/src/deps.rs`.
+- [x] Add `sovra-core/src/group/`. Pure, serde, no IO. It ended up as `keys`,
+  `membership`, `fold`, `dag`, `knowledge`, `shared_artifact`, `pairing`, `sas`,
+  `link`, `session` and `wire` instead of the five files first planned.
+- [x] A `Spawn` handle from the runtime, so mesh tasks have owners and
   cancellation.
-- [ ] Add `RuntimeServices.group: Option<Arc<dyn GroupNetwork>>` and wire
+- [x] `RuntimeServices.groups: Option<GroupServices>` wired in
   `sovra-app/src/main.rs`. With no mesh configured, behaviour is unchanged.
-- [ ] Spike: two iroh endpoints in one test process connect directly,
-  exchange an ALPN message, and shut down cleanly. Measure binary size and
-  compile time.
+- [x] Spike: two iroh endpoints in one test process connect directly and
+  exchange messages (`sovra-mesh` tests). Binary size and compile time were
+  not measured.
 
 ### T1 — Create a group (first user-visible milestone)
 
@@ -847,34 +849,35 @@ instances**, Skills-page cards, and CHANGELOG/README updates.
   10-minute invites with a transcript-bound proof (`InviteBook`), the
   one-guess short-code window, and SAS derivation (4 emoji with spoken
   names, plus 6 digits).
-- [ ] `GroupCommand` / `GroupEvent` and the `GroupState` reducer.
+- [x] `GroupCommand` / `GroupEvent` and the `GroupsView` reducer.
 
 **Mesh**
 
-- [ ] iroh endpoint lifecycle:
-  - device key loaded from the keychain (stage 1 P1)
-  - relay configuration: n0 in dev, a configurable URL otherwise
-  - Pkarr discovery
-- [ ] `sovra/pair/1`: QR/link invite (§7.1), short code with SPAKE2 (§7.2),
-  SAS (§7.3).
-- [ ] Membership log storage. p2panda log or Sovra's envelope, behind
-  `GroupLog`.
-- [ ] Admission check on every incoming connection.
+- [x] iroh endpoint lifecycle:
+  - device key kept in the OS keychain (dev builds: `dev-credentials/`)
+  - n0 relays and key-based lookup (`Reach::Internet`), or direct only
+    (`SOVRA_GROUP_REACH=local`). *Not yet:* a configurable relay URL.
+- [ ] `sovra/pair/1`: the `sovra://join` link invite (§7.1) works. *Not yet:*
+  QR code display, the short code with SPAKE2 (§7.2), and showing the SAS
+  emoji check (§7.3) — link joins skip it.
+- [x] Membership log storage: Sovra's own signed envelope, saved as
+  `groups/group.json` (owner-only permissions) through the `GroupStore` port.
+- [x] Admission check on every incoming request (`admits_request`).
 
 **Runtime**
 
-- [ ] `GroupRuntime` covering create, invite, join, confirm, rename, role,
-  remove and leave.
+- [x] Group runtime covering create, invite, join, rename, role, remove and
+  leave, with push on change and background sync every 20 s.
 - [ ] Presence via gossip.
-- [ ] Persist group state through the `MemoryStore` port (new `group` table)
-  with a schema bump.
+- [ ] Persist group state through the `MemoryStore` port. *Today:* a JSON
+  file through `GroupStore`, which is simpler and enough for now.
 
 **UI**
 
-- [ ] Settings → Groups: Create, Roster, Add a computer, Add a person,
-  QR/link screen, Join screen, emoji confirm, Remove dialogs with honest copy,
-  and the second-admin banner.
-- [ ] Development-mode ids on every control.
+- [ ] Settings → Groups: Create, Roster, Add a computer, Add a person, link
+  screen, Join screen, Remove dialogs with honest copy, and the second-admin
+  banner are done. *Not yet:* QR code and the emoji confirm screen.
+- [x] Development-mode ids on every control.
 
 **Packaging**
 
@@ -883,40 +886,44 @@ instances**, Skills-page cards, and CHANGELOG/README updates.
 
 **Skills page**
 
-- [ ] "Make a group for your family or team", e.g. *"Make a group called
-  Family and add my iMac."*
-- [ ] "Add another computer to my group".
+- [x] "Share with your family or team" (opens Settings → Groups).
+- [ ] "Add another computer to my group" as its own card.
 
-**Acceptance criteria**
+**Acceptance criteria** (not yet measured on two real computers)
 
 - Two dev instances on different networks (one behind NAT) pair by link in
   under 30 s.
 - On the same LAN, they pair by 6-digit code.
 - Removal takes effect on all online computers within 10 s.
-- Offline computers converge on reconnect.
+- Offline computers converge on reconnect. *(Covered by the runtime test
+  with a switched-off computer.)*
 
 ### T2 — Share memory in lanes
 
 - [ ] Lanes as encrypted spaces (p2panda-encryption data scheme): create, add
-  and remove members, rotate on removal.
-- [ ] Operation envelope plus LogSync. Write path: log first, then the
-  projection (stage 1 P6).
-- [ ] Fold and conflict rules (§9.4) in core: corroboration, contested,
-  merge-supersede, lane isolation. Property tests for convergence.
-- [ ] Retrieval with the lane filter in the SurrealDB query, provenance trust,
-  new-member damping, and local re-embedding of shared text.
+  and remove members, rotate on removal. *Today:* one whole-group lane,
+  carried over encrypted QUIC and stored owner-only, without its own key.
+- [x] Operation envelope plus sync: signed, hash-chained operations with
+  Sync / Push, sent in rounds of at most 6 MB so large histories arrive.
+- [x] Fold and conflict rules (§9.4) in core: replacement, corroboration,
+  disputes, former members hidden, Viewers cannot add. Order-independence
+  tests over shuffled orders.
+- [ ] Retrieval: helpers get group details ranked by BM25 with agreement and
+  dispute weights, and who shared them. *Not yet:* the SurrealDB lane filter,
+  new-member damping, local re-embedding.
 - [ ] UI:
-  - lane chips
-  - Share with…, Make private, Who taught this, Undo
-  - Hide / Erase the words
-  - which lanes each helper can read
+  - [x] Share with… from Knowledge (reworded for the group, checked first)
+  - [x] Who shared it, Agree, Correct, Withdraw, Erase the words
+  - [ ] lane chips, Make private, which lanes each helper can read
 - [ ] Rebuild-projection-from-log recovery tool (Settings → Repair).
-- [ ] Skills page: "Share a memory with your group".
+- [x] Skills page: "Share something Sovra remembers with your group".
 - **Acceptance criteria:**
-  - Dad's shared fact answers Mum's question, with attribution.
+  - Dad's shared fact answers Mum's question, with attribution. *(Runtime
+    test.)*
   - Sam's private fact is never retrievable by Mum's helpers, as verified by
-    test.
-  - Concurrent corrections produce a dispute card.
+    test. *(Private facts never leave the computer; per-person lanes are T5.)*
+  - Concurrent corrections produce a dispute card. *(Core test; the Groups
+    list labels it "People disagree".)*
 
 ### T3 — Share helpers, skills, artifacts and schedules
 
@@ -925,8 +932,11 @@ instances**, Skills-page cards, and CHANGELOG/README updates.
 - [ ] Skill folders as bundle files (`sovra-skills::LocalSkillStore`).
 - [ ] Taint tracking in a turn, and confirmation cards for side-effecting
   tools in tainted turns (`sovra-adk` harness, runtime approval flow).
-- [ ] Artifact versions as ops and blobs. Keep-both / Choose-one UI.
+- [x] Artifact versions as ops (inline, up to 512 KB each; blobs later).
+  Share with my group, Shared in <group>, Keep a copy, edits shared back as
+  new versions, "two versions" kept when edits cross, Stop sharing.
 - [ ] Group schedules (they depend on stage 1 P5): author-only execution.
+- [x] Skills page: "Share a document or list with your group".
 - [ ] Skills page: "Share a helper with your group".
 
 ### T4 — Hand off work

@@ -5,6 +5,7 @@ fn source() -> ArtifactSource {
         session_id: "s".into(),
         message_id: "m".into(),
         author: "Sovra".into(),
+        shared_from: String::new(),
     }
 }
 

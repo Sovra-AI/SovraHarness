@@ -35,6 +35,8 @@ impl Skill {
             "artifacts" => "Open your saved work library",
             "connections" => "Link the things Sovra can use",
             "groups" => "Share with your family or team",
+            "share-artifact" => "Share a document or list with your group",
+            "share-memory" => "Share something Sovra remembers with your group",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -150,6 +152,14 @@ impl Skill {
             "groups" => (
                 "Opens Groups, where your family or team's computers join together. Share a detail like “the boiler service is on 12 March” and everyone's helpers can answer with it, saying who shared it.".to_owned(),
                 "/groups ".to_owned(),
+            ),
+            "share-artifact" => (
+                "Opens Artifacts. Open something you saved, like the family shopping list, and press Share with your group. Everyone gets a copy, and when someone changes it and shares again, the group gets the new version.".to_owned(),
+                "/share-artifact ".to_owned(),
+            ),
+            "share-memory" => (
+                "Opens what Sovra remembers. Open a detail, like “Mum's dentist is Dr Patel”, press Share, check the words, and everyone's helpers in your group can use it.".to_owned(),
+                "/share-memory ".to_owned(),
             ),
             "connect-service" => sample_pair(
                 "connect-service",
@@ -403,6 +413,20 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Settings → Groups to start or join a group, invite family or teammates, and share details everyone's helpers can use.",
             SkillAction::Settings,
             &["family", "share-with-group"],
+        ),
+        action(
+            "share-artifact",
+            "Share with my group",
+            "Open Artifacts to share a saved document, list or picture with your group, keep a copy of what others shared, and share your changes back as a new version.",
+            SkillAction::Artifacts,
+            &["share-document", "shared-artifacts"],
+        ),
+        action(
+            "share-memory",
+            "Share a memory",
+            "Open what Sovra remembers, choose a saved detail and share it with your group so everyone's helpers can use it.",
+            SkillAction::Knowledge,
+            &["share-detail"],
         ),
         action(
             "connect-service",

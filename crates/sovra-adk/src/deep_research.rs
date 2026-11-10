@@ -417,6 +417,7 @@ impl ResearchRun<'_> {
                 session_id: self.turn.session_id.clone(),
                 message_id: self.activity_id.clone(),
                 author: "Research".into(),
+                shared_from: String::new(),
             },
         };
         match saver.save(draft).await {

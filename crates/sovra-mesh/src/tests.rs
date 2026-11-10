@@ -185,3 +185,94 @@ async fn the_group_record_survives_a_save_and_reload() {
     }
     std::fs::remove_dir_all(dir).expect("cleans up");
 }
+
+/// Answers a sync with a full, budget-sized batch of shared artifacts.
+struct BigLibrary(Vec<sovra_core::group::KnowledgeOp>);
+
+#[async_trait::async_trait]
+impl PeerHandler for BigLibrary {
+    async fn handle(&self, _from: DeviceId, _request: PeerRequest) -> PeerResponse {
+        let (knowledge, _) = sovra_core::group::within_budget(
+            self.0.clone(),
+            sovra_core::group::MAX_REPLY_KNOWLEDGE_BYTES,
+        );
+        PeerResponse::Synced {
+            membership: Vec::new(),
+            knowledge,
+            want_membership: BTreeSet::new(),
+            want_knowledge: BTreeSet::new(),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_full_round_of_shared_artifacts_crosses_the_real_network_signed() {
+    use sovra_core::group::{KnowledgeBody, LaneId, UnsignedKnowledge};
+
+    let a = Mesh::bind([5; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([6; 32], Reach::LocalOnly).await.expect("binds");
+    let group = GroupId([9; 32]);
+    // Lists with many line breaks, which JSON escapes, so the budget must count
+    // encoded bytes rather than characters.
+    let content = "- milk\n- \"eggs\"\n".repeat(30_000);
+    assert!(content.len() <= sovra_core::group::MAX_SHARED_ARTIFACT_BYTES);
+    let ops: Vec<_> = (1..=20_u64)
+        .map(|seq| {
+            let unsigned = UnsignedKnowledge {
+                group,
+                lane: LaneId::whole_group(&group),
+                author: b.this_device(),
+                seq,
+                prev: None,
+                deps: Vec::new(),
+                at: sovra_core::Timestamp(i64::try_from(seq).expect("small")),
+                body: KnowledgeBody::ShareArtifact {
+                    title: format!("List {seq}"),
+                    kind: sovra_core::artifacts::ArtifactKind::Checklist,
+                    language: String::new(),
+                    content: content.clone(),
+                    replaces: Vec::new(),
+                    origin: String::new(),
+                },
+            };
+            let signature = b.sign(&unsigned.signing_bytes());
+            unsigned.sign(signature)
+        })
+        .collect();
+    let mut server = serve(&b, Arc::new(BigLibrary(ops.clone())));
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        a.request(
+            &b.address(),
+            PeerRequest::Sync {
+                group,
+                membership: BTreeSet::new(),
+                knowledge: BTreeSet::new(),
+                from: a.address(),
+            },
+        ),
+    )
+    .await
+    .expect("answers in time")
+    .expect("a budget-sized reply fits in one message");
+    let PeerResponse::Synced { knowledge, .. } = response else {
+        panic!("expected a sync answer, got {response:?}");
+    };
+    assert!(
+        knowledge.len() > 1 && knowledge.len() < ops.len(),
+        "a round carries some, not all: {}",
+        knowledge.len()
+    );
+    assert_eq!(knowledge, ops[..knowledge.len()].to_vec(), "oldest first");
+    let verifier = a.verifier();
+    assert!(knowledge.iter().all(|op| verifier.verify(
+        &op.unsigned().author,
+        &op.unsigned().signing_bytes(),
+        op.signature()
+    )));
+
+    b.close().await;
+    a.close().await;
+    while server.join_next().await.is_some() {}
+}

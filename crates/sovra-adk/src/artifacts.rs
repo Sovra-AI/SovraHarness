@@ -133,6 +133,7 @@ impl Tool for SaveArtifactTool {
                 session_id: ctx.session_id().to_owned(),
                 message_id: String::new(),
                 author: self.author.clone(),
+                shared_from: String::new(),
             },
         };
         match (self.saver.save)(draft).await {

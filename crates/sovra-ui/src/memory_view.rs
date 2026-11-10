@@ -96,6 +96,9 @@ pub(crate) struct MemoryView {
     duplicates: Option<sovra_core::MemoryDuplicateReport>,
     /// A same-detail link is being stored. The picture stays up while that write runs.
     version_link: bool,
+    /// The saved detail being reworded before it is shared with the group.
+    sharing: Option<FactId>,
+    share_draft: Entity<TextareaState>,
 }
 
 impl MemoryView {
@@ -189,6 +192,8 @@ impl MemoryView {
             graph: graph::GraphState::default(),
             duplicates: None,
             version_link: false,
+            sharing: None,
+            share_draft: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 5)),
         }
     }
 
@@ -869,6 +874,12 @@ impl Render for MemoryView {
                         ),
                 );
             }
+            if let Some((group, your_name)) = self.share_target(cx)
+                && detail.fact.is_current()
+                && detail.fact.stopped_at.is_none()
+            {
+                panel = panel.child(self.share_controls(detail, &id, &group, &your_name, busy, cx));
+            }
             if self.editing.as_ref() == Some(&id) {
                 let target = id.clone();
                 panel = panel
@@ -908,6 +919,128 @@ impl Render for MemoryView {
             column = column.child(self.semantic_controls(cx));
         }
         column
+    }
+}
+
+impl MemoryView {
+    /// The group name and this person's name there, when they may share with it.
+    fn share_target(&self, cx: &Context<Self>) -> Option<(String, String)> {
+        let groups = &self.models.read(cx).groups;
+        let group = groups.group.as_ref()?;
+        if !groups
+            .my_role()
+            .is_some_and(sovra_core::group::Role::writes)
+        {
+            return None;
+        }
+        let me = groups.this_computer?;
+        let name = group.owner_of(&me).map(|member| member.name.clone())?;
+        Some((group.name.clone(), name))
+    }
+
+    /// "Share with <group>": reword the detail for others, then send it.
+    fn share_controls(
+        &self,
+        detail: &sovra_core::MemoryDetail,
+        id: &FactId,
+        group: &str,
+        your_name: &str,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let groups = &self.models.read(cx).groups;
+        let me = groups.this_computer;
+        let worded = sovra_core::group::shareable_text(&detail.fact.content, your_name);
+        let already = groups
+            .knowledge
+            .iter()
+            .any(|shared| shared.usable() && Some(shared.author) == me && shared.text == worded);
+        let mut section = v_flex()
+            .id("memory-share-group")
+            .test_support()
+            .w_full()
+            .gap(t.space.small);
+        if self.sharing.as_ref() != Some(id) {
+            if already {
+                return section.child(
+                    div()
+                        .id("memory-shared-already")
+                        .test_support()
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(format!("Shared with {group}.")),
+                );
+            }
+            let target = id.clone();
+            return section.child(
+                design::button("memory-share", format!("Share with {group}"), cx)
+                    .self_start()
+                    .max_w_full()
+                    .disabled(busy)
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.share_draft.update(cx, |input, cx| {
+                            input.set_value(worded.clone(), window, cx);
+                        });
+                        view.sharing = Some(target.clone());
+                        view.editing = None;
+                        view.stopping = None;
+                        cx.notify();
+                    })),
+            );
+        }
+        let topics = sovra_core::group::shareable_topics(&detail.fact.entities, your_name);
+        let group_name = group.to_owned();
+        section = section
+            .child(
+                div()
+                    .whitespace_normal()
+                    .sovra_text(TextRole::Caption, cx)
+                    .child(format!(
+                        "Everyone in {group} will see this, and their helpers can use it. Check the words make sense to them."
+                    )),
+            )
+            .child(Textarea::new(&self.share_draft).aria_label("Words to share with your group"))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::primary_button("memory-share-confirm", "Share", cx)
+                            .disabled(busy)
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                let text = view.share_draft.read(cx).value().trim().to_owned();
+                                if let Err(error) =
+                                    sovra_core::group::check_share(&text, &topics)
+                                {
+                                    view.state.error =
+                                        Some(format!("That can't be shared: {error}."));
+                                } else {
+                                    let _ = cx.global::<RuntimeClient>().0.send(
+                                        Command::Group(
+                                            sovra_core::group::GroupCommand::Share {
+                                                text,
+                                                about: topics.clone(),
+                                            },
+                                        ),
+                                    );
+                                    view.sharing = None;
+                                    view.notice = Some(format!(
+                                        "Shared with {group_name}. Their helpers can use it now."
+                                    ));
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        design::button("memory-share-cancel", "Cancel", cx).on_click(
+                            cx.listener(|view, _, _, cx| {
+                                view.sharing = None;
+                                cx.notify();
+                            }),
+                        ),
+                    ),
+            );
+        section
     }
 }
 
@@ -1357,6 +1490,125 @@ mod tests {
                 MemoryAction::Remove(FactId("fact:tea".into()))
             );
             cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
+        }
+    }
+
+    /// Mum's one-person group, folded for real with signatures waived.
+    fn mums_group() -> sovra_core::group::GroupState {
+        use sovra_core::group::{
+            DeviceId, GroupId, MembershipBody, PersonId, Signature, SignatureVerifier, UnsignedOp,
+        };
+        struct AcceptAll;
+        impl SignatureVerifier for AcceptAll {
+            fn verify(&self, _: &DeviceId, _: &[u8], _: &Signature) -> bool {
+                true
+            }
+        }
+        let mum = DeviceId([1; 32]);
+        let group = GroupId::derive(&mum, &[9; 16]);
+        let genesis = UnsignedOp {
+            group,
+            author: mum,
+            seq: 1,
+            prev: None,
+            deps: Vec::new(),
+            at: Timestamp(1),
+            body: MembershipBody::Genesis {
+                name: "Family".into(),
+                nonce: [9; 16],
+                founder: PersonId([10; 32]),
+                founder_name: "Mum".into(),
+                device_name: "Mum's laptop".into(),
+            },
+        }
+        .sign(Signature([0; 64]));
+        sovra_core::group::fold(group, [&genesis], &AcceptAll)
+    }
+
+    #[gpui_kit::test]
+    fn a_saved_detail_can_be_reworded_and_shared_with_the_group(cx: &mut TestAppContext) {
+        for (width, height) in [(640., 420.), (1280., 900.)] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| crate::init(client, cx));
+            let mut shell = None;
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let view = cx.new(|cx| crate::Shell::new(0, window, cx));
+                shell = Some(view.clone());
+                Root::new(view, window, cx)
+            });
+            let shell = shell.unwrap();
+            events
+                .send_blocking(Event::Group(Box::new(
+                    sovra_core::group::GroupEvent::Loaded {
+                        this_computer: sovra_core::group::DeviceId([1; 32]),
+                        group: Some(mums_group()),
+                    },
+                )))
+                .unwrap();
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| {
+                    shell.select_tab(NavTab::Knowledge, cx);
+                    shell.select_knowledge_section(
+                        crate::knowledge_view::KnowledgeSection::Memories,
+                        cx,
+                    );
+                });
+                window.render_frame(cx);
+            })
+            .unwrap();
+            let mut dentist = detail();
+            dentist.fact.content = "User's dentist is Dr Patel".into();
+            dentist.fact.entities = vec!["user".into(), "Dr Patel".into()];
+            let load = request(&commands);
+            respond(
+                &events,
+                load.request_id,
+                MemoryReviewResult::Page(MemoryPage {
+                    facts: vec![dentist.fact.clone()],
+                    next: None,
+                    overview: None,
+                    chats: Vec::new(),
+                }),
+            );
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                click(window, ("memory-open", 0usize), height, cx);
+            })
+            .unwrap();
+            let inspect = request(&commands);
+            respond(
+                &events,
+                inspect.request_id,
+                MemoryReviewResult::Detail(Box::new(dentist)),
+            );
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                click(window, "memory-share", height, cx);
+                let view = shell.read(cx).memory_view.clone();
+                assert_eq!(
+                    view.read(cx).share_draft.read(cx).value().to_string(),
+                    "Mum's dentist is Dr Patel",
+                    "reworded for the group"
+                );
+                click(window, "memory-share-confirm", height, cx);
+            })
+            .unwrap();
+            let shared =
+                std::iter::from_fn(|| commands.try_recv().ok()).find_map(|command| match command {
+                    Command::Group(sovra_core::group::GroupCommand::Share { text, about }) => {
+                        Some((text, about))
+                    }
+                    _ => None,
+                });
+            assert_eq!(
+                shared,
+                Some((
+                    "Mum's dentist is Dr Patel".to_owned(),
+                    vec!["Mum".to_owned(), "Dr Patel".to_owned()]
+                )),
+                "{width}x{height}"
+            );
         }
     }
 }

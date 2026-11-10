@@ -17,10 +17,11 @@ use async_channel::Sender;
 use sovra_core::group::{
     DeviceId, GroupCommand, GroupEvent, GroupId, GroupProblem, GroupRecord, GroupState, GroupStore,
     GroupTransport, Invite, InviteBook, InviteKind, JoinLink, KnowledgeBody, KnowledgeOp,
-    KnowledgeRejection, KnowledgeView, LaneId, LinkError, MembershipBody, MembershipOp,
-    PairingFailure, PairingStep, PeerAddress, PeerHandler, PeerRequest, PeerResponse, PersonId,
-    RedeemError, Refusal, Rejection, SharedDetail, SharedHit, SignatureVerifier, Spawn, UnsignedOp,
-    admits_request, check_share, fold, fold_knowledge, invite_proof, join_transcript,
+    KnowledgeRejection, KnowledgeView, LaneId, LinkError, MAX_REPLY_KNOWLEDGE_BYTES,
+    MembershipBody, MembershipOp, PairingFailure, PairingStep, PeerAddress, PeerHandler,
+    PeerRequest, PeerResponse, PersonId, RedeemError, Refusal, Rejection, SharedArtifact,
+    SharedDetail, SignatureVerifier, Spawn, UnsignedOp, admits_request, check_artifact,
+    check_share, fold, fold_knowledge, invite_proof, join_transcript, within_budget,
 };
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
@@ -46,16 +47,21 @@ impl std::fmt::Debug for GroupServices {
 const SYNC_EVERY: Duration = Duration::from_secs(20);
 /// A request to another computer gives up after this long.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Most catch-up rounds with one computer per sync; each round carries up to
+/// `MAX_REPLY_KNOWLEDGE_BYTES`, so this bounds one sync at a few hundred megabytes.
+const MAX_SYNC_ROUNDS: usize = 32;
+
+/// What the Groups screens show of the shared lane.
+struct SharedNow {
+    details: Vec<SharedDetail>,
+    artifacts: Vec<SharedArtifact>,
+}
 
 /// What helpers may read: the group's usable shared details.
 #[derive(Clone, Default)]
 pub(crate) struct GroupKnowledge(Arc<RwLock<KnowledgeView>>);
 
 impl GroupKnowledge {
-    pub(crate) async fn search(&self, question: &str, limit: usize) -> Vec<SharedHit> {
-        self.0.read().await.search(question, limit)
-    }
-
     /// Adds group knowledge to a turn that already reads personal memory. Turns
     /// without a reader (untrusted senders, remembering paused) get none either.
     pub(crate) fn wrap(
@@ -71,12 +77,49 @@ impl GroupKnowledge {
     }
 
     async fn add_to(&self, context: &mut sovra_core::MemoryContext, question: &str) {
-        for hit in self
-            .search(question, sovra_core::MAX_GROUP_EVIDENCE_ITEMS)
-            .await
-        {
+        let view = self.0.read().await;
+        // Details first; a couple of places stay for shared documents and lists.
+        let details = sovra_core::MAX_GROUP_EVIDENCE_ITEMS.saturating_sub(ARTIFACT_EVIDENCE_ITEMS);
+        for hit in view.search(question, details) {
             context.push_group(evidence(&hit.detail));
         }
+        for artifact in view.search_artifacts(question, ARTIFACT_EVIDENCE_ITEMS) {
+            context.push_group(artifact_evidence(artifact));
+        }
+    }
+}
+
+/// Most shared artifacts one recall adds.
+const ARTIFACT_EVIDENCE_ITEMS: usize = 2;
+/// How much of a shared artifact a helper reads in recall.
+const ARTIFACT_EXCERPT_CHARS: usize = 1_200;
+
+/// A shared artifact as recall evidence: its title and opening, attributed.
+fn artifact_evidence(artifact: &SharedArtifact) -> sovra_core::GroupEvidence {
+    let mut excerpt: String = artifact
+        .content
+        .chars()
+        .take(ARTIFACT_EXCERPT_CHARS)
+        .collect();
+    if artifact.content.chars().count() > ARTIFACT_EXCERPT_CHARS {
+        excerpt.push('…');
+    }
+    sovra_core::GroupEvidence {
+        citation: format!("group-artifact:{}", &artifact.id.to_hex()[..12]),
+        statement: format!(
+            "Shared {} “{}”:\n{excerpt}",
+            artifact.kind.label().to_lowercase(),
+            artifact.title
+        ),
+        shared_by: artifact.shared_by.clone(),
+        computer: artifact.computer.clone(),
+        shared_at: artifact.shared_at,
+        valid_at: None,
+        disputed: matches!(
+            artifact.status,
+            sovra_core::group::DetailStatus::Disputed { .. }
+        ),
+        agreed_by: 0,
     }
 }
 
@@ -338,30 +381,47 @@ impl Groups {
         }
     }
 
-    fn details(view: &KnowledgeView) -> Vec<SharedDetail> {
+    fn shared(view: &KnowledgeView) -> SharedNow {
         let mut details: Vec<SharedDetail> = view.details.values().cloned().collect();
         details.sort_by(|a, b| b.shared_at.cmp(&a.shared_at).then(b.id.cmp(&a.id)));
-        details
+        SharedNow {
+            details,
+            artifacts: view.shared_artifacts(),
+        }
+    }
+
+    async fn publish_shared(&self, shared: SharedNow) {
+        self.emit(GroupEvent::Knowledge(shared.details)).await;
+        self.emit(GroupEvent::Artifacts(shared.artifacts)).await;
     }
 
     async fn publish_loaded(&self) {
-        let (roster, details) = {
+        let (roster, shared) = {
             let inner = self.inner.lock().await;
-            (inner.roster.clone(), Self::details(&inner.view))
+            (inner.roster.clone(), Self::shared(&inner.view))
         };
         self.emit(GroupEvent::Loaded {
             this_computer: self.me(),
             group: roster,
         })
         .await;
-        self.emit(GroupEvent::Knowledge(details)).await;
+        self.publish_shared(shared).await;
     }
 
-    async fn publish_changed(&self, roster: Option<GroupState>, details: Vec<SharedDetail>) {
+    async fn publish_changed(&self, roster: Option<GroupState>, shared: SharedNow) {
         if let Some(roster) = roster {
             self.emit(GroupEvent::Changed(roster)).await;
         }
-        self.emit(GroupEvent::Knowledge(details)).await;
+        self.publish_shared(shared).await;
+    }
+
+    async fn publish_left(&self) {
+        self.emit(GroupEvent::LeftGroup).await;
+        self.publish_shared(SharedNow {
+            details: Vec::new(),
+            artifacts: Vec::new(),
+        })
+        .await;
     }
 
     fn address_of(record: &GroupRecord, device: DeviceId) -> PeerAddress {
@@ -453,7 +513,8 @@ impl Groups {
             }
         }
         for op in knowledge {
-            if !have_knowledge.contains(&op.hash()) && Some(op.unsigned.group) == inner.record.group
+            if !have_knowledge.contains(&op.hash())
+                && Some(op.unsigned().group) == inner.record.group
             {
                 inner.record.knowledge.push(op);
                 changed = true;
@@ -473,13 +534,12 @@ impl Groups {
         }
         self.persist(&inner).await;
         let roster = inner.roster.clone();
-        let details = Self::details(&inner.view);
+        let shared = Self::shared(&inner.view);
         drop(inner);
         if removed {
-            self.emit(GroupEvent::LeftGroup).await;
-            self.emit(GroupEvent::Knowledge(Vec::new())).await;
+            self.publish_left().await;
         } else {
-            self.publish_changed(roster, details).await;
+            self.publish_changed(roster, shared).await;
         }
         true
     }
@@ -493,14 +553,33 @@ impl Groups {
 
     /// Asks every other computer what this one missed, and sends what they missed.
     async fn sync_all(self: &Arc<Self>) {
-        let (group, peers, membership, knowledge) = {
+        let peers = {
+            let inner = self.inner.lock().await;
+            if inner.record.group.is_none() {
+                return;
+            }
+            self.peers(&inner)
+        };
+        for peer in peers {
+            // A large history arrives over several rounds; stop once a round brings
+            // nothing new.
+            for _ in 0..MAX_SYNC_ROUNDS {
+                if !self.sync_round(&peer).await {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// One exchange with `peer`. Returns whether it brought anything new.
+    async fn sync_round(self: &Arc<Self>, peer: &PeerAddress) -> bool {
+        let (group, membership, knowledge) = {
             let inner = self.inner.lock().await;
             let Some(group) = inner.record.group else {
-                return;
+                return false;
             };
             (
                 group,
-                self.peers(&inner),
                 inner
                     .record
                     .membership
@@ -515,48 +594,54 @@ impl Groups {
                     .collect::<BTreeSet<_>>(),
             )
         };
-        for peer in peers {
-            let request = PeerRequest::Sync {
-                group,
-                membership: membership.clone(),
-                knowledge: knowledge.clone(),
-                from: self.transport.address(),
-            };
-            match self.ask(&peer, request).await {
-                Ok(PeerResponse::Synced {
-                    membership: theirs,
-                    knowledge: their_knowledge,
-                    want_membership,
-                    want_knowledge,
-                }) => {
-                    self.merge(theirs, their_knowledge).await;
-                    if !want_membership.is_empty() || !want_knowledge.is_empty() {
-                        let (wanted, wanted_knowledge) = {
-                            let inner = self.inner.lock().await;
-                            (
-                                inner
-                                    .record
-                                    .membership
-                                    .iter()
-                                    .filter(|op| want_membership.contains(&op.hash()))
-                                    .cloned()
-                                    .collect::<Vec<_>>(),
-                                inner
-                                    .record
-                                    .knowledge
-                                    .iter()
-                                    .filter(|op| want_knowledge.contains(&op.hash()))
-                                    .cloned()
-                                    .collect::<Vec<_>>(),
-                            )
-                        };
-                        self.broadcast(group, vec![peer], &wanted, &wanted_knowledge);
-                    }
+        let request = PeerRequest::Sync {
+            group,
+            membership,
+            knowledge,
+            from: self.transport.address(),
+        };
+        match self.ask(peer, request).await {
+            Ok(PeerResponse::Synced {
+                membership: theirs,
+                knowledge: their_knowledge,
+                want_membership,
+                want_knowledge,
+            }) => {
+                let changed = self.merge(theirs, their_knowledge).await;
+                if !want_membership.is_empty() || !want_knowledge.is_empty() {
+                    let (wanted, wanted_knowledge) = {
+                        let inner = self.inner.lock().await;
+                        (
+                            inner
+                                .record
+                                .membership
+                                .iter()
+                                .filter(|op| want_membership.contains(&op.hash()))
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                            inner
+                                .record
+                                .knowledge
+                                .iter()
+                                .filter(|op| want_knowledge.contains(&op.hash()))
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                        )
+                    };
+                    // What does not fit is asked for again on the peer's next sync.
+                    let (wanted_knowledge, _) =
+                        within_budget(wanted_knowledge, MAX_REPLY_KNOWLEDGE_BYTES);
+                    self.broadcast(group, vec![peer.clone()], &wanted, &wanted_knowledge);
                 }
-                Ok(other) => tracing::debug!(?other, "unexpected sync answer"),
-                Err(error) => {
-                    tracing::debug!(%error, peer = %peer.device.fingerprint(), "sync skipped");
-                }
+                changed
+            }
+            Ok(other) => {
+                tracing::debug!(?other, "unexpected sync answer");
+                false
+            }
+            Err(error) => {
+                tracing::debug!(%error, peer = %peer.device.fingerprint(), "sync skipped");
+                false
             }
         }
     }
@@ -581,7 +666,13 @@ impl Groups {
             GroupCommand::Join {
                 link,
                 computer_name,
-            } => self.join(&link, computer_name).await,
+            } => {
+                self.join(&link, computer_name).await;
+                // A join hands over as much history as fits in one message; fetch the
+                // rest (and meet the other computers) straight away.
+                let groups = self.clone();
+                (self.spawn)(Box::pin(async move { groups.sync_all().await }));
+            }
             GroupCommand::ShowShortCode | GroupCommand::JoinWithCode { .. } => {
                 self.emit(GroupEvent::Problem(GroupProblem::Other(
                     "Same-room codes aren't ready yet. Use the link or QR code instead.".into(),
@@ -648,6 +739,28 @@ impl Groups {
             }
             GroupCommand::Erase { detail } => {
                 self.knowledge(KnowledgeBody::Redact { detail }).await;
+            }
+            GroupCommand::ShareArtifact {
+                title,
+                kind,
+                language,
+                content,
+                new_version_of,
+                local_id,
+            } => {
+                let replaces = match new_version_of {
+                    Some(original) => self.inner.lock().await.view.latest_versions_of(&original),
+                    None => Vec::new(),
+                };
+                self.knowledge(KnowledgeBody::ShareArtifact {
+                    title,
+                    kind,
+                    language,
+                    content,
+                    replaces,
+                    origin: local_id,
+                })
+                .await;
             }
         }
     }
@@ -933,23 +1046,35 @@ impl Groups {
         }
         self.persist(&inner).await;
         let roster_now = inner.roster.clone();
-        let details = Self::details(&inner.view);
+        let shared = Self::shared(&inner.view);
         drop(inner);
         self.broadcast(roster.group, peers, &[op], &[]);
         if left {
-            self.emit(GroupEvent::LeftGroup).await;
-            self.emit(GroupEvent::Knowledge(Vec::new())).await;
+            self.publish_left().await;
         } else {
-            self.publish_changed(roster_now, details).await;
+            self.publish_changed(roster_now, shared).await;
         }
     }
 
     /// Signs a knowledge change, keeps it only if the rules accept it, and sends it.
     async fn knowledge(self: &Arc<Self>, body: KnowledgeBody) {
-        if let KnowledgeBody::Share { text, about, .. } = &body
-            && let Err(error) = check_share(text, about)
-        {
-            self.emit(GroupEvent::Problem(GroupProblem::Other(error.to_string())))
+        let checked = match &body {
+            KnowledgeBody::Share { text, about, .. } => {
+                check_share(text, about).map_err(|error| error.to_string())
+            }
+            KnowledgeBody::ShareArtifact {
+                title,
+                language,
+                content,
+                ..
+            } => check_artifact(title, language, content)
+                .map_err(|error| format!("That can't be shared: {error}.")),
+            KnowledgeBody::Corroborate { .. }
+            | KnowledgeBody::Withdraw { .. }
+            | KnowledgeBody::Redact { .. } => Ok(()),
+        };
+        if let Err(message) = checked {
+            self.emit(GroupEvent::Problem(GroupProblem::Other(message)))
                 .await;
             return;
         }
@@ -988,10 +1113,10 @@ impl Groups {
         self.refold(&mut inner).await;
         self.persist(&inner).await;
         let roster_now = inner.roster.clone();
-        let details = Self::details(&inner.view);
+        let shared = Self::shared(&inner.view);
         drop(inner);
         self.broadcast(roster.group, peers, &[], &[op]);
-        self.publish_changed(roster_now, details).await;
+        self.publish_changed(roster_now, shared).await;
     }
 
     /// Admits a computer holding a live invite: signs its addition and hands it the history.
@@ -1071,12 +1196,14 @@ impl Groups {
         Self::remember(&mut inner.record, address);
         self.refold(&mut inner).await;
         self.persist(&inner).await;
+        // The joiner syncs straight after joining, so a history too large for one
+        // message still arrives in full.
         let response = PeerResponse::Joined {
             membership: inner.record.membership.clone(),
-            knowledge: inner.record.knowledge.clone(),
+            knowledge: within_budget(inner.record.knowledge.clone(), MAX_REPLY_KNOWLEDGE_BYTES).0,
         };
         let roster_now = inner.roster.clone();
-        let details = Self::details(&inner.view);
+        let shared = Self::shared(&inner.view);
         drop(inner);
         self.broadcast(
             group,
@@ -1092,7 +1219,7 @@ impl Groups {
         self.emit(GroupEvent::Pairing(PairingStep::SkipCode)).await;
         self.emit(GroupEvent::Pairing(PairingStep::Admitted { group }))
             .await;
-        self.publish_changed(roster_now, details).await;
+        self.publish_changed(roster_now, shared).await;
         response
     }
 }
@@ -1161,13 +1288,17 @@ impl Groups {
                         .filter(|op| !membership.contains(&op.hash()))
                         .cloned()
                         .collect(),
-                    knowledge: inner
-                        .record
-                        .knowledge
-                        .iter()
-                        .filter(|op| !knowledge.contains(&op.hash()))
-                        .cloned()
-                        .collect(),
+                    knowledge: within_budget(
+                        inner
+                            .record
+                            .knowledge
+                            .iter()
+                            .filter(|op| !knowledge.contains(&op.hash()))
+                            .cloned()
+                            .collect(),
+                        MAX_REPLY_KNOWLEDGE_BYTES,
+                    )
+                    .0,
                     want_membership: membership.difference(&mine_membership).copied().collect(),
                     want_knowledge: knowledge.difference(&mine_knowledge).copied().collect(),
                 }
@@ -1313,7 +1444,22 @@ mod tests {
             )
             .expect("lane");
         let op = share.clone().sign(signature(&dad, &share.signing_bytes()));
-        fold_knowledge(&roster, lane, &[op], &Fake)
+        let list = fold_knowledge(&roster, lane, std::slice::from_ref(&op), &Fake)
+            .draft(
+                dad,
+                Timestamp(4),
+                KnowledgeBody::ShareArtifact {
+                    title: "Shopping list".into(),
+                    kind: sovra_core::artifacts::ArtifactKind::Checklist,
+                    language: String::new(),
+                    content: "- oat milk\n- eggs\n- bread".into(),
+                    replaces: Vec::new(),
+                    origin: String::new(),
+                },
+            )
+            .expect("lane");
+        let list = list.clone().sign(signature(&dad, &list.signing_bytes()));
+        fold_knowledge(&roster, lane, &[op, list], &Fake)
     }
 
     struct Empty;
@@ -1350,6 +1496,23 @@ mod tests {
         assert!(evidence.statement.contains("12 March"));
         assert!(evidence.citation.starts_with("group:"));
         assert!(!evidence.disputed);
+
+        let context = reader
+            .search(sovra_core::MemorySearch {
+                text: "what is on our shopping list".into(),
+                entity: None,
+                valid_at: None,
+                known_at: None,
+            })
+            .await
+            .expect("searches");
+        let list = context
+            .group
+            .iter()
+            .find(|evidence| evidence.citation.starts_with("group-artifact:"))
+            .expect("the shared list is recalled");
+        assert_eq!(list.shared_by, "Dad");
+        assert!(list.statement.contains("Shopping list") && list.statement.contains("oat milk"));
 
         assert!(
             knowledge.wrap(None).is_none(),

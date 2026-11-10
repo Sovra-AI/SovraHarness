@@ -699,6 +699,12 @@ impl Shell {
         &self.state
     }
 
+    /// This computer's group, as Settings → Groups folds it from `Event::Group`.
+    /// Artifacts and Knowledge read it to offer "Share with my group".
+    pub(crate) fn groups<'a>(&self, cx: &'a App) -> &'a sovra_core::group::GroupsView {
+        &self.models.read(cx).groups
+    }
+
     /// Chat composer placeholder currently held by the input (follows UI language).
     #[must_use]
     pub fn composer_placeholder(&self, cx: &App) -> String {

@@ -11,6 +11,27 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Share artifacts with your group.** Saved documents, lists, tables and
+  pictures get **Share with my group** on the Artifacts page; everything the
+  group shared appears under **Shared in <group>**, where **Keep a copy**
+  saves it to your library. Sharing an edited copy makes it that artifact's
+  newest version on every computer; two edits made at the same time are both
+  kept (“two versions”) until someone shares one that settles them. **Stop
+  sharing** works for the sharer or an admin. Each shared artifact is checked
+  on every computer (title, up to 512 KB, plain text, never run). Helpers
+  that read memory also find matching shared artifacts (“what's on our
+  shopping list?”) and say who shared them.
+- **Share a memory with your group.** A saved detail on the Knowledge page
+  has **Share with <group>**: Sovra rewords “User's dentist…” as
+  “Mum's dentist…”, you check the words, and everyone's helpers can use it.
+  Skills has two new cards for these.
+- Groups sync large histories in rounds (at most 6 MB per message), so a
+  computer that joins a group with many shared artifacts still receives all of
+  them. Viewers can read but no longer add to the group, on every computer.
+- Debug builds started with `SOVRA_DEV=1` may set `SOVRA_DATA_DIR` to run a
+  second Sovra (its own device key and group) beside the first; release builds
+  always use the system data folder.
+
 - Investor pitch slide 9 shows the permit history as three readable receipts
   — 12 March, 2 October, and what is current — then the question and the
   memo. The old timeline no longer crashes the lines together.

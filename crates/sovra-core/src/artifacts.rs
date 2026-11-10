@@ -206,6 +206,10 @@ pub struct ArtifactSource {
     /// Who made it: "Sovra" or a team member's name.
     #[serde(default)]
     pub author: String,
+    /// The shared group artifact (its id in hex) this is a kept copy of, so sharing
+    /// an edit makes it that artifact's newest version. Empty for everything else.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shared_from: String,
 }
 
 /// An artifact before the library assigned it an id and time.

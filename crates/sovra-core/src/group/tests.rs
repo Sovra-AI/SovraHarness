@@ -1062,3 +1062,363 @@ fn a_correction_must_name_details_its_author_had_seen() {
         Err(ShareError::TooLong)
     );
 }
+
+// ---- shared artifacts ----------------------------------------------------
+
+fn artifact_body(title: &str, content: &str, replaces: Vec<OpHash>) -> KnowledgeBody {
+    KnowledgeBody::ShareArtifact {
+        title: title.into(),
+        kind: crate::artifacts::ArtifactKind::Checklist,
+        language: String::new(),
+        content: content.into(),
+        replaces,
+        origin: String::new(),
+    }
+}
+
+impl Shared {
+    fn share_artifact(
+        &mut self,
+        author: DeviceId,
+        at: i64,
+        content: &str,
+        replaces: Vec<OpHash>,
+    ) -> OpHash {
+        self.push(
+            author,
+            at,
+            artifact_body("Shopping list", content, replaces),
+        )
+        .hash()
+    }
+}
+
+#[test]
+fn a_shared_artifact_reaches_everyone_and_a_new_version_replaces_the_old() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let first = shared.share_artifact(device(2), 3_000, "- milk\n- eggs", Vec::new());
+    let view = shared.view();
+    let artifact = &view.artifacts[&first];
+    assert_eq!(artifact.shared_by, "Person 2");
+    assert_eq!(artifact.title, "Shopping list");
+    assert!(artifact.is_latest());
+
+    // Sam edits a copy of the first version and shares it back.
+    let replaces = shared.view().latest_versions_of(&first);
+    assert_eq!(replaces, vec![first]);
+    let second = shared.share_artifact(device(3), 4_000, "- milk\n- eggs\n- bread", replaces);
+    let view = shared.view();
+    assert_eq!(
+        view.artifacts[&first].status,
+        DetailStatus::Replaced { by: vec![second] }
+    );
+    assert_eq!(
+        view.shared_artifacts()[0].id,
+        second,
+        "latest version first"
+    );
+    assert_eq!(
+        view.latest_versions_of(&first),
+        vec![second],
+        "an edit of an old copy replaces the newest version, never forks"
+    );
+    assert_eq!(view.latest_versions_of(&OpHash([7; 32])), Vec::new());
+}
+
+#[test]
+fn two_versions_made_at_once_are_both_kept_until_one_settles_them() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let first = shared.share_artifact(device(1), 3_000, "- milk", Vec::new());
+    let base = shared.view();
+    let dad = sign_knowledge(
+        base.draft(
+            device(2),
+            Timestamp(4_000),
+            artifact_body("Shopping list", "- milk\n- tea", vec![first]),
+        )
+        .expect("lane"),
+    );
+    let sam = sign_knowledge(
+        base.draft(
+            device(3),
+            Timestamp(4_001),
+            artifact_body("Shopping list", "- milk\n- crisps", vec![first]),
+        )
+        .expect("lane"),
+    );
+    shared.ops.extend([dad.clone(), sam.clone()]);
+    let view = shared.view();
+    assert!(matches!(
+        view.artifacts[&sam.hash()].status,
+        DetailStatus::Disputed { chosen: true, .. }
+    ));
+    assert!(matches!(
+        view.artifacts[&dad.hash()].status,
+        DetailStatus::Disputed { chosen: false, .. }
+    ));
+    assert_eq!(
+        view.disputes,
+        Vec::<Vec<OpHash>>::new(),
+        "disputes list details"
+    );
+    let mut both = vec![dad.hash(), sam.hash()];
+    both.sort();
+    assert_eq!(view.latest_versions_of(&first), both);
+
+    let merged = shared.share_artifact(
+        device(1),
+        5_000,
+        "- milk\n- tea\n- crisps",
+        view.latest_versions_of(&first),
+    );
+    let view = shared.view();
+    assert_eq!(view.latest_versions_of(&first), vec![merged]);
+    assert_ne!(view.artifacts[&dad.hash()].status, DetailStatus::Current);
+    assert!(!view.artifacts[&sam.hash()].is_latest());
+}
+
+#[test]
+fn viewers_cannot_add_and_only_the_sharer_or_an_admin_can_remove_an_artifact() {
+    let mut log = family_of_three();
+    log.add(4, Role::Viewer, 2_200);
+    let mut shared = Shared::new(&log);
+    let viewer_artifact = shared.push(
+        device(4),
+        3_000,
+        artifact_body("Notes", "hello", Vec::new()),
+    );
+    let viewer_detail = shared.push(device(4), 3_001, share_body("Hello", Vec::new()));
+    let view = shared.view();
+    assert_eq!(
+        view.rejected.get(&viewer_artifact.hash()),
+        Some(&KnowledgeRejection::NotAllowed)
+    );
+    assert_eq!(
+        view.rejected.get(&viewer_detail.hash()),
+        Some(&KnowledgeRejection::NotAllowed)
+    );
+
+    let list = shared.share_artifact(device(2), 3_100, "- milk", Vec::new());
+    let refused = shared.push(device(3), 3_200, KnowledgeBody::Withdraw { detail: list });
+    assert_eq!(
+        shared.view().rejected.get(&refused.hash()),
+        Some(&KnowledgeRejection::NotAllowed)
+    );
+    shared.push(device(2), 3_300, KnowledgeBody::Withdraw { detail: list });
+    assert_eq!(
+        shared.view().artifacts[&list].status,
+        DetailStatus::Withdrawn
+    );
+    shared.push(device(1), 3_400, KnowledgeBody::Redact { detail: list });
+    let view = shared.view();
+    assert_eq!(view.artifacts[&list].status, DetailStatus::Redacted);
+    assert_eq!(
+        view.artifacts[&list].content, "",
+        "erased on every computer"
+    );
+    assert!(!view.artifacts[&list].is_latest());
+}
+
+#[test]
+fn oversized_or_empty_artifacts_are_refused_by_sharer_and_receiver() {
+    assert_eq!(
+        check_artifact("List", "", &"x".repeat(MAX_SHARED_ARTIFACT_BYTES + 1)),
+        Err(ArtifactShareError::TooBig)
+    );
+    assert_eq!(
+        check_artifact(" ", "", "x"),
+        Err(ArtifactShareError::NoTitle)
+    );
+    assert_eq!(
+        check_artifact("List", "", "  "),
+        Err(ArtifactShareError::Empty)
+    );
+    assert_eq!(check_artifact("List", "", "- milk"), Ok(()));
+
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let huge = shared.push(
+        device(2),
+        3_000,
+        artifact_body(
+            "Big",
+            &"x".repeat(MAX_SHARED_ARTIFACT_BYTES + 1),
+            Vec::new(),
+        ),
+    );
+    assert_eq!(
+        shared.view().rejected.get(&huge.hash()),
+        Some(&KnowledgeRejection::InvalidDetail)
+    );
+}
+
+#[test]
+fn shared_artifacts_fold_the_same_in_any_order() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let first = shared.share_artifact(device(1), 3_000, "- milk", Vec::new());
+    let base = shared.view();
+    for (author, content) in [(2, "- milk\n- tea"), (3, "- milk\n- jam")] {
+        let draft = base
+            .draft(
+                device(author),
+                Timestamp(4_000),
+                artifact_body("Shopping list", content, vec![first]),
+            )
+            .expect("lane");
+        shared.ops.push(sign_knowledge(draft));
+    }
+    shared.share(device(2), 5_000, "Bins on Tuesday", Vec::new());
+    let expected = shared.view();
+    for seed in 0..60 {
+        let mut ops = shared.ops.clone();
+        let mut state: u64 = seed;
+        for i in (1..ops.len()).rev() {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ops.swap(i, usize::try_from(state >> 33).expect("fits") % (i + 1));
+        }
+        let view = fold_knowledge(&shared.roster, shared.lane, &ops, &FakeVerifier);
+        assert_eq!(view.artifacts, expected.artifacts, "seed {seed}");
+    }
+}
+
+#[test]
+fn a_large_history_is_sent_in_rounds_that_always_make_progress() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    for n in 0..4_i64 {
+        shared.share_artifact(device(2), 3_000 + n, &"x".repeat(1_000), Vec::new());
+    }
+    let ops = shared.ops.clone();
+    let (all, trimmed) = within_budget(ops.clone(), usize::MAX);
+    assert_eq!(all.len(), 4);
+    assert!(!trimmed);
+    let size = |op: &KnowledgeOp| serde_json::to_vec(op).expect("plain data").len();
+    let (some, trimmed) = within_budget(ops.clone(), size(&ops[0]) + size(&ops[1]) + 10);
+    assert_eq!(some.len(), 2);
+    assert!(trimmed);
+    assert_eq!(some, ops[..2].to_vec(), "oldest first, in order");
+    let (one, trimmed) = within_budget(ops, 1);
+    assert_eq!(one.len(), 1, "the first always fits so sync never stalls");
+    assert!(trimmed);
+}
+
+#[test]
+fn the_groups_view_keeps_shared_artifacts_until_this_computer_leaves() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    shared.share_artifact(device(2), 3_000, "- milk", Vec::new());
+    let mut view = GroupsView::default();
+    view.apply(GroupEvent::Loaded {
+        this_computer: device(1),
+        group: Some(log.state()),
+    });
+    view.apply(GroupEvent::Artifacts(shared.view().shared_artifacts()));
+    assert_eq!(view.artifacts.len(), 1);
+    view.apply(GroupEvent::LeftGroup);
+    assert_eq!(view.artifacts, Vec::<SharedArtifact>::new());
+}
+
+#[test]
+fn a_saved_artifact_knows_whether_the_group_has_its_latest_words() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let me = device(2);
+    assert_eq!(
+        sharing_state("art-1", "", "Shopping list", "- milk", &me, &[]),
+        SharingState::NotShared
+    );
+    let original = shared
+        .push(
+            me,
+            3_000,
+            KnowledgeBody::ShareArtifact {
+                title: "Shopping list".into(),
+                kind: crate::artifacts::ArtifactKind::Checklist,
+                language: String::new(),
+                content: "- milk".into(),
+                replaces: Vec::new(),
+                origin: "art-1".into(),
+            },
+        )
+        .hash();
+    let all = shared.view().shared_artifacts();
+    assert_eq!(
+        sharing_state("art-1", "", "Shopping list", "- milk", &me, &all),
+        SharingState::UpToDate
+    );
+    assert_eq!(
+        sharing_state("art-1", "", "Shopping list", "- milk\n- eggs", &me, &all),
+        SharingState::Changed {
+            version_of: original
+        }
+    );
+    assert_eq!(
+        sharing_state("art-1", "", "Shopping list", "- milk", &device(3), &all),
+        SharingState::NotShared,
+        "another computer's library ids mean nothing here"
+    );
+
+    // Sam keeps a copy; the group moves on; Sam's copy is out of date.
+    let sams_copy_from = original.to_hex();
+    shared.share_artifact(device(1), 4_000, "- milk\n- jam", vec![original]);
+    let all = shared.view().shared_artifacts();
+    assert_eq!(
+        sharing_state(
+            "art-9",
+            &sams_copy_from,
+            "Shopping list",
+            "- milk",
+            &device(3),
+            &all
+        ),
+        SharingState::Changed {
+            version_of: original
+        }
+    );
+    assert_eq!(
+        sharing_state(
+            "art-9",
+            &sams_copy_from,
+            "Shopping list",
+            "- milk\n- jam",
+            &device(3),
+            &all
+        ),
+        SharingState::UpToDate
+    );
+}
+
+#[test]
+fn a_personal_memory_is_reworded_with_the_sharers_name() {
+    assert_eq!(
+        shareable_text("User's dentist is Dr Patel", "Mum"),
+        "Mum's dentist is Dr Patel"
+    );
+    assert_eq!(
+        shareable_text("The user prefers the 8am train", "Dad"),
+        "Dad prefers the 8am train"
+    );
+    assert_eq!(
+        shareable_text("the user's username is sam_88", "Sam"),
+        "Sam's username is sam_88",
+        "only the whole word changes"
+    );
+    assert_eq!(
+        shareable_text("Bins go out on Tuesday", "Mum"),
+        "Bins go out on Tuesday"
+    );
+    assert_eq!(
+        shareable_text("Sam goes to the école près de la gare", "Mum"),
+        "Sam goes to the école près de la gare"
+    );
+    assert_eq!(shareable_text("  User likes tea ", ""), "User likes tea");
+    assert_eq!(
+        shareable_topics(&["user".into(), "Dr Patel".into(), "User".into()], "Mum"),
+        vec!["Mum".to_owned(), "Dr Patel".to_owned()]
+    );
+}

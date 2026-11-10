@@ -500,30 +500,58 @@ impl ModelsView {
                 .and_then(|group| group.owner_of(&device))
                 .map(|member| member.person)
         });
-        v_flex()
+        let can_add = self.groups.my_role().is_some_and(Role::writes);
+        let artifacts = self
+            .groups
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.is_latest())
+            .count();
+        let mut section = v_flex()
             .id("groups-knowledge")
             .test_support()
             .w_full()
             .gap(t.space.compact)
             .child(div().sovra_text(TextRole::Body, cx).child("Shared with the group"))
             .child(caption(
-                "Helpers on every computer in the group can use these, and they say who shared each one.",
+                "Helpers on every computer in the group can use these, and they say who shared each one. To share something you already saved, open it in Knowledge or Artifacts and press Share.",
                 cx,
             ))
-            .child(Input::new(&self.groups_form.share))
             .child(
-                h_flex().child(
+                div()
+                    .id("groups-shared-artifacts")
+                    .test_support()
+                    .child(caption(
+                        match artifacts {
+                            0 => "No documents, lists or pictures shared yet. They appear on the Artifacts page.".to_owned(),
+                            1 => "1 document, list or picture is shared — see the Artifacts page.".to_owned(),
+                            n => format!("{n} documents, lists and pictures are shared — see the Artifacts page."),
+                        },
+                        cx,
+                    )),
+            );
+        if can_add {
+            section = section
+                .child(Input::new(&self.groups_form.share))
+                .child(h_flex().child(
                     design::primary_button("groups-share", "Share with the group", cx).on_click(
                         cx.listener(|view, _, window, cx| {
                             let text = value(&view.groups_form.share, cx);
                             view.groups_form
                                 .share
                                 .update(cx, |input, cx| input.set_value("", window, cx));
-                            send(GroupCommand::Share { text, about: Vec::new() }, cx);
+                            send(
+                                GroupCommand::Share {
+                                    text,
+                                    about: Vec::new(),
+                                },
+                                cx,
+                            );
                         }),
                     ),
-                ),
-            )
+                ));
+        }
+        section
             .children(self.groups.knowledge.iter().enumerate().map(|(index, detail)| {
                 let id = detail.id;
                 let mine = detail.person.is_some() && detail.person == my_person;

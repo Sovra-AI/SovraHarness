@@ -151,6 +151,29 @@ Code, or another MCP client to the running app. Its Settings switch, explicit
 top-bar indicator, and authenticated local transport are separate from the
 `SOVRA_DEV` credential exception. Agent verification rules are in `AGENTS.md`.
 
+## Two Sovra computers on one machine (groups)
+
+Groups need at least two computers. In a debug build with `SOVRA_DEV=1`,
+`SOVRA_DATA_DIR` points one launch at its own data folder, which gives it its
+own device key, group, memory and artifacts. Release builds ignore it.
+
+1. Start the first one as usual: `cargo xtask dev`.
+2. Start the second from the binary that build produced (the dev lock allows
+   only one `cargo xtask dev`):
+
+   ```sh
+   SOVRA_DEV=1 SOVRA_DATA_DIR="$HOME/.local/share/sovra-second" \
+     SOVRA_GROUP_REACH=local target/debug/sovra
+   ```
+
+   Set `SOVRA_GROUP_REACH=local` on both to keep group traffic on direct,
+   same-machine connections instead of relays.
+3. Create a group in one window (Settings → Groups), copy the invite link and
+   paste it into the other.
+
+Each instance has its own `development-control/` folder under its data folder,
+so Development mode can drive both through separate MCP servers.
+
 ## Related docs
 
 - [`docs/development-mcp.md`](development-mcp.md) — Development mode MCP bridge

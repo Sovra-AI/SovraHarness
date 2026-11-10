@@ -27,7 +27,9 @@ use sha2::{Digest as _, Sha256};
 use super::dag::{self, DagNode};
 use super::fold::GroupState;
 use super::keys::{DeviceId, GroupId, OpHash, PersonId, Signature, SignatureVerifier};
+use super::shared_artifact::{MAX_ORIGIN_CHARS, SharedArtifact, check_artifact};
 use crate::Timestamp;
+use crate::artifacts::ArtifactKind;
 
 /// Longest shared detail, in characters (a paragraph, not a document).
 pub const MAX_SHARED_DETAIL_CHARS: usize = 2_000;
@@ -66,6 +68,19 @@ pub enum KnowledgeBody {
     Withdraw { detail: OpHash },
     /// Erase a detail's words on every computer; only the record that it existed stays.
     Redact { detail: OpHash },
+    /// An artifact (document, checklist, picture…), optionally a newer version of
+    /// earlier shared ones. Withdraw and Redact name artifacts the same way as details.
+    ShareArtifact {
+        title: String,
+        kind: ArtifactKind,
+        language: String,
+        content: String,
+        replaces: Vec<OpHash>,
+        /// The sharer's own library id for it, so their later edits of that artifact
+        /// are shared as its new versions. Not meaningful on other computers.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        origin: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,12 +95,25 @@ pub struct UnsignedKnowledge {
     pub body: KnowledgeBody,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A signed knowledge operation. Read-only once made: its hash is computed once and
+/// kept, because a shared artifact makes hashing the whole operation costly and every
+/// merge, fold and sync asks for it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeOp {
     #[serde(flatten)]
-    pub unsigned: UnsignedKnowledge,
-    pub signature: Signature,
+    pub(super) unsigned: UnsignedKnowledge,
+    pub(super) signature: Signature,
+    #[serde(skip)]
+    hash: std::sync::OnceLock<OpHash>,
 }
+
+impl PartialEq for KnowledgeOp {
+    fn eq(&self, other: &Self) -> bool {
+        self.unsigned == other.unsigned && self.signature == other.signature
+    }
+}
+
+impl Eq for KnowledgeOp {}
 
 impl UnsignedKnowledge {
     pub fn signing_bytes(&self) -> Vec<u8> {
@@ -102,13 +130,22 @@ impl UnsignedKnowledge {
         KnowledgeOp {
             unsigned: self,
             signature,
+            hash: std::sync::OnceLock::new(),
         }
     }
 }
 
 impl KnowledgeOp {
     pub fn hash(&self) -> OpHash {
-        self.unsigned.hash()
+        *self.hash.get_or_init(|| self.unsigned.hash())
+    }
+
+    pub fn unsigned(&self) -> &UnsignedKnowledge {
+        &self.unsigned
+    }
+
+    pub fn signature(&self) -> &Signature {
+        &self.signature
     }
 
     fn node(&self) -> DagNode {
@@ -218,6 +255,8 @@ pub enum KnowledgeRejection {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct KnowledgeView {
     pub details: BTreeMap<OpHash, SharedDetail>,
+    /// Every shared artifact version, by id.
+    pub artifacts: BTreeMap<OpHash, SharedArtifact>,
     pub rejected: BTreeMap<OpHash, KnowledgeRejection>,
     pub pending: BTreeSet<OpHash>,
     pub forked: BTreeSet<DeviceId>,
@@ -320,7 +359,58 @@ pub fn fold_knowledge<'a>(
                 }
             }
         };
+        // Viewers read but never add. Former members are judged by what they could do
+        // then, which nobody recorded, so their additions are kept (hidden) instead.
+        let adds = matches!(
+            op.unsigned.body,
+            KnowledgeBody::Share { .. }
+                | KnowledgeBody::ShareArtifact { .. }
+                | KnowledgeBody::Corroborate { .. }
+        );
+        if adds && !former && !roster.role_of(&author).is_some_and(super::Role::writes) {
+            view.rejected.insert(*hash, KnowledgeRejection::NotAllowed);
+            continue;
+        }
         let result = match &op.unsigned.body {
+            KnowledgeBody::ShareArtifact {
+                title,
+                kind,
+                language,
+                content,
+                replaces,
+                origin,
+            } => {
+                if check_artifact(title, language, content).is_err()
+                    || origin.chars().count() > MAX_ORIGIN_CHARS
+                {
+                    Err(KnowledgeRejection::InvalidDetail)
+                } else if replaces.iter().any(|old| {
+                    !view.artifacts.contains_key(old) || !order.ancestors[hash].contains(old)
+                }) {
+                    Err(KnowledgeRejection::UnknownDetail)
+                } else {
+                    view.artifacts.insert(
+                        *hash,
+                        SharedArtifact {
+                            id: *hash,
+                            title: title.trim().to_owned(),
+                            kind: *kind,
+                            language: language.trim().to_owned(),
+                            content: content.clone(),
+                            author,
+                            person: Some(person),
+                            shared_by: shared_by.clone(),
+                            computer: computer.clone(),
+                            shared_at: op.unsigned.at,
+                            replaces: replaces.clone(),
+                            status: DetailStatus::Current,
+                            from_former_member: former,
+                            origin: origin.clone(),
+                        },
+                    );
+                    Ok(())
+                }
+            }
             KnowledgeBody::Share {
                 text,
                 about,
@@ -369,9 +459,14 @@ pub fn fold_knowledge<'a>(
             },
             KnowledgeBody::Withdraw { detail } | KnowledgeBody::Redact { detail } => {
                 let admin = roster.role_of(&author).is_some_and(super::Role::manages);
-                match view.details.get(detail) {
+                let owner = view
+                    .details
+                    .get(detail)
+                    .map(|target| target.person)
+                    .or_else(|| view.artifacts.get(detail).map(|target| target.person));
+                match owner {
                     None => Err(KnowledgeRejection::UnknownDetail),
-                    Some(target) if target.person != Some(person) && !admin => {
+                    Some(owner) if owner != Some(person) && !admin => {
                         Err(KnowledgeRejection::NotAllowed)
                     }
                     Some(_) => {
@@ -395,23 +490,34 @@ pub fn fold_knowledge<'a>(
         }
     }
 
-    settle_replacements(&mut view, &order);
+    view.disputes = settle_replacements(&mut view.details, &order);
+    settle_replacements(&mut view.artifacts, &order);
     for (detail, person) in agreements {
         if let Some(target) = view.details.get_mut(&detail) {
             target.agreed_by.insert(person);
         }
     }
-    for detail in withdrawals {
-        if let Some(target) = view.details.get_mut(&detail)
+    for id in withdrawals {
+        if let Some(target) = view.details.get_mut(&id)
+            && !matches!(target.status, DetailStatus::Redacted)
+        {
+            target.status = DetailStatus::Withdrawn;
+        }
+        if let Some(target) = view.artifacts.get_mut(&id)
             && !matches!(target.status, DetailStatus::Redacted)
         {
             target.status = DetailStatus::Withdrawn;
         }
     }
-    for detail in redactions {
-        if let Some(target) = view.details.get_mut(&detail) {
+    for id in redactions {
+        if let Some(target) = view.details.get_mut(&id) {
             target.text.clear();
             target.about.clear();
+            target.status = DetailStatus::Redacted;
+        }
+        if let Some(target) = view.artifacts.get_mut(&id) {
+            target.title.clear();
+            target.content.clear();
             target.status = DetailStatus::Redacted;
         }
     }
@@ -419,32 +525,80 @@ pub fn fold_knowledge<'a>(
     view
 }
 
-/// Marks replaced details, and disputes where corrections did not see each other.
-fn settle_replacements(view: &mut KnowledgeView, order: &dag::DagOrder) {
-    // Which shares replace each old detail.
+/// Something shared that newer shares can replace: a detail or an artifact version.
+trait Versioned {
+    fn replaces(&self) -> &[OpHash];
+    fn is_from_former_member(&self) -> bool;
+    fn set_status(&mut self, status: DetailStatus);
+    /// Two replacements that say the same thing agree rather than conflict.
+    fn same_as(&self, other: &Self) -> bool;
+    /// Which side of a dispute is shown first: later `valid_at`, then later share.
+    fn preference(&self) -> (Option<Timestamp>, Timestamp);
+}
+
+impl Versioned for SharedDetail {
+    fn replaces(&self) -> &[OpHash] {
+        &self.replaces
+    }
+    fn is_from_former_member(&self) -> bool {
+        self.from_former_member
+    }
+    fn set_status(&mut self, status: DetailStatus) {
+        self.status = status;
+    }
+    fn same_as(&self, other: &Self) -> bool {
+        same_claim(self, other)
+    }
+    fn preference(&self) -> (Option<Timestamp>, Timestamp) {
+        (self.valid_at, self.shared_at)
+    }
+}
+
+impl Versioned for SharedArtifact {
+    fn replaces(&self) -> &[OpHash] {
+        &self.replaces
+    }
+    fn is_from_former_member(&self) -> bool {
+        self.from_former_member
+    }
+    fn set_status(&mut self, status: DetailStatus) {
+        self.status = status;
+    }
+    fn same_as(&self, other: &Self) -> bool {
+        self.title == other.title && self.content == other.content
+    }
+    fn preference(&self) -> (Option<Timestamp>, Timestamp) {
+        (None, self.shared_at)
+    }
+}
+
+/// Marks replaced items, and disputes where replacements did not see each other.
+/// Returns the groups of items in dispute, each sorted.
+fn settle_replacements<T: Versioned>(
+    items: &mut BTreeMap<OpHash, T>,
+    order: &dag::DagOrder,
+) -> Vec<Vec<OpHash>> {
+    // Which shares replace each old item.
     let mut replaced_by: BTreeMap<OpHash, Vec<OpHash>> = BTreeMap::new();
-    for detail in view.details.values() {
-        if !detail.from_former_member {
-            for old in &detail.replaces {
-                replaced_by.entry(*old).or_default().push(detail.id);
+    for (id, item) in items.iter() {
+        if !item.is_from_former_member() {
+            for old in item.replaces() {
+                replaced_by.entry(*old).or_default().push(*id);
             }
         }
     }
     let mut disputed: BTreeMap<OpHash, BTreeSet<OpHash>> = BTreeMap::new();
     for (old, replacements) in &replaced_by {
-        if let Some(target) = view.details.get_mut(old) {
-            target.status = DetailStatus::Replaced {
+        if let Some(target) = items.get_mut(old) {
+            target.set_status(DetailStatus::Replaced {
                 by: replacements.clone(),
-            };
+            });
         }
         // Siblings that differ and did not see each other are in dispute, unless a
-        // later correction already retired them.
+        // later replacement already retired them.
         for a in replacements {
             for b in replacements {
-                if a < b
-                    && order.concurrent(a, b)
-                    && !same_claim(&view.details[a], &view.details[b])
-                {
+                if a < b && order.concurrent(a, b) && !items[a].same_as(&items[b]) {
                     disputed.entry(*a).or_default().insert(*b);
                     disputed.entry(*b).or_default().insert(*a);
                 }
@@ -472,26 +626,23 @@ fn settle_replacements(view: &mut KnowledgeView, order: &dag::DagOrder) {
         let chosen = members
             .iter()
             .copied()
-            .max_by_key(|id| {
-                let detail = &view.details[id];
-                (detail.valid_at, detail.shared_at, *id)
-            })
-            .expect("a dispute has at least two details");
+            .max_by_key(|id| (items[id].preference(), *id))
+            .expect("a dispute has at least two items");
         for id in members {
             let with = members
                 .iter()
                 .copied()
                 .filter(|other| other != id)
                 .collect();
-            if let Some(detail) = view.details.get_mut(id) {
-                detail.status = DetailStatus::Disputed {
+            if let Some(item) = items.get_mut(id) {
+                item.set_status(DetailStatus::Disputed {
                     with,
                     chosen: *id == chosen,
-                };
+                });
             }
         }
     }
-    view.disputes = groups.into_iter().collect();
+    groups.into_iter().collect()
 }
 
 /// Corrections that say the same thing agree rather than conflict.
@@ -555,6 +706,40 @@ fn keys(text: &str) -> impl Iterator<Item = String> + '_ {
         .map(|word| stem(&word))
 }
 
+/// BM25 (k1 1.2, b 0.75) of each document's words against the query terms.
+fn bm25(query: &BTreeSet<String>, docs: &[Vec<String>]) -> Vec<f32> {
+    const K1: f32 = 1.2;
+    const B: f32 = 0.75;
+    if docs.is_empty() {
+        return Vec::new();
+    }
+    #[expect(clippy::cast_precision_loss, reason = "document counts are small")]
+    let total = docs.len() as f32;
+    #[expect(clippy::cast_precision_loss, reason = "word counts are small")]
+    let average = docs.iter().map(Vec::len).sum::<usize>() as f32 / total;
+    docs.iter()
+        .map(|words| {
+            #[expect(clippy::cast_precision_loss, reason = "word counts are small")]
+            let length = words.len() as f32;
+            query
+                .iter()
+                .map(|term| {
+                    #[expect(clippy::cast_precision_loss, reason = "counts are small")]
+                    let frequency = words.iter().filter(|w| *w == term).count() as f32;
+                    if frequency == 0.0 {
+                        return 0.0;
+                    }
+                    #[expect(clippy::cast_precision_loss, reason = "counts are small")]
+                    let containing = docs.iter().filter(|w| w.contains(term)).count() as f32;
+                    let idf = ((total - containing + 0.5) / (containing + 0.5) + 1.0).ln();
+                    idf * frequency * (K1 + 1.0)
+                        / (frequency + K1 * (1.0 - B + B * length / average.max(1.0)))
+                })
+                .sum()
+        })
+        .collect()
+}
+
 /// One shared detail ranked for a question.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SharedHit {
@@ -577,63 +762,37 @@ impl KnowledgeView {
     /// Ranks usable details for `question` with BM25 (k1 1.2, b 0.75) over text and
     /// topics, then weights agreement up and unresolved disputes down.
     pub fn search(&self, question: &str, limit: usize) -> Vec<SharedHit> {
-        const K1: f32 = 1.2;
-        const B: f32 = 0.75;
         let query: BTreeSet<String> = keys(question).collect();
         if query.is_empty() || limit == 0 {
             return Vec::new();
         }
-        let docs: Vec<(&SharedDetail, Vec<String>)> = self
-            .usable()
+        let details: Vec<&SharedDetail> = self.usable().collect();
+        let docs: Vec<Vec<String>> = details
+            .iter()
             .map(|detail| {
                 let mut words: Vec<String> = keys(&detail.text).collect();
                 for topic in &detail.about {
                     words.extend(keys(topic));
                 }
-                (detail, words)
+                words
             })
             .collect();
-        if docs.is_empty() {
-            return Vec::new();
-        }
-        #[expect(clippy::cast_precision_loss, reason = "detail counts are small")]
-        let total = docs.len() as f32;
-        #[expect(clippy::cast_precision_loss, reason = "word counts are small")]
-        let average = docs.iter().map(|(_, words)| words.len()).sum::<usize>() as f32 / total;
-        let mut hits: Vec<SharedHit> = docs
+        let mut hits: Vec<SharedHit> = details
             .iter()
-            .filter_map(|(detail, words)| {
-                #[expect(clippy::cast_precision_loss, reason = "word counts are small")]
-                let length = words.len() as f32;
-                let score: f32 = query
-                    .iter()
-                    .map(|term| {
-                        #[expect(clippy::cast_precision_loss, reason = "counts are small")]
-                        let containing =
-                            docs.iter().filter(|(_, w)| w.contains(term)).count() as f32;
-                        #[expect(clippy::cast_precision_loss, reason = "counts are small")]
-                        let frequency = words.iter().filter(|w| *w == term).count() as f32;
-                        if frequency == 0.0 {
-                            return 0.0;
-                        }
-                        let idf = ((total - containing + 0.5) / (containing + 0.5) + 1.0).ln();
-                        idf * frequency * (K1 + 1.0)
-                            / (frequency + K1 * (1.0 - B + B * length / average.max(1.0)))
-                    })
-                    .sum();
-                (score > 0.0).then(|| {
-                    #[expect(clippy::cast_precision_loss, reason = "agreement counts are small")]
-                    let agreement = 1.0 + 0.25 * detail.agreed_by.len().min(4) as f32;
-                    let dispute = match detail.status {
-                        DetailStatus::Disputed { chosen: true, .. } => 0.8,
-                        DetailStatus::Disputed { chosen: false, .. } => 0.6,
-                        _ => 1.0,
-                    };
-                    SharedHit {
-                        detail: (*detail).clone(),
-                        score: score * agreement * dispute,
-                    }
-                })
+            .zip(bm25(&query, &docs))
+            .filter(|(_, score)| *score > 0.0)
+            .map(|(detail, score)| {
+                #[expect(clippy::cast_precision_loss, reason = "agreement counts are small")]
+                let agreement = 1.0 + 0.25 * detail.agreed_by.len().min(4) as f32;
+                let dispute = match detail.status {
+                    DetailStatus::Disputed { chosen: true, .. } => 0.8,
+                    DetailStatus::Disputed { chosen: false, .. } => 0.6,
+                    _ => 1.0,
+                };
+                SharedHit {
+                    detail: (*detail).clone(),
+                    score: score * agreement * dispute,
+                }
             })
             .collect();
         hits.sort_by(|a, b| {
@@ -644,6 +803,84 @@ impl KnowledgeView {
         });
         hits.truncate(limit);
         hits
+    }
+
+    /// Ranks the latest shared artifacts for `question` with the same BM25 as details,
+    /// over the title (counted twice) and the start of the content. Best first.
+    pub fn search_artifacts(&self, question: &str, limit: usize) -> Vec<&SharedArtifact> {
+        /// Long artifacts are ranked by their opening, which is what they are about.
+        const RANKED_CHARS: usize = 20_000;
+        let query: BTreeSet<String> = keys(question).collect();
+        if query.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let artifacts: Vec<&SharedArtifact> = self
+            .artifacts
+            .values()
+            .filter(|artifact| artifact.is_latest())
+            .collect();
+        let docs: Vec<Vec<String>> = artifacts
+            .iter()
+            .map(|artifact| {
+                let opening: String = artifact.content.chars().take(RANKED_CHARS).collect();
+                let mut words: Vec<String> = keys(&artifact.title).collect();
+                words.extend(keys(&artifact.title));
+                words.extend(keys(&opening));
+                words
+            })
+            .collect();
+        let mut hits: Vec<(&SharedArtifact, f32)> = artifacts
+            .into_iter()
+            .zip(bm25(&query, &docs))
+            .filter(|(_, score)| *score > 0.0)
+            .collect();
+        hits.sort_by(|a, b| {
+            b.1.total_cmp(&a.1)
+                .then_with(|| b.0.shared_at.cmp(&a.0.shared_at))
+                .then_with(|| a.0.id.cmp(&b.0.id))
+        });
+        hits.into_iter()
+            .take(limit)
+            .map(|(artifact, _)| artifact)
+            .collect()
+    }
+
+    /// Shared artifacts, newest first: the latest version of each (both, when two
+    /// were made at once), then older and withdrawn versions.
+    pub fn shared_artifacts(&self) -> Vec<SharedArtifact> {
+        let mut artifacts: Vec<SharedArtifact> = self.artifacts.values().cloned().collect();
+        artifacts.sort_by(|a, b| {
+            b.is_latest()
+                .cmp(&a.is_latest())
+                .then(b.shared_at.cmp(&a.shared_at))
+                .then(b.id.cmp(&a.id))
+        });
+        artifacts
+    }
+
+    /// What a new version of `artifact` should replace: the latest versions that grew
+    /// from it, so sharing an edit of an old copy never forks the history. Empty when
+    /// the artifact is unknown here (then the edit is shared as a new artifact).
+    pub fn latest_versions_of(&self, artifact: &OpHash) -> Vec<OpHash> {
+        if !self.artifacts.contains_key(artifact) {
+            return Vec::new();
+        }
+        let mut latest: Vec<OpHash> = self
+            .artifacts
+            .values()
+            .filter(|candidate| {
+                !matches!(
+                    candidate.status,
+                    DetailStatus::Replaced { .. } | DetailStatus::Redacted
+                ) && candidate.lineage(&self.artifacts).contains(artifact)
+            })
+            .map(|candidate| candidate.id)
+            .collect();
+        if latest.is_empty() {
+            latest.push(*artifact);
+        }
+        latest.sort();
+        latest
     }
 
     /// The next operation this computer should sign in this lane.

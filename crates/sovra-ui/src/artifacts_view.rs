@@ -5,6 +5,11 @@
 //! filter, the open artifact and its edit form — and changes the library
 //! through `Command::Artifacts`. Kinds come from `sovra_core::artifacts::KINDS`,
 //! so a new kind needs only an icon here.
+//!
+//! When this computer is in a group, the page also lists what the group shared
+//! (read from the shell's `GroupsView`), offers **Share with my group** on saved
+//! artifacts and **Keep a copy** on shared ones. Which saved artifact belongs to
+//! which shared one is decided by `sovra_core::group::sharing_state`.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -20,7 +25,13 @@ use gpui_kit::{
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
     TestSupportExt as _, WeakEntity, Window, div,
 };
-use sovra_core::artifacts::{Artifact, ArtifactCommand, ArtifactFilter, ArtifactKind, KINDS};
+use sovra_core::artifacts::{
+    Artifact, ArtifactCommand, ArtifactDraft, ArtifactFilter, ArtifactKind, ArtifactSource, KINDS,
+};
+use sovra_core::group::{
+    DetailStatus, GroupCommand, OpHash, SharedArtifact, SharingState, check_artifact, lineage_ids,
+    sharing_state,
+};
 use sovra_core::{Command, Timestamp, format_relative_time};
 
 use crate::RuntimeClient;
@@ -44,28 +55,51 @@ pub(crate) fn kind_icon(kind: ArtifactKind) -> IconName {
 
 /// Markdown that previews the artifact: prose as is, everything else as a
 /// highlighted code block so nothing is executed or rendered unsafely here.
-fn preview_markdown(artifact: &Artifact) -> String {
-    match artifact.kind {
+fn preview_markdown(kind: ArtifactKind, language: &str, content: &str) -> String {
+    match kind {
         ArtifactKind::Document
         | ArtifactKind::Checklist
         | ArtifactKind::Table
-        | ArtifactKind::Note => artifact.content.clone(),
+        | ArtifactKind::Note => content.to_owned(),
         ArtifactKind::Code
         | ArtifactKind::Diagram
         | ArtifactKind::Webpage
         | ArtifactKind::Picture
         | ArtifactKind::Data => {
-            let fence = if artifact.content.contains("```") {
+            let fence = if content.contains("```") {
                 "~~~~"
             } else {
                 "```"
             };
-            format!(
-                "{fence}{}\n{}\n{fence}",
-                artifact.language, artifact.content
-            )
+            format!("{fence}{language}\n{content}\n{fence}")
         }
     }
+}
+
+/// The first words of a shared artifact, on one line.
+fn snippet(content: &str) -> String {
+    let flat: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    flat.chars().take(160).collect()
+}
+
+/// A shared artifact as a card shows it, without its (possibly large) content.
+struct SharedCard {
+    id: OpHash,
+    title: String,
+    kind: ArtifactKind,
+    shared_by: String,
+    shared_at: Timestamp,
+    snippet: String,
+    two_versions: bool,
+}
+
+/// What the page needs from this computer's group, copied small each render.
+struct GroupGlance {
+    name: String,
+    /// This person may add to the group (not a Viewer).
+    can_share: bool,
+    /// The latest version of each shared artifact.
+    cards: Vec<SharedCard>,
 }
 
 fn now() -> Timestamp {
@@ -86,6 +120,14 @@ pub(crate) struct ArtifactsView {
     title: Entity<InputState>,
     content: Entity<TextareaState>,
     save_dialog: Option<Task<()>>,
+    /// The shared group artifact shown in detail, instead of a saved one.
+    open_shared: Option<OpHash>,
+    /// A shared artifact waiting for "Click again to stop sharing".
+    confirm_withdraw: bool,
+    /// Why the last "Share with my group" could not go out, in plain words.
+    share_error: Option<String>,
+    /// Shown after Share or Keep a copy, until another artifact opens.
+    share_notice: Option<String>,
     _search_events: Subscription,
 }
 
@@ -111,6 +153,10 @@ impl ArtifactsView {
             title: cx.new(|cx| InputState::new(window, cx).placeholder("Name")),
             content: cx.new(|cx| TextareaState::new(window, cx).auto_grow(6, 24)),
             save_dialog: None,
+            open_shared: None,
+            confirm_withdraw: false,
+            share_error: None,
+            share_notice: None,
             _search_events: search_events,
         }
     }
@@ -118,8 +164,164 @@ impl ArtifactsView {
     /// Opens one artifact (from a chat card or the library).
     pub(crate) fn show(&mut self, id: &str, cx: &mut Context<Self>) {
         self.open = Some(id.to_owned());
+        self.open_shared = None;
         self.editing = false;
         self.confirm_delete = false;
+        self.share_error = None;
+        self.share_notice = None;
+        cx.notify();
+    }
+
+    fn show_shared(&mut self, id: OpHash, cx: &mut Context<Self>) {
+        self.open = None;
+        self.open_shared = Some(id);
+        self.editing = false;
+        self.confirm_withdraw = false;
+        self.share_error = None;
+        self.share_notice = None;
+        cx.notify();
+    }
+
+    fn back_to_library(&mut self, cx: &mut Context<Self>) {
+        self.open = None;
+        self.open_shared = None;
+        self.editing = false;
+        self.share_error = None;
+        self.share_notice = None;
+        cx.notify();
+    }
+
+    /// The group this computer is in, if any, with its latest shared artifacts.
+    fn group_glance(&self, cx: &Context<Self>) -> Option<GroupGlance> {
+        let shell = self.shell.upgrade()?;
+        let groups = shell.read(cx).groups(cx);
+        let group = groups.group.as_ref()?;
+        let cards = groups
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.is_latest())
+            .map(|artifact| SharedCard {
+                id: artifact.id,
+                title: artifact.title.clone(),
+                kind: artifact.kind,
+                shared_by: artifact.shared_by.clone(),
+                shared_at: artifact.shared_at,
+                snippet: snippet(&artifact.content),
+                two_versions: matches!(artifact.status, DetailStatus::Disputed { .. }),
+            })
+            .collect();
+        Some(GroupGlance {
+            name: group.name.clone(),
+            can_share: groups
+                .my_role()
+                .is_some_and(sovra_core::group::Role::writes),
+            cards,
+        })
+    }
+
+    /// How a saved artifact stands with the group (`None` outside a group).
+    fn sharing(&self, artifact: &Artifact, cx: &Context<Self>) -> Option<SharingState> {
+        let shell = self.shell.upgrade()?;
+        let groups = shell.read(cx).groups(cx);
+        groups.group.as_ref()?;
+        let me = groups.this_computer?;
+        Some(sharing_state(
+            &artifact.id,
+            &artifact.source.shared_from,
+            &artifact.title,
+            &artifact.content,
+            &me,
+            &groups.artifacts,
+        ))
+    }
+
+    /// One shared artifact, and whether this computer's person may stop sharing it.
+    fn shared(&self, id: &OpHash, cx: &Context<Self>) -> Option<(SharedArtifact, bool)> {
+        let shell = self.shell.upgrade()?;
+        let groups = shell.read(cx).groups(cx);
+        let artifact = groups
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.id == *id)?;
+        let me = groups.this_computer?;
+        let my_person = groups
+            .group
+            .as_ref()
+            .and_then(|group| group.owner_of(&me))
+            .map(|member| member.person);
+        let mine = my_person.is_some() && artifact.person == my_person;
+        Some((artifact.clone(), mine || groups.can_manage()))
+    }
+
+    /// A saved copy of any version of the shared artifact `id`, if this computer has one.
+    fn my_copy_of(&self, id: OpHash, cx: &Context<Self>) -> Option<String> {
+        let shell = self.shell.upgrade()?;
+        let shell = shell.read(cx);
+        let versions: Vec<String> = lineage_ids(id, &shell.groups(cx).artifacts)
+            .iter()
+            .map(OpHash::to_hex)
+            .collect();
+
+        shell
+            .workspace()
+            .artifacts
+            .artifacts
+            .iter()
+            .find(|artifact| versions.contains(&artifact.source.shared_from))
+            .map(|artifact| artifact.id.clone())
+    }
+
+    fn share_with_group(
+        &mut self,
+        artifact: &Artifact,
+        version_of: Option<OpHash>,
+        group: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = check_artifact(&artifact.title, &artifact.language, &artifact.content) {
+            self.share_error = Some(format!("This can't be shared: {error}."));
+            self.share_notice = None;
+            cx.notify();
+            return;
+        }
+        let _ = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Group(GroupCommand::ShareArtifact {
+                title: artifact.title.clone(),
+                kind: artifact.kind,
+                language: artifact.language.clone(),
+                content: artifact.content.clone(),
+                new_version_of: version_of,
+                local_id: artifact.id.clone(),
+            }));
+        self.share_error = None;
+        self.share_notice = Some(format!(
+            "Shared with {group}. Everyone in the group gets it the next time their computer is on."
+        ));
+        cx.notify();
+    }
+
+    fn keep_copy(&mut self, artifact: &SharedArtifact, cx: &mut Context<Self>) {
+        Self::send(
+            ArtifactCommand::Save(ArtifactDraft {
+                title: artifact.title.clone(),
+                kind: artifact.kind,
+                language: artifact.language.clone(),
+                content: artifact.content.clone(),
+                source: ArtifactSource {
+                    session_id: String::new(),
+                    message_id: String::new(),
+                    author: artifact.shared_by.clone(),
+                    shared_from: artifact.id.to_hex(),
+                },
+            }),
+            cx,
+        );
+        self.share_notice = Some(
+            "Kept a copy in your artifacts. Edit it, then share your changes back with the group."
+                .into(),
+        );
         cx.notify();
     }
 
@@ -173,9 +375,13 @@ impl Render for ArtifactsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = design::tokens(cx);
         let library = self.library(cx);
-        let body = match self.open.as_ref().and_then(|id| library.get(id)) {
-            Some(artifact) => self.detail(artifact, cx).into_any_element(),
-            None => self.list(&library, cx).into_any_element(),
+        let shared = self.open_shared.and_then(|id| self.shared(&id, cx));
+        let body = match (self.open.as_ref().and_then(|id| library.get(id)), shared) {
+            (Some(artifact), _) => self.detail(artifact, cx).into_any_element(),
+            (None, Some((artifact, may_withdraw))) => self
+                .shared_detail(&artifact, may_withdraw, cx)
+                .into_any_element(),
+            (None, None) => self.list(&library, cx).into_any_element(),
         };
         v_flex()
             .id("sovra-artifacts-view")
@@ -255,6 +461,10 @@ impl ArtifactsView {
                 })),
             );
         }
+        let shared_section = self
+            .group_glance(cx)
+            .filter(|glance| !glance.cards.is_empty())
+            .map(|glance| shared_section(&glance, now, cx));
         let content = if library.artifacts.is_empty() {
             empty_state(cx).into_any_element()
         } else if shown.is_empty() {
@@ -292,6 +502,7 @@ impl ArtifactsView {
                     .max_w(t.layout.reading_width)
                     .child(Input::new(&self.search).aria_label("Search your artifacts")),
             )
+            .children(shared_section)
             .child(chips)
             .child(content)
     }
@@ -310,6 +521,8 @@ impl ArtifactsView {
         let exported = artifact.clone();
         let edited = artifact.clone();
         let id = artifact.id.clone();
+        let group = self.group_glance(cx).filter(|glance| glance.can_share);
+        let sharing = group.as_ref().and_then(|_| self.sharing(artifact, cx));
         let mut actions = h_flex()
             .id("artifact-actions")
             .flex_wrap()
@@ -339,6 +552,37 @@ impl ArtifactsView {
                         );
                     })),
             );
+        }
+        let mut share_status = None;
+        if let (Some(group), Some(sharing)) = (group, sharing) {
+            let label = match &sharing {
+                SharingState::NotShared => Some(format!("Share with {}", group.name)),
+                SharingState::Changed { .. } => {
+                    Some(format!("Share your changes with {}", group.name))
+                }
+                SharingState::UpToDate => {
+                    share_status = Some(format!(
+                        "Shared with {}. Everyone has this version.",
+                        group.name
+                    ));
+                    None
+                }
+            };
+            if let Some(label) = label {
+                let version_of = match sharing {
+                    SharingState::Changed { version_of } => Some(version_of),
+                    SharingState::NotShared | SharingState::UpToDate => None,
+                };
+                let shared = artifact.clone();
+                let name = group.name;
+                actions = actions.child(
+                    design::button("artifact-share-group", label, cx)
+                        .icon(Icon::new(IconName::Users))
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.share_with_group(&shared, version_of, &name, cx);
+                        })),
+                );
+            }
         }
         if !self.editing {
             actions = actions.child(
@@ -422,7 +666,7 @@ impl ArtifactsView {
                             "artifact-preview-text",
                             artifact.updated_at.millis().unsigned_abs(),
                         ),
-                        preview_markdown(artifact),
+                        preview_markdown(artifact.kind, &artifact.language, &artifact.content),
                     )
                     .selectable(true)
                     .style(design::markdown_style(cx)),
@@ -439,11 +683,7 @@ impl ArtifactsView {
                 h_flex().child(
                     design::button("artifact-back", "← All artifacts", cx)
                         .ghost()
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.open = None;
-                            view.editing = false;
-                            cx.notify();
-                        })),
+                        .on_click(cx.listener(|view, _, _, cx| view.back_to_library(cx))),
                 ),
             )
             .child(
@@ -485,8 +725,286 @@ impl ArtifactsView {
                     }),
             )
             .child(actions)
+            .children(self.share_feedback(share_status, cx))
             .child(body)
     }
+
+    /// The line under the actions: an error, what just happened, or where it stands.
+    fn share_feedback(
+        &self,
+        status: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let t = design::tokens(cx);
+        let (text, colour) = match (&self.share_error, &self.share_notice, status) {
+            (Some(error), _, _) => (error.clone(), cx.theme().danger),
+            (None, Some(notice), _) => (notice.clone(), t.text_secondary),
+            (None, None, Some(status)) => (status, t.text_secondary),
+            (None, None, None) => return None,
+        };
+        Some(
+            div()
+                .id("artifact-share-feedback")
+                .test_support()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(colour)
+                .child(text),
+        )
+    }
+
+    /// Someone's shared artifact: read it, keep a copy, or stop sharing it.
+    fn shared_detail(
+        &self,
+        artifact: &SharedArtifact,
+        may_withdraw: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let info = artifact.kind.info();
+        let when = format_relative_time(artifact.shared_at, now());
+        let from = if artifact.computer.is_empty() {
+            String::new()
+        } else {
+            format!(" from {}", artifact.computer)
+        };
+        let note = match artifact.status {
+            DetailStatus::Disputed { .. } => Some(
+                "Two people changed this at the same time, so both versions are kept. Keep a copy of the one you want, or share one that combines them.",
+            ),
+            DetailStatus::Replaced { .. } => Some("There's a newer version of this in the group."),
+            DetailStatus::Withdrawn => {
+                Some("This was taken back. Helpers and the group list no longer show it.")
+            }
+            DetailStatus::Redacted => Some("Its words were erased on every computer."),
+            DetailStatus::Current => None,
+        };
+        let copy_text = artifact.content.clone();
+        let kept = artifact.clone();
+        let id = artifact.id;
+        let my_copy = self.my_copy_of(id, cx);
+        let mut actions = h_flex()
+            .id("shared-artifact-actions")
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(
+                design::button("shared-artifact-copy", "Copy", cx)
+                    .icon(Icon::new(IconName::Copy))
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                    }),
+            );
+        actions = match my_copy {
+            Some(local) => actions.child(
+                design::primary_button("shared-artifact-open-copy", "Open my copy", cx)
+                    .icon(Icon::new(IconName::FileText))
+                    .on_click(cx.listener(move |view, _, _, cx| view.show(&local, cx))),
+            ),
+            None => actions.child(
+                design::primary_button("shared-artifact-keep", "Keep a copy", cx)
+                    .icon(Icon::new(IconName::Download))
+                    .on_click(cx.listener(move |view, _, _, cx| view.keep_copy(&kept, cx))),
+            ),
+        };
+        if may_withdraw && artifact.is_latest() {
+            actions = actions.child(
+                design::button(
+                    "shared-artifact-withdraw",
+                    if self.confirm_withdraw {
+                        "Click again to stop sharing"
+                    } else {
+                        "Stop sharing"
+                    },
+                    cx,
+                )
+                .ghost()
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    if view.confirm_withdraw {
+                        let _ = cx
+                            .global::<RuntimeClient>()
+                            .0
+                            .send(Command::Group(GroupCommand::Withdraw { detail: id }));
+                        view.confirm_withdraw = false;
+                        view.share_notice =
+                            Some("Stopped sharing. Copies people kept stay theirs.".into());
+                    } else {
+                        view.confirm_withdraw = true;
+                    }
+                    cx.notify();
+                })),
+            );
+        }
+        v_flex()
+            .id("shared-artifact-detail")
+            .test_support()
+            .w_full()
+            .max_w(t.chat.column_width)
+            .gap(t.space.medium)
+            .child(
+                h_flex().child(
+                    design::button("shared-artifact-back", "← All artifacts", cx)
+                        .ghost()
+                        .on_click(cx.listener(|view, _, _, cx| view.back_to_library(cx))),
+                ),
+            )
+            .child(
+                h_flex()
+                    .gap(t.space.small)
+                    .items_center()
+                    .min_w_0()
+                    .child(Icon::new(kind_icon(artifact.kind)).text_color(cx.theme().primary))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .sovra_text(TextRole::PageTitle, cx)
+                            .child(artifact.title.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(t.text_secondary)
+                    .child(format!(
+                        "{} · shared by {}{from} · {when}",
+                        info.label, artifact.shared_by
+                    )),
+            )
+            .children(note.map(|note| {
+                div()
+                    .id("shared-artifact-note")
+                    .test_support()
+                    .whitespace_normal()
+                    .sovra_text(TextRole::Body, cx)
+                    .text_color(t.text_secondary)
+                    .child(note)
+            }))
+            .child(actions)
+            .children(self.share_feedback(None, cx))
+            .child(
+                div()
+                    .id("shared-artifact-preview")
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .p(t.space.medium)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .sovra_text(TextRole::Reading, cx)
+                    .child(
+                        TextView::markdown(
+                            (
+                                "shared-artifact-preview-text",
+                                artifact.shared_at.millis().unsigned_abs(),
+                            ),
+                            preview_markdown(artifact.kind, &artifact.language, &artifact.content),
+                        )
+                        .selectable(true)
+                        .style(design::markdown_style(cx)),
+                    ),
+            )
+    }
+}
+
+/// "Shared in <group>": the latest version of each artifact people shared.
+fn shared_section(
+    glance: &GroupGlance,
+    now: Timestamp,
+    cx: &mut Context<ArtifactsView>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex()
+        .id("shared-artifacts")
+        .test_support()
+        .w_full()
+        .gap(t.space.small)
+        .child(
+            div()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child(format!("Shared in {}", glance.name)),
+        )
+        .child(
+            div()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("Things people in your group shared. Open one to read it or keep a copy."),
+        )
+        .child(
+            h_flex()
+                .id("shared-artifact-grid")
+                .w_full()
+                .flex_wrap()
+                .gap(t.space.medium)
+                .children(
+                    glance
+                        .cards
+                        .iter()
+                        .enumerate()
+                        .map(|(index, card)| shared_card(card, index, now, cx)),
+                ),
+        )
+}
+
+fn shared_card(
+    card: &SharedCard,
+    index: usize,
+    now: Timestamp,
+    cx: &mut Context<ArtifactsView>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let id = card.id;
+    let mut caption = format!(
+        "{} · shared by {} · {}",
+        card.kind.label(),
+        card.shared_by,
+        format_relative_time(card.shared_at, now)
+    );
+    if card.two_versions {
+        caption.push_str(" · two versions");
+    }
+    v_flex()
+        .id(("shared-artifact-card", index))
+        .test_support()
+        .prefer_width(t.layout.card_min_width)
+        .max_w(t.layout.card_max_width)
+        .gap(t.space.small)
+        .p(t.space.medium)
+        .sovra_surface(Surface::Glass, cx)
+        .child(
+            h_flex()
+                .gap(t.space.small)
+                .items_center()
+                .min_w_0()
+                .child(Icon::new(kind_icon(card.kind)).text_color(cx.theme().primary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .text_ellipsis()
+                        .child(card.title.clone()),
+                ),
+        )
+        .child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(caption),
+        )
+        .child(
+            div()
+                .sovra_text(TextRole::Body, cx)
+                .text_color(t.text_secondary)
+                .line_clamp(2)
+                .child(card.snippet.clone()),
+        )
+        .child(
+            h_flex().child(
+                design::button(("shared-artifact-open", index), "Open", cx)
+                    .small()
+                    .accessibility_label(format!("Open {}", card.title))
+                    .on_click(cx.listener(move |view, _, _, cx| view.show_shared(id, cx))),
+            ),
+        )
 }
 
 fn empty_state(cx: &mut Context<ArtifactsView>) -> impl IntoElement + use<> {

@@ -73,6 +73,7 @@ fn artifact(id: &str, kind: ArtifactKind, content: &str, at: i64) -> Artifact {
                 session_id: "s".into(),
                 message_id: "m".into(),
                 author: "Priya".into(),
+                shared_from: String::new(),
             },
         },
         Timestamp(at),

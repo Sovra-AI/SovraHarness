@@ -22,7 +22,8 @@ fn main() -> anyhow::Result<()> {
 
     let dirs = directories::ProjectDirs::from("com", "Sovra", "SovraHarness")
         .context("could not resolve the user's home directory")?;
-    let development_directory = dirs.data_local_dir().join("development-control");
+    let data_dir = data_directory(&dirs);
+    let development_directory = data_dir.as_path().join("development-control");
     if std::env::args_os()
         .nth(1)
         .is_some_and(|arg| arg == "--development-mcp")
@@ -47,7 +48,7 @@ fn main() -> anyhow::Result<()> {
         directory: development_directory,
         executable: std::env::current_exe().context("could not resolve Sovra executable")?,
     };
-    let _log_guard = logging::init(&dirs.data_local_dir().join("logs"))?;
+    let _log_guard = logging::init(&data_dir.as_path().join("logs"))?;
     tracing::info!(version = VERSION, "starting SovraHarness");
     let mut session_namespace = [0_u8; 16];
     getrandom::fill(&mut session_namespace)
@@ -57,7 +58,7 @@ fn main() -> anyhow::Result<()> {
     agent_config.searxng_base_url = read_searxng_base_url();
     // The composition root picks the memory backend; the runtime opens it on its own
     // executor. Swapping to a remote server (or another backend) happens here only.
-    let memory_dir = dirs.data_local_dir().join("memory");
+    let memory_dir = data_dir.as_path().join("memory");
     let memory: sovra_runtime::MemoryFactory = Box::new(move || {
         Box::pin(async move {
             let store = SurrealStore::open(StoreConfig::on_disk(memory_dir)).await?;
@@ -65,8 +66,8 @@ fn main() -> anyhow::Result<()> {
         })
     });
     let model_repository = sovra_providers::ModelRepository::new(
-        dirs.data_local_dir().join("models"),
-        credential_store(&dirs),
+        data_dir.as_path().join("models"),
+        credential_store(&data_dir),
         read_model_keys(),
     );
     let models = sovra_runtime::ModelsConfig {
@@ -79,16 +80,17 @@ fn main() -> anyhow::Result<()> {
         ],
     };
     // WhatsApp credentials (Signal keys) live in one SQLite file in the app data directory.
-    let whatsapp = sovra_whatsapp::WhatsAppChannel::new(dirs.data_local_dir().join("whatsapp"));
+    let whatsapp = sovra_whatsapp::WhatsAppChannel::new(data_dir.as_path().join("whatsapp"));
     // The Telegram bot token is an API key: it goes where model keys go (keychain, or the
     // SOVRA_DEV plaintext files in debug builds).
-    let telegram =
-        sovra_telegram::TelegramChannel::new(Arc::new(KeychainTokenStore(credential_store(&dirs))))
-            .map_err(|error| tracing::warn!(%error, "telegram linking unavailable"))
-            .ok();
+    let telegram = sovra_telegram::TelegramChannel::new(Arc::new(KeychainTokenStore(
+        credential_store(&data_dir),
+    )))
+    .map_err(|error| tracing::warn!(%error, "telegram linking unavailable"))
+    .ok();
     let google = sovra_google::GoogleAdapter::new(
         read_google_sources(),
-        Arc::new(CredentialVault(credential_store(&dirs))),
+        Arc::new(CredentialVault(credential_store(&data_dir))),
     )
     .context("failed to prepare Google connections")?;
     let client = sovra_runtime::start_with_services(
@@ -99,13 +101,13 @@ fn main() -> anyhow::Result<()> {
             memory_extraction_slots: read_memory_extraction_slots(),
             models: Some(models),
             files: Some(Arc::new(sovra_files::LocalFileStore::new(
-                dirs.data_local_dir().join("attachments"),
+                data_dir.as_path().join("attachments"),
             ))),
             skills: Some(Arc::new(sovra_skills::LocalSkillStore::new(
-                dirs.data_local_dir().join("skills"),
+                data_dir.as_path().join("skills"),
             ))),
             index: Some(Arc::new(sovra_files::LocalFileIndex::new(
-                dirs.data_local_dir().join("file-index"),
+                data_dir.as_path().join("file-index"),
             ))),
             messaging: sovra_runtime::MessagingChannels {
                 whatsapp: Some(Arc::new(whatsapp)),
@@ -119,16 +121,17 @@ fn main() -> anyhow::Result<()> {
             google: Some(Arc::new(google)),
             development: Some(development),
             probes: Vec::new(),
-            terminal: Some(terminal_config(dirs.data_local_dir())),
+            terminal: Some(terminal_config(data_dir.as_path())),
             mcp_sample_program: std::env::current_exe().ok(),
             mcp_catalogue: Some(
-                dirs.data_local_dir()
+                data_dir
+                    .as_path()
                     .join("connected-services")
                     .join("services.json"),
             ),
-            groups: group_services(&dirs),
+            groups: group_services(&data_dir),
             schedules: Some(Arc::new(sovra_runtime::JsonScheduleStore::new(
-                dirs.data_local_dir().join("schedules.json"),
+                data_dir.as_path().join("schedules.json"),
             ))),
         },
     )
@@ -330,8 +333,8 @@ fn group_device_key(credentials: &dyn sovra_providers::CredentialStore) -> Optio
 
 /// Groups: the device key, where the group record lives, and how far the network
 /// reaches (`SOVRA_GROUP_REACH=local` keeps it to direct, same-network connections).
-fn group_services(dirs: &directories::ProjectDirs) -> Option<sovra_runtime::GroupServices> {
-    let secret = group_device_key(credential_store(dirs).as_ref())?;
+fn group_services(data_dir: &std::path::Path) -> Option<sovra_runtime::GroupServices> {
+    let secret = group_device_key(credential_store(data_dir).as_ref())?;
     let reach = if std::env::var_os("SOVRA_GROUP_REACH").is_some_and(|value| value == "local") {
         sovra_mesh::Reach::LocalOnly
     } else {
@@ -346,19 +349,30 @@ fn group_services(dirs: &directories::ProjectDirs) -> Option<sovra_runtime::Grou
                     .map_err(|error| error.to_string())
             })
         }),
-        store: Arc::new(sovra_mesh::FileGroupStore::new(
-            dirs.data_local_dir().join("groups"),
-        )),
+        store: Arc::new(sovra_mesh::FileGroupStore::new(data_dir.join("groups"))),
     })
+}
+
+/// Where this install keeps its data. A development build with `SOVRA_DEV=1` may
+/// point `SOVRA_DATA_DIR` elsewhere so two Sovra computers can run side by side
+/// (each with its own device key and group); release builds always use the OS default.
+fn data_directory(dirs: &directories::ProjectDirs) -> std::path::PathBuf {
+    if cfg!(debug_assertions)
+        && std::env::var_os("SOVRA_DEV").is_some_and(|value| value == "1")
+        && let Some(dir) = std::env::var_os("SOVRA_DATA_DIR").filter(|dir| !dir.is_empty())
+    {
+        return std::path::PathBuf::from(dir);
+    }
+    dirs.data_local_dir().to_path_buf()
 }
 
 /// `cargo xtask dev` sets `SOVRA_DEV`: every rebuild changes the binary's code
 /// signature, which makes macOS re-prompt for the keychain password each reload.
-fn credential_store(dirs: &directories::ProjectDirs) -> Arc<dyn sovra_providers::CredentialStore> {
+fn credential_store(data_dir: &std::path::Path) -> Arc<dyn sovra_providers::CredentialStore> {
     if cfg!(debug_assertions) && std::env::var_os("SOVRA_DEV").is_some_and(|value| value == "1") {
         tracing::warn!("SOVRA_DEV set: model keys use plaintext dev files, not the keychain");
         Arc::new(sovra_providers::FileCredentialStore::new(
-            dirs.data_local_dir().join("dev-credentials"),
+            data_dir.join("dev-credentials"),
         ))
     } else {
         Arc::new(sovra_providers::OsCredentialStore)

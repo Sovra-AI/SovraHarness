@@ -719,7 +719,8 @@ mod tests {
         height: f32,
         cx: &mut gpui_kit::App,
     ) {
-        for _ in 0..40 {
+        // The full library is several screens tall; 200 steps of 80px cover 16,000px.
+        for _ in 0..200 {
             let bounds = window.find(id.clone()).bounds();
             let vertically_inside = bounds.top() >= px(0.) && bounds.bottom() <= px(height);
             let horizontally_inside = bounds.left() >= px(0.) && bounds.right() <= px(width);
