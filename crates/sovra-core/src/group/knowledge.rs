@@ -83,6 +83,11 @@ pub enum KnowledgeBody {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         origin: String,
     },
+    /// A helper or schedule, optionally an update of earlier shared ones.
+    ShareTemplate {
+        template: super::template::Template,
+        replaces: Vec<OpHash>,
+    },
     /// Hands the lane key `key` to member computers: one sealed copy per computer.
     KeyGrant {
         key: OpHash,
@@ -285,6 +290,8 @@ pub struct KnowledgeView {
     pub details: BTreeMap<OpHash, SharedDetail>,
     /// Every shared artifact version, by id.
     pub artifacts: BTreeMap<OpHash, SharedArtifact>,
+    /// Shared helpers and schedules, by id.
+    pub templates: BTreeMap<OpHash, super::template::SharedTemplate>,
     /// Lane keys and which computers hold a copy.
     pub keys: BTreeMap<OpHash, LaneKey>,
     /// Sealed operations this computer cannot open (yet): no key for them here.
@@ -464,6 +471,7 @@ fn fold_lane<'a>(
             body,
             KnowledgeBody::Share { .. }
                 | KnowledgeBody::ShareArtifact { .. }
+                | KnowledgeBody::ShareTemplate { .. }
                 | KnowledgeBody::Corroborate { .. }
         );
         if adds && !former && !roster.role_of(&author).is_some_and(super::Role::writes) {
@@ -490,6 +498,33 @@ fn fold_lane<'a>(
                 Ok(())
             }
             KnowledgeBody::Sealed { .. } => Err(KnowledgeRejection::InvalidDetail),
+            KnowledgeBody::ShareTemplate { template, replaces } => {
+                if super::template::check_template(template).is_err() {
+                    Err(KnowledgeRejection::InvalidDetail)
+                } else if replaces.iter().any(|old| {
+                    !view.templates.contains_key(old) || !order.ancestors[hash].contains(old)
+                }) {
+                    Err(KnowledgeRejection::UnknownDetail)
+                } else {
+                    view.templates.insert(
+                        *hash,
+                        super::template::SharedTemplate {
+                            id: *hash,
+                            template: template.clone(),
+                            author,
+                            person: Some(person),
+                            shared_by: shared_by.clone(),
+                            computer: computer.clone(),
+                            shared_at: op.unsigned.at,
+                            replaces: replaces.clone(),
+                            status: DetailStatus::Current,
+                            from_former_member: former,
+                            space,
+                        },
+                    );
+                    Ok(())
+                }
+            }
             KnowledgeBody::ShareArtifact {
                 title,
                 kind,
@@ -583,7 +618,8 @@ fn fold_lane<'a>(
                     .details
                     .get(detail)
                     .map(|target| target.person)
-                    .or_else(|| view.artifacts.get(detail).map(|target| target.person));
+                    .or_else(|| view.artifacts.get(detail).map(|target| target.person))
+                    .or_else(|| view.templates.get(detail).map(|target| target.person));
                 match owner {
                     None => Err(KnowledgeRejection::UnknownDetail),
                     Some(owner) if owner != Some(person) && !admin => {
@@ -612,6 +648,7 @@ fn fold_lane<'a>(
 
     view.disputes = settle_replacements(&mut view.details, &order);
     settle_replacements(&mut view.artifacts, &order);
+    settle_replacements(&mut view.templates, &order);
     for (detail, person) in agreements {
         if let Some(target) = view.details.get_mut(&detail) {
             target.agreed_by.insert(person);
@@ -628,6 +665,11 @@ fn fold_lane<'a>(
         {
             target.status = DetailStatus::Withdrawn;
         }
+        if let Some(target) = view.templates.get_mut(&id)
+            && !matches!(target.status, DetailStatus::Redacted)
+        {
+            target.status = DetailStatus::Withdrawn;
+        }
     }
     for id in redactions {
         if let Some(target) = view.details.get_mut(&id) {
@@ -638,6 +680,10 @@ fn fold_lane<'a>(
         if let Some(target) = view.artifacts.get_mut(&id) {
             target.title.clear();
             target.content.clear();
+            target.status = DetailStatus::Redacted;
+        }
+        if let Some(target) = view.templates.get_mut(&id) {
+            target.erase();
             target.status = DetailStatus::Redacted;
         }
     }
@@ -671,6 +717,24 @@ impl Versioned for SharedDetail {
     }
     fn preference(&self) -> (Option<Timestamp>, Timestamp) {
         (self.valid_at, self.shared_at)
+    }
+}
+
+impl Versioned for super::template::SharedTemplate {
+    fn replaces(&self) -> &[OpHash] {
+        &self.replaces
+    }
+    fn is_from_former_member(&self) -> bool {
+        self.from_former_member
+    }
+    fn set_status(&mut self, status: DetailStatus) {
+        self.status = status;
+    }
+    fn same_as(&self, other: &Self) -> bool {
+        self.template == other.template
+    }
+    fn preference(&self) -> (Option<Timestamp>, Timestamp) {
+        (None, self.shared_at)
     }
 }
 
@@ -963,6 +1027,18 @@ impl KnowledgeView {
             .take(limit)
             .map(|(artifact, _)| artifact)
             .collect()
+    }
+
+    /// Shared helpers and schedules, latest versions first, newest first.
+    pub fn shared_templates(&self) -> Vec<super::template::SharedTemplate> {
+        let mut templates: Vec<_> = self.templates.values().cloned().collect();
+        templates.sort_by(|a, b| {
+            b.is_latest()
+                .cmp(&a.is_latest())
+                .then(b.shared_at.cmp(&a.shared_at))
+                .then(b.id.cmp(&a.id))
+        });
+        templates
     }
 
     /// Shared artifacts, newest first: the latest version of each (both, when two

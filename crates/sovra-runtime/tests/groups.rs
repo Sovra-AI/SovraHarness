@@ -884,3 +884,56 @@ async fn a_wrong_code_burns_it_and_a_no_on_the_pictures_admits_nobody() {
     );
     assert!(!roster.admits(&stranger.device));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_shared_helper_and_schedule_reach_others_as_templates_to_copy() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 91).await;
+    let dad = Computer::start(&net, 92);
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Desktop".into(),
+    });
+    dad.roster(|state| state.admits(&dad.device)).await;
+
+    mum.send(GroupCommand::ShareTemplate {
+        template: sovra_core::group::Template::Helper {
+            name: "Gardener".into(),
+            icon: "🌱".into(),
+            role: "Garden helper".into(),
+            tagline: "Knows our garden".into(),
+            instructions: "Water the roses on Sundays.".into(),
+            expertise: Vec::new(),
+        },
+        with: None,
+    });
+    mum.send(GroupCommand::ShareTemplate {
+        template: sovra_core::group::Template::Schedule {
+            name: "Bin reminder".into(),
+            cadence: "every Monday at 7pm".into(),
+            prompt: "Remind us to put the bins out.".into(),
+        },
+        with: None,
+    });
+    let templates = dad
+        .wait(|event| match event {
+            GroupEvent::Templates(templates) if templates.len() == 2 => Some(templates),
+            _ => None,
+        })
+        .await;
+    assert!(
+        templates
+            .iter()
+            .all(|shared| shared.shared_by == "Mum" && shared.is_latest())
+    );
+    assert!(
+        templates
+            .iter()
+            .any(|shared| shared.template.body() == "Water the roses on Sundays.")
+    );
+}

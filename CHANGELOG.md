@@ -11,6 +11,15 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Share helpers, skills and schedules with your group.** Helpers you made
+  (Team page), your own skills (Skills page) and schedules (Schedules page)
+  have *Share with my group*. Groups → *Shared helpers and schedules* shows
+  each one's full words first; *Use this helper*, *Use this skill* or *Add to
+  my schedules* makes your own copy. Shared helpers and skills never bring
+  tools (each person grants tools on their own computer), shared skills are
+  not applied automatically, schedules that send messages are never shared,
+  and a shared schedule only runs on the computer that adds it. Sharing an
+  update replaces the old version; the sharer or an admin can stop sharing.
 - **Join a group in the same room with a six-digit code.** Groups → *Show a
   code* displays six digits; on the other computer, on the same Wi-Fi, type
   them under *Join with code*. Sovra finds the computer showing the code on

@@ -568,3 +568,170 @@ fn same_room_codes_show_digits_and_ask_both_people_to_compare_pictures(cx: &mut 
     })
     .expect("window open");
 }
+
+#[gpui_kit::test]
+fn a_shared_helper_or_schedule_becomes_your_own_copy_when_you_choose(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 3200.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    let template = |n: u8, template| sovra_core::group::SharedTemplate {
+        id: OpHash([n; 32]),
+        template,
+        author: DAD,
+        person: Some(PersonId([20; 32])),
+        shared_by: "Dad".into(),
+        computer: "Dad's desktop".into(),
+        shared_at: Timestamp(i64::from(n)),
+        replaces: Vec::new(),
+        status: DetailStatus::Current,
+        from_former_member: false,
+        space: sovra_core::group::Space::Group,
+    };
+    group_event(
+        &events,
+        GroupEvent::Templates(vec![
+            template(
+                31,
+                sovra_core::group::Template::Helper {
+                    name: "Gardener".into(),
+                    icon: "🌱".into(),
+                    role: "Garden helper".into(),
+                    tagline: "Knows our garden".into(),
+                    instructions: "Water the roses on Sundays.".into(),
+                    expertise: Vec::new(),
+                },
+            ),
+            template(
+                30,
+                sovra_core::group::Template::Schedule {
+                    name: "Bin reminder".into(),
+                    cadence: "every Monday at 7pm".into(),
+                    prompt: "Remind us to put the bins out.".into(),
+                },
+            ),
+        ]),
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        assert!(
+            window.find(("groups-template-words", 0usize)).visible(),
+            "read before use"
+        );
+        window.click(("groups-template-use", 0usize), cx);
+        window.click(("groups-template-use", 1usize), cx);
+    })
+    .expect("window open");
+    settle(cx);
+    let sent = drain(&commands);
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        Command::Teams(sovra_core::teams::TeamCommand::SaveMember(member))
+            if member.name == "Gardener" && member.id.starts_with("shared-") && !member.builtin
+    )));
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        Command::Schedule(sovra_core::ScheduleCommand::Create { name, send: None, .. })
+            if name == "Bin reminder"
+    )));
+}
+
+#[gpui_kit::test]
+fn your_own_helper_can_be_shared_from_the_team_page(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    events
+        .send_blocking(Event::Teams(sovra_core::teams::TeamEvent::Loaded {
+            members: vec![sovra_core::teams::TeamMember {
+                id: "gardener".into(),
+                name: "Gardener".into(),
+                icon: "🌱".into(),
+                role: "Garden helper".into(),
+                tagline: "Knows our garden".into(),
+                instructions: "Water the roses on Sundays.".into(),
+                expertise: Vec::new(),
+                conductor: false,
+                active: true,
+                builtin: false,
+            }],
+        }))
+        .expect("headless test fixture is available");
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Team, cx));
+        window.render_frame(cx);
+        window.click(("team-member-share", 0usize), cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert!(drain(&commands).iter().any(|command| matches!(
+        command,
+        Command::Group(GroupCommand::ShareTemplate {
+            template: sovra_core::group::Template::Helper { name, .. },
+            with: None,
+        }) if name == "Gardener"
+    )));
+}
+
+#[gpui_kit::test]
+fn a_shared_skill_is_kept_without_tools_until_you_grant_them(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(
+        &events,
+        GroupEvent::Templates(vec![sovra_core::group::SharedTemplate {
+            id: OpHash([40; 32]),
+            template: sovra_core::group::Template::Skill {
+                name: "Plan a weekly menu".into(),
+                description: "Makes a week of dinners from what is in the fridge.".into(),
+                instructions: "Ask what is in the fridge, then plan seven dinners.".into(),
+            },
+            author: DAD,
+            person: Some(PersonId([20; 32])),
+            shared_by: "Dad".into(),
+            computer: "Dad's desktop".into(),
+            shared_at: Timestamp(5),
+            replaces: Vec::new(),
+            status: DetailStatus::Current,
+            from_former_member: false,
+            space: sovra_core::group::Space::Group,
+        }]),
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        window.click(("groups-template-use", 0usize), cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert!(drain(&commands).iter().any(|command| matches!(
+        command,
+        Command::Skills(sovra_core::skills::SkillCommand::Save(skill))
+            if skill.title == "Plan a weekly menu"
+                && skill.tools.is_empty()
+                && !skill.auto_apply
+                && !skill.builtin
+    )));
+}

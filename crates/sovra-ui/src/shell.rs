@@ -1806,6 +1806,10 @@ impl Shell {
                             open: self.schedule_form_open,
                             compact: self.history_compact,
                             range: self.schedule_timeline_range,
+                            can_share: self
+                                .groups(cx)
+                                .my_role()
+                                .is_some_and(sovra_core::group::Role::writes),
                         },
                         cx,
                     )

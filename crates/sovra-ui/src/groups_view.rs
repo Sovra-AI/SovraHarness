@@ -158,6 +158,7 @@ impl ModelsView {
                 body.child(self.render_roster(cx))
                     .child(self.render_invites(cx))
                     .child(self.render_knowledge(cx))
+                    .child(self.render_templates(cx))
                     .child(self.render_federated(cx))
                     .child(
                         h_flex().child(
@@ -995,5 +996,178 @@ impl ModelsView {
             section = section.child(log);
         }
         section
+    }
+}
+
+impl ModelsView {
+    /// Helpers and schedules people shared: read the words, then use your own copy.
+    fn render_templates(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let manage = self.groups.can_manage();
+        let my_person = self.groups.my_person();
+        let mut section = v_flex()
+            .id("groups-templates")
+            .test_support()
+            .w_full()
+            .gap(t.space.compact)
+            .child(div().sovra_text(TextRole::Body, cx).child("Shared helpers and schedules"))
+            .child(caption(
+                "Read what a helper or schedule says before you use it. Using one makes your own copy on this computer; it never brings tools, and nothing runs until you choose.",
+                cx,
+            ));
+        let shown: Vec<_> = self
+            .groups
+            .templates
+            .iter()
+            .filter(|shared| shared.is_latest())
+            .cloned()
+            .collect();
+        if shown.is_empty() {
+            return section.child(caption(
+                "Nothing yet. Share one from the Team or Schedules page.",
+                cx,
+            ));
+        }
+        for (index, shared) in shown.into_iter().enumerate() {
+            let mine = shared.person.is_some() && shared.person == my_person;
+            let id = shared.id;
+            let (title, kind) = match &shared.template {
+                sovra_core::group::Template::Helper {
+                    icon, name, role, ..
+                } => (format!("{icon} {name}"), format!("Helper · {role}")),
+                sovra_core::group::Template::Schedule { name, cadence, .. } => {
+                    (name.clone(), format!("Schedule · {cadence}"))
+                }
+                sovra_core::group::Template::Skill { name, .. } => {
+                    (name.clone(), "Skill".to_owned())
+                }
+            };
+            let mut caption_text = format!("{kind} · shared by {}", shared.shared_by);
+            if let Some(label) = self.groups.space_label(&shared.space) {
+                caption_text.push_str(" · ");
+                caption_text.push_str(&label.to_lowercase());
+            }
+            let use_button = match shared.template.clone() {
+                sovra_core::group::Template::Helper {
+                    name,
+                    icon,
+                    role,
+                    tagline,
+                    instructions,
+                    expertise,
+                } => {
+                    let member = sovra_core::teams::TeamMember {
+                        id: shared.helper_id(),
+                        name,
+                        icon,
+                        role,
+                        tagline,
+                        instructions,
+                        expertise,
+                        conductor: false,
+                        active: true,
+                        builtin: false,
+                    };
+                    design::button(("groups-template-use", index), "Use this helper", cx)
+                        .small()
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            let _ = cx.global::<RuntimeClient>().0.send(Command::Teams(
+                                sovra_core::teams::TeamCommand::SaveMember(member.clone()),
+                            ));
+                        }))
+                }
+                sovra_core::group::Template::Schedule {
+                    name,
+                    cadence,
+                    prompt,
+                } => design::button(("groups-template-use", index), "Add to my schedules", cx)
+                    .small()
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        let _ = cx.global::<RuntimeClient>().0.send(Command::Schedule(
+                            sovra_core::ScheduleCommand::Create {
+                                name: name.clone(),
+                                cadence: cadence.clone(),
+                                prompt: prompt.clone(),
+                                send: None,
+                            },
+                        ));
+                    })),
+                sovra_core::group::Template::Skill {
+                    name,
+                    description,
+                    instructions,
+                } => {
+                    let skill = shared_skill(shared.helper_id(), name, description, instructions);
+                    design::button(("groups-template-use", index), "Use this skill", cx)
+                        .small()
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            let _ = cx.global::<RuntimeClient>().0.send(Command::Skills(
+                                sovra_core::skills::SkillCommand::Save(Box::new(skill.clone())),
+                            ));
+                        }))
+                }
+            };
+            let mut actions = h_flex().flex_wrap().gap(t.space.small).child(use_button);
+            if mine || manage {
+                actions = actions.child(
+                    design::button(("groups-template-withdraw", index), "Stop sharing", cx)
+                        .ghost()
+                        .xsmall()
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            send(GroupCommand::Withdraw { detail: id }, cx);
+                        })),
+                );
+            }
+            section = section.child(
+                v_flex()
+                    .id(("groups-template", index))
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .gap(t.space.compact)
+                    .p(t.space.compact)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .child(div().sovra_text(TextRole::Body, cx).child(title))
+                    .child(caption(caption_text, cx))
+                    .child(
+                        div()
+                            .id(("groups-template-words", index))
+                            .test_support()
+                            .whitespace_normal()
+                            .sovra_text(TextRole::Caption, cx)
+                            .child(shared.template.body().to_owned()),
+                    )
+                    .child(actions),
+            );
+        }
+        section
+    }
+}
+
+/// A shared skill as this person's own: no tools (they grant those here), off the
+/// automatic list until they choose, under a stable name so using it twice updates it.
+fn shared_skill(
+    name: String,
+    title: String,
+    description: String,
+    instructions: String,
+) -> sovra_core::skills::Skill {
+    sovra_core::skills::Skill {
+        name,
+        title,
+        description,
+        category: "Your skills".into(),
+        aliases: Vec::new(),
+        kind: sovra_core::skills::SkillKind::Procedure,
+        instructions,
+        tools: Vec::new(),
+        argument_hint: String::new(),
+        requires_input: false,
+        enabled: true,
+        auto_apply: false,
+        builtin: false,
+        license: None,
+        compatibility: None,
+        metadata: std::collections::BTreeMap::new(),
     }
 }

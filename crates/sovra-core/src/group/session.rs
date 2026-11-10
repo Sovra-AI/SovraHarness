@@ -93,6 +93,11 @@ pub enum GroupCommand {
     AskGroup {
         question: String,
     },
+    /// Share a helper or schedule with the whole group, or (`with`) one person.
+    ShareTemplate {
+        template: super::template::Template,
+        with: Option<PersonId>,
+    },
     /// Share a saved artifact with the whole group. `new_version_of` names the shared
     /// artifact it was copied from, so it becomes that artifact's newest version.
     ShareArtifact {
@@ -171,6 +176,8 @@ pub enum GroupEvent {
     Knowledge(Vec<SharedDetail>),
     /// Every shared artifact version, latest versions first.
     Artifacts(Vec<SharedArtifact>),
+    /// Every shared helper and schedule, latest versions first.
+    Templates(Vec<super::template::SharedTemplate>),
     /// This computer's federated recall choices and the questions it answered lately.
     Federated {
         settings: FederatedSettings,
@@ -238,6 +245,8 @@ pub struct GroupsView {
     pub knowledge: Vec<SharedDetail>,
     /// Shared artifact versions, latest versions first.
     pub artifacts: Vec<SharedArtifact>,
+    /// Shared helpers and schedules, latest versions first.
+    pub templates: Vec<super::template::SharedTemplate>,
     pub federated: FederatedSettings,
     /// Questions other helpers asked this computer, newest first.
     pub recent_asks: Vec<AskRecord>,
@@ -258,6 +267,7 @@ impl Default for GroupsView {
             loaded: false,
             knowledge: Vec::new(),
             artifacts: Vec::new(),
+            templates: Vec::new(),
             federated: FederatedSettings::default(),
             recent_asks: Vec::new(),
             answers: None,
@@ -318,6 +328,7 @@ impl GroupsView {
             }
             GroupEvent::Knowledge(details) => self.knowledge = details,
             GroupEvent::Artifacts(artifacts) => self.artifacts = artifacts,
+            GroupEvent::Templates(templates) => self.templates = templates,
             GroupEvent::Federated { settings, recent } => {
                 self.federated = settings;
                 self.recent_asks = recent;
@@ -332,6 +343,7 @@ impl GroupsView {
         self.group = None;
         self.knowledge.clear();
         self.artifacts.clear();
+        self.templates.clear();
         self.recent_asks.clear();
         self.answers = None;
         self.invite = None;

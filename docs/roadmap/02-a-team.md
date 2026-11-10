@@ -936,17 +936,22 @@ Status checked against the code on 2026-11-10.
 
 ### T3 — Share helpers, skills, artifacts and schedules
 
-- [ ] `HelperBundle` and `HelperAdopt` (§10). Signing, verification, preview,
-  local grants, update diff.
-- [ ] Skill folders as bundle files (`sovra-skills::LocalSkillStore`).
+- [x] Shared helpers (§10) as signed templates: preview of the full words,
+  local copy on *Use this helper*, no tool grants travel (Sovra helpers have
+  none), updates replace older versions. *Not yet:* an update diff view.
+- [x] Shared skills as the same templates (title, description, instructions);
+  tools never travel and copies are not auto-applied. *Not yet:* resource
+  files from skill folders.
 - [ ] Taint tracking in a turn, and confirmation cards for side-effecting
   tools in tainted turns (`sovra-adk` harness, runtime approval flow).
 - [x] Artifact versions as ops (inline, up to 512 KB each; blobs later).
   Share with my group, Shared in <group>, Keep a copy, edits shared back as
   new versions, "two versions" kept when edits cross, Stop sharing.
-- [ ] Group schedules (they depend on stage 1 P5): author-only execution.
+- [x] Group schedules as templates: a shared schedule never runs on another
+  person's computer until they add their own copy; message-sending schedules
+  are never shared.
 - [x] Skills page: "Share a document or list with your group".
-- [ ] Skills page: "Share a helper with your group".
+- [x] Skills page: "Share a helper, skill or schedule with your group".
 
 ### T4 — Hand off work
 

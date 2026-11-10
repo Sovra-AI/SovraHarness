@@ -499,6 +499,10 @@ fn render_skills_catalog(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    let can_share = shell
+        .groups(cx)
+        .my_role()
+        .is_some_and(sovra_core::group::Role::writes);
     let matches: Vec<(usize, &Skill)> = shell
         .skills
         .search_all(query)
@@ -570,7 +574,7 @@ fn render_skills_catalog(
                     v_flex().w_full().gap(t.space.medium).children(
                         group
                             .into_iter()
-                            .map(|(index, skill)| card(skill, index, view, cx)),
+                            .map(|(index, skill)| card(skill, index, view, can_share, cx)),
                     ),
                 ),
         );
@@ -729,6 +733,7 @@ fn card(
     skill: &Skill,
     index: usize,
     view: &SkillLibrary,
+    can_share: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
@@ -833,6 +838,27 @@ fn card(
                 }))
         }));
 
+    if !skill.builtin && can_share {
+        // Only the words travel; any tools it asks for stay behind.
+        let template = sovra_core::group::Template::Skill {
+            name: skill.title.clone(),
+            description: skill.description.clone(),
+            instructions: skill.instructions.clone(),
+        };
+        actions = actions.child(
+            design::button(("skill-share", index), "Share with my group", cx)
+                .small()
+                .ghost()
+                .on_click(move |_, _, cx| {
+                    let _ = cx.global::<RuntimeClient>().0.send(Command::Group(
+                        sovra_core::group::GroupCommand::ShareTemplate {
+                            template: template.clone(),
+                            with: None,
+                        },
+                    ));
+                }),
+        );
+    }
     if !skill.builtin {
         actions = actions
             .child(

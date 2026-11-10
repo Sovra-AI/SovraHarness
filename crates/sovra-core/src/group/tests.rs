@@ -1786,3 +1786,133 @@ fn a_same_room_code_is_six_digits_and_binds_both_computers() {
         "a computer in the middle shows different pictures"
     );
 }
+
+// ---- shared helpers and schedules -----------------------------------------
+
+fn helper(instructions: &str) -> Template {
+    Template::Helper {
+        name: "Gardener".into(),
+        icon: "🌱".into(),
+        role: "Garden helper".into(),
+        tagline: "Knows our garden".into(),
+        instructions: instructions.into(),
+        expertise: vec!["roses".into()],
+    }
+}
+
+#[test]
+fn shared_helpers_and_schedules_version_like_artifacts_and_viewers_cannot_share() {
+    let mut log = family_of_three();
+    log.add(4, Role::Viewer, 2_200);
+    let mut shared = Shared::new(&log);
+    let first = shared
+        .push(
+            device(2),
+            3_000,
+            KnowledgeBody::ShareTemplate {
+                template: helper("Water the roses on Sundays."),
+                replaces: Vec::new(),
+            },
+        )
+        .hash();
+    let update = shared
+        .push(
+            device(1),
+            3_100,
+            KnowledgeBody::ShareTemplate {
+                template: helper("Water the roses on Sundays and Wednesdays."),
+                replaces: vec![first],
+            },
+        )
+        .hash();
+    let schedule = shared
+        .push(
+            device(3),
+            3_200,
+            KnowledgeBody::ShareTemplate {
+                template: Template::Schedule {
+                    name: "Bin reminder".into(),
+                    cadence: "every Monday at 7pm".into(),
+                    prompt: "Remind us to put the bins out.".into(),
+                },
+                replaces: Vec::new(),
+            },
+        )
+        .hash();
+    let viewer = shared.push(
+        device(4),
+        3_300,
+        KnowledgeBody::ShareTemplate {
+            template: helper("Anything"),
+            replaces: Vec::new(),
+        },
+    );
+    let view = shared.view();
+    assert_eq!(
+        view.templates[&first].status,
+        DetailStatus::Replaced { by: vec![update] }
+    );
+    assert!(view.templates[&update].is_latest());
+    assert_eq!(view.templates[&schedule].shared_by, "Person 3");
+    assert_eq!(
+        view.rejected.get(&viewer.hash()),
+        Some(&KnowledgeRejection::NotAllowed)
+    );
+    assert_eq!(
+        view.shared_templates()[0].id,
+        schedule,
+        "newest latest first"
+    );
+    assert_eq!(
+        view.templates[&update].helper_id(),
+        view.templates[&update].helper_id()
+    );
+    assert!(view.templates[&update].helper_id().starts_with("shared-"));
+
+    shared.push(device(1), 3_400, KnowledgeBody::Redact { detail: schedule });
+    let erased = &shared.view().templates[&schedule];
+    assert_eq!(erased.status, DetailStatus::Redacted);
+    assert_eq!(
+        erased.template.body(),
+        "",
+        "its words are erased everywhere"
+    );
+}
+
+#[test]
+fn templates_are_checked_for_names_words_and_size() {
+    assert_eq!(check_template(&helper("Help with the garden.")), Ok(()));
+    assert_eq!(check_template(&helper("  ")), Err(TemplateError::Empty));
+    assert_eq!(
+        check_template(&helper(&"x".repeat(MAX_TEMPLATE_INSTRUCTIONS_CHARS + 1))),
+        Err(TemplateError::TooLong)
+    );
+    assert_eq!(
+        check_template(&Template::Schedule {
+            name: " ".into(),
+            cadence: "daily".into(),
+            prompt: "Hi".into(),
+        }),
+        Err(TemplateError::NoName)
+    );
+    let Template::Helper {
+        name,
+        icon,
+        role,
+        tagline,
+        instructions,
+        ..
+    } = helper("Hi")
+    else {
+        unreachable!("built as a helper");
+    };
+    let crowded = Template::Helper {
+        name,
+        icon,
+        role,
+        tagline,
+        instructions,
+        expertise: vec!["topic".into(); MAX_TEMPLATE_TOPICS + 1],
+    };
+    assert_eq!(check_template(&crowded), Err(TemplateError::TooManyTopics));
+}

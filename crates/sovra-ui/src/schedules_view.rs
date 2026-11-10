@@ -27,6 +27,8 @@ pub(crate) struct ScheduleForm<'a> {
     pub open: bool,
     pub compact: bool,
     pub range: TimelineRange,
+    /// This computer is in a group and may add to it: offer "Share with my group".
+    pub can_share: bool,
 }
 
 pub(crate) fn render_schedules_view(
@@ -82,7 +84,7 @@ pub(crate) fn render_schedules_view(
         page = page.child(render_timeline(state, form.compact, form.range, cx));
     }
     if show_list {
-        page = page.child(render_schedule_list(state, cx));
+        page = page.child(render_schedule_list(state, form.can_share, cx));
     }
 
     v_flex()
@@ -230,6 +232,7 @@ fn render_schedule_form(
 
 fn render_schedule_list(
     state: &WorkspaceState,
+    can_share: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
@@ -242,7 +245,7 @@ fn render_schedule_list(
                 .schedules
                 .iter()
                 .enumerate()
-                .map(|(idx, item)| render_schedule_row(state, item, idx, cx)),
+                .map(|(idx, item)| render_schedule_row(state, item, idx, can_share, cx)),
         )
 }
 
@@ -616,8 +619,32 @@ fn render_schedule_row(
     state: &WorkspaceState,
     item: &ScheduleItem,
     idx: usize,
+    can_share: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
+    // Schedules that send messages on someone's behalf are never shared.
+    let shared = (can_share && item.send.is_none()).then(|| {
+        let template = sovra_core::group::Template::Schedule {
+            name: item.name.clone(),
+            cadence: item.cadence_label(),
+            prompt: item.prompt.clone(),
+        };
+        design::button(("schedule-share", idx), "Share with my group", cx)
+            .accessibility_label("Share this schedule with your group")
+            .ghost()
+            .small()
+            .on_click(move |_, _, cx| {
+                let _ = cx
+                    .global::<crate::RuntimeClient>()
+                    .0
+                    .send(sovra_core::Command::Group(
+                        sovra_core::group::GroupCommand::ShareTemplate {
+                            template: template.clone(),
+                            with: None,
+                        },
+                    ));
+            })
+    });
     let t = design::tokens(cx);
     let theme = cx.theme();
     let schedule_id_toggle = item.id.clone();
@@ -700,6 +727,7 @@ fn render_schedule_row(
                             shell.run_schedule_in_chat(&schedule_id_run, window, cx);
                         })),
                 )
+                .children(shared)
                 .child(
                     design::button(("schedule-delete", idx), "Delete", cx)
                         .accessibility_label("Delete schedule")

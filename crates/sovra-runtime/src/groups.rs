@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_channel::Sender;
+use sovra_core::group::check_template;
 use sovra_core::group::{
     AskLimiter, AskRecord, Bytes, GroupCipher, OpHash, SharedHit, Space, check_ask,
     federated_items, fold_space, lanes_of, log_ask, sealed_aad, spaces_of,
@@ -69,6 +70,7 @@ const MAX_SYNC_ROUNDS: usize = 32;
 struct SharedNow {
     details: Vec<SharedDetail>,
     artifacts: Vec<SharedArtifact>,
+    templates: Vec<sovra_core::group::SharedTemplate>,
 }
 
 /// Opens this computer's own recall when another computer asks (federated recall).
@@ -720,12 +722,27 @@ impl Groups {
                 .then(b.shared_at.cmp(&a.shared_at))
                 .then(b.id.cmp(&a.id))
         });
-        SharedNow { details, artifacts }
+        let mut templates: Vec<sovra_core::group::SharedTemplate> = views
+            .iter()
+            .flat_map(|view| view.shared_templates())
+            .collect();
+        templates.sort_by(|a, b| {
+            b.is_latest()
+                .cmp(&a.is_latest())
+                .then(b.shared_at.cmp(&a.shared_at))
+                .then(b.id.cmp(&a.id))
+        });
+        SharedNow {
+            details,
+            artifacts,
+            templates,
+        }
     }
 
     async fn publish_shared(&self, shared: SharedNow) {
         self.emit(GroupEvent::Knowledge(shared.details)).await;
         self.emit(GroupEvent::Artifacts(shared.artifacts)).await;
+        self.emit(GroupEvent::Templates(shared.templates)).await;
     }
 
     async fn publish_loaded(&self) {
@@ -759,6 +776,7 @@ impl Groups {
         self.publish_shared(SharedNow {
             details: Vec::new(),
             artifacts: Vec::new(),
+            templates: Vec::new(),
         })
         .await;
     }
@@ -1151,6 +1169,17 @@ impl Groups {
                         .collect();
                     groups.emit(GroupEvent::Answers { question, answers }).await;
                 }));
+            }
+            GroupCommand::ShareTemplate { template, with } => {
+                let space = self.space_with(with).await;
+                self.knowledge(
+                    space,
+                    KnowledgeBody::ShareTemplate {
+                        template,
+                        replaces: Vec::new(),
+                    },
+                )
+                .await;
             }
             GroupCommand::SetFederated(settings) => {
                 let recent = {
@@ -1872,6 +1901,9 @@ impl Groups {
                 ..
             } => check_artifact(title, language, content)
                 .map_err(|error| format!("That can't be shared: {error}.")),
+            KnowledgeBody::ShareTemplate { template, .. } => {
+                check_template(template).map_err(|error| format!("That can't be shared: {error}."))
+            }
             KnowledgeBody::Corroborate { .. }
             | KnowledgeBody::Withdraw { .. }
             | KnowledgeBody::Redact { .. } => Ok(()),

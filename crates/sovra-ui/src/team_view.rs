@@ -148,6 +148,13 @@ impl TeamView {
 
 impl Render for TeamView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let can_share = self.shell.upgrade().is_some_and(|shell| {
+            shell
+                .read(cx)
+                .groups(cx)
+                .my_role()
+                .is_some_and(sovra_core::group::Role::writes)
+        });
         let t = design::tokens(cx);
         let members = self.members(cx);
         let mut page = v_flex()
@@ -171,7 +178,7 @@ impl Render for TeamView {
                     members
                         .iter()
                         .enumerate()
-                        .map(|(index, member)| member_card(member, index, cx)),
+                        .map(|(index, member)| member_card(member, index, can_share, cx)),
                 ),
         );
         page = page.child(self.add_section(&members, cx));
@@ -510,9 +517,32 @@ fn member_identity(member: &TeamMember, cx: &Context<TeamView>) -> impl IntoElem
 fn member_card(
     member: &TeamMember,
     index: usize,
+    can_share: bool,
     cx: &mut Context<TeamView>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    // Built-in helpers come with Sovra, so only the person's own are worth sharing.
+    let share = (can_share && !member.builtin).then(|| {
+        let template = sovra_core::group::Template::Helper {
+            name: member.name.clone(),
+            icon: member.icon.clone(),
+            role: member.role.clone(),
+            tagline: member.tagline.clone(),
+            instructions: member.instructions.clone(),
+            expertise: member.expertise.clone(),
+        };
+        design::button(("team-member-share", index), "Share with my group", cx)
+            .ghost()
+            .small()
+            .on_click(cx.listener(move |_, _, _, cx| {
+                let _ = cx.global::<RuntimeClient>().0.send(Command::Group(
+                    sovra_core::group::GroupCommand::ShareTemplate {
+                        template: template.clone(),
+                        with: None,
+                    },
+                ));
+            }))
+    });
     let toggled = member.clone();
     let edited = member.clone();
     let asked = member.id.clone();
@@ -578,6 +608,7 @@ fn member_card(
                             view.edit(edited.clone(), window, cx);
                         })),
                 )
+                .children(share)
                 .children(remove),
         )
 }

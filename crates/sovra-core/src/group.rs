@@ -20,6 +20,7 @@ mod sas;
 mod session;
 mod shared_artifact;
 mod space;
+mod template;
 mod wire;
 
 pub use federated::{
@@ -53,6 +54,10 @@ pub use shared_artifact::{
     sharing_state,
 };
 pub use space::{Space, lanes_of, space_of_lane, spaces_of};
+pub use template::{
+    MAX_TEMPLATE_INSTRUCTIONS_CHARS, MAX_TEMPLATE_LINE_CHARS, MAX_TEMPLATE_TOPICS, SharedTemplate,
+    Template, TemplateError, check_template,
+};
 pub use wire::{
     GroupRecord, GroupStore, GroupStoreError, GroupTransport, MAX_PEER_MESSAGE_BYTES,
     MAX_REPLY_KNOWLEDGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler, PeerRequest, PeerResponse,
