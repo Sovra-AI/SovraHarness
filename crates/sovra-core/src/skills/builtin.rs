@@ -37,6 +37,7 @@ impl Skill {
             "groups" => "Share with your family or team",
             "share-artifact" => "Share a document or list with your group",
             "share-memory" => "Share something Sovra remembers with your group",
+            "ask-group" => "Ask your family or team's memories",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -156,6 +157,10 @@ impl Skill {
             "share-artifact" => (
                 "Opens Artifacts. Open something you saved, like the family shopping list, and press Share with your group. Everyone gets a copy, and when someone changes it and shares again, the group gets the new version.".to_owned(),
                 "/share-artifact ".to_owned(),
+            ),
+            "ask-group" => (
+                "Opens Groups. Ask a question like “Who is our dentist?” and the computers in your group that allow it look in their own memory and send back a short answer with who it came from. Your memories stay on your computer unless you turn on answering.".to_owned(),
+                "/ask-group ".to_owned(),
             ),
             "share-memory" => (
                 "Opens what Sovra remembers. Open a detail, like “Mum's dentist is Dr Patel”, press Share, check the words, and everyone's helpers in your group can use it.".to_owned(),
@@ -420,6 +425,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Artifacts to share a saved document, list or picture with your group, keep a copy of what others shared, and share your changes back as a new version.",
             SkillAction::Artifacts,
             &["share-document", "shared-artifacts"],
+        ),
+        action(
+            "ask-group",
+            "Ask my group",
+            "Open Settings → Groups to ask the memories of your group's computers, choose whether your own memory answers them, and see every question you were asked.",
+            SkillAction::Settings,
+            &["federated", "ask-family"],
         ),
         action(
             "share-memory",

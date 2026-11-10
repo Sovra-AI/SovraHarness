@@ -10,7 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sovra_core::artifacts::ArtifactKind;
-use sovra_core::group::{DetailStatus, GroupCommand, GroupEvent, GroupState, Role, SharedArtifact};
+use sovra_core::group::{
+    DetailStatus, FederatedSettings, GroupCommand, GroupEvent, GroupState, Role, SharedArtifact,
+};
 use sovra_core::{AgentConfig, Command, Event};
 use sovra_runtime::{Client, GroupServices, RuntimeServices};
 
@@ -33,6 +35,29 @@ impl Drop for TempDir {
 
 impl Computer {
     fn start(name: &str, key: u8) -> Self {
+        Self::start_remembering(name, key, &[])
+    }
+
+    /// A computer whose own memory already holds `facts` (in-memory `SurrealDB`).
+    fn start_remembering(name: &str, key: u8, facts: &[&str]) -> Self {
+        let facts: Vec<String> = facts.iter().map(|fact| (*fact).to_owned()).collect();
+        let memory: Option<sovra_runtime::MemoryFactory> = (!facts.is_empty()).then(|| {
+            Box::new(move || {
+                Box::pin(async move {
+                    use sovra_core::MemoryStore as _;
+                    let store = sovra_store_surreal::SurrealStore::open(
+                        sovra_store_surreal::StoreConfig::in_memory(),
+                    )
+                    .await?;
+                    store.set_memory_enabled(true).await?;
+                    // Notes keep their own source, as details saved from chat do.
+                    for text in facts {
+                        store.remember_note(sovra_core::MemoryNote { text }).await?;
+                    }
+                    Ok(Arc::new(store) as Arc<dyn sovra_core::MemoryStore>)
+                }) as sovra_runtime::MemoryStoreFuture
+            }) as sovra_runtime::MemoryFactory
+        });
         let dir =
             std::env::temp_dir().join(format!("sovra-two-computers-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -41,6 +66,7 @@ impl Computer {
             "two-computers",
             AgentConfig::default(),
             RuntimeServices {
+                memory,
                 groups: Some(GroupServices {
                     transport: Box::new(move || {
                         Box::pin(async move {
@@ -123,7 +149,7 @@ impl Computer {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_computers_form_a_group_and_share_over_the_real_network() {
-    let mum = Computer::start("mum", 31);
+    let mum = Computer::start_remembering("mum", 31, &["User's dentist is Dr Patel"]);
     let dad = Computer::start("dad", 32);
 
     mum.send(GroupCommand::Create {
@@ -218,6 +244,54 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
         back.iter().find(|a| a.id == list.id).expect("kept").status,
         DetailStatus::Replaced { .. }
     ));
+
+    // Federated recall: nothing comes back until Mum lets the group ask her memory.
+    dad.send(GroupCommand::AskGroup {
+        question: "who is the dentist".into(),
+    });
+    let none = dad
+        .wait("answers while Mum isn't answering", |event| match event {
+            GroupEvent::Answers { answers, .. } => Some(answers),
+            _ => None,
+        })
+        .await;
+    assert_eq!(none, Vec::new(), "answering starts off");
+    mum.send(GroupCommand::SetFederated(FederatedSettings {
+        answer: true,
+        ask: false,
+    }));
+    mum.wait("Mum's answering switched on", |event| match event {
+        GroupEvent::Federated { settings, .. } if settings.answer => Some(()),
+        _ => None,
+    })
+    .await;
+    // Dad's earlier unanswered ask put Mum on a short cooldown for automatic recall;
+    // an explicit "Ask my group" always asks.
+    dad.send(GroupCommand::AskGroup {
+        question: "who is the dentist".into(),
+    });
+    let answers = dad
+        .wait("Mum's answer", |event| match event {
+            GroupEvent::Answers { answers, .. } if !answers.is_empty() => Some(answers),
+            _ => None,
+        })
+        .await;
+    assert_eq!(answers[0].from, "Mum");
+    assert_eq!(answers[0].computer, "Mum's laptop");
+    assert!(
+        answers[0].statement.contains("Mum's dentist is Dr Patel"),
+        "reworded for the group: {}",
+        answers[0].statement
+    );
+    let log = mum
+        .wait("Mum's log of the question", |event| match event {
+            GroupEvent::Federated { recent, .. } if !recent.is_empty() => Some(recent),
+            _ => None,
+        })
+        .await;
+    assert_eq!(log[0].asked_by, "Dad");
+    assert_eq!(log[0].question, "who is the dentist");
+    assert!(log[0].answered >= 1);
 
     // Mum removes Dad; his computer leaves the group.
     let dad_person = joined

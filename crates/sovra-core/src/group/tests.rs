@@ -1422,3 +1422,111 @@ fn a_personal_memory_is_reworded_with_the_sharers_name() {
         vec!["Mum".to_owned(), "Dr Patel".to_owned()]
     );
 }
+
+// ---- federated recall ----------------------------------------------------
+
+#[test]
+fn federated_answers_are_few_short_reworded_and_unique() {
+    let found = vec![
+        ("User's dentist is Dr Patel".to_owned(), Timestamp(1)),
+        ("User's dentist is Dr Patel".to_owned(), Timestamp(2)),
+        ("x".repeat(MAX_FEDERATED_STATEMENT_CHARS + 50), Timestamp(3)),
+        ("  ".to_owned(), Timestamp(4)),
+        ("A".into(), Timestamp(5)),
+        ("B".into(), Timestamp(6)),
+        ("C".into(), Timestamp(7)),
+    ];
+    let items = federated_items(found, "Mum");
+    assert_eq!(items.len(), MAX_FEDERATED_ITEMS);
+    assert_eq!(items[0].statement, "Mum's dentist is Dr Patel");
+    assert_eq!(items[0].recorded_at, Timestamp(1), "duplicates collapse");
+    assert_eq!(
+        items[1].statement.chars().count(),
+        MAX_FEDERATED_STATEMENT_CHARS + 1,
+        "long answers are cut with an ellipsis"
+    );
+    assert!(items.iter().all(|item| !item.statement.trim().is_empty()));
+    assert_eq!(
+        check_ask("  who is the dentist? "),
+        Some("who is the dentist?".into())
+    );
+    assert_eq!(check_ask("   "), None);
+    assert_eq!(check_ask(&"q".repeat(MAX_ASK_CHARS + 1)), None);
+}
+
+#[test]
+fn a_computer_may_ask_another_only_so_often() {
+    let mut limiter = AskLimiter::default();
+    for n in 0..ASKS_PER_MINUTE {
+        assert!(limiter.allow(
+            device(2),
+            Timestamp(1_000 + i64::try_from(n).expect("small"))
+        ));
+    }
+    assert!(
+        !limiter.allow(device(2), Timestamp(2_000)),
+        "too many in a minute"
+    );
+    assert!(
+        limiter.allow(device(3), Timestamp(2_000)),
+        "limits are per computer"
+    );
+    assert!(
+        limiter.allow(device(2), Timestamp(61_000)),
+        "a minute later it may ask again"
+    );
+}
+
+#[test]
+fn the_owner_sees_recent_questions_newest_first_and_answering_starts_off() {
+    let mut log = Vec::new();
+    for n in 0..(MAX_ASK_LOG + 5) {
+        log_ask(
+            &mut log,
+            AskRecord {
+                asked_by: "Dad".into(),
+                computer: "Desktop".into(),
+                question: format!("question {n}"),
+                answered: 1,
+                at: Timestamp(i64::try_from(n).expect("small")),
+            },
+        );
+    }
+    assert_eq!(log.len(), MAX_ASK_LOG);
+    assert_eq!(log[0].question, format!("question {}", MAX_ASK_LOG + 4));
+    assert_eq!(
+        FederatedSettings::default(),
+        FederatedSettings {
+            answer: false,
+            ask: false
+        }
+    );
+    let old_record: GroupRecord = serde_json::from_str(
+        r#"{"person":null,"person_name":"","computer_name":"","group":null,"membership":[],"knowledge":[],"addresses":[]}"#,
+    )
+    .expect("records saved before federated recall still load");
+    assert_eq!(old_record.federated, FederatedSettings::default());
+
+    let mut view = GroupsView::default();
+    view.apply(GroupEvent::Federated {
+        settings: FederatedSettings {
+            answer: true,
+            ask: false,
+        },
+        recent: log.clone(),
+    });
+    view.apply(GroupEvent::Answers {
+        question: "who is the dentist".into(),
+        answers: vec![GroupAnswer {
+            statement: "Mum's dentist is Dr Patel".into(),
+            from: "Mum".into(),
+            computer: "Laptop".into(),
+            recorded_at: Timestamp(1),
+        }],
+    });
+    assert!(view.federated.answer);
+    assert_eq!(view.recent_asks.len(), MAX_ASK_LOG);
+    assert!(view.answers.is_some());
+    view.apply(GroupEvent::LeftGroup);
+    assert!(view.recent_asks.is_empty() && view.answers.is_none());
+}

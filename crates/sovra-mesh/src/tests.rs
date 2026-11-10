@@ -27,9 +27,11 @@ impl PeerHandler for Recorder {
                 want_membership: membership,
                 want_knowledge: BTreeSet::new(),
             },
-            PeerRequest::Join { .. } | PeerRequest::Push { .. } => PeerResponse::Refused {
-                reason: Refusal::NotAMember,
-            },
+            PeerRequest::Join { .. } | PeerRequest::Push { .. } | PeerRequest::Ask { .. } => {
+                PeerResponse::Refused {
+                    reason: Refusal::NotAMember,
+                }
+            }
         }
     }
 }

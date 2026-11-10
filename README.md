@@ -9,7 +9,8 @@ and Velopack installers. Chrome defaults to Arabic, with a Settings language
 picker and right-to-left layout. Settings → Groups lets a family or small team
 share memories, documents and lists across their computers: **Share with my
 group** on an artifact or a saved detail, **Keep a copy** of what others
-shared, and edits come back as new versions. macOS, Windows and Linux from one
+shared, and edits come back as new versions. **Ask my group** asks the
+memories of computers whose owners allow it, without copying those memories. macOS, Windows and Linux from one
 codebase.
 
 The Knowledge page includes an interactive map of saved details and their

@@ -11,6 +11,15 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Ask each other's memories (federated recall).** Settings → Groups can
+  ask the group's computers a question (“Who is our dentist?”). Each computer
+  whose owner turned on *Let my group's helpers ask my memory* searches its own
+  memory and sends back up to four short answers with the owner's name; nothing
+  else leaves it. *Ask my group when I chat* lets helpers do the same during
+  chat (2.5 s deadline, quiet computers skipped). Both start off, owners see
+  every question they were asked, and asks are rate-limited. Skills has an
+  “Ask your family or team's memories” card. Direction for memory, compute and
+  learning across desktops: `docs/roadmap/05-collective-intelligence.md`.
 - **Share artifacts with your group.** Saved documents, lists, tables and
   pictures get **Share with my group** on the Artifacts page; everything the
   group shared appears under **Shared in <group>**, where **Keep a copy**

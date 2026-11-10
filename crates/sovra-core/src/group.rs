@@ -8,6 +8,7 @@
 //! "Group" is the user-facing word (roadmap decision D1); "team" stays the AI helpers.
 
 mod dag;
+mod federated;
 mod fold;
 mod keys;
 mod knowledge;
@@ -19,6 +20,11 @@ mod session;
 mod shared_artifact;
 mod wire;
 
+pub use federated::{
+    ASKS_PER_MINUTE, AskLimiter, AskRecord, FederatedItem, FederatedSettings, GroupAnswer,
+    MAX_ASK_CHARS, MAX_ASK_LOG, MAX_FEDERATED_ITEMS, MAX_FEDERATED_STATEMENT_CHARS, check_ask,
+    federated_items, log_ask,
+};
 pub use fold::{DeviceEntry, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
 pub use keys::{DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, SignatureVerifier};
 pub use knowledge::{

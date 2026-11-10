@@ -81,6 +81,9 @@ pub enum PeerRequest {
         membership: Vec<MembershipOp>,
         knowledge: Vec<KnowledgeOp>,
     },
+    /// Federated recall: "search your memory for this", answered only by computers
+    /// whose owner turned answering on (see `group::federated`).
+    Ask { group: GroupId, question: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +102,10 @@ pub enum PeerResponse {
         want_knowledge: BTreeSet<OpHash>,
     },
     Accepted,
+    /// A few short answers from the asked computer's own memory.
+    Answered {
+        items: Vec<super::federated::FederatedItem>,
+    },
     Refused {
         reason: Refusal,
     },
@@ -114,6 +121,8 @@ pub enum Refusal {
     InviteExpired,
     InviteUsed,
     Malformed,
+    /// This computer's owner has not turned on answering, or it is asked too often.
+    NotAnswering,
 }
 
 /// The bytes a join proof is bound to: both computers and the group.
@@ -140,7 +149,9 @@ pub fn admits_request(
                 _ => Err(Refusal::WrongGroup),
             };
         }
-        PeerRequest::Sync { group, .. } | PeerRequest::Push { group, .. } => group,
+        PeerRequest::Sync { group, .. }
+        | PeerRequest::Push { group, .. }
+        | PeerRequest::Ask { group, .. } => group,
     };
     match roster {
         Some(state) if state.group != *group => Err(Refusal::WrongGroup),
@@ -208,6 +219,9 @@ pub struct GroupRecord {
     pub knowledge: Vec<KnowledgeOp>,
     /// Last known way to reach each computer, learned from links and sync.
     pub addresses: Vec<PeerAddress>,
+    /// Whether this computer answers and asks the group's memories (both off at first).
+    #[serde(default)]
+    pub federated: super::federated::FederatedSettings,
 }
 
 /// Why the group record could not be read or written.

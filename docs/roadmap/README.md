@@ -13,6 +13,7 @@ The investor deck presents four sizes of the same program:
 | 2 | **Next** | **A team.** A few computers share helpers and memory. A busy laptop hands heavy work to a free one. | [`02-a-team.md`](02-a-team.md) | **Build-ready, very detailed** |
 | 3 | Direction | **A company.** A private fleet with ledger memory, lanes for each team, and a model trained on its own computers. | [`03-a-company.md`](03-a-company.md) | Outline (likely to change) |
 | 4 | Direction | **Regulated work.** Health, law, finance, government: data that must not leave. Here, it never has to. | [`04-regulated-work.md`](04-regulated-work.md) | Outline (likely to change) |
+| 5 | Direction | **Collective intelligence.** Desktops contribute memory, compute and learning to people they trust; federated recall moves the question, not the data. | [`05-collective-intelligence.md`](05-collective-intelligence.md) | Outline; federated recall started |
 
 Stage 2 gets the deepest treatment because it is the next thing to build and
 because every later stage reuses its parts: device identity, signed logs, lanes,

@@ -3,7 +3,7 @@
 //! "computer", "group", "share"; the rules live in `sovra_core::group`.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Selectable as _, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputState},
@@ -15,7 +15,8 @@ use gpui_kit::{
 };
 use sovra_core::Command;
 use sovra_core::group::{
-    DetailStatus, GroupCommand, PairingStage, Role, SharedDetail, removal_warning,
+    DetailStatus, FederatedSettings, GroupCommand, PairingStage, Role, SharedDetail,
+    removal_warning,
 };
 
 use crate::RuntimeClient;
@@ -31,6 +32,7 @@ pub(crate) struct GroupsForm {
     join_link: Entity<InputState>,
     invite_name: Entity<InputState>,
     share: Entity<InputState>,
+    ask: Entity<InputState>,
     /// Which person or computer is waiting for "Yes, remove".
     confirm_remove: Option<String>,
 }
@@ -49,6 +51,11 @@ impl GroupsForm {
             invite_name: input("Their name", window, cx),
             share: input(
                 "Something your group should know, like “The boiler service is on 12 March”",
+                window,
+                cx,
+            ),
+            ask: input(
+                "Ask everyone's memories, like “Who is our dentist?”",
                 window,
                 cx,
             ),
@@ -142,6 +149,7 @@ impl ModelsView {
                 body.child(self.render_roster(cx))
                     .child(self.render_invites(cx))
                     .child(self.render_knowledge(cx))
+                    .child(self.render_federated(cx))
                     .child(
                         h_flex().child(
                             design::button("groups-leave", "Leave this group", cx)
@@ -624,4 +632,170 @@ pub(crate) fn now_millis() -> i64 {
         .map_or(0, |elapsed| {
             i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
         })
+}
+
+impl ModelsView {
+    /// "Ask each other's memories": federated recall. Memory stays on each computer;
+    /// a question goes out and a few attributed answers come back. Both directions are
+    /// separate choices, and both start off.
+    fn render_federated(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let settings = self.groups.federated;
+        let switch = |id: &'static str, on: bool, label: &str, cx: &mut Context<Self>| {
+            design::button(
+                id,
+                if on {
+                    format!("{label}: on")
+                } else {
+                    format!("{label}: off")
+                },
+                cx,
+            )
+            .small()
+            .selected(on)
+        };
+        let mut section = v_flex()
+            .id("groups-federated")
+            .test_support()
+            .w_full()
+            .gap(t.space.compact)
+            .child(div().sovra_text(TextRole::Body, cx).child("Ask each other's memories"))
+            .child(caption(
+                "Your memories stay on your computer. When this is on, a question from someone's helper in your group is searched here, and only a few short answers go back, with your name on them. You can see every question below.",
+                cx,
+            ))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        switch(
+                            "groups-federated-answer",
+                            settings.answer,
+                            "Let my group's helpers ask my memory",
+                            cx,
+                        )
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            send(
+                                GroupCommand::SetFederated(FederatedSettings {
+                                    answer: !settings.answer,
+                                    ..settings
+                                }),
+                                cx,
+                            );
+                        })),
+                    )
+                    .child(
+                        switch(
+                            "groups-federated-ask",
+                            settings.ask,
+                            "Ask my group when I chat",
+                            cx,
+                        )
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            send(
+                                GroupCommand::SetFederated(FederatedSettings {
+                                    ask: !settings.ask,
+                                    ..settings
+                                }),
+                                cx,
+                            );
+                        })),
+                    ),
+            )
+            .child(caption(
+                "Asking sends your question to the computers in your group that answer.",
+                cx,
+            ))
+            .child(
+                Input::new(&self.groups_form.ask)
+                    .id("groups-ask-input")
+                    .aria_label("Ask your group's memories"),
+            )
+            .child(
+                h_flex().child(
+                    design::button("groups-ask", "Ask my group", cx).on_click(cx.listener(
+                        |view, _, window, cx| {
+                            let question = value(&view.groups_form.ask, cx);
+                            if question.is_empty() {
+                                return;
+                            }
+                            view.groups_form
+                                .ask
+                                .update(cx, |input, cx| input.set_value("", window, cx));
+                            send(GroupCommand::AskGroup { question }, cx);
+                        },
+                    )),
+                ),
+            );
+        if let Some((question, answers)) = &self.groups.answers {
+            let mut list = v_flex()
+                .id("groups-answers")
+                .test_support()
+                .w_full()
+                .gap(t.space.compact)
+                .p(t.space.small)
+                .sovra_surface(Surface::Subtle, cx)
+                .child(caption(format!("You asked: {question}"), cx));
+            if answers.is_empty() {
+                list = list.child(caption(
+                    "Nobody's computer had an answer. Their computer may be off, or they haven't turned on answering.",
+                    cx,
+                ));
+            }
+            for (index, answer) in answers.iter().enumerate() {
+                list = list.child(
+                    v_flex()
+                        .id(("groups-answer", index))
+                        .test_support()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Body, cx)
+                                .child(answer.statement.clone()),
+                        )
+                        .child(caption(
+                            format!("From {}'s memory · {}", answer.from, answer.computer),
+                            cx,
+                        )),
+                );
+            }
+            section = section.child(list);
+        }
+        if !self.groups.recent_asks.is_empty() {
+            let mut log = v_flex()
+                .id("groups-asked-log")
+                .test_support()
+                .w_full()
+                .gap(t.space.compact)
+                .child(
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .child("Questions your group asked"),
+                );
+            for (index, ask) in self.groups.recent_asks.iter().take(10).enumerate() {
+                let answered = match ask.answered {
+                    0 => "nothing sent".to_owned(),
+                    1 => "1 answer sent".to_owned(),
+                    n => format!("{n} answers sent"),
+                };
+                log = log.child(
+                    div()
+                        .id(("groups-asked", index))
+                        .test_support()
+                        .whitespace_normal()
+                        .child(caption(
+                            format!(
+                                "{} ({}): “{}” — {answered}",
+                                ask.asked_by, ask.computer, ask.question
+                            ),
+                            cx,
+                        )),
+                );
+            }
+            section = section.child(log);
+        }
+        section
+    }
 }

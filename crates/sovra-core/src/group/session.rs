@@ -2,6 +2,7 @@
 //! screens render. Copy here is plain words (Skills-page rule): "computer", not
 //! "device"; "group", not "mesh".
 
+use super::federated::{AskRecord, FederatedSettings, GroupAnswer};
 use super::fold::GroupState;
 use super::keys::{DeviceId, OpHash, PersonId};
 use super::knowledge::SharedDetail;
@@ -82,6 +83,13 @@ pub enum GroupCommand {
     Erase {
         detail: OpHash,
     },
+    /// Turn federated recall on or off for this computer: answering others' helpers
+    /// from this memory, and asking the group's computers when recalling.
+    SetFederated(FederatedSettings),
+    /// "Ask my group": search the memories of computers that answer, once, now.
+    AskGroup {
+        question: String,
+    },
     /// Share a saved artifact with the whole group. `new_version_of` names the shared
     /// artifact it was copied from, so it becomes that artifact's newest version.
     ShareArtifact {
@@ -155,6 +163,16 @@ pub enum GroupEvent {
     Knowledge(Vec<SharedDetail>),
     /// Every shared artifact version, latest versions first.
     Artifacts(Vec<SharedArtifact>),
+    /// This computer's federated recall choices and the questions it answered lately.
+    Federated {
+        settings: FederatedSettings,
+        recent: Vec<AskRecord>,
+    },
+    /// What the group's computers answered to an "Ask my group" question.
+    Answers {
+        question: String,
+        answers: Vec<GroupAnswer>,
+    },
     /// This computer was removed from, or left, its group.
     LeftGroup,
     Problem(GroupProblem),
@@ -210,6 +228,11 @@ pub struct GroupsView {
     pub knowledge: Vec<SharedDetail>,
     /// Shared artifact versions, latest versions first.
     pub artifacts: Vec<SharedArtifact>,
+    pub federated: FederatedSettings,
+    /// Questions other helpers asked this computer, newest first.
+    pub recent_asks: Vec<AskRecord>,
+    /// The last "Ask my group" question and what came back.
+    pub answers: Option<(String, Vec<GroupAnswer>)>,
 }
 
 impl Default for GroupsView {
@@ -224,6 +247,9 @@ impl Default for GroupsView {
             loaded: false,
             knowledge: Vec::new(),
             artifacts: Vec::new(),
+            federated: FederatedSettings::default(),
+            recent_asks: Vec::new(),
+            answers: None,
         }
     }
 }
@@ -276,6 +302,11 @@ impl GroupsView {
             }
             GroupEvent::Knowledge(details) => self.knowledge = details,
             GroupEvent::Artifacts(artifacts) => self.artifacts = artifacts,
+            GroupEvent::Federated { settings, recent } => {
+                self.federated = settings;
+                self.recent_asks = recent;
+            }
+            GroupEvent::Answers { question, answers } => self.answers = Some((question, answers)),
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
         }
@@ -285,6 +316,8 @@ impl GroupsView {
         self.group = None;
         self.knowledge.clear();
         self.artifacts.clear();
+        self.recent_asks.clear();
+        self.answers = None;
         self.invite = None;
         self.short_code = None;
         self.pairing = PairingStage::Idle;

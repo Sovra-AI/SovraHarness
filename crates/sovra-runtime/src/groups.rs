@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_channel::Sender;
+use sovra_core::group::{AskLimiter, AskRecord, check_ask, federated_items, log_ask};
 use sovra_core::group::{
     DeviceId, GroupCommand, GroupEvent, GroupId, GroupProblem, GroupRecord, GroupState, GroupStore,
     GroupTransport, Invite, InviteBook, InviteKind, JoinLink, KnowledgeBody, KnowledgeOp,
@@ -57,11 +58,38 @@ struct SharedNow {
     artifacts: Vec<SharedArtifact>,
 }
 
-/// What helpers may read: the group's usable shared details.
+/// Opens this computer's own recall when another computer asks (federated recall).
+/// A fresh reader each time, so pausing remembering takes effect at once.
+pub(crate) type LocalMemory =
+    Arc<dyn Fn() -> Option<Arc<dyn sovra_core::MemoryReader>> + Send + Sync>;
+
+/// What helpers may read: the group's usable shared details, plus the way to ask the
+/// group's computers (federated recall) and to answer them from this computer's memory.
 #[derive(Clone, Default)]
-pub(crate) struct GroupKnowledge(Arc<RwLock<KnowledgeView>>);
+pub(crate) struct GroupKnowledge(
+    Arc<RwLock<KnowledgeView>>,
+    Arc<std::sync::RwLock<Option<LocalMemory>>>,
+    Arc<std::sync::RwLock<Option<std::sync::Weak<Groups>>>>,
+);
 
 impl GroupKnowledge {
+    fn local_reader(&self) -> Option<Arc<dyn sovra_core::MemoryReader>> {
+        let local = self
+            .1
+            .read()
+            .expect("local memory lock is never poisoned")
+            .clone();
+        local.and_then(|open| open())
+    }
+
+    fn groups(&self) -> Option<Arc<Groups>> {
+        self.2
+            .read()
+            .expect("groups handle lock is never poisoned")
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+    }
+
     /// Adds group knowledge to a turn that already reads personal memory. Turns
     /// without a reader (untrusted senders, remembering paused) get none either.
     pub(crate) fn wrap(
@@ -77,17 +105,46 @@ impl GroupKnowledge {
     }
 
     async fn add_to(&self, context: &mut sovra_core::MemoryContext, question: &str) {
-        let view = self.0.read().await;
-        // Details first; a couple of places stay for shared documents and lists.
-        let details = sovra_core::MAX_GROUP_EVIDENCE_ITEMS.saturating_sub(ARTIFACT_EVIDENCE_ITEMS);
-        for hit in view.search(question, details) {
-            context.push_group(evidence(&hit.detail));
-        }
-        for artifact in view.search_artifacts(question, ARTIFACT_EVIDENCE_ITEMS) {
-            context.push_group(artifact_evidence(artifact));
+        let (details, artifacts) = {
+            let view = self.0.read().await;
+            (
+                view.search(question, sovra_core::MAX_GROUP_EVIDENCE_ITEMS)
+                    .iter()
+                    .map(|hit| evidence(&hit.detail))
+                    .collect::<Vec<_>>(),
+                view.search_artifacts(question, ARTIFACT_EVIDENCE_ITEMS)
+                    .into_iter()
+                    .map(artifact_evidence)
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let asked = match self.groups() {
+            Some(groups) => groups.ask_group(question).await,
+            None => Vec::new(),
+        };
+        // Shared details lead; each other kind keeps a place before the rest fills in.
+        let mut details = details.into_iter();
+        let mut artifacts = artifacts.into_iter();
+        let mut ordered: Vec<sovra_core::GroupEvidence> =
+            details.by_ref().take(DETAILS_FIRST).collect();
+        ordered.extend(artifacts.next());
+        ordered.extend(asked.into_iter().take(ASKED_EVIDENCE_ITEMS));
+        ordered.extend(artifacts);
+        ordered.extend(details);
+        for item in ordered {
+            context.push_group(item);
         }
     }
 }
+
+/// Shared details that come before anything else in group recall.
+const DETAILS_FIRST: usize = 3;
+/// Most answers from other computers' memories one recall adds.
+const ASKED_EVIDENCE_ITEMS: usize = 2;
+/// How long recall waits for the group's computers to answer.
+const ASK_TIMEOUT: Duration = Duration::from_millis(2_500);
+/// A computer that did not answer is not asked again for this long.
+const ASK_COOLDOWN_MS: i64 = 5 * 60 * 1_000;
 
 /// Most shared artifacts one recall adds.
 const ARTIFACT_EVIDENCE_ITEMS: usize = 2;
@@ -234,8 +291,19 @@ impl GroupRuntime {
                 }
             };
             let groups = Arc::new(
-                Groups::open(transport, services.store, events, readers, spawn.clone()).await,
+                Groups::open(
+                    transport,
+                    services.store,
+                    events,
+                    readers.clone(),
+                    spawn.clone(),
+                )
+                .await,
             );
+            *readers
+                .2
+                .write()
+                .expect("groups handle lock is never poisoned") = Some(Arc::downgrade(&groups));
             let serving = groups.clone();
             spawn(Box::pin(async move {
                 let handler: Arc<dyn PeerHandler> = Arc::new(GroupHandler(serving.clone()));
@@ -261,6 +329,15 @@ impl GroupRuntime {
             knowledge,
             _tasks: tasks,
         }
+    }
+
+    /// Lets other computers' helpers ask this computer's memory (when the owner allows).
+    pub(crate) fn attach_memory(&self, open: LocalMemory) {
+        *self
+            .knowledge
+            .1
+            .write()
+            .expect("local memory lock is never poisoned") = Some(open);
     }
 
     pub(crate) fn send(&self, command: GroupCommand) {
@@ -297,6 +374,11 @@ struct Inner {
     roster: Option<GroupState>,
     view: KnowledgeView,
     invites: InviteBook,
+    /// Questions other computers asked this one, newest first (not saved).
+    asks: Vec<AskRecord>,
+    limiter: AskLimiter,
+    /// Computers that recently did not answer, and until when they are skipped.
+    quiet_until: std::collections::BTreeMap<DeviceId, Timestamp>,
 }
 
 struct Groups {
@@ -337,6 +419,9 @@ impl Groups {
                 roster: None,
                 view: KnowledgeView::default(),
                 invites: InviteBook::default(),
+                asks: Vec::new(),
+                limiter: AskLimiter::default(),
+                quiet_until: std::collections::BTreeMap::new(),
             }),
         };
         {
@@ -396,9 +481,14 @@ impl Groups {
     }
 
     async fn publish_loaded(&self) {
-        let (roster, shared) = {
+        let (roster, shared, settings, recent) = {
             let inner = self.inner.lock().await;
-            (inner.roster.clone(), Self::shared(&inner.view))
+            (
+                inner.roster.clone(),
+                Self::shared(&inner.view),
+                inner.record.federated,
+                inner.asks.clone(),
+            )
         };
         self.emit(GroupEvent::Loaded {
             this_computer: self.me(),
@@ -406,6 +496,7 @@ impl Groups {
         })
         .await;
         self.publish_shared(shared).await;
+        self.emit(GroupEvent::Federated { settings, recent }).await;
     }
 
     async fn publish_changed(&self, roster: Option<GroupState>, shared: SharedNow) {
@@ -740,6 +831,28 @@ impl Groups {
             GroupCommand::Erase { detail } => {
                 self.knowledge(KnowledgeBody::Redact { detail }).await;
             }
+            GroupCommand::AskGroup { question } => {
+                // Waiting on other computers must not hold up the next command.
+                let groups = self.clone();
+                (self.spawn)(Box::pin(async move {
+                    let answers = groups
+                        .ask_peers(&question, true)
+                        .await
+                        .into_iter()
+                        .map(|(_, answer)| answer)
+                        .collect();
+                    groups.emit(GroupEvent::Answers { question, answers }).await;
+                }));
+            }
+            GroupCommand::SetFederated(settings) => {
+                let recent = {
+                    let mut inner = self.inner.lock().await;
+                    inner.record.federated = settings;
+                    self.persist(&inner).await;
+                    inner.asks.clone()
+                };
+                self.emit(GroupEvent::Federated { settings, recent }).await;
+            }
             GroupCommand::ShareArtifact {
                 title,
                 kind,
@@ -819,6 +932,7 @@ impl Groups {
             membership: vec![op],
             knowledge: Vec::new(),
             addresses: Vec::new(),
+            federated: inner.record.federated,
         };
         self.refold(&mut inner).await;
         self.persist(&inner).await;
@@ -1252,6 +1366,7 @@ impl PeerHandler for GroupHandler {
                     .admit(from, group, proof, person, computer_name, address)
                     .await
             }
+            PeerRequest::Ask { question, .. } => groups.answer(from, &question).await,
             other => groups.serve_peer(other).await,
         }
     }
@@ -1311,10 +1426,198 @@ impl Groups {
                 self.merge(membership, knowledge).await;
                 PeerResponse::Accepted
             }
-            PeerRequest::Join { .. } => PeerResponse::Refused {
+            PeerRequest::Join { .. } | PeerRequest::Ask { .. } => PeerResponse::Refused {
                 reason: Refusal::Malformed,
             },
         }
+    }
+
+    /// Federated recall, answering side: searches this computer's own memory for a
+    /// member's question, if the owner turned answering on, and logs what was asked.
+    async fn answer(&self, from: DeviceId, question: &str) -> PeerResponse {
+        let refused = PeerResponse::Refused {
+            reason: Refusal::NotAnswering,
+        };
+        let Some(question) = check_ask(question) else {
+            return PeerResponse::Refused {
+                reason: Refusal::Malformed,
+            };
+        };
+        let (owner, asked_by, computer) = {
+            let mut inner = self.inner.lock().await;
+            let Some(roster) = inner.roster.clone() else {
+                return refused;
+            };
+            let reads = roster
+                .role_of(&from)
+                .is_some_and(sovra_core::group::Role::reads);
+            if !inner.record.federated.answer || !reads || !inner.limiter.allow(from, now()) {
+                return refused;
+            }
+            let me = self.me();
+            let name_of = |device: &DeviceId| roster.owner_of(device).map(|m| m.name.clone());
+            let computer = roster
+                .owner_of(&from)
+                .and_then(|member| member.devices.get(&from))
+                .map(|entry| entry.name.clone())
+                .unwrap_or_default();
+            (
+                name_of(&me).unwrap_or_default(),
+                name_of(&from).unwrap_or_default(),
+                computer,
+            )
+        };
+        let found = match self.knowledge.local_reader() {
+            Some(reader) => {
+                let search = reader.search(sovra_core::MemorySearch {
+                    text: question.clone(),
+                    entity: None,
+                    valid_at: None,
+                    known_at: None,
+                });
+                match tokio::time::timeout(ASK_TIMEOUT, search).await {
+                    Ok(Ok(context)) => context
+                        .memories
+                        .into_iter()
+                        .map(|memory| (memory.statement, memory.learned_at))
+                        .collect(),
+                    Ok(Err(error)) => {
+                        tracing::debug!(%error, "federated recall search failed");
+                        Vec::new()
+                    }
+                    Err(_) => Vec::new(),
+                }
+            }
+            // Remembering is paused or there is no memory: nothing to share.
+            None => Vec::new(),
+        };
+        let items = federated_items(found, &owner);
+        let (settings, recent) = {
+            let mut inner = self.inner.lock().await;
+            log_ask(
+                &mut inner.asks,
+                AskRecord {
+                    asked_by,
+                    computer,
+                    question,
+                    answered: items.len(),
+                    at: now(),
+                },
+            );
+            (inner.record.federated, inner.asks.clone())
+        };
+        self.emit(GroupEvent::Federated { settings, recent }).await;
+        PeerResponse::Answered { items }
+    }
+
+    /// Federated recall, asking side: sends `question` to every other computer in the
+    /// group at once and turns their answers into attributed evidence. Computers that
+    /// do not answer are skipped for a while so recall never keeps waiting on them.
+    async fn ask_group(&self, question: &str) -> Vec<sovra_core::GroupEvidence> {
+        if !self.inner.lock().await.record.federated.ask {
+            return Vec::new();
+        }
+        self.ask_peers(question, false)
+            .await
+            .into_iter()
+            .enumerate()
+            .map(|(index, (device, answer))| sovra_core::GroupEvidence {
+                citation: format!("group-ask:{}:{index}", &device.to_hex()[..12]),
+                statement: answer.statement,
+                shared_by: answer.from,
+                computer: answer.computer,
+                shared_at: answer.recorded_at,
+                valid_at: None,
+                disputed: false,
+                agreed_by: 0,
+            })
+            .collect()
+    }
+
+    /// Asks every other computer in the group at once. Used by recall (when asking is
+    /// on) and by "Ask my group", which is itself the person's say-so for that question.
+    /// `explicit` (the person pressed Ask) asks even computers on a cooldown.
+    async fn ask_peers(
+        &self,
+        question: &str,
+        explicit: bool,
+    ) -> Vec<(DeviceId, sovra_core::group::GroupAnswer)> {
+        let Some(question) = check_ask(question) else {
+            return Vec::new();
+        };
+        let (group, peers) = {
+            let inner = self.inner.lock().await;
+            let Some(roster) = inner.roster.clone() else {
+                return Vec::new();
+            };
+            let at = now();
+            let peers: Vec<(PeerAddress, String, String)> = self
+                .peers(&inner)
+                .into_iter()
+                .filter(|peer| {
+                    explicit
+                        || inner
+                            .quiet_until
+                            .get(&peer.device)
+                            .is_none_or(|until| *until <= at)
+                })
+                .map(|peer| {
+                    let member = roster.owner_of(&peer.device);
+                    let person = member.map(|m| m.name.clone()).unwrap_or_default();
+                    let computer = member
+                        .and_then(|m| m.devices.get(&peer.device))
+                        .map(|entry| entry.name.clone())
+                        .unwrap_or_default();
+                    (peer, person, computer)
+                })
+                .collect();
+            (roster.group, peers)
+        };
+        let asks = peers.into_iter().map(|(peer, person, computer)| {
+            let request = PeerRequest::Ask {
+                group,
+                question: question.clone(),
+            };
+            async move {
+                let answer =
+                    tokio::time::timeout(ASK_TIMEOUT, self.transport.request(&peer, request)).await;
+                (peer.device, person, computer, answer)
+            }
+        });
+        let answers = futures::future::join_all(asks).await;
+        let mut evidence = Vec::new();
+        let mut quiet = Vec::new();
+        let mut answered = Vec::new();
+        for (device, person, computer, answer) in answers {
+            match answer {
+                Ok(Ok(PeerResponse::Answered { items })) => {
+                    answered.push(device);
+                    for item in items {
+                        evidence.push((
+                            device,
+                            sovra_core::group::GroupAnswer {
+                                statement: item.statement,
+                                from: person.clone(),
+                                computer: computer.clone(),
+                                recorded_at: item.recorded_at,
+                            },
+                        ));
+                    }
+                }
+                _ => quiet.push(device),
+            }
+        }
+        if !quiet.is_empty() || !answered.is_empty() {
+            let until = Timestamp(now().0.saturating_add(ASK_COOLDOWN_MS));
+            let mut inner = self.inner.lock().await;
+            for device in quiet {
+                inner.quiet_until.insert(device, until);
+            }
+            for device in answered {
+                inner.quiet_until.remove(&device);
+            }
+        }
+        evidence
     }
 }
 
@@ -1357,6 +1660,9 @@ fn refusal_problem(reason: Refusal) -> GroupProblem {
             GroupProblem::BadInvite
         }
         Refusal::NotAMember => GroupProblem::NotAllowed,
+        Refusal::NotAnswering => {
+            GroupProblem::Other("That computer isn't answering questions from the group.".into())
+        }
     }
 }
 

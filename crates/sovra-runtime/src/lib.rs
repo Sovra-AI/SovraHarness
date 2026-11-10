@@ -498,6 +498,15 @@ async fn serve(
     let mut specialists = default_sovra_srx_agents();
     let memory = open_memory(memory_factory).await;
     auth.attach_store(memory.clone());
+    {
+        // Federated recall answers from this computer's own memory, by keyword, and
+        // only while remembering is on (the reader is `None` when it is paused).
+        let store = memory.clone();
+        let control = memory_control.clone();
+        groups.attach_memory(Arc::new(move || {
+            recalling::reader(store.as_ref(), &control, None)
+        }));
+    }
     let mut memory_semantic = memory_semantic::SemanticRuntime::start(
         memory.clone(),
         memory_repository,

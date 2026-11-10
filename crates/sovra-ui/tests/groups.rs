@@ -10,8 +10,9 @@ use sovra_core::artifacts::{
     Artifact, ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactKind,
 };
 use sovra_core::group::{
-    DetailStatus, DeviceId, GroupCommand, GroupEvent, GroupId, GroupState, MembershipBody, OpHash,
-    PersonId, Role, SharedArtifact, SharedDetail, Signature, SignatureVerifier, UnsignedOp, fold,
+    AskRecord, DetailStatus, DeviceId, FederatedSettings, GroupAnswer, GroupCommand, GroupEvent,
+    GroupId, GroupState, MembershipBody, OpHash, PersonId, Role, SharedArtifact, SharedDetail,
+    Signature, SignatureVerifier, UnsignedOp, fold,
 };
 use sovra_core::models::InterfaceScale;
 use sovra_core::{Command, Event, NavTab, Timestamp};
@@ -229,7 +230,12 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
             window.render_frame(cx);
             let column = window.find("settings-column").bounds();
-            for id in ["settings-groups", "groups-roster", "groups-knowledge"] {
+            for id in [
+                "settings-groups",
+                "groups-roster",
+                "groups-knowledge",
+                "groups-federated",
+            ] {
                 let bounds = window.find(id).bounds();
                 assert!(
                     bounds.size.width <= column.size.width + px(1.),
@@ -372,4 +378,75 @@ fn shared_artifacts_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mu
         })
         .expect("window open");
     }
+}
+
+#[gpui_kit::test]
+fn group_members_can_ask_each_others_memories_with_consent_and_a_log(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 3200.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(
+        &events,
+        GroupEvent::Federated {
+            settings: FederatedSettings::default(),
+            recent: vec![AskRecord {
+                asked_by: "Dad".into(),
+                computer: "Dad's desktop".into(),
+                question: "when is bin day".into(),
+                answered: 1,
+                at: Timestamp(5),
+            }],
+        },
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        assert!(window.find("groups-federated").visible());
+        assert!(
+            window.find(("groups-asked", 0usize)).visible(),
+            "the owner sees who asked"
+        );
+        window.click("groups-federated-answer", cx);
+        window.click("groups-ask-input", cx);
+        window.input("who is our dentist", cx);
+        window.click("groups-ask", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    let sent = drain(&commands);
+    assert!(sent.contains(&Command::Group(GroupCommand::SetFederated(
+        FederatedSettings {
+            answer: true,
+            ask: false,
+        }
+    ))));
+    assert!(sent.contains(&Command::Group(GroupCommand::AskGroup {
+        question: "who is our dentist".into()
+    })));
+
+    group_event(
+        &events,
+        GroupEvent::Answers {
+            question: "who is our dentist".into(),
+            answers: vec![GroupAnswer {
+                statement: "Dad's dentist is Dr Shah".into(),
+                from: "Dad".into(),
+                computer: "Dad's desktop".into(),
+                recorded_at: Timestamp(3),
+            }],
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find(("groups-answer", 0usize)).visible());
+    })
+    .expect("window open");
 }
