@@ -92,7 +92,7 @@ impl ModelsView {
         let mut section = settings_section(
             "settings-groups",
             "Groups",
-            "Share helpers and knowledge with your family or team, computer to computer. Nothing leaves your computers through a Sovra server, and nothing is shared until you choose to share it.",
+            "Share helpers and knowledge with your family or team, computer to computer. Nothing leaves your computers through a Sovra server, nothing is shared until you choose to share it, and what you share is locked so only computers in your group can read it.",
             cx,
         );
         if let Some(problem) = &view.problem {

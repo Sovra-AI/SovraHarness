@@ -8,10 +8,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+aes-gcm = { workspace = true }
 async-trait = { workspace = true }
+curve25519-dalek = { workspace = true }
+getrandom = { workspace = true }
 iroh = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 sovra-core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

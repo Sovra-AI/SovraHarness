@@ -12,6 +12,7 @@ mod federated;
 mod fold;
 mod keys;
 mod knowledge;
+mod lane_keys;
 mod link;
 mod membership;
 mod pairing;
@@ -30,8 +31,9 @@ pub use keys::{DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, Si
 pub use knowledge::{
     DetailStatus, KnowledgeBody, KnowledgeOp, KnowledgeRejection, KnowledgeView, LaneId,
     MAX_SHARED_DETAIL_CHARS, MAX_SHARED_TOPICS, ShareError, SharedDetail, SharedHit,
-    UnsignedKnowledge, check_share, fold_knowledge,
+    UnsignedKnowledge, check_share, fold_knowledge, fold_knowledge_opened,
 };
+pub use lane_keys::{Bytes, GroupCipher, LaneKey, current_devices, sealed_aad, usable_key};
 pub use link::{JOIN_LINK_PREFIX, JoinLink, LinkError, MAX_JOIN_LINK_CHARS};
 pub use membership::{MembershipBody, MembershipOp, Role, UnsignedOp};
 pub use pairing::{

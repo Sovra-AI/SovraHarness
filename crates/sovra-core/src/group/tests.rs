@@ -1530,3 +1530,143 @@ fn the_owner_sees_recent_questions_newest_first_and_answering_starts_off() {
     view.apply(GroupEvent::LeftGroup);
     assert!(view.recent_asks.is_empty() && view.answers.is_none());
 }
+
+// ---- lane encryption -----------------------------------------------------
+
+fn grant_body(key: u8, devices: &[u8]) -> KnowledgeBody {
+    KnowledgeBody::KeyGrant {
+        key: OpHash([key; 32]),
+        grants: devices
+            .iter()
+            .map(|n| (device(*n), Bytes(vec![*n, key])))
+            .collect(),
+    }
+}
+
+#[test]
+fn removing_someone_retires_every_key_they_held_and_newcomers_can_be_granted() {
+    let mut log = family_of_three();
+    let mut shared = Shared::new(&log);
+    shared.push(device(1), 3_000, grant_body(1, &[1, 2, 3]));
+    let view = shared.view();
+    assert_eq!(view.usable_key(&shared.roster), Some(OpHash([1; 32])));
+    assert_eq!(view.keys[&OpHash([1; 32])].grants.len(), 3);
+    assert!(
+        view.keys[&OpHash([1; 32])]
+            .missing(&shared.roster)
+            .is_empty()
+    );
+
+    log.push(
+        device(1),
+        4_000,
+        MembershipBody::RemovePerson { person: person(3) },
+    );
+    shared.roster = log.state();
+    let view = shared.view();
+    assert_eq!(
+        view.usable_key(&shared.roster),
+        None,
+        "Sam held it, so it is retired"
+    );
+    assert!(
+        view.keys.contains_key(&OpHash([1; 32])),
+        "history under the old key stays readable"
+    );
+
+    shared.push(device(1), 5_000, grant_body(2, &[1, 2]));
+    let view = shared.view();
+    assert_eq!(view.usable_key(&shared.roster), Some(OpHash([2; 32])));
+
+    log.add(4, Role::Member, 6_000);
+    shared.roster = log.state();
+    let view = shared.view();
+    assert_eq!(
+        view.keys[&OpHash([2; 32])].missing(&shared.roster),
+        std::collections::BTreeSet::from([device(4)]),
+        "a newcomer still needs a copy"
+    );
+    assert_eq!(
+        view.usable_key(&shared.roster),
+        Some(OpHash([2; 32])),
+        "adding someone does not retire a key"
+    );
+}
+
+#[test]
+fn sealed_shares_stay_unreadable_until_opened_then_fold_like_plain_ones() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let sealed = shared.push(
+        device(2),
+        3_000,
+        KnowledgeBody::Sealed {
+            key: OpHash([1; 32]),
+            ciphertext: Bytes(vec![1, 2, 3]),
+        },
+    );
+    let view = shared.view();
+    assert!(view.unreadable.contains(&sealed.hash()));
+    assert!(view.details.is_empty());
+    assert!(view.rejected.is_empty());
+    assert_eq!(
+        view.heads,
+        vec![sealed.hash()],
+        "it still moves the chain on"
+    );
+
+    let opened = std::collections::BTreeMap::from([(
+        sealed.hash(),
+        share_body("The boiler service is on 12 March", Vec::new()),
+    )]);
+    let view = fold_knowledge_opened(
+        &shared.roster,
+        shared.lane,
+        &shared.ops,
+        &FakeVerifier,
+        &opened,
+    );
+    assert!(view.unreadable.is_empty());
+    let detail = &view.details[&sealed.hash()];
+    assert_eq!(detail.shared_by, "Person 2");
+    assert_eq!(view.search("boiler service", 5).len(), 1);
+
+    // Sealing inside sealing, or a grant hidden inside a seal, is refused.
+    let nested = std::collections::BTreeMap::from([(sealed.hash(), grant_body(9, &[2]))]);
+    let view = fold_knowledge_opened(
+        &shared.roster,
+        shared.lane,
+        &shared.ops,
+        &FakeVerifier,
+        &nested,
+    );
+    assert_eq!(
+        view.rejected.get(&sealed.hash()),
+        Some(&KnowledgeRejection::InvalidDetail)
+    );
+}
+
+#[test]
+fn sealed_bytes_travel_as_hex_and_are_bound_to_their_place() {
+    let bytes = Bytes(vec![0, 15, 16, 255]);
+    let text = serde_json::to_string(&bytes).expect("encodes");
+    assert_eq!(text, "\"000f10ff\"");
+    assert_eq!(
+        serde_json::from_str::<Bytes>(&text).expect("decodes"),
+        bytes
+    );
+    assert!(serde_json::from_str::<Bytes>("\"0g\"").is_err());
+    assert!(serde_json::from_str::<Bytes>("\"abc\"").is_err());
+
+    let log = family_of_three();
+    let lane = LaneId::whole_group(&log.group);
+    let here = sealed_aad(&log.group, &lane, &OpHash([1; 32]), &device(2));
+    assert_ne!(
+        here,
+        sealed_aad(&log.group, &lane, &OpHash([2; 32]), &device(2))
+    );
+    assert_ne!(
+        here,
+        sealed_aad(&log.group, &lane, &OpHash([1; 32]), &device(3))
+    );
+}

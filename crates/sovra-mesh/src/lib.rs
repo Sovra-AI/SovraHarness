@@ -7,6 +7,7 @@
 //! lives in `sovra_core::group`, and every task runs on the spawner the runtime
 //! hands in, so the runtime owns cancellation. This crate never names `tokio`.
 
+mod cipher;
 mod store;
 
 use std::str::FromStr as _;
@@ -57,6 +58,7 @@ impl SignatureVerifier for Ed25519Verifier {
 pub struct Mesh {
     endpoint: Endpoint,
     secret: SecretKey,
+    cipher: Arc<cipher::MeshCipher>,
 }
 
 impl Mesh {
@@ -74,7 +76,12 @@ impl Mesh {
             .await
             .map_err(|error| MeshError::Bind(error.to_string()))?;
         tracing::info!(device = %endpoint.id().fmt_short(), ?reach, "group network ready");
-        Ok(Self { endpoint, secret })
+        let cipher = Arc::new(cipher::MeshCipher::new(&device_secret));
+        Ok(Self {
+            endpoint,
+            secret,
+            cipher,
+        })
     }
 
     /// The public key for a device secret, without binding anything.
@@ -153,6 +160,10 @@ impl GroupTransport for Mesh {
 
     fn verifier(&self) -> Arc<dyn SignatureVerifier + Send + Sync> {
         Arc::new(Ed25519Verifier)
+    }
+
+    fn cipher(&self) -> Arc<dyn sovra_core::group::GroupCipher> {
+        self.cipher.clone()
     }
 
     fn address(&self) -> PeerAddress {

@@ -194,6 +194,8 @@ pub trait GroupTransport: Send + Sync {
     fn this_device(&self) -> DeviceId;
     fn sign(&self, message: &[u8]) -> Signature;
     fn verifier(&self) -> Arc<dyn SignatureVerifier + Send + Sync>;
+    /// Lane encryption with this computer's device key (see `group::lane_keys`).
+    fn cipher(&self) -> Arc<dyn super::lane_keys::GroupCipher>;
     /// How others can reach this computer right now (for join links).
     fn address(&self) -> PeerAddress;
     /// Accepts connections and hands each request to `handler`, until [`Self::close`].

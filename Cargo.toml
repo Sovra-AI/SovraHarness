@@ -46,6 +46,9 @@ async-channel = "2.5.0"
 async-trait = "0.1.89"
 # Google sign-in: PKCE verifier/state randomness and base64url (Gmail raw messages).
 base64 = "0.23.1"
+# Lane encryption in sovra-mesh: the versions iroh already builds (no second copies).
+aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc"] }
+curve25519-dalek = { version = "=5.0.0", default-features = false }
 getrandom = "0.4.3"
 # Peer-to-peer QUIC dialled by public key, with hole punching and encrypted relay
 # fallback (MIT OR Apache-2.0, rustls over ring, no OpenSSL). Stable wire protocol and

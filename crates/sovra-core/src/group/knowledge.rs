@@ -27,6 +27,7 @@ use sha2::{Digest as _, Sha256};
 use super::dag::{self, DagNode};
 use super::fold::GroupState;
 use super::keys::{DeviceId, GroupId, OpHash, PersonId, Signature, SignatureVerifier};
+use super::lane_keys::{Bytes, LaneKey};
 use super::shared_artifact::{MAX_ORIGIN_CHARS, SharedArtifact, check_artifact};
 use crate::Timestamp;
 use crate::artifacts::ArtifactKind;
@@ -81,6 +82,13 @@ pub enum KnowledgeBody {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         origin: String,
     },
+    /// Hands the lane key `key` to member computers: one sealed copy per computer.
+    KeyGrant {
+        key: OpHash,
+        grants: Vec<(DeviceId, Bytes)>,
+    },
+    /// Any other operation, encrypted with lane key `key` (see `group::lane_keys`).
+    Sealed { key: OpHash, ciphertext: Bytes },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +113,10 @@ pub struct KnowledgeOp {
     pub(super) signature: Signature,
     #[serde(skip)]
     hash: std::sync::OnceLock<OpHash>,
+    /// Whether the signature checked out, remembered after the first fold. Each
+    /// computer checks with one verifier (its own transport's), so the answer holds.
+    #[serde(skip)]
+    signed: std::sync::OnceLock<bool>,
 }
 
 impl PartialEq for KnowledgeOp {
@@ -131,6 +143,7 @@ impl UnsignedKnowledge {
             unsigned: self,
             signature,
             hash: std::sync::OnceLock::new(),
+            signed: std::sync::OnceLock::new(),
         }
     }
 }
@@ -138,6 +151,17 @@ impl UnsignedKnowledge {
 impl KnowledgeOp {
     pub fn hash(&self) -> OpHash {
         *self.hash.get_or_init(|| self.unsigned.hash())
+    }
+
+    /// Whether its author really signed it; checked once, then remembered.
+    pub fn signed_by_author(&self, verifier: &dyn SignatureVerifier) -> bool {
+        *self.signed.get_or_init(|| {
+            verifier.verify(
+                &self.unsigned.author,
+                &self.unsigned.signing_bytes(),
+                &self.signature,
+            )
+        })
     }
 
     pub fn unsigned(&self) -> &UnsignedKnowledge {
@@ -257,6 +281,10 @@ pub struct KnowledgeView {
     pub details: BTreeMap<OpHash, SharedDetail>,
     /// Every shared artifact version, by id.
     pub artifacts: BTreeMap<OpHash, SharedArtifact>,
+    /// Lane keys and which computers hold a copy.
+    pub keys: BTreeMap<OpHash, LaneKey>,
+    /// Sealed operations this computer cannot open (yet): no key for them here.
+    pub unreadable: BTreeSet<OpHash>,
     pub rejected: BTreeMap<OpHash, KnowledgeRejection>,
     pub pending: BTreeSet<OpHash>,
     pub forked: BTreeSet<DeviceId>,
@@ -294,6 +322,19 @@ pub fn fold_knowledge<'a>(
     ops: impl IntoIterator<Item = &'a KnowledgeOp>,
     verifier: &dyn SignatureVerifier,
 ) -> KnowledgeView {
+    fold_knowledge_opened(roster, lane, ops, verifier, &BTreeMap::new())
+}
+
+/// [`fold_knowledge`] with the plaintext of sealed operations this computer could open
+/// (`opened`, by operation hash). Sealed operations missing from it are kept, counted
+/// as applied for ordering, and listed in [`KnowledgeView::unreadable`].
+pub fn fold_knowledge_opened<'a>(
+    roster: &GroupState,
+    lane: LaneId,
+    ops: impl IntoIterator<Item = &'a KnowledgeOp>,
+    verifier: &dyn SignatureVerifier,
+    opened: &BTreeMap<OpHash, KnowledgeBody>,
+) -> KnowledgeView {
     let group = roster.group;
     let mut view = KnowledgeView {
         lane: Some((group, lane)),
@@ -309,7 +350,7 @@ pub fn fold_knowledge<'a>(
             Some(KnowledgeRejection::WrongGroup)
         } else if unsigned.lane != lane {
             Some(KnowledgeRejection::WrongLane)
-        } else if !verifier.verify(&unsigned.author, &unsigned.signing_bytes(), &op.signature) {
+        } else if !op.signed_by_author(verifier) {
             Some(KnowledgeRejection::BadSignature)
         } else {
             None
@@ -359,10 +400,26 @@ pub fn fold_knowledge<'a>(
                 }
             }
         };
+        let body = match &op.unsigned.body {
+            KnowledgeBody::Sealed { .. } => match opened.get(hash) {
+                Some(KnowledgeBody::Sealed { .. } | KnowledgeBody::KeyGrant { .. }) => {
+                    view.rejected
+                        .insert(*hash, KnowledgeRejection::InvalidDetail);
+                    continue;
+                }
+                Some(inner) => inner,
+                None => {
+                    view.unreadable.insert(*hash);
+                    applied.insert(*hash);
+                    continue;
+                }
+            },
+            plain => plain,
+        };
         // Viewers read but never add. Former members are judged by what they could do
         // then, which nobody recorded, so their additions are kept (hidden) instead.
         let adds = matches!(
-            op.unsigned.body,
+            body,
             KnowledgeBody::Share { .. }
                 | KnowledgeBody::ShareArtifact { .. }
                 | KnowledgeBody::Corroborate { .. }
@@ -371,7 +428,26 @@ pub fn fold_knowledge<'a>(
             view.rejected.insert(*hash, KnowledgeRejection::NotAllowed);
             continue;
         }
-        let result = match &op.unsigned.body {
+        let result = match body {
+            // Kept even from someone who has since left: removing a person must not
+            // make what the group already shared under their key unreadable. Their key
+            // is retired for new content by `LaneKey::usable` instead.
+            KnowledgeBody::KeyGrant { key, grants } => {
+                let entry = view.keys.entry(*key).or_default();
+                entry.created_at = Some(
+                    entry
+                        .created_at
+                        .map_or(op.unsigned.at, |at| at.min(op.unsigned.at)),
+                );
+                for (device, sealed) in grants {
+                    entry
+                        .grants
+                        .entry(*device)
+                        .or_insert_with(|| sealed.clone());
+                }
+                Ok(())
+            }
+            KnowledgeBody::Sealed { .. } => Err(KnowledgeRejection::InvalidDetail),
             KnowledgeBody::ShareArtifact {
                 title,
                 kind,
@@ -470,7 +546,7 @@ pub fn fold_knowledge<'a>(
                         Err(KnowledgeRejection::NotAllowed)
                     }
                     Some(_) => {
-                        if matches!(op.unsigned.body, KnowledgeBody::Redact { .. }) {
+                        if matches!(body, KnowledgeBody::Redact { .. }) {
                             redactions.push(*detail);
                         } else {
                             withdrawals.push(*detail);
@@ -881,6 +957,11 @@ impl KnowledgeView {
         }
         latest.sort();
         latest
+    }
+
+    /// The newest lane key that may encrypt new content (see `lane_keys`).
+    pub fn usable_key(&self, roster: &GroupState) -> Option<OpHash> {
+        super::lane_keys::usable_key(&self.keys, roster)
     }
 
     /// The next operation this computer should sign in this lane.

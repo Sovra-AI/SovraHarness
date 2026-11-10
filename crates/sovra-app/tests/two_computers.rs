@@ -21,7 +21,7 @@ const WAIT: Duration = Duration::from_secs(60);
 struct Computer {
     client: Client,
     events: async_channel::Receiver<Event>,
-    _dir: TempDir,
+    dir: TempDir,
 }
 
 /// A folder removed when the test ends.
@@ -88,7 +88,7 @@ impl Computer {
         Self {
             client,
             events,
-            _dir: TempDir(dir),
+            dir: TempDir(dir),
         }
     }
 
@@ -244,6 +244,15 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
         back.iter().find(|a| a.id == list.id).expect("kept").status,
         DetailStatus::Replaced { .. }
     ));
+
+    // What is saved on disk is sealed: none of the shared words appear in either record.
+    for computer in [&mum, &dad] {
+        let saved = std::fs::read_to_string(computer.dir.0.join("groups").join("group.json"))
+            .expect("the group record is saved");
+        for words in ["12 March", "bread", "Shopping list"] {
+            assert!(!saved.contains(words), "{words:?} is readable on disk");
+        }
+    }
 
     // Federated recall: nothing comes back until Mum lets the group ask her memory.
     dad.send(GroupCommand::AskGroup {

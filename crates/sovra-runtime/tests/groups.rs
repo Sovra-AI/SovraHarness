@@ -48,6 +48,66 @@ struct LoopTransport {
     me: DeviceId,
     net: Arc<Network>,
     closed: tokio::sync::Notify,
+    cipher: Arc<FakeCipher>,
+}
+
+/// Deterministic stand-in for lane encryption: only the named computer opens a seal,
+/// and content opens only with its key and associated data. Not cryptography.
+struct FakeCipher {
+    me: DeviceId,
+    next: std::sync::atomic::AtomicU64,
+}
+
+/// A repeating pad from the key and place: cheap, and wrong with any other key.
+fn stream(key: &[u8], aad: &[u8], len: usize) -> Vec<u8> {
+    let pad = Sha256::digest([key, aad].concat());
+    pad.iter().copied().cycle().take(len).collect()
+}
+
+impl sovra_core::group::GroupCipher for FakeCipher {
+    fn seal_for(&self, device: &DeviceId, plaintext: &[u8]) -> Option<Vec<u8>> {
+        let mut out = device.as_bytes().to_vec();
+        out.extend(
+            plaintext
+                .iter()
+                .zip(stream(device.as_bytes(), b"seal", plaintext.len()))
+                .map(|(a, b)| a ^ b),
+        );
+        Some(out)
+    }
+    fn open_sealed(&self, sealed: &[u8]) -> Option<Vec<u8>> {
+        let (to, body) = sealed.split_at_checked(32)?;
+        (to == self.me.as_bytes()).then(|| {
+            body.iter()
+                .zip(stream(to, b"seal", body.len()))
+                .map(|(a, b)| a ^ b)
+                .collect()
+        })
+    }
+    fn encrypt(&self, key: &[u8; 32], aad: &[u8], plaintext: &[u8]) -> Option<Vec<u8>> {
+        let mut out: Vec<u8> = Sha256::digest([key.as_slice(), aad, plaintext].concat()).to_vec();
+        out.extend(
+            plaintext
+                .iter()
+                .zip(stream(key, aad, plaintext.len()))
+                .map(|(a, b)| a ^ b),
+        );
+        Some(out)
+    }
+    fn decrypt(&self, key: &[u8; 32], aad: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
+        let (tag, body) = ciphertext.split_at_checked(32)?;
+        let plaintext: Vec<u8> = body
+            .iter()
+            .zip(stream(key, aad, body.len()))
+            .map(|(a, b)| a ^ b)
+            .collect();
+        (Sha256::digest([key.as_slice(), aad, &plaintext].concat()).as_slice() == tag)
+            .then_some(plaintext)
+    }
+    fn random_key(&self) -> Option<[u8; 32]> {
+        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(Sha256::digest([self.me.as_bytes().as_slice(), &n.to_le_bytes()].concat()).into())
+    }
 }
 
 #[async_trait::async_trait]
@@ -62,6 +122,10 @@ impl GroupTransport for LoopTransport {
 
     fn verifier(&self) -> Arc<dyn SignatureVerifier + Send + Sync> {
         Arc::new(FakeVerifier)
+    }
+
+    fn cipher(&self) -> Arc<dyn sovra_core::group::GroupCipher> {
+        self.cipher.clone()
     }
 
     fn address(&self) -> PeerAddress {
@@ -134,6 +198,7 @@ struct Computer {
     device: DeviceId,
     client: Client,
     events: async_channel::Receiver<Event>,
+    store: Arc<MemoryStore>,
 }
 
 impl Computer {
@@ -143,14 +208,19 @@ impl Computer {
             me: device,
             net: net.clone(),
             closed: tokio::sync::Notify::new(),
+            cipher: Arc::new(FakeCipher {
+                me: device,
+                next: std::sync::atomic::AtomicU64::new(0),
+            }),
         });
+        let store = Arc::new(MemoryStore::default());
         let client = sovra_runtime::start_with_services(
             "group-test",
             AgentConfig::default(),
             RuntimeServices {
                 groups: Some(GroupServices {
                     transport: Box::new(move || Box::pin(async move { Ok(transport) })),
-                    store: Arc::new(MemoryStore::default()),
+                    store: store.clone(),
                 }),
                 ..RuntimeServices::default()
             },
@@ -161,6 +231,7 @@ impl Computer {
             device,
             client,
             events,
+            store,
         }
     }
 
@@ -511,4 +582,78 @@ async fn shared_artifacts_reach_a_new_member_in_rounds_and_edits_become_new_vers
     });
     mum.wait(|event| matches!(event, GroupEvent::Problem(_)).then_some(()))
         .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shared_content_is_sealed_on_disk_and_removing_someone_rotates_the_key() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 31);
+    let dad = Computer::start(&net, 32);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Laptop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Desktop".into(),
+    });
+    let joined = dad.roster(|state| state.people.len() == 2).await;
+
+    mum.send(GroupCommand::Share {
+        text: "The spare key is under the blue pot".into(),
+        about: Vec::new(),
+    });
+    dad.knowledge(|details| has(details, "blue pot")).await;
+    for computer in [&mum, &dad] {
+        let saved = serde_json::to_string(&*computer.store.0.lock().expect("not poisoned"))
+            .expect("encodes");
+        assert!(!saved.contains("blue pot"), "only sealed words are saved");
+        assert!(saved.contains("key_grant") && saved.contains("sealed"));
+    }
+    let keys_before = lane_keys(&mum.store);
+    assert_eq!(keys_before.len(), 1);
+    assert_eq!(keys_before[0].1, BTreeSet::from([mum.device, dad.device]));
+
+    let dad_person = joined.owner_of(&dad.device).expect("member").person;
+    mum.send(GroupCommand::RemovePerson { person: dad_person });
+    mum.roster(|state| !state.admits(&dad.device)).await;
+    mum.send(GroupCommand::Share {
+        text: "New wifi password is on the fridge".into(),
+        about: Vec::new(),
+    });
+    mum.knowledge(|details| has(details, "fridge")).await;
+    let keys_after = lane_keys(&mum.store);
+    assert_eq!(keys_after.len(), 2, "a fresh key after the removal");
+    let fresh = keys_after
+        .iter()
+        .find(|(id, _)| *id != keys_before[0].0)
+        .expect("new key");
+    assert_eq!(
+        fresh.1,
+        BTreeSet::from([mum.device]),
+        "Dad never gets the new key"
+    );
+}
+
+/// Each lane key in a saved record and the computers it was granted to.
+fn lane_keys(store: &MemoryStore) -> Vec<(String, BTreeSet<DeviceId>)> {
+    let saved = serde_json::to_value(&*store.0.lock().expect("not poisoned")).expect("encodes");
+    let mut keys: BTreeMap<String, BTreeSet<DeviceId>> = BTreeMap::new();
+    for op in saved["knowledge"].as_array().expect("ops") {
+        let body = &op["body"];
+        if body["op"] == "key_grant" {
+            let entry = keys.entry(body["key"].to_string()).or_default();
+            for grant in body["grants"].as_array().expect("grants") {
+                entry.insert(serde_json::from_value(grant[0].clone()).expect("device"));
+            }
+        }
+    }
+    keys.into_iter().collect()
 }

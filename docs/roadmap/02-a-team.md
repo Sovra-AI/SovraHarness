@@ -903,9 +903,12 @@ Status checked against the code on 2026-11-10.
 
 ### T2 — Share memory in lanes
 
-- [ ] Lanes as encrypted spaces (p2panda-encryption data scheme): create, add
-  and remove members, rotate on removal. *Today:* one whole-group lane,
-  carried over encrypted QUIC and stored owner-only, without its own key.
+- [x] Lanes as encrypted spaces: content is sealed with a lane key, each
+  member computer gets its own sealed copy (`KeyGrant`), and a key that any
+  removed computer held is never used again, so removal rotates the key.
+  Newcomers get older keys for history. Built in-house on X25519 + AES-256-GCM
+  (`sovra-core/src/group/lane_keys.rs`, `sovra-mesh/src/cipher.rs`) rather
+  than p2panda-encryption; an external review is still due before GA (T6).
 - [x] Operation envelope plus sync: signed, hash-chained operations with
   Sync / Push, sent in rounds of at most 6 MB so large histories arrive.
 - [x] Fold and conflict rules (§9.4) in core: replacement, corroboration,

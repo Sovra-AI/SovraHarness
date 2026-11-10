@@ -11,6 +11,15 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Group sharing is encrypted with keys that change when someone leaves.**
+  Everything shared in a group (details, artifacts, agreements, corrections)
+  is sealed with a group key before it is saved or sent; each computer in the
+  group gets its own sealed copy of the key. Removing someone retires every
+  key they held, so the next share makes a fresh key only the remaining
+  computers can open. Newcomers receive the older keys so they can read the
+  group's history; people who were removed keep only what they already had.
+  Keys use the computers' existing device keys (X25519 from Ed25519) and
+  AES-256-GCM, the same primitives iroh already ships.
 - **Ask each other's memories (federated recall).** Settings → Groups can
   ask the group's computers a question (“Who is our dentist?”). Each computer
   whose owner turned on *Let my group's helpers ask my memory* searches its own

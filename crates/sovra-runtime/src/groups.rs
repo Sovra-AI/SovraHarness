@@ -14,7 +14,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_channel::Sender;
-use sovra_core::group::{AskLimiter, AskRecord, check_ask, federated_items, log_ask};
+use sovra_core::group::{
+    AskLimiter, AskRecord, Bytes, GroupCipher, OpHash, check_ask, current_devices, federated_items,
+    fold_knowledge_opened, log_ask, sealed_aad,
+};
 use sovra_core::group::{
     DeviceId, GroupCommand, GroupEvent, GroupId, GroupProblem, GroupRecord, GroupState, GroupStore,
     GroupTransport, Invite, InviteBook, InviteKind, JoinLink, KnowledgeBody, KnowledgeOp,
@@ -22,7 +25,7 @@ use sovra_core::group::{
     MembershipBody, MembershipOp, PairingFailure, PairingStep, PeerAddress, PeerHandler,
     PeerRequest, PeerResponse, PersonId, RedeemError, Refusal, Rejection, SharedArtifact,
     SharedDetail, SignatureVerifier, Spawn, UnsignedOp, admits_request, check_artifact,
-    check_share, fold, fold_knowledge, invite_proof, join_transcript, within_budget,
+    check_share, fold, invite_proof, join_transcript, within_budget,
 };
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
@@ -379,11 +382,16 @@ struct Inner {
     limiter: AskLimiter,
     /// Computers that recently did not answer, and until when they are skipped.
     quiet_until: std::collections::BTreeMap<DeviceId, Timestamp>,
+    /// Lane keys this computer holds (opened from its grants, or made here).
+    lane_keys: std::collections::BTreeMap<OpHash, [u8; 32]>,
+    /// Plaintext of sealed operations already opened, by operation hash.
+    opened: std::collections::BTreeMap<OpHash, KnowledgeBody>,
 }
 
 struct Groups {
     transport: Arc<dyn GroupTransport>,
     verifier: Arc<dyn SignatureVerifier + Send + Sync>,
+    cipher: Arc<dyn GroupCipher>,
     store: Arc<dyn GroupStore>,
     events: Sender<Event>,
     knowledge: GroupKnowledge,
@@ -407,9 +415,11 @@ impl Groups {
             }
         };
         let verifier = transport.verifier();
+        let cipher = transport.cipher();
         let groups = Self {
             transport,
             verifier,
+            cipher,
             store,
             events,
             knowledge,
@@ -422,6 +432,8 @@ impl Groups {
                 asks: Vec::new(),
                 limiter: AskLimiter::default(),
                 quiet_until: std::collections::BTreeMap::new(),
+                lane_keys: std::collections::BTreeMap::new(),
+                opened: std::collections::BTreeMap::new(),
             }),
         };
         {
@@ -446,16 +458,136 @@ impl Groups {
             .record
             .group
             .map(|group| fold(group, &inner.record.membership, verifier));
-        inner.view = match &inner.roster {
-            Some(roster) => fold_knowledge(
-                roster,
-                LaneId::whole_group(&roster.group),
-                &inner.record.knowledge,
-                verifier,
-            ),
-            None => KnowledgeView::default(),
+        inner.view = if let Some(roster) = inner.roster.clone() {
+            self.fold_and_open(inner, &roster)
+        } else {
+            inner.lane_keys.clear();
+            inner.opened.clear();
+            KnowledgeView::default()
         };
         inner.view.clone_into(&mut *self.knowledge.0.write().await);
+    }
+
+    /// Folds the lane, opens any lane keys granted to this computer and any sealed
+    /// operations it can now read, and folds again when that revealed something.
+    fn fold_and_open(&self, inner: &mut Inner, roster: &GroupState) -> KnowledgeView {
+        let verifier = self.verifier.as_ref();
+        let lane = LaneId::whole_group(&roster.group);
+        let view = fold_knowledge_opened(
+            roster,
+            lane,
+            &inner.record.knowledge,
+            verifier,
+            &inner.opened,
+        );
+        let me = self.me();
+        for (id, key) in &view.keys {
+            if inner.lane_keys.contains_key(id) {
+                continue;
+            }
+            if let Some(sealed) = key.grants.get(&me)
+                && let Some(opened) = self.cipher.open_sealed(&sealed.0)
+                && let Ok(bytes) = <[u8; 32]>::try_from(opened.as_slice())
+            {
+                inner.lane_keys.insert(*id, bytes);
+            }
+        }
+        let mut revealed = false;
+        for op in &inner.record.knowledge {
+            let KnowledgeBody::Sealed { key, ciphertext } = &op.unsigned().body else {
+                continue;
+            };
+            let hash = op.hash();
+            if inner.opened.contains_key(&hash) {
+                continue;
+            }
+            let Some(lane_key) = inner.lane_keys.get(key) else {
+                continue;
+            };
+            let aad = sealed_aad(&roster.group, &lane, key, &op.unsigned().author);
+            if let Some(plaintext) = self.cipher.decrypt(lane_key, &aad, &ciphertext.0)
+                && let Ok(body) = serde_json::from_slice::<KnowledgeBody>(&plaintext)
+            {
+                inner.opened.insert(hash, body);
+                revealed = true;
+            }
+        }
+        if revealed {
+            fold_knowledge_opened(
+                roster,
+                lane,
+                &inner.record.knowledge,
+                verifier,
+                &inner.opened,
+            )
+        } else {
+            view
+        }
+    }
+
+    /// This computer's next knowledge operation, signed, on top of what it has folded.
+    fn sign_next(&self, inner: &Inner, body: KnowledgeBody) -> Option<KnowledgeOp> {
+        let unsigned = inner.view.draft(self.me(), now(), body)?;
+        Some(
+            unsigned
+                .clone()
+                .sign(self.transport.sign(&unsigned.signing_bytes())),
+        )
+    }
+
+    /// A grant of lane key `id` sealed to each of `devices` (skipping any that fail).
+    fn grant_body(&self, id: OpHash, key: &[u8; 32], devices: &[DeviceId]) -> KnowledgeBody {
+        KnowledgeBody::KeyGrant {
+            key: id,
+            grants: devices
+                .iter()
+                .filter_map(|device| {
+                    self.cipher
+                        .seal_for(device, key)
+                        .map(|sealed| (*device, Bytes(sealed)))
+                })
+                .collect(),
+        }
+    }
+
+    /// Makes sure this computer holds a lane key that every current computer has and
+    /// no removed computer ever had, making a fresh one when needed (the rotation).
+    /// Returns the key and any grant operations it had to add to the record.
+    async fn ensure_key(
+        &self,
+        inner: &mut Inner,
+        roster: &GroupState,
+    ) -> Option<(OpHash, [u8; 32], Vec<KnowledgeOp>)> {
+        let usable = inner
+            .view
+            .usable_key(roster)
+            .filter(|id| inner.lane_keys.contains_key(id));
+        let (id, key) = if let Some(id) = usable {
+            (id, inner.lane_keys[&id])
+        } else {
+            let key = self.cipher.random_key()?;
+            let id = OpHash(self.cipher.random_key()?);
+            inner.lane_keys.insert(id, key);
+            (id, key)
+        };
+        let holders: BTreeSet<DeviceId> = inner
+            .view
+            .keys
+            .get(&id)
+            .map(|lane_key| lane_key.grants.keys().copied().collect())
+            .unwrap_or_default();
+        let missing: Vec<DeviceId> = current_devices(roster)
+            .difference(&holders)
+            .copied()
+            .collect();
+        let mut added = Vec::new();
+        if !missing.is_empty() {
+            let op = self.sign_next(inner, self.grant_body(id, &key, &missing))?;
+            inner.record.knowledge.push(op.clone());
+            self.refold(inner).await;
+            added.push(op);
+        }
+        Some((id, key, added))
     }
 
     async fn persist(&self, inner: &Inner) {
@@ -1186,6 +1318,10 @@ impl Groups {
             KnowledgeBody::Corroborate { .. }
             | KnowledgeBody::Withdraw { .. }
             | KnowledgeBody::Redact { .. } => Ok(()),
+            // Built here, never asked for by the UI.
+            KnowledgeBody::KeyGrant { .. } | KnowledgeBody::Sealed { .. } => {
+                Err("That can't be shared directly.".into())
+            }
         };
         if let Err(message) = checked {
             self.emit(GroupEvent::Problem(GroupProblem::Other(message)))
@@ -1201,35 +1337,73 @@ impl Groups {
             .await;
             return;
         };
-        let Some(unsigned) = inner.view.draft(self.me(), now(), body) else {
+        let lane = LaneId::whole_group(&roster.group);
+        // Everything new is sealed with a lane key only current computers hold.
+        let Some((key_id, key, mut new_ops)) = self.ensure_key(&mut inner, &roster).await else {
             drop(inner);
             self.emit(GroupEvent::Problem(GroupProblem::Other(
-                "Create or join a group first.".into(),
+                "This computer couldn't make a secure key for the group. Try again.".into(),
             )))
             .await;
             return;
         };
-        let op = unsigned
-            .clone()
-            .sign(self.transport.sign(&unsigned.signing_bytes()));
-        let mut trial_ops = inner.record.knowledge.clone();
-        trial_ops.push(op.clone());
-        let lane = LaneId::whole_group(&roster.group);
-        let trial = fold_knowledge(&roster, lane, &trial_ops, self.verifier.as_ref());
-        if let Some(rejection) = trial.rejected.get(&op.hash()) {
-            drop(inner);
-            self.emit(GroupEvent::Problem(knowledge_problem(*rejection)))
-                .await;
-            return;
-        }
+        let me = self.me();
+        let sealed = serde_json::to_vec(&body).ok().and_then(|plaintext| {
+            let aad = sealed_aad(&roster.group, &lane, &key_id, &me);
+            self.cipher.encrypt(&key, &aad, &plaintext)
+        });
+        let op = sealed.and_then(|ciphertext| {
+            self.sign_next(
+                &inner,
+                KnowledgeBody::Sealed {
+                    key: key_id,
+                    ciphertext: Bytes(ciphertext),
+                },
+            )
+        });
         let peers = self.peers(&inner);
-        inner.record.knowledge.push(op.clone());
+        let rejection = match &op {
+            Some(op) => {
+                inner.opened.insert(op.hash(), body);
+                let mut trial_ops = inner.record.knowledge.clone();
+                trial_ops.push(op.clone());
+                let trial = fold_knowledge_opened(
+                    &roster,
+                    lane,
+                    &trial_ops,
+                    self.verifier.as_ref(),
+                    &inner.opened,
+                );
+                trial.rejected.get(&op.hash()).copied()
+            }
+            None => None,
+        };
+        let problem = match (&op, rejection) {
+            (None, _) => Some(GroupProblem::Other(
+                "This computer couldn't seal that for the group. Try again.".into(),
+            )),
+            (Some(op), Some(rejection)) => {
+                inner.opened.remove(&op.hash());
+                Some(knowledge_problem(rejection))
+            }
+            (Some(op), None) => {
+                inner.record.knowledge.push(op.clone());
+                new_ops.push(op.clone());
+                None
+            }
+        };
         self.refold(&mut inner).await;
         self.persist(&inner).await;
         let roster_now = inner.roster.clone();
         let shared = Self::shared(&inner.view);
         drop(inner);
-        self.broadcast(roster.group, peers, &[], &[op]);
+        // Key grants made on the way go out even when the share itself was refused.
+        if !new_ops.is_empty() {
+            self.broadcast(roster.group, peers, &[], &new_ops);
+        }
+        if let Some(problem) = problem {
+            self.emit(GroupEvent::Problem(problem)).await;
+        }
         self.publish_changed(roster_now, shared).await;
     }
 
@@ -1309,6 +1483,27 @@ impl Groups {
         inner.record.membership.extend(added.iter().cloned());
         Self::remember(&mut inner.record, address);
         self.refold(&mut inner).await;
+        // The newcomer can read the group's history: hand it every key held here.
+        let mut granted = Vec::new();
+        let held: Vec<(OpHash, [u8; 32])> = inner
+            .lane_keys
+            .iter()
+            .filter(|(id, _)| {
+                inner
+                    .view
+                    .keys
+                    .get(*id)
+                    .is_some_and(|lane_key| !lane_key.grants.contains_key(&from))
+            })
+            .map(|(id, key)| (*id, *key))
+            .collect();
+        for (id, key) in held {
+            if let Some(op) = self.sign_next(&inner, self.grant_body(id, &key, &[from])) {
+                inner.record.knowledge.push(op.clone());
+                self.refold(&mut inner).await;
+                granted.push(op);
+            }
+        }
         self.persist(&inner).await;
         // The joiner syncs straight after joining, so a history too large for one
         // message still arrives in full.
@@ -1326,7 +1521,7 @@ impl Groups {
                 .filter(|peer| peer.device != from)
                 .collect(),
             &added,
-            &[],
+            &granted,
         );
         self.emit(GroupEvent::Pairing(PairingStep::PeerConnected))
             .await;
@@ -1669,7 +1864,7 @@ fn refusal_problem(reason: Refusal) -> GroupProblem {
 #[cfg(test)]
 mod tests {
     use sha2::{Digest as _, Sha256};
-    use sovra_core::group::{KnowledgeView, UnsignedKnowledge};
+    use sovra_core::group::{KnowledgeView, UnsignedKnowledge, fold_knowledge};
 
     use super::*;
 
