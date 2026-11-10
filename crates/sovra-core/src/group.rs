@@ -19,6 +19,7 @@ mod pairing;
 mod sas;
 mod session;
 mod shared_artifact;
+mod space;
 mod wire;
 
 pub use federated::{
@@ -31,7 +32,7 @@ pub use keys::{DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, Si
 pub use knowledge::{
     DetailStatus, KnowledgeBody, KnowledgeOp, KnowledgeRejection, KnowledgeView, LaneId,
     MAX_SHARED_DETAIL_CHARS, MAX_SHARED_TOPICS, ShareError, SharedDetail, SharedHit,
-    UnsignedKnowledge, check_share, fold_knowledge, fold_knowledge_opened,
+    UnsignedKnowledge, check_share, fold_knowledge, fold_knowledge_opened, fold_space,
 };
 pub use lane_keys::{Bytes, GroupCipher, LaneKey, current_devices, sealed_aad, usable_key};
 pub use link::{JOIN_LINK_PREFIX, JoinLink, LinkError, MAX_JOIN_LINK_CHARS};
@@ -50,6 +51,7 @@ pub use shared_artifact::{
     MAX_SHARED_TITLE_CHARS, SharedArtifact, SharingState, check_artifact, lineage_ids,
     sharing_state,
 };
+pub use space::{Space, lanes_of, space_of_lane, spaces_of};
 pub use wire::{
     GroupRecord, GroupStore, GroupStoreError, GroupTransport, MAX_PEER_MESSAGE_BYTES,
     MAX_REPLY_KNOWLEDGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler, PeerRequest, PeerResponse,

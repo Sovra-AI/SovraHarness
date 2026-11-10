@@ -91,6 +91,8 @@ struct SharedCard {
     shared_at: Timestamp,
     snippet: String,
     two_versions: bool,
+    /// "Just you and Dad" for a two-person space.
+    space_label: Option<String>,
 }
 
 /// What the page needs from this computer's group, copied small each render.
@@ -98,6 +100,8 @@ struct GroupGlance {
     name: String,
     /// This person may add to the group (not a Viewer).
     can_share: bool,
+    /// Everyone else, for "Just Dad".
+    others: Vec<(sovra_core::group::PersonId, String)>,
     /// The latest version of each shared artifact.
     cards: Vec<SharedCard>,
 }
@@ -208,6 +212,7 @@ impl ArtifactsView {
                 shared_at: artifact.shared_at,
                 snippet: snippet(&artifact.content),
                 two_versions: matches!(artifact.status, DetailStatus::Disputed { .. }),
+                space_label: groups.space_label(&artifact.space),
             })
             .collect();
         Some(GroupGlance {
@@ -215,6 +220,7 @@ impl ArtifactsView {
             can_share: groups
                 .my_role()
                 .is_some_and(sovra_core::group::Role::writes),
+            others: groups.others(),
             cards,
         })
     }
@@ -275,6 +281,7 @@ impl ArtifactsView {
         &mut self,
         artifact: &Artifact,
         version_of: Option<OpHash>,
+        with: Option<&(sovra_core::group::PersonId, String)>,
         group: &str,
         cx: &mut Context<Self>,
     ) {
@@ -294,11 +301,17 @@ impl ArtifactsView {
                 content: artifact.content.clone(),
                 new_version_of: version_of,
                 local_id: artifact.id.clone(),
+                with: with.map(|(person, _)| *person),
             }));
         self.share_error = None;
-        self.share_notice = Some(format!(
-            "Shared with {group}. Everyone in the group gets it the next time their computer is on."
-        ));
+        self.share_notice = Some(match with {
+            Some((_, name)) => {
+                format!("Shared with just {name}. Nobody else in {group} can see it.")
+            }
+            None => format!(
+                "Shared with {group}. Everyone in the group gets it the next time their computer is on."
+            ),
+        });
         cx.notify();
     }
 
@@ -574,14 +587,42 @@ impl ArtifactsView {
                     SharingState::NotShared | SharingState::UpToDate => None,
                 };
                 let shared = artifact.clone();
-                let name = group.name;
+                let name = group.name.clone();
                 actions = actions.child(
                     design::button("artifact-share-group", label, cx)
                         .icon(Icon::new(IconName::Users))
                         .on_click(cx.listener(move |view, _, _, cx| {
-                            view.share_with_group(&shared, version_of, &name, cx);
+                            view.share_with_group(&shared, version_of, None, &name, cx);
                         })),
                 );
+                // A brand-new share may go to just one person instead.
+                if version_of.is_none() {
+                    for (index, other) in group.others.iter().take(4).enumerate() {
+                        let shared = artifact.clone();
+                        let name = group.name.clone();
+                        let other = other.clone();
+                        actions = actions.child(
+                            design::button(
+                                ("artifact-share-just", index),
+                                format!("Just {}", other.1),
+                                cx,
+                            )
+                            .ghost()
+                            .accessibility_label(format!("Share only with {}", other.1))
+                            .on_click(cx.listener(
+                                move |view, _, _, cx| {
+                                    view.share_with_group(
+                                        &shared,
+                                        None,
+                                        Some(&other),
+                                        &name,
+                                        cx,
+                                    );
+                                },
+                            )),
+                        );
+                    }
+                }
             }
         }
         if !self.editing {
@@ -960,6 +1001,10 @@ fn shared_card(
     );
     if card.two_versions {
         caption.push_str(" · two versions");
+    }
+    if let Some(label) = &card.space_label {
+        caption.push_str(" · ");
+        caption.push_str(&label.to_lowercase());
     }
     v_flex()
         .id(("shared-artifact-card", index))

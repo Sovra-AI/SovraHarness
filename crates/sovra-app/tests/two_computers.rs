@@ -183,6 +183,7 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
     dad.send(GroupCommand::Share {
         text: "The boiler service is booked for 12 March".into(),
         about: vec!["boiler".into()],
+        with: None,
     });
     let details = mum
         .wait("Dad's detail on Mum's laptop", |event| match event {
@@ -209,6 +210,7 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
         content: "- milk\n- eggs".into(),
         new_version_of: None,
         local_id: "art-list".into(),
+        with: None,
     });
     let received = dad
         .artifacts("Mum's list on Dad's desktop", |artifacts| {
@@ -228,6 +230,7 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
         content: "- milk\n- eggs\n- bread".into(),
         new_version_of: Some(list.id),
         local_id: "art-dads-copy".into(),
+        with: None,
     });
     let back = mum
         .artifacts("Dad's new version on Mum's laptop", |artifacts| {

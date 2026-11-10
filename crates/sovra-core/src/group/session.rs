@@ -61,10 +61,11 @@ pub enum GroupCommand {
         person: PersonId,
     },
     Leave,
-    /// Share a detail with the whole group.
+    /// Share a detail with the whole group, or (`with`) just one other person.
     Share {
         text: String,
         about: Vec<String>,
+        with: Option<PersonId>,
     },
     /// Correct one or more shared details (settles a dispute when it names several).
     Correct {
@@ -100,6 +101,9 @@ pub enum GroupCommand {
         new_version_of: Option<OpHash>,
         /// This computer's library id for it, so later edits find their way back.
         local_id: String,
+        /// Just one other person instead of the whole group. A new version always
+        /// stays in its original's space.
+        with: Option<PersonId>,
     },
 }
 
@@ -321,6 +325,44 @@ impl GroupsView {
         self.invite = None;
         self.short_code = None;
         self.pairing = PairingStage::Idle;
+    }
+
+    /// This computer's person in the group, if any.
+    pub fn my_person(&self) -> Option<PersonId> {
+        let me = self.this_computer?;
+        self.group
+            .as_ref()?
+            .owner_of(&me)
+            .map(|member| member.person)
+    }
+
+    /// Everyone else in the group, by name, for "Just Dad" choices.
+    pub fn others(&self) -> Vec<(PersonId, String)> {
+        let me = self.my_person();
+        let mut others: Vec<(PersonId, String)> = self
+            .group
+            .iter()
+            .flat_map(|group| group.people.values())
+            .filter(|member| Some(member.person) != me)
+            .map(|member| (member.person, member.name.clone()))
+            .collect();
+        others.sort_by_key(|a| a.1.to_lowercase());
+        others
+    }
+
+    /// "Just you and Dad" for something in a two-person space; `None` for the group.
+    pub fn space_label(&self, space: &super::space::Space) -> Option<String> {
+        let me = self.my_person()?;
+        let other = space.other(&me)?;
+        let name = self
+            .group
+            .as_ref()
+            .and_then(|group| group.people.get(&other))
+            .map_or_else(
+                || "someone who left".to_owned(),
+                |member| member.name.clone(),
+            );
+        Some(format!("Just you and {name}"))
     }
 
     /// The role of this computer's person, if it is in a group.

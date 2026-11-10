@@ -354,6 +354,7 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
     dad.send(GroupCommand::Share {
         text: "The boiler service is booked for 12 March".into(),
         about: vec!["boiler".into()],
+        with: None,
     });
     let mut boiler = None;
     for computer in [&mum, &mum_imac] {
@@ -376,6 +377,7 @@ async fn a_family_forms_a_group_and_shares_knowledge_across_computers() {
     dad.send(GroupCommand::Share {
         text: "Gran arrives on Friday by train".into(),
         about: Vec::new(),
+        with: None,
     });
     mum.knowledge(|details| has(details, "Gran arrives")).await;
     net.off
@@ -519,6 +521,7 @@ async fn shared_artifacts_reach_a_new_member_in_rounds_and_edits_become_new_vers
             content: format!("{n}{big}"),
             new_version_of: None,
             local_id: String::new(),
+            with: None,
         });
         mum.artifacts(|artifacts| artifacts.len() == n + 1).await;
     }
@@ -529,6 +532,7 @@ async fn shared_artifacts_reach_a_new_member_in_rounds_and_edits_become_new_vers
         content: "- milk".into(),
         new_version_of: None,
         local_id: String::new(),
+        with: None,
     });
     let list = mum
         .artifacts(|artifacts| artifacts.len() == 21)
@@ -558,6 +562,7 @@ async fn shared_artifacts_reach_a_new_member_in_rounds_and_edits_become_new_vers
         content: "- milk\n- bread".into(),
         new_version_of: Some(list.id),
         local_id: String::new(),
+        with: None,
     });
     let seen = mum
         .artifacts(|artifacts| artifacts.iter().any(|a| a.content.contains("bread")))
@@ -579,6 +584,7 @@ async fn shared_artifacts_reach_a_new_member_in_rounds_and_edits_become_new_vers
         content: "x".repeat(sovra_core::group::MAX_SHARED_ARTIFACT_BYTES + 1),
         new_version_of: None,
         local_id: String::new(),
+        with: None,
     });
     mum.wait(|event| matches!(event, GroupEvent::Problem(_)).then_some(()))
         .await;
@@ -609,6 +615,7 @@ async fn shared_content_is_sealed_on_disk_and_removing_someone_rotates_the_key()
     mum.send(GroupCommand::Share {
         text: "The spare key is under the blue pot".into(),
         about: Vec::new(),
+        with: None,
     });
     dad.knowledge(|details| has(details, "blue pot")).await;
     for computer in [&mum, &dad] {
@@ -627,6 +634,7 @@ async fn shared_content_is_sealed_on_disk_and_removing_someone_rotates_the_key()
     mum.send(GroupCommand::Share {
         text: "New wifi password is on the fridge".into(),
         about: Vec::new(),
+        with: None,
     });
     mum.knowledge(|details| has(details, "fridge")).await;
     let keys_after = lane_keys(&mum.store);
@@ -656,4 +664,68 @@ fn lane_keys(store: &MemoryStore) -> Vec<(String, BTreeSet<DeviceId>)> {
         }
     }
     keys.into_iter().collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn something_shared_with_just_one_person_never_reaches_anyone_else() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 41);
+    let dad = Computer::start(&net, 42);
+    let sam = Computer::start(&net, 43);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Laptop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+    for (computer, name) in [(&dad, "Dad"), (&sam, "Sam")] {
+        mum.send(GroupCommand::InvitePerson {
+            name: name.into(),
+            role: Role::Member,
+        });
+        let link = mum.link().await;
+        computer.send(GroupCommand::Join {
+            link,
+            computer_name: format!("{name}'s computer"),
+        });
+        computer
+            .roster(|state| state.admits(&computer.device))
+            .await;
+    }
+    let roster = mum.roster(|state| state.people.len() == 3).await;
+    let dad_person = roster.owner_of(&dad.device).expect("Dad").person;
+
+    mum.send(GroupCommand::Share {
+        text: "Sam's surprise party is on Friday".into(),
+        about: Vec::new(),
+        with: Some(dad_person),
+    });
+    let details = dad
+        .knowledge(|details| has(details, "surprise party"))
+        .await;
+    let party = details
+        .iter()
+        .find(|detail| detail.text.contains("surprise party"))
+        .expect("shared with Dad");
+    assert!(matches!(party.space, sovra_core::group::Space::Pair { .. }));
+
+    // A group-wide share after it, so Sam certainly syncs past the private one.
+    mum.send(GroupCommand::Share {
+        text: "Bins go out on Tuesday".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    sam.knowledge(|details| has(details, "Bins go out")).await;
+    sam.send(GroupCommand::Load);
+    let seen = sam.knowledge(|details| has(details, "Bins go out")).await;
+    assert!(!has(&seen, "surprise party"));
+    let pair_lane = party.space.lane(&roster.group);
+    let sams_record = sam.store.0.lock().expect("not poisoned").clone();
+    assert!(
+        sams_record
+            .knowledge
+            .iter()
+            .all(|op| op.unsigned().lane != pair_lane),
+        "nothing from Mum and Dad's space is stored on Sam's computer"
+    );
 }

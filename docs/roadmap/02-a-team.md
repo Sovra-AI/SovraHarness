@@ -968,7 +968,10 @@ Status checked against the code on 2026-11-10.
 
 ### T5 — People-to-people and calm change
 
-- [ ] *Me & Sam* lanes, plus `age` drops for one-off files.
+- [x] *Me & Sam* lanes: a two-person space per pair of people
+  (`sovra-core/src/group/space.rs`) with its own lane, keys and sync audience;
+  Share with… → Just Dad in Groups, Artifacts and Knowledge. *Not yet:* `age`
+  drops for one-off files.
 - [ ] A "What's new in <group>" digest, and dispute resolution cards.
 - [ ] Snapshots, prune points and storage budgets.
 - [ ] A write-only *Contributor* role (e.g. kids add to the shopping list).

@@ -11,7 +11,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AppContext as _, ClipboardItem, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Styled as _, TestSupportExt as _, Window, div,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window,
+    div,
 };
 use sovra_core::Command;
 use sovra_core::group::{
@@ -33,6 +34,8 @@ pub(crate) struct GroupsForm {
     invite_name: Entity<InputState>,
     share: Entity<InputState>,
     ask: Entity<InputState>,
+    /// Share with the whole group (`None`) or just this person.
+    share_with: Option<sovra_core::group::PersonId>,
     /// Which person or computer is waiting for "Yes, remove".
     confirm_remove: Option<String>,
 }
@@ -59,6 +62,7 @@ impl GroupsForm {
                 window,
                 cx,
             ),
+            share_with: None,
             confirm_remove: None,
         }
     }
@@ -539,11 +543,38 @@ impl ModelsView {
                     )),
             );
         if can_add {
+            let chosen = self.groups_form.share_with;
+            let mut audience = h_flex()
+                .id("groups-share-with")
+                .flex_wrap()
+                .gap(t.space.small)
+                .child(
+                    design::button("groups-share-everyone", "Everyone", cx)
+                        .small()
+                        .selected(chosen.is_none())
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.groups_form.share_with = None;
+                            cx.notify();
+                        })),
+                );
+            for (index, (person, name)) in self.groups.others().into_iter().enumerate() {
+                audience = audience.child(
+                    design::button(("groups-share-just", index), format!("Just {name}"), cx)
+                        .small()
+                        .selected(chosen == Some(person))
+                        .accessibility_label(format!("Share only with {name}"))
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.groups_form.share_with = Some(person);
+                            cx.notify();
+                        })),
+                );
+            }
             section = section
                 .child(Input::new(&self.groups_form.share))
+                .child(audience)
                 .child(h_flex().child(
-                    design::primary_button("groups-share", "Share with the group", cx).on_click(
-                        cx.listener(|view, _, window, cx| {
+                    design::primary_button("groups-share", "Share", cx).on_click(cx.listener(
+                        |view, _, window, cx| {
                             let text = value(&view.groups_form.share, cx);
                             view.groups_form
                                 .share
@@ -552,11 +583,12 @@ impl ModelsView {
                                 GroupCommand::Share {
                                     text,
                                     about: Vec::new(),
+                                    with: view.groups_form.share_with,
                                 },
                                 cx,
                             );
-                        }),
-                    ),
+                        },
+                    )),
                 ));
         }
         section
@@ -587,6 +619,16 @@ impl ModelsView {
                     ));
                 if let Some(status) = status_label(detail) {
                     row = row.child(h_flex().child(pill(status, cx)));
+                }
+                if let Some(label) = self.groups.space_label(&detail.space) {
+                    row = row.child(
+                        h_flex().child(
+                            pill(label.clone(), cx)
+                                .id(("groups-detail-space", index))
+                                .aria_label(label)
+                                .test_support(),
+                        ),
+                    );
                 }
                 if detail.usable() {
                     let mut actions = h_flex().flex_wrap().gap(t.space.small);

@@ -29,6 +29,7 @@ use super::fold::GroupState;
 use super::keys::{DeviceId, GroupId, OpHash, PersonId, Signature, SignatureVerifier};
 use super::lane_keys::{Bytes, LaneKey};
 use super::shared_artifact::{MAX_ORIGIN_CHARS, SharedArtifact, check_artifact};
+use super::space::Space;
 use crate::Timestamp;
 use crate::artifacts::ArtifactKind;
 
@@ -246,6 +247,9 @@ pub struct SharedDetail {
     pub agreed_by: BTreeSet<PersonId>,
     /// The sharer's computer is no longer in the group.
     pub from_former_member: bool,
+    /// Who it is shared with: the whole group, or just two people.
+    #[serde(default)]
+    pub space: Space,
 }
 
 impl SharedDetail {
@@ -294,6 +298,8 @@ pub struct KnowledgeView {
     pub heads: Vec<OpHash>,
     tips: BTreeMap<DeviceId, (u64, OpHash)>,
     lane: Option<(GroupId, LaneId)>,
+    /// Which space this lane is (the whole group unless folded with `fold_space`).
+    pub space: Space,
 }
 
 /// Every device that has ever been in the roster, with its person and names.
@@ -335,9 +341,41 @@ pub fn fold_knowledge_opened<'a>(
     verifier: &dyn SignatureVerifier,
     opened: &BTreeMap<OpHash, KnowledgeBody>,
 ) -> KnowledgeView {
+    fold_lane(roster, lane, Space::Group, ops, verifier, opened)
+}
+
+/// Folds one space's lane: only operations in that lane are read (others are not
+/// this view's business), and in a two-person space only those two may write.
+pub fn fold_space<'a>(
+    roster: &GroupState,
+    space: Space,
+    ops: impl IntoIterator<Item = &'a KnowledgeOp>,
+    verifier: &dyn SignatureVerifier,
+    opened: &BTreeMap<OpHash, KnowledgeBody>,
+) -> KnowledgeView {
+    let lane = space.lane(&roster.group);
+    fold_lane(
+        roster,
+        lane,
+        space,
+        ops.into_iter().filter(|op| op.unsigned.lane == lane),
+        verifier,
+        opened,
+    )
+}
+
+fn fold_lane<'a>(
+    roster: &GroupState,
+    lane: LaneId,
+    space: Space,
+    ops: impl IntoIterator<Item = &'a KnowledgeOp>,
+    verifier: &dyn SignatureVerifier,
+    opened: &BTreeMap<OpHash, KnowledgeBody>,
+) -> KnowledgeView {
     let group = roster.group;
     let mut view = KnowledgeView {
         lane: Some((group, lane)),
+        space,
         ..KnowledgeView::default()
     };
     let mut candidates: BTreeMap<OpHash, &KnowledgeOp> = BTreeMap::new();
@@ -400,6 +438,10 @@ pub fn fold_knowledge_opened<'a>(
                 }
             }
         };
+        if !space.includes(&person) {
+            view.rejected.insert(*hash, KnowledgeRejection::NotAllowed);
+            continue;
+        }
         let body = match &op.unsigned.body {
             KnowledgeBody::Sealed { .. } => match opened.get(hash) {
                 Some(KnowledgeBody::Sealed { .. } | KnowledgeBody::KeyGrant { .. }) => {
@@ -482,6 +524,7 @@ pub fn fold_knowledge_opened<'a>(
                             status: DetailStatus::Current,
                             from_former_member: former,
                             origin: origin.clone(),
+                            space,
                         },
                     );
                     Ok(())
@@ -516,6 +559,7 @@ pub fn fold_knowledge_opened<'a>(
                             status: DetailStatus::Current,
                             agreed_by: BTreeSet::new(),
                             from_former_member: former,
+                            space,
                         },
                     );
                     Ok(())
@@ -959,9 +1003,9 @@ impl KnowledgeView {
         latest
     }
 
-    /// The newest lane key that may encrypt new content (see `lane_keys`).
+    /// The newest lane key that may encrypt new content in this view's space.
     pub fn usable_key(&self, roster: &GroupState) -> Option<OpHash> {
-        super::lane_keys::usable_key(&self.keys, roster)
+        super::lane_keys::usable_key(&self.keys, &self.space.audience(roster))
     }
 
     /// The next operation this computer should sign in this lane.

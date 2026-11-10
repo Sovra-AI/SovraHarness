@@ -1553,7 +1553,7 @@ fn removing_someone_retires_every_key_they_held_and_newcomers_can_be_granted() {
     assert_eq!(view.keys[&OpHash([1; 32])].grants.len(), 3);
     assert!(
         view.keys[&OpHash([1; 32])]
-            .missing(&shared.roster)
+            .missing(&current_devices(&shared.roster))
             .is_empty()
     );
 
@@ -1582,7 +1582,7 @@ fn removing_someone_retires_every_key_they_held_and_newcomers_can_be_granted() {
     shared.roster = log.state();
     let view = shared.view();
     assert_eq!(
-        view.keys[&OpHash([2; 32])].missing(&shared.roster),
+        view.keys[&OpHash([2; 32])].missing(&current_devices(&shared.roster)),
         std::collections::BTreeSet::from([device(4)]),
         "a newcomer still needs a copy"
     );
@@ -1668,5 +1668,83 @@ fn sealed_bytes_travel_as_hex_and_are_bound_to_their_place() {
     assert_ne!(
         here,
         sealed_aad(&log.group, &lane, &OpHash([1; 32]), &device(3))
+    );
+}
+
+// ---- two-person spaces ----------------------------------------------------
+
+#[test]
+fn a_two_person_space_is_its_own_lane_only_they_write_and_only_they_hold_keys() {
+    let log = family_of_three();
+    let roster = log.state();
+    let pair = Space::pair(person(2), person(1));
+    assert_eq!(
+        pair,
+        Space::pair(person(1), person(2)),
+        "same space either way"
+    );
+    assert_ne!(pair.lane(&log.group), Space::Group.lane(&log.group));
+    assert_eq!(space_of_lane(&roster, &pair.lane(&log.group)), Some(pair));
+    assert_eq!(
+        space_of_lane(&roster, &Space::Group.lane(&log.group)),
+        Some(Space::Group)
+    );
+    assert_eq!(pair.other(&person(1)), Some(person(2)));
+    assert_eq!(
+        pair.audience(&roster),
+        std::collections::BTreeSet::from([device(1), device(2)])
+    );
+    assert_eq!(
+        spaces_of(&roster, &person(1)).len(),
+        3,
+        "the group and two pairs"
+    );
+
+    let mut shared = Shared::new(&log);
+    shared.lane = pair.lane(&log.group);
+    let mums = shared.share(
+        device(1),
+        3_000,
+        "Surprise party for Sam on Friday",
+        Vec::new(),
+    );
+    let sams = shared.push(
+        device(3),
+        3_100,
+        share_body("I know about the party", Vec::new()),
+    );
+    shared.push(device(1), 3_200, grant_body(5, &[1, 2]));
+    shared.push(device(1), 3_300, grant_body(6, &[1, 2, 3]));
+    // A share in the group lane is not this view's business.
+    let group_op = sign_knowledge(UnsignedKnowledge {
+        group: log.group,
+        lane: Space::Group.lane(&log.group),
+        author: device(2),
+        seq: 1,
+        prev: None,
+        deps: Vec::new(),
+        at: Timestamp(3_400),
+        body: share_body("Bins on Tuesday", Vec::new()),
+    });
+    let mut ops = shared.ops.clone();
+    ops.push(group_op);
+    let view = fold_space(
+        &roster,
+        pair,
+        &ops,
+        &FakeVerifier,
+        &std::collections::BTreeMap::new(),
+    );
+    assert_eq!(view.details[&mums].space, pair);
+    assert_eq!(
+        view.rejected.get(&sams.hash()),
+        Some(&KnowledgeRejection::NotAllowed),
+        "Sam is not in Mum and Dad's space"
+    );
+    assert_eq!(view.details.len(), 1);
+    assert_eq!(
+        view.usable_key(&roster),
+        Some(OpHash([5; 32])),
+        "a key Sam was given is never used for Mum and Dad"
     );
 }

@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Share with just one person.** In a group, details, memories and
+  artifacts can go to *Just Dad* instead of everyone. Each pair of people has
+  its own space with its own keys; its history only ever travels between
+  those two people's computers, and their helpers are the only ones that can
+  use it. Private items say “Just you and Dad”. Skills has a “Share
+  something with just one person” card.
 - **Group sharing is encrypted with keys that change when someone leaves.**
   Everything shared in a group (details, artifacts, agreements, corrections)
   is sealed with a group key before it is saved or sent; each computer in the

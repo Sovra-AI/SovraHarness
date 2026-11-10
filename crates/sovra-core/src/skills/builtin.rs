@@ -38,6 +38,7 @@ impl Skill {
             "share-artifact" => "Share a document or list with your group",
             "share-memory" => "Share something Sovra remembers with your group",
             "ask-group" => "Ask your family or team's memories",
+            "share-privately" => "Share something with just one person",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -157,6 +158,10 @@ impl Skill {
             "share-artifact" => (
                 "Opens Artifacts. Open something you saved, like the family shopping list, and press Share with your group. Everyone gets a copy, and when someone changes it and shares again, the group gets the new version.".to_owned(),
                 "/share-artifact ".to_owned(),
+            ),
+            "share-privately" => (
+                "Opens Groups. Write something like “Sam's surprise party is on Friday”, choose Just Dad, and press Share. Only you and Dad can see it; it never goes to anyone else's computer.".to_owned(),
+                "/share-privately ".to_owned(),
             ),
             "ask-group" => (
                 "Opens Groups. Ask a question like “Who is our dentist?” and the computers in your group that allow it look in their own memory and send back a short answer with who it came from. Your memories stay on your computer unless you turn on answering.".to_owned(),
@@ -425,6 +430,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Artifacts to share a saved document, list or picture with your group, keep a copy of what others shared, and share your changes back as a new version.",
             SkillAction::Artifacts,
             &["share-document", "shared-artifacts"],
+        ),
+        action(
+            "share-privately",
+            "Share with one person",
+            "Open Settings → Groups to share a detail, document or list with just one person in your group. It is locked so only your two computers can read it.",
+            SkillAction::Settings,
+            &["just-you-and", "private-share"],
         ),
         action(
             "ask-group",

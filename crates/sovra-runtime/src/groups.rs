@@ -15,17 +15,17 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use sovra_core::group::{
-    AskLimiter, AskRecord, Bytes, GroupCipher, OpHash, check_ask, current_devices, federated_items,
-    fold_knowledge_opened, log_ask, sealed_aad,
+    AskLimiter, AskRecord, Bytes, GroupCipher, OpHash, SharedHit, Space, check_ask,
+    federated_items, fold_space, lanes_of, log_ask, sealed_aad, spaces_of,
 };
 use sovra_core::group::{
     DeviceId, GroupCommand, GroupEvent, GroupId, GroupProblem, GroupRecord, GroupState, GroupStore,
     GroupTransport, Invite, InviteBook, InviteKind, JoinLink, KnowledgeBody, KnowledgeOp,
-    KnowledgeRejection, KnowledgeView, LaneId, LinkError, MAX_REPLY_KNOWLEDGE_BYTES,
-    MembershipBody, MembershipOp, PairingFailure, PairingStep, PeerAddress, PeerHandler,
-    PeerRequest, PeerResponse, PersonId, RedeemError, Refusal, Rejection, SharedArtifact,
-    SharedDetail, SignatureVerifier, Spawn, UnsignedOp, admits_request, check_artifact,
-    check_share, fold, invite_proof, join_transcript, within_budget,
+    KnowledgeRejection, KnowledgeView, LinkError, MAX_REPLY_KNOWLEDGE_BYTES, MembershipBody,
+    MembershipOp, PairingFailure, PairingStep, PeerAddress, PeerHandler, PeerRequest, PeerResponse,
+    PersonId, RedeemError, Refusal, Rejection, SharedArtifact, SharedDetail, SignatureVerifier,
+    Spawn, UnsignedOp, admits_request, check_artifact, check_share, fold, invite_proof,
+    join_transcript, within_budget,
 };
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
@@ -70,7 +70,8 @@ pub(crate) type LocalMemory =
 /// group's computers (federated recall) and to answer them from this computer's memory.
 #[derive(Clone, Default)]
 pub(crate) struct GroupKnowledge(
-    Arc<RwLock<KnowledgeView>>,
+    /// One view per space this computer's person is in; the whole group first.
+    Arc<RwLock<Vec<KnowledgeView>>>,
     Arc<std::sync::RwLock<Option<LocalMemory>>>,
     Arc<std::sync::RwLock<Option<std::sync::Weak<Groups>>>>,
 );
@@ -109,14 +110,20 @@ impl GroupKnowledge {
 
     async fn add_to(&self, context: &mut sovra_core::MemoryContext, question: &str) {
         let (details, artifacts) = {
-            let view = self.0.read().await;
+            let views = self.0.read().await;
+            let mut hits: Vec<SharedHit> = views
+                .iter()
+                .flat_map(|view| view.search(question, sovra_core::MAX_GROUP_EVIDENCE_ITEMS))
+                .collect();
+            hits.sort_by(|a, b| b.score.total_cmp(&a.score));
             (
-                view.search(question, sovra_core::MAX_GROUP_EVIDENCE_ITEMS)
-                    .iter()
+                hits.iter()
                     .map(|hit| evidence(&hit.detail))
                     .collect::<Vec<_>>(),
-                view.search_artifacts(question, ARTIFACT_EVIDENCE_ITEMS)
-                    .into_iter()
+                views
+                    .iter()
+                    .flat_map(|view| view.search_artifacts(question, ARTIFACT_EVIDENCE_ITEMS))
+                    .take(ARTIFACT_EVIDENCE_ITEMS)
                     .map(artifact_evidence)
                     .collect::<Vec<_>>(),
             )
@@ -375,7 +382,10 @@ fn random<const N: usize>() -> Option<[u8; N]> {
 struct Inner {
     record: GroupRecord,
     roster: Option<GroupState>,
+    /// The whole group's lane.
     view: KnowledgeView,
+    /// Two-person spaces this computer's person is in.
+    pairs: std::collections::BTreeMap<Space, KnowledgeView>,
     invites: InviteBook,
     /// Questions other computers asked this one, newest first (not saved).
     asks: Vec<AskRecord>,
@@ -428,6 +438,7 @@ impl Groups {
                 record,
                 roster: None,
                 view: KnowledgeView::default(),
+                pairs: std::collections::BTreeMap::new(),
                 invites: InviteBook::default(),
                 asks: Vec::new(),
                 limiter: AskLimiter::default(),
@@ -458,38 +469,62 @@ impl Groups {
             .record
             .group
             .map(|group| fold(group, &inner.record.membership, verifier));
-        inner.view = if let Some(roster) = inner.roster.clone() {
-            self.fold_and_open(inner, &roster)
+        if let Some(roster) = inner.roster.clone() {
+            let me = roster.owner_of(&self.me()).map(|member| member.person);
+            let spaces = me.map_or_else(|| vec![Space::Group], |me| spaces_of(&roster, &me));
+            let mut views = self.fold_and_open(inner, &roster, &spaces);
+            inner.view = views.remove(&Space::Group).unwrap_or_default();
+            inner.pairs = views;
         } else {
             inner.lane_keys.clear();
             inner.opened.clear();
-            KnowledgeView::default()
-        };
-        inner.view.clone_into(&mut *self.knowledge.0.write().await);
+            inner.view = KnowledgeView::default();
+            inner.pairs.clear();
+        }
+        let mut all = vec![inner.view.clone()];
+        all.extend(inner.pairs.values().cloned());
+        *self.knowledge.0.write().await = all;
     }
 
-    /// Folds the lane, opens any lane keys granted to this computer and any sealed
+    /// Folds each space, opens any lane keys granted to this computer and any sealed
     /// operations it can now read, and folds again when that revealed something.
-    fn fold_and_open(&self, inner: &mut Inner, roster: &GroupState) -> KnowledgeView {
+    fn fold_and_open(
+        &self,
+        inner: &mut Inner,
+        roster: &GroupState,
+        spaces: &[Space],
+    ) -> std::collections::BTreeMap<Space, KnowledgeView> {
         let verifier = self.verifier.as_ref();
-        let lane = LaneId::whole_group(&roster.group);
-        let view = fold_knowledge_opened(
-            roster,
-            lane,
-            &inner.record.knowledge,
-            verifier,
-            &inner.opened,
-        );
+        let fold_all = |inner: &Inner| {
+            spaces
+                .iter()
+                .map(|space| {
+                    (
+                        *space,
+                        fold_space(
+                            roster,
+                            *space,
+                            &inner.record.knowledge,
+                            verifier,
+                            &inner.opened,
+                        ),
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        let views = fold_all(inner);
         let me = self.me();
-        for (id, key) in &view.keys {
-            if inner.lane_keys.contains_key(id) {
-                continue;
-            }
-            if let Some(sealed) = key.grants.get(&me)
-                && let Some(opened) = self.cipher.open_sealed(&sealed.0)
-                && let Ok(bytes) = <[u8; 32]>::try_from(opened.as_slice())
-            {
-                inner.lane_keys.insert(*id, bytes);
+        for view in views.values() {
+            for (id, key) in &view.keys {
+                if inner.lane_keys.contains_key(id) {
+                    continue;
+                }
+                if let Some(sealed) = key.grants.get(&me)
+                    && let Some(opened) = self.cipher.open_sealed(&sealed.0)
+                    && let Ok(bytes) = <[u8; 32]>::try_from(opened.as_slice())
+                {
+                    inner.lane_keys.insert(*id, bytes);
+                }
             }
         }
         let mut revealed = false;
@@ -504,7 +539,8 @@ impl Groups {
             let Some(lane_key) = inner.lane_keys.get(key) else {
                 continue;
             };
-            let aad = sealed_aad(&roster.group, &lane, key, &op.unsigned().author);
+            let unsigned = op.unsigned();
+            let aad = sealed_aad(&roster.group, &unsigned.lane, key, &unsigned.author);
             if let Some(plaintext) = self.cipher.decrypt(lane_key, &aad, &ciphertext.0)
                 && let Ok(body) = serde_json::from_slice::<KnowledgeBody>(&plaintext)
             {
@@ -512,22 +548,28 @@ impl Groups {
                 revealed = true;
             }
         }
-        if revealed {
-            fold_knowledge_opened(
-                roster,
-                lane,
-                &inner.record.knowledge,
-                verifier,
-                &inner.opened,
-            )
-        } else {
-            view
+        if revealed { fold_all(inner) } else { views }
+    }
+
+    /// The folded view of `space` (none when this computer is not in it).
+    fn view_of<'a>(inner: &'a Inner, space: &Space) -> Option<&'a KnowledgeView> {
+        match space {
+            Space::Group => Some(&inner.view),
+            Space::Pair { .. } => inner.pairs.get(space),
         }
     }
 
+    /// The space a shared detail or artifact lives in, among those this computer has.
+    fn space_holding(inner: &Inner, id: &OpHash) -> Option<Space> {
+        std::iter::once(&inner.view)
+            .chain(inner.pairs.values())
+            .find(|view| view.details.contains_key(id) || view.artifacts.contains_key(id))
+            .map(|view| view.space)
+    }
+
     /// This computer's next knowledge operation, signed, on top of what it has folded.
-    fn sign_next(&self, inner: &Inner, body: KnowledgeBody) -> Option<KnowledgeOp> {
-        let unsigned = inner.view.draft(self.me(), now(), body)?;
+    fn sign_next(&self, inner: &Inner, space: &Space, body: KnowledgeBody) -> Option<KnowledgeOp> {
+        let unsigned = Self::view_of(inner, space)?.draft(self.me(), now(), body)?;
         Some(
             unsigned
                 .clone()
@@ -557,9 +599,9 @@ impl Groups {
         &self,
         inner: &mut Inner,
         roster: &GroupState,
+        space: &Space,
     ) -> Option<(OpHash, [u8; 32], Vec<KnowledgeOp>)> {
-        let usable = inner
-            .view
+        let usable = Self::view_of(inner, space)?
             .usable_key(roster)
             .filter(|id| inner.lane_keys.contains_key(id));
         let (id, key) = if let Some(id) = usable {
@@ -570,19 +612,19 @@ impl Groups {
             inner.lane_keys.insert(id, key);
             (id, key)
         };
-        let holders: BTreeSet<DeviceId> = inner
-            .view
+        let holders: BTreeSet<DeviceId> = Self::view_of(inner, space)?
             .keys
             .get(&id)
             .map(|lane_key| lane_key.grants.keys().copied().collect())
             .unwrap_or_default();
-        let missing: Vec<DeviceId> = current_devices(roster)
+        let missing: Vec<DeviceId> = space
+            .audience(roster)
             .difference(&holders)
             .copied()
             .collect();
         let mut added = Vec::new();
         if !missing.is_empty() {
-            let op = self.sign_next(inner, self.grant_body(id, &key, &missing))?;
+            let op = self.sign_next(inner, space, self.grant_body(id, &key, &missing))?;
             inner.record.knowledge.push(op.clone());
             self.refold(inner).await;
             added.push(op);
@@ -598,13 +640,27 @@ impl Groups {
         }
     }
 
-    fn shared(view: &KnowledgeView) -> SharedNow {
-        let mut details: Vec<SharedDetail> = view.details.values().cloned().collect();
+    /// Everything shared in every space this computer is in, newest first.
+    fn shared(inner: &Inner) -> SharedNow {
+        let views: Vec<&KnowledgeView> = std::iter::once(&inner.view)
+            .chain(inner.pairs.values())
+            .collect();
+        let mut details: Vec<SharedDetail> = views
+            .iter()
+            .flat_map(|view| view.details.values().cloned())
+            .collect();
         details.sort_by(|a, b| b.shared_at.cmp(&a.shared_at).then(b.id.cmp(&a.id)));
-        SharedNow {
-            details,
-            artifacts: view.shared_artifacts(),
-        }
+        let mut artifacts: Vec<SharedArtifact> = views
+            .iter()
+            .flat_map(|view| view.shared_artifacts())
+            .collect();
+        artifacts.sort_by(|a, b| {
+            b.is_latest()
+                .cmp(&a.is_latest())
+                .then(b.shared_at.cmp(&a.shared_at))
+                .then(b.id.cmp(&a.id))
+        });
+        SharedNow { details, artifacts }
     }
 
     async fn publish_shared(&self, shared: SharedNow) {
@@ -617,7 +673,7 @@ impl Groups {
             let inner = self.inner.lock().await;
             (
                 inner.roster.clone(),
-                Self::shared(&inner.view),
+                Self::shared(&inner),
                 inner.record.federated,
                 inner.asks.clone(),
             )
@@ -698,17 +754,48 @@ impl Groups {
     ) {
         for peer in peers {
             let groups = self.clone();
-            let request = PeerRequest::Push {
-                group,
-                membership: membership.to_vec(),
-                knowledge: knowledge.to_vec(),
-            };
+            let membership = membership.to_vec();
+            let knowledge = knowledge.to_vec();
             (self.spawn)(Box::pin(async move {
+                // A two-person space's history only ever goes to that pair's computers.
+                let knowledge = groups.for_device(knowledge, &peer.device).await;
+                if membership.is_empty() && knowledge.is_empty() {
+                    return;
+                }
+                let request = PeerRequest::Push {
+                    group,
+                    membership,
+                    knowledge,
+                };
                 if let Err(error) = groups.ask(&peer, request).await {
                     tracing::debug!(%error, peer = %peer.device.fingerprint(), "push not delivered; sync will retry");
                 }
             }));
         }
+    }
+
+    /// Only the operations whose space `device` belongs to.
+    async fn for_device(&self, ops: Vec<KnowledgeOp>, device: &DeviceId) -> Vec<KnowledgeOp> {
+        let inner = self.inner.lock().await;
+        let Some(roster) = inner.roster.as_ref() else {
+            return Vec::new();
+        };
+        Self::reachable(roster, ops, device)
+    }
+
+    fn reachable(
+        roster: &GroupState,
+        ops: Vec<KnowledgeOp>,
+        device: &DeviceId,
+    ) -> Vec<KnowledgeOp> {
+        let lanes = lanes_of(roster);
+        ops.into_iter()
+            .filter(|op| {
+                lanes
+                    .get(&op.unsigned().lane)
+                    .is_some_and(|space| space.reaches(roster, device))
+            })
+            .collect()
     }
 
     /// Adds operations this computer did not have. Returns whether anything changed.
@@ -735,6 +822,16 @@ impl Groups {
                 changed = true;
             }
         }
+        // Keep only spaces this computer belongs to (judged with the roster as it now
+        // stands, so a person added in the same batch counts).
+        let roster = inner
+            .record
+            .group
+            .map(|group| fold(group, &inner.record.membership, self.verifier.as_ref()));
+        let knowledge = match &roster {
+            Some(roster) => Self::reachable(roster, knowledge, &self.me()),
+            None => Vec::new(),
+        };
         for op in knowledge {
             if !have_knowledge.contains(&op.hash())
                 && Some(op.unsigned().group) == inner.record.group
@@ -757,7 +854,7 @@ impl Groups {
         }
         self.persist(&inner).await;
         let roster = inner.roster.clone();
-        let shared = Self::shared(&inner.view);
+        let shared = Self::shared(&inner);
         drop(inner);
         if removed {
             self.publish_left().await;
@@ -936,32 +1033,46 @@ impl Groups {
                     None => self.emit(GroupEvent::LeftGroup).await,
                 }
             }
-            GroupCommand::Share { text, about } => {
-                self.knowledge(KnowledgeBody::Share {
-                    text,
-                    about,
-                    valid_at: None,
-                    replaces: Vec::new(),
-                })
+            GroupCommand::Share { text, about, with } => {
+                let space = self.space_with(with).await;
+                self.knowledge(
+                    space,
+                    KnowledgeBody::Share {
+                        text,
+                        about,
+                        valid_at: None,
+                        replaces: Vec::new(),
+                    },
+                )
                 .await;
             }
             GroupCommand::Correct { details, text } => {
-                self.knowledge(KnowledgeBody::Share {
-                    text,
-                    about: Vec::new(),
-                    valid_at: None,
-                    replaces: details,
-                })
+                let space = self.space_of(details.first()).await;
+                self.knowledge(
+                    space,
+                    KnowledgeBody::Share {
+                        text,
+                        about: Vec::new(),
+                        valid_at: None,
+                        replaces: details,
+                    },
+                )
                 .await;
             }
             GroupCommand::Agree { detail } => {
-                self.knowledge(KnowledgeBody::Corroborate { detail }).await;
+                let space = self.space_of(Some(&detail)).await;
+                self.knowledge(space, KnowledgeBody::Corroborate { detail })
+                    .await;
             }
             GroupCommand::Withdraw { detail } => {
-                self.knowledge(KnowledgeBody::Withdraw { detail }).await;
+                let space = self.space_of(Some(&detail)).await;
+                self.knowledge(space, KnowledgeBody::Withdraw { detail })
+                    .await;
             }
             GroupCommand::Erase { detail } => {
-                self.knowledge(KnowledgeBody::Redact { detail }).await;
+                let space = self.space_of(Some(&detail)).await;
+                self.knowledge(space, KnowledgeBody::Redact { detail })
+                    .await;
             }
             GroupCommand::AskGroup { question } => {
                 // Waiting on other computers must not hold up the next command.
@@ -992,22 +1103,59 @@ impl Groups {
                 content,
                 new_version_of,
                 local_id,
+                with,
             } => {
-                let replaces = match new_version_of {
-                    Some(original) => self.inner.lock().await.view.latest_versions_of(&original),
-                    None => Vec::new(),
+                // A new version stays in its original's space.
+                let (space, replaces) = match new_version_of {
+                    Some(original) => {
+                        let inner = self.inner.lock().await;
+                        match Self::space_holding(&inner, &original) {
+                            Some(space) => (
+                                space,
+                                Self::view_of(&inner, &space)
+                                    .map(|view| view.latest_versions_of(&original))
+                                    .unwrap_or_default(),
+                            ),
+                            None => (Space::Group, Vec::new()),
+                        }
+                    }
+                    None => (self.space_with(with).await, Vec::new()),
                 };
-                self.knowledge(KnowledgeBody::ShareArtifact {
-                    title,
-                    kind,
-                    language,
-                    content,
-                    replaces,
-                    origin: local_id,
-                })
+                self.knowledge(
+                    space,
+                    KnowledgeBody::ShareArtifact {
+                        title,
+                        kind,
+                        language,
+                        content,
+                        replaces,
+                        origin: local_id,
+                    },
+                )
                 .await;
             }
         }
+    }
+
+    /// The whole group, or the two-person space with `with`.
+    async fn space_with(&self, with: Option<PersonId>) -> Space {
+        let inner = self.inner.lock().await;
+        let me = inner
+            .roster
+            .as_ref()
+            .and_then(|roster| roster.owner_of(&self.me()))
+            .map(|member| member.person);
+        match (with, me) {
+            (Some(other), Some(me)) if other != me => Space::pair(me, other),
+            _ => Space::Group,
+        }
+    }
+
+    /// The space holding a shared detail or artifact (the whole group if unknown).
+    async fn space_of(&self, id: Option<&OpHash>) -> Space {
+        let inner = self.inner.lock().await;
+        id.and_then(|id| Self::space_holding(&inner, id))
+            .unwrap_or(Space::Group)
     }
 
     async fn create(&self, name: String, your_name: String, computer_name: String) {
@@ -1292,7 +1440,7 @@ impl Groups {
         }
         self.persist(&inner).await;
         let roster_now = inner.roster.clone();
-        let shared = Self::shared(&inner.view);
+        let shared = Self::shared(&inner);
         drop(inner);
         self.broadcast(roster.group, peers, &[op], &[]);
         if left {
@@ -1303,7 +1451,7 @@ impl Groups {
     }
 
     /// Signs a knowledge change, keeps it only if the rules accept it, and sends it.
-    async fn knowledge(self: &Arc<Self>, body: KnowledgeBody) {
+    async fn knowledge(self: &Arc<Self>, space: Space, body: KnowledgeBody) {
         let checked = match &body {
             KnowledgeBody::Share { text, about, .. } => {
                 check_share(text, about).map_err(|error| error.to_string())
@@ -1337,9 +1485,18 @@ impl Groups {
             .await;
             return;
         };
-        let lane = LaneId::whole_group(&roster.group);
-        // Everything new is sealed with a lane key only current computers hold.
-        let Some((key_id, key, mut new_ops)) = self.ensure_key(&mut inner, &roster).await else {
+        if Self::view_of(&inner, &space).is_none() {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "That person isn't in your group.".into(),
+            )))
+            .await;
+            return;
+        }
+        let lane = space.lane(&roster.group);
+        // Everything new is sealed with a lane key only this space's computers hold.
+        let Some((key_id, key, mut new_ops)) = self.ensure_key(&mut inner, &roster, &space).await
+        else {
             drop(inner);
             self.emit(GroupEvent::Problem(GroupProblem::Other(
                 "This computer couldn't make a secure key for the group. Try again.".into(),
@@ -1355,6 +1512,7 @@ impl Groups {
         let op = sealed.and_then(|ciphertext| {
             self.sign_next(
                 &inner,
+                &space,
                 KnowledgeBody::Sealed {
                     key: key_id,
                     ciphertext: Bytes(ciphertext),
@@ -1367,9 +1525,9 @@ impl Groups {
                 inner.opened.insert(op.hash(), body);
                 let mut trial_ops = inner.record.knowledge.clone();
                 trial_ops.push(op.clone());
-                let trial = fold_knowledge_opened(
+                let trial = fold_space(
                     &roster,
-                    lane,
+                    space,
                     &trial_ops,
                     self.verifier.as_ref(),
                     &inner.opened,
@@ -1395,7 +1553,7 @@ impl Groups {
         self.refold(&mut inner).await;
         self.persist(&inner).await;
         let roster_now = inner.roster.clone();
-        let shared = Self::shared(&inner.view);
+        let shared = Self::shared(&inner);
         drop(inner);
         // Key grants made on the way go out even when the share itself was refused.
         if !new_ops.is_empty() {
@@ -1483,22 +1641,28 @@ impl Groups {
         inner.record.membership.extend(added.iter().cloned());
         Self::remember(&mut inner.record, address);
         self.refold(&mut inner).await;
-        // The newcomer can read the group's history: hand it every key held here.
+        // The newcomer can read the history of every space it belongs to: hand it
+        // every key held here for those spaces.
         let mut granted = Vec::new();
-        let held: Vec<(OpHash, [u8; 32])> = inner
-            .lane_keys
-            .iter()
-            .filter(|(id, _)| {
-                inner
-                    .view
-                    .keys
-                    .get(*id)
-                    .is_some_and(|lane_key| !lane_key.grants.contains_key(&from))
+        let roster_after = inner.roster.clone();
+        let held: Vec<(Space, OpHash, [u8; 32])> = std::iter::once(&inner.view)
+            .chain(inner.pairs.values())
+            .filter(|view| {
+                roster_after
+                    .as_ref()
+                    .is_some_and(|roster| view.space.reaches(roster, &from))
             })
-            .map(|(id, key)| (*id, *key))
+            .flat_map(|view| {
+                view.keys
+                    .iter()
+                    .filter(|(_, lane_key)| !lane_key.grants.contains_key(&from))
+                    .filter_map(|(id, _)| {
+                        inner.lane_keys.get(id).map(|key| (view.space, *id, *key))
+                    })
+            })
             .collect();
-        for (id, key) in held {
-            if let Some(op) = self.sign_next(&inner, self.grant_body(id, &key, &[from])) {
+        for (space, id, key) in held {
+            if let Some(op) = self.sign_next(&inner, &space, self.grant_body(id, &key, &[from])) {
                 inner.record.knowledge.push(op.clone());
                 self.refold(&mut inner).await;
                 granted.push(op);
@@ -1506,13 +1670,17 @@ impl Groups {
         }
         self.persist(&inner).await;
         // The joiner syncs straight after joining, so a history too large for one
-        // message still arrives in full.
+        // message still arrives in full. It only ever sees spaces it belongs to.
+        let visible = match &inner.roster {
+            Some(roster) => Self::reachable(roster, inner.record.knowledge.clone(), &from),
+            None => Vec::new(),
+        };
         let response = PeerResponse::Joined {
             membership: inner.record.membership.clone(),
-            knowledge: within_budget(inner.record.knowledge.clone(), MAX_REPLY_KNOWLEDGE_BYTES).0,
+            knowledge: within_budget(visible, MAX_REPLY_KNOWLEDGE_BYTES).0,
         };
         let roster_now = inner.roster.clone();
-        let shared = Self::shared(&inner.view);
+        let shared = Self::shared(&inner);
         drop(inner);
         self.broadcast(
             group,
@@ -1562,13 +1730,13 @@ impl PeerHandler for GroupHandler {
                     .await
             }
             PeerRequest::Ask { question, .. } => groups.answer(from, &question).await,
-            other => groups.serve_peer(other).await,
+            other => groups.serve_peer(from, other).await,
         }
     }
 }
 
 impl Groups {
-    async fn serve_peer(&self, request: PeerRequest) -> PeerResponse {
+    async fn serve_peer(&self, from: DeviceId, request: PeerRequest) -> PeerResponse {
         match request {
             PeerRequest::Sync {
                 membership,
@@ -1599,13 +1767,19 @@ impl Groups {
                         .cloned()
                         .collect(),
                     knowledge: within_budget(
-                        inner
-                            .record
-                            .knowledge
-                            .iter()
-                            .filter(|op| !knowledge.contains(&op.hash()))
-                            .cloned()
-                            .collect(),
+                        inner.roster.as_ref().map_or_else(Vec::new, |roster| {
+                            Self::reachable(
+                                roster,
+                                inner
+                                    .record
+                                    .knowledge
+                                    .iter()
+                                    .filter(|op| !knowledge.contains(&op.hash()))
+                                    .cloned()
+                                    .collect(),
+                                &from,
+                            )
+                        }),
                         MAX_REPLY_KNOWLEDGE_BYTES,
                     )
                     .0,
@@ -1864,7 +2038,7 @@ fn refusal_problem(reason: Refusal) -> GroupProblem {
 #[cfg(test)]
 mod tests {
     use sha2::{Digest as _, Sha256};
-    use sovra_core::group::{KnowledgeView, UnsignedKnowledge, fold_knowledge};
+    use sovra_core::group::{KnowledgeView, LaneId, UnsignedKnowledge, fold_knowledge};
 
     use super::*;
 
@@ -1977,7 +2151,7 @@ mod tests {
     #[tokio::test]
     async fn a_helpers_recall_carries_shared_group_details_with_who_shared_them() {
         let knowledge = GroupKnowledge::default();
-        *knowledge.0.write().await = view_with_dads_detail();
+        *knowledge.0.write().await = vec![view_with_dads_detail()];
         let reader = knowledge
             .wrap(Some(Arc::new(Empty)))
             .expect("wraps an existing reader");

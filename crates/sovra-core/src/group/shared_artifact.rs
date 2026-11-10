@@ -89,6 +89,9 @@ pub struct SharedArtifact {
     pub from_former_member: bool,
     /// The sharer's own library id for it (see `KnowledgeBody::ShareArtifact`).
     pub origin: String,
+    /// Who it is shared with: the whole group, or just two people.
+    #[serde(default)]
+    pub space: super::space::Space,
 }
 
 impl SharedArtifact {

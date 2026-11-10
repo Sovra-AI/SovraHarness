@@ -58,18 +58,17 @@ pub struct LaneKey {
 }
 
 impl LaneKey {
-    /// Whether it may encrypt new content: nobody who holds it has been removed.
-    pub fn usable(&self, roster: &GroupState) -> bool {
-        !self
-            .grants
-            .keys()
-            .any(|device| roster.former_devices.contains_key(device))
+    /// Whether it may encrypt new content: every computer that holds it is still in
+    /// the space's `audience` (nobody removed, nobody outside a two-person space).
+    pub fn usable(&self, audience: &BTreeSet<DeviceId>) -> bool {
+        self.grants.keys().all(|device| audience.contains(device))
     }
 
-    /// Current computers that still need a copy.
-    pub fn missing(&self, roster: &GroupState) -> BTreeSet<DeviceId> {
-        current_devices(roster)
-            .into_iter()
+    /// Computers in `audience` that still need a copy.
+    pub fn missing(&self, audience: &BTreeSet<DeviceId>) -> BTreeSet<DeviceId> {
+        audience
+            .iter()
+            .copied()
             .filter(|device| !self.grants.contains_key(device))
             .collect()
     }
@@ -84,10 +83,13 @@ pub fn current_devices(roster: &GroupState) -> BTreeSet<DeviceId> {
         .collect()
 }
 
-/// The newest key that may encrypt new content, if any.
-pub fn usable_key(keys: &BTreeMap<OpHash, LaneKey>, roster: &GroupState) -> Option<OpHash> {
+/// The newest key that may encrypt new content for `audience`, if any.
+pub fn usable_key(
+    keys: &BTreeMap<OpHash, LaneKey>,
+    audience: &BTreeSet<DeviceId>,
+) -> Option<OpHash> {
     keys.iter()
-        .filter(|(_, key)| key.usable(roster))
+        .filter(|(_, key)| key.usable(audience))
         .max_by_key(|(id, key)| (key.created_at, **id))
         .map(|(id, _)| *id)
 }

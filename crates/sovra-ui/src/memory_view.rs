@@ -1,7 +1,7 @@
 //! Live conversation memories, retained sources, and explicit user corrections.
 
 use gpui_kit::component::{
-    Disableable as _, Selectable as _, h_flex,
+    Disableable as _, Selectable as _, Sizable as _, h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     v_flex,
 };
@@ -99,6 +99,8 @@ pub(crate) struct MemoryView {
     /// The saved detail being reworded before it is shared with the group.
     sharing: Option<FactId>,
     share_draft: Entity<TextareaState>,
+    /// Share with the whole group (`None`) or just this person.
+    share_to: Option<sovra_core::group::PersonId>,
 }
 
 impl MemoryView {
@@ -193,6 +195,7 @@ impl MemoryView {
             duplicates: None,
             version_link: false,
             sharing: None,
+            share_to: None,
             share_draft: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 5)),
         }
     }
@@ -989,16 +992,56 @@ impl MemoryView {
             );
         }
         let topics = sovra_core::group::shareable_topics(&detail.fact.entities, your_name);
-        let group_name = group.to_owned();
+        let others = self.models.read(cx).groups.others();
+        let chosen = self.share_to;
+        let chosen_name = chosen.and_then(|person| {
+            others
+                .iter()
+                .find(|(other, _)| *other == person)
+                .map(|(_, name)| name.clone())
+        });
+        let group_name = chosen_name
+            .as_ref()
+            .map_or_else(|| group.to_owned(), |name| format!("just {name}"));
+        let mut audience = h_flex()
+            .id("memory-share-to")
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(
+                design::button("memory-share-everyone", format!("Everyone in {group}"), cx)
+                    .small()
+                    .selected(chosen.is_none())
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.share_to = None;
+                        cx.notify();
+                    })),
+            );
+        for (index, (person, name)) in others.into_iter().enumerate() {
+            audience = audience.child(
+                design::button(("memory-share-just", index), format!("Just {name}"), cx)
+                    .small()
+                    .selected(chosen == Some(person))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.share_to = Some(person);
+                        cx.notify();
+                    })),
+            );
+        }
         section = section
             .child(
                 div()
                     .whitespace_normal()
                     .sovra_text(TextRole::Caption, cx)
-                    .child(format!(
-                        "Everyone in {group} will see this, and their helpers can use it. Check the words make sense to them."
-                    )),
+                    .child(match &chosen_name {
+                        Some(name) => format!(
+                            "Only you and {name} will see this, and {name}'s helpers can use it. Check the words make sense to them."
+                        ),
+                        None => format!(
+                            "Everyone in {group} will see this, and their helpers can use it. Check the words make sense to them."
+                        ),
+                    }),
             )
+            .child(audience)
             .child(Textarea::new(&self.share_draft).aria_label("Words to share with your group"))
             .child(
                 h_flex()
@@ -1020,6 +1063,7 @@ impl MemoryView {
                                             sovra_core::group::GroupCommand::Share {
                                                 text,
                                                 about: topics.clone(),
+                                                with: view.share_to,
                                             },
                                         ),
                                     );
@@ -1596,9 +1640,9 @@ mod tests {
             .unwrap();
             let shared =
                 std::iter::from_fn(|| commands.try_recv().ok()).find_map(|command| match command {
-                    Command::Group(sovra_core::group::GroupCommand::Share { text, about }) => {
-                        Some((text, about))
-                    }
+                    Command::Group(sovra_core::group::GroupCommand::Share {
+                        text, about, ..
+                    }) => Some((text, about)),
                     _ => None,
                 });
             assert_eq!(

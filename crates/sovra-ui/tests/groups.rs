@@ -83,6 +83,7 @@ fn dads_detail() -> SharedDetail {
         status: DetailStatus::Current,
         agreed_by: BTreeSet::new(),
         from_former_member: false,
+        space: sovra_core::group::Space::Group,
     }
 }
 
@@ -267,6 +268,7 @@ fn dads_list() -> SharedArtifact {
         status: DetailStatus::Current,
         from_former_member: false,
         origin: "art-dad".into(),
+        space: sovra_core::group::Space::Group,
     }
 }
 
@@ -449,4 +451,38 @@ fn group_members_can_ask_each_others_memories_with_consent_and_a_log(cx: &mut Te
         assert!(window.find(("groups-answer", 0usize)).visible());
     })
     .expect("window open");
+}
+
+#[gpui_kit::test]
+fn a_detail_can_go_to_just_one_person_and_private_ones_say_so(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    let mut private = dads_detail();
+    private.space = sovra_core::group::Space::pair(PersonId([10; 32]), PersonId([20; 32]));
+    group_event(&events, GroupEvent::Knowledge(vec![private]));
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        let tag = window.find(("groups-detail-space", 0usize));
+        assert!(tag.visible());
+        assert_eq!(tag.label(), Some("Just you and Dad"));
+        window.click(("groups-share-just", 0usize), cx);
+        window.render_frame(cx);
+        window.click("groups-share", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    let sent = drain(&commands);
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        Command::Group(GroupCommand::Share { with: Some(person), .. }) if *person == PersonId([20; 32])
+    )));
 }
