@@ -8,7 +8,7 @@ Map of the top-level guides for SovraHarness. Start at the
 | [Getting started](getting-started.md) | First launch, first chat and finding features |
 | [Configuration and local data](configuration.md) | Startup variables, data paths and troubleshooting |
 | [Schedules](schedules.md) | Repeating prompts and confirmed timed messages |
-| [Groups](groups.md) | People, computers and explicitly shared knowledge |
+| [Groups](groups.md) | How people and computers share a roster and explicit details |
 | [Release guide](releasing.md) | Packaging, signing and release verification |
 | [Roadmap](roadmap/README.md) | Implemented foundations and planned stages |
 | [Architecture](architecture.md) | Why the crates, Command/Event, and adapters are shaped this way |

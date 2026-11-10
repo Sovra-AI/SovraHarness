@@ -3,7 +3,7 @@
 //! "computer", "group", "share"; the rules live in `sovra_core::group`.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputState},
@@ -15,7 +15,7 @@ use gpui_kit::{
 };
 use sovra_core::Command;
 use sovra_core::group::{
-    DetailStatus, GroupCommand, PairingStage, Role, SharedDetail, removal_warning,
+    DetailStatus, GroupCommand, GroupEvent, PairingStage, Role, SharedDetail, removal_warning,
 };
 
 use crate::RuntimeClient;
@@ -33,6 +33,8 @@ pub(crate) struct GroupsForm {
     share: Entity<InputState>,
     /// Which person or computer is waiting for "Yes, remove".
     confirm_remove: Option<String>,
+    copy_pending: bool,
+    copied_link: Option<String>,
 }
 
 impl GroupsForm {
@@ -53,6 +55,8 @@ impl GroupsForm {
                 cx,
             ),
             confirm_remove: None,
+            copy_pending: false,
+            copied_link: None,
         }
     }
 }
@@ -79,6 +83,35 @@ fn status_label(detail: &SharedDetail) -> Option<&'static str> {
 }
 
 impl ModelsView {
+    pub(crate) fn apply_group_event(&mut self, event: GroupEvent, cx: &mut Context<Self>) {
+        if let GroupEvent::InviteReady { link, .. } = &event {
+            if self.groups_form.copy_pending {
+                cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+                self.groups_form.copied_link = Some(link.clone());
+            }
+            self.groups_form.copy_pending = false;
+        } else if matches!(
+            event,
+            GroupEvent::Problem(_) | GroupEvent::LeftGroup | GroupEvent::Loaded { .. }
+        ) {
+            self.groups_form.copy_pending = false;
+            self.groups_form.copied_link = None;
+        }
+        self.groups.apply(event);
+        cx.notify();
+    }
+
+    fn create_and_copy_invite(&mut self, command: GroupCommand, cx: &mut Context<Self>) {
+        // Clipboard ownership follows this explicit click, never an unsolicited group event.
+        self.groups_form.copy_pending = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Group(command))
+            .is_ok();
+        self.groups_form.copied_link = None;
+        cx.notify();
+    }
+
     pub(crate) fn render_groups_section(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let view = &self.groups;
@@ -402,35 +435,46 @@ impl ModelsView {
             .test_support()
             .w_full()
             .gap(t.space.compact)
-            .child(div().sovra_text(TextRole::Body, cx).child("Invite"));
+            .child(div().sovra_text(TextRole::Body, cx).child("Share an invite link"))
+            .child(caption("Create a one-time link, then paste it into a message. Keep Sovra open while the other person joins.", cx));
         if manage {
             invites = invites
-                .child(Input::new(&self.groups_form.invite_name))
+                .child(
+                    Input::new(&self.groups_form.invite_name)
+                        .id("groups-invite-name")
+                        .aria_label("Name of the person to invite"),
+                )
                 .child(
                     h_flex()
                         .flex_wrap()
                         .gap(t.space.small)
                         .child(
-                            design::button("groups-invite-member", "Invite as member", cx)
-                                .small()
-                                .on_click(cx.listener(|view, _, _, cx| {
-                                    let name = value(&view.groups_form.invite_name, cx);
-                                    send(
-                                        GroupCommand::InvitePerson {
-                                            name,
-                                            role: Role::Member,
-                                        },
-                                        cx,
-                                    );
-                                })),
+                            design::primary_button(
+                                "groups-invite-member",
+                                "Create and copy invite link",
+                                cx,
+                            )
+                            .small()
+                            .disabled(self.groups_form.copy_pending)
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                let name = value(&view.groups_form.invite_name, cx);
+                                view.create_and_copy_invite(
+                                    GroupCommand::InvitePerson {
+                                        name,
+                                        role: Role::Member,
+                                    },
+                                    cx,
+                                );
+                            })),
                         )
                         .child(
-                            design::button("groups-invite-admin", "Invite as admin", cx)
+                            design::button("groups-invite-admin", "Create and copy admin link", cx)
                                 .small()
                                 .ghost()
+                                .disabled(self.groups_form.copy_pending)
                                 .on_click(cx.listener(|view, _, _, cx| {
                                     let name = value(&view.groups_form.invite_name, cx);
-                                    send(
+                                    view.create_and_copy_invite(
                                         GroupCommand::InvitePerson {
                                             name,
                                             role: Role::Admin,
@@ -446,17 +490,29 @@ impl ModelsView {
                 design::button("groups-invite-computer", "Add another of my computers", cx)
                     .small()
                     .ghost()
-                    .on_click(cx.listener(|_, _, _, cx| send(GroupCommand::InviteComputer, cx))),
+                    .disabled(self.groups_form.copy_pending)
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.create_and_copy_invite(GroupCommand::InviteComputer, cx);
+                    })),
             ),
         );
+        if self.groups_form.copy_pending {
+            invites = invites.child(caption("Creating your invite link…", cx));
+        }
         if let Some((link, expires_at)) = self.groups.invite.clone() {
             let mono = cx.theme().mono_font_family.clone();
-            let minutes = (expires_at.millis() - now_millis()).max(0) / 60_000;
+            let remaining = (expires_at.millis() - now_millis()).max(0);
+            let minutes = (remaining + 59_999) / 60_000;
+            if self.groups_form.copied_link.as_ref() == Some(&link) {
+                invites = invites.child(caption(
+                    "Invite link copied. Paste it into a message to share it.",
+                    cx,
+                ));
+            }
             invites = invites
                 .child(caption(
                     format!(
-                        "Send this link to them. It works once and expires in about {} minutes.",
-                        minutes + 1
+                        "Send this link to them. It works once and expires in about {minutes} minutes."
                     ),
                     cx,
                 ))
@@ -478,11 +534,15 @@ impl ModelsView {
                                 .child(link.clone()),
                         )
                         .child(
-                            design::button("groups-copy-link", "Copy", cx)
+                            design::button("groups-copy-link", "Copy invite link", cx)
                                 .xsmall()
-                                .on_click(move |_, _, cx| {
+                                .accessibility_label("Copy group invite link")
+                                .disabled(remaining == 0 || self.groups_form.copy_pending)
+                                .on_click(cx.listener(move |view, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                                }),
+                                    view.groups_form.copied_link = Some(link.clone());
+                                    cx.notify();
+                                })),
                         ),
                 );
         }

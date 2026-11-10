@@ -11,9 +11,16 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Settings → Groups offers **Create and copy invite link** and copies a new
+  one-time invitation only after the runtime confirms it; **Copy invite link**
+  lets you copy it again.
+
 - Add first-use, knowledge review, schedules, groups, configuration/local-data and release guides;
   expand the docs index and reconcile credential, update, group-roadmap and
   network-isolation descriptions with the implementation.
+- Expand the groups guide with the identities, signed membership log, invite
+  links, peer sync and shared-knowledge rules the app runs, and keep the
+  later lane and handoff design in the roadmap.
 
 - Investor pitch slides no longer share one paper fill. Four light washes
   alternate down the deck, and nine slides carry a Bootstrap Icon from
