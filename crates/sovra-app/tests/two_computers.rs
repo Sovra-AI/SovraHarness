@@ -80,6 +80,7 @@ impl Computer {
                     }),
                     store: Arc::new(sovra_mesh::FileGroupStore::new(store_dir)),
                     qr: None,
+                    helper_model: None,
                 }),
                 ..RuntimeServices::default()
             },

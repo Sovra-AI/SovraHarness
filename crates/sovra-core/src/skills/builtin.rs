@@ -41,6 +41,7 @@ impl Skill {
             "share-privately" => "Share something with just one person",
             "add-computer" => "Add another computer to my group",
             "share-helper" => "Share a helper, skill or schedule with your group",
+            "share-ai" => "Let a free computer in your group do the answering",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -160,6 +161,10 @@ impl Skill {
             "share-artifact" => (
                 "Opens Artifacts. Open something you saved, like the family shopping list, and press Share with your group. Everyone gets a copy, and when someone changes it and shares again, the group gets the new version.".to_owned(),
                 "/share-artifact ".to_owned(),
+            ),
+            "share-ai" => (
+                "Opens Groups. On the computer with a good AI, turn on Let my group use this computer's AI. On an older laptop with no AI, turn on Use a free computer's AI — then just chat, and the free computer answers.".to_owned(),
+                "/share-ai ".to_owned(),
             ),
             "share-helper" => (
                 "Opens your team. On a helper you made, press Share with my group; you can do the same for a skill or a schedule. Others read the words first and press Use this helper to get their own copy. Shared helpers never bring tools with them.".to_owned(),
@@ -440,6 +445,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Artifacts to share a saved document, list or picture with your group, keep a copy of what others shared, and share your changes back as a new version.",
             SkillAction::Artifacts,
             &["share-document", "shared-artifacts"],
+        ),
+        action(
+            "share-ai",
+            "Share an AI",
+            "Open Settings → Groups to let a computer with no AI use a free computer's AI in your group. Only the conversation's words travel; the helping computer never uses its tools for someone else.",
+            SkillAction::Settings,
+            &["work-handoff", "borrow-ai"],
         ),
         action(
             "share-helper",

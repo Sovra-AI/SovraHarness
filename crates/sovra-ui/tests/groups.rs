@@ -735,3 +735,48 @@ fn a_shared_skill_is_kept_without_tools_until_you_grant_them(cx: &mut TestAppCon
                 && !skill.builtin
     )));
 }
+
+#[gpui_kit::test]
+fn this_computers_ai_can_be_offered_to_the_group_and_its_jobs_are_listed(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 3600.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(
+        &events,
+        GroupEvent::Work {
+            settings: sovra_core::group::WorkSettings::default(),
+            recent: vec![sovra_core::group::WorkRecord {
+                asked_by: "Dad".into(),
+                computer: "Old laptop".into(),
+                at: Timestamp(1),
+                answered: true,
+            }],
+        },
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("groups-work-job", 0usize)).label(),
+            Some("Dad (Old laptop) · answered")
+        );
+        window.click("groups-work-help", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert!(
+        drain(&commands).contains(&Command::Group(GroupCommand::SetWork(
+            sovra_core::group::WorkSettings {
+                help_others: true,
+                use_group: false,
+            }
+        )))
+    );
+}

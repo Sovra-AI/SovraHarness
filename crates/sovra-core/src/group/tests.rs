@@ -1960,3 +1960,92 @@ fn each_computer_says_whether_it_is_online_or_when_it_was_last_seen() {
         .collect();
     assert_eq!(seen, vec![Some(Timestamp(42))]);
 }
+
+// ---- work handoff ----------------------------------------------------------
+
+fn job(turns: &[(bool, &str)]) -> ChatJob {
+    ChatJob {
+        instructions: "Be kind.".into(),
+        turns: turns
+            .iter()
+            .map(|(from_person, text)| JobTurn {
+                from_person: *from_person,
+                text: (*text).into(),
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn a_chat_job_must_end_with_a_question_and_fit() {
+    assert_eq!(check_job(&job(&[(true, "What's for dinner?")])), Ok(()));
+    assert_eq!(check_job(&job(&[])), Err(WorkError::Empty));
+    assert_eq!(
+        check_job(&job(&[(true, "Hi"), (false, "Hello!")])),
+        Err(WorkError::Empty),
+        "the last turn is the person's question"
+    );
+    let long = "x".repeat(MAX_JOB_BYTES);
+    assert_eq!(check_job(&job(&[(true, &long)])), Err(WorkError::TooBig));
+
+    // A long chat is trimmed to its newest turns, keeping the question.
+    let many: Vec<(bool, String)> = (0..200)
+        .map(|n| (n % 2 == 0, format!("turn {n}")))
+        .collect();
+    let mut chat = job(&[]);
+    chat.turns = many
+        .iter()
+        .map(|(from_person, text)| JobTurn {
+            from_person: *from_person,
+            text: text.clone(),
+        })
+        .collect();
+    chat.turns.push(JobTurn {
+        from_person: true,
+        text: "And now?".into(),
+    });
+    let trimmed = chat.trimmed();
+    assert_eq!(trimmed.turns.len(), MAX_JOB_TURNS);
+    assert_eq!(
+        trimmed.turns.last().map(|turn| turn.text.as_str()),
+        Some("And now?")
+    );
+    assert_eq!(check_job(&trimmed), Ok(()));
+}
+
+#[test]
+fn helpers_heard_from_recently_are_asked_first_and_work_settings_start_off() {
+    let seen = std::collections::BTreeMap::from([
+        (device(2), Timestamp(100)),
+        (device(3), Timestamp(900)),
+    ]);
+    assert_eq!(
+        helper_order(
+            [device(1), device(2), device(3), device(4)],
+            &seen,
+            &device(1)
+        ),
+        vec![device(3), device(2), device(4)]
+    );
+    assert_eq!(
+        WorkSettings::default(),
+        WorkSettings {
+            help_others: false,
+            use_group: false
+        }
+    );
+    let mut log = Vec::new();
+    for n in 0..(MAX_WORK_LOG + 3) {
+        log_work(
+            &mut log,
+            WorkRecord {
+                asked_by: format!("Person {n}"),
+                computer: "Laptop".into(),
+                at: Timestamp(0),
+                answered: true,
+            },
+        );
+    }
+    assert_eq!(log.len(), MAX_WORK_LOG);
+    assert_eq!(log[0].asked_by, format!("Person {}", MAX_WORK_LOG + 2));
+}

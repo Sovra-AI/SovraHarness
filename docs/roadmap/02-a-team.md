@@ -873,7 +873,8 @@ Status checked against the code on 2026-11-10.
 
 - [x] Group runtime covering create, invite, join, rename, role, remove and
   leave, with push on change and background sync every 20 s.
-- [ ] Presence via gossip.
+- [x] Presence: every successful exchange marks a computer seen; Groups shows
+  Online now / Seen N min ago (no separate gossip needed at this size).
 - [ ] Persist group state through the `MemoryStore` port. *Today:* a JSON
   file through `GroupStore`, which is simpler and enough for now.
 
@@ -962,12 +963,16 @@ Status checked against the code on 2026-11-10.
 
 ### T4 — Hand off work
 
-- [ ] Job protocol (§11.2) in `sovra-mesh`, with pure messages and scheduler
-  in core.
+- [x] Job protocol, first slice: `PeerRequest::Work` carries a text-only chat
+  job (`sovra-core/src/group/work.rs`); helpers are tried most-recently-seen
+  first. *Not yet:* streaming tokens, cancel within 1 s, embedding/indexing jobs.
 - [ ] Capability advertisement in heartbeats: models from `/api/tags` and
   `/api/ps`, memory, AC, idle, queue, sharing policy.
-- [ ] `ProviderKind::Group` plus a `ModelProvider` impl and an `Llm` forwarder
-  (§11.4). Handle every compiler-listed match.
+- [x] An `Llm` forwarder (`sovra-adk/src/group_work.rs`, `GroupLlm`) used when
+  this computer has no AI and *Use a free computer's AI* is on; the helping
+  side answers on its own selected AI with no tools (`HarnessWork`). Chosen
+  instead of a new `ProviderKind`, so model setup and 15 provider matches stay
+  unchanged.
 - [ ] Embedding and extraction offload (`HttpEmbedder`, `HttpSummarizer`
   destinations).
 - [ ] UI:

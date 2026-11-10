@@ -107,6 +107,15 @@ impl Client {
     }
 }
 
+/// A harness whose AI is a free computer in the group, when this computer's owner
+/// turned on "Use a free computer's AI when this one has none".
+async fn group_harness(groups: &groups::GroupRuntime, config: &AgentConfig) -> Option<AdkHarness> {
+    let peer = groups.work_peer().await?;
+    AdkHarness::through_group(config, peer)
+        .map_err(|error| tracing::warn!(%error, "group helper unavailable"))
+        .ok()
+}
+
 /// Starts the runtime on its own thread with default [`AgentConfig`] and no persistent
 /// memory, and returns the UI's handle.
 pub fn start(version: &str) -> Result<Client, Error> {
@@ -505,6 +514,26 @@ async fn serve(
         let control = memory_control.clone();
         groups.attach_memory(Arc::new(move || {
             recalling::reader(store.as_ref(), &control, None)
+        }));
+    }
+    {
+        // Work handoff answers group members with whichever AI is selected now.
+        let execution = models.as_ref().map(|models| models.execution.clone());
+        let legacy = harness.clone();
+        groups.attach_model_unless_given(Arc::new(move || {
+            let execution = execution.clone();
+            let legacy = legacy.clone();
+            Box::pin(async move {
+                let selected = match execution {
+                    Some(execution) => match execution.read().await.clone() {
+                        models::ModelExecution::Selected { harness, .. } => Some(*harness),
+                        models::ModelExecution::Legacy => legacy,
+                        models::ModelExecution::Unavailable(_) => None,
+                    },
+                    None => legacy,
+                };
+                selected.map(|harness| harness.work_model())
+            })
         }));
     }
     let mut memory_semantic = memory_semantic::SemanticRuntime::start(
@@ -939,9 +968,18 @@ async fn serve(
             } => {
                 let (selected, timeout) = if let Some(models) = &models {
                     match models.execution.read().await.clone() {
-                        models::ModelExecution::Legacy => (harness.clone(), None),
+                        models::ModelExecution::Legacy => match harness.clone() {
+                            Some(harness) => (Some(harness), None),
+                            None => (group_harness(&groups, &agent_config).await, None),
+                        },
                         models::ModelExecution::Selected { harness, timeout } => {
                             (Some(*harness), Some(timeout))
+                        }
+                        // No AI here: a free computer in the group may answer instead.
+                        models::ModelExecution::Unavailable(_)
+                            if let Some(helper) = group_harness(&groups, &agent_config).await =>
+                        {
+                            (Some(helper), None)
                         }
                         models::ModelExecution::Unavailable(message) => {
                             let _ = events
@@ -955,7 +993,10 @@ async fn serve(
                         }
                     }
                 } else {
-                    (harness.clone(), None)
+                    match harness.clone() {
+                        Some(harness) => (Some(harness), None),
+                        None => (group_harness(&groups, &agent_config).await, None),
+                    }
                 };
                 let memory_enabled = models
                     .as_ref()

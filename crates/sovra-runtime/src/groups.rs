@@ -50,6 +50,9 @@ pub struct GroupServices {
     pub store: Arc<dyn GroupStore>,
     /// Turns invite links into QR codes; `None` shows the link only.
     pub qr: Option<QrEncoder>,
+    /// A fixed AI to answer group members' work with (an always-on helper box, or a
+    /// test). `None` answers with whichever AI this computer has selected.
+    pub helper_model: Option<Arc<dyn sovra_core::group::WorkModel>>,
 }
 
 impl std::fmt::Debug for GroupServices {
@@ -78,6 +81,14 @@ struct SharedNow {
 pub(crate) type LocalMemory =
     Arc<dyn Fn() -> Option<Arc<dyn sovra_core::MemoryReader>> + Send + Sync>;
 
+/// This computer's currently selected AI, for answering group members' chat jobs
+/// (work handoff). Looked up per job so switching models takes effect at once.
+pub(crate) type LocalModel = Arc<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Option<Arc<dyn sovra_core::group::WorkModel>>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// What helpers may read: the group's usable shared details, plus the way to ask the
 /// group's computers (federated recall) and to answer them from this computer's memory.
 #[derive(Clone, Default)]
@@ -86,6 +97,7 @@ pub(crate) struct GroupKnowledge(
     Arc<RwLock<Vec<KnowledgeView>>>,
     Arc<std::sync::RwLock<Option<LocalMemory>>>,
     Arc<std::sync::RwLock<Option<std::sync::Weak<Groups>>>>,
+    Arc<std::sync::RwLock<Option<LocalModel>>>,
 );
 
 impl GroupKnowledge {
@@ -281,6 +293,19 @@ impl GroupRuntime {
     ) -> Self {
         let (commands, receiver) = async_channel::bounded::<GroupCommand>(32);
         let knowledge = GroupKnowledge::default();
+        if let Some(model) = services
+            .as_ref()
+            .and_then(|services| services.helper_model.clone())
+        {
+            let open: LocalModel = Arc::new(move || {
+                let model = model.clone();
+                Box::pin(async move { Some(model) })
+            });
+            *knowledge
+                .3
+                .write()
+                .expect("local model lock is never poisoned") = Some(open);
+        }
         let tasks = Arc::new(std::sync::Mutex::new(tokio::task::JoinSet::new()));
         let spawn = spawner(&tasks, handle);
         let readers = knowledge.clone();
@@ -354,6 +379,30 @@ impl GroupRuntime {
         }
     }
 
+    /// Lets group members hand chat work to this computer's selected AI (when the
+    /// owner allows), unless the composition root gave a fixed helper AI.
+    pub(crate) fn attach_model_unless_given(&self, open: LocalModel) {
+        let mut slot = self
+            .knowledge
+            .3
+            .write()
+            .expect("local model lock is never poisoned");
+        if slot.is_none() {
+            *slot = Some(open);
+        }
+    }
+
+    /// A way to hand a chat turn to a free computer in the group, when this computer's
+    /// owner turned that on and it is in a group.
+    pub(crate) async fn work_peer(&self) -> Option<Arc<dyn sovra_core::group::WorkPeer>> {
+        let groups = self.knowledge.groups()?;
+        let wanted = {
+            let inner = groups.inner.lock().await;
+            inner.record.work.use_group && inner.roster.is_some()
+        };
+        wanted.then(|| Arc::new(GroupWork(groups)) as Arc<dyn sovra_core::group::WorkPeer>)
+    }
+
     /// Lets other computers' helpers ask this computer's memory (when the owner allows).
     pub(crate) fn attach_memory(&self, open: LocalMemory) {
         *self
@@ -367,6 +416,70 @@ impl GroupRuntime {
         if self.commands.try_send(command).is_err() {
             tracing::warn!("group command dropped: the groups worker is busy or stopped");
         }
+    }
+}
+
+/// How long a helping computer may take to answer one chat job.
+const JOB_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Asking side of work handoff: tries the group's other computers, most recently
+/// heard from first, until one answers.
+struct GroupWork(Arc<Groups>);
+
+#[async_trait::async_trait]
+impl sovra_core::group::WorkPeer for GroupWork {
+    async fn run(
+        &self,
+        job: sovra_core::group::ChatJob,
+    ) -> Result<sovra_core::group::JobAnswer, sovra_core::group::WorkError> {
+        sovra_core::group::check_job(&job)?;
+        let groups = &self.0;
+        let (group, candidates) = {
+            let inner = groups.inner.lock().await;
+            let Some(roster) = inner.roster.clone() else {
+                return Err(sovra_core::group::WorkError::NobodyFree);
+            };
+            let order = sovra_core::group::helper_order(
+                groups.peers(&inner).into_iter().map(|peer| peer.device),
+                &inner.last_seen,
+                &groups.me(),
+            );
+            let candidates: Vec<(PeerAddress, String, String)> = order
+                .into_iter()
+                .map(|device| {
+                    let member = roster.owner_of(&device);
+                    (
+                        Groups::address_of(&inner.record, device),
+                        member.map(|m| m.name.clone()).unwrap_or_default(),
+                        member
+                            .and_then(|m| m.devices.get(&device))
+                            .map(|entry| entry.name.clone())
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect();
+            (roster.group, candidates)
+        };
+        for (peer, helper, computer) in candidates {
+            let request = PeerRequest::Work {
+                group,
+                job: job.clone(),
+            };
+            let answer = tokio::time::timeout(
+                JOB_TIMEOUT + REQUEST_TIMEOUT,
+                groups.transport.request(&peer, request),
+            )
+            .await;
+            if let Ok(Ok(PeerResponse::Worked { text })) = answer {
+                groups.saw(peer.device).await;
+                return Ok(sovra_core::group::JobAnswer {
+                    text,
+                    helper,
+                    computer,
+                });
+            }
+        }
+        Err(sovra_core::group::WorkError::NobodyFree)
     }
 }
 
@@ -414,6 +527,9 @@ struct Inner {
     last_seen: std::collections::BTreeMap<DeviceId, Timestamp>,
     /// Computers that recently did not answer, and until when they are skipped.
     quiet_until: std::collections::BTreeMap<DeviceId, Timestamp>,
+    /// Chat jobs this computer answered for others, newest first (not saved).
+    work_log: Vec<sovra_core::group::WorkRecord>,
+    work_limiter: AskLimiter,
     /// Lane keys this computer holds (opened from its grants, or made here).
     lane_keys: std::collections::BTreeMap<OpHash, [u8; 32]>,
     /// Plaintext of sealed operations already opened, by operation hash.
@@ -505,6 +621,8 @@ impl Groups {
                 limiter: AskLimiter::default(),
                 quiet_until: std::collections::BTreeMap::new(),
                 last_seen: std::collections::BTreeMap::new(),
+                work_log: Vec::new(),
+                work_limiter: AskLimiter::default(),
                 lane_keys: std::collections::BTreeMap::new(),
                 opened: std::collections::BTreeMap::new(),
                 short: None,
@@ -765,6 +883,84 @@ impl Groups {
         .await;
         self.publish_shared(shared).await;
         self.emit(GroupEvent::Federated { settings, recent }).await;
+        self.publish_work().await;
+    }
+
+    async fn publish_work(&self) {
+        let (settings, recent) = {
+            let inner = self.inner.lock().await;
+            (inner.record.work, inner.work_log.clone())
+        };
+        self.emit(GroupEvent::Work { settings, recent }).await;
+    }
+
+    /// Helping side: answers a group member's chat job with this computer's AI, if
+    /// the owner turned helping on. No tools; logged for the owner.
+    async fn work(&self, from: DeviceId, job: sovra_core::group::ChatJob) -> PeerResponse {
+        let refused = PeerResponse::Refused {
+            reason: Refusal::NotHelping,
+        };
+        if sovra_core::group::check_job(&job).is_err() {
+            return PeerResponse::Refused {
+                reason: Refusal::Malformed,
+            };
+        }
+        let (asked_by, computer) = {
+            let mut inner = self.inner.lock().await;
+            let Some(roster) = inner.roster.clone() else {
+                return refused;
+            };
+            if !inner.record.work.help_others
+                || !roster.admits(&from)
+                || !inner
+                    .work_limiter
+                    .allow_up_to(from, now(), sovra_core::group::JOBS_PER_MINUTE)
+            {
+                return refused;
+            }
+            let member = roster.owner_of(&from);
+            (
+                member.map(|m| m.name.clone()).unwrap_or_default(),
+                member
+                    .and_then(|m| m.devices.get(&from))
+                    .map(|entry| entry.name.clone())
+                    .unwrap_or_default(),
+            )
+        };
+        let open = self
+            .knowledge
+            .3
+            .read()
+            .expect("local model lock is never poisoned")
+            .clone();
+        let model = match open {
+            Some(open) => open().await,
+            None => None,
+        };
+        let answer = match model {
+            Some(model) => tokio::time::timeout(JOB_TIMEOUT, model.answer(job))
+                .await
+                .ok()
+                .and_then(Result::ok),
+            None => None,
+        };
+        {
+            let mut inner = self.inner.lock().await;
+            sovra_core::group::log_work(
+                &mut inner.work_log,
+                sovra_core::group::WorkRecord {
+                    asked_by,
+                    computer,
+                    at: now(),
+                    answered: answer.is_some(),
+                },
+            );
+        }
+        self.publish_work().await;
+        match answer {
+            Some(text) => PeerResponse::Worked { text },
+            None => refused,
+        }
     }
 
     async fn publish_changed(&self, roster: Option<GroupState>, shared: SharedNow) {
@@ -1197,6 +1393,14 @@ impl Groups {
                     },
                 )
                 .await;
+            }
+            GroupCommand::SetWork(settings) => {
+                {
+                    let mut inner = self.inner.lock().await;
+                    inner.record.work = settings;
+                    self.persist(&inner).await;
+                }
+                self.publish_work().await;
             }
             GroupCommand::SetFederated(settings) => {
                 let recent = {
@@ -1647,6 +1851,7 @@ impl Groups {
             knowledge: Vec::new(),
             addresses: Vec::new(),
             federated: inner.record.federated,
+            work: inner.record.work,
         };
         self.refold(&mut inner).await;
         self.persist(&inner).await;
@@ -2229,6 +2434,7 @@ impl PeerHandler for GroupHandler {
                     .await
             }
             PeerRequest::ConfirmJoin { matches } => groups.confirm_join(from, matches).await,
+            PeerRequest::Work { job, .. } => groups.work(from, job).await,
             other => groups.serve_peer(from, other).await,
         }
     }
@@ -2297,7 +2503,8 @@ impl Groups {
             PeerRequest::Join { .. }
             | PeerRequest::Ask { .. }
             | PeerRequest::JoinByCode { .. }
-            | PeerRequest::ConfirmJoin { .. } => PeerResponse::Refused {
+            | PeerRequest::ConfirmJoin { .. }
+            | PeerRequest::Work { .. } => PeerResponse::Refused {
                 reason: Refusal::Malformed,
             },
         }
@@ -2531,6 +2738,9 @@ fn refusal_problem(reason: Refusal) -> GroupProblem {
             GroupProblem::BadInvite
         }
         Refusal::NotAMember => GroupProblem::NotAllowed,
+        Refusal::NotHelping => {
+            GroupProblem::Other("That computer isn't helping with work right now.".into())
+        }
         Refusal::NotAnswering => {
             GroupProblem::Other("That computer isn't answering questions from the group.".into())
         }

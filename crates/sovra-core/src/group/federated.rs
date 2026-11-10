@@ -102,6 +102,11 @@ pub struct AskLimiter {
 impl AskLimiter {
     /// Whether `from` may ask now; records the question when it may.
     pub fn allow(&mut self, from: DeviceId, now: Timestamp) -> bool {
+        self.allow_up_to(from, now, ASKS_PER_MINUTE)
+    }
+
+    /// Like [`Self::allow`], with another per-minute limit (work jobs use fewer).
+    pub fn allow_up_to(&mut self, from: DeviceId, now: Timestamp, per_minute: usize) -> bool {
         const MINUTE_MS: i64 = 60_000;
         let times = self.recent.entry(from).or_default();
         while times
@@ -110,7 +115,7 @@ impl AskLimiter {
         {
             times.pop_front();
         }
-        if times.len() >= ASKS_PER_MINUTE {
+        if times.len() >= per_minute {
             return false;
         }
         times.push_back(now);

@@ -44,6 +44,12 @@ other computer on the local network (mDNS), so both must be on the same network.
   your name; you can see every question. **Ask my group** asks once;
   **Ask my group when I chat** lets helpers ask during chat. Both start off.
 
+- **Share an AI:** turn on **Let my group use this computer's AI** on a computer
+  with an AI, and **Use a free computer's AI when this one has none** on one
+  without. Chats on the second are answered by the first, which gets only the
+  conversation's words and never uses its tools, files or memory for you. Groups
+  shows which computers are online now.
+
 Nothing in your private chats or files is copied into the group automatically.
 Shared results identify who supplied them. Other people's words remain data;
 sharing never grants tools or permission to run commands.
@@ -71,9 +77,10 @@ through a relay. This is not a guarantee that packets stay on the local network.
 relay services. Set it before launching each participating app; see
 [configuration](configuration.md).
 
-Still planned (see the [group roadmap](roadmap/02-a-team.md)): handing heavy
-work to another computer, Sovra-run relays, presence, and an external security
-review of pairing and lane encryption before general release.
+Still planned (see the [group roadmap](roadmap/02-a-team.md)): streaming and
+instant cancel for handed-off answers, handing off embedding and indexing work,
+Sovra-run relays, and an external security review of pairing and lane
+encryption before general release.
 
 Group records live under `groups/` in app data. The device secret lives in the
 credential store. If it cannot be stored safely, Groups stays unavailable.

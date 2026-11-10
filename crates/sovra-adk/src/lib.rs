@@ -14,6 +14,7 @@ mod documents;
 mod file_index;
 mod files;
 mod google;
+mod group_work;
 mod memory;
 mod native_ui;
 mod orchestrator;
@@ -33,6 +34,7 @@ mod working_context;
 pub use artifacts::ArtifactSaver;
 pub use deep_research::{DeepResearchTurn, new_research_run_id};
 pub use google::GoogleTools;
+pub use group_work::{GroupLlm, HarnessWork, job_from_request};
 pub use schedules::ScheduleTools;
 pub use team::TeamTurn;
 pub use web_search::SearchClient;
@@ -461,6 +463,20 @@ impl AdkHarness {
     }
 
     /// Builds an `AdkHarness` with a custom [`Llm`] and tool list (used for tests and custom models).
+    /// A harness whose AI is a free computer in the person's group (work handoff).
+    /// It gets no tools: a handed-off turn answers in words only.
+    pub fn through_group(
+        config: &AgentConfig,
+        peer: Arc<dyn sovra_core::group::WorkPeer>,
+    ) -> Result<Self, Error> {
+        Self::with_llm_and_tools(config, Arc::new(GroupLlm::new(peer)), Vec::new())
+    }
+
+    /// This harness's AI, for answering group members' chat jobs without tools.
+    pub fn work_model(&self) -> Arc<dyn sovra_core::group::WorkModel> {
+        Arc::new(HarnessWork::new(self.llm.clone()))
+    }
+
     pub fn with_llm_and_tools(
         config: &AgentConfig,
         llm: Arc<dyn Llm>,

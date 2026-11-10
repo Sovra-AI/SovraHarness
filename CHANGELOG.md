@@ -11,6 +11,15 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Let a free computer in your group answer.** Settings → Groups → *Share
+  this computer's AI*: on a computer with an AI, *Let my group use this
+  computer's AI*; on one without, *Use a free computer's AI when this one has
+  none*. Chats on the second computer are then answered by the first, which
+  receives only the conversation's words and never uses its tools, files or
+  memory for someone else. Both start off; jobs are size- and rate-limited and
+  listed for the helping computer's owner. Groups also shows which computers
+  are online now. Skills has a “Let a free computer in your group do the
+  answering” card.
 - Same-room codes now work when the code was already showing before the other
   person pressed *Join with code*: each computer keeps a live list of nearby
   Sovra computers instead of listening only after Join. Found by driving two

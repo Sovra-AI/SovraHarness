@@ -231,6 +231,15 @@ struct Computer {
 
 impl Computer {
     fn start(net: &Arc<Network>, n: u8) -> Self {
+        Self::start_with(net, n, None)
+    }
+
+    /// A computer whose AI (for helping the group) is `helper`.
+    fn start_with(
+        net: &Arc<Network>,
+        n: u8,
+        helper: Option<Arc<dyn sovra_core::group::WorkModel>>,
+    ) -> Self {
         let device = DeviceId([n; 32]);
         let transport: Arc<dyn GroupTransport> = Arc::new(LoopTransport {
             me: device,
@@ -250,6 +259,7 @@ impl Computer {
                     transport: Box::new(move || Box::pin(async move { Ok(transport) })),
                     store: store.clone(),
                     qr: None,
+                    helper_model: helper,
                 }),
                 ..RuntimeServices::default()
             },
@@ -982,4 +992,114 @@ async fn each_computer_knows_which_others_are_online() {
         Some(&before),
         "not refreshed while off"
     );
+}
+
+/// Stands in for a helping computer's AI.
+struct EchoAi;
+
+#[async_trait::async_trait]
+impl sovra_core::group::WorkModel for EchoAi {
+    async fn answer(
+        &self,
+        job: sovra_core::group::ChatJob,
+    ) -> Result<String, sovra_core::group::WorkError> {
+        assert!(job.turns.last().is_some_and(|turn| turn.from_person));
+        Ok(format!(
+            "Mum's computer says: {}",
+            job.turns.last().map_or("", |turn| turn.text.as_str())
+        ))
+    }
+}
+
+async fn reply(computer: &Computer, session: &str) -> Event {
+    tokio::time::timeout(WAIT, async {
+        loop {
+            match computer.events.recv().await.expect("runtime running") {
+                event @ (Event::AgentChunk { .. } | Event::AgentError { .. })
+                    if matches!(&event, Event::AgentChunk { session_id, .. } | Event::AgentError { session_id, .. } if session_id == session) =>
+                {
+                    return event;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("a reply in time")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_computer_without_ai_gets_its_answer_from_a_free_computer_in_the_group() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start_with(&net, 111, Some(Arc::new(EchoAi)));
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Desktop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+    let dad = Computer::start(&net, 112);
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Old laptop".into(),
+    });
+    dad.roster(|state| state.admits(&dad.device)).await;
+    dad.send(GroupCommand::SetWork(sovra_core::group::WorkSettings {
+        help_others: false,
+        use_group: true,
+    }));
+    dad.wait(|event| match event {
+        GroupEvent::Work { settings, .. } if settings.use_group => Some(()),
+        _ => None,
+    })
+    .await;
+
+    // Mum has not offered to help yet: Dad is told nobody is free.
+    dad.client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "before".into(),
+            prompt: "What's for dinner?".into(),
+        })
+        .expect("accepted");
+    assert!(matches!(
+        reply(&dad, "before").await,
+        Event::AgentError { .. }
+    ));
+
+    mum.send(GroupCommand::SetWork(sovra_core::group::WorkSettings {
+        help_others: true,
+        use_group: false,
+    }));
+    mum.wait(|event| match event {
+        GroupEvent::Work { settings, .. } if settings.help_others => Some(()),
+        _ => None,
+    })
+    .await;
+    dad.client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "after".into(),
+            prompt: "What's for dinner?".into(),
+        })
+        .expect("accepted");
+    let answer = reply(&dad, "after").await;
+    assert!(
+        matches!(&answer, Event::AgentChunk { text, .. } if text.contains("Mum's computer says: What's for dinner?")),
+        "{answer:?}"
+    );
+    let log = mum
+        .wait(|event| match event {
+            GroupEvent::Work { recent, .. } if !recent.is_empty() => Some(recent),
+            _ => None,
+        })
+        .await;
+    assert_eq!(log[0].asked_by, "Dad");
+    assert_eq!(log[0].computer, "Old laptop");
+    assert!(log[0].answered);
 }

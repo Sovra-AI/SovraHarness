@@ -95,6 +95,11 @@ pub enum PeerRequest {
     /// Same room: the joining person's answer to "do the pictures match?". The
     /// inviting computer answers only once its own person has answered too.
     ConfirmJoin { matches: bool },
+    /// Work handoff: "answer this chat turn with your AI" (no tools travel).
+    Work {
+        group: GroupId,
+        job: super::work::ChatJob,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +121,10 @@ pub enum PeerResponse {
     /// A few short answers from the asked computer's own memory.
     Answered {
         items: Vec<super::federated::FederatedItem>,
+    },
+    /// A helping computer's answer to a chat job.
+    Worked {
+        text: String,
     },
     /// The code was right: compare pictures now. Carries what the joiner needs to
     /// derive them and to know what it is joining.
@@ -143,6 +152,8 @@ pub enum Refusal {
     Malformed,
     /// This computer's owner has not turned on answering, or it is asked too often.
     NotAnswering,
+    /// This computer is not helping with work now (off, no AI, or busy).
+    NotHelping,
 }
 
 /// The bytes a join proof is bound to: both computers and the group.
@@ -175,7 +186,8 @@ pub fn admits_request(
         }
         PeerRequest::Sync { group, .. }
         | PeerRequest::Push { group, .. }
-        | PeerRequest::Ask { group, .. } => group,
+        | PeerRequest::Ask { group, .. }
+        | PeerRequest::Work { group, .. } => group,
     };
     match roster {
         Some(state) if state.group != *group => Err(Refusal::WrongGroup),
@@ -254,6 +266,9 @@ pub struct GroupRecord {
     /// Whether this computer answers and asks the group's memories (both off at first).
     #[serde(default)]
     pub federated: super::federated::FederatedSettings,
+    /// Whether this computer helps with, and hands off, chat work (both off at first).
+    #[serde(default)]
+    pub work: super::work::WorkSettings,
 }
 
 /// Why the group record could not be read or written.

@@ -22,6 +22,7 @@ mod shared_artifact;
 mod space;
 mod template;
 mod wire;
+mod work;
 
 pub use federated::{
     ASKS_PER_MINUTE, AskLimiter, AskRecord, FederatedItem, FederatedSettings, GroupAnswer,
@@ -62,6 +63,10 @@ pub use wire::{
     GroupRecord, GroupStore, GroupStoreError, GroupTransport, MAX_PEER_MESSAGE_BYTES,
     MAX_REPLY_KNOWLEDGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler, PeerRequest, PeerResponse,
     Refusal, Spawn, TransportError, admits_request, join_transcript, within_budget,
+};
+pub use work::{
+    ChatJob, JOBS_PER_MINUTE, JobAnswer, JobTurn, MAX_JOB_BYTES, MAX_JOB_TURNS, MAX_WORK_LOG,
+    WorkError, WorkModel, WorkPeer, WorkRecord, WorkSettings, check_job, helper_order, log_work,
 };
 
 #[cfg(test)]

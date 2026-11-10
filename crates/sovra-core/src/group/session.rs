@@ -89,6 +89,8 @@ pub enum GroupCommand {
     /// Turn federated recall on or off for this computer: answering others' helpers
     /// from this memory, and asking the group's computers when recalling.
     SetFederated(FederatedSettings),
+    /// Turn work handoff on or off for this computer.
+    SetWork(super::work::WorkSettings),
     /// "Ask my group": search the memories of computers that answer, once, now.
     AskGroup {
         question: String,
@@ -185,6 +187,11 @@ pub enum GroupEvent {
     },
     /// When this computer last heard from each other computer in the group.
     Presence(std::collections::BTreeMap<DeviceId, Timestamp>),
+    /// This computer's work-handoff choices and the jobs it ran for others lately.
+    Work {
+        settings: super::work::WorkSettings,
+        recent: Vec<super::work::WorkRecord>,
+    },
     /// What the group's computers answered to an "Ask my group" question.
     Answers {
         question: String,
@@ -281,6 +288,9 @@ pub struct GroupsView {
     pub answers: Option<(String, Vec<GroupAnswer>)>,
     /// When this computer last heard from each other computer.
     pub last_seen: std::collections::BTreeMap<DeviceId, Timestamp>,
+    pub work: super::work::WorkSettings,
+    /// Chat jobs this computer answered for others, newest first.
+    pub recent_work: Vec<super::work::WorkRecord>,
 }
 
 impl Default for GroupsView {
@@ -301,6 +311,8 @@ impl Default for GroupsView {
             recent_asks: Vec::new(),
             answers: None,
             last_seen: std::collections::BTreeMap::new(),
+            work: super::work::WorkSettings::default(),
+            recent_work: Vec::new(),
         }
     }
 }
@@ -365,6 +377,10 @@ impl GroupsView {
             }
             GroupEvent::Answers { question, answers } => self.answers = Some((question, answers)),
             GroupEvent::Presence(last_seen) => self.last_seen = last_seen,
+            GroupEvent::Work { settings, recent } => {
+                self.work = settings;
+                self.recent_work = recent;
+            }
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
         }
@@ -378,6 +394,7 @@ impl GroupsView {
         self.recent_asks.clear();
         self.answers = None;
         self.last_seen.clear();
+        self.recent_work.clear();
         self.invite = None;
         self.short_code = None;
         self.pairing = PairingStage::Idle;

@@ -162,6 +162,7 @@ impl ModelsView {
                     .child(self.render_knowledge(cx))
                     .child(self.render_templates(cx))
                     .child(self.render_federated(cx))
+                    .child(self.render_work(cx))
                     .child(
                         h_flex().child(
                             design::button("groups-leave", "Leave this group", cx)
@@ -1207,5 +1208,106 @@ fn shared_skill(
         license: None,
         compatibility: None,
         metadata: std::collections::BTreeMap::new(),
+    }
+}
+
+impl ModelsView {
+    /// "Share this computer's AI": work handoff. A computer with no AI can ask a free
+    /// one in the group; a helping computer answers in words only, without tools.
+    fn render_work(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let settings = self.groups.work;
+        let mut section = v_flex()
+            .id("groups-work")
+            .test_support()
+            .w_full()
+            .gap(t.space.compact)
+            .child(div().sovra_text(TextRole::Body, cx).child("Share this computer's AI"))
+            .child(caption(
+                "A computer with no AI of its own can ask a free one in the group to answer a chat. Only the conversation's words travel; the helping computer never uses its tools, files or memory for someone else.",
+                cx,
+            ))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::button(
+                            "groups-work-help",
+                            if settings.help_others {
+                                "Let my group use this computer's AI: on"
+                            } else {
+                                "Let my group use this computer's AI: off"
+                            },
+                            cx,
+                        )
+                        .small()
+                        .selected(settings.help_others)
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            send(
+                                GroupCommand::SetWork(sovra_core::group::WorkSettings {
+                                    help_others: !settings.help_others,
+                                    ..settings
+                                }),
+                                cx,
+                            );
+                        })),
+                    )
+                    .child(
+                        design::button(
+                            "groups-work-use",
+                            if settings.use_group {
+                                "Use a free computer's AI when this one has none: on"
+                            } else {
+                                "Use a free computer's AI when this one has none: off"
+                            },
+                            cx,
+                        )
+                        .small()
+                        .selected(settings.use_group)
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            send(
+                                GroupCommand::SetWork(sovra_core::group::WorkSettings {
+                                    use_group: !settings.use_group,
+                                    ..settings
+                                }),
+                                cx,
+                            );
+                        })),
+                    ),
+            );
+        if !self.groups.recent_work.is_empty() {
+            let mut log = v_flex()
+                .id("groups-work-log")
+                .test_support()
+                .w_full()
+                .gap(t.space.compact)
+                .child(
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .child("Answered for your group"),
+                );
+            for (index, job) in self.groups.recent_work.iter().take(10).enumerate() {
+                let line = format!(
+                    "{} ({}) · {}",
+                    job.asked_by,
+                    job.computer,
+                    if job.answered {
+                        "answered"
+                    } else {
+                        "could not answer"
+                    }
+                );
+                log = log.child(
+                    div()
+                        .id(("groups-work-job", index))
+                        .aria_label(line.clone())
+                        .test_support()
+                        .child(caption(line, cx)),
+                );
+            }
+            section = section.child(log);
+        }
+        section
     }
 }
