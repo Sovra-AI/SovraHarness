@@ -202,6 +202,7 @@ fn the_group_shows_who_is_in_it_and_what_was_shared(cx: &mut TestAppContext) {
         GroupEvent::InviteReady {
             link: "sovra://join/example".into(),
             expires_at: Timestamp(i64::MAX / 2),
+            qr: vec![vec![true, false], vec![false, true]],
         },
     );
     settle(cx);
@@ -209,6 +210,10 @@ fn the_group_shows_who_is_in_it_and_what_was_shared(cx: &mut TestAppContext) {
         window.render_frame(cx);
         assert!(window.find("groups-invite-link").visible());
         assert!(window.find("groups-copy-link").visible());
+        assert!(
+            window.find("groups-invite-qr").visible(),
+            "the link as a QR code"
+        );
     })
     .expect("window open");
 }
@@ -485,4 +490,81 @@ fn a_detail_can_go_to_just_one_person_and_private_ones_say_so(cx: &mut TestAppCo
         command,
         Command::Group(GroupCommand::Share { with: Some(person), .. }) if *person == PersonId([20; 32])
     )));
+}
+
+#[gpui_kit::test]
+fn same_room_codes_show_digits_and_ask_both_people_to_compare_pictures(cx: &mut TestAppContext) {
+    // The joining side: no group yet, types a code.
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: DAD,
+            group: None,
+        },
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        window.click("groups-join-code", cx);
+        window.input("123 456", cx);
+        window.click("groups-join-code-button", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    let sent = drain(&commands);
+    assert!(sent.iter().any(|command| matches!(
+        command,
+        Command::Group(GroupCommand::JoinWithCode { code, .. }) if code == "123 456"
+    )));
+
+    let pictures = sovra_core::group::short_auth_string(b"transcript", &MUM, &DAD);
+    group_event(
+        &events,
+        GroupEvent::Pairing(sovra_core::group::PairingStep::PeerConnected),
+    );
+    group_event(
+        &events,
+        GroupEvent::Pairing(sovra_core::group::PairingStep::CodeReady(pictures.clone())),
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("groups-picture-check").visible());
+        assert_eq!(
+            window.find("groups-pictures").label(),
+            Some(pictures.spoken().as_str()),
+            "the pictures are read aloud by name"
+        );
+        window.click("groups-pictures-match", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert!(
+        drain(&commands).contains(&Command::Group(GroupCommand::ConfirmCode { matches: true }))
+    );
+
+    // The inviting side shows its code.
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(
+        &events,
+        GroupEvent::ShortCodeReady {
+            code: "654 321".into(),
+            expires_at: Timestamp(i64::MAX / 2),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("groups-short-code").label(), Some("654 321"));
+    })
+    .expect("window open");
 }

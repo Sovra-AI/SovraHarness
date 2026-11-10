@@ -59,7 +59,15 @@ pub struct Mesh {
     endpoint: Endpoint,
     secret: SecretKey,
     cipher: Arc<cipher::MeshCipher>,
+    /// Finds Sovra computers on the same network (same-room codes). `None` when the
+    /// network allows no multicast; codes then say nobody is nearby.
+    nearby: Option<iroh_mdns_address_lookup::MdnsAddressLookup>,
 }
+
+/// The mDNS service Sovra computers announce under (not iroh's shared default).
+const NEARBY_SERVICE: &str = "sovra";
+/// The tag a computer announces while it shows a same-room code, before its hint.
+const PAIRING_TAG: &str = "sovra-pair-";
 
 impl Mesh {
     /// Binds the endpoint. Must run inside the runtime's async reactor.
@@ -77,10 +85,19 @@ impl Mesh {
             .map_err(|error| MeshError::Bind(error.to_string()))?;
         tracing::info!(device = %endpoint.id().fmt_short(), ?reach, "group network ready");
         let cipher = Arc::new(cipher::MeshCipher::new(&device_secret));
+        let nearby = iroh_mdns_address_lookup::MdnsAddressLookup::builder()
+            .service_name(NEARBY_SERVICE)
+            .build(endpoint.id())
+            .map_err(|error| tracing::info!(%error, "same-room codes unavailable on this network"))
+            .ok();
+        if let (Some(nearby), Ok(lookup)) = (&nearby, endpoint.address_lookup()) {
+            lookup.add(nearby.clone());
+        }
         Ok(Self {
             endpoint,
             secret,
             cipher,
+            nearby,
         })
     }
 
@@ -164,6 +181,51 @@ impl GroupTransport for Mesh {
 
     fn cipher(&self) -> Arc<dyn sovra_core::group::GroupCipher> {
         self.cipher.clone()
+    }
+
+    fn set_pairing_open(&self, hint: Option<u8>) {
+        let tag = hint.and_then(|hint| format!("{PAIRING_TAG}{hint:x}").parse().ok());
+        self.endpoint.set_user_data_for_address_lookup(tag);
+    }
+
+    async fn nearby_pairing(&self, hint: u8, listen_ms: u64) -> Vec<PeerAddress> {
+        use n0_future::StreamExt as _;
+        let wanted = format!("{PAIRING_TAG}{hint:x}");
+        let Some(nearby) = &self.nearby else {
+            return Vec::new();
+        };
+        let mut events = nearby.subscribe().await;
+        let mut found: std::collections::BTreeMap<DeviceId, PeerAddress> =
+            std::collections::BTreeMap::new();
+        let me = self.this_device();
+        let listen = async {
+            while let Some(event) = events.next().await {
+                let iroh_mdns_address_lookup::DiscoveryEvent::Discovered { endpoint_info, .. } =
+                    event
+                else {
+                    continue;
+                };
+                let pairing = endpoint_info
+                    .data
+                    .user_data()
+                    .is_some_and(|tag| tag.as_ref() == wanted);
+                let device = DeviceId(*endpoint_info.endpoint_id.as_bytes());
+                if !pairing || device == me {
+                    continue;
+                }
+                let addr = endpoint_info.to_endpoint_addr();
+                found.insert(
+                    device,
+                    PeerAddress {
+                        device,
+                        relay: addr.relay_urls().next().map(ToString::to_string),
+                        addrs: addr.ip_addrs().map(ToString::to_string).collect(),
+                    },
+                );
+            }
+        };
+        let _ = n0_future::time::timeout(std::time::Duration::from_millis(listen_ms), listen).await;
+        found.into_values().collect()
     }
 
     fn address(&self) -> PeerAddress {

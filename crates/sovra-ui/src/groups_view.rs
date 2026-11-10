@@ -16,7 +16,7 @@ use gpui_kit::{
 };
 use sovra_core::Command;
 use sovra_core::group::{
-    DetailStatus, FederatedSettings, GroupCommand, PairingStage, Role, SharedDetail,
+    DetailStatus, FederatedSettings, GroupCommand, InviteKind, PairingStage, Role, SharedDetail,
     removal_warning,
 };
 
@@ -34,6 +34,7 @@ pub(crate) struct GroupsForm {
     invite_name: Entity<InputState>,
     share: Entity<InputState>,
     ask: Entity<InputState>,
+    join_code: Entity<InputState>,
     /// Share with the whole group (`None`) or just this person.
     share_with: Option<sovra_core::group::PersonId>,
     /// Which person or computer is waiting for "Yes, remove".
@@ -62,6 +63,7 @@ impl GroupsForm {
                 window,
                 cx,
             ),
+            join_code: input("The six digits on the other computer", window, cx),
             share_with: None,
             confirm_remove: None,
         }
@@ -114,6 +116,9 @@ impl ModelsView {
             return section
                 .child(caption("Getting your group ready…", cx))
                 .into_any_element();
+        }
+        if let Some(check) = self.render_picture_check(cx) {
+            section = section.child(check);
         }
         match &view.group {
             None => section
@@ -233,6 +238,86 @@ impl ModelsView {
                     )
                     .children(joining.then(|| caption("Connecting to the other computer…", cx))),
             )
+            .child(caption(
+                "In the same room? Ask them to show a code in their Groups, then type the six digits here.",
+                cx,
+            ))
+            .child(
+                Input::new(&form.join_code)
+                    .id("groups-join-code")
+                    .aria_label("Six-digit code from the other computer"),
+            )
+            .child(h_flex().child(
+                design::button("groups-join-code-button", "Join with code", cx).on_click(
+                    cx.listener(|view, _, _, cx| {
+                        let form = &view.groups_form;
+                        let command = GroupCommand::JoinWithCode {
+                            code: value(&form.join_code, cx),
+                            computer_name: value(&form.computer_name, cx),
+                        };
+                        send(command, cx);
+                    }),
+                ),
+            ))
+    }
+
+    /// "Do these pictures match the other screen?" — both people answer before a
+    /// computer joins by code.
+    fn render_picture_check(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let PairingStage::ConfirmCode { code, here, .. } = &self.groups.pairing else {
+            return None;
+        };
+        let t = design::tokens(cx);
+        let pictures: String = code
+            .emoji
+            .iter()
+            .map(|(picture, _)| *picture)
+            .collect::<Vec<_>>()
+            .join("  ");
+        let mut check = v_flex()
+            .id("groups-picture-check")
+            .test_support()
+            .w_full()
+            .gap(t.space.small)
+            .p(t.space.medium)
+            .sovra_surface(Surface::Subtle, cx)
+            .child(
+                div()
+                    .sovra_text(TextRole::Body, cx)
+                    .child("Check the other screen shows the same four pictures and numbers."),
+            )
+            .child(
+                div()
+                    .id("groups-pictures")
+                    .test_support()
+                    .aria_label(code.spoken())
+                    .sovra_text(TextRole::PageTitle, cx)
+                    .child(pictures),
+            )
+            .child(caption(format!("{} · {}", code.spoken(), code.digits), cx));
+        check = match here {
+            None => check.child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::primary_button("groups-pictures-match", "They match", cx).on_click(
+                            cx.listener(|_, _, _, cx| {
+                                send(GroupCommand::ConfirmCode { matches: true }, cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        design::button("groups-pictures-differ", "They don't", cx).on_click(
+                            cx.listener(|_, _, _, cx| {
+                                send(GroupCommand::ConfirmCode { matches: false }, cx);
+                            }),
+                        ),
+                    ),
+            ),
+            Some(_) => check.child(caption("Waiting for the other person to check…", cx)),
+        };
+        Some(check)
     }
 
     fn render_roster(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -450,17 +535,79 @@ impl ModelsView {
                                         cx,
                                     );
                                 })),
+                        )
+                        .child(
+                            design::button(
+                                "groups-code-person",
+                                "In the same room? Show a code",
+                                cx,
+                            )
+                            .small()
+                            .ghost()
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                let name = value(&view.groups_form.invite_name, cx);
+                                send(
+                                    GroupCommand::ShowShortCode {
+                                        kind: InviteKind::Person {
+                                            name,
+                                            role: Role::Member,
+                                        },
+                                    },
+                                    cx,
+                                );
+                            })),
                         ),
                 );
         }
         invites = invites.child(
-            h_flex().child(
-                design::button("groups-invite-computer", "Add another of my computers", cx)
+            h_flex()
+                .flex_wrap()
+                .gap(t.space.small)
+                .child(
+                    design::button("groups-invite-computer", "Add another of my computers", cx)
+                        .small()
+                        .ghost()
+                        .on_click(
+                            cx.listener(|_, _, _, cx| send(GroupCommand::InviteComputer, cx)),
+                        ),
+                )
+                .child(
+                    design::button(
+                        "groups-code-computer",
+                        "Show a code for my other computer",
+                        cx,
+                    )
                     .small()
                     .ghost()
-                    .on_click(cx.listener(|_, _, _, cx| send(GroupCommand::InviteComputer, cx))),
-            ),
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        send(
+                            GroupCommand::ShowShortCode {
+                                kind: InviteKind::OwnDevice,
+                            },
+                            cx,
+                        );
+                    })),
+                ),
         );
+        if let Some((code, expires_at)) = self.groups.short_code.clone() {
+            let minutes = (expires_at.millis() - now_millis()).max(0) / 60_000;
+            invites = invites
+                .child(caption(
+                    format!(
+                        "Type this on the other computer, on the same Wi-Fi. It works for one try, for about {} minutes.",
+                        minutes + 1
+                    ),
+                    cx,
+                ))
+                .child(
+                    div()
+                        .id("groups-short-code")
+                        .test_support()
+                        .aria_label(code.clone())
+                        .sovra_text(TextRole::PageTitle, cx)
+                        .child(code),
+                );
+        }
         if let Some((link, expires_at)) = self.groups.invite.clone() {
             let mono = cx.theme().mono_font_family.clone();
             let minutes = (expires_at.millis() - now_millis()).max(0) / 60_000;
@@ -497,6 +644,15 @@ impl ModelsView {
                                 }),
                         ),
                 );
+            if !self.groups.invite_qr.is_empty() {
+                invites = invites
+                    .child(caption("Or scan this with the other device's camera.", cx))
+                    .child(h_flex().child(crate::connections_view::scan_code(
+                        "groups-invite-qr",
+                        self.groups.invite_qr.clone(),
+                        cx,
+                    )));
+            }
         }
         invites
     }

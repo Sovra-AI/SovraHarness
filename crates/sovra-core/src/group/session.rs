@@ -7,7 +7,7 @@ use super::fold::GroupState;
 use super::keys::{DeviceId, OpHash, PersonId};
 use super::knowledge::SharedDetail;
 use super::membership::Role;
-use super::pairing::{PairingStage, PairingStep};
+use super::pairing::{InviteKind, PairingStage, PairingStep};
 use super::shared_artifact::SharedArtifact;
 use crate::Timestamp;
 use crate::artifacts::ArtifactKind;
@@ -30,8 +30,10 @@ pub enum GroupCommand {
         name: String,
         role: Role,
     },
-    /// Same room, no camera: show a six-digit code instead.
-    ShowShortCode,
+    /// Same room, no camera: show a six-digit code instead (for this kind of invite).
+    ShowShortCode {
+        kind: InviteKind,
+    },
     /// On the joining computer: a pasted or scanned link.
     Join {
         link: String,
@@ -157,6 +159,8 @@ pub enum GroupEvent {
     InviteReady {
         link: String,
         expires_at: Timestamp,
+        /// The link as a scannable code (rows of dark modules); empty when unavailable.
+        qr: Vec<Vec<bool>>,
     },
     ShortCodeReady {
         code: String,
@@ -225,6 +229,8 @@ pub struct GroupsView {
     pub group: Option<GroupState>,
     pub pairing: PairingStage,
     pub invite: Option<(String, Timestamp)>,
+    /// The invite link as a scannable code.
+    pub invite_qr: Vec<Vec<bool>>,
     pub short_code: Option<(String, Timestamp)>,
     pub problem: Option<GroupProblem>,
     pub loaded: bool,
@@ -246,6 +252,7 @@ impl Default for GroupsView {
             group: None,
             pairing: PairingStage::Idle,
             invite: None,
+            invite_qr: Vec::new(),
             short_code: None,
             problem: None,
             loaded: false,
@@ -281,8 +288,13 @@ impl GroupsView {
                     self.group = Some(state);
                 }
             }
-            GroupEvent::InviteReady { link, expires_at } => {
+            GroupEvent::InviteReady {
+                link,
+                expires_at,
+                qr,
+            } => {
                 self.invite = Some((link, expires_at));
+                self.invite_qr = qr;
                 self.short_code = None;
                 self.pairing = std::mem::replace(&mut self.pairing, PairingStage::Idle)
                     .advance(PairingStep::InviteShown { expires_at });

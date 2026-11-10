@@ -633,7 +633,31 @@ fn cells_f32(count: usize) -> f32 {
 /// white in both themes so phone cameras read it.
 fn render_qr_card(ticket: &WhatsAppQrTicket, cx: &Context<ModelsView>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let matrix = ticket.qr_matrix.clone();
+    v_flex()
+        .items_center()
+        .gap(t.space.hair)
+        .child(scan_code(
+            "whatsapp-qr-matrix",
+            ticket.qr_matrix.clone(),
+            cx,
+        ))
+        .child(caption(
+            format!(
+                "The code changes every {} seconds while this window is open.",
+                ticket.expires_in_secs
+            ),
+            cx,
+        ))
+}
+
+/// A scannable code drawn from its module grid, framed; shared by `WhatsApp` linking and
+/// group invites.
+pub(crate) fn scan_code(
+    id: &'static str,
+    matrix: Vec<Vec<bool>>,
+    cx: &Context<ModelsView>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
     let dark = t.scan_code_dark;
     let light = t.scan_code_light;
     let side = t.layout.scan_code;
@@ -675,25 +699,13 @@ fn render_qr_card(ticket: &WhatsAppQrTicket, cx: &Context<ModelsView>) -> impl I
     .size(side)
     .flex_shrink_0();
 
-    v_flex()
-        .items_center()
-        .gap(t.space.hair)
-        .child(
-            div()
-                .id("whatsapp-qr-matrix")
-                .test_support()
-                .rounded(t.radius.card)
-                .border_1()
-                .border_color(cx.theme().border)
-                .child(grid),
-        )
-        .child(caption(
-            format!(
-                "The code changes every {} seconds while this window is open.",
-                ticket.expires_in_secs
-            ),
-            cx,
-        ))
+    div()
+        .id(id)
+        .test_support()
+        .rounded(t.radius.card)
+        .border_1()
+        .border_color(cx.theme().border)
+        .child(grid)
 }
 
 impl ModelsView {

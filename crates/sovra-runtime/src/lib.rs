@@ -28,7 +28,7 @@ mod terminal;
 pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
 mod teams;
-pub use groups::{GroupServices, TransportFactory, TransportFuture};
+pub use groups::{GroupServices, QrEncoder, TransportFactory, TransportFuture};
 pub use models::ModelsConfig;
 pub use schedules::{JsonScheduleStore, MemoryScheduleStore};
 

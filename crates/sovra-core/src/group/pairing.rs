@@ -1,13 +1,13 @@
 //! Pairing a computer into a group: invites, the short-code window, and the steps a
-//! person sees. Pure bookkeeping — the mesh adapter does the networking and the PAKE,
-//! then reports what happened here so every rule stays testable.
+//! person sees. Pure bookkeeping — the mesh adapter finds nearby computers and carries
+//! the messages, and reports what happened here so every rule stays testable.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use super::keys::GroupId;
+use super::keys::{DeviceId, GroupId};
 use super::membership::Role;
 use super::sas::ShortAuthString;
 use crate::Timestamp;
@@ -257,4 +257,51 @@ impl PairingStage {
             _ => Self::ConfirmCode { code, here, there },
         }
     }
+}
+
+/// A typed same-room code, as six digits (spaces and dashes ignored).
+pub fn normalise_code(input: &str) -> Option<String> {
+    let digits: String = input
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect();
+    (digits.len() == 6 && digits.chars().all(|c| c.is_ascii_digit())).then_some(digits)
+}
+
+/// Six digits from 32 random bits, shown as "123 456".
+pub fn format_code(random: u32) -> (String, String) {
+    let number = random % 1_000_000;
+    let digits = format!("{number:06}");
+    let shown = format!("{} {}", &digits[..3], &digits[3..]);
+    (digits, shown)
+}
+
+/// The invite secret both computers derive from the same-room code.
+///
+/// Six digits are guessable offline by whoever receives a proof, so the code alone
+/// never admits anyone: the inviting computer allows one guess in two minutes, and
+/// both people must then see the same four pictures (`short_auth_string`), which a
+/// computer in the middle cannot arrange.
+pub fn short_code_secret(digits: &str) -> [u8; 16] {
+    let digest = Sha256::digest([b"sovra-short-code-v1".as_slice(), digits.as_bytes()].concat());
+    let mut secret = [0u8; 16];
+    secret.copy_from_slice(&digest[..16]);
+    secret
+}
+
+/// What a same-room proof is bound to: both computers (the joiner does not know the
+/// group yet).
+pub fn code_transcript(inviter: &DeviceId, joiner: &DeviceId) -> Vec<u8> {
+    let mut bytes = b"sovra-code-join-v1".to_vec();
+    bytes.extend_from_slice(inviter.as_bytes());
+    bytes.extend_from_slice(joiner.as_bytes());
+    bytes
+}
+
+/// A 4-bit hint a computer showing a code announces, so a joiner only contacts the
+/// computers whose hint matches its code. Two people showing codes in one office
+/// then rarely spend each other's single guess. It gives away 4 of the code's ~20
+/// bits, leaving a nearby attacker one guess in about 62,500 before the picture check.
+pub fn code_hint(digits: &str) -> u8 {
+    Sha256::digest([b"sovra-code-hint-v1".as_slice(), digits.as_bytes()].concat())[0] & 0x0f
 }

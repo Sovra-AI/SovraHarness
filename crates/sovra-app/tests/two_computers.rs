@@ -79,6 +79,7 @@ impl Computer {
                         })
                     }),
                     store: Arc::new(sovra_mesh::FileGroupStore::new(store_dir)),
+                    qr: None,
                 }),
                 ..RuntimeServices::default()
             },
@@ -317,4 +318,46 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
         matches!(event, GroupEvent::LeftGroup).then_some(())
     })
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_computers_in_the_same_room_join_by_code_and_matching_pictures() {
+    let mum = Computer::start("code-mum", 81);
+    let dad = Computer::start("code-dad", 82);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Mum's laptop".into(),
+    });
+    mum.roster("the new group", |state| state.name == "Family")
+        .await;
+    mum.send(GroupCommand::ShowShortCode {
+        kind: sovra_core::group::InviteKind::Person {
+            name: "Dad".into(),
+            role: Role::Member,
+        },
+    });
+    let code = mum
+        .wait("a same-room code", |event| match event {
+            GroupEvent::ShortCodeReady { code, .. } => Some(code),
+            _ => None,
+        })
+        .await;
+    dad.send(GroupCommand::JoinWithCode {
+        code,
+        computer_name: "Dad's desktop".into(),
+    });
+    let pictures = |event| match event {
+        GroupEvent::Pairing(sovra_core::group::PairingStep::CodeReady(code)) => Some(code),
+        _ => None,
+    };
+    let on_dads = dad.wait("pictures on Dad's screen", pictures).await;
+    let on_mums = mum.wait("pictures on Mum's screen", pictures).await;
+    assert_eq!(on_dads, on_mums);
+    dad.send(GroupCommand::ConfirmCode { matches: true });
+    mum.send(GroupCommand::ConfirmCode { matches: true });
+    let joined = dad
+        .roster("Dad in the group by code", |state| state.people.len() == 2)
+        .await;
+    assert_eq!(joined.name, "Family");
 }

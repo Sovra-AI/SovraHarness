@@ -39,6 +39,7 @@ impl Skill {
             "share-memory" => "Share something Sovra remembers with your group",
             "ask-group" => "Ask your family or team's memories",
             "share-privately" => "Share something with just one person",
+            "add-computer" => "Add another computer to my group",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -158,6 +159,10 @@ impl Skill {
             "share-artifact" => (
                 "Opens Artifacts. Open something you saved, like the family shopping list, and press Share with your group. Everyone gets a copy, and when someone changes it and shares again, the group gets the new version.".to_owned(),
                 "/share-artifact ".to_owned(),
+            ),
+            "add-computer" => (
+                "Opens Groups. On a computer already in the group, press “Show a code for my other computer”. On the new one, type the six digits, then check both screens show the same four pictures and press They match.".to_owned(),
+                "/add-computer ".to_owned(),
             ),
             "share-privately" => (
                 "Opens Groups. Write something like “Sam's surprise party is on Friday”, choose Just Dad, and press Share. Only you and Dad can see it; it never goes to anyone else's computer.".to_owned(),
@@ -430,6 +435,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Artifacts to share a saved document, list or picture with your group, keep a copy of what others shared, and share your changes back as a new version.",
             SkillAction::Artifacts,
             &["share-document", "shared-artifacts"],
+        ),
+        action(
+            "add-computer",
+            "Add a computer",
+            "Open Settings → Groups to add another of your computers or a new person: in the same room with a six-digit code and four matching pictures, or from anywhere with an invite link or QR code.",
+            SkillAction::Settings,
+            &["pair", "same-room-code"],
         ),
         action(
             "share-privately",

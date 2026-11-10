@@ -42,6 +42,8 @@ impl SignatureVerifier for FakeVerifier {
 struct Network {
     handlers: Mutex<BTreeMap<DeviceId, Arc<dyn PeerHandler>>>,
     off: Mutex<BTreeSet<DeviceId>>,
+    /// Computers showing a same-room code, with its hint.
+    pairing: Mutex<BTreeMap<DeviceId, u8>>,
 }
 
 struct LoopTransport {
@@ -126,6 +128,32 @@ impl GroupTransport for LoopTransport {
 
     fn cipher(&self) -> Arc<dyn sovra_core::group::GroupCipher> {
         self.cipher.clone()
+    }
+
+    fn set_pairing_open(&self, hint: Option<u8>) {
+        let mut pairing = self.net.pairing.lock().expect("not poisoned");
+        match hint {
+            Some(hint) => {
+                pairing.insert(self.me, hint);
+            }
+            None => {
+                pairing.remove(&self.me);
+            }
+        }
+    }
+
+    async fn nearby_pairing(&self, hint: u8, _listen_ms: u64) -> Vec<PeerAddress> {
+        let pairing = self.net.pairing.lock().expect("not poisoned").clone();
+        pairing
+            .into_iter()
+            .filter(|(device, shown)| *device != self.me && *shown == hint)
+            .map(|(device, _)| device)
+            .map(|device| PeerAddress {
+                device,
+                relay: None,
+                addrs: vec!["loopback".into()],
+            })
+            .collect()
     }
 
     fn address(&self) -> PeerAddress {
@@ -221,6 +249,7 @@ impl Computer {
                 groups: Some(GroupServices {
                     transport: Box::new(move || Box::pin(async move { Ok(transport) })),
                     store: store.clone(),
+                    qr: None,
                 }),
                 ..RuntimeServices::default()
             },
@@ -728,4 +757,130 @@ async fn something_shared_with_just_one_person_never_reaches_anyone_else() {
             .all(|op| op.unsigned().lane != pair_lane),
         "nothing from Mum and Dad's space is stored on Sam's computer"
     );
+}
+
+impl Computer {
+    async fn short_code(&self) -> String {
+        self.wait(|event| match event {
+            GroupEvent::ShortCodeReady { code, .. } => Some(code),
+            _ => None,
+        })
+        .await
+    }
+
+    async fn pictures(&self) -> sovra_core::group::ShortAuthString {
+        self.wait(|event| match event {
+            GroupEvent::Pairing(sovra_core::group::PairingStep::CodeReady(code)) => Some(code),
+            _ => None,
+        })
+        .await
+    }
+}
+
+async fn founded(net: &Arc<Network>, n: u8) -> Computer {
+    let mum = Computer::start(net, n);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Laptop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+    mum
+}
+
+fn dad_invite() -> GroupCommand {
+    GroupCommand::ShowShortCode {
+        kind: sovra_core::group::InviteKind::Person {
+            name: "Dad".into(),
+            role: Role::Member,
+        },
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_same_room_code_joins_after_both_people_see_the_same_pictures() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 61).await;
+    let dad = Computer::start(&net, 62);
+
+    mum.send(dad_invite());
+    let code = mum.short_code().await;
+    assert_eq!(code.len(), 7, "shown as 123 456");
+    dad.send(GroupCommand::JoinWithCode {
+        code,
+        computer_name: "Desktop".into(),
+    });
+    let on_dads = dad.pictures().await;
+    let on_mums = mum.pictures().await;
+    assert_eq!(on_dads, on_mums, "both screens show the same pictures");
+
+    dad.send(GroupCommand::ConfirmCode { matches: true });
+    mum.send(GroupCommand::ConfirmCode { matches: true });
+    let joined = dad.roster(|state| state.admits(&dad.device)).await;
+    assert_eq!(
+        joined
+            .owner_of(&dad.device)
+            .map(|member| member.name.clone()),
+        Some("Dad".into())
+    );
+    mum.roster(|state| state.admits(&dad.device)).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_wrong_code_burns_it_and_a_no_on_the_pictures_admits_nobody() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 71).await;
+    let stranger = Computer::start(&net, 72);
+    let dad = Computer::start(&net, 73);
+
+    mum.send(dad_invite());
+    let code = mum.short_code().await;
+    // A wrong code that happens to share the right one's hint, so it reaches Mum.
+    let digits = sovra_core::group::normalise_code(&code).expect("six digits");
+    let hint = sovra_core::group::code_hint(&digits);
+    let wrong = (0..1_000_000u32)
+        .map(|n| format!("{n:06}"))
+        .find(|guess| *guess != digits && sovra_core::group::code_hint(guess) == hint)
+        .expect("some other code shares the hint");
+    stranger.send(GroupCommand::JoinWithCode {
+        code: wrong,
+        computer_name: "Unknown".into(),
+    });
+    stranger
+        .wait(|event| matches!(event, GroupEvent::Problem(_)).then_some(()))
+        .await;
+    // One guess only: now even the right code no longer works.
+    dad.send(GroupCommand::JoinWithCode {
+        code,
+        computer_name: "Desktop".into(),
+    });
+    dad.wait(|event| matches!(event, GroupEvent::Problem(_)).then_some(()))
+        .await;
+
+    // A fresh code, but Mum sees different pictures and says so.
+    mum.send(dad_invite());
+    let code = mum.short_code().await;
+    dad.send(GroupCommand::JoinWithCode {
+        code,
+        computer_name: "Desktop".into(),
+    });
+    dad.pictures().await;
+    mum.pictures().await;
+    mum.send(GroupCommand::ConfirmCode { matches: false });
+    dad.send(GroupCommand::ConfirmCode { matches: true });
+    dad.wait(|event| {
+        matches!(
+            event,
+            GroupEvent::Pairing(sovra_core::group::PairingStep::Failed(_))
+        )
+        .then_some(())
+    })
+    .await;
+    mum.send(GroupCommand::Load);
+    let roster = mum.roster(|state| state.name == "Family").await;
+    assert!(
+        !roster.admits(&dad.device),
+        "nobody joins unless both say they match"
+    );
+    assert!(!roster.admits(&stranger.device));
 }

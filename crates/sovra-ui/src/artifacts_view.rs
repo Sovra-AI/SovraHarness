@@ -611,13 +611,7 @@ impl ArtifactsView {
                             .accessibility_label(format!("Share only with {}", other.1))
                             .on_click(cx.listener(
                                 move |view, _, _, cx| {
-                                    view.share_with_group(
-                                        &shared,
-                                        None,
-                                        Some(&other),
-                                        &name,
-                                        cx,
-                                    );
+                                    view.share_with_group(&shared, None, Some(&other), &name, cx);
                                 },
                             )),
                         );

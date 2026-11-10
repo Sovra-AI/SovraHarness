@@ -27,6 +27,10 @@ use sovra_core::group::{
     Spawn, UnsignedOp, admits_request, check_artifact, check_share, fold, invite_proof,
     join_transcript, within_budget,
 };
+use sovra_core::group::{
+    SHORT_CODE_LIFETIME_MS, ShortCodeWindow, code_hint, code_transcript, format_code,
+    normalise_code, short_auth_string, short_code_secret,
+};
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
 
@@ -35,10 +39,16 @@ pub type TransportFuture =
     Pin<Box<dyn Future<Output = Result<Arc<dyn GroupTransport>, String>> + Send>>;
 pub type TransportFactory = Box<dyn FnOnce() -> TransportFuture + Send>;
 
+/// Draws text as a scannable code (rows of dark modules). Supplied by the composition
+/// root from the adapter that owns the QR library.
+pub type QrEncoder = Arc<dyn Fn(&str) -> Vec<Vec<bool>> + Send + Sync>;
+
 /// The adapters groups need, supplied by the composition root.
 pub struct GroupServices {
     pub transport: TransportFactory,
     pub store: Arc<dyn GroupStore>,
+    /// Turns invite links into QR codes; `None` shows the link only.
+    pub qr: Option<QrEncoder>,
 }
 
 impl std::fmt::Debug for GroupServices {
@@ -304,6 +314,7 @@ impl GroupRuntime {
                 Groups::open(
                     transport,
                     services.store,
+                    services.qr,
                     events,
                     readers.clone(),
                     spawn.clone(),
@@ -357,6 +368,13 @@ impl GroupRuntime {
     }
 }
 
+/// A receiver for the inviting person's picture answer, if a join is pending.
+fn pending_answer(
+    pending: Option<&PendingPair>,
+) -> Option<tokio::sync::watch::Receiver<Option<bool>>> {
+    pending.map(|pending| pending.answer.subscribe())
+}
+
 fn unavailable() -> GroupProblem {
     GroupProblem::Other("Groups aren't available in this session.".into())
 }
@@ -396,9 +414,46 @@ struct Inner {
     lane_keys: std::collections::BTreeMap<OpHash, [u8; 32]>,
     /// Plaintext of sealed operations already opened, by operation hash.
     opened: std::collections::BTreeMap<OpHash, KnowledgeBody>,
+    /// The same-room code showing here, if any.
+    short: Option<ShortInvite>,
+    /// A same-room join this computer invited, waiting for both people's answers.
+    pending_pair: Option<PendingPair>,
+    /// A same-room join this computer started, waiting for its person's answer.
+    joining: Option<CodeJoin>,
 }
 
+/// A same-room code: its secret, its one-guess window and what it invites.
+struct ShortInvite {
+    secret: [u8; 16],
+    window: ShortCodeWindow,
+    kind: InviteKind,
+}
+
+/// Inviting side of a same-room join, between "code was right" and "both matched".
+struct PendingPair {
+    joiner: DeviceId,
+    person: PersonId,
+    computer_name: String,
+    address: PeerAddress,
+    kind: InviteKind,
+    /// This computer's person's answer, which the joiner's request waits for.
+    answer: tokio::sync::watch::Sender<Option<bool>>,
+}
+
+/// Joining side of a same-room join.
+struct CodeJoin {
+    inviter: PeerAddress,
+    group: GroupId,
+    computer_name: String,
+}
+
+/// How long a joining computer listens for a nearby code.
+const NEARBY_LISTEN_MS: u64 = 4_000;
+/// How long either side waits for the other person to compare pictures.
+const PICTURE_CHECK: Duration = Duration::from_millis(SHORT_CODE_LIFETIME_MS.unsigned_abs());
+
 struct Groups {
+    qr: Option<QrEncoder>,
     transport: Arc<dyn GroupTransport>,
     verifier: Arc<dyn SignatureVerifier + Send + Sync>,
     cipher: Arc<dyn GroupCipher>,
@@ -413,6 +468,7 @@ impl Groups {
     async fn open(
         transport: Arc<dyn GroupTransport>,
         store: Arc<dyn GroupStore>,
+        qr: Option<QrEncoder>,
         events: Sender<Event>,
         knowledge: GroupKnowledge,
         spawn: Spawn,
@@ -427,6 +483,7 @@ impl Groups {
         let verifier = transport.verifier();
         let cipher = transport.cipher();
         let groups = Self {
+            qr,
             transport,
             verifier,
             cipher,
@@ -445,6 +502,9 @@ impl Groups {
                 quiet_until: std::collections::BTreeMap::new(),
                 lane_keys: std::collections::BTreeMap::new(),
                 opened: std::collections::BTreeMap::new(),
+                short: None,
+                pending_pair: None,
+                joining: None,
             }),
         };
         {
@@ -993,13 +1053,18 @@ impl Groups {
                 let groups = self.clone();
                 (self.spawn)(Box::pin(async move { groups.sync_all().await }));
             }
-            GroupCommand::ShowShortCode | GroupCommand::JoinWithCode { .. } => {
-                self.emit(GroupEvent::Problem(GroupProblem::Other(
-                    "Same-room codes aren't ready yet. Use the link or QR code instead.".into(),
-                )))
-                .await;
+            GroupCommand::ShowShortCode { kind } => self.show_short_code(kind).await,
+            GroupCommand::JoinWithCode {
+                code,
+                computer_name,
+            } => {
+                // Listening for nearby computers takes seconds; keep commands flowing.
+                let groups = self.clone();
+                (self.spawn)(Box::pin(async move {
+                    groups.join_with_code(&code, computer_name).await;
+                }));
             }
-            GroupCommand::ConfirmCode { .. } => {}
+            GroupCommand::ConfirmCode { matches } => self.confirm_code(matches).await,
             GroupCommand::CancelPairing => {
                 self.emit(GroupEvent::Pairing(PairingStep::Cancel)).await;
             }
@@ -1137,6 +1202,329 @@ impl Groups {
         }
     }
 
+    /// Shows a six-digit code and tells computers on this network a code is showing.
+    async fn show_short_code(self: &Arc<Self>, kind: InviteKind) {
+        let mut inner = self.inner.lock().await;
+        let Some(roster) = inner.roster.clone() else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "Create or join a group first.".into(),
+            )))
+            .await;
+            return;
+        };
+        if matches!(kind, InviteKind::Person { .. })
+            && !roster
+                .role_of(&self.me())
+                .is_some_and(sovra_core::group::Role::manages)
+        {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::NotAllowed))
+                .await;
+            return;
+        }
+        let Some(random) = random::<4>() else {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer couldn't make a secure code. Try again.".into(),
+            )))
+            .await;
+            return;
+        };
+        let (digits, shown) = format_code(u32::from_le_bytes(random));
+        let window = ShortCodeWindow::open(now());
+        let expires_at = window.expires_at;
+        inner.short = Some(ShortInvite {
+            secret: short_code_secret(&digits),
+            window,
+            kind,
+        });
+        drop(inner);
+        self.transport.set_pairing_open(Some(code_hint(&digits)));
+        self.emit(GroupEvent::ShortCodeReady {
+            code: shown,
+            expires_at,
+        })
+        .await;
+        // Stop announcing when the code runs out, unless a newer code replaced it.
+        let groups = self.clone();
+        (self.spawn)(Box::pin(async move {
+            tokio::time::sleep(PICTURE_CHECK).await;
+            let mut inner = groups.inner.lock().await;
+            if inner
+                .short
+                .as_ref()
+                .is_some_and(|short| short.window.expires_at == expires_at)
+            {
+                inner.short = None;
+                groups.transport.set_pairing_open(None);
+            }
+        }));
+    }
+
+    /// Joining side: finds the nearby computer showing this code and starts the
+    /// picture check with it.
+    async fn join_with_code(&self, code: &str, computer_name: String) {
+        let Some(digits) = normalise_code(code) else {
+            self.emit(GroupEvent::Problem(GroupProblem::BadInvite))
+                .await;
+            return;
+        };
+        if self.inner.lock().await.record.group.is_some() {
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer is already in a group. Leave it first.".into(),
+            )))
+            .await;
+            return;
+        }
+        let Some(person) = random::<32>() else {
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "This computer couldn't make a secure key. Try again.".into(),
+            )))
+            .await;
+            return;
+        };
+        let nearby = self
+            .transport
+            .nearby_pairing(code_hint(&digits), NEARBY_LISTEN_MS)
+            .await;
+        if nearby.is_empty() {
+            self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                PairingFailure::Unreachable,
+            )))
+            .await;
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "No computer nearby is showing a code. Check both computers are on the same Wi-Fi, then try again.".into(),
+            )))
+            .await;
+            return;
+        }
+        let me = self.me();
+        let secret = short_code_secret(&digits);
+        for candidate in nearby {
+            let request = PeerRequest::JoinByCode {
+                proof: invite_proof(&secret, &code_transcript(&candidate.device, &me)),
+                person: PersonId(person),
+                computer_name: computer_name.clone(),
+                from: self.transport.address(),
+            };
+            if let Ok(PeerResponse::CodeCheck { group, .. }) = self.ask(&candidate, request).await {
+                let pictures = short_auth_string(
+                    &join_transcript(&candidate.device, &me, &group),
+                    &candidate.device,
+                    &me,
+                );
+                self.inner.lock().await.joining = Some(CodeJoin {
+                    inviter: candidate,
+                    group,
+                    computer_name,
+                });
+                self.emit(GroupEvent::Pairing(PairingStep::PeerConnected))
+                    .await;
+                self.emit(GroupEvent::Pairing(PairingStep::CodeReady(pictures)))
+                    .await;
+                return;
+            }
+        }
+        self.emit(GroupEvent::Pairing(PairingStep::Failed(
+            PairingFailure::Refused,
+        )))
+        .await;
+        self.emit(GroupEvent::Problem(GroupProblem::Other(
+            "That code didn't match. Ask for a new code and type it again.".into(),
+        )))
+        .await;
+    }
+
+    /// "They match" / "They don't", on either computer.
+    async fn confirm_code(self: &Arc<Self>, matches: bool) {
+        let (inviting, joining) = {
+            let mut inner = self.inner.lock().await;
+            let inviting = inner.pending_pair.as_ref().map(|pending| {
+                pending.answer.send_replace(Some(matches));
+            });
+            (inviting.is_some(), inner.joining.take())
+        };
+        self.emit(GroupEvent::Pairing(PairingStep::ConfirmedHere(matches)))
+            .await;
+        if inviting {
+            return;
+        }
+        let Some(join) = joining else {
+            return;
+        };
+        let groups = self.clone();
+        (self.spawn)(Box::pin(async move {
+            // The inviting computer answers once its person has compared too.
+            let answer = tokio::time::timeout(
+                PICTURE_CHECK + REQUEST_TIMEOUT,
+                groups
+                    .transport
+                    .request(&join.inviter, PeerRequest::ConfirmJoin { matches }),
+            )
+            .await;
+            match answer {
+                Ok(Ok(PeerResponse::Joined {
+                    membership,
+                    knowledge,
+                })) if matches => {
+                    groups
+                        .emit(GroupEvent::Pairing(PairingStep::ConfirmedThere(true)))
+                        .await;
+                    groups
+                        .finish_join(
+                            join.group,
+                            join.inviter,
+                            membership,
+                            knowledge,
+                            join.computer_name,
+                        )
+                        .await;
+                }
+                _ if !matches => {}
+                _ => {
+                    groups
+                        .emit(GroupEvent::Pairing(PairingStep::Failed(
+                            PairingFailure::CodeMismatch,
+                        )))
+                        .await;
+                    groups
+                        .emit(GroupEvent::Problem(GroupProblem::Other(
+                            "The computers weren't joined: the pictures didn't match, or the other person didn't answer in time.".into(),
+                        )))
+                        .await;
+                }
+            }
+        }));
+    }
+
+    /// Inviting side: a nearby computer typed a code. One guess, then compare pictures.
+    async fn code_join(
+        &self,
+        from: DeviceId,
+        proof: [u8; 32],
+        person: PersonId,
+        computer_name: String,
+        address: PeerAddress,
+    ) -> PeerResponse {
+        let me = self.me();
+        let mut inner = self.inner.lock().await;
+        let Some(roster) = inner.roster.clone() else {
+            return PeerResponse::Refused {
+                reason: Refusal::WrongGroup,
+            };
+        };
+        let Some(mut short) = inner.short.take() else {
+            return PeerResponse::Refused {
+                reason: Refusal::InviteUnknown,
+            };
+        };
+        // The code is spent by any attempt, right or wrong.
+        self.transport.set_pairing_open(None);
+        if !short.window.take_guess(now()) {
+            return PeerResponse::Refused {
+                reason: Refusal::InviteExpired,
+            };
+        }
+        if invite_proof(&short.secret, &code_transcript(&me, &from)) != proof {
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "Someone typed a wrong code, so it stopped working. Show a new code to try again."
+                    .into(),
+            )))
+            .await;
+            return PeerResponse::Refused {
+                reason: Refusal::InviteUnknown,
+            };
+        }
+        let inviter_name = roster
+            .owner_of(&me)
+            .map(|member| member.name.clone())
+            .unwrap_or_default();
+        let person_name = match &short.kind {
+            InviteKind::Person { name, .. } => name.clone(),
+            InviteKind::OwnDevice => inviter_name.clone(),
+        };
+        let (answer, _) = tokio::sync::watch::channel(None);
+        inner.pending_pair = Some(PendingPair {
+            joiner: from,
+            person,
+            computer_name,
+            address,
+            kind: short.kind,
+            answer,
+        });
+        drop(inner);
+        let pictures = short_auth_string(&join_transcript(&me, &from, &roster.group), &me, &from);
+        self.emit(GroupEvent::Pairing(PairingStep::PeerConnected))
+            .await;
+        self.emit(GroupEvent::Pairing(PairingStep::CodeReady(pictures)))
+            .await;
+        PeerResponse::CodeCheck {
+            group: roster.group,
+            group_name: roster.name,
+            inviter_name,
+            person_name,
+        }
+    }
+
+    /// Inviting side: the joining person answered. Admit only if both said they match.
+    async fn confirm_join(self: &Arc<Self>, from: DeviceId, matches: bool) -> PeerResponse {
+        let refused = PeerResponse::Refused {
+            reason: Refusal::InviteUnknown,
+        };
+        let mut answer = {
+            let mut inner = self.inner.lock().await;
+            match inner.pending_pair.as_ref() {
+                Some(pending) if pending.joiner == from => {
+                    if !matches {
+                        inner.pending_pair = None;
+                    }
+                    pending_answer(inner.pending_pair.as_ref())
+                }
+                _ => return refused,
+            }
+        };
+        self.emit(GroupEvent::Pairing(PairingStep::ConfirmedThere(matches)))
+            .await;
+        if !matches {
+            return refused;
+        }
+        let here = match answer.as_mut() {
+            Some(answer) => tokio::time::timeout(PICTURE_CHECK, answer.wait_for(Option::is_some))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .and_then(|value| *value),
+            None => None,
+        };
+        let mut inner = self.inner.lock().await;
+        let Some(pending) = inner
+            .pending_pair
+            .take()
+            .filter(|pending| pending.joiner == from)
+        else {
+            return refused;
+        };
+        if here != Some(true) {
+            return refused;
+        }
+        let group = inner.roster.as_ref().map(|roster| roster.group);
+        let Some(group) = group else {
+            return refused;
+        };
+        self.admit_kind(
+            inner,
+            from,
+            group,
+            pending.kind,
+            pending.person,
+            pending.computer_name,
+            pending.address,
+        )
+        .await
+    }
+
     /// The whole group, or the two-person space with `with`.
     async fn space_with(&self, with: Option<PersonId>) -> Space {
         let inner = self.inner.lock().await;
@@ -1271,8 +1659,63 @@ impl Groups {
         )
         .encode();
         drop(inner);
-        self.emit(GroupEvent::InviteReady { link, expires_at })
+        let qr = self
+            .qr
+            .as_ref()
+            .map(|encode| encode(&link))
+            .unwrap_or_default();
+        self.emit(GroupEvent::InviteReady {
+            link,
+            expires_at,
+            qr,
+        })
+        .await;
+    }
+
+    /// Takes the history a group handed this computer and becomes a member.
+    async fn finish_join(
+        &self,
+        group: GroupId,
+        inviter: PeerAddress,
+        membership: Vec<MembershipOp>,
+        knowledge: Vec<KnowledgeOp>,
+        computer_name: String,
+    ) {
+        let me = self.me();
+        let mut inner = self.inner.lock().await;
+        inner.record.group = Some(group);
+        inner.record.membership = membership;
+        inner.record.knowledge = knowledge;
+        Self::remember(&mut inner.record, inviter);
+        self.refold(&mut inner).await;
+        let member = inner
+            .roster
+            .as_ref()
+            .and_then(|roster| roster.owner_of(&me))
+            .map(|member| (member.person, member.name.clone()));
+        let Some((person, name)) = member else {
+            Self::forget_group(&mut inner.record);
+            self.refold(&mut inner).await;
+            drop(inner);
+            self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                PairingFailure::Refused,
+            )))
             .await;
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "The other computer didn't add this one. Ask for a new invite.".into(),
+            )))
+            .await;
+            return;
+        };
+        inner.record.person = Some(person);
+        inner.record.person_name = name;
+        inner.record.computer_name = computer_name;
+        self.persist(&inner).await;
+        drop(inner);
+        self.emit(GroupEvent::Pairing(PairingStep::SkipCode)).await;
+        self.emit(GroupEvent::Pairing(PairingStep::Admitted { group }))
+            .await;
+        self.publish_loaded().await;
     }
 
     async fn join(&self, link: &str, computer_name: String) {
@@ -1332,42 +1775,8 @@ impl Groups {
                 membership,
                 knowledge,
             }) => {
-                let mut inner = self.inner.lock().await;
-                inner.record.group = Some(link.group);
-                inner.record.membership = membership;
-                inner.record.knowledge = knowledge;
-                Self::remember(&mut inner.record, inviter);
-                self.refold(&mut inner).await;
-                let member = inner
-                    .roster
-                    .as_ref()
-                    .and_then(|roster| roster.owner_of(&me))
-                    .map(|member| (member.person, member.name.clone()));
-                let Some((person, name)) = member else {
-                    Self::forget_group(&mut inner.record);
-                    self.refold(&mut inner).await;
-                    drop(inner);
-                    self.emit(GroupEvent::Pairing(PairingStep::Failed(
-                        PairingFailure::Refused,
-                    )))
+                self.finish_join(link.group, inviter, membership, knowledge, computer_name)
                     .await;
-                    self.emit(GroupEvent::Problem(GroupProblem::Other(
-                        "The other computer didn't add this one. Ask for a new invite.".into(),
-                    )))
-                    .await;
-                    return;
-                };
-                inner.record.person = Some(person);
-                inner.record.person_name = name;
-                inner.record.computer_name = computer_name;
-                self.persist(&inner).await;
-                drop(inner);
-                self.emit(GroupEvent::Pairing(PairingStep::SkipCode)).await;
-                self.emit(GroupEvent::Pairing(PairingStep::Admitted {
-                    group: link.group,
-                }))
-                .await;
-                self.publish_loaded().await;
             }
             Ok(PeerResponse::Refused { reason }) => {
                 self.emit(GroupEvent::Pairing(PairingStep::Failed(
@@ -1592,6 +2001,35 @@ impl Groups {
                 };
             }
         };
+        self.admit_kind(
+            inner,
+            from,
+            group,
+            invite.kind,
+            person,
+            computer_name,
+            address,
+        )
+        .await
+    }
+
+    /// Signs a new computer's addition (and its person's, for a person invite), hands
+    /// it the keys and history of its spaces, and tells the other computers.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one admission's facts, used once each"
+    )]
+    async fn admit_kind(
+        self: &Arc<Self>,
+        mut inner: tokio::sync::MutexGuard<'_, Inner>,
+        from: DeviceId,
+        group: GroupId,
+        kind: InviteKind,
+        person: PersonId,
+        computer_name: String,
+        address: PeerAddress,
+    ) -> PeerResponse {
+        let me = self.me();
         let Some(roster) = inner.roster.clone() else {
             return PeerResponse::Refused {
                 reason: Refusal::WrongGroup,
@@ -1602,7 +2040,7 @@ impl Groups {
                 reason: Refusal::NotAMember,
             };
         };
-        let bodies = match invite.kind {
+        let bodies = match kind {
             InviteKind::OwnDevice => vec![MembershipBody::AddDevice {
                 person: my_person,
                 device: from,
@@ -1730,6 +2168,17 @@ impl PeerHandler for GroupHandler {
                     .await
             }
             PeerRequest::Ask { question, .. } => groups.answer(from, &question).await,
+            PeerRequest::JoinByCode {
+                proof,
+                person,
+                computer_name,
+                from: address,
+            } => {
+                groups
+                    .code_join(from, proof, person, computer_name, address)
+                    .await
+            }
+            PeerRequest::ConfirmJoin { matches } => groups.confirm_join(from, matches).await,
             other => groups.serve_peer(from, other).await,
         }
     }
@@ -1795,7 +2244,10 @@ impl Groups {
                 self.merge(membership, knowledge).await;
                 PeerResponse::Accepted
             }
-            PeerRequest::Join { .. } | PeerRequest::Ask { .. } => PeerResponse::Refused {
+            PeerRequest::Join { .. }
+            | PeerRequest::Ask { .. }
+            | PeerRequest::JoinByCode { .. }
+            | PeerRequest::ConfirmJoin { .. } => PeerResponse::Refused {
                 reason: Refusal::Malformed,
             },
         }

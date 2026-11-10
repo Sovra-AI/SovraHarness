@@ -27,11 +27,13 @@ impl PeerHandler for Recorder {
                 want_membership: membership,
                 want_knowledge: BTreeSet::new(),
             },
-            PeerRequest::Join { .. } | PeerRequest::Push { .. } | PeerRequest::Ask { .. } => {
-                PeerResponse::Refused {
-                    reason: Refusal::NotAMember,
-                }
-            }
+            PeerRequest::Join { .. }
+            | PeerRequest::Push { .. }
+            | PeerRequest::Ask { .. }
+            | PeerRequest::JoinByCode { .. }
+            | PeerRequest::ConfirmJoin { .. } => PeerResponse::Refused {
+                reason: Refusal::NotAMember,
+            },
         }
     }
 }
@@ -277,4 +279,44 @@ async fn a_full_round_of_shared_artifacts_crosses_the_real_network_signed() {
     b.close().await;
     a.close().await;
     while server.join_next().await.is_some() {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_computer_showing_a_code_is_found_on_the_same_network() {
+    let showing = Mesh::bind([51; 32], Reach::LocalOnly).await.expect("binds");
+    let typing = Mesh::bind([52; 32], Reach::LocalOnly).await.expect("binds");
+    let bystander = Mesh::bind([53; 32], Reach::LocalOnly).await.expect("binds");
+    showing.set_pairing_open(Some(5));
+    bystander.set_pairing_open(Some(6));
+
+    let mut found = Vec::new();
+    for _ in 0..4 {
+        found = typing.nearby_pairing(5, 3_000).await;
+        if found
+            .iter()
+            .any(|peer| peer.device == showing.this_device())
+        {
+            break;
+        }
+    }
+    if typing.nearby.is_none() {
+        // No multicast here (some sandboxes): the feature reports nobody nearby.
+        assert_eq!(found, Vec::<PeerAddress>::new());
+    } else {
+        let mine = found
+            .iter()
+            .find(|peer| peer.device == showing.this_device())
+            .expect("the computer showing a code with this hint is found");
+        assert!(!mine.addrs.is_empty(), "with an address to dial");
+        assert!(
+            found
+                .iter()
+                .all(|peer| peer.device != bystander.this_device()),
+            "a computer showing a code with another hint is never contacted"
+        );
+    }
+
+    showing.close().await;
+    typing.close().await;
+    bystander.close().await;
 }

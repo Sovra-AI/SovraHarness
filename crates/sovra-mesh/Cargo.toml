@@ -12,6 +12,8 @@ aes-gcm = { workspace = true }
 async-trait = { workspace = true }
 curve25519-dalek = { workspace = true }
 getrandom = { workspace = true }
+iroh-mdns-address-lookup = { workspace = true }
+n0-future = { workspace = true }
 iroh = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

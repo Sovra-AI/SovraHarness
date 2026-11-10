@@ -857,9 +857,12 @@ Status checked against the code on 2026-11-10.
   - device key kept in the OS keychain (dev builds: `dev-credentials/`)
   - n0 relays and key-based lookup (`Reach::Internet`), or direct only
     (`SOVRA_GROUP_REACH=local`). *Not yet:* a configurable relay URL.
-- [ ] `sovra/pair/1`: the `sovra://join` link invite (§7.1) works. *Not yet:*
-  QR code display, the short code with SPAKE2 (§7.2), and showing the SAS
-  emoji check (§7.3) — link joins skip it.
+- [x] `sovra/pair/1`: the `sovra://join` link invite with its QR code (§7.1),
+  and the same-room short code (§7.2) found over mDNS, followed by the SAS
+  picture check on both screens (§7.3). Instead of SPAKE2, the code allows
+  one guess and the SAS check (bound to both device keys) defeats a computer
+  in the middle; offline guessing of the 6 digits only helps an attacker
+  who then also fails the picture check.
 - [x] Membership log storage: Sovra's own signed envelope, saved as
   `groups/group.json` (owner-only permissions) through the `GroupStore` port.
 - [x] Admission check on every incoming request (`admits_request`).
@@ -874,9 +877,9 @@ Status checked against the code on 2026-11-10.
 
 **UI**
 
-- [ ] Settings → Groups: Create, Roster, Add a computer, Add a person, link
-  screen, Join screen, Remove dialogs with honest copy, and the second-admin
-  banner are done. *Not yet:* QR code and the emoji confirm screen.
+- [x] Settings → Groups: Create, Roster, Add a computer, Add a person, link
+  and QR screen, same-room code, Join screen, picture check, Remove dialogs
+  with honest copy, and the second-admin banner.
 - [x] Development-mode ids on every control.
 
 **Packaging**
@@ -887,7 +890,7 @@ Status checked against the code on 2026-11-10.
 **Skills page**
 
 - [x] "Share with your family or team" (opens Settings → Groups).
-- [ ] "Add another computer to my group" as its own card.
+- [x] "Add another computer to my group".
 
 **Acceptance criteria** (not yet measured on two real computers)
 

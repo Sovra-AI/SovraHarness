@@ -84,6 +84,17 @@ pub enum PeerRequest {
     /// Federated recall: "search your memory for this", answered only by computers
     /// whose owner turned answering on (see `group::federated`).
     Ask { group: GroupId, question: String },
+    /// Same room: "I typed your code". The proof binds the code to both computers;
+    /// the inviting computer allows one guess, then both people compare pictures.
+    JoinByCode {
+        proof: [u8; 32],
+        person: PersonId,
+        computer_name: String,
+        from: PeerAddress,
+    },
+    /// Same room: the joining person's answer to "do the pictures match?". The
+    /// inviting computer answers only once its own person has answered too.
+    ConfirmJoin { matches: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +116,15 @@ pub enum PeerResponse {
     /// A few short answers from the asked computer's own memory.
     Answered {
         items: Vec<super::federated::FederatedItem>,
+    },
+    /// The code was right: compare pictures now. Carries what the joiner needs to
+    /// derive them and to know what it is joining.
+    CodeCheck {
+        group: GroupId,
+        group_name: String,
+        inviter_name: String,
+        /// The name the joining computer's person will have in the group.
+        person_name: String,
     },
     Refused {
         reason: Refusal,
@@ -143,6 +163,10 @@ pub fn admits_request(
     request: &PeerRequest,
 ) -> Result<(), Refusal> {
     let group = match request {
+        // Anyone nearby may try a same-room code; the code and pictures decide.
+        PeerRequest::JoinByCode { .. } | PeerRequest::ConfirmJoin { .. } => {
+            return roster.map(|_| ()).ok_or(Refusal::WrongGroup);
+        }
         PeerRequest::Join { group, .. } => {
             return match roster {
                 Some(state) if state.group == *group => Ok(()),
@@ -196,6 +220,12 @@ pub trait GroupTransport: Send + Sync {
     fn verifier(&self) -> Arc<dyn SignatureVerifier + Send + Sync>;
     /// Lane encryption with this computer's device key (see `group::lane_keys`).
     fn cipher(&self) -> Arc<dyn super::lane_keys::GroupCipher>;
+    /// Same room: tell computers on this network a code with this `hint` is showing
+    /// here (`None` stops). See `group::code_hint`.
+    fn set_pairing_open(&self, hint: Option<u8>);
+    /// Same room: computers on this network showing a code with `hint`, heard
+    /// within `listen_ms`.
+    async fn nearby_pairing(&self, hint: u8, listen_ms: u64) -> Vec<PeerAddress>;
     /// How others can reach this computer right now (for join links).
     fn address(&self) -> PeerAddress;
     /// Accepts connections and hands each request to `handler`, until [`Self::close`].

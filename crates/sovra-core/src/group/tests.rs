@@ -690,6 +690,7 @@ fn the_view_leaves_the_group_when_this_computer_is_removed() {
     view.apply(GroupEvent::InviteReady {
         link: "sovra://join/x".into(),
         expires_at: Timestamp(9_000),
+        qr: Vec::new(),
     });
     assert!(matches!(view.pairing, PairingStage::ShowingInvite { .. }));
 
@@ -1746,5 +1747,42 @@ fn a_two_person_space_is_its_own_lane_only_they_write_and_only_they_hold_keys() 
         view.usable_key(&roster),
         Some(OpHash([5; 32])),
         "a key Sam was given is never used for Mum and Dad"
+    );
+}
+
+#[test]
+fn a_same_room_code_is_six_digits_and_binds_both_computers() {
+    assert_eq!(normalise_code(" 123 456 "), Some("123456".into()));
+    assert_eq!(normalise_code("123-456"), Some("123456".into()));
+    assert_eq!(normalise_code("12345"), None);
+    assert_eq!(normalise_code("12345a"), None);
+    let (digits, shown) = format_code(7);
+    assert_eq!((digits.as_str(), shown.as_str()), ("000007", "000 007"));
+    let (digits, _) = format_code(u32::MAX);
+    assert_eq!(digits.len(), 6);
+
+    let secret = short_code_secret("123456");
+    assert_ne!(secret, short_code_secret("123457"));
+    let here = invite_proof(&secret, &code_transcript(&device(1), &device(2)));
+    assert_ne!(
+        here,
+        invite_proof(&secret, &code_transcript(&device(1), &device(3))),
+        "a proof made for one computer is useless from another"
+    );
+    // Both screens derive the same pictures once the joiner knows the group.
+    let group = GroupId([4; 32]);
+    let transcript = join_transcript(&device(1), &device(2), &group);
+    assert_eq!(
+        short_auth_string(&transcript, &device(1), &device(2)),
+        short_auth_string(&transcript, &device(2), &device(1))
+    );
+    assert_ne!(
+        short_auth_string(&transcript, &device(1), &device(2)),
+        short_auth_string(
+            &join_transcript(&device(9), &device(2), &group),
+            &device(9),
+            &device(2)
+        ),
+        "a computer in the middle shows different pictures"
     );
 }

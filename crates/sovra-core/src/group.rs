@@ -39,7 +39,8 @@ pub use link::{JOIN_LINK_PREFIX, JoinLink, LinkError, MAX_JOIN_LINK_CHARS};
 pub use membership::{MembershipBody, MembershipOp, Role, UnsignedOp};
 pub use pairing::{
     INVITE_LIFETIME_MS, Invite, InviteBook, InviteKind, PairingFailure, PairingStage, PairingStep,
-    RedeemError, SHORT_CODE_LIFETIME_MS, ShortCodeWindow, invite_proof,
+    RedeemError, SHORT_CODE_LIFETIME_MS, ShortCodeWindow, code_hint, code_transcript, format_code,
+    invite_proof, normalise_code, short_code_secret,
 };
 pub use sas::{SAS_EMOJI, ShortAuthString, short_auth_string};
 pub use session::{

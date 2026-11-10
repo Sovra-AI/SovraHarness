@@ -11,6 +11,14 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Join a group in the same room with a six-digit code.** Groups → *Show a
+  code* displays six digits; on the other computer, on the same Wi-Fi, type
+  them under *Join with code*. Sovra finds the computer showing the code on
+  the local network (mDNS, `iroh-mdns-address-lookup`), and both screens then
+  show four pictures with their names and six digits. The computer joins only
+  when both people press *They match*. A code allows one try within two
+  minutes, and a wrong try burns it. Invite links now also show a QR code.
+  Skills has an “Add another computer to my group” card.
 - **Share with just one person.** In a group, details, memories and
   artifacts can go to *Just Dad* instead of everyone. Each pair of people has
   its own space with its own keys; its history only ever travels between
