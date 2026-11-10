@@ -937,3 +937,49 @@ async fn a_shared_helper_and_schedule_reach_others_as_templates_to_copy() {
             .any(|shared| shared.template.body() == "Water the roses on Sundays.")
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_computer_knows_which_others_are_online() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 101).await;
+    let dad = Computer::start(&net, 102);
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Desktop".into(),
+    });
+    dad.roster(|state| state.admits(&dad.device)).await;
+
+    // Opening Groups syncs at once, and the sync reports who answered.
+    mum.send(GroupCommand::Load);
+    let seen = mum
+        .wait(|event| match event {
+            GroupEvent::Presence(seen) if seen.contains_key(&dad.device) => Some(seen),
+            _ => None,
+        })
+        .await;
+    assert!(
+        !seen.contains_key(&mum.device),
+        "a computer does not list itself"
+    );
+
+    // Dad's computer goes off: it is no longer heard from.
+    net.off.lock().expect("not poisoned").insert(dad.device);
+    let before = seen[&dad.device];
+    mum.send(GroupCommand::Load);
+    let after = mum
+        .wait(|event| match event {
+            GroupEvent::Presence(seen) => Some(seen),
+            _ => None,
+        })
+        .await;
+    assert_eq!(
+        after.get(&dad.device),
+        Some(&before),
+        "not refreshed while off"
+    );
+}

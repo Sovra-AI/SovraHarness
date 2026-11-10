@@ -183,6 +183,8 @@ pub enum GroupEvent {
         settings: FederatedSettings,
         recent: Vec<AskRecord>,
     },
+    /// When this computer last heard from each other computer in the group.
+    Presence(std::collections::BTreeMap<DeviceId, Timestamp>),
     /// What the group's computers answered to an "Ask my group" question.
     Answers {
         question: String,
@@ -209,6 +211,31 @@ pub struct ComputerRow {
     pub name: String,
     pub fingerprint: String,
     pub is_this_computer: bool,
+    /// When this computer last heard from it (`None`: not since it started).
+    pub last_seen: Option<Timestamp>,
+}
+
+/// A computer counts as online if it was heard from within this long (three sync
+/// rounds, so one missed round does not flicker).
+pub const ONLINE_WINDOW_MS: i64 = 60_000;
+
+/// "Online now", "Seen 5 min ago" or "Not seen yet", for one computer.
+pub fn presence_label(last_seen: Option<Timestamp>, now: Timestamp) -> String {
+    let Some(seen) = last_seen else {
+        return "Not seen since this computer started".to_owned();
+    };
+    let ago = now.0.saturating_sub(seen.0).max(0);
+    if ago < ONLINE_WINDOW_MS {
+        return "Online now".to_owned();
+    }
+    let minutes = ago / 60_000;
+    if minutes < 60 {
+        format!("Seen {minutes} min ago")
+    } else if minutes < 48 * 60 {
+        format!("Seen {} h ago", minutes / 60)
+    } else {
+        format!("Seen {} days ago", minutes / (24 * 60))
+    }
 }
 
 /// Plain-word role names.
@@ -252,6 +279,8 @@ pub struct GroupsView {
     pub recent_asks: Vec<AskRecord>,
     /// The last "Ask my group" question and what came back.
     pub answers: Option<(String, Vec<GroupAnswer>)>,
+    /// When this computer last heard from each other computer.
+    pub last_seen: std::collections::BTreeMap<DeviceId, Timestamp>,
 }
 
 impl Default for GroupsView {
@@ -271,6 +300,7 @@ impl Default for GroupsView {
             federated: FederatedSettings::default(),
             recent_asks: Vec::new(),
             answers: None,
+            last_seen: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -334,6 +364,7 @@ impl GroupsView {
                 self.recent_asks = recent;
             }
             GroupEvent::Answers { question, answers } => self.answers = Some((question, answers)),
+            GroupEvent::Presence(last_seen) => self.last_seen = last_seen,
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
         }
@@ -346,6 +377,7 @@ impl GroupsView {
         self.templates.clear();
         self.recent_asks.clear();
         self.answers = None;
+        self.last_seen.clear();
         self.invite = None;
         self.short_code = None;
         self.pairing = PairingStage::Idle;
@@ -430,6 +462,7 @@ impl GroupsView {
                         name: entry.name.clone(),
                         fingerprint: device.fingerprint(),
                         is_this_computer: Some(*device) == me,
+                        last_seen: self.last_seen.get(device).copied(),
                     })
                     .collect(),
             })

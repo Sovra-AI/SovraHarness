@@ -393,7 +393,15 @@ impl ModelsView {
                                     computer.name, computer.fingerprint
                                 )
                             } else {
-                                format!("{} · {}", computer.name, computer.fingerprint)
+                                format!(
+                                    "{} · {} · {}",
+                                    computer.name,
+                                    sovra_core::group::presence_label(
+                                        computer.last_seen,
+                                        sovra_core::Timestamp(now_millis())
+                                    ),
+                                    computer.fingerprint
+                                )
                             };
                             let name = computer.name.clone();
                             let mut line = h_flex()

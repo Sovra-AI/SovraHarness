@@ -1916,3 +1916,47 @@ fn templates_are_checked_for_names_words_and_size() {
     };
     assert_eq!(check_template(&crowded), Err(TemplateError::TooManyTopics));
 }
+
+#[test]
+fn each_computer_says_whether_it_is_online_or_when_it_was_last_seen() {
+    let now = Timestamp(10_000_000);
+    assert_eq!(
+        presence_label(None, now),
+        "Not seen since this computer started"
+    );
+    assert_eq!(
+        presence_label(Some(Timestamp(now.0 - 5_000)), now),
+        "Online now"
+    );
+    assert_eq!(
+        presence_label(Some(Timestamp(now.0 - 5 * 60_000)), now),
+        "Seen 5 min ago"
+    );
+    assert_eq!(
+        presence_label(Some(Timestamp(now.0 - 3 * 3_600_000)), now),
+        "Seen 3 h ago"
+    );
+    assert_eq!(
+        presence_label(Some(Timestamp(now.0 - 72 * 3_600_000)), now),
+        "Seen 3 days ago"
+    );
+
+    let log = family_of_three();
+    let mut view = GroupsView::default();
+    view.apply(GroupEvent::Loaded {
+        this_computer: device(1),
+        group: Some(log.state()),
+    });
+    view.apply(GroupEvent::Presence(std::collections::BTreeMap::from([(
+        device(2),
+        Timestamp(42),
+    )])));
+    let seen: Vec<Option<Timestamp>> = view
+        .rows()
+        .iter()
+        .flat_map(|row| row.computers.iter())
+        .filter(|computer| computer.device == device(2))
+        .map(|computer| computer.last_seen)
+        .collect();
+    assert_eq!(seen, vec![Some(Timestamp(42))]);
+}

@@ -410,6 +410,8 @@ struct Inner {
     /// Questions other computers asked this one, newest first (not saved).
     asks: Vec<AskRecord>,
     limiter: AskLimiter,
+    /// When each other computer was last heard from (any successful exchange).
+    last_seen: std::collections::BTreeMap<DeviceId, Timestamp>,
     /// Computers that recently did not answer, and until when they are skipped.
     quiet_until: std::collections::BTreeMap<DeviceId, Timestamp>,
     /// Lane keys this computer holds (opened from its grants, or made here).
@@ -502,6 +504,7 @@ impl Groups {
                 asks: Vec::new(),
                 limiter: AskLimiter::default(),
                 quiet_until: std::collections::BTreeMap::new(),
+                last_seen: std::collections::BTreeMap::new(),
                 lane_keys: std::collections::BTreeMap::new(),
                 opened: std::collections::BTreeMap::new(),
                 short: None,
@@ -814,9 +817,22 @@ impl Groups {
             .collect()
     }
 
+    /// Notes that `device` just answered or spoke to this computer.
+    async fn saw(&self, device: DeviceId) {
+        self.inner.lock().await.last_seen.insert(device, now());
+    }
+
+    async fn publish_presence(&self) {
+        let seen = self.inner.lock().await.last_seen.clone();
+        self.emit(GroupEvent::Presence(seen)).await;
+    }
+
     async fn ask(&self, to: &PeerAddress, request: PeerRequest) -> Result<PeerResponse, String> {
         match tokio::time::timeout(REQUEST_TIMEOUT, self.transport.request(to, request)).await {
-            Ok(Ok(response)) => Ok(response),
+            Ok(Ok(response)) => {
+                self.saw(to.device).await;
+                Ok(response)
+            }
             Ok(Err(error)) => Err(error.to_string()),
             Err(_) => Err("no answer in time".into()),
         }
@@ -967,6 +983,7 @@ impl Groups {
                 }
             }
         }
+        self.publish_presence().await;
     }
 
     /// One exchange with `peer`. Returns whether it brought anything new.
@@ -2186,6 +2203,7 @@ impl PeerHandler for GroupHandler {
         if let Err(reason) = admitted {
             return PeerResponse::Refused { reason };
         }
+        groups.saw(from).await;
         match request {
             PeerRequest::Join {
                 group,
