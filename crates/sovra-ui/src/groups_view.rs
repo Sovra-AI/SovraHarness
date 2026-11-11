@@ -67,8 +67,31 @@ pub(crate) struct GroupsForm {
     pub(crate) setup: Setup,
     /// The page inside a group; `None` follows [`GroupsView::starting_page`].
     pub(crate) page: Option<GroupPage>,
+    /// Sections the person has opened.
+    open: std::collections::BTreeSet<Panel>,
+}
+
+/// Parts of the page that stay folded until someone asks for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Panel {
     /// "How do groups work?" opened again from inside a group.
-    explain_open: bool,
+    Explain,
+    /// "More…" shows the rarely used pages beside the everyday four.
+    MorePages,
+    /// "More ways to invite": an admin link and adding your own computers.
+    MoreInvite,
+}
+
+impl GroupsForm {
+    fn is_open(&self, panel: Panel) -> bool {
+        self.open.contains(&panel)
+    }
+
+    fn toggle(&mut self, panel: Panel) {
+        if !self.open.remove(&panel) {
+            self.open.insert(panel);
+        }
+    }
 }
 
 impl GroupsForm {
@@ -96,7 +119,7 @@ impl GroupsForm {
             copied_link: None,
             setup: Setup::Choose,
             page: None,
-            explain_open: false,
+            open: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -324,14 +347,34 @@ impl ModelsView {
             body = body.child(check);
         }
         if view.group.is_none() {
+            // The choice comes first; the longer explanation follows for anyone unsure.
             return body
-                .child(Self::render_explainer("groups-intro", cx))
+                .child(
+                    v_flex()
+                        .id("groups-what")
+                        .test_support()
+                        .w_full()
+                        .gap(t.space.small)
+                        .child(
+                            div()
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .child("What is a group?"),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Body, cx)
+                                .child(WHAT_IS_A_GROUP),
+                        ),
+                )
                 .child(self.render_setup(cx))
+                .child(Self::render_explainer("groups-intro", false, cx))
                 .into_any_element();
         }
         body = body.child(self.render_group_header(cx));
-        if self.groups_form.explain_open {
-            body = body.child(Self::render_explainer("groups-intro", cx));
+        if self.groups_form.is_open(Panel::Explain) {
+            body = body.child(Self::render_explainer("groups-intro", true, cx));
         }
         if let Some(steps) = self.render_first_steps(cx) {
             body = body.child(steps);
@@ -342,7 +385,13 @@ impl ModelsView {
     }
 
     /// "What is a group?": what it is, what you can do, how it works, why it's safe.
-    fn render_explainer(id: &'static str, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// `intro` repeats the one-sentence answer; outside a group that sentence already
+    /// sits above the two choices.
+    fn render_explainer(
+        id: &'static str,
+        intro: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         v_flex()
             .id(id)
@@ -355,15 +404,19 @@ impl ModelsView {
             .child(
                 div()
                     .sovra_text(TextRole::SectionTitle, cx)
-                    .child("What is a group?"),
+                    .child(if intro {
+                        "What is a group?"
+                    } else {
+                        "More about groups"
+                    }),
             )
-            .child(
+            .children(intro.then(|| {
                 div()
                     .w_full()
                     .whitespace_normal()
                     .sovra_text(TextRole::Body, cx)
-                    .child(WHAT_IS_A_GROUP),
-            )
+                    .child(WHAT_IS_A_GROUP)
+            }))
             .child(heading("In a group you can:", cx))
             .child(
                 v_flex()
@@ -481,7 +534,6 @@ impl ModelsView {
 
     fn back_to_choose(cx: &mut Context<Self>) -> Button {
         design::button("groups-setup-back", "Back", cx)
-            .ghost()
             .small()
             .accessibility_label("Back to start or join")
             .on_click(cx.listener(|view, _, _, cx| {
@@ -601,7 +653,7 @@ impl ModelsView {
                 "groups-join-code",
                 "1. Type the six numbers from their screen",
                 &form.join_code,
-                "On their computer they open Groups → Invite someone and press We're in the same room: show six numbers. Both computers need to be on the same Wi-Fi.",
+                "On their computer they open Groups → Invite someone and press They're sitting next to me. Both computers need to be on the same Wi-Fi.",
                 cx,
             ))
         } else {
@@ -739,7 +791,7 @@ impl ModelsView {
             (Some(name), _) => format!("You're in this group as {name}."),
             (None, _) => "This computer is in this group.".to_owned(),
         };
-        let open = self.groups_form.explain_open;
+        let open = self.groups_form.is_open(Panel::Explain);
         v_flex()
             .id("groups-header")
             .test_support()
@@ -787,10 +839,9 @@ impl ModelsView {
                         },
                         cx,
                     )
-                    .ghost()
                     .small()
                     .on_click(cx.listener(|view, _, _, cx| {
-                        view.groups_form.explain_open = !view.groups_form.explain_open;
+                        view.groups_form.toggle(Panel::Explain);
                         cx.notify();
                     })),
                 ),
@@ -857,6 +908,8 @@ impl ModelsView {
     fn render_page_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let current = self.current_page();
+        // The rarely used pages stay behind "More" unless one of them is open.
+        let more = self.groups_form.is_open(Panel::MorePages) || !current.is_everyday();
         v_flex()
             .w_full()
             .gap(t.space.compact)
@@ -869,17 +922,40 @@ impl ModelsView {
                     .min_w_0()
                     .flex_wrap()
                     .gap(t.space.small)
-                    .children(GroupPage::ALL.into_iter().map(|page| {
+                    .children(
+                        GroupPage::ALL
+                            .into_iter()
+                            .filter(|page| more || page.is_everyday())
+                            .map(|page| {
+                                design::button(
+                                    SharedString::from(format!("groups-page-{}", page.id())),
+                                    format!("{} {}", page.icon(), page.title()),
+                                    cx,
+                                )
+                                .small()
+                                .selected(page == current)
+                                .accessibility_label(format!("Open {}", page.title()))
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    view.open_group_page(page, cx);
+                                }))
+                            }),
+                    )
+                    .children((current.is_everyday()).then(|| {
                         design::button(
-                            SharedString::from(format!("groups-page-{}", page.id())),
-                            format!("{} {}", page.icon(), page.title()),
+                            "groups-more-pages",
+                            if more { "Fewer choices" } else { "More…" },
                             cx,
                         )
                         .small()
-                        .selected(page == current)
-                        .accessibility_label(format!("Open {}", page.title()))
-                        .on_click(cx.listener(move |view, _, _, cx| {
-                            view.open_group_page(page, cx);
+                        .ghost()
+                        .accessibility_label(if more {
+                            "Show fewer choices"
+                        } else {
+                            "Show more choices: shared helpers, borrow an AI, smaller circles and history"
+                        })
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.groups_form.toggle(Panel::MorePages);
+                            cx.notify();
                         }))
                     })),
             )
@@ -999,7 +1075,6 @@ impl ModelsView {
                 .child(
                     h_flex().child(
                         design::button("groups-leave-ask", "Leave this group", cx)
-                            .ghost()
                             .small()
                             .accessibility_label("Leave this group on this computer")
                             .on_click(cx.listener(|view, _, _, cx| {
@@ -1061,19 +1136,15 @@ impl ModelsView {
                             let device = computer.device;
                             let key = format!("computer:{}", device.to_hex());
                             let label = if computer.is_this_computer {
-                                format!(
-                                    "💻 {} (this computer) · safety code {}",
-                                    computer.name, computer.fingerprint
-                                )
+                                format!("💻 {} (this computer)", computer.name)
                             } else {
                                 format!(
-                                    "💻 {} · {} · safety code {}",
+                                    "💻 {} · {}",
                                     computer.name,
                                     sovra_core::group::presence_label(
                                         computer.last_seen,
                                         sovra_core::Timestamp(now_millis())
-                                    ),
-                                    computer.fingerprint
+                                    )
                                 )
                             };
                             let name = computer.name.clone();
@@ -1198,11 +1269,133 @@ impl ModelsView {
     fn render_invites(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let manage = self.groups.can_manage();
+        let more = self.groups_form.is_open(Panel::MoreInvite) || !manage;
         let mut invites = v_flex()
             .id("groups-invites")
             .test_support()
             .w_full()
             .gap(t.space.medium);
+        // What the person just asked for goes first, so it is never below the fold.
+        if self.groups_form.copy_pending {
+            invites = invites.child(caption("Making your invite link…", cx));
+        }
+        if let Some((code, expires_at)) = self.groups.short_code.clone() {
+            let minutes = (expires_at.millis() - now_millis()).max(0) / 60_000;
+            invites = invites.child(
+                v_flex()
+                    .id("groups-short-code-card")
+                    .test_support()
+                    .w_full()
+                    .gap(t.space.small)
+                    .p(t.space.medium)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .border_1()
+                    .border_color(cx.theme().primary)
+                    .child(heading("🔢 Your six numbers", cx))
+                    .child(
+                        div()
+                            .id("groups-short-code")
+                            .test_support()
+                            .aria_label(code.clone())
+                            .sovra_text(TextRole::PageTitle, cx)
+                            .child(code),
+                    )
+                    .child(numbered(
+                        "groups-short-code-steps",
+                        &[
+                            "On the other computer, open Groups and choose Join a group.",
+                            "Choose We're in the same room, and type these six numbers.",
+                            "Both screens then show four pictures. If they match, press Yes, they match on both.",
+                        ],
+                        cx,
+                    ))
+                    .child(words(
+                        format!(
+                            "Both computers need to be on the same Wi-Fi. The numbers work for one try, for about {} minutes.",
+                            minutes + 1
+                        ),
+                        cx,
+                    )),
+            );
+        }
+        if let Some((link, expires_at)) = self.groups.invite.clone() {
+            let mono = cx.theme().mono_font_family.clone();
+            let remaining = (expires_at.millis() - now_millis()).max(0);
+            let minutes = (remaining + 59_999) / 60_000;
+            let mut card = v_flex()
+                .id("groups-invite-card")
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .gap(t.space.small)
+                .p(t.space.medium)
+                .sovra_surface(Surface::Subtle, cx)
+                .border_1()
+                .border_color(cx.theme().primary)
+                .child(heading("✉️ Your invite link is ready", cx));
+            if self.groups_form.copied_link.as_ref() == Some(&link) {
+                card = card.child(words(
+                    "✅ Copied! Now paste it into an email or message to them.",
+                    cx,
+                ));
+            }
+            card = card
+                .child(numbered(
+                    "groups-invite-steps",
+                    &[
+                        "Paste the link into an email or a message and send it. (Right-click and choose Paste, or press Ctrl and V.)",
+                        "They need Sovra on their computer. Then they open Groups, choose Join a group, and paste the link.",
+                        "Keep Sovra open on this computer until they've joined.",
+                    ],
+                    cx,
+                ))
+                .child(words(
+                    format!("The link works once and stops working in about {minutes} minutes."),
+                    cx,
+                ))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .gap(t.space.small)
+                        .child(
+                            div()
+                                .id("groups-invite-link")
+                                .test_support()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(mono)
+                                .sovra_text(TextRole::Caption, cx)
+                                .child(link.clone()),
+                        )
+                        .child(
+                            design::button("groups-copy-link", "Copy the link again", cx)
+                                .small()
+                                .accessibility_label("Copy group invite link")
+                                .disabled(remaining == 0 || self.groups_form.copy_pending)
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+                                    view.groups_form.copied_link = Some(link.clone());
+                                    cx.notify();
+                                })),
+                        ),
+                );
+            if !self.groups.invite_qr.is_empty() {
+                card = card
+                    .child(words(
+                        "Or, if they're next to you, they can point their phone or tablet camera at this square.",
+                        cx,
+                    ))
+                    .child(h_flex().child(crate::connections_view::scan_code(
+                        "groups-invite-qr",
+                        self.groups.invite_qr.clone(),
+                        cx,
+                    )));
+            }
+            invites = invites.child(card);
+        }
         if manage {
             invites = invites.child(
                 v_flex()
@@ -1228,7 +1421,6 @@ impl ModelsView {
                                     "Create invite link",
                                     cx,
                                 )
-                                .small()
                                 .accessibility_label("Create and copy an invite link")
                                 .disabled(self.groups_form.copy_pending)
                                 .on_click(cx.listener(|view, _, _, cx| {
@@ -1245,10 +1437,12 @@ impl ModelsView {
                             .child(
                                 design::button(
                                     "groups-code-person",
-                                    "We're in the same room: show six numbers",
+                                    "They're sitting next to me",
                                     cx,
                                 )
-                                .small()
+                                .accessibility_label(
+                                    "They're sitting next to me: show six numbers to type on their computer",
+                                )
                                 .on_click(cx.listener(|view, _, _, cx| {
                                     let name = value(&view.groups_form.invite_name, cx);
                                     send(
@@ -1264,45 +1458,82 @@ impl ModelsView {
                             ),
                     )
                     .child(
-                        h_flex()
+                        div()
+                            .id("groups-invite-warning")
+                            .test_support()
                             .w_full()
-                            .min_w_0()
-                            .flex_wrap()
-                            .items_center()
-                            .gap(t.space.small)
-                            .child(words(
-                                "Want them to help look after the group? Invite them as an admin instead.",
-                                cx,
-                            ).flex_1())
-                            .child(
-                                design::button(
-                                    "groups-invite-admin",
-                                    "Create admin invite link",
-                                    cx,
-                                )
-                                .small()
-                                .ghost()
-                                .disabled(self.groups_form.copy_pending)
-                                .on_click(cx.listener(|view, _, _, cx| {
-                                    let name = value(&view.groups_form.invite_name, cx);
-                                    view.create_and_copy_invite(
-                                        GroupCommand::InvitePerson {
-                                            name,
-                                            role: Role::Admin,
-                                        },
-                                        cx,
-                                    );
-                                })),
-                            ),
+                            .whitespace_normal()
+                            .p(t.space.compact)
+                            .sovra_surface(Surface::Matte, cx)
+                            .sovra_text(TextRole::Body, cx)
+                            .text_color(cx.theme().warning)
+                            .child("⚠️ Important: leave this computer switched on with Sovra open, and ask them to use the link within 10 minutes. If it stops working, just make a new one."),
                     ),
+            );
+            invites = invites.child(
+                h_flex().child(
+                    design::button(
+                        "groups-more-invite",
+                        if more {
+                            "Fewer ways to invite"
+                        } else {
+                            "More ways to invite…"
+                        },
+                        cx,
+                    )
+                    .small()
+                    .ghost()
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.groups_form.toggle(Panel::MoreInvite);
+                        cx.notify();
+                    })),
+                ),
             );
         } else {
             invites = invites.child(words(
-                "Only an admin can invite new people. Ask an admin (see People) to send them an invite. You can still add your own computers below.",
+                "Only an admin (someone in charge of the group) can invite new people. Ask them to send an invite. You can still add your own computers below.",
                 cx,
             ));
         }
-        invites = invites.child(
+        if !more {
+            return invites;
+        }
+        if manage {
+            invites = invites.child(
+                v_flex()
+                    .w_full()
+                    .gap(t.space.small)
+                    .p(t.space.compact)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .child(heading("Invite someone to help look after the group", cx))
+                    .child(words(
+                        "An admin can invite and remove people, like you. Type their name above, then press this instead.",
+                        cx,
+                    ))
+                    .child(
+                        h_flex().child(
+                            design::button(
+                                "groups-invite-admin",
+                                "Create admin invite link",
+                                cx,
+                            )
+                            .small()
+                            .disabled(self.groups_form.copy_pending)
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                let name = value(&view.groups_form.invite_name, cx);
+                                view.create_and_copy_invite(
+                                    GroupCommand::InvitePerson {
+                                        name,
+                                        role: Role::Admin,
+                                    },
+                                    cx,
+                                );
+                            })),
+                        ),
+                    ),
+            );
+        }
+        invites.child(
             v_flex()
                 .w_full()
                 .gap(t.space.small)
@@ -1346,124 +1577,7 @@ impl ModelsView {
                             })),
                         ),
                 ),
-        );
-        if self.groups_form.copy_pending {
-            invites = invites.child(caption("Making your invite link…", cx));
-        }
-        if let Some((code, expires_at)) = self.groups.short_code.clone() {
-            let minutes = (expires_at.millis() - now_millis()).max(0) / 60_000;
-            invites = invites.child(
-                v_flex()
-                    .id("groups-short-code-card")
-                    .test_support()
-                    .w_full()
-                    .gap(t.space.small)
-                    .p(t.space.medium)
-                    .sovra_surface(Surface::Subtle, cx)
-                    .child(heading("Your six numbers", cx))
-                    .child(
-                        div()
-                            .id("groups-short-code")
-                            .test_support()
-                            .aria_label(code.clone())
-                            .sovra_text(TextRole::PageTitle, cx)
-                            .child(code),
-                    )
-                    .child(numbered(
-                        "groups-short-code-steps",
-                        &[
-                            "On the other computer, open Groups and choose Join a group.",
-                            "Choose We're in the same room, and type these six numbers.",
-                            "Both screens then show four pictures. If they match, press Yes, they match on both.",
-                        ],
-                        cx,
-                    ))
-                    .child(words(
-                        format!(
-                            "Both computers need to be on the same Wi-Fi. The numbers work for one try, for about {} minutes.",
-                            minutes + 1
-                        ),
-                        cx,
-                    )),
-            );
-        }
-        if let Some((link, expires_at)) = self.groups.invite.clone() {
-            let mono = cx.theme().mono_font_family.clone();
-            let remaining = (expires_at.millis() - now_millis()).max(0);
-            let minutes = (remaining + 59_999) / 60_000;
-            let mut card = v_flex()
-                .id("groups-invite-card")
-                .test_support()
-                .w_full()
-                .min_w_0()
-                .gap(t.space.small)
-                .p(t.space.medium)
-                .sovra_surface(Surface::Subtle, cx)
-                .child(heading("Your invite link is ready", cx));
-            if self.groups_form.copied_link.as_ref() == Some(&link) {
-                card = card.child(words(
-                    "✅ Copied! Now paste it into an email or message to them.",
-                    cx,
-                ));
-            }
-            card = card
-                .child(numbered(
-                    "groups-invite-steps",
-                    &[
-                        "Paste the link into an email or a message and send it.",
-                        "They open Sovra, go to Groups, choose Join a group, and paste it in.",
-                        "Keep Sovra open on this computer until they've joined.",
-                    ],
-                    cx,
-                ))
-                .child(words(
-                    format!("The link works once and stops working in about {minutes} minutes."),
-                    cx,
-                ))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .items_center()
-                        .gap(t.space.small)
-                        .child(
-                            div()
-                                .id("groups-invite-link")
-                                .test_support()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .font_family(mono)
-                                .sovra_text(TextRole::Caption, cx)
-                                .child(link.clone()),
-                        )
-                        .child(
-                            design::button("groups-copy-link", "Copy again", cx)
-                                .xsmall()
-                                .accessibility_label("Copy group invite link")
-                                .disabled(remaining == 0 || self.groups_form.copy_pending)
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                                    view.groups_form.copied_link = Some(link.clone());
-                                    cx.notify();
-                                })),
-                        ),
-                );
-            if !self.groups.invite_qr.is_empty() {
-                card = card
-                    .child(words(
-                        "Or, if they're next to you, they can point their phone or tablet camera at this square.",
-                        cx,
-                    ))
-                    .child(h_flex().child(crate::connections_view::scan_code(
-                        "groups-invite-qr",
-                        self.groups.invite_qr.clone(),
-                        cx,
-                    )));
-            }
-            invites = invites.child(card);
-        }
-        invites
+        )
     }
 
     fn render_knowledge(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -1478,6 +1592,7 @@ impl ModelsView {
                 .map(|member| member.person)
         });
         let can_add = self.groups.my_role().is_some_and(Role::writes);
+        let confirm = self.groups_form.confirm_remove.clone();
         let artifacts = self
             .groups
             .artifacts
@@ -1529,7 +1644,7 @@ impl ModelsView {
                     )
                     .small()
                     .selected(chosen_department == Some(department))
-                    .accessibility_label(format!("Share only with the {name} department"))
+                    .accessibility_label(format!("Share only with the {name} circle"))
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.groups_form.share_department = Some(department);
                         view.groups_form.share_with = None;
@@ -1599,6 +1714,7 @@ impl ModelsView {
         section
             .children(self.groups.knowledge.iter().enumerate().map(|(index, detail)| {
                 let id = detail.id;
+                let erase_key = format!("erase:{id:?}");
                 let mine = detail.person.is_some() && detail.person == my_person;
                 let mut row = v_flex()
                     .id(("groups-detail", index))
@@ -1639,9 +1755,8 @@ impl ModelsView {
                     let mut actions = h_flex().flex_wrap().gap(t.space.small);
                     if !mine {
                         actions = actions.child(
-                            design::button(("groups-agree", index), "👍 That's right", cx)
-                                .ghost()
-                                .xsmall()
+                            design::button(("groups-agree", index), "👍 I agree", cx)
+                                .small()
                                 .accessibility_label("I agree this note is right")
                                 .on_click(cx.listener(move |_, _, _, cx| send(GroupCommand::Agree { detail: id }, cx))),
                         );
@@ -1649,23 +1764,34 @@ impl ModelsView {
                     if mine || manage {
                         actions = actions
                             .child(
-                                design::button(("groups-withdraw", index), "Stop sharing", cx)
-                                    .ghost()
-                                    .xsmall()
-                                    .accessibility_label("Stop sharing this note; helpers stop using it")
+                                design::button(("groups-withdraw", index), "Stop sharing with everyone", cx)
+                                    .small()
+                                    .accessibility_label("Stop sharing this note; Sovra stops using it for everyone")
                                     .on_click(cx.listener(move |_, _, _, cx| {
                                         send(GroupCommand::Withdraw { detail: id }, cx);
                                     })),
                             )
-                            .child(
-                                design::button(("groups-erase", index), "Erase everywhere", cx)
-                                    .ghost()
-                                    .xsmall()
-                                    .accessibility_label("Erase this note's words on every computer in the group")
-                                    .on_click(cx.listener(move |_, _, _, cx| {
-                                        send(GroupCommand::Erase { detail: id }, cx);
-                                    })),
-                            );
+                            .child(if confirm.as_deref() == Some(erase_key.as_str()) {
+                                design::button(
+                                    ("groups-erase-yes", index),
+                                    "Yes, delete it from every computer",
+                                    cx,
+                                )
+                                .small()
+                                .accessibility_label("Yes, delete this note's words from every computer in the group")
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    view.groups_form.confirm_remove = None;
+                                    send(GroupCommand::Erase { detail: id }, cx);
+                                }))
+                            } else {
+                                design::button(("groups-erase", index), "Delete for everyone…", cx)
+                                    .small()
+                                    .accessibility_label("Delete this note's words from every computer in the group; asks first")
+                                    .on_click(cx.listener(move |view, _, _, cx| {
+                                        view.groups_form.confirm_remove = Some(erase_key.clone());
+                                        cx.notify();
+                                    }))
+                            });
                     }
                     row = row.child(actions);
                 }
@@ -1765,7 +1891,7 @@ impl ModelsView {
             .child(heading("Your choices", cx))
             .child(switch_row(
                 "Answer questions from my group",
-                "When on, questions from your group are looked up in this computer's memory, and a few short answers go back with your name on them. Your memories stay here.",
+                "When on, people in your group can get answers from what you have told Sovra on this computer. Only a few short answers go back, with your name on them. Everything else stays here.",
                 settings.answer,
                 design::button(
                     "groups-federated-answer",
@@ -1864,19 +1990,19 @@ impl ModelsView {
                 .get(person)
                 .map_or_else(|| "someone who left".to_owned(), |m| m.name.clone())
         };
-        section = section.child(heading("Your departments", cx));
+        section = section.child(heading("Your circles", cx));
         if group.departments.is_empty() {
             section = section.child(words(
-                "None yet. Most families don't need any; they're handy for teams.",
+                "None yet. Most families don't need any; they're handy at work.",
                 cx,
             ));
         }
         for (index, department) in group.departments.values().enumerate() {
             let members: Vec<String> = department.members.iter().map(&name_of).collect();
             let line = if members.is_empty() {
-                format!("🏢 {} — nobody yet", department.name)
+                format!("⭕ {} — nobody yet", department.name)
             } else {
-                format!("🏢 {} — {}", department.name, members.join(", "))
+                format!("⭕ {} — {}", department.name, members.join(", "))
             };
             section = section.child(
                 div()
@@ -1887,7 +2013,7 @@ impl ModelsView {
             );
         }
         if !self.groups.can_manage() {
-            return section.child(words("Only an admin can make or change a department.", cx));
+            return section.child(words("Only an admin can make or change a circle.", cx));
         }
         let ticked = self.groups_form.department_members.clone();
         let mut people = h_flex()
@@ -1900,7 +2026,7 @@ impl ModelsView {
                 design::button(("groups-department-person", index), member.name.clone(), cx)
                     .small()
                     .selected(ticked.contains(&person))
-                    .accessibility_label(format!("Put {} in this department", member.name))
+                    .accessibility_label(format!("Put {} in this circle", member.name))
                     .on_click(cx.listener(move |view, _, _, cx| {
                         let members = &mut view.groups_form.department_members;
                         if !members.remove(&person) {
@@ -1916,18 +2042,18 @@ impl ModelsView {
                 .gap(t.space.small)
                 .p(t.space.compact)
                 .sovra_surface(Surface::Subtle, cx)
-                .child(heading("Make or change a department", cx))
+                .child(heading("Make or change a circle", cx))
                 .child(field(
                     "groups-department-name",
-                    "1. Department name",
+                    "1. What should the circle be called?",
                     &self.groups_form.department_name,
-                    "Typing an existing name changes who is in it.",
+                    "Typing the name of a circle you already have changes who is in it.",
                     cx,
                 ))
-                .child(caption("2. Tap the people who belong in it", cx))
+                .child(caption("2. Tap the people who belong in it, then press Save circle", cx))
                 .child(people)
                 .child(h_flex().child(
-                    design::primary_button("groups-department-save", "3. Save department", cx)
+                    design::primary_button("groups-department-save", "Save circle", cx)
                         .on_click(cx.listener(|view, _, window, cx| {
                             let name = value(&view.groups_form.department_name, cx);
                             let Some(slug) =
@@ -1945,7 +2071,7 @@ impl ModelsView {
                         })),
                 ))
                 .child(words(
-                    "Someone taken out of a department stops getting its new notes. What they already had stays with them.",
+                    "Someone taken out of a circle stops getting its new notes. Notes they already had stay on their computer.",
                     cx,
                 )),
         )
@@ -2014,7 +2140,7 @@ impl ModelsView {
             .w_full()
             .gap(t.space.compact)
             .child(words(
-                "Using one makes your own copy on this computer. It never brings tools with it, and nothing runs until you choose.",
+                "Using one makes your own copy on this computer. It can't do anything on your computer until you choose to use it.",
                 cx,
             ));
         let shown: Vec<_> = self
@@ -2188,7 +2314,7 @@ impl ModelsView {
             .child(heading("Your choices for this computer", cx))
             .child(switch_row(
                 "Lend this computer's AI",
-                "Turn this on if this computer has an AI set up. Other computers in the group without one can then use it. It never uses its tools, files or memory for someone else.",
+                "Turn this on if this computer has an AI set up. Computers in the group without one can then use it. Any AI costs come from this computer's AI account. It never opens your files or what Sovra remembers for someone else.",
                 settings.help_others,
                 design::button(
                     "groups-work-help",
@@ -2213,7 +2339,7 @@ impl ModelsView {
             ))
             .child(switch_row(
                 "Borrow an AI when this computer has none",
-                "Turn this on if this computer has no AI of its own. Your chats are then answered by a free computer in the group.",
+                "Turn this on if this computer has no AI of its own. Your chats are then answered by another computer in the group that is switched on and lending its AI.",
                 settings.use_group,
                 design::button(
                     "groups-work-use",

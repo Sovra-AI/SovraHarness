@@ -121,10 +121,19 @@ fn group_event(events: &async_channel::Sender<Event>, event: GroupEvent) {
         .expect("headless test fixture is available");
 }
 
-/// Opens one page inside the group, as a person pressing its button would:
-/// scrolling the page until the button is on screen first.
+/// Opens one page inside the group, as a person pressing its button would. The
+/// rarely used pages sit behind "More…", so open that first when needed.
 fn page(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, id: &str) {
     let button = gpui_kit::SharedString::from(format!("groups-page-{id}"));
+    if window.try_find(button.clone()).is_none() {
+        press(window, cx, "groups-more-pages");
+    }
+    press(window, cx, &button);
+}
+
+/// Scrolls the Groups page until the control is fully on screen, then clicks it.
+fn press(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, id: &str) {
+    let button = gpui_kit::SharedString::from(id.to_owned());
     for _ in 0..60 {
         let pane = window.find("groups-scroll").bounds();
         let target = window.find(button.clone()).bounds();
@@ -229,6 +238,7 @@ fn the_group_shows_who_is_in_it_and_what_was_shared(cx: &mut TestAppContext) {
             window.find("groups-invite-member").visible(),
             "Mum is an admin"
         );
+        press(window, cx, "groups-more-invite");
         window.click("groups-invite-computer", cx);
     })
     .expect("window open");
@@ -1183,6 +1193,77 @@ fn an_admin_alone_in_a_new_group_starts_on_invite_someone(cx: &mut TestAppContex
         assert!(
             window.find("groups-pane-invite").visible(),
             "nobody to share with yet, so inviting comes first"
+        );
+    })
+    .expect("window open");
+}
+
+#[gpui_kit::test]
+fn the_page_keeps_it_simple_and_asks_before_deleting(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    let mut mine = dads_detail();
+    mine.author = MUM;
+    mine.person = Some(PersonId([10; 32]));
+    group_event(&events, GroupEvent::Knowledge(vec![mine]));
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        // Only the everyday pages are offered until "More…" is pressed.
+        assert!(window.find("groups-page-notes").visible());
+        assert!(window.try_find("groups-page-history").is_none());
+        press(window, cx, "groups-more-pages");
+        assert!(window.find("groups-page-history").visible());
+        // Deleting a note for everyone asks first.
+        page(window, cx, "notes");
+        window.click(("groups-erase", 0usize), cx);
+        window.render_frame(cx);
+        assert!(window.find(("groups-erase-yes", 0usize)).visible());
+    })
+    .expect("window open");
+    assert!(
+        !drain(&commands)
+            .iter()
+            .any(|command| matches!(command, Command::Group(GroupCommand::Erase { .. }))),
+        "one click never erases"
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click(("groups-erase-yes", 0usize), cx);
+    })
+    .expect("window open");
+    assert!(
+        drain(&commands)
+            .iter()
+            .any(|command| matches!(command, Command::Group(GroupCommand::Erase { .. })))
+    );
+
+    // A new invite link sits above the form, with the warning in plain sight.
+    group_event(
+        &events,
+        GroupEvent::InviteReady {
+            link: "sovra://join/example".into(),
+            expires_at: Timestamp(i64::MAX / 2),
+            qr: Vec::new(),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let card = window.find("groups-invite-card").bounds();
+        let form = window.find("groups-invite-name").bounds();
+        assert!(card.bottom() <= form.top(), "the result comes first");
+        assert!(window.find("groups-invite-warning").visible());
+        assert!(
+            window.try_find("groups-invite-admin").is_none(),
+            "extra ways to invite wait behind a toggle"
         );
     })
     .expect("window open");

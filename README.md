@@ -26,7 +26,7 @@ The **Groups** tab explains itself in plain words: *What is a group?*, what you
 can do in one, and how it works. You choose **Start a new group** or **Join a
 group** and answer two or three labelled questions. Inside a group, one page at a
 time (**Invite someone**, **Shared notes**, **People**, **Shared helpers**,
-**Ask the group**, **Borrow an AI**, **Departments**, **History**) says what it is
+**Ask the group**, and under **More…** **Borrow an AI**, **Smaller circles**, **History**) says what it is
 for and how to use it in numbered steps, and a **Getting started** list shows what
 a new group still has to do. Under **Invite someone**, **Create invite link** makes
 a one-time link and copies it for you to send.

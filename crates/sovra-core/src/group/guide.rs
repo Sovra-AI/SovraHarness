@@ -16,38 +16,38 @@ pub struct Benefit {
 }
 
 /// The first sentence anyone reads about groups.
-pub const WHAT_IS_A_GROUP: &str = "A group joins your Sovra to the Sovra on the computers of people you trust, like your family or a small team at work. Then you can share things with all of them at once.";
+pub const WHAT_IS_A_GROUP: &str = "A group links you with people you trust, like your family or a small team at work, so you can pass notes, lists and questions to each other privately.";
 
 /// Why it is safe, said once and plainly.
-pub const PRIVACY_PROMISE: &str = "Private: nothing is shared until you press Share. What you share goes straight from your computer to theirs, locked so only your group can read it. It never passes through a Sovra server.";
+pub const PRIVACY_PROMISE: &str = "Private: nothing is shared until you press Share. What you share goes straight from your computer to theirs, locked so only your group can read it. It is not kept by Sovra or anyone else.";
 
 pub const BENEFITS: [Benefit; 4] = [
     Benefit {
         icon: "📝",
         title: "Share notes",
-        example: "Tell everyone's helpers something once, like “Grandad's birthday is 4 June”.",
+        example: "Tell everyone something once, like “Grandad's birthday is 4 June”. When they ask Sovra in a chat, it knows.",
     },
     Benefit {
         icon: "📄",
-        title: "Share documents and helpers",
-        example: "Send a shopping list, a letter or a helper you made to everyone at once.",
+        title: "Share letters and lists",
+        example: "Send a shopping list, a letter or a recipe to everyone at once.",
     },
     Benefit {
         icon: "🔎",
         title: "Ask each other",
-        example: "Ask “Who is our plumber?” and get an answer from the family's computers.",
+        example: "Ask “Who is our plumber?” and get an answer from what your family has told Sovra.",
     },
     Benefit {
         icon: "💻",
         title: "Borrow an AI",
-        example: "An old laptop with no AI can use the AI on another computer in the group.",
+        example: "An old laptop that isn't set up with an AI can use the one on another family computer.",
     },
 ];
 
 /// How a group comes together, in order.
 pub const HOW_IT_WORKS: [&str; 3] = [
     "One person starts the group on their computer.",
-    "They invite everyone else: with a link sent in a message, or with six numbers if you're in the same room.",
+    "They invite everyone else: with a link sent by email or message, or, when you're sitting together, with six numbers on the screen.",
     "Each person chooses what to share. Nothing is shared until you press Share.",
 ];
 
@@ -68,13 +68,19 @@ impl GroupPage {
     pub const ALL: [Self; 8] = [
         Self::Invite,
         Self::Notes,
+        Self::Ask,
         Self::People,
         Self::Helpers,
-        Self::Ask,
         Self::BorrowAi,
         Self::Departments,
         Self::History,
     ];
+
+    /// The four pages a family uses every day are always shown; the rest wait
+    /// behind "More" so the first choice is never a wall of buttons.
+    pub const fn is_everyday(self) -> bool {
+        matches!(self, Self::Invite | Self::Notes | Self::Ask | Self::People)
+    }
 
     /// Stable id for controls and tests.
     pub const fn id(self) -> &'static str {
@@ -111,7 +117,7 @@ impl GroupPage {
             Self::Helpers => "Shared helpers",
             Self::Ask => "Ask the group",
             Self::BorrowAi => "Borrow an AI",
-            Self::Departments => "Departments",
+            Self::Departments => "Smaller circles",
             Self::History => "History",
         }
     }
@@ -123,17 +129,23 @@ impl GroupPage {
             Self::Invite => {
                 "Bring a new person into the group, or add another of your own computers."
             }
-            Self::Notes => "Tell your group something once, and everyone's helpers will know it.",
-            Self::Helpers => {
-                "Helpers, skills and schedules that people in your group made and shared."
+            Self::Notes => {
+                "Tell your group something once. When anyone asks Sovra in a chat, it will know, and say it came from you."
             }
-            Self::Ask => "Ask a question and get answers from what the other computers remember.",
-            Self::BorrowAi => "A computer with no AI set up can use another group computer's AI.",
+            Self::Helpers => {
+                "Ready-made helpers, skills and reminders that people in your group made and shared with you."
+            }
+            Self::Ask => {
+                "Ask a question and get answers from what your group has told Sovra on their computers."
+            }
+            Self::BorrowAi => {
+                "A computer that isn't set up with an AI can use the AI on another computer in your group."
+            }
             Self::Departments => {
-                "Smaller circles inside your group, like “Kids” or “Legal”. Notes shared with one only reach the people in it."
+                "A smaller circle inside your group, like “Grandchildren”, or “Legal” at work. A note shared with a circle only reaches the people in it. Most families don't need one."
             }
             Self::History => {
-                "A record of everything this computer shared, so you can always check."
+                "A list of everything this computer has shared, so you can always look back."
             }
         }
     }
@@ -143,43 +155,43 @@ impl GroupPage {
         match self {
             Self::People => &[
                 "Each person can have more than one computer, like a laptop and a desktop.",
-                "An admin can invite and remove people. Make a second admin so the group is never stuck if a computer is lost.",
+                "An admin is someone in charge: they can invite and remove people. Make a second admin so the group is never stuck if a computer is lost.",
                 "To leave the group, press Leave this group at the bottom.",
             ],
             Self::Invite => &[
                 "Type their name and press Create invite link. The link is copied for you.",
-                "Paste it into an email or a message and send it to them.",
-                "Keep Sovra open on this computer until they've joined. The link works once, for 10 minutes.",
-                "Sitting next to them? Press We're in the same room: show six numbers, and read them out.",
+                "Paste it into an email or a message and send it to them. (Right-click and choose Paste, or press Ctrl and V.)",
+                "They need Sovra on their computer. Once it is installed, they open Groups, choose Join a group, and paste the link.",
+                "Sitting next to them? Press They're sitting next to me instead, and read out the six numbers.",
             ],
             Self::Notes => &[
                 "Type something useful, like “The dentist is Dr Patel, 01234 567890”.",
                 "Choose who should see it: everyone, or just one person.",
-                "Press Share. Anyone can then ask their helper, and it will answer with your note and say it came from you.",
+                "Press Share. Now when anyone asks Sovra in a chat, it can answer with your note and say it came from you.",
             ],
             Self::Helpers => &[
-                "Read what a helper or schedule says first.",
+                "A helper is a ready-made assistant for one kind of job, like planning meals. Read what it says first.",
                 "Press Use this helper, Use this skill or Add to my schedules to get your own copy.",
                 "To share one of yours, open the Team or Schedules page and press Share with my group.",
             ],
             Self::Ask => &[
                 "Type a question, like “Who is our plumber?”, and press Ask my group.",
-                "Computers that allow it look in their own memory and send back short answers, each with a name on it.",
-                "Your own memory is only searched if you turn on Answer questions from my group.",
+                "The people who allow it get your question looked up in what they told Sovra, and short answers come back with their name on.",
+                "Others can only look things up on your computer if you turn on Answer questions from my group.",
             ],
             Self::BorrowAi => &[
                 "On the computer that has an AI, turn on Lend this computer's AI.",
                 "On the computer without one, turn on Borrow an AI when this computer has none.",
-                "Then just chat as usual. Only the words of the chat are sent; nothing else on the helping computer is used.",
+                "Then just chat as usual. Only the words of the chat are sent. Any AI costs come from the computer that lends it.",
             ],
             Self::Departments => &[
-                "An admin types a name and taps the people who belong.",
-                "Press Save department.",
-                "When sharing a note, choose Just and the department's name to keep it inside that circle.",
+                "An admin types a name for the circle and taps the people who belong.",
+                "Press Save circle.",
+                "When sharing a note, choose Just and the circle's name to keep it inside that circle.",
             ],
             Self::History => &[
                 "Every share and every answer this computer gave is listed here, newest first.",
-                "Each record is sealed, so if anything were ever changed you would see a warning.",
+                "If anything in this list were ever changed behind your back, you would see a warning.",
                 "You don't need to do anything here. It's for peace of mind.",
             ],
         }

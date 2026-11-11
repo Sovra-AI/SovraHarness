@@ -170,7 +170,7 @@ impl Skill {
                 "/share-ai ".to_owned(),
             ),
             "departments" => (
-                "Opens Groups → Departments. Type Legal, tap the people who work in Legal, and press Save department. Then, when sharing, choose Just Legal — only Legal's computers get it.".to_owned(),
+                "Opens Groups → Smaller circles (under More…). Type Legal, tap the people who work in Legal, and press Save circle. Then, when sharing, choose Just Legal — only Legal's computers get it.".to_owned(),
                 "/departments ".to_owned(),
             ),
             "share-history" => (
@@ -182,7 +182,7 @@ impl Skill {
                 "/share-helper ".to_owned(),
             ),
             "add-computer" => (
-                "Opens Groups → Invite someone. On a computer already in the group, press “Show six numbers for my other computer”. On the new one, choose Join a group, then type the six numbers, then check both screens show the same four pictures and press They match.".to_owned(),
+                "Opens Groups → Invite someone. On a computer already in the group, press More ways to invite…, then “Show six numbers for my other computer”. On the new one, choose Join a group, then type the six numbers, then check both screens show the same four pictures and press They match.".to_owned(),
                 "/add-computer ".to_owned(),
             ),
             "share-privately" => (

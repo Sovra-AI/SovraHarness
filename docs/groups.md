@@ -26,12 +26,12 @@ and the "what's next" rules are pure data in `sovra_core::group` (`guide.rs`:
 `WHAT_IS_A_GROUP`, `BENEFITS`, `HOW_IT_WORKS`, `PRIVACY_PROMISE`, `GroupPage`,
 `GroupsView::first_steps`, `GroupsView::starting_page`) and are unit-tested there.
 
-**Outside a group** the page opens with **What is a group?**: one sentence on
-what a group is, four things you can do in one (share notes, share documents and
-helpers, ask each other, borrow an AI), three steps under **How it works**, and
-the privacy promise (nothing is shared until you press Share; what you share goes
-straight from computer to computer, locked to the group). Below it, **What would
-you like to do?** offers two choices, one at a time:
+**Outside a group** the page opens with **What is a group?** in one sentence,
+then **What would you like to do?** with two choices, one at a time. Below them,
+**More about groups** lists four things you can do in one (share notes, share
+letters and lists, ask each other, borrow an AI), three steps under **How it
+works**, and the privacy promise (nothing is shared until you press Share; what
+you share goes straight from computer to computer, locked to the group):
 
 1. **Start a new group** asks three labelled questions (*What should the group be
    called?*, *What's your name?*, *What do you call this computer?*), then
@@ -51,16 +51,20 @@ and **How do groups work?**, which opens the explanation again. A **Getting
 started** list shows what a new group still has to do (**Invite someone**,
 **Share your first note**, **Make a second admin**), each with **Do this**; it
 disappears once everything is done. Then **What would you like to do?** lists the
-pages; the open one is selected. An admin alone in a new group starts on **Invite
+four everyday pages (**Invite someone**, **Shared notes**, **Ask the group**,
+**People**); **More…** adds **Shared helpers**, **Borrow an AI**, **Smaller
+circles** and **History** (`GroupPage::is_everyday`). The open one is selected. An admin alone in a new group starts on **Invite
 someone**; everyone else starts on **Shared notes**. When an invite link or six
 numbers arrive, the page switches to **Invite someone** so they stay in view.
 
 3. **Invite someone.** Admins type the person's name, then **Create invite
-   link** (or **Create admin invite link**). The confirmed `sovra://join/…` link
-   is copied automatically; the card says to paste it into an email or message,
-   what the other person does, and to keep Sovra open. **Copy again** copies it
-   again; the link is also shown as a QR code. Links work once and expire after
-   ten minutes. **We're in the same room: show six numbers** shows a code with
+   link**. The confirmed `sovra://join/…` link is copied automatically; the card
+   says to paste it into an email or message (with how to paste), that the other
+   person needs Sovra installed, what they do, and to keep Sovra open. **Copy the
+   link again** copies it again; the link is also shown as a QR code. **More ways
+   to invite…** reveals **Create admin invite link** and adding your own computers. Links work once and expire after
+   ten minutes; a warning beside the button says so in plain words, and a new link
+   or code appears at the top of the page. **They're sitting next to me** shows a code with
    the three steps for the other computer. **Add another of my own computers**
    (**Create a link for my other computer**, **Show six numbers for my other
    computer**) adds a computer to your own identity and is open to members too.
@@ -68,8 +72,9 @@ numbers arrive, the page switches to **Invite someone** so they stay in view.
    see it (**Everyone**, **Just <name>** or **Just <department>**), and press
    **Share**. Nothing in private chats or files is copied into that list. Helpers
    that use a note are told who shared it and which computer it came from. Each
-   note offers **👍 That's right** (agree) and, for its author or an admin, **Stop
-   sharing** and **Erase everywhere**. The page also counts the documents, lists
+   note offers **👍 I agree** and, for its author or an admin, **Stop sharing with
+   everyone** and **Delete for everyone…**, which asks **Yes, delete it from every
+   computer** first. The page also counts the documents, lists
    and pictures shared on the Artifacts page.
 5. **Share what you already have:** a saved detail in **Knowledge** has
    **Share with …** (reworded with your name, checked by you first); an
@@ -89,10 +94,12 @@ numbers arrive, the page switches to **Invite someone** so they stay in view.
    chats are answered by the first, which gets only the conversation's words and
    never uses its tools for someone else.
 8. **People.** Everyone in the group with their role and computers; each
-   computer shows **Online now** or when it was last seen, and a safety code
-   (its key fingerprint). Admins see a tip to make a second admin.
-9. **Departments** (admins make them): type a name such as *Legal*, tap the
-   people in it, and choose **Save department**. That signs a `SetDepartment`
+   computer shows **Online now** or when it was last seen. The key fingerprint
+   is not shown; it meant nothing to most people. Admins see a tip to make a
+   second admin.
+9. **Smaller circles** (departments in the code; admins make them, under
+   **More…**): type a name such as *Legal*, tap the people in it, and choose
+   **Save circle**. That signs a `SetDepartment`
    operation into the membership log, which only admins may write, and only for
    people in the group. Members then see **Just Legal** beside **Everyone** when
    sharing. A department is its own lane (`Space::Department`) with its own lane

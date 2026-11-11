@@ -31,7 +31,22 @@ move them under a version heading when the tag is cut.
   the family emoji, which this Linux font fallback draws garbled, is replaced
   by 👥 (People) and 🏠 (the group's name), and the second-admin tip no longer
   says "next to their name" while nobody else has joined. The join-by-numbers
-  hint names the exact button the other person presses.
+  hint names the exact button the other person presses. A fresh-eyes review as a
+  non-technical first-time user then led to a second pass:
+  - Outside a group, the start/join choice comes first.
+  - Inside a group, four everyday pages show, with the rest under **More…**;
+    "Departments" became **Smaller circles**.
+  - A new invite link or six numbers now appear at the top of Invite someone. A
+    plain warning sits next to the button: keep Sovra open, and the link lasts
+    10 minutes.
+  - The admin link and adding your own computers moved under **More ways to
+    invite…**.
+  - "They're sitting next to me" replaces the long same-room button.
+  - Note actions are real buttons (**👍 I agree**, **Stop sharing with
+    everyone**, **Delete for everyone…**), and deleting asks first.
+  - The key "safety code" is gone from People.
+  - "Helper" and "memory" wording became "what you've told Sovra".
+  - Borrow an AI says AI costs come from the lending computer.
 
 ## [0.2.0] — 2026-11-11
 
