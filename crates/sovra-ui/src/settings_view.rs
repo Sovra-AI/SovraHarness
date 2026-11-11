@@ -49,7 +49,11 @@ pub(crate) fn settings_section(
         .gap(t.space.small)
         .sovra_surface(Surface::Matte, cx)
         .child({
-            let mut title_el = div().sovra_text(TextRole::SectionTitle, cx);
+            let mut title_el = div()
+                .id(format!("{id}-title"))
+                .test_support()
+                .aria_label(title)
+                .sovra_text(TextRole::SectionTitle, cx);
             if design::is_rtl(cx) {
                 title_el = title_el.text_right();
             }
@@ -98,11 +102,17 @@ impl ModelsView {
                     .items_center()
                     .flex_wrap()
                     .gap(t.space.small)
-                    .child(design::page_header(
-                        design::chrome(cx, ChromeKey::SettingsTitle),
-                        design::chrome(cx, ChromeKey::SettingsSubtitle),
-                        cx,
-                    ))
+                    .child({
+                        let title = design::chrome(cx, ChromeKey::SettingsTitle);
+                        design::page_header(
+                            title,
+                            design::chrome(cx, ChromeKey::SettingsSubtitle),
+                            cx,
+                        )
+                        .id("settings-page-title")
+                        .test_support()
+                        .aria_label(title)
+                    })
                     .child(
                         design::button(
                             "settings-restart-tour",
@@ -249,7 +259,6 @@ impl ModelsView {
                     )
                     .small()
                     .selected(selected)
-                    .accessibility_label(info.english_name)
                     .on_click(cx.listener(move |view, _, _, cx| {
                         let language = UiLanguage::from_tag(tag);
                         design::set_ui_language(language.clone(), cx);

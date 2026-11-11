@@ -1551,6 +1551,33 @@ fn appearance_choice_is_saved_and_restored(cx: &mut TestAppContext) {
     cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
 }
 
+fn reveal_language_choice(window: &mut gpui_kit::Window, tag: &str, cx: &mut gpui_kit::App) {
+    let id = format!("settings-language-choice-{tag}");
+    for _ in 0..40 {
+        window.render_frame(cx);
+        let choices = window.find("settings-language-choices");
+        let item = window.find(id.clone());
+        let item_bounds = item.bounds();
+        let choices_bounds = choices.bounds();
+        if item.visible()
+            && item_bounds.top() >= choices_bounds.top()
+            && item_bounds.bottom() <= choices_bounds.bottom()
+        {
+            return;
+        }
+        let delta = if item_bounds.top() < choices_bounds.top() {
+            px(80.)
+        } else {
+            px(-80.)
+        };
+        window.scroll(
+            "settings-language-choices",
+            ScrollDelta::Pixels(point(px(0.), delta)),
+            cx,
+        );
+    }
+}
+
 #[gpui_kit::test]
 fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestAppContext) {
     let (client, commands, events) = Client::loopback();
@@ -1676,36 +1703,145 @@ fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestApp
             arabic_choice, english_choice,
             "the chooser must offer more than one distinct language: {arabic_choice:?} vs {english_choice:?}"
         );
+        assert!(
+            sovra_ui::design::is_rtl(cx),
+            "default Settings chrome is right to left"
+        );
+        reveal_language_choice(window, "tr", cx);
+        assert!(
+            window.find("settings-language-choice-tr").visible(),
+            "Turkish must be a choosable language"
+        );
+        assert_eq!(
+            window.find("settings-language-choice-tr").label(),
+            Some("Türkçe (Turkish)")
+        );
+        window.click("settings-language-choice-tr", cx);
+        window.render_frame(cx);
+        let turkish = UiLanguage::from_tag("tr");
+        assert!(
+            !sovra_ui::design::is_rtl(cx),
+            "Turkish stays left to right"
+        );
+        assert_eq!(
+            window.find("settings-page-title").label(),
+            Some("Ayarlar")
+        );
+        assert_eq!(window.find("settings-language-title").label(), Some("Dil"));
+        assert_eq!(window.find("nav-chat").label(), Some("Sohbet"));
+        assert_eq!(window.find("nav-settings").label(), Some("Ayarlar"));
+        assert_eq!(
+            window.find("settings-theme-light").label(),
+            Some("Açık görünüm")
+        );
+        assert_eq!(
+            window.find("settings-theme-dark").label(),
+            Some("Koyu görünüm")
+        );
+        assert_eq!(chrome(&turkish, ChromeKey::SettingsLight), "Açık");
+        assert_eq!(chrome(&turkish, ChromeKey::SettingsDark), "Koyu");
+        assert_eq!(chrome(&turkish, ChromeKey::LoginCancel), "İptal");
+        assert_eq!(
+            window.find("settings-restart-tour").label(),
+            Some(chrome(&turkish, ChromeKey::SettingsTour))
+        );
+        reveal_language_choice(window, "en", cx);
         window.click("settings-language-choice-en", cx);
         window.render_frame(cx);
+        assert!(
+            !sovra_ui::design::is_rtl(cx),
+            "English stays left to right"
+        );
+        assert_eq!(
+            window.find("settings-page-title").label(),
+            Some("Settings")
+        );
+        assert_eq!(
+            window.find("nav-chat").label(),
+            Some(chrome(&UiLanguage::english(), ChromeKey::NavChat))
+        );
         assert_eq!(
             window.find("settings-restart-tour").label(),
             Some(chrome(&UiLanguage::english(), ChromeKey::SettingsTour)),
             "choosing English must update visible Settings chrome immediately"
         );
+        reveal_language_choice(window, "ar", cx);
         window.click("settings-language-choice-ar", cx);
         window.render_frame(cx);
+        assert!(
+            sovra_ui::design::is_rtl(cx),
+            "Arabic restores right to left"
+        );
+        assert_eq!(
+            window.find("settings-page-title").label(),
+            Some(chrome(&UiLanguage::arabic(), ChromeKey::SettingsTitle))
+        );
+        assert_eq!(
+            window.find("nav-settings").label(),
+            Some(chrome(&UiLanguage::arabic(), ChromeKey::NavSettings))
+        );
         assert_eq!(
             window.find("settings-restart-tour").label(),
             Some(chrome(&UiLanguage::default(), ChromeKey::SettingsTour)),
             "choosing Arabic must restore Arabic Settings chrome"
         );
-        window.click("settings-language-choice-en", cx);
-        window.render_frame(cx);
-        assert_eq!(
-            window.find("settings-restart-tour").label(),
-            Some(chrome(&UiLanguage::english(), ChromeKey::SettingsTour))
-        );
     })
     .unwrap();
-    let saved = loop {
+    let mut saved = Vec::new();
+    while saved.len() < 3 {
         if let Command::Models(ModelCommand::SetLanguage { language }) =
             commands.try_recv().expect("language saved")
         {
-            break language;
+            saved.push(language);
         }
-    };
-    assert_eq!(saved, UiLanguage::english());
+    }
+    assert_eq!(
+        saved.iter().map(UiLanguage::tag).collect::<Vec<_>>(),
+        ["tr", "en", "ar"]
+    );
+    events
+        .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
+            ModelPreferences {
+                language: UiLanguage::from_tag("tr"),
+                ..ModelPreferences::default()
+            },
+        )))
+        .unwrap();
+    events
+        .send_blocking(Event::Auth(sovra_core::AuthEvent::GoogleSignInStarted {
+            auth_url: "https://example.test/google".into(),
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            !sovra_ui::design::is_rtl(cx),
+            "Turkish cancel stays left to right"
+        );
+        assert_eq!(
+            window.find("login-google-cancel-btn").label(),
+            Some("İptal")
+        );
+    })
+    .unwrap();
+    events
+        .send_blocking(Event::Auth(sovra_core::AuthEvent::SignedIn {
+            session: sovra_core::AuthSession {
+                account_id: "test-account".into(),
+                email: "test@example.com".into(),
+                full_name: "Ahmed Al Mansoori".into(),
+                provider: sovra_core::auth::AuthProvider::Password,
+                signed_in_at: sovra_core::Timestamp(1),
+            },
+            new_account: false,
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
     events
         .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
             ModelPreferences {

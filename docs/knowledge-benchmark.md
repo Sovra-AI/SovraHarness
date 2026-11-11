@@ -2,9 +2,11 @@
 
 Assessment date: 11 November 2026. Sovra already uses modern memory foundations:
 immutable evidence, attributed interpretations, temporal corrections, hybrid
-retrieval, and permission checks at recall. Keep those foundations. The priorities
-are measuring realistic recall, preserving document structure, and addressing
-the current dependency audit failures before considering a storage migration.
+retrieval, and permission checks at recall. Keep those foundations. The measurements
+found a large-folder vector-write timeout, now fixed, and clear remaining limits:
+65.6% direct user-source recall within the context budget, expensive vector-batch
+preparation, and an event-consolidation error in the live fixture. Improve those paths
+and document structure before considering a wholesale storage migration.
 
 This assessment covers conversation memory, indexed files, and their retrieval
 paths. It distinguishes code inspection, previous measurements, and new benchmark
@@ -71,6 +73,13 @@ Assistant evidence is excluded because imported transcripts lack certified provi
 input lineage. Non-abstention questions without labeled user evidence are unscored;
 abstention cannot receive a correctness score without a reader. Returning a source
 ID does not prove that its bounded excerpt contains the answer.
+
+The app already supports model-driven reformulated lookup batches, covered by the
+[runtime regression](../crates/sovra-app/tests/memory_lifecycle/sources.rs). This
+diagnostic deliberately measures a single direct search; it does not exercise those
+lookups or extracted facts. Its recall percentages therefore describe this path,
+not the application’s end-to-end recall or answer accuracy. Any proposed retrieval
+change must also be compared with that existing runtime path.
 
 The [manifest](evaluations/knowledge-2026-11-11/manifest.json) records all 500
 questions and 122,416 user turns. Nine empty turns cannot pass source admission;
@@ -161,6 +170,29 @@ with new held-out cases. Increasing the budget alone cannot recover missing top-
 candidates or establish answer correctness. Do not tune on these 500 questions and
 then report them as held-out improvement.
 
+The current [runtime run](evaluations/knowledge-2026-11-11/runtime.json) completed
+in **1,179.29 seconds** and delivered all **576/576 expected source items** to the
+provider. It exercised the real disk store and `Client` at 1/4/16 concurrent prompts,
+64 per configuration. Each configuration finished with zero pending or working
+extraction jobs. Historical fixture extraction was cancelled before measurement;
+new query capture still used the normal extraction workers and a deterministic
+loopback provider. No real model was called by this run.
+
+| Initial sources | Preparation (s) | Dispatch-to-provider p95, concurrency 1 (ms) | Concurrency 4 (ms) | Concurrency 16 (ms) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 11.65 | 231.12 | 640.53 | 2058.04 |
+| 10,000 | 89.19 | 240.34 | 602.60 | 2033.48 |
+| 100,000 | 779.41 | 180.02 | 399.79 | 1162.79 |
+
+Preparation includes durable source admission and cancelling the synthetic historical
+extraction backlog. Dispatch timings include command handling, retrieval and loopback
+HTTP overhead, not generation; capture/completion timings in the raw report are
+client-observed upper bounds. These are test-profile measurements, not a release-build
+SLA or semantic/QA score. SQL query counts, transaction conflicts and peak resource
+use are not instrumented. Provider tokens and model cost are zero for this local
+fixture; they do not predict real-model usage. The exact-code workload verifies scale and
+evidence delivery but cannot replace the public-language or live-model diagnostics.
+
 The disk fact-store run completed at 100, 1,000 and 5,000 facts, checking lexical,
 entity and paginated reads at each size. See the retained
 [disk measurements](evaluations/knowledge-2026-11-11/disk-growth.json).
@@ -210,7 +242,9 @@ answer/capture accuracy. This small synthetic run is not a public QA benchmark s
 
 ## Verification checkpoint
 
-The workspace diagnostics compile and pass Clippy. All eight Python preparation
+The [verification record](evaluations/knowledge-2026-11-11/verification.json) records
+the gates, measurement coverage and current published dependency constraints. The
+workspace diagnostics compile and pass Clippy. All eight Python preparation
 and aggregation tests pass, including occurrence identity, atomic publication,
 refusal to overwrite and rejection of incomplete scores. The first 28-case attempt
 stopped after 10 cases at a repeated upstream session identity; its
@@ -218,7 +252,9 @@ stopped after 10 cases at a repeated upstream session identity; its
 retained as diagnostic history, not an aggregate score. The importer now distinguishes
 session occurrences.
 
-The current targeted nextest run covered the file adapter, memory store and runtime
+After the vector-write fix, **all 127 file-adapter tests passed**, with two opt-in
+measurements skipped by that normal run. The separate 10,000-file measurement then
+passed. The earlier combined targeted nextest run covered the file adapter, memory store and runtime
 memory lifecycle: **250 passed, one failed, seven opt-in tests skipped**. The failed
 streaming pause/resume test passed alone in 13.34 seconds using the same executable.
 Another workspace test run overlapped the first run; this does not establish a
@@ -238,11 +274,10 @@ the target directory. `just free-cache` now aliases the same guarded cleanup.
 The complete public-corpus rerun above followed that cleanup.
 
 The latest `cargo xtask ci` passed formatting, Clippy, layering, styles and docs,
-then stopped at the dependency audit before tests. The MCP dependency was updated
-in concurrent, uncommitted work; its previous advisory no longer appears in this
-working-tree run. That separate dependency update is not part of the benchmark
-commit, so a checkout still on `rmcp 3.8.0` can also report `RUSTSEC-2026-0462`.
-The remaining working-tree failure is:
+then stopped at the dependency audit before tests. That run included the concurrent
+MCP SDK update to 3.9.0, which has since landed separately in `d09e069` and resolves
+`RUSTSEC-2026-0462`. Checkouts before that update can also report the MCP advisory.
+The remaining failure is:
 
 ```text
 error[vulnerability]: libsqlite3-sys via C SQLite CVE-2026-119375
@@ -257,18 +292,19 @@ SQLite consumers together (file index, Diesel and WhatsApp storage share one nat
 SQLite link); do not waive the audit or loosen dependency rules. This checkpoint
 does not meet the repository's definition of done.
 
-The current published WhatsApp SQLite adapter is still 0.7.0 with a `libsqlite3-sys
-0.37` constraint; Diesel 2.3.14 requires `<0.39.0`. Thus updating only `rusqlite` to
+The published [WhatsApp SQLite adapter 0.7.0 dependency metadata](https://crates.io/api/v1/crates/whatsapp-rust-sqlite-storage/0.7.0/dependencies)
+still requires `libsqlite3-sys ^0.37`; [Diesel 2.3.14](https://crates.io/api/v1/crates/diesel/2.3.14/dependencies)
+requires `<0.39.0`. Thus updating only `rusqlite` to
 0.41.1 cannot resolve the shared native link. A compatible upstream release or a
 reviewed, reproducible dependency patch is needed; changing the lockfile alone is
-not a fix. The MCP SDK has a published 3.9.0 fix.
+not a fix.
 
 ## Follow-up priorities and open verification
 
-The full public-corpus source diagnostic, disk growth run, 10,000-file rerun and
-selected-model observations above are complete. A fresh 1k/10k/100k runtime run is
-still in progress; its initial 1,000-source stage found all 192 expected source
-items. No aggregate result is claimed until the whole run completes.
+The full public-corpus source diagnostic, disk growth run, 10,000-file rerun,
+selected-model observations and current 1k/10k/100k runtime measurements are complete.
+The repository's required CI pass remains blocked by the dependency advisory above;
+this assessment does not claim release readiness or universal answer accuracy.
 
 1. Distinguish immutable past events from replaceable current-state facts during
    consolidation. The live return-move observation is a concrete failure case for

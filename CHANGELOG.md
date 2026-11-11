@@ -135,6 +135,10 @@ move them under a version heading when the tag is cut.
   second Sovra (its own device key and group) beside the first; release builds
   always use the system data folder.
 
+- Choosing a language in Settings now switches the interface into that language.
+  Turkish is Türkçe, left to right, with its own wording. Arabic stays the
+  default, and only right-to-left languages use a right-to-left layout.
+
 - Fix large-folder embedding writes repeatedly rebuilding the full current-chunk
   catalogue per vector; use indexed membership checks while retaining permissions,
   source-version validation and the five-second transaction limit.
@@ -145,6 +149,8 @@ move them under a version heading when the tag is cut.
 - Add an opt-in, hash-pinned LongMemEval-S source-retrieval diagnostic and a
   knowledge-capture tool assessment. Reports distinguish user-source recall from
   extraction, assistant-memory coverage and answer correctness.
+- Retain the completed 1,000/10,000/100,000-source runtime measurements and
+  verification record, including all 576 evidence-delivery checks and the CI blocker.
 - Add an opt-in disk file-index benchmark for 100/1,000/10,000 synthetic files,
   unchanged-file reuse, lexical retrieval and 768-dimensional vector scans,
   including replacement, reopening and access-removal checks.

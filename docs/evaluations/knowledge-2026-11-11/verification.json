@@ -1,0 +1,126 @@
+{
+  "assessment_date": "2026-11-11",
+  "published_benchmark_commit": "a287e0a8d47bad4a149bccec67243637c44785ac",
+  "working_tree_note": "Tests ran with concurrent changes, including rmcp 3.9.0; those changes were excluded from the benchmark commit. The rmcp update subsequently landed separately in d09e069.",
+  "cargo_lock_sha256_at_final_review": "23158a3a19a2cd3440b8851bfa0ae1884f9808aabc740bed90382342a56c12c3",
+  "checks": {
+    "cargo_xtask_ci": {
+      "status": "failed",
+      "completed": [
+        "fmt",
+        "clippy --workspace --all-targets -- -D warnings",
+        "check-deps",
+        "check-styles",
+        "check-docs"
+      ],
+      "stopped_at": "cargo deny --all-features check",
+      "advisories": [
+        "RUSTSEC-2026-0459"
+      ],
+      "output": [
+        "error[vulnerability]: libsqlite3-sys via C SQLite CVE-2026-119375",
+        "libsqlite3-sys 0.37.0; upgrade to >=0.39.0",
+        "advisories FAILED, bans ok, licenses ok, sources ok",
+        "xtask: `deny` failed"
+      ]
+    },
+    "python_evaluation_tests": {
+      "passed": 8,
+      "failed": 0
+    },
+    "file_adapter_after_fix": {
+      "passed": 127,
+      "failed": 0,
+      "opt_in_skipped": 2
+    },
+    "combined_targeted_suite": {
+      "passed": 250,
+      "failed": 1,
+      "opt_in_skipped": 7,
+      "failed_test": "sources::pausing_then_resuming_during_a_reply_does_not_revive_its_capture",
+      "isolated_same_binary_retry": "passed; 13.34 seconds"
+    },
+    "retrieval_diagnostic": {
+      "status": "complete",
+      "questions": 500,
+      "scored_questions": 419,
+      "admitted_sources": 122407,
+      "empty_turns_excluded": 9
+    },
+    "file_index_measurement": {
+      "status": "complete_after_fix",
+      "files": [
+        100,
+        1000,
+        10000
+      ],
+      "exact_keyword_hits": 60,
+      "exact_fixture_vector_hits": 60,
+      "replacement": true,
+      "reopen": true,
+      "root_revocation": true
+    },
+    "disk_fact_growth": {
+      "status": "complete",
+      "facts": [
+        100,
+        1000,
+        5000
+      ]
+    },
+    "live_selected_model": {
+      "status": "observations_complete",
+      "observations": 16,
+      "manual_expected_checks_met": 14,
+      "manual_partial": 2,
+      "tokens": null,
+      "cost_usd": null
+    },
+    "development_mcp": {
+      "inspection": "passed",
+      "screenshot": "captured privately outside checkout",
+      "restored": "Chat; task-launched app closed",
+      "coverage_gap": "OS folder picker is outside the bridge; no claim of native end-to-end verification of large-folder semantic ingestion."
+    },
+    "runtime_measurement": {
+      "status": "complete",
+      "process_exit_code": 0,
+      "test_duration_seconds": 1179.29,
+      "sources": [
+        1000,
+        10000,
+        100000
+      ],
+      "concurrency": [
+        1,
+        4,
+        16
+      ],
+      "grounded_requests": 576,
+      "requests": 576,
+      "pending_and_working_at_end": 0,
+      "scope": "Synthetic exact-source evidence via Client and deterministic loopback HTTP provider; no model quality score."
+    }
+  },
+  "dependency_recheck": {
+    "rusqlite": {
+      "latest_stable": "0.41.1",
+      "libsqlite3-sys": "^0.39.0",
+      "source": "https://crates.io/api/v1/crates/rusqlite/0.41.1/dependencies"
+    },
+    "libsqlite3-sys": {
+      "latest_stable": "0.39.1"
+    },
+    "diesel": {
+      "latest_stable": "2.3.14",
+      "libsqlite3-sys": ">=0.17.2, <0.39.0",
+      "source": "https://crates.io/api/v1/crates/diesel/2.3.14/dependencies"
+    },
+    "whatsapp-rust-sqlite-storage": {
+      "latest_stable": "0.7.0",
+      "libsqlite3-sys": "^0.37",
+      "source": "https://crates.io/api/v1/crates/whatsapp-rust-sqlite-storage/0.7.0/dependencies"
+    },
+    "conclusion": "No compatible published dependency combination uses the patched SQLite binding across these consumers. No audit waiver, feature removal or vendored dependency patch was introduced."
+  }
+}

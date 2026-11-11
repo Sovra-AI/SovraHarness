@@ -851,17 +851,18 @@ async fn language_defaults_to_arabic_and_survives_restart() {
     })
     .await;
     assert!(
-        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::default() && preferences.language.tag() == "ar")
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::default() && preferences.language.tag() == "ar" && preferences.language.is_rtl())
     );
-    catalog(&client).await;
+    // Language is stored with preferences. The model catalog is a separate
+    // refresh and must not gate saving or reloading the chosen tag.
     send(
         &client,
         ModelCommand::SetLanguage {
-            language: UiLanguage::english(),
+            language: UiLanguage::from_tag("tr"),
         },
     );
     event(&client, |e| {
-        matches!(e, Event::Models(ModelEvent::PreferencesChanged(p)) if p.language == UiLanguage::english())
+        matches!(e, Event::Models(ModelEvent::PreferencesChanged(p)) if p.language.tag() == "tr" && !p.language.is_rtl())
     })
     .await;
     stop(client).await;
@@ -871,7 +872,26 @@ async fn language_defaults_to_arabic_and_survives_restart() {
     })
     .await;
     assert!(
-        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::english())
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language.tag() == "tr" && !preferences.language.is_rtl())
+    );
+    send(
+        &client,
+        ModelCommand::SetLanguage {
+            language: UiLanguage::english(),
+        },
+    );
+    event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::PreferencesChanged(p)) if p.language == UiLanguage::english() && !p.language.is_rtl())
+    })
+    .await;
+    stop(client).await;
+    let client = fixture.start();
+    let loaded = event(&client, |e| {
+        matches!(e, Event::Models(ModelEvent::Loaded { .. }))
+    })
+    .await;
+    assert!(
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::english() && !preferences.language.is_rtl())
     );
     stop(client).await;
 }
