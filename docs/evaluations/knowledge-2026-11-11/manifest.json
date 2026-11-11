@@ -5,7 +5,7 @@
   "upstream_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
   "selection": "First 500 question IDs per category; abstention separate",
   "scope": "Full S histories, user-authored raw sources only; no extracted facts, embeddings, reader or judge. Not an official QA score.",
-  "status": "runtime_benchmark_running",
+  "status": "measurements_complete_ci_blocked",
   "base_commit": "4b1c9c14950afac130a9d487ae4a46c143bab20c",
   "worktree": "uncommitted benchmark changes plus pre-existing unrelated edits",
   "machine": {
@@ -4526,7 +4526,9 @@
     "file_index": "file-index.json",
     "disk_growth": "disk-growth.json",
     "live": "live.json",
-    "live_review": "live-review.json"
+    "live_review": "live-review.json",
+    "runtime": "runtime.json",
+    "verification": "verification.json"
   },
   "verification": {
     "rust_clippy": "passed (workspace/all targets)",
@@ -4561,7 +4563,8 @@
       ],
       "coverage_gap": "The bridge cannot operate the OS directory picker, so large-folder semantic ingestion was verified by the real adapter benchmark, not end to end through the native UI.",
       "cleanup": "Chat restored, then the task-launched dev app exited (dev command exit 0)."
-    }
+    },
+    "runtime": "Passed: all 576 expected source items reached the provider at 1k/10k/100k sources and concurrency 1/4/16; 1179.29 seconds."
   },
   "fixture_note": "All 500 upstream questions. Empty user turns are reported and excluded at admission; none are labeled evidence. Distinct session occurrences retain distinct identities.",
   "initial_fixture_sha256": "aeab2903c8cded35ed8c3e5458ea81e24e0ca3fe43ca31ca0a2dbbc96c1faa77",
