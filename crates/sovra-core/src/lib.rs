@@ -36,6 +36,7 @@ mod schedules;
 pub mod skills;
 pub mod specialists;
 mod status;
+pub mod swarm;
 pub mod teams;
 pub mod terminal;
 mod tool_calls;

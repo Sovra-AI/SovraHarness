@@ -30,7 +30,9 @@ pub use federated::{
     federated_items, log_ask,
 };
 pub use fold::{DeviceEntry, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
-pub use keys::{DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, SignatureVerifier};
+pub use keys::{
+    ContentHash, DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, SignatureVerifier,
+};
 pub use knowledge::{
     DetailStatus, KnowledgeBody, KnowledgeOp, KnowledgeRejection, KnowledgeView, LaneId,
     MAX_SHARED_DETAIL_CHARS, MAX_SHARED_TOPICS, ShareError, SharedDetail, SharedHit,

@@ -45,6 +45,14 @@ impl MeshCipher {
             public: MontgomeryPoint::mul_base_clamped(secret),
         }
     }
+
+    /// The static X25519 secret this computer shares with `peer`, or `None` for a
+    /// key that is not a valid point or would give the all-zero secret. Symmetric:
+    /// both computers compute the same bytes.
+    pub(crate) fn agree(&self, peer: &DeviceId) -> Option<[u8; 32]> {
+        let shared = device_point(peer)?.mul_clamped(self.secret);
+        (shared.as_bytes() != &[0u8; 32]).then(|| shared.to_bytes())
+    }
 }
 
 /// A computer's X25519 key, from its Ed25519 device key (its group address).

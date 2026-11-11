@@ -136,7 +136,10 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
 /// External crates `sovra-core` may use: pure, no IO, no async runtime, no GUI.
 /// `serde_json` parses search source JSON (Mwmbl, Wikipedia, `SearXNG`) for ranking. It performs no IO.
 /// `url` and `sha2` are pure: web-address checks and the PKCE S256 challenge. They open nothing.
+/// `blake3` is pure hashing like `sha2`: content addresses and Merkle nodes for the swarm audit
+/// ledger (roadmap D5 chose BLAKE3 for shared records). It opens nothing and spawns nothing.
 const CORE_ALLOWED_EXTERNAL: &[&str] = &[
+    "blake3",
     "serde",
     "serde_json",
     "sha2",

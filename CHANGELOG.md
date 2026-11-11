@@ -11,6 +11,19 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Sovereign swarm foundations** (`sovra_core::swarm`, not yet wired into the
+  app; see [docs/swarm.md](docs/swarm.md)). Added:
+  - a BLAKE3 audit ledger (RFC 9162 Merkle log, signed checkpoints, witnesses
+    that catch forks and rollbacks, a report of where every item lives);
+  - department custody rules that filter search hits before retrieval;
+  - hash-bound human sign-off for anything leaving a computer;
+  - private shared training: GaLore projection, SCAFFOLD drift control, exact
+    discrete-Gaussian differential privacy with a zCDP budget, and
+    double-masked secure aggregation.
+
+  `sovra-mesh` supplies Ed25519 signing, X25519 mask seeds and the OS random
+  source. The workspace gains `blake3` (already built for iroh).
+
 - Answers from a free computer in your group now stream in as they are
   written, **Stop** stops the helping computer's AI within a second, and if
   the helping computer goes away before answering, the next free one takes

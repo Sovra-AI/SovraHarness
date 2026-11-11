@@ -13,7 +13,7 @@ The investor deck presents four sizes of the same program:
 | --- | --- | --- | --- | --- |
 | 1 | **Today** | **A person.** A private team of helpers on their own laptop that remembers their life and keeps their files at home. | [`01-a-person.md`](01-a-person.md) | Baseline + groundwork to start now |
 | 2 | Foundation implemented; **Next** for the full design | **A group.** A few computers share helpers and memory. A busy laptop hands heavy work to a free one. | [`02-a-team.md`](02-a-team.md) | **Build-ready, very detailed** |
-| 3 | Direction | **A company.** A private fleet with ledger memory, lanes for each team, and a model trained on its own computers. | [`03-a-company.md`](03-a-company.md) | Outline (likely to change) |
+| 3 | Direction | **A company.** A private fleet with ledger memory, lanes for each team, and a model trained on its own computers. | [`03-a-company.md`](03-a-company.md) | Outline; core rules for ledger, departments, sign-off and private training built ([swarm](../swarm.md)) |
 | 4 | Direction | **Regulated work.** Health, law, finance, government: data that must not leave. Here, it never has to. | [`04-regulated-work.md`](04-regulated-work.md) | Outline (likely to change) |
 | 5 | Direction | **Collective intelligence.** Desktops contribute memory, compute and learning to people they trust; federated recall moves the question, not the data. | [`05-collective-intelligence.md`](05-collective-intelligence.md) | Outline; federated recall started |
 

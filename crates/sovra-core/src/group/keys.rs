@@ -124,6 +124,21 @@ hex_bytes!(
 );
 
 hex_bytes!(
+    /// BLAKE3 of some content: a document, a model's weights, an audit entry. Shared
+    /// records are named by what they contain (roadmap D5), so a copy on any computer
+    /// is provably the same thing, and the ledger keeps the hash after a purge.
+    ContentHash,
+    32
+);
+
+impl ContentHash {
+    /// BLAKE3 of `bytes`.
+    pub fn of(bytes: &[u8]) -> Self {
+        Self(*blake3::hash(bytes).as_bytes())
+    }
+}
+
+hex_bytes!(
     /// A detached Ed25519 signature over [`super::MembershipOp::signing_bytes`].
     Signature,
     64

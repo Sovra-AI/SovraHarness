@@ -9,6 +9,7 @@
 
 mod cipher;
 mod store;
+mod swarm;
 
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use sovra_core::group::{
 };
 
 pub use store::FileGroupStore;
+pub use swarm::{OsRandom, SwarmKeys};
 
 /// How far this computer reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

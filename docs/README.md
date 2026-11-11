@@ -11,6 +11,7 @@ Map of the top-level guides for SovraHarness. Start at the
 | [Groups](groups.md) | How people and computers share a roster and explicit details |
 | [Release guide](releasing.md) | Packaging, signing and release verification |
 | [Roadmap](roadmap/README.md) | Implemented foundations and planned stages |
+| [Sovereign swarm](swarm.md) | Company audit ledger, departments, sign-off and private shared training (rules built, not yet in the app) |
 | [Architecture](architecture.md) | Why the crates, Command/Event, and adapters are shaped this way |
 | [Native development](development.md) | One-shot `cargo xtask dev`, cache reclaim, sign-in status |
 | [Development MCP](development-mcp.md) | Inspect and operate the running native window |
