@@ -96,6 +96,8 @@ crates/
   sovra-telegram  Telegram Bot API adapter for the same port (reqwest long polling; the
                   runtime drives polling through ChannelSession::poll).
   sovra-mesh      Peer-to-peer groups adapter. The only crate naming iroh.
+  sovra-train     Local training on Burn (CPU; CubeCL GPU behind `gpu`) behind the
+                  core swarm Objective port. The only crate naming burn.
   sovra-ui        GPUI views. The only crate allowed to use gpui-kit.
   sovra-app       binary + composition root: velopack hook, paths, logging, wiring. No logic.
 xtask/            automation: ci, hooks, layering rules (xtask/src/deps.rs)

@@ -52,7 +52,7 @@ reason is stated here so it can be revisited.
 | Automerge CRDTs | Signed, hash-chained operation sets with a pure fold (`sovra-core/src/group`) | D3: converges like a CRDT, and adds signatures, roles and dispute rules that Automerge does not have. |
 | BLAKE3 content addresses | `ContentHash` (BLAKE3) for ledger entries, Merkle nodes, models and released content | D5. The group op log keeps its SHA-256 ids for compatibility. |
 | Embedded LanceDB | SurrealDB's embedded vector index (`sovra-store-surreal`) | D6: one local index per computer, rebuildable from the log. A LanceDB adapter would sit behind the same `MemoryStore` port. |
-| Burn + CubeCL | Not yet. `swarm::learn::scaffold::Objective` is the port a local trainer implements | Training kernels belong in an adapter crate (`sovra-train`). The protocol around them is backend-neutral and is what this change builds. |
+| Burn + CubeCL | `sovra-train`: Burn 0.22.1 models behind the core `Objective` port; pure-Rust CPU by default, CubeCL wgpu with `--features gpu` | Training kernels stay in an adapter crate; the protocol around them is backend-neutral. |
 | FedLore (GaLore) | `learn::galore`: projector, `GaloreAdam`, and shared per-round projectors for compact federated updates | The test checks the claim: Llama-7B Adam state is over 24 GB in bf16, and under 4 GB with rank 128. |
 | SCAFFOLD | `learn::scaffold` (option II) | Only `Δy` is sent: the fleet derives the mean control update, `−c − mean Δy / (Kη)`, which halves both the traffic and the noise. |
 | OpenDP ε-DP | Exact discrete-Gaussian sampler (Canonne, Kamath & Steinke 2020, the same family OpenDP uses), distributed noise (Kairouz, Liu & Steinke 2021), zCDP accounting | Integer noise composes exactly with masking. The OpenDP library itself is not linked. |
@@ -116,7 +116,11 @@ data stays more than 0.5 away.
 2. UI: *done* for the Groups summary. Still to do: a full **Audit history** page (where each item lives, who read it, every
    model change) and approval cards that use `EgressGate` for outbound
    messages. Register both on the Skills page.
-3. Departments in the group roster (a third `Space` kind beside the whole group
-   and pairs), so lanes and departments are one thing.
-4. A `sovra-train` adapter implementing `Objective` with Burn (CubeCL backends)
-   or a sandboxed sidecar, starting with LoRA adapters on 0.5–3B models.
+3. Departments in the group roster: *done* (`Space::Department`; see
+   [Groups](groups.md)).
+4. `sovra-train`: *done* for the first model. A Burn 0.22.1 `LinearModel`
+   implements `Objective` with Burn autodiff on the pure-Rust CPU backend, or
+   CubeCL (wgpu) with `--features gpu`. Tests show its gradient matches finite
+   differences, and that 10 computers' private rounds lower the loss. Still to
+   do: LoRA adapters on 0.5–3B models, and runtime scheduling of rounds between
+   computers (trainers run only on AC power and when idle).

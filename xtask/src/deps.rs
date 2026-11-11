@@ -38,6 +38,10 @@ const LAYERS: &[(&str, &[&str])] = &[
     // own dependency set behind the core GroupTransport/GroupStore ports. It names no
     // tokio: the runtime drives its futures and hands in the spawner (roadmap D2).
     ("sovra-mesh", &["sovra-core"]),
+    // Local training: the Burn deep-learning framework (CPU by default, CubeCL GPU
+    // backends behind a feature) is a heavy, distinct dependency set. It implements
+    // the core swarm `Objective` port so only parameter changes ever leave it.
+    ("sovra-train", &["sovra-core"]),
     ("sovra-ui", &["sovra-core", "sovra-runtime"]),
     (
         "sovra-app",
