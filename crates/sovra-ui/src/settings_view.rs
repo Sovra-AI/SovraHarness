@@ -138,7 +138,7 @@ impl ModelsView {
                     .child(Self::render_appearance_section(cx))
                     .child(self.render_language_section(cx))
                     .child(Self::render_open_connections_section(cx))
-                    .child(self.render_groups_section(cx))
+                    .child(Self::render_open_groups_section(cx))
                     .child(self.render_development_section(cx))
                     .child(self.render_always_context_section(cx))
                     .child(self.render_agent_behavior_section(cx))
@@ -148,6 +148,23 @@ impl ModelsView {
             cx,
         )
         .into_any_element()
+    }
+
+    /// Groups moved to their own tab; Settings keeps a signpost for people who look here.
+    fn render_open_groups_section(cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        settings_section(
+            "settings-groups",
+            design::chrome(cx, ChromeKey::NavGroups),
+            "Share notes, documents and helpers with your family or team. Groups has its own page now, with everything explained step by step.",
+            cx,
+        )
+        .child(
+            h_flex().child(
+                design::primary_button("settings-open-groups", "Open Groups", cx).on_click(
+                    cx.listener(|_, _, _, cx| cx.emit(crate::models_view::OpenGroups)),
+                ),
+            ),
+        )
     }
 
     fn render_open_connections_section(cx: &mut Context<Self>) -> impl IntoElement + use<> {

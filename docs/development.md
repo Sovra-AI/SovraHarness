@@ -176,7 +176,7 @@ own device key, group, memory and artifacts. Release builds ignore it.
 
    Set `SOVRA_GROUP_REACH=local` on both to keep group traffic on direct,
    same-machine connections instead of relays.
-3. Create a group in one window (Settings → Groups), copy the invite link and
+3. Create a group in one window (the **Groups** tab), copy the invite link and
    paste it into the other.
 
 Each instance has its own `development-control/` folder under its data folder,

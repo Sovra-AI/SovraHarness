@@ -478,6 +478,20 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
         assert!(shell.read(cx).workspace().active_thread().unwrap().pinned);
 
         // Switch back to the first thread by clicking row 1 in the rail.
+        // The rail scrolls; bring row 1 fully into view like a person would.
+        for _ in 0..20 {
+            let rail = window.find("chat-history-rail").bounds();
+            let row = window.find(("chat-thread-row", 1usize)).bounds();
+            if row.bottom() <= rail.bottom() {
+                break;
+            }
+            window.scroll(
+                "chat-history-list",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-40.))),
+                cx,
+            );
+            window.render_frame(cx);
+        }
         window.click(("chat-thread-row", 1usize), cx);
         window.render_frame(cx);
         assert_eq!(

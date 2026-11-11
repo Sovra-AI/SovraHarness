@@ -1,5 +1,5 @@
-//! Settings → Groups: start/join forms, the roster and shared knowledge, end to end
-//! through the shell with a scripted runtime.
+//! The Groups tab: the explanation, the start/join choice, each page inside a group,
+//! end to end through the shell with a scripted runtime.
 
 use std::collections::BTreeSet;
 
@@ -121,6 +121,28 @@ fn group_event(events: &async_channel::Sender<Event>, event: GroupEvent) {
         .expect("headless test fixture is available");
 }
 
+/// Opens one page inside the group, as a person pressing its button would:
+/// scrolling the page until the button is on screen first.
+fn page(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, id: &str) {
+    let button = gpui_kit::SharedString::from(format!("groups-page-{id}"));
+    for _ in 0..60 {
+        let pane = window.find("groups-scroll").bounds();
+        let target = window.find(button.clone()).bounds();
+        if target.top() >= pane.top() && target.bottom() <= pane.bottom() {
+            break;
+        }
+        let dy = if target.top() < pane.top() { 80. } else { -80. };
+        window.scroll(
+            "groups-scroll",
+            gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(dy))),
+            cx,
+        );
+        window.render_frame(cx);
+    }
+    window.click(button, cx);
+    window.render_frame(cx);
+}
+
 fn drain(commands: &async_channel::Receiver<Command>) -> Vec<Command> {
     std::iter::from_fn(|| commands.try_recv().ok()).collect()
 }
@@ -138,11 +160,28 @@ fn a_computer_outside_a_group_can_start_one_or_join_one(cx: &mut TestAppContext)
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        assert!(
+            window.find("groups-intro").visible(),
+            "it says what a group is"
+        );
+        assert!(window.find("groups-how-it-works").visible());
+        assert!(window.find("groups-privacy").visible());
         assert!(window.find("groups-start").visible());
         assert!(window.find("groups-join").visible());
+        assert!(
+            window.try_find("groups-create").is_none(),
+            "one choice at a time: the form waits until a path is picked"
+        );
+        window.click("groups-choose-start", cx);
+        window.render_frame(cx);
+        assert!(window.find("groups-start-name").visible());
         window.click("groups-create", cx);
+        window.click("groups-setup-back", cx);
+        window.render_frame(cx);
+        window.click("groups-choose-join", cx);
+        window.render_frame(cx);
         window.click("groups-join-button", cx);
     })
     .expect("window open");
@@ -171,18 +210,25 @@ fn the_group_shows_who_is_in_it_and_what_was_shared(cx: &mut TestAppContext) {
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        assert!(window.find("groups-header").visible());
+        assert!(
+            window.find("groups-pane-notes").visible(),
+            "a group with people in it opens on the shared notes"
+        );
+        assert!(window.find(("groups-detail", 0usize)).visible());
+        window.click("groups-share", cx);
+        window.click(("groups-agree", 0usize), cx);
+        page(window, cx, "people");
         assert!(window.find("groups-roster").visible());
         assert!(window.find(("groups-person", 0usize)).visible());
         assert!(window.find(("groups-person", 1usize)).visible());
-        assert!(window.find(("groups-detail", 0usize)).visible());
+        page(window, cx, "invite");
         assert!(
             window.find("groups-invite-member").visible(),
             "Mum is an admin"
         );
-        window.click("groups-share", cx);
-        window.click(("groups-agree", 0usize), cx);
         window.click("groups-invite-computer", cx);
     })
     .expect("window open");
@@ -258,30 +304,40 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
                 design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
             });
             cx.update_window(window.into(), |_, window, cx| {
-                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
                 window.render_frame(cx);
-                let column = window.find("settings-column").bounds();
-                for id in [
-                    "settings-groups",
-                    "groups-roster",
-                    "groups-knowledge",
-                    "groups-invites",
-                    "groups-copy-link",
-                    "groups-invite-member",
-                    "groups-federated",
-                    "groups-audit",
-                    "groups-audit-headline",
-                    "groups-departments",
+                let column = window.find("groups-column").bounds();
+                for (open, ids) in [
+                    (
+                        "notes",
+                        &[
+                            "settings-groups",
+                            "groups-header",
+                            "groups-pages",
+                            "groups-knowledge",
+                        ][..],
+                    ),
+                    ("people", &["groups-roster"][..]),
+                    (
+                        "invite",
+                        &["groups-invites", "groups-copy-link", "groups-invite-member"][..],
+                    ),
+                    ("ask", &["groups-federated"][..]),
+                    ("history", &["groups-audit", "groups-audit-headline"][..]),
+                    ("departments", &["groups-departments"][..]),
                 ] {
-                    let bounds = window.find(id).bounds();
-                    assert!(
-                        bounds.size.width <= column.size.width + px(1.),
-                        "{width}x{height}@{scale}: {id} is wider than the settings column"
-                    );
-                    assert!(
-                        bounds.origin.x >= column.origin.x - px(1.),
-                        "{width}x{height}@{scale}: {id} starts outside the settings column"
-                    );
+                    page(window, cx, open);
+                    for id in ids {
+                        let bounds = window.find(*id).bounds();
+                        assert!(
+                            bounds.size.width <= column.size.width + px(1.),
+                            "{width}x{height}@{scale}: {id} is wider than the groups column"
+                        );
+                        assert!(
+                            bounds.origin.x >= column.origin.x - px(1.),
+                            "{width}x{height}@{scale}: {id} starts outside the groups column"
+                        );
+                    }
                 }
             })
             .expect("window open");
@@ -327,8 +383,9 @@ fn an_admin_makes_a_department_and_members_share_just_with_it(cx: &mut TestAppCo
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        page(window, cx, "departments");
         assert!(window.find("groups-departments").visible());
         window.click(("groups-department-person", 0usize), cx);
         window.click("groups-department-name", cx);
@@ -367,6 +424,7 @@ fn an_admin_makes_a_department_and_members_share_just_with_it(cx: &mut TestAppCo
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find(("groups-department", 0usize)).visible());
+        page(window, cx, "notes");
         window.click(("groups-share-department", 0usize), cx);
         window.click("groups-share-input", cx);
         window.input("The Jones contract renews in June", cx);
@@ -397,8 +455,9 @@ fn the_owner_sees_this_computers_checked_history(cx: &mut TestAppContext) {
     group_event(&events, GroupEvent::Audit(audit_summary()));
     settle(cx);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        page(window, cx, "history");
         assert!(window.find("groups-audit").visible());
         assert!(window.find("groups-audit-headline").visible());
         assert!(window.find(("groups-audit-line", 1usize)).visible());
@@ -564,8 +623,9 @@ fn group_members_can_ask_each_others_memories_with_consent_and_a_log(cx: &mut Te
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        page(window, cx, "ask");
         assert!(window.find("groups-federated").visible());
         assert!(
             window.find(("groups-asked", 0usize)).visible(),
@@ -625,7 +685,7 @@ fn a_detail_can_go_to_just_one_person_and_private_ones_say_so(cx: &mut TestAppCo
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
         let tag = window.find(("groups-detail-space", 0usize));
         assert!(tag.visible());
@@ -657,7 +717,11 @@ fn same_room_codes_show_digits_and_ask_both_people_to_compare_pictures(cx: &mut 
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        window.click("groups-choose-join", cx);
+        window.render_frame(cx);
+        window.click("groups-join-way-code", cx);
         window.render_frame(cx);
         window.click("groups-join-code", cx);
         window.input("123 456", cx);
@@ -770,8 +834,9 @@ fn a_shared_helper_or_schedule_becomes_your_own_copy_when_you_choose(cx: &mut Te
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        page(window, cx, "helpers");
         assert!(
             window.find(("groups-template-words", 0usize)).visible(),
             "read before use"
@@ -871,8 +936,9 @@ fn a_shared_skill_is_kept_without_tools_until_you_grant_them(cx: &mut TestAppCon
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        page(window, cx, "helpers");
         window.click(("groups-template-use", 0usize), cx);
     })
     .expect("window open");
@@ -912,8 +978,9 @@ fn this_computers_ai_can_be_offered_to_the_group_and_its_jobs_are_listed(cx: &mu
     settle(cx);
     drain(&commands);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        page(window, cx, "borrow-ai");
         assert_eq!(
             window.find(("groups-work-job", 0usize)).label(),
             Some("Dad (Old laptop) · answered")
@@ -944,8 +1011,9 @@ fn member_invite_copies_only_after_confirmation_and_recovers_from_errors(cx: &mu
     );
     settle(cx);
     cx.update_window(window.into(), |_, window, cx| {
-        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
         window.render_frame(cx);
+        page(window, cx, "invite");
         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("keep me".into()));
         window.click("groups-invite-name", cx);
         window.input("Sam", cx);
@@ -1001,4 +1069,77 @@ fn member_invite_copies_only_after_confirmation_and_recovers_from_errors(cx: &mu
             Some("sovra://join/confirmed".into())
         );
     });
+}
+
+#[gpui_kit::test]
+fn leaving_asks_twice_and_getting_started_opens_the_right_page(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        // Nothing shared yet and Dad is not an admin: both are still to do.
+        assert!(window.find("groups-first-steps").visible());
+        assert_eq!(
+            window.find(("groups-step", 2usize)).label(),
+            Some("Share your first note: to do")
+        );
+        window.click(("groups-step-do", 3usize), cx);
+        window.render_frame(cx);
+        assert!(
+            window.find("groups-pane-people").visible(),
+            "Make a second admin opens People"
+        );
+        window.click("groups-leave-ask", cx);
+        window.render_frame(cx);
+        assert!(window.find("groups-leave-confirm").visible());
+    })
+    .expect("window open");
+    assert!(
+        !drain(&commands).contains(&Command::Group(GroupCommand::Leave)),
+        "one click never leaves the group"
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("groups-leave", cx);
+    })
+    .expect("window open");
+    assert!(drain(&commands).contains(&Command::Group(GroupCommand::Leave)));
+}
+
+#[gpui_kit::test]
+fn settings_points_to_the_groups_tab(cx: &mut TestAppContext) {
+    let (window, shell, _commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: None,
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        assert!(
+            window.try_find("groups-choose").is_none(),
+            "Groups is no longer squeezed into Settings"
+        );
+        window.click("settings-open-groups", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Groups);
+        assert!(window.find("groups-choose").visible());
+    })
+    .expect("window open");
 }

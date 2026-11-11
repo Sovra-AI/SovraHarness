@@ -31,6 +31,27 @@ use gpui_kit::{AppContext as _, Hsla, Rgba, TestAppContext, px, size};
 use sovra_runtime::Client;
 use sovra_ui::{Shell, design};
 
+/// Clicks a sidebar tab. In small windows the icon rail scrolls, so first bring the
+/// icon fully into view, as a person would.
+fn click_nav(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, id: &'static str) {
+    if let Some(rail) = window.try_find("chat-history-rail-collapsed") {
+        for _ in 0..40 {
+            let (rail, icon) = (rail.bounds(), window.find(id).bounds());
+            if icon.top() >= rail.top() && icon.bottom() <= rail.bottom() {
+                break;
+            }
+            let dy = if icon.top() < rail.top() { 40. } else { -40. };
+            window.scroll(
+                "chat-history-rail-collapsed",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(dy))),
+                cx,
+            );
+            window.render_frame(cx);
+        }
+    }
+    window.click(id, cx);
+}
+
 fn contrast(a: Hsla, b: Hsla) -> f32 {
     let luminance = |color: Hsla| {
         let color = Rgba::from(color);
@@ -145,7 +166,7 @@ fn appearance_lives_in_settings_at_minimum_and_default_window_sizes(cx: &mut Tes
             // The title bar stays empty: no product name, no appearance switch.
             assert!(window.try_find("toggle-appearance").is_none());
             assert!(window.try_find("title-logo").is_none());
-            window.click("nav-settings", cx);
+            click_nav(window, cx, "nav-settings");
             window.render_frame(cx);
             for id in ["settings-theme-light", "settings-theme-dark"] {
                 let button = window.find(id);
@@ -273,9 +294,10 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
                 ("nav-skills", "sovra-skills-view"),
                 ("nav-settings", "sovra-settings-view"),
                 ("nav-connections", "connections-page"),
+                ("nav-groups", "sovra-groups-view"),
                 ("nav-models", "models-setup-home"),
             ] {
-                window.click(tab, cx);
+                click_nav(window, cx, tab);
                 window.render_frame(cx);
                 let bounds = window.find(page).bounds();
                 assert!(
@@ -436,9 +458,10 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
             ("nav-skills", "sovra-skills-view"),
             ("nav-settings", "sovra-settings-view"),
             ("nav-connections", "connections-page"),
+            ("nav-groups", "sovra-groups-view"),
             ("nav-models", "models-setup-home"),
         ] {
-            window.click(tab, cx);
+            click_nav(window, cx, tab);
             window.render_frame(cx);
             let bounds = window.find(page).bounds();
             assert!(
@@ -446,7 +469,7 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
                 "{page} overflows horizontally at 200%: {bounds:?}"
             );
         }
-        window.click("nav-settings", cx);
+        click_nav(window, cx, "nav-settings");
         window.render_frame(cx);
         let larger = window.find("settings-text-larger");
         assert!(larger.bounds().right() <= dimensions.width);

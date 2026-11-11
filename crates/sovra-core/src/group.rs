@@ -10,6 +10,7 @@
 mod dag;
 mod federated;
 mod fold;
+mod guide;
 mod keys;
 mod knowledge;
 mod lane_keys;
@@ -30,6 +31,9 @@ pub use federated::{
     federated_items, log_ask,
 };
 pub use fold::{DeviceEntry, GroupDepartment, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
+pub use guide::{
+    BENEFITS, Benefit, FirstStep, GroupPage, HOW_IT_WORKS, PRIVACY_PROMISE, WHAT_IS_A_GROUP,
+};
 pub use keys::{
     ContentHash, DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, SignatureVerifier,
 };

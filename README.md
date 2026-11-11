@@ -6,7 +6,7 @@
 Native Rust desktop app for the Sovra agent harness: a GPUI chat UI, a tokio
 runtime, local memory (vector + graph + full-text behind a `MemoryStore` port),
 and Velopack installers. Chrome defaults to Arabic, with a Settings language
-picker and right-to-left layout. Settings → Groups lets a family or small team
+picker and right-to-left layout. The **Groups** tab lets a family or small team
 share memories, documents, lists, helpers and schedules across their computers:
 **Share with my group** (or *Just Dad*) on an artifact, a saved detail, a helper or
 a schedule, **Keep a copy** of what others shared, and edits come back as new
@@ -22,8 +22,14 @@ or choose **Read as a list**. **Focus on these connections** opens a smaller
 map around the selected detail; **Show all** restores the overview. The map
 renders natively inside the app, with no extra runtime or browser dependency.
 
-In **Settings → Groups**, use **Create and copy invite link** to generate a
-one-time link and copy it to your clipboard for sharing.
+The **Groups** tab explains itself in plain words: *What is a group?*, what you
+can do in one, and how it works. You choose **Start a new group** or **Join a
+group** and answer two or three labelled questions. Inside a group, one page at a
+time (**Invite someone**, **Shared notes**, **People**, **Shared helpers**,
+**Ask the group**, **Borrow an AI**, **Departments**, **History**) says what it is
+for and how to use it in numbered steps, and a **Getting started** list shows what
+a new group still has to do. Under **Invite someone**, **Create invite link** makes
+a one-time link and copies it for you to send.
 
 ## Quick start
 

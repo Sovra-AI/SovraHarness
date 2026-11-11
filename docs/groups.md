@@ -1,6 +1,6 @@
 # Groups of people and computers
 
-**Settings → Groups** connects the computers in a family or a small team and
+The **Groups** tab connects the computers in a family or a small team and
 lets each person explicitly share details, memories, documents, helpers,
 skills and schedules that the helpers on those computers can use — with the
 whole group or just one person — ask each other's memories, and let a computer
@@ -18,56 +18,89 @@ code and this page are the ones to trust.
 
 ## What you do on the screen
 
-1. Open **Settings → Groups**. Enter a group name, your name, and this
-   computer's name under **Start a group**, then choose **Start the group**.
-   The screen asks you to add a second admin so membership can still be
-   managed when this computer is unavailable.
-2. Enter the person's name, then choose **Create and copy invite link** for
-   a member or **Create and copy admin link** for an admin. The confirmed
-   `sovra://join/…` link is copied automatically; paste it into a private message.
-   **Copy invite link** copies it again. **Add another of my computers** also
-   creates and copies a link, for your own identity. Links work once and expire
-   after ten minutes. Keep this app open until the other computer joins.
-3. On the other computer, paste the link under **Join a group**, name that
-   computer, and choose **Join**. The inviting computer has to stay online
-   until **Join** finishes. The joining screen says "Connecting to the other
-   computer…" while the request is in flight.
-4. Under **Shared with the group**, write one detail, choose **Everyone** or
-   **Just <name>**, and choose **Share**. Nothing in private chats or files is
-   copied into that list. Helpers that use a detail are told who shared it and
-   which computer it came from.
-5. **In the same room**, choose **In the same room? Show a code** (or **Show a
-   code for my other computer**) and read out the six digits. On the other
-   computer, on the same network, type them under **Join with code**. Both
-   screens then show the same four pictures with their names and six digits;
-   each person presses **They match**. A code allows one try within two
-   minutes; a wrong try ends it. Invite links are also shown as a QR code.
-6. **Share what you already have:** a saved detail in **Knowledge** has
+Groups has its own tab in the sidebar (**Groups**, under Chat, Team, Artifacts and
+Schedules). Settings keeps a short **Groups** card with **Open Groups** for people
+who look there. The page is written for someone with no technical background:
+every page says what it is for and how to use it in numbered steps. The wording
+and the "what's next" rules are pure data in `sovra_core::group` (`guide.rs`:
+`WHAT_IS_A_GROUP`, `BENEFITS`, `HOW_IT_WORKS`, `PRIVACY_PROMISE`, `GroupPage`,
+`GroupsView::first_steps`, `GroupsView::starting_page`) and are unit-tested there.
+
+**Outside a group** the page opens with **What is a group?**: one sentence on
+what a group is, four things you can do in one (share notes, share documents and
+helpers, ask each other, borrow an AI), three steps under **How it works**, and
+the privacy promise (nothing is shared until you press Share; what you share goes
+straight from computer to computer, locked to the group). Below it, **What would
+you like to do?** offers two choices, one at a time:
+
+1. **Start a new group** asks three labelled questions (*What should the group be
+   called?*, *What's your name?*, *What do you call this computer?*), then
+   **Start the group**. **Back** returns to the choice.
+2. **Join a group** asks **How did they invite you?**: **They sent me a link**
+   (paste it) or **We're in the same room** (type the six numbers from their
+   screen). Then name this computer and press **Join the group**. The screen says
+   "Connecting to the other computer…" while the request is in flight; the
+   inviting computer has to stay online until it finishes. Joining by numbers
+   then shows **One last check**: both screens show the same four pictures with
+   their names and six digits, and each person presses **Yes, they match**. A
+   code allows one try within two minutes; a wrong try ends it.
+
+**Inside a group** the page shows the group's name with how many people and
+computers are in it, who you are in it ("You're in this group as Mum, an admin"),
+and **How do groups work?**, which opens the explanation again. A **Getting
+started** list shows what a new group still has to do (**Invite someone**,
+**Share your first note**, **Make a second admin**), each with **Do this**; it
+disappears once everything is done. Then **What would you like to do?** lists the
+pages; the open one is selected. An admin alone in a new group starts on **Invite
+someone**; everyone else starts on **Shared notes**. When an invite link or six
+numbers arrive, the page switches to **Invite someone** so they stay in view.
+
+3. **Invite someone.** Admins type the person's name, then **Create invite
+   link** (or **Create admin invite link**). The confirmed `sovra://join/…` link
+   is copied automatically; the card says to paste it into an email or message,
+   what the other person does, and to keep Sovra open. **Copy again** copies it
+   again; the link is also shown as a QR code. Links work once and expire after
+   ten minutes. **We're in the same room: show six numbers** shows a code with
+   the three steps for the other computer. **Add another of my own computers**
+   (**Create a link for my other computer**, **Show six numbers for my other
+   computer**) adds a computer to your own identity and is open to members too.
+4. **Shared notes.** Under **Share a note**, write one detail, choose who should
+   see it (**Everyone**, **Just <name>** or **Just <department>**), and press
+   **Share**. Nothing in private chats or files is copied into that list. Helpers
+   that use a note are told who shared it and which computer it came from. Each
+   note offers **👍 That's right** (agree) and, for its author or an admin, **Stop
+   sharing** and **Erase everywhere**. The page also counts the documents, lists
+   and pictures shared on the Artifacts page.
+5. **Share what you already have:** a saved detail in **Knowledge** has
    **Share with …** (reworded with your name, checked by you first); an
    artifact has **Share with my group** or **Just <name>**; your own helpers,
    skills and schedules have **Share with my group**. Others find artifacts
    under **Shared in …** on the Artifacts page (**Keep a copy**), and helpers,
-   skills and schedules under **Shared helpers and schedules** (read the words,
-   then **Use this helper**, **Use this skill** or **Add to my schedules**).
-7. **Ask each other's memories:** **Let my group's helpers ask my memory**
-   answers others from this computer's memory with a few short, named answers
-   (every question is listed); **Ask my group** asks once; **Ask my group when
-   I chat** asks during chats. All start off.
-8. **Share this computer's AI:** **Let my group use this computer's AI** on a
-   computer with an AI, and **Use a free computer's AI when this one has none**
-   on one without. The second's chats are answered by the first, which gets
-   only the conversation's words and never uses its tools for someone else.
-   Each computer in the roster shows **Online now** or when it was last seen.
-9. **Departments** (admins): type a name such as *Legal*, tap the people in
-   it, and choose **Save department**. That signs a `SetDepartment` operation
-   into the membership log, which only admins may write, and only for people
-   in the group. Members then see **Just Legal** beside **Everyone** when
+   skills and schedules on **Shared helpers** (read the words, then **Use this
+   helper**, **Use this skill** or **Add to my schedules**).
+6. **Ask the group.** **Ask my group** sends one question. Two switches, each
+   with an **On**/**Off** label and a **Turn on**/**Turn off** button:
+   **Answer questions from my group** answers others from this computer's
+   memory with a few short, named answers (every question is listed under
+   **Questions your group asked this computer**), and **Ask the group while I
+   chat** asks during chats. Both start off.
+7. **Borrow an AI.** **Lend this computer's AI** on a computer with an AI, and
+   **Borrow an AI when this computer has none** on one without. The second's
+   chats are answered by the first, which gets only the conversation's words and
+   never uses its tools for someone else.
+8. **People.** Everyone in the group with their role and computers; each
+   computer shows **Online now** or when it was last seen, and a safety code
+   (its key fingerprint). Admins see a tip to make a second admin.
+9. **Departments** (admins make them): type a name such as *Legal*, tap the
+   people in it, and choose **Save department**. That signs a `SetDepartment`
+   operation into the membership log, which only admins may write, and only for
+   people in the group. Members then see **Just Legal** beside **Everyone** when
    sharing. A department is its own lane (`Space::Department`) with its own lane
    keys, so only its current members' computers receive or can read it. Saving
    again with fewer people rotates the key, and the people taken out keep only
    what they already had. Leaving the group leaves every department. Someone who
    is not in a department is refused if they try to share there.
-10. **History on this computer** lists what this computer shared and each
+10. **History** lists what this computer shared and each
    memory it gave to someone's helpers, newest first, with a line such as
    "2 records, all checked · fingerprint 3f2a9c01". Each record is signed with
    this computer's key and holds only a BLAKE3 fingerprint of the words, never
@@ -90,11 +123,13 @@ code and this page are the ones to trust.
    carry no trusted sender, so only signed checkpoints and co-signatures from
    current members count.
 
-Admins change a person between **Admin** and **Member**, and they remove a
-person. Removing a person or another computer asks for a second click
+On **People**, admins change a person between **Admin** and **Member** (**Make
+admin**, **Make a member again**), and they remove a person (**Remove from
+group**). Removing a person or another computer asks for a second click
 (**Yes, remove** or **Yes, remove them**). Removing a computer shows this
 warning first: that computer will stop getting new group information, and
-things it already has stay on it. **Leave this group** is on this computer.
+things it already has stay on it. **Leave this group** is on this computer and
+asks first ("Are you sure?", **Yes, leave the group** or **No, stay**).
 The operation it signs removes the whole person, so every computer that
 belongs to that person leaves the roster together. If that person is the only
 admin, the app refuses and says to make someone else an admin first.
@@ -112,7 +147,7 @@ recorded says to leave first.
 | Admin, Member | `Role` | What the roster currently allows. See [Roles](#roles). |
 | Shared detail | `SharedDetail` | One paragraph someone chose to share, plus its history. |
 | Team | `sovra_core::teams` | AI helpers in a chat. Unrelated to this roster. |
-| WhatsApp group | `SyncedGroup` | A messaging chat. `ConnectionEvent::GroupsChanged` updates that address book. An empty snapshot does not wipe saved people. It does not create or update a Settings → Groups roster. |
+| WhatsApp group | `SyncedGroup` | A messaging chat. `ConnectionEvent::GroupsChanged` updates that address book. An empty snapshot does not wipe saved people. It does not create or update a Groups roster. |
 
 `Role` also contains **Viewer** ("can read") and **Contributor** ("can add,
 can't read"). The Groups screen never assigns those two. The knowledge fold
@@ -167,7 +202,7 @@ it is full is dropped and logged.
 
 ```mermaid
 flowchart LR
-  screen["Settings → Groups"] -->|Command::Group| runtime["sovra-runtime groups worker"]
+  screen["Groups tab"] -->|Command::Group| runtime["sovra-runtime groups worker"]
   runtime -->|Event::Group| screen
   runtime --> fold["sovra-core fold"]
   runtime --> disk["groups/group.json"]
@@ -596,7 +631,8 @@ the removal, their own group file is cleared.
 | iroh endpoint, Ed25519, `groups/group.json` | `crates/sovra-mesh/src/lib.rs`, `crates/sovra-mesh/src/store.rs` |
 | Create, invite, join, admit, sync, broadcast, recall wrapper | `crates/sovra-runtime/src/groups.rs` |
 | Device key and reach | `crates/sovra-app/src/main.rs` (`group_device_key`, `group_services`) |
-| Settings → Groups | `crates/sovra-ui/src/groups_view.rs` |
+| Groups tab (layout) | `crates/sovra-ui/src/groups_view.rs` |
+| Groups tab wording, pages and Getting started | `crates/sovra-core/src/group/guide.rs` |
 | Spaces, lane keys, shared artifacts, templates, federated recall, work jobs | `crates/sovra-core/src/group/{space,lane_keys,shared_artifact,template,federated,work}.rs` |
 | Sealing, nearby (mDNS) discovery | `crates/sovra-mesh/src/cipher.rs`, `crates/sovra-mesh/src/lib.rs` |
 | Handing a turn to the group, answering without tools | `crates/sovra-adk/src/group_work.rs` |

@@ -5,7 +5,7 @@ Status, 2026-11-11: the **rules and cryptography are implemented and tested**
 
 *Today* in the app: every computer in a group keeps a **signed audit history**.
 Each share it makes, and each memory it gives to another person's helpers, is
-recorded. The history is re-verified on every start, and Settings → Groups shows
+recorded. The history is re-verified on every start, and the Groups tab (**History**) shows
 it under **History on this computer** (see [Groups](groups.md)). Histories are
 replicated on every group sync (`PeerRequest::AuditSync`, `swarm::audit::FleetAudit`).
 Every computer keeps checked, relayed copies of the others' histories, only a

@@ -14,7 +14,7 @@ struct Catalog {
     strings: &'static [&'static str; WIDTH],
 }
 
-const WIDTH: usize = 85;
+const WIDTH: usize = 87;
 const _: [(); WIDTH] = [(); super::ChromeKey::ALL.len()];
 
 const PACK_FR: [&str; WIDTH] = [
@@ -103,6 +103,8 @@ const PACK_FR: [&str; WIDTH] = [
     "Envoyez ces fichiers une fois cette réponse terminée",
     "you@example.com",
     "Saisissez votre mot de passe",
+    "Groupes",
+    "Partagez avec votre famille ou votre équipe",
 ];
 
 const PACK_ES: [&str; WIDTH] = [
@@ -191,6 +193,8 @@ const PACK_ES: [&str; WIDTH] = [
     "Envía estos archivos cuando termine esta respuesta",
     "you@example.com",
     "Escribe tu contraseña",
+    "Grupos",
+    "Comparte con tu familia o tu equipo",
 ];
 
 const PACK_ZH: [&str; WIDTH] = [
@@ -279,6 +283,8 @@ const PACK_ZH: [&str; WIDTH] = [
     "本条回复结束后再发送这些文件",
     "you@example.com",
     "输入你的密码",
+    "群组",
+    "与家人或团队分享",
 ];
 
 const PACK_ZH_HANT: [&str; WIDTH] = [
@@ -367,6 +373,8 @@ const PACK_ZH_HANT: [&str; WIDTH] = [
     "這則回覆結束後再傳送這些檔案",
     "you@example.com",
     "輸入你的密碼",
+    "群組",
+    "與家人或團隊分享",
 ];
 
 const PACK_JA: [&str; WIDTH] = [
@@ -455,6 +463,8 @@ const PACK_JA: [&str; WIDTH] = [
     "この返信が終わってから、これらのファイルを送る",
     "you@example.com",
     "パスワードを入力",
+    "グループ",
+    "家族やチームと共有",
 ];
 
 const PACK_HI: [&str; WIDTH] = [
@@ -543,6 +553,8 @@ const PACK_HI: [&str; WIDTH] = [
     "यह जवाब खत्म होने के बाद ये फ़ाइलें भेजें",
     "you@example.com",
     "अपना पासवर्ड दर्ज करें",
+    "समूह",
+    "अपने परिवार या टीम के साथ साझा करें",
 ];
 
 const PACK_PT: [&str; WIDTH] = [
@@ -631,6 +643,8 @@ const PACK_PT: [&str; WIDTH] = [
     "Envia estes ficheiros quando esta resposta terminar",
     "you@example.com",
     "Introduz a palavra-passe",
+    "Grupos",
+    "Partilhe com a sua família ou equipa",
 ];
 
 const PACK_RU: [&str; WIDTH] = [
@@ -719,6 +733,8 @@ const PACK_RU: [&str; WIDTH] = [
     "Отправьте эти файлы, когда этот ответ закончится",
     "you@example.com",
     "Введите пароль",
+    "Группы",
+    "Делитесь с семьёй или командой",
 ];
 
 const PACK_DE: [&str; WIDTH] = [
@@ -807,6 +823,8 @@ const PACK_DE: [&str; WIDTH] = [
     "Sende diese Dateien, wenn diese Antwort fertig ist",
     "you@example.com",
     "Passwort eingeben",
+    "Gruppen",
+    "Mit Familie oder Team teilen",
 ];
 
 const PACK_IT: [&str; WIDTH] = [
@@ -895,6 +913,8 @@ const PACK_IT: [&str; WIDTH] = [
     "Invia questi file al termine di questa risposta",
     "you@example.com",
     "Inserisci la password",
+    "Gruppi",
+    "Condividi con la famiglia o il team",
 ];
 
 const PACK_KO: [&str; WIDTH] = [
@@ -983,6 +1003,8 @@ const PACK_KO: [&str; WIDTH] = [
     "이 답변이 끝난 뒤에 이 파일들을 보내기",
     "you@example.com",
     "비밀번호 입력",
+    "그룹",
+    "가족이나 팀과 공유하기",
 ];
 
 const PACK_TR: [&str; WIDTH] = [
@@ -1071,6 +1093,8 @@ const PACK_TR: [&str; WIDTH] = [
     "Bu yanıt bitince bu dosyaları gönderin",
     "you@example.com",
     "Parolanızı girin",
+    "Gruplar",
+    "Ailenizle veya ekibinizle paylaşın",
 ];
 
 const PACK_NL: [&str; WIDTH] = [
@@ -1159,6 +1183,8 @@ const PACK_NL: [&str; WIDTH] = [
     "Verstuur deze bestanden als dit antwoord klaar is",
     "you@example.com",
     "Vul je wachtwoord in",
+    "Groepen",
+    "Deel met je familie of team",
 ];
 
 const PACK_PL: [&str; WIDTH] = [
@@ -1247,6 +1273,8 @@ const PACK_PL: [&str; WIDTH] = [
     "Wyślij te pliki, gdy ta odpowiedź się skończy",
     "you@example.com",
     "Wpisz hasło",
+    "Grupy",
+    "Udostępniaj rodzinie lub zespołowi",
 ];
 
 const PACK_VI: [&str; WIDTH] = [
@@ -1335,6 +1363,8 @@ const PACK_VI: [&str; WIDTH] = [
     "Gửi các tệp này sau khi câu trả lời này xong",
     "you@example.com",
     "Nhập mật khẩu của bạn",
+    "Nhóm",
+    "Chia sẻ với gia đình hoặc nhóm của bạn",
 ];
 
 const PACK_TH: [&str; WIDTH] = [
@@ -1423,6 +1453,8 @@ const PACK_TH: [&str; WIDTH] = [
     "ส่งไฟล์เหล่านี้หลังจากคำตอบนี้เสร็จ",
     "you@example.com",
     "ป้อนรหัสผ่านของคุณ",
+    "กลุ่ม",
+    "แบ่งปันกับครอบครัวหรือทีมของคุณ",
 ];
 
 const PACK_ID: [&str; WIDTH] = [
@@ -1511,6 +1543,8 @@ const PACK_ID: [&str; WIDTH] = [
     "Kirim berkas ini setelah balasan ini selesai",
     "you@example.com",
     "Masukkan kata sandi Anda",
+    "Grup",
+    "Berbagi dengan keluarga atau tim Anda",
 ];
 
 const PACK_MS: [&str; WIDTH] = [
@@ -1599,6 +1633,8 @@ const PACK_MS: [&str; WIDTH] = [
     "Hantar fail ini selepas balasan ini selesai",
     "you@example.com",
     "Masukkan kata laluan anda",
+    "Kumpulan",
+    "Kongsi dengan keluarga atau pasukan anda",
 ];
 
 const PACK_UK: [&str; WIDTH] = [
@@ -1687,6 +1723,8 @@ const PACK_UK: [&str; WIDTH] = [
     "Надішліть ці файли, коли ця відповідь закінчиться",
     "you@example.com",
     "Введіть пароль",
+    "Групи",
+    "Діліться з родиною або командою",
 ];
 
 const PACK_SV: [&str; WIDTH] = [
@@ -1775,6 +1813,8 @@ const PACK_SV: [&str; WIDTH] = [
     "Skicka de här filerna när svaret är klart",
     "you@example.com",
     "Skriv ditt lösenord",
+    "Grupper",
+    "Dela med din familj eller ditt team",
 ];
 
 const PACK_DA: [&str; WIDTH] = [
@@ -1863,6 +1903,8 @@ const PACK_DA: [&str; WIDTH] = [
     "Send disse filer, når dette svar er færdigt",
     "you@example.com",
     "Skriv din adgangskode",
+    "Grupper",
+    "Del med din familie eller dit team",
 ];
 
 const PACK_FI: [&str; WIDTH] = [
@@ -1951,6 +1993,8 @@ const PACK_FI: [&str; WIDTH] = [
     "Lähetä nämä tiedostot, kun tämä vastaus on valmis",
     "you@example.com",
     "Kirjoita salasanasi",
+    "Ryhmät",
+    "Jaa perheesi tai tiimisi kanssa",
 ];
 
 const PACK_NO: [&str; WIDTH] = [
@@ -2039,6 +2083,8 @@ const PACK_NO: [&str; WIDTH] = [
     "Send disse filene når dette svaret er ferdig",
     "you@example.com",
     "Skriv inn passordet",
+    "Grupper",
+    "Del med familien eller teamet ditt",
 ];
 
 const PACK_CS: [&str; WIDTH] = [
@@ -2127,6 +2173,8 @@ const PACK_CS: [&str; WIDTH] = [
     "Odešlete tyto soubory, až tahle odpověď skončí",
     "you@example.com",
     "Zadejte heslo",
+    "Skupiny",
+    "Sdílejte s rodinou nebo týmem",
 ];
 
 const PACK_EL: [&str; WIDTH] = [
@@ -2215,6 +2263,8 @@ const PACK_EL: [&str; WIDTH] = [
     "Στείλτε αυτά τα αρχεία όταν τελειώσει αυτή η απάντηση",
     "you@example.com",
     "Πληκτρολογήστε τον κωδικό",
+    "Ομάδες",
+    "Μοιραστείτε με την οικογένεια ή την ομάδα σας",
 ];
 
 const PACK_HE: [&str; WIDTH] = [
@@ -2303,6 +2353,8 @@ const PACK_HE: [&str; WIDTH] = [
     "שלחו את הקבצים האלה אחרי שהתשובה הזו נגמרת",
     "you@example.com",
     "הזינו את הסיסמה",
+    "קבוצות",
+    "שתפו עם המשפחה או הצוות",
 ];
 
 const PACK_FA: [&str; WIDTH] = [
@@ -2391,6 +2443,8 @@ const PACK_FA: [&str; WIDTH] = [
     "این پرونده‌ها را پس از پایان این پاسخ بفرستید",
     "you@example.com",
     "گذرواژه را وارد کنید",
+    "گروه‌ها",
+    "با خانواده یا تیم خود به اشتراک بگذارید",
 ];
 
 const PACK_UR: [&str; WIDTH] = [
@@ -2479,6 +2533,8 @@ const PACK_UR: [&str; WIDTH] = [
     "یہ جواب ختم ہونے کے بعد یہ فائلیں بھیجیں",
     "you@example.com",
     "اپنا پاس ورڈ لکھیں",
+    "گروپس",
+    "اپنے خاندان یا ٹیم کے ساتھ شیئر کریں",
 ];
 
 const PACK_BN: [&str; WIDTH] = [
@@ -2567,6 +2623,8 @@ const PACK_BN: [&str; WIDTH] = [
     "এই উত্তর শেষ হলে এই ফাইলগুলো পাঠান",
     "you@example.com",
     "আপনার পাসওয়ার্ড দিন",
+    "গ্রুপ",
+    "পরিবার বা দলের সঙ্গে ভাগ করুন",
 ];
 
 const PACK_TA: [&str; WIDTH] = [
@@ -2655,6 +2713,8 @@ const PACK_TA: [&str; WIDTH] = [
     "இந்தப் பதில் முடிந்த பிறகு இந்தக் கோப்புகளை அனுப்புங்கள்",
     "you@example.com",
     "உங்கள் கடவுச்சொல்லை உள்ளிடுங்கள்",
+    "குழுக்கள்",
+    "குடும்பம் அல்லது குழுவுடன் பகிருங்கள்",
 ];
 
 const PACK_TE: [&str; WIDTH] = [
@@ -2743,6 +2803,8 @@ const PACK_TE: [&str; WIDTH] = [
     "ఈ సమాధానం అయిపోయాక ఈ ఫైళ్లను పంపండి",
     "you@example.com",
     "మీ పాస్‌వర్డ్ ఇవ్వండి",
+    "సమూహాలు",
+    "మీ కుటుంబం లేదా బృందంతో పంచుకోండి",
 ];
 
 const PACK_MR: [&str; WIDTH] = [
@@ -2831,6 +2893,8 @@ const PACK_MR: [&str; WIDTH] = [
     "हे उत्तर संपल्यावर या फाइल्स पाठवा",
     "you@example.com",
     "तुमचा पासवर्ड टाका",
+    "गट",
+    "कुटुंब किंवा टीमसोबत शेअर करा",
 ];
 
 const PACK_GU: [&str; WIDTH] = [
@@ -2919,6 +2983,8 @@ const PACK_GU: [&str; WIDTH] = [
     "આ જવાબ પૂરો થયા પછી આ ફાઇલો મોકલો",
     "you@example.com",
     "તમારો પાસવર્ડ દાખલ કરો",
+    "જૂથો",
+    "પરિવાર અથવા ટીમ સાથે શેર કરો",
 ];
 
 const PACK_KN: [&str; WIDTH] = [
@@ -3007,6 +3073,8 @@ const PACK_KN: [&str; WIDTH] = [
     "ಈ ಉತ್ತರ ಮುಗಿದ ನಂತರ ಈ ಕಡತಗಳನ್ನು ಕಳುಹಿಸಿ",
     "you@example.com",
     "ನಿಮ್ಮ ಗುಪ್ತಪದ ನಮೂದಿಸಿ",
+    "ಗುಂಪುಗಳು",
+    "ಕುಟುಂಬ ಅಥವಾ ತಂಡದೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ",
 ];
 
 const PACK_ML: [&str; WIDTH] = [
@@ -3095,6 +3163,8 @@ const PACK_ML: [&str; WIDTH] = [
     "ഈ മറുപടി തീർന്ന ശേഷം ഈ ഫയലുകൾ അയയ്ക്കുക",
     "you@example.com",
     "നിങ്ങളുടെ പാസ്‌വേഡ് നൽകുക",
+    "ഗ്രൂപ്പുകൾ",
+    "കുടുംബവുമായോ ടീമുമായോ പങ്കിടുക",
 ];
 
 const PACK_PA: [&str; WIDTH] = [
@@ -3183,6 +3253,8 @@ const PACK_PA: [&str; WIDTH] = [
     "ਇਹ ਜਵਾਬ ਮੁੱਕਣ ਤੋਂ ਬਾਅਦ ਇਹ ਫ਼ਾਈਲਾਂ ਭੇਜੋ",
     "you@example.com",
     "ਆਪਣਾ ਪਾਸਵਰਡ ਦਿਓ",
+    "ਸਮੂਹ",
+    "ਪਰਿਵਾਰ ਜਾਂ ਟੀਮ ਨਾਲ ਸਾਂਝਾ ਕਰੋ",
 ];
 
 const PACK_SW: [&str; WIDTH] = [
@@ -3271,6 +3343,8 @@ const PACK_SW: [&str; WIDTH] = [
     "Tuma faili hizi jibu hili likimalizika",
     "you@example.com",
     "Weka nenosiri lako",
+    "Vikundi",
+    "Shiriki na familia au timu yako",
 ];
 
 const PACK_AM: [&str; WIDTH] = [
@@ -3359,6 +3433,8 @@ const PACK_AM: [&str; WIDTH] = [
     "ይህ ምላሽ ሲያልቅ እነዚህን ፋይሎች ይላኩ",
     "you@example.com",
     "የይለፍ ቃልዎን ያስገቡ",
+    "ቡድኖች",
+    "ከቤተሰብዎ ወይም ከቡድንዎ ጋር ያጋሩ",
 ];
 
 const PACK_HA: [&str; WIDTH] = [
@@ -3447,6 +3523,8 @@ const PACK_HA: [&str; WIDTH] = [
     "Aika waɗannan fayiloli bayan wannan amsa ta ƙare",
     "you@example.com",
     "Shigar da kalmar sirrinka",
+    "Ƙungiyoyi",
+    "Raba tare da iyalinka ko ƙungiyarka",
 ];
 
 const PACK_YO: [&str; WIDTH] = [
@@ -3535,6 +3613,8 @@ const PACK_YO: [&str; WIDTH] = [
     "Fi àwọn fáìlì wọ̀nyí ránṣẹ́ lẹ́yìn tí ìdáhùn yìí bá parí",
     "you@example.com",
     "Tẹ ọ̀rọ̀ aṣínà rẹ",
+    "Àwọn ẹgbẹ́",
+    "Pín pẹ̀lú ìdílé tàbí ẹgbẹ́ rẹ",
 ];
 
 const PACK_IG: [&str; WIDTH] = [
@@ -3623,6 +3703,8 @@ const PACK_IG: [&str; WIDTH] = [
     "Ziga faịlụ ndị a mgbe azịza a gwụchara",
     "you@example.com",
     "Tinye okwuntụghe gị",
+    "Otu",
+    "Kekọrịta ya na ezinụlọ ma ọ bụ otu gị",
 ];
 
 const PACK_ZU: [&str; WIDTH] = [
@@ -3711,6 +3793,8 @@ const PACK_ZU: [&str; WIDTH] = [
     "Thumela lawa mafayela uma impendulo isiqedile",
     "you@example.com",
     "Faka iphasiwedi yakho",
+    "Amaqembu",
+    "Yabelana nomndeni noma neqembu lakho",
 ];
 
 const PACK_AF: [&str; WIDTH] = [
@@ -3799,6 +3883,8 @@ const PACK_AF: [&str; WIDTH] = [
     "Stuur hierdie lêers nadat hierdie antwoord klaar is",
     "you@example.com",
     "Voer jou wagwoord in",
+    "Groepe",
+    "Deel met jou familie of span",
 ];
 
 const PACK_RO: [&str; WIDTH] = [
@@ -3887,6 +3973,8 @@ const PACK_RO: [&str; WIDTH] = [
     "Trimite aceste fișiere după ce se termină acest răspuns",
     "you@example.com",
     "Scrie parola",
+    "Grupuri",
+    "Partajează cu familia sau echipa ta",
 ];
 
 const PACK_HU: [&str; WIDTH] = [
@@ -3975,6 +4063,8 @@ const PACK_HU: [&str; WIDTH] = [
     "Küldd el ezeket a fájlokat, ha ez a válasz kész",
     "you@example.com",
     "Írd be a jelszavad",
+    "Csoportok",
+    "Ossz meg a családoddal vagy a csapatoddal",
 ];
 
 const PACK_BG: [&str; WIDTH] = [
@@ -4063,6 +4153,8 @@ const PACK_BG: [&str; WIDTH] = [
     "Изпратете тези файлове, когато този отговор свърши",
     "you@example.com",
     "Въведете паролата",
+    "Групи",
+    "Споделяйте със семейството или екипа си",
 ];
 
 const PACK_HR: [&str; WIDTH] = [
@@ -4151,6 +4243,8 @@ const PACK_HR: [&str; WIDTH] = [
     "Pošaljite ove datoteke kad ovaj odgovor završi",
     "you@example.com",
     "Upišite lozinku",
+    "Grupe",
+    "Dijelite s obitelji ili timom",
 ];
 
 const PACK_SK: [&str; WIDTH] = [
@@ -4239,6 +4333,8 @@ const PACK_SK: [&str; WIDTH] = [
     "Odošlite tieto súbory, keď táto odpoveď skončí",
     "you@example.com",
     "Zadajte heslo",
+    "Skupiny",
+    "Zdieľajte s rodinou alebo tímom",
 ];
 
 const PACK_SL: [&str; WIDTH] = [
@@ -4327,6 +4423,8 @@ const PACK_SL: [&str; WIDTH] = [
     "Pošljite te datoteke, ko se ta odgovor konča",
     "you@example.com",
     "Vpišite geslo",
+    "Skupine",
+    "Delite z družino ali ekipo",
 ];
 
 const PACK_LT: [&str; WIDTH] = [
@@ -4415,6 +4513,8 @@ const PACK_LT: [&str; WIDTH] = [
     "Išsiųskite šiuos failus, kai šis atsakymas baigsis",
     "you@example.com",
     "Įrašykite slaptažodį",
+    "Grupės",
+    "Dalykitės su šeima ar komanda",
 ];
 
 const PACK_LV: [&str; WIDTH] = [
@@ -4503,6 +4603,8 @@ const PACK_LV: [&str; WIDTH] = [
     "Nosūtiet šos failus, kad šī atbilde beigsies",
     "you@example.com",
     "Ierakstiet paroli",
+    "Grupas",
+    "Kopīgojiet ar ģimeni vai komandu",
 ];
 
 const PACK_ET: [&str; WIDTH] = [
@@ -4591,6 +4693,8 @@ const PACK_ET: [&str; WIDTH] = [
     "Saada need failid, kui see vastus on valmis",
     "you@example.com",
     "Sisesta parool",
+    "Grupid",
+    "Jagage pere või meeskonnaga",
 ];
 
 const PACK_SR: [&str; WIDTH] = [
@@ -4679,6 +4783,8 @@ const PACK_SR: [&str; WIDTH] = [
     "Пошаљите ове датотеке кад овај одговор заврши",
     "you@example.com",
     "Унесите лозинку",
+    "Групе",
+    "Делите са породицом или тимом",
 ];
 
 const PACK_BS: [&str; WIDTH] = [
@@ -4767,6 +4873,8 @@ const PACK_BS: [&str; WIDTH] = [
     "Pošaljite ove datoteke kad ovaj odgovor završi",
     "you@example.com",
     "Unesite lozinku",
+    "Grupe",
+    "Dijelite s porodicom ili timom",
 ];
 
 const PACK_MK: [&str; WIDTH] = [
@@ -4855,6 +4963,8 @@ const PACK_MK: [&str; WIDTH] = [
     "Испратете ги овие датотеки кога ќе заврши овој одговор",
     "you@example.com",
     "Внесете ја лозинката",
+    "Групи",
+    "Споделете со семејството или тимот",
 ];
 
 const PACK_SQ: [&str; WIDTH] = [
@@ -4943,6 +5053,8 @@ const PACK_SQ: [&str; WIDTH] = [
     "Dërgoni këta skedarë pasi të mbarojë kjo përgjigje",
     "you@example.com",
     "Vendosni fjalëkalimin tuaj",
+    "Grupet",
+    "Ndani me familjen ose ekipin tuaj",
 ];
 
 const PACK_KA: [&str; WIDTH] = [
@@ -5031,6 +5143,8 @@ const PACK_KA: [&str; WIDTH] = [
     "ეს ფაილები გაგზავნეთ ამ პასუხის დასრულების შემდეგ",
     "you@example.com",
     "შეიყვანეთ პაროლი",
+    "ჯგუფები",
+    "გაუზიარეთ ოჯახს ან გუნდს",
 ];
 
 const PACK_HY: [&str; WIDTH] = [
@@ -5119,6 +5233,8 @@ const PACK_HY: [&str; WIDTH] = [
     "Ուղարկիր այս ֆայլերը այս պատասխանն ավարտվելուց հետո",
     "you@example.com",
     "Մուտքագրեք ձեր գաղտնաբառը",
+    "Խմբեր",
+    "Կիսվեք ընտանիքի կամ թիմի հետ",
 ];
 
 const PACK_AZ: [&str; WIDTH] = [
@@ -5207,6 +5323,8 @@ const PACK_AZ: [&str; WIDTH] = [
     "Bu cavab bitəndən sonra bu faylları göndərin",
     "you@example.com",
     "Şifrənizi daxil edin",
+    "Qruplar",
+    "Ailəniz və ya komandanızla paylaşın",
 ];
 
 const PACK_KK: [&str; WIDTH] = [
@@ -5295,6 +5413,8 @@ const PACK_KK: [&str; WIDTH] = [
     "Осы жауап біткен соң мына файлдарды жіберіңіз",
     "you@example.com",
     "Құпиясөзіңізді енгізіңіз",
+    "Топтар",
+    "Отбасыңызбен немесе командаңызбен бөлісіңіз",
 ];
 
 const PACK_UZ: [&str; WIDTH] = [
@@ -5383,6 +5503,8 @@ const PACK_UZ: [&str; WIDTH] = [
     "Bu javob tugagach, shu fayllarni yuboring",
     "you@example.com",
     "Parolingizni kiriting",
+    "Guruhlar",
+    "Oilangiz yoki jamoangiz bilan ulashing",
 ];
 
 const PACK_MN: [&str; WIDTH] = [
@@ -5471,6 +5593,8 @@ const PACK_MN: [&str; WIDTH] = [
     "Энэ хариу дууссаны дараа эдгээр файлыг илгээнэ үү",
     "you@example.com",
     "Нууц үгээ оруулна уу",
+    "Бүлгүүд",
+    "Гэр бүл эсвэл багтайгаа хуваалцаарай",
 ];
 
 const PACK_NE: [&str; WIDTH] = [
@@ -5559,6 +5683,8 @@ const PACK_NE: [&str; WIDTH] = [
     "यो जवाफ सकिएपछि यी फाइल पठाउनुहोस्",
     "you@example.com",
     "आफ्नो पासवर्ड हाल्नुहोस्",
+    "समूहहरू",
+    "परिवार वा टोलीसँग साझा गर्नुहोस्",
 ];
 
 const PACK_SI: [&str; WIDTH] = [
@@ -5647,6 +5773,8 @@ const PACK_SI: [&str; WIDTH] = [
     "මෙම පිළිතුර නිම වූ පසු මෙම ගොනු යවන්න",
     "you@example.com",
     "ඔබේ මුරපදය ඇතුළත් කරන්න",
+    "කණ්ඩායම්",
+    "පවුල හෝ කණ්ඩායම සමඟ බෙදාගන්න",
 ];
 
 const PACK_MY: [&str; WIDTH] = [
@@ -5735,6 +5863,8 @@ const PACK_MY: [&str; WIDTH] = [
     "ဤအဖြေပြီးသည့်နောက် ဤဖိုင်များကို ပို့ပါ",
     "you@example.com",
     "သင့်စကားဝှက်ကို ရိုက်ထည့်ပါ",
+    "အုပ်စုများ",
+    "မိသားစု သို့မဟုတ် အဖွဲ့နှင့် မျှဝေပါ",
 ];
 
 const PACK_KM: [&str; WIDTH] = [
@@ -5823,6 +5953,8 @@ const PACK_KM: [&str; WIDTH] = [
     "ផ្ញើឯកសារទាំងនេះ បន្ទាប់ពីចម្លើយនេះចប់",
     "you@example.com",
     "បញ្ចូលពាក្យសម្ងាត់របស់អ្នក",
+    "ក្រុម",
+    "ចែករំលែកជាមួយគ្រួសារ ឬក្រុមរបស់អ្នក",
 ];
 
 const PACK_LO: [&str; WIDTH] = [
@@ -5911,6 +6043,8 @@ const PACK_LO: [&str; WIDTH] = [
     "ສົ່ງໄຟລ໌ເຫຼົ່ານີ້ຫຼັງຈາກຄຳຕອບນີ້ສຳເລັດ",
     "you@example.com",
     "ໃສ່ລະຫັດຜ່ານຂອງທ່ານ",
+    "ກຸ່ມ",
+    "ແບ່ງປັນກັບຄອບຄົວ ຫຼື ທີມຂອງທ່ານ",
 ];
 
 const PACK_TL: [&str; WIDTH] = [
@@ -5999,6 +6133,8 @@ const PACK_TL: [&str; WIDTH] = [
     "Ipadala ang mga file na ito pagkatapos ng sagot na ito",
     "you@example.com",
     "Ilagay ang kontrasenyas mo",
+    "Mga Grupo",
+    "Magbahagi sa iyong pamilya o team",
 ];
 
 const PACK_CA: [&str; WIDTH] = [
@@ -6087,6 +6223,8 @@ const PACK_CA: [&str; WIDTH] = [
     "Envia aquests fitxers quan acabi aquesta resposta",
     "you@example.com",
     "Introdueix la contrasenya",
+    "Grups",
+    "Comparteix amb la família o l'equip",
 ];
 
 const PACK_EU: [&str; WIDTH] = [
@@ -6175,6 +6313,8 @@ const PACK_EU: [&str; WIDTH] = [
     "Bidali fitxategi hauek erantzun hau amaitu ondoren",
     "you@example.com",
     "Sartu pasahitza",
+    "Taldeak",
+    "Partekatu zure familiarekin edo taldearekin",
 ];
 
 const PACK_GL: [&str; WIDTH] = [
@@ -6263,6 +6403,8 @@ const PACK_GL: [&str; WIDTH] = [
     "Envía estes ficheiros cando remate esta resposta",
     "you@example.com",
     "Escribe o teu contrasinal",
+    "Grupos",
+    "Comparte coa túa familia ou equipo",
 ];
 
 const PACK_CY: [&str; WIDTH] = [
@@ -6351,6 +6493,8 @@ const PACK_CY: [&str; WIDTH] = [
     "Anfonwch y ffeiliau hyn ar ôl i'r ateb hwn orffen",
     "you@example.com",
     "Rhowch eich cyfrinair",
+    "Grwpiau",
+    "Rhannu gyda'ch teulu neu'ch tîm",
 ];
 
 const PACK_GA: [&str; WIDTH] = [
@@ -6439,6 +6583,8 @@ const PACK_GA: [&str; WIDTH] = [
     "Seol na comhaid seo tar éis don fhreagra seo críochnú",
     "you@example.com",
     "Cuir isteach do phasfhocal",
+    "Grúpaí",
+    "Roinn le do theaghlach nó d'fhoireann",
 ];
 
 const PACK_IS: [&str; WIDTH] = [
@@ -6527,6 +6673,8 @@ const PACK_IS: [&str; WIDTH] = [
     "Sendu þessar skrár eftir að þetta svar lýkur",
     "you@example.com",
     "Sláðu inn lykilorðið þitt",
+    "Hópar",
+    "Deildu með fjölskyldunni eða teyminu",
 ];
 
 const PACK_MT: [&str; WIDTH] = [
@@ -6615,6 +6763,8 @@ const PACK_MT: [&str; WIDTH] = [
     "Ibgħat dawn il-fajls wara li tispiċċa din it-tweġiba",
     "you@example.com",
     "Daħħal il-kelma tas-sigurtà tiegħek",
+    "Gruppi",
+    "Aqsam mal-familja jew mat-tim tiegħek",
 ];
 
 const PACK_LB: [&str; WIDTH] = [
@@ -6703,6 +6853,8 @@ const PACK_LB: [&str; WIDTH] = [
     "Schéckt dës Dateien, nodeems dës Äntwert fäerdeg ass",
     "you@example.com",
     "Gitt Äert Passwuert an",
+    "Gruppen",
+    "Mat der Famill oder dem Team deelen",
 ];
 
 const PACK_BE: [&str; WIDTH] = [
@@ -6791,6 +6943,8 @@ const PACK_BE: [&str; WIDTH] = [
     "Адпраўце гэтыя файлы пасля заканчэння гэтага адказу",
     "you@example.com",
     "Увядзіце ваш пароль",
+    "Групы",
+    "Дзяліцеся з сям'ёй або камандай",
 ];
 
 const PACK_PS: [&str; WIDTH] = [
@@ -6879,6 +7033,8 @@ const PACK_PS: [&str; WIDTH] = [
     "د دې ځواب له پای وروسته دا فایلونه ولېږئ",
     "you@example.com",
     "خپل پټنوم ولیکئ",
+    "ډلې",
+    "له کورنۍ یا ټیم سره یې شریک کړئ",
 ];
 
 const PACK_SD: [&str; WIDTH] = [
@@ -6967,6 +7123,8 @@ const PACK_SD: [&str; WIDTH] = [
     "هي جواب پورو ٿيڻ کان پوءِ هي فائلون موڪليو",
     "you@example.com",
     "پنهنجو پاسورڊ لکو",
+    "گروپ",
+    "پنهنجي خاندان يا ٽيم سان شيئر ڪريو",
 ];
 
 const PACK_KU: [&str; WIDTH] = [
@@ -7055,6 +7213,8 @@ const PACK_KU: [&str; WIDTH] = [
     "Piştî ku ev bersiv biqede van pelan bişîne",
     "you@example.com",
     "Şîfreya xwe binivîse",
+    "Kom",
+    "Bi malbat an tîma xwe re parve bike",
 ];
 
 const PACK_CKB: [&str; WIDTH] = [
@@ -7143,6 +7303,8 @@ const PACK_CKB: [&str; WIDTH] = [
     "دوای تەواوبوونی ئەم وەڵامە ئەم پەڕگانە بنێرە",
     "you@example.com",
     "وشەی نهێنی بنووسە",
+    "گرووپەکان",
+    "لەگەڵ خێزان یان تیمەکەت هاوبەشی بکە",
 ];
 
 const PACK_YI: [&str; WIDTH] = [
@@ -7231,6 +7393,8 @@ const PACK_YI: [&str; WIDTH] = [
     "שיקט די טעקעס נאכדעם וואס דער ענטפער ענדיקט זיך",
     "you@example.com",
     "גיט אריין דאס פאסווארט",
+    "גרופּעס",
+    "טיילט מיט דער משפּחה אָדער מאַנשאַפֿט",
 ];
 
 const PACK_DV: [&str; WIDTH] = [
@@ -7319,6 +7483,8 @@ const PACK_DV: [&str; WIDTH] = [
     "މި ޖަވާބު ނިމުމުން މި ފައިލްތައް ފޮނުވާ",
     "you@example.com",
     "ޕާސްވޯޑް ލިޔޭ",
+    "ގްރޫޕްތައް",
+    "އާއިލާ ނުވަތަ ޓީމާ ހިއްސާކުރޭ",
 ];
 
 const PACK_UG: [&str; WIDTH] = [
@@ -7407,6 +7573,8 @@ const PACK_UG: [&str; WIDTH] = [
     "بۇ جاۋاب تۈگىگەندىن كېيىن بۇ ھۆججەتلەرنى يوللاڭ",
     "you@example.com",
     "پارولىڭىزنى كىرگۈزۈڭ",
+    "گۇرۇپپىلار",
+    "ئائىلە ياكى گۇرۇپپىڭىز بىلەن ھەمبەھىرلەڭ",
 ];
 
 const PACK_SO: [&str; WIDTH] = [
@@ -7495,6 +7663,8 @@ const PACK_SO: [&str; WIDTH] = [
     "Dir faylashan marka jawaabtan dhammaato",
     "you@example.com",
     "Geli eraygaaga sirta",
+    "Kooxaha",
+    "La wadaag qoyskaaga ama kooxdaada",
 ];
 
 const PACK_RW: [&str; WIDTH] = [
@@ -7583,6 +7753,8 @@ const PACK_RW: [&str; WIDTH] = [
     "Ohereza izi dosiye nyuma y'uko iri subiza rirangiye",
     "you@example.com",
     "Andika ijambo ryawe ry'ibanga",
+    "Amatsinda",
+    "Sangiza umuryango wawe cyangwa itsinda ryawe",
 ];
 
 const PACK_HT: [&str; WIDTH] = [
@@ -7671,6 +7843,8 @@ const PACK_HT: [&str; WIDTH] = [
     "Voye fichye sa yo apre repons sa a fini",
     "you@example.com",
     "Antre modpas ou",
+    "Gwoup",
+    "Pataje ak fanmi w oswa ekip ou",
 ];
 
 const PACK_JV: [&str; WIDTH] = [
@@ -7759,6 +7933,8 @@ const PACK_JV: [&str; WIDTH] = [
     "Kirim berkas iki sawisé wangsulan iki rampung",
     "you@example.com",
     "Lebokaké sandhimu",
+    "Grup",
+    "Bagekna karo kulawarga utawa tim sampeyan",
 ];
 
 static CATALOGS: &[Catalog] = &[

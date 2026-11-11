@@ -11,6 +11,24 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Groups, rebuilt so anyone can use it.** Groups moved out of Settings into
+  its own sidebar tab, **Groups** (translated in every Settings language);
+  Settings keeps an **Open Groups** card. The page now opens with **What is a
+  group?**: what a group is, four things you can do in one, three steps under
+  **How it works**, and the privacy promise. Then you pick **Start a new group**
+  or **Join a group** (with a link, or six numbers in the same room) and answer
+  two or three labelled questions. Inside a group, the long wall of sections is
+  now one page at a time (**Invite someone**, **Shared notes**, **People**,
+  **Shared helpers**, **Ask the group**, **Borrow an AI**, **Departments**,
+  **History**); each says what it is for and how to use it in numbered steps. A
+  **Getting started** list shows what a new group still has to do, with **Do
+  this** buttons. On/off settings read **On**/**Off** with **Turn on**/**Turn
+  off**, jargon is reworded ("six numbers", "safety code", "Lend this
+  computer's AI"), and **Leave this group** now asks "Are you sure?" before it
+  leaves. Group skills on the Skills page open the matching page directly
+  (`SkillAction::Groups`). The wording and the "what's next" rules live in
+  `sovra-core` (`group/guide.rs`) with unit tests.
+
 ## [0.2.0] — 2026-11-11
 
 - **`sovra-train`** (new adapter crate, not yet scheduled by the app): local

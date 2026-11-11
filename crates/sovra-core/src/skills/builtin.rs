@@ -3,6 +3,7 @@
 //! for non-technical people to browse and try with one click.
 
 use super::{Skill, SkillAction, SkillKind};
+use crate::group::GroupPage;
 
 /// Plain-English presentation metadata for a [`Skill`] on the Skills page.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,7 +158,7 @@ impl Skill {
                 "/connections ".to_owned(),
             ),
             "groups" => (
-                "Opens Groups, where your family or team's computers join together. Share a detail like “the boiler service is on 12 March” and everyone's helpers can answer with it, saying who shared it.".to_owned(),
+                "Opens Groups, which explains everything step by step: start a group or join one, then invite your family or team. Share a detail like “the boiler service is on 12 March” and everyone's helpers can answer with it, saying who shared it.".to_owned(),
                 "/groups ".to_owned(),
             ),
             "share-artifact" => (
@@ -165,15 +166,15 @@ impl Skill {
                 "/share-artifact ".to_owned(),
             ),
             "share-ai" => (
-                "Opens Groups. On the computer with a good AI, turn on Let my group use this computer's AI. On an older laptop with no AI, turn on Use a free computer's AI — then just chat, and the free computer answers.".to_owned(),
+                "Opens Groups → Borrow an AI. On the computer with a good AI, turn on Lend this computer's AI. On an older laptop with no AI, turn on Borrow an AI when this computer has none — then just chat, and the other computer answers.".to_owned(),
                 "/share-ai ".to_owned(),
             ),
             "departments" => (
-                "Opens Groups. Under Departments, type Legal, tap the people who work in Legal, and press Save department. Then, when sharing, choose Just Legal — only Legal's computers get it.".to_owned(),
+                "Opens Groups → Departments. Type Legal, tap the people who work in Legal, and press Save department. Then, when sharing, choose Just Legal — only Legal's computers get it.".to_owned(),
                 "/departments ".to_owned(),
             ),
             "share-history" => (
-                "Opens Groups. Scroll to History on this computer to see each thing you shared and each memory you gave to someone's helpers, and whether the record checks out. Read the fingerprint to your accountant or IT person so they can compare it with theirs.".to_owned(),
+                "Opens Groups → History to see each thing you shared and each memory you gave to someone's helpers, and whether the record checks out. Read the fingerprint to your accountant or IT person so they can compare it with theirs.".to_owned(),
                 "/share-history ".to_owned(),
             ),
             "share-helper" => (
@@ -181,15 +182,15 @@ impl Skill {
                 "/share-helper ".to_owned(),
             ),
             "add-computer" => (
-                "Opens Groups. On a computer already in the group, press “Show a code for my other computer”. On the new one, type the six digits, then check both screens show the same four pictures and press They match.".to_owned(),
+                "Opens Groups → Invite someone. On a computer already in the group, press “Show six numbers for my other computer”. On the new one, choose Join a group, then type the six numbers, then check both screens show the same four pictures and press They match.".to_owned(),
                 "/add-computer ".to_owned(),
             ),
             "share-privately" => (
-                "Opens Groups. Write something like “Sam's surprise party is on Friday”, choose Just Dad, and press Share. Only you and Dad can see it; it never goes to anyone else's computer.".to_owned(),
+                "Opens Groups → Shared notes. Write something like “Sam's surprise party is on Friday”, choose Just Dad, and press Share. Only you and Dad can see it; it never goes to anyone else's computer.".to_owned(),
                 "/share-privately ".to_owned(),
             ),
             "ask-group" => (
-                "Opens Groups. Ask a question like “Who is our dentist?” and the computers in your group that allow it look in their own memory and send back a short answer with who it came from. Your memories stay on your computer unless you turn on answering.".to_owned(),
+                "Opens Groups → Ask the group. Ask a question like “Who is our dentist?” and the computers in your group that allow it look in their own memory and send back a short answer with who it came from. Your memories stay on your computer unless you turn on Answer questions from my group.".to_owned(),
                 "/ask-group ".to_owned(),
             ),
             "share-memory" => (
@@ -445,8 +446,8 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "groups",
             "Groups",
-            "Open Settings → Groups to start or join a group, invite family or teammates, and share details everyone's helpers can use.",
-            SkillAction::Settings,
+            "Open Groups to start or join a group, invite family or teammates, and share notes everyone's helpers can use.",
+            SkillAction::Groups(GroupPage::Notes),
             &["family", "share-with-group"],
         ),
         action(
@@ -459,22 +460,22 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "share-ai",
             "Share an AI",
-            "Open Settings → Groups to let a computer with no AI use a free computer's AI in your group. Only the conversation's words travel; the helping computer never uses its tools for someone else.",
-            SkillAction::Settings,
+            "Open Groups to let a computer with no AI borrow another group computer's AI. Only the conversation's words travel; the helping computer never uses its tools for someone else.",
+            SkillAction::Groups(GroupPage::BorrowAi),
             &["work-handoff", "borrow-ai"],
         ),
         action(
             "share-history",
             "Sharing history",
-            "Open Settings → Groups to see a signed record of everything this computer shared with your group and every memory it gave to someone's helpers. Only fingerprints of the words are kept, and any change to the record shows.",
-            SkillAction::Settings,
+            "Open Groups to see a signed record of everything this computer shared with your group and every memory it gave to someone's helpers. Only fingerprints of the words are kept, and any change to the record shows.",
+            SkillAction::Groups(GroupPage::History),
             &["audit", "audit-history"],
         ),
         action(
             "departments",
             "Departments",
-            "Open Settings → Groups to set up departments like Legal or Finance. Each keeps its own shared details, locked so only the people in it can read them; people taken out stop getting new ones.",
-            SkillAction::Settings,
+            "Open Groups to set up departments like Legal or Finance. Each keeps its own shared details, locked so only the people in it can read them; people taken out stop getting new ones.",
+            SkillAction::Groups(GroupPage::Departments),
             &["department", "business-units"],
         ),
         action(
@@ -487,22 +488,22 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "add-computer",
             "Add a computer",
-            "Open Settings → Groups to add another of your computers or a new person: in the same room with a six-digit code and four matching pictures, or from anywhere with an invite link or QR code.",
-            SkillAction::Settings,
+            "Open Groups to add another of your computers or a new person: in the same room with six numbers and four matching pictures, or from anywhere with an invite link or QR code.",
+            SkillAction::Groups(GroupPage::Invite),
             &["pair", "same-room-code"],
         ),
         action(
             "share-privately",
             "Share with one person",
-            "Open Settings → Groups to share a detail, document or list with just one person in your group. It is locked so only your two computers can read it.",
-            SkillAction::Settings,
+            "Open Groups to share a note, document or list with just one person in your group. It is locked so only your two computers can read it.",
+            SkillAction::Groups(GroupPage::Notes),
             &["just-you-and", "private-share"],
         ),
         action(
             "ask-group",
             "Ask my group",
-            "Open Settings → Groups to ask the memories of your group's computers, choose whether your own memory answers them, and see every question you were asked.",
-            SkillAction::Settings,
+            "Open Groups to ask the memories of your group's computers, choose whether your own memory answers them, and see every question you were asked.",
+            SkillAction::Groups(GroupPage::Ask),
             &["federated", "ask-family"],
         ),
         action(

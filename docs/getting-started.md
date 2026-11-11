@@ -42,7 +42,7 @@ tools or group networking; see [network destinations](value-realisation/03-sover
 | See what Sovra remembers and where it came from | [Reviewing knowledge](knowledge.md) |
 | Ask several helpers together or keep a reply | [Teams and artifacts](teams-and-artifacts.md) |
 | Run something later | [Schedules](schedules.md) |
-| Share a detail with family or colleagues | [Settings → Groups](groups.md) |
+| Share a detail with family or colleagues | [Groups](groups.md) |
 | Connect WhatsApp or Telegram | [Messaging](communications.md) |
 | Use Google services | [Google](google.md) |
 | Add tools from another service | [MCP servers](connected-services.md) |

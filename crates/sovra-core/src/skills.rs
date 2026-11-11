@@ -36,6 +36,8 @@ pub enum SkillAction {
     /// Opens Connections on the card that asks for a web address.
     ConnectService,
     Settings,
+    /// Opens the Groups page on one of its pages.
+    Groups(crate::group::GroupPage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

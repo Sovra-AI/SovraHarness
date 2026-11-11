@@ -90,6 +90,7 @@ pub struct Shell {
     _connection_navigation: Subscription,
     _show_local_ai: Subscription,
     _show_models: Subscription,
+    _open_groups: Subscription,
     _team_ask: Subscription,
     _try_asking: Subscription,
 }
@@ -198,6 +199,12 @@ impl Shell {
                     .read(cx)
                     .focus_handle(cx)
                     .focus(window, cx);
+            },
+        );
+        let open_groups = cx.subscribe(
+            &models,
+            |shell, _, _: &crate::models_view::OpenGroups, cx| {
+                shell.select_tab(NavTab::Groups, cx);
             },
         );
         let models_tour = cx.subscribe(
@@ -467,7 +474,7 @@ impl Shell {
                             let _ =
                                 client.send(Command::Group(sovra_core::group::GroupCommand::Load));
                         }
-                        // Settings → Groups renders this computer's group and its knowledge.
+                        // The Groups tab renders this computer's group and its knowledge.
                         if let sovra_core::Event::Group(event) = &event {
                             let can_answer = shell.models.update(cx, |models, cx| {
                                 models.apply_group_event((**event).clone(), cx);
@@ -621,6 +628,7 @@ impl Shell {
             _connection_navigation: connection_navigation,
             _show_local_ai: show_local_ai,
             _show_models: show_models,
+            _open_groups: open_groups,
             focus_handle,
             history_compact: Self::sidebar_rail(window),
             history_overlay_open: false,
@@ -682,7 +690,12 @@ impl Shell {
             NavTab::Settings | NavTab::Connections => {
                 self.google_card.update(cx, |_, cx| cx.notify());
             }
-            NavTab::Chat | NavTab::MyAis | NavTab::Models | NavTab::Schedules | NavTab::Skills => {}
+            NavTab::Chat
+            | NavTab::MyAis
+            | NavTab::Models
+            | NavTab::Schedules
+            | NavTab::Skills
+            | NavTab::Groups => {}
         }
         cx.notify();
     }
@@ -700,7 +713,7 @@ impl Shell {
         &self.state
     }
 
-    /// This computer's group, as Settings → Groups folds it from `Event::Group`.
+    /// This computer's group, as the Groups tab folds it from `Event::Group`.
     /// Artifacts and Knowledge read it to offer "Share with my group".
     pub(crate) fn groups<'a>(&self, cx: &'a App) -> &'a sovra_core::group::GroupsView {
         &self.models.read(cx).groups
@@ -769,6 +782,7 @@ impl Shell {
                 .update(cx, crate::memory_view::MemoryView::load);
         }
         self.models.update(cx, |models, cx| {
+            models.groups_page = tab == NavTab::Groups;
             if tab == NavTab::Connections {
                 // Opening the tab shows the catalogue. A setup already in
                 // progress keeps going when its key is saved.
@@ -820,6 +834,7 @@ impl Shell {
         // would otherwise send a closed Settings page back to Models.
         self.state.select_tab(NavTab::Connections);
         self.models.update(cx, |models, cx| {
+            models.groups_page = false;
             models.settings_open = false;
             models.home_open = false;
             models.connections_page = true;
@@ -848,6 +863,7 @@ impl Shell {
         // `select_tab(Models)` opens the model home and would close the download.
         self.state.select_tab(NavTab::Models);
         self.models.update(cx, |models, cx| {
+            models.groups_page = false;
             models.connections_page = false;
             models.open_kind = None;
             models.settings_open = false;
@@ -1785,12 +1801,14 @@ impl Shell {
             .into_any_element(),
             ScreenRoute::MainWorkspace => {
                 let center = match self.state.active_tab {
-                    NavTab::Models | NavTab::Settings | NavTab::Connections => div()
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .child(self.models.clone())
-                        .into_any_element(),
+                    NavTab::Models | NavTab::Settings | NavTab::Connections | NavTab::Groups => {
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .child(self.models.clone())
+                            .into_any_element()
+                    }
                     NavTab::MyAis => render_my_ais_view(
                         &self.state,
                         &self.sim_route_input,

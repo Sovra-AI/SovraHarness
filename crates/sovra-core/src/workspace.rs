@@ -44,13 +44,16 @@ pub enum NavTab {
     Artifacts,
     /// Links this app can use. Appended so existing discriminants stay stable.
     Connections,
+    /// Family or team computers joined together (`crate::group`).
+    Groups,
 }
 
 impl NavTab {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Chat,
         Self::Team,
         Self::Artifacts,
+        Self::Groups,
         Self::MyAis,
         Self::Knowledge,
         Self::Skills,
@@ -72,6 +75,7 @@ impl NavTab {
             Self::Team => "Team",
             Self::Artifacts => "Artifacts",
             Self::Connections => "Connections",
+            Self::Groups => "Groups",
         }
     }
 
@@ -87,6 +91,7 @@ impl NavTab {
             Self::Team => crate::models::ChromeKey::NavTeam,
             Self::Artifacts => crate::models::ChromeKey::NavArtifacts,
             Self::Connections => crate::models::ChromeKey::NavConnections,
+            Self::Groups => crate::models::ChromeKey::NavGroups,
         }
     }
 
@@ -102,6 +107,7 @@ impl NavTab {
             Self::Team => crate::models::ChromeKey::NavTeamTooltip,
             Self::Artifacts => crate::models::ChromeKey::NavArtifactsTooltip,
             Self::Connections => crate::models::ChromeKey::NavConnectionsTooltip,
+            Self::Groups => crate::models::ChromeKey::NavGroupsTooltip,
         }
     }
 

@@ -21,11 +21,12 @@ use crate::chat_history_view::render_chat_history_section;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::{Shell, logo};
 
-const PRIMARY_TABS: [NavTab; 4] = [
+const PRIMARY_TABS: [NavTab; 5] = [
     NavTab::Chat,
     NavTab::Team,
     NavTab::Artifacts,
     NavTab::Schedules,
+    NavTab::Groups,
 ];
 
 const AI_SETUP_TABS: [NavTab; 6] = [
@@ -297,6 +298,7 @@ fn nav_tab_meta(tab: NavTab) -> (&'static str, IconName) {
         NavTab::Skills => ("nav-skills", IconName::BookOpen),
         NavTab::Settings => ("nav-settings", IconName::Settings),
         NavTab::Connections => ("nav-connections", IconName::Link),
+        NavTab::Groups => ("nav-groups", IconName::Heart),
     }
 }
 

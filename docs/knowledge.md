@@ -59,5 +59,5 @@ source access and model choices. **Guide** explains the memory concepts; example
 in that section are illustrative rather than your own saved facts.
 
 Shared knowledge between computers is managed separately in
-[Settings → Groups](groups.md). Local storage and backup limitations are covered
+[Groups](groups.md). Local storage and backup limitations are covered
 in [Configuration and local data](configuration.md).

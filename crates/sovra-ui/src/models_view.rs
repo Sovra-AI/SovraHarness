@@ -79,6 +79,10 @@ impl gpui_kit::EventEmitter<ShowLocalAi> for ModelsView {}
 pub(crate) struct ShowModels;
 impl gpui_kit::EventEmitter<ShowModels> for ModelsView {}
 
+/// Settings points to the Groups tab.
+pub(crate) struct OpenGroups;
+impl gpui_kit::EventEmitter<OpenGroups> for ModelsView {}
+
 #[allow(
     clippy::struct_excessive_bools,
     reason = "independent view flags; a state enum would be artificial"
@@ -116,6 +120,8 @@ pub struct ModelsView {
     pub(crate) settings_open: bool,
     /// The Connections tab is showing this view.
     pub(crate) connections_page: bool,
+    /// The Groups tab is showing this view (it owns the group state and form).
+    pub(crate) groups_page: bool,
     /// The card the person opened. `None` is the first-screen catalogue.
     pub(crate) open_kind: Option<sovra_core::CatalogueKind>,
     /// Google status for the catalogue. The shell copies each Google event here.
@@ -148,7 +154,7 @@ pub struct ModelsView {
     pub(crate) service_client_secret: Entity<InputState>,
     /// Form state for the connected services screen.
     pub(crate) services_screen: crate::service_connect_view::ServicesScreen,
-    /// Settings → Groups: this computer's group, folded from runtime events.
+    /// The Groups tab: this computer's group, folded from runtime events.
     pub(crate) groups: sovra_core::group::GroupsView,
     pub(crate) groups_form: crate::groups_view::GroupsForm,
     scroll: UniformListScrollHandle,
@@ -323,6 +329,7 @@ impl ModelsView {
             connections_open: false,
             settings_open: false,
             connections_page: false,
+            groups_page: false,
             open_kind: None,
             google: sovra_core::google::GoogleConnection::default(),
             connection_form: None,
@@ -1501,6 +1508,9 @@ impl ModelsView {
             self.open_connection(Some(connection), window, cx);
             self.state.notice = notice;
             self.state.error = error;
+        }
+        if self.groups_page {
+            return self.render_groups_page(cx);
         }
         if self.connections_page {
             return self.render_connections_page(window, cx);

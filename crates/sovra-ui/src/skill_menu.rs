@@ -109,6 +109,11 @@ impl Shell {
                 );
             }
             SkillAction::Settings => self.select_tab(NavTab::Settings, cx),
+            SkillAction::Groups(page) => {
+                self.select_tab(NavTab::Groups, cx);
+                self.models()
+                    .update(cx, |models, cx| models.open_group_page(page, cx));
+            }
         }
     }
 
