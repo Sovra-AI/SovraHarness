@@ -17,6 +17,7 @@ Map of the top-level guides for SovraHarness. Start at the
 | [Reviewing knowledge](knowledge.md) | Check sources, explore connections and stop recall |
 | [Memory capture and recall](memory-capture-and-recall.md) | Current contract for saving and recalling a chat turn |
 | [Agent memory log](agent-memory.md) | Dated audits and measured limits; not the day-to-day contract |
+| [Knowledge benchmark](knowledge-benchmark.md) | Current tool assessment, reproducible retrieval diagnostic and verification gaps |
 | [Models](models.md) | Connect an AI service and pick a chat model |
 | [Files in chat](files.md) | Paperclip attachments and the document reader helper |
 | [File understanding](file-ontology.md) | What a file is, and live folder reading |

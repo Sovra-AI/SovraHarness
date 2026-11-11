@@ -209,13 +209,26 @@ impl SemanticIndex for LocalFileIndex {
             params![sql_id(setting.id)?, dimensions],
         )
         .map_err(|e| db_error(&e))?;
-        for (input, vector) in inputs.iter().zip(vectors) {
-            let bytes: Vec<u8> = vector
-                .values()
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect();
-            tx.execute(&format!("INSERT OR IGNORE INTO index_embeddings(setting_id,chunk_id,vector) SELECT ?2,c.id,?4 FROM index_chunks c WHERE c.id=?3 AND c.body=?5 AND c.id IN ({CURRENT})"), params![setting.root_id,sql_id(setting.id)?,input.chunk_id,bytes,input.text]).map_err(|e| db_error(&e))?;
+        {
+            // Check the submitted chunk through the existing reverse indexes;
+            // rebuilding the entire current-chunk set per vector is quadratic.
+            let mut insert = tx.prepare("INSERT OR IGNORE INTO index_embeddings(setting_id,chunk_id,vector) SELECT ?2,c.id,?4 FROM index_chunks c WHERE c.id=?3 AND c.body=?5 AND EXISTS (SELECT 1 FROM index_version_chunks vc JOIN index_files f ON f.current_version=vc.version_id WHERE vc.chunk_id=c.id AND f.root_id=?1 AND f.available=1)").map_err(|e| db_error(&e))?;
+            for (input, vector) in inputs.iter().zip(vectors) {
+                let bytes: Vec<u8> = vector
+                    .values()
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect();
+                insert
+                    .execute(params![
+                        setting.root_id,
+                        sql_id(setting.id)?,
+                        input.chunk_id,
+                        bytes,
+                        input.text
+                    ])
+                    .map_err(|e| db_error(&e))?;
+            }
         }
         tx.commit().map_err(|e| db_error(&e))
     }

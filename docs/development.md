@@ -73,13 +73,13 @@ a running session or test command may still need:
   change) it reports the size and keeps building. This is an advisory threshold,
   not an enforced disk limit; `dev` never runs `cargo clean`.
 - To reclaim space explicitly, stop any live `cargo xtask dev` session and finish
-  other Cargo work, then run `just clear-cache` (same as
+  other Cargo work, then run `just free-cache` (`just clear-cache` also works; same as
   `cargo xtask clean-cache reclaim`). That command reports the effective target
   size, refuses while `target/dev/watch.lock` is held, and runs profile-scoped
   `cargo clean` for reclaimable `dev` and `release` artefacts. Optional
   `--cargo-home` also deletes recreatable `~/.cargo` registry/src, registry/cache
   and git checkouts — never `bin`, config or credentials. Use
-  `just clean-cache` (status) or `just clear-cache --dry-run` to inspect without
+  `just clean-cache` (status) or `just free-cache --dry-run` to inspect without
   deleting. Do not wipe the cache after every build.
 - Per-crate builds (the hook's `clippy -p <crate>`, per-crate tests) can resolve
   different dependency features than `cargo run` and so add duplicate dependency

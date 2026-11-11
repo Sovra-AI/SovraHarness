@@ -2,7 +2,7 @@ use super::*;
 use sovra_core::file_index::semantic::{EmbeddingTarget, EmbeddingVector, SemanticIndex};
 use sovra_core::models::{ModelConnection, ModelInfo, ProviderKind};
 
-fn target() -> EmbeddingTarget {
+pub(super) fn target() -> EmbeddingTarget {
     EmbeddingTarget::for_embeddings(
         &ModelConnection::new("local", ProviderKind::Ollama),
         &ModelInfo {
