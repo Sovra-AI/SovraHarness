@@ -14,6 +14,10 @@ move them under a version heading when the tag is cut.
 - Update the MCP SDK (`rmcp`) to 3.9.0 for RUSTSEC-2026-0462 (unbounded
   response buffering in its HTTP clients).
 
+- Choosing a language in Settings now switches the interface into that language.
+  Turkish is Türkçe, left to right, with its own wording. Arabic stays the
+  default, and only right-to-left languages use a right-to-left layout.
+
 - Fix large-folder embedding writes repeatedly rebuilding the full current-chunk
   catalogue per vector; use indexed membership checks while retaining permissions,
   source-version validation and the five-second transaction limit.

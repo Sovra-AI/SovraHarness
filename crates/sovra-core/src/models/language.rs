@@ -5,8 +5,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// BCP-47 tag identifying the UI and agent reply language.
 ///
-/// Unknown tags stay choosable so the agent can still reply in that language;
-/// chrome falls back to Arabic so the screen never shows empty text or raw keys.
+/// Unknown tags stay choosable so the agent can still reply in that language.
+/// Tags outside the Settings catalog fall back to Arabic chrome so the screen
+/// never shows empty text or raw keys. Every catalog language has its own chrome.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiLanguage(String);
 
@@ -316,16 +317,23 @@ impl ChromeKey {
     ];
 }
 
-/// Chrome string for `language`. Arabic and English have complete catalogs;
-/// every other choosable language falls back to Arabic so keys never appear.
+/// Chrome string for `language`. English and Arabic have their own catalogs.
+/// Every other Settings language has its own wording. A tag outside the catalog
+/// falls back to Arabic so keys never appear.
 #[must_use]
 pub fn chrome(language: &UiLanguage, key: ChromeKey) -> &'static str {
-    let text = match language.primary() {
-        "en" => english(key),
-        _ => arabic(key),
+    let text = if language.tag() == "en" {
+        english(key)
+    } else if let Some(text) = chrome_catalog::localized(language.tag(), key) {
+        text
+    } else {
+        arabic(key)
     };
     if text.is_empty() { english(key) } else { text }
 }
+
+#[path = "chrome_catalog.rs"]
+mod chrome_catalog;
 
 /// Every language the Settings picker offers.
 #[must_use]
@@ -1160,10 +1168,174 @@ mod tests {
             }
         }
         assert_eq!(
+            chrome(&UiLanguage::from_tag("zz"), ChromeKey::SettingsTitle),
+            chrome(&UiLanguage::arabic(), ChromeKey::SettingsTitle),
+            "a tag outside the catalog falls back to Arabic"
+        );
+        assert_ne!(
             chrome(&UiLanguage::from_tag("fr"), ChromeKey::SettingsTitle),
             chrome(&UiLanguage::arabic(), ChromeKey::SettingsTitle),
-            "languages without a chrome catalog fall back to Arabic"
+            "French settings chrome must not reuse Arabic"
         );
+    }
+
+    #[test]
+    fn turkish_tag_is_tr_turkce_ltr_and_chrome_is_ayarlar_dil_sohbet_iptal_acik_koyu() {
+        let turkish = UiLanguage::from_tag("TR");
+        assert_eq!(turkish.tag(), "tr");
+        assert_eq!(turkish.english_name(), "Turkish");
+        assert_eq!(turkish.native_name(), "Türkçe");
+        assert!(!turkish.is_rtl());
+        let expected = [
+            (ChromeKey::SettingsTitle, "Ayarlar"),
+            (ChromeKey::SettingsLanguageTitle, "Dil"),
+            (ChromeKey::NavChat, "Sohbet"),
+            (ChromeKey::LoginCancel, "İptal"),
+            (ChromeKey::SettingsLight, "Açık"),
+            (ChromeKey::SettingsDark, "Koyu"),
+        ];
+        for (key, label) in expected {
+            let text = chrome(&turkish, key);
+            assert_eq!(text, label, "{key:?}");
+            assert_ne!(text, chrome(&UiLanguage::arabic(), key), "{key:?}");
+            assert_ne!(text, chrome(&UiLanguage::english(), key), "{key:?}");
+            assert!(
+                !has_arabic_script(text),
+                "{key:?} used Arabic script: {text}"
+            );
+        }
+        let own: Vec<_> = ChromeKey::ALL
+            .iter()
+            .map(|key| chrome(&turkish, *key))
+            .collect();
+        let english: Vec<_> = ChromeKey::ALL
+            .iter()
+            .map(|key| chrome(&UiLanguage::english(), *key))
+            .collect();
+        let arabic: Vec<_> = ChromeKey::ALL
+            .iter()
+            .map(|key| chrome(&UiLanguage::arabic(), *key))
+            .collect();
+        assert_ne!(own, english);
+        assert_ne!(own, arabic);
+    }
+
+    #[test]
+    fn missing_or_empty_language_stays_arabic_rtl() {
+        for tag in ["", "   "] {
+            let language = UiLanguage::from_tag(tag);
+            assert_eq!(language.tag(), "ar");
+            assert!(language.is_rtl());
+            assert_eq!(
+                chrome(&language, ChromeKey::SettingsTitle),
+                chrome(&UiLanguage::arabic(), ChromeKey::SettingsTitle)
+            );
+            assert!(has_arabic_script(chrome(
+                &language,
+                ChromeKey::SettingsTitle
+            )));
+        }
+    }
+
+    #[test]
+    fn chooser_languages_have_own_chrome_not_arabic_or_english_and_reply_names() {
+        let arabic = UiLanguage::arabic();
+        let english = UiLanguage::english();
+        let english_set: Vec<_> = ChromeKey::ALL
+            .iter()
+            .map(|key| chrome(&english, *key))
+            .collect();
+        let arabic_script_keys: Vec<_> = ChromeKey::ALL
+            .iter()
+            .copied()
+            .filter(|key| has_arabic_script(chrome(&arabic, *key)))
+            .collect();
+        assert_ne!(
+            arabic_script_keys.len(),
+            0,
+            "Arabic chrome has no Arabic-script strings"
+        );
+        let sequence = ["ar", "tr", "en", "ar"];
+        let mut seen = Vec::new();
+        for tag in sequence {
+            let language = UiLanguage::from_tag(tag);
+            seen.push((
+                language.tag().to_owned(),
+                language.is_rtl(),
+                chrome(&language, ChromeKey::SettingsTitle).to_owned(),
+            ));
+        }
+        assert_eq!(seen[0].0, "ar");
+        assert!(seen[0].1);
+        assert!(has_arabic_script(&seen[0].2));
+        assert_eq!(seen[1].0, "tr");
+        assert!(!seen[1].1);
+        assert_eq!(seen[1].2, "Ayarlar");
+        assert_eq!(seen[2].0, "en");
+        assert!(!seen[2].1);
+        assert_eq!(seen[2].2, "Settings");
+        assert_eq!(seen[3], seen[0]);
+
+        for info in world_languages() {
+            let language = UiLanguage::from_tag(info.tag);
+            assert_eq!(language.tag(), info.tag);
+            assert_eq!(language.english_name(), info.english_name);
+            assert_eq!(language.native_name(), info.native_name);
+            assert_eq!(language.is_rtl(), info.rtl);
+            let reply = language.reply_instruction();
+            assert!(
+                reply.contains(info.english_name),
+                "{} reply missing English name: {reply}",
+                info.tag
+            );
+            assert!(
+                reply.contains(info.native_name),
+                "{} reply missing native name: {reply}",
+                info.tag
+            );
+            if info.tag != "ar" {
+                assert!(
+                    !reply.contains("العربية"),
+                    "{} reply named Arabic: {reply}",
+                    info.tag
+                );
+            }
+            let mut own = Vec::new();
+            let uses_arabic_script = has_arabic_script(info.native_name);
+            for key in ChromeKey::ALL {
+                let text = chrome(&language, key);
+                assert!(!text.is_empty(), "{key:?} empty for {}", info.tag);
+                assert_ne!(
+                    text,
+                    format!("{key:?}"),
+                    "raw key on screen for {key:?} {}",
+                    info.tag
+                );
+                own.push(text);
+                if info.tag != "ar" && arabic_script_keys.contains(&key) {
+                    assert_ne!(
+                        text,
+                        chrome(&arabic, key),
+                        "{key:?} for {} reused the Arabic catalog",
+                        info.tag
+                    );
+                    if !uses_arabic_script {
+                        assert!(
+                            !has_arabic_script(text),
+                            "{key:?} for {} contains Arabic script: {text}",
+                            info.tag
+                        );
+                    }
+                }
+            }
+            if info.tag != "en" {
+                assert_ne!(
+                    own, english_set,
+                    "{} chrome catalog is a copy of English",
+                    info.tag
+                );
+            }
+        }
     }
 
     #[test]
