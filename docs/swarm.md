@@ -124,3 +124,8 @@ data stays more than 0.5 away.
    differences, and that 10 computers' private rounds lower the loss. Still to
    do: LoRA adapters on 0.5–3B models, and runtime scheduling of rounds between
    computers (trainers run only on AC power and when idle).
+5. **Training screen (future feature, owner decision 2026-11-11).** The person
+   running Sovra picks the open base model, with a licence that allows
+   fine-tuning. Sovra does not choose a default. Which items may train it, such
+   as an "OK to train on" mark per department, is still to be decided. Until
+   this screen exists, no shared model is trained in the app.
