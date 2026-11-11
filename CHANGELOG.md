@@ -11,6 +11,9 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Update the MCP SDK (`rmcp`) to 3.9.0 for RUSTSEC-2026-0462 (unbounded
+  response buffering in its HTTP clients).
+
 - Fix large-folder embedding writes repeatedly rebuilding the full current-chunk
   catalogue per vector; use indexed membership checks while retaining permissions,
   source-version validation and the five-second transaction limit.

@@ -54,7 +54,7 @@ iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "p
 directories = "6.0.0"
 futures = "0.3.32"
 # Official MCP server SDK; stdio only, owned by sovra-runtime.
-rmcp = { version = "=3.8.0", default-features = false, features = ["server", "transport-io"] }
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io"] }
 cap-std = "4.0.3"
 cap-fs-ext = "4.0.3"
 fastcdc = { version = "5.0.0", default-features = false }
