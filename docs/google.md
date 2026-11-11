@@ -19,7 +19,7 @@ Sources were checked on 2026-10-27; they are listed at the end.
 | Connecting | "Your browser has opened Google's page" | Open the page again · Copy link · Cancel |
 | Connected | Avatar initial, name, email; one row + switch per service; "Try asking…" examples | Switch a service; **Disconnect Google** (asks once more) |
 | Needs sign-in | The account and why | **Sign in again** |
-| Needs a client id | Desktop client id and optional masked secret | **Save**, then **Connect Google** |
+| Not set up yet | "Google isn't included in this copy of Sovra yet" (builds without a built-in client) | **Use my own Google Cloud client** reveals the client id and masked secret; **Save**, then **Connect Google** |
 
 - Plain words throughout: Email, Calendar, Files, Contacts, To-dos, each with the
   product name beside it and one sentence on what Sovra does with it.
@@ -182,7 +182,11 @@ either choice is a data change plus tool tweaks.
    privacy policy, the scopes above, and test users while in *Testing*.
 3. Create an **OAuth client ID** of type **Desktop app**. Google documents its
    secret as not confidential for installed apps, so it may ship in the binary.
-4. Build with the client baked in, so the single binary needs no setup:
+4. Build with the client baked in, so the single binary needs no setup. Locally,
+   copy `google-client.env.example` to the gitignored `google-client.env` and
+   fill it in; `crates/sovra-app/build.rs` bakes it into every build (`cargo xtask
+   dev`, `run`, `dist`). CI and release pipelines set the same names as build
+   environment variables, which win over the file:
 
    ```sh
    SOVRA_GOOGLE_CLIENT_ID=… SOVRA_GOOGLE_CLIENT_SECRET=… cargo xtask dist

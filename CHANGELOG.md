@@ -25,6 +25,11 @@ move them under a version heading when the tag is cut.
   unchanged-file reuse, lexical retrieval and 768-dimensional vector scans,
   including replacement, reopening and access-removal checks.
 
+- Google connects with one click: the Desktop OAuth client is baked into builds
+  from a gitignored `google-client.env` (or build environment variables), and
+  the client-id form only appears behind **Use my own Google Cloud client** in
+  copies built without one.
+
 - Settings → Groups offers **Create and copy invite link** and copies a new
   one-time invitation only after the runtime confirms it; **Copy invite link**
   lets you copy it again.
