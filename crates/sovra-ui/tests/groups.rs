@@ -1143,3 +1143,47 @@ fn settings_points_to_the_groups_tab(cx: &mut TestAppContext) {
     })
     .expect("window open");
 }
+
+/// Mum's new group before anyone else joins.
+fn just_mum() -> GroupState {
+    let nonce = [9; 16];
+    let group = GroupId::derive(&MUM, &nonce);
+    let genesis = UnsignedOp {
+        group,
+        author: MUM,
+        seq: 1,
+        prev: None,
+        deps: Vec::new(),
+        at: Timestamp(1),
+        body: MembershipBody::Genesis {
+            name: "Family".into(),
+            nonce,
+            founder: PersonId([10; 32]),
+            founder_name: "Mum".into(),
+            device_name: "Mum's laptop".into(),
+        },
+    };
+    fold(group, &[genesis.sign(Signature([0; 64]))], &AcceptAll)
+}
+
+#[gpui_kit::test]
+fn an_admin_alone_in_a_new_group_starts_on_invite_someone(cx: &mut TestAppContext) {
+    let (window, shell, _commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(just_mum()),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        assert!(
+            window.find("groups-pane-invite").visible(),
+            "nobody to share with yet, so inviting comes first"
+        );
+    })
+    .expect("window open");
+}

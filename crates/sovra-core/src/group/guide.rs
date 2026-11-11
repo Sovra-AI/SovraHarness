@@ -92,7 +92,7 @@ impl GroupPage {
 
     pub const fn icon(self) -> &'static str {
         match self {
-            Self::People => "👪",
+            Self::People => "👥",
             Self::Invite => "✉️",
             Self::Notes => "📝",
             Self::Helpers => "🤝",

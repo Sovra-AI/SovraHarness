@@ -27,7 +27,10 @@ move them under a version heading when the tag is cut.
   computer's AI"), and **Leave this group** now asks "Are you sure?" before it
   leaves. Group skills on the Skills page open the matching page directly
   (`SkillAction::Groups`). The wording and the "what's next" rules live in
-  `sovra-core` (`group/guide.rs`) with unit tests.
+  `sovra-core` (`group/guide.rs`) with unit tests. Checked in the running app:
+  the family emoji, which this Linux font fallback draws garbled, is replaced
+  by 👥 (People) and 🏠 (the group's name), and the second-admin tip no longer
+  says "next to their name" while nobody else has joined.
 
 ## [0.2.0] — 2026-11-11
 

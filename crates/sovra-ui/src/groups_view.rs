@@ -760,7 +760,7 @@ impl ModelsView {
                             .min_w_0()
                             .truncate()
                             .sovra_text(TextRole::SectionTitle, cx)
-                            .child(format!("👪 {}", group.name)),
+                            .child(format!("🏠 {}", group.name)),
                     )
                     .child(pill(
                         format!(
@@ -938,9 +938,18 @@ impl ModelsView {
         let t = design::tokens(cx);
         let mut people = v_flex().w_full().min_w_0().gap(t.space.medium);
         if self.groups.show_second_admin_banner() {
+            let alone = self
+                .groups
+                .group
+                .as_ref()
+                .is_some_and(|group| group.people.len() < 2);
             people = people.child(
                 words(
-                    "Tip: make someone else an admin too, so the group can still be looked after if this computer is lost or broken. Press Make admin next to their name.",
+                    if alone {
+                        "Tip: once someone else has joined, press Make admin next to their name. A second admin can still look after the group if this computer is lost or broken."
+                    } else {
+                        "Tip: make someone else an admin too, so the group can still be looked after if this computer is lost or broken. Press Make admin next to their name."
+                    },
                     cx,
                 )
                 .id("groups-second-admin")
