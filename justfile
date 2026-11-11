@@ -43,6 +43,9 @@ clean-cache *args:
 clear-cache *args:
     cargo xtask clean-cache reclaim {{args}}
 
+# Free Rust build-cache space using the same guarded cleanup
+alias free-cache := clear-cache
+
 # Release build + Velopack packaging
 dist:
     cargo xtask dist

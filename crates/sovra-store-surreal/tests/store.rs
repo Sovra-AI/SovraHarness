@@ -20,6 +20,9 @@ mod consolidation;
 #[path = "store/growth.rs"]
 mod growth;
 
+#[path = "store/retrieval_evaluation.rs"]
+mod retrieval_evaluation;
+
 #[cfg(test)]
 #[path = "store/profile.rs"]
 mod profile;

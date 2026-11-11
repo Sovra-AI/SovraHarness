@@ -1,0 +1,468 @@
+{
+  "cases": [
+    {
+      "capture_us": 208183,
+      "category": "abstention",
+      "context_source_keys": [
+        "answer_8748f791_abs_1:8",
+        "answer_8748f791_abs_1:10",
+        "answer_8748f791_abs_2:2",
+        "1d03455f_1:4"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [],
+      "expected_sources": 0,
+      "id": "031748ae_abs",
+      "returned_source_keys": [
+        "answer_8748f791_abs_1:8",
+        "answer_8748f791_abs_1:10",
+        "answer_8748f791_abs_2:2",
+        "1d03455f_1:4",
+        "ca8286f2:8",
+        "ultrachat_300117:8",
+        "sharegpt_GHkdBCd_0:2",
+        "sharegpt_EX0p0tj_19:21",
+        "ultrachat_473482:4",
+        "ca8286f2:10",
+        "c629cbe4:0",
+        "ultrachat_427235:2"
+      ],
+      "scores": null,
+      "search_terms": [
+        "many",
+        "engineers",
+        "lead",
+        "just",
+        "started",
+        "new",
+        "role",
+        "software"
+      ],
+      "search_us": 10754,
+      "sources": 258,
+      "sources_after_question": 0
+    },
+    {
+      "capture_us": 193787,
+      "category": "abstention",
+      "context_source_keys": [
+        "sharegpt_8T6d65A_83:7",
+        "sharegpt_xzol7DQ_13:7",
+        "answer_c6fd8ebd_abs:10"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [],
+      "expected_sources": 0,
+      "id": "0862e8bf_abs",
+      "returned_source_keys": [
+        "sharegpt_8T6d65A_83:7",
+        "sharegpt_xzol7DQ_13:7",
+        "answer_c6fd8ebd_abs:10"
+      ],
+      "scores": null,
+      "search_terms": [
+        "name",
+        "hamster"
+      ],
+      "search_us": 1142,
+      "sources": 258,
+      "sources_after_question": 0
+    },
+    {
+      "capture_us": 197061,
+      "category": "abstention",
+      "context_source_keys": [
+        "answer_96c743d0_abs_1:6",
+        "answer_96c743d0_abs_2:4",
+        "answer_96c743d0_abs_1:8",
+        "ultrachat_342361:0"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [
+        "answer_96c743d0_abs_1:6"
+      ],
+      "expected_sources": 1,
+      "id": "09ba9854_abs",
+      "returned_source_keys": [
+        "answer_96c743d0_abs_1:6",
+        "answer_96c743d0_abs_2:4",
+        "answer_96c743d0_abs_1:8",
+        "ultrachat_342361:0",
+        "answer_96c743d0_abs_2:8",
+        "ultrachat_342361:2",
+        "answer_96c743d0_abs_2:2",
+        "answer_96c743d0_abs_2:6",
+        "answer_96c743d0_abs_2:0",
+        "answer_96c743d0_abs_1:0",
+        "sharegpt_9MXUwJk_0:6",
+        "ultrachat_514874:4"
+      ],
+      "scores": null,
+      "search_terms": [
+        "much",
+        "save",
+        "taking",
+        "bus",
+        "airport",
+        "hotel",
+        "instead",
+        "taxi"
+      ],
+      "search_us": 7730,
+      "sources": 255,
+      "sources_after_question": 0
+    },
+    {
+      "capture_us": 170379,
+      "category": "abstention",
+      "context_source_keys": [
+        "answer_a22b654d_abs_1:0",
+        "answer_a22b654d_abs_2:0",
+        "3a11533e:8",
+        "answer_a22b654d_abs_2:8"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [],
+      "expected_sources": 0,
+      "id": "0ddfec37_abs",
+      "returned_source_keys": [
+        "answer_a22b654d_abs_1:0",
+        "answer_a22b654d_abs_2:0",
+        "3a11533e:8",
+        "answer_a22b654d_abs_2:8",
+        "3a11533e:10",
+        "3a11533e:4",
+        "25572732:10",
+        "e1b8999c_3:6",
+        "answer_a22b654d_abs_1:6",
+        "ultrachat_433592:8",
+        "6de70f46_1:0",
+        "sharegpt_YHzbRoY_0:0"
+      ],
+      "scores": null,
+      "search_terms": [
+        "many",
+        "autographed",
+        "football",
+        "added",
+        "collection",
+        "first",
+        "three",
+        "months"
+      ],
+      "search_us": 9909,
+      "sources": 222,
+      "sources_after_question": 0
+    },
+    {
+      "capture_us": 182866,
+      "category": "knowledge-update",
+      "context_source_keys": [
+        "answer_a7b44747_1:6",
+        "answer_a7b44747_2:6",
+        "answer_a7b44747_2:8",
+        "answer_a7b44747_2:10"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [
+        "answer_a7b44747_1:6",
+        "answer_a7b44747_2:6"
+      ],
+      "expected_sources": 2,
+      "id": "01493427",
+      "returned_source_keys": [
+        "answer_a7b44747_1:6",
+        "answer_a7b44747_2:6",
+        "answer_a7b44747_2:8",
+        "answer_a7b44747_2:10",
+        "answer_a7b44747_2:0",
+        "88e73f02:10",
+        "answer_a7b44747_1:0",
+        "answer_a7b44747_1:4",
+        "c2204106_3:0",
+        "answer_a7b44747_1:2",
+        "077f7bcb_3:2",
+        "answer_a7b44747_2:4"
+      ],
+      "scores": {
+        "context_source_recall": 1.0,
+        "recall_at_1": 0.5,
+        "recall_at_12": 1.0,
+        "recall_at_4": 1.0
+      },
+      "search_terms": [
+        "many",
+        "new",
+        "postcards",
+        "added",
+        "collection",
+        "since",
+        "started",
+        "collecting"
+      ],
+      "search_us": 11158,
+      "sources": 242,
+      "sources_after_question": 0
+    },
+    {
+      "capture_us": 181718,
+      "category": "knowledge-update",
+      "context_source_keys": [
+        "answer_8748f791_1:8",
+        "answer_8748f791_1:10",
+        "answer_8748f791_2:2",
+        "sharegpt_Ukl9zsG_0:0"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [
+        "answer_8748f791_1:10",
+        "answer_8748f791_2:2"
+      ],
+      "expected_sources": 2,
+      "id": "031748ae",
+      "returned_source_keys": [
+        "answer_8748f791_1:8",
+        "answer_8748f791_1:10",
+        "answer_8748f791_2:2",
+        "sharegpt_Ukl9zsG_0:0",
+        "d6c6dadf:10",
+        "4dd1ba8d_1:6",
+        "sharegpt_xjZo5Ac_0:0",
+        "ultrachat_556006:2",
+        "ultrachat_69185:2",
+        "bd3880f4:6",
+        "ultrachat_362770:6",
+        "sharegpt_q3qJzui_0:0"
+      ],
+      "scores": {
+        "context_source_recall": 1.0,
+        "recall_at_1": 0.0,
+        "recall_at_12": 1.0,
+        "recall_at_4": 1.0
+      },
+      "search_terms": [
+        "many",
+        "engineers",
+        "lead",
+        "just",
+        "started",
+        "new",
+        "role",
+        "senior"
+      ],
+      "search_us": 10349,
+      "sources": 246,
+      "sources_after_question": 0
+    },
+    {
+      "capture_us": 182139,
+      "category": "knowledge-update",
+      "context_source_keys": [
+        "answer_da72b1b4_1:4",
+        "answer_da72b1b4_2:0",
+        "answer_da72b1b4_1:8",
+        "sharegpt_2pwdGxJ_16:0"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [
+        "answer_da72b1b4_1:4",
+        "answer_da72b1b4_2:0"
+      ],
+      "expected_sources": 2,
+      "id": "06db6396",
+      "returned_source_keys": [
+        "answer_da72b1b4_1:4",
+        "answer_da72b1b4_2:0",
+        "answer_da72b1b4_1:8",
+        "sharegpt_2pwdGxJ_16:0",
+        "sharegpt_7o0D0JH_0:0",
+        "ultrachat_357443:6",
+        "8235b87d:8",
+        "c3d89115:6",
+        "6ebdc1fe_2:10",
+        "da94a327_2:4",
+        "sharegpt_SwdaeDm_15:3",
+        "5bd9f1e6_1:2"
+      ],
+      "scores": {
+        "context_source_recall": 1.0,
+        "recall_at_1": 0.5,
+        "recall_at_12": 1.0,
+        "recall_at_4": 1.0
+      },
+      "search_terms": [
+        "many",
+        "projects",
+        "completed",
+        "since",
+        "starting",
+        "painting",
+        "classes"
+      ],
+      "search_us": 10465,
+      "sources": 240,
+      "sources_after_question": 12
+    },
+    {
+      "capture_us": 197770,
+      "category": "knowledge-update",
+      "context_source_keys": [
+        "answer_7e9ad7b4_1:2",
+        "answer_7e9ad7b4_2:2",
+        "answer_7e9ad7b4_2:4",
+        "answer_7e9ad7b4_1:4"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [
+        "answer_7e9ad7b4_1:2",
+        "answer_7e9ad7b4_2:0"
+      ],
+      "expected_sources": 2,
+      "id": "07741c44",
+      "returned_source_keys": [
+        "answer_7e9ad7b4_1:2",
+        "answer_7e9ad7b4_2:2",
+        "answer_7e9ad7b4_2:4",
+        "answer_7e9ad7b4_1:4",
+        "answer_7e9ad7b4_2:10",
+        "answer_7e9ad7b4_2:0",
+        "1e0c4b50:8",
+        "ultrachat_157118:10",
+        "sharegpt_CEWG2XW_0:0",
+        "ultrachat_370246:12",
+        "answer_7e9ad7b4_1:6",
+        "answer_7e9ad7b4_1:10"
+      ],
+      "scores": {
+        "context_source_recall": 0.5,
+        "recall_at_1": 0.5,
+        "recall_at_12": 1.0,
+        "recall_at_4": 0.5
+      },
+      "search_terms": [
+        "initially",
+        "keep",
+        "old",
+        "sneakers"
+      ],
+      "search_us": 4341,
+      "sources": 254,
+      "sources_after_question": 2
+    },
+    {
+      "capture_us": 187283,
+      "category": "multi-session",
+      "context_source_keys": [
+        "answer_39900a0a_3:0",
+        "answer_39900a0a_2:0",
+        "sharegpt_3cVjZ2b_16:0",
+        "answer_39900a0a_3:4"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [
+        "answer_39900a0a_1:0",
+        "answer_39900a0a_3:0"
+      ],
+      "expected_sources": 2,
+      "id": "00ca467f",
+      "returned_source_keys": [
+        "answer_39900a0a_3:0",
+        "answer_39900a0a_2:0",
+        "sharegpt_3cVjZ2b_16:0",
+        "answer_39900a0a_3:4",
+        "answer_39900a0a_3:6",
+        "answer_39900a0a_2:10",
+        "ultrachat_239705:8",
+        "ultrachat_145200:6",
+        "6395ae23_1:6",
+        "answer_39900a0a_1:8",
+        "answer_39900a0a_1:0",
+        "ultrachat_492025:4"
+      ],
+      "scores": {
+        "context_source_recall": 0.5,
+        "recall_at_1": 0.5,
+        "recall_at_12": 1.0,
+        "recall_at_4": 0.5
+      },
+      "search_terms": [
+        "many",
+        "doctor",
+        "appointments",
+        "did",
+        "go",
+        "march"
+      ],
+      "search_us": 5334,
+      "sources": 243,
+      "sources_after_question": 0
+    },
+    {
+      "capture_us": 182953,
+      "category": "multi-session",
+      "context_source_keys": [
+        "answer_35c9798c_1:0",
+        "answer_35c9798c_2:0",
+        "answer_35c9798c_2:4",
+        "ultrachat_372868:8"
+      ],
+      "excluded_assistant_evidence": 0,
+      "expected_source_keys": [
+        "answer_35c9798c_1:0",
+        "answer_35c9798c_2:0"
+      ],
+      "expected_sources": 2,
+      "id": "0100672e",
+      "returned_source_keys": [
+        "answer_35c9798c_1:0",
+        "answer_35c9798c_2:0",
+        "answer_35c9798c_2:4",
+        "ultrachat_372868:8",
+        "answer_35c9798c_1:4",
+        "a4b223a7_1:10",
+        "answer_35c9798c_1:6",
+        "07313722_2:4",
+        "sharegpt_sDfu38Q_0:0",
+        "ultrachat_108891:2",
+        "answer_35c9798c_2:6",
+        "b167a4a8:0"
+      ],
+      "scores": {
+        "context_source_recall": 1.0,
+        "recall_at_1": 0.5,
+        "recall_at_12": 1.0,
+        "recall_at_4": 1.0
+      },
+      "search_terms": [
+        "much",
+        "did",
+        "spend",
+        "each",
+        "coffee",
+        "mug",
+        "coworkers"
+      ],
+      "search_us": 7493,
+      "sources": 241,
+      "sources_after_question": 0
+    }
+  ],
+  "engine": "SurrealDB / mem://",
+  "fixture_sha256": "aeab2903c8cded35ed8c3e5458ea81e24e0ca3fe43ca31ca0a2dbbc96c1faa77",
+  "limitations": [
+    "Source-ID recall does not establish that a bounded quote contains the answer.",
+    "Assistant evidence is excluded because imported transcripts have no certified input lineage.",
+    "Abstention cases report retrieval counts, not answer correctness.",
+    "All upstream history is retained, including sessions dated after the question; no inferred temporal filter is applied.",
+    "Latency excludes runtime scheduling, disk IO, embeddings and generation."
+  ],
+  "model_calls": 0,
+  "revision": "98d7416c24c778c2fee6e6f3006e7a073259d48f",
+  "scope": "Full S histories, user-authored raw sources only; no extracted facts, embeddings, reader or judge. Not an official QA score.",
+  "selection": "First 4 question IDs per category; abstention separate",
+  "status": "failed",
+  "suite": "longmemeval-s-user-source-v1",
+  "upstream": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json",
+  "upstream_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "failure": "Importer reused duplicate upstream session IDs with differing evidence; incomplete run, not a score."
+}

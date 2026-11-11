@@ -55,7 +55,7 @@ or Claude Code, see [Development MCP](docs/development-mcp.md).
 | `cargo xtask check-docs`   | README mermaid graphs and relative markdown links                            |
 | `cargo xtask setup`        | Install pinned CI tools (deny, nextest, shear)                               |
 | `cargo xtask dist`         | Release build and verified native installer (Velopack `vpk` 1.2.161)         |
-| `just clear-cache`         | Reclaim Cargo build caches when no `dev` session is running                  |
+| `just free-cache`          | Reclaim Cargo build caches when no `dev` session is running (`clear-cache` also works) |
 
 ## How it is put together
 
@@ -163,6 +163,7 @@ sequenceDiagram
 | [Reviewing knowledge](docs/knowledge.md) | Check sources, explore connections and stop recall |
 | [Memory capture and recall](docs/memory-capture-and-recall.md) | One chat turn through save and later recall |
 | [Agent memory log](docs/agent-memory.md) | Dated audits and measured limits |
+| [Knowledge benchmark](docs/knowledge-benchmark.md) | Tool assessment and reproducible source-retrieval diagnostic |
 | [Models](docs/models.md) | Connect a service, pick a chat model |
 | [Files in chat](docs/files.md) | Paperclip attachments and the document reader |
 | [File understanding](docs/file-ontology.md) | What a file is, live folder reading |

@@ -1,0 +1,205 @@
+{
+  "suite": "synthetic-file-index-v1",
+  "status": "failed",
+  "engine": "SQLite / FTS5 / exhaustive cosine scan",
+  "dimensions": 768,
+  "samples_per_size": 20,
+  "model_calls": 0,
+  "scope": "Synthetic short UTF-8 files; no PDF/OCR extraction or semantic relevance score.",
+  "stages": [
+    {
+      "files": 100,
+      "scan_us": 88000,
+      "scan": {
+        "visited": 100,
+        "indexed": 100,
+        "reused": 0,
+        "skipped": 0,
+        "failed": 0,
+        "removed": 0,
+        "bytes_read": 14390,
+        "discovered": 100,
+        "handled": 100,
+        "walk_complete": true,
+        "current": "project-00064.txt",
+        "elapsed_ms": 78,
+        "files_per_minute": 0,
+        "kinds": {
+          "document": 100
+        },
+        "areas": {
+          "work": 100
+        }
+      },
+      "unchanged_scan_us": 42063,
+      "unchanged_scan": {
+        "visited": 100,
+        "indexed": 0,
+        "reused": 100,
+        "skipped": 0,
+        "failed": 0,
+        "removed": 0,
+        "bytes_read": 14390,
+        "discovered": 100,
+        "handled": 100,
+        "walk_complete": true,
+        "current": "project-00058.txt",
+        "elapsed_ms": 37,
+        "files_per_minute": 0,
+        "kinds": {
+          "document": 100
+        },
+        "areas": {
+          "work": 100
+        }
+      },
+      "synthetic_vector_write_us": 88947,
+      "lexical_us": [
+        1466,
+        1448,
+        1694,
+        1297,
+        1686,
+        1649,
+        1678,
+        1732,
+        1784,
+        1904,
+        1589,
+        1701,
+        1560,
+        1667,
+        1531,
+        1651,
+        1782,
+        1460,
+        1445,
+        1504
+      ],
+      "vector_scan_us": [
+        6631,
+        6608,
+        6352,
+        6906,
+        7489,
+        7295,
+        6532,
+        6616,
+        7481,
+        7480,
+        7696,
+        7571,
+        6230,
+        6438,
+        6594,
+        6273,
+        7347,
+        7145,
+        6761,
+        7417
+      ],
+      "exact_lexical_hits": 20,
+      "exact_vector_hits": 20
+    },
+    {
+      "files": 1000,
+      "scan_us": 631146,
+      "scan": {
+        "visited": 1000,
+        "indexed": 900,
+        "reused": 100,
+        "skipped": 0,
+        "failed": 0,
+        "removed": 0,
+        "bytes_read": 144890,
+        "discovered": 1000,
+        "handled": 1000,
+        "walk_complete": true,
+        "current": "project-00448.txt",
+        "elapsed_ms": 617,
+        "files_per_minute": 0,
+        "kinds": {
+          "document": 1000
+        },
+        "areas": {
+          "work": 1000
+        }
+      },
+      "unchanged_scan_us": 294018,
+      "unchanged_scan": {
+        "visited": 1000,
+        "indexed": 0,
+        "reused": 1000,
+        "skipped": 0,
+        "failed": 0,
+        "removed": 0,
+        "bytes_read": 19122,
+        "discovered": 1000,
+        "handled": 1000,
+        "walk_complete": true,
+        "current": "project-00312.txt",
+        "elapsed_ms": 286,
+        "files_per_minute": 0,
+        "kinds": {
+          "document": 1000
+        },
+        "areas": {
+          "work": 1000
+        }
+      },
+      "synthetic_vector_write_us": 2935330,
+      "lexical_us": [
+        1407,
+        1716,
+        1793,
+        1905,
+        1702,
+        1796,
+        1879,
+        1785,
+        1990,
+        1786,
+        1700,
+        1735,
+        1754,
+        1929,
+        1530,
+        1812,
+        1559,
+        1827,
+        1868,
+        1909
+      ],
+      "vector_scan_us": [
+        67550,
+        63869,
+        67640,
+        66284,
+        69093,
+        69209,
+        70756,
+        65056,
+        75282,
+        67521,
+        67302,
+        66829,
+        67317,
+        69553,
+        67553,
+        73735,
+        68756,
+        64639,
+        69488,
+        69300
+      ],
+      "exact_lexical_hits": 20,
+      "exact_vector_hits": 20
+    }
+  ],
+  "failure": {
+    "stage_files": 10000,
+    "operation": "commit vector batch",
+    "elapsed_test_seconds": 250.19,
+    "message": "SQLite interrupted by the five-second transaction limit; initial full-catalogue membership query repeated for each vector."
+  }
+}

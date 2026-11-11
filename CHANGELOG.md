@@ -11,6 +11,20 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- Fix large-folder embedding writes repeatedly rebuilding the full current-chunk
+  catalogue per vector; use indexed membership checks while retaining permissions,
+  source-version validation and the five-second transaction limit.
+
+- Add `just free-cache` as an alias for the guarded Rust build-cache cleanup;
+  it accepts the same flags as `just clear-cache`.
+
+- Add an opt-in, hash-pinned LongMemEval-S source-retrieval diagnostic and a
+  knowledge-capture tool assessment. Reports distinguish user-source recall from
+  extraction, assistant-memory coverage and answer correctness.
+- Add an opt-in disk file-index benchmark for 100/1,000/10,000 synthetic files,
+  unchanged-file reuse, lexical retrieval and 768-dimensional vector scans,
+  including replacement, reopening and access-removal checks.
+
 - Settings → Groups offers **Create and copy invite link** and copies a new
   one-time invitation only after the runtime confirms it; **Copy invite link**
   lets you copy it again.

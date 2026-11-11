@@ -5,6 +5,7 @@ mod graph;
 mod history;
 mod legacy_text;
 mod live;
+mod performance;
 #[cfg(unix)]
 mod recovery;
 mod report;
