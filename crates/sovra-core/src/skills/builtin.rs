@@ -43,6 +43,7 @@ impl Skill {
             "share-helper" => "Share a helper, skill or schedule with your group",
             "share-ai" => "Let a free computer in your group do the answering",
             "share-history" => "See everything this computer shared",
+            "departments" => "Keep each department's knowledge to itself",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -166,6 +167,10 @@ impl Skill {
             "share-ai" => (
                 "Opens Groups. On the computer with a good AI, turn on Let my group use this computer's AI. On an older laptop with no AI, turn on Use a free computer's AI — then just chat, and the free computer answers.".to_owned(),
                 "/share-ai ".to_owned(),
+            ),
+            "departments" => (
+                "Opens Groups. Under Departments, type Legal, tap the people who work in Legal, and press Save department. Then, when sharing, choose Just Legal — only Legal's computers get it.".to_owned(),
+                "/departments ".to_owned(),
             ),
             "share-history" => (
                 "Opens Groups. Scroll to History on this computer to see each thing you shared and each memory you gave to someone's helpers, and whether the record checks out. Read the fingerprint to your accountant or IT person so they can compare it with theirs.".to_owned(),
@@ -464,6 +469,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Settings → Groups to see a signed record of everything this computer shared with your group and every memory it gave to someone's helpers. Only fingerprints of the words are kept, and any change to the record shows.",
             SkillAction::Settings,
             &["audit", "audit-history"],
+        ),
+        action(
+            "departments",
+            "Departments",
+            "Open Settings → Groups to set up departments like Legal or Finance. Each keeps its own shared details, locked so only the people in it can read them; people taken out stop getting new ones.",
+            SkillAction::Settings,
+            &["department", "business-units"],
         ),
         action(
             "share-helper",

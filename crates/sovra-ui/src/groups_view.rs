@@ -37,6 +37,11 @@ pub(crate) struct GroupsForm {
     join_code: Entity<InputState>,
     /// Share with the whole group (`None`) or just this person.
     share_with: Option<sovra_core::group::PersonId>,
+    /// Or just this department (takes precedence when set).
+    share_department: Option<sovra_core::group::OpHash>,
+    department_name: Entity<InputState>,
+    /// People ticked for the department being made.
+    department_members: std::collections::BTreeSet<sovra_core::group::PersonId>,
     /// Which person or computer is waiting for "Yes, remove".
     confirm_remove: Option<String>,
     copy_pending: bool,
@@ -67,6 +72,9 @@ impl GroupsForm {
             ),
             join_code: input("The six digits on the other computer", window, cx),
             share_with: None,
+            share_department: None,
+            department_name: input("Department name, like Legal", window, cx),
+            department_members: std::collections::BTreeSet::new(),
             confirm_remove: None,
             copy_pending: false,
             copied_link: None,
@@ -196,6 +204,7 @@ impl ModelsView {
                     .child(self.render_templates(cx))
                     .child(self.render_federated(cx))
                     .child(self.render_work(cx))
+                    .child(self.render_departments(cx))
                     .child(self.render_audit(cx))
                     .child(
                         h_flex().child(
@@ -791,6 +800,7 @@ impl ModelsView {
             );
         if can_add {
             let chosen = self.groups_form.share_with;
+            let chosen_department = self.groups_form.share_department;
             let mut audience = h_flex()
                 .id("groups-share-with")
                 .flex_wrap()
@@ -798,9 +808,10 @@ impl ModelsView {
                 .child(
                     design::button("groups-share-everyone", "Everyone", cx)
                         .small()
-                        .selected(chosen.is_none())
+                        .selected(chosen.is_none() && chosen_department.is_none())
                         .on_click(cx.listener(|view, _, _, cx| {
                             view.groups_form.share_with = None;
+                            view.groups_form.share_department = None;
                             cx.notify();
                         })),
                 );
@@ -808,12 +819,31 @@ impl ModelsView {
                 audience = audience.child(
                     design::button(("groups-share-just", index), format!("Just {name}"), cx)
                         .small()
-                        .selected(chosen == Some(person))
+                        .selected(chosen_department.is_none() && chosen == Some(person))
                         .accessibility_label(format!("Share only with {name}"))
                         .on_click(cx.listener(move |view, _, _, cx| {
                             view.groups_form.share_with = Some(person);
+                            view.groups_form.share_department = None;
                             cx.notify();
                         })),
+                );
+            }
+            for (index, (department, name)) in self.groups.my_departments().into_iter().enumerate()
+            {
+                audience = audience.child(
+                    design::button(
+                        ("groups-share-department", index),
+                        format!("Just {name}"),
+                        cx,
+                    )
+                    .small()
+                    .selected(chosen_department == Some(department))
+                    .accessibility_label(format!("Share only with the {name} department"))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.groups_form.share_department = Some(department);
+                        view.groups_form.share_with = None;
+                        cx.notify();
+                    })),
                 );
             }
             section = section
@@ -830,14 +860,19 @@ impl ModelsView {
                             view.groups_form
                                 .share
                                 .update(cx, |input, cx| input.set_value("", window, cx));
-                            send(
-                                GroupCommand::Share {
+                            let command = match view.groups_form.share_department {
+                                Some(department) => GroupCommand::ShareInDepartment {
+                                    department,
+                                    text,
+                                    about: Vec::new(),
+                                },
+                                None => GroupCommand::Share {
                                     text,
                                     about: Vec::new(),
                                     with: view.groups_form.share_with,
                                 },
-                                cx,
-                            );
+                            };
+                            send(command, cx);
                         },
                     )),
                 ));
@@ -1094,6 +1129,98 @@ impl ModelsView {
 }
 
 impl ModelsView {
+    /// Departments: who is in each, and for admins, making or changing one.
+    fn render_departments(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let mut section = v_flex()
+            .id("groups-departments")
+            .test_support()
+            .w_full()
+            .gap(t.space.compact)
+            .child(div().sovra_text(TextRole::Body, cx).child("Departments"))
+            .child(caption(
+                "A department, like Legal or Finance, keeps its own shared details. Only the people in it get them, locked so no other computer can read them.",
+                cx,
+            ));
+        let Some(group) = self.groups.group.clone() else {
+            return section;
+        };
+        let name_of = |person: &sovra_core::group::PersonId| {
+            group
+                .people
+                .get(person)
+                .map_or_else(|| "someone who left".to_owned(), |m| m.name.clone())
+        };
+        for (index, department) in group.departments.values().enumerate() {
+            let members: Vec<String> = department.members.iter().map(&name_of).collect();
+            let line = if members.is_empty() {
+                format!("{} — nobody yet", department.name)
+            } else {
+                format!("{} — {}", department.name, members.join(", "))
+            };
+            section = section.child(
+                div()
+                    .id(("groups-department", index))
+                    .test_support()
+                    .whitespace_normal()
+                    .child(caption(line, cx)),
+            );
+        }
+        if !self.groups.can_manage() {
+            return section;
+        }
+        let ticked = self.groups_form.department_members.clone();
+        let mut people = h_flex()
+            .id("groups-department-people")
+            .flex_wrap()
+            .gap(t.space.small);
+        for (index, member) in group.people.values().enumerate() {
+            let person = member.person;
+            people = people.child(
+                design::button(("groups-department-person", index), member.name.clone(), cx)
+                    .small()
+                    .selected(ticked.contains(&person))
+                    .accessibility_label(format!("Put {} in this department", member.name))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        let members = &mut view.groups_form.department_members;
+                        if !members.remove(&person) {
+                            members.insert(person);
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+        section
+            .child(caption(
+                "Type a department's name, choose who is in it, and save. Saving an existing name changes who is in it; someone taken out stops getting new details.",
+                cx,
+            ))
+            .child(
+                Input::new(&self.groups_form.department_name)
+                    .id("groups-department-name")
+                    .aria_label("Department name"),
+            )
+            .child(people)
+            .child(h_flex().child(
+                design::primary_button("groups-department-save", "Save department", cx).on_click(
+                    cx.listener(|view, _, window, cx| {
+                        let name = value(&view.groups_form.department_name, cx);
+                        let Some(slug) =
+                            sovra_core::swarm::department::DepartmentId::from_name(&name)
+                        else {
+                            return;
+                        };
+                        let members = std::mem::take(&mut view.groups_form.department_members);
+                        view.groups_form
+                            .department_name
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        send(GroupCommand::SetDepartment { slug, name, members }, cx);
+                        cx.notify();
+                    }),
+                ),
+            ))
+    }
+
     /// This computer's signed history of what it shared and gave out. Read-only:
     /// nothing here can change the record.
     fn render_audit(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {

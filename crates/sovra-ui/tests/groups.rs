@@ -271,6 +271,7 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
                     "groups-federated",
                     "groups-audit",
                     "groups-audit-headline",
+                    "groups-departments",
                 ] {
                     let bounds = window.find(id).bounds();
                     assert!(
@@ -309,6 +310,76 @@ fn audit_summary() -> sovra_core::swarm::audit::AuditSummary {
         other_records: 41,
         forked: Vec::new(),
     }
+}
+
+#[gpui_kit::test]
+fn an_admin_makes_a_department_and_members_share_just_with_it(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 3200.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        assert!(window.find("groups-departments").visible());
+        window.click(("groups-department-person", 0usize), cx);
+        window.click("groups-department-name", cx);
+        window.input("Legal & HR", cx);
+        window.click("groups-department-save", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    let sent = drain(&commands);
+    let saved = sent.iter().find_map(|command| match command {
+        Command::Group(GroupCommand::SetDepartment {
+            slug,
+            name,
+            members,
+        }) => Some((slug.as_str().to_owned(), name.clone(), members.len())),
+        _ => None,
+    });
+    assert_eq!(saved, Some(("legal-hr".into(), "Legal & HR".into(), 1)));
+
+    // Once Mum is in Legal, she can share just with it.
+    let mut roster = family();
+    let slug = sovra_core::swarm::department::DepartmentId::new("legal").expect("valid");
+    let id = sovra_core::group::department_ref(&roster.group, &slug);
+    let me = roster.owner_of(&MUM).expect("Mum").person;
+    roster.departments.insert(
+        id,
+        sovra_core::group::GroupDepartment {
+            slug,
+            name: "Legal".into(),
+            members: [me].into(),
+            ever: [me].into(),
+        },
+    );
+    group_event(&events, GroupEvent::Changed(roster));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find(("groups-department", 0usize)).visible());
+        window.click(("groups-share-department", 0usize), cx);
+        window.click("groups-share-input", cx);
+        window.input("The Jones contract renews in June", cx);
+        window.click("groups-share", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    let sent = drain(&commands);
+    assert!(
+        sent.contains(&Command::Group(GroupCommand::ShareInDepartment {
+            department: id,
+            text: "The Jones contract renews in June".into(),
+            about: Vec::new(),
+        }))
+    );
 }
 
 #[gpui_kit::test]

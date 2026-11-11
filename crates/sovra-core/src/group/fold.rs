@@ -65,6 +65,16 @@ pub struct DeviceEntry {
     pub added_at: Timestamp,
 }
 
+/// A department of the group: its slug, the name people see, who is in it now,
+/// and everyone who ever was (their past shares in it stay attributable).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupDepartment {
+    pub slug: crate::swarm::department::DepartmentId,
+    pub name: String,
+    pub members: BTreeSet<PersonId>,
+    pub ever: BTreeSet<PersonId>,
+}
+
 /// One person in the roster, with their current computers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member {
@@ -94,6 +104,8 @@ pub struct GroupState {
     pub forked: BTreeSet<DeviceId>,
     /// Applied operations nothing else builds on: the `deps` of the next operation.
     pub heads: Vec<OpHash>,
+    /// Departments, by [`super::space::department_ref`].
+    pub departments: BTreeMap<OpHash, GroupDepartment>,
     /// The latest structurally valid operation per device, for chaining the next one.
     chain_tips: BTreeMap<DeviceId, (u64, OpHash)>,
 }
@@ -113,8 +125,18 @@ impl GroupState {
             pending: BTreeSet::new(),
             forked: BTreeSet::new(),
             heads: Vec::new(),
+            departments: BTreeMap::new(),
             chain_tips: BTreeMap::new(),
         }
+    }
+
+    /// The departments `person` is in now, by name.
+    pub fn departments_of(&self, person: &PersonId) -> Vec<(OpHash, &GroupDepartment)> {
+        self.departments
+            .iter()
+            .filter(|(_, d)| d.members.contains(person))
+            .map(|(id, d)| (*id, d))
+            .collect()
     }
 
     /// The person a current device belongs to.
@@ -631,6 +653,10 @@ fn apply_change(op: &MembershipOp, hash: OpHash, out: &mut Applied) -> Result<()
                 }
             }
             state.removed_people.insert(*person);
+            // Leaving the group leaves every department: no new keys or content.
+            for department in state.departments.values_mut() {
+                department.members.remove(person);
+            }
             out.removals.push(Removal {
                 op: hash,
                 target: Target::Person(*person),
@@ -660,6 +686,38 @@ fn apply_change(op: &MembershipOp, hash: OpHash, out: &mut Applied) -> Result<()
                 return Err(Rejection::InvalidName);
             }
             name.trim().clone_into(&mut state.name);
+            Ok(())
+        }
+        MembershipBody::SetDepartment {
+            slug,
+            name,
+            members,
+        } => {
+            if !manages {
+                return Err(Rejection::NotAllowed);
+            }
+            if !valid_name(name) {
+                return Err(Rejection::InvalidName);
+            }
+            if members
+                .iter()
+                .any(|person| !state.people.contains_key(person))
+            {
+                return Err(Rejection::UnknownTarget);
+            }
+            let id = super::space::department_ref(&state.group, slug);
+            let department = state
+                .departments
+                .entry(id)
+                .or_insert_with(|| GroupDepartment {
+                    slug: slug.clone(),
+                    name: String::new(),
+                    members: BTreeSet::new(),
+                    ever: BTreeSet::new(),
+                });
+            name.trim().clone_into(&mut department.name);
+            department.members.clone_from(members);
+            department.ever.extend(members.iter().copied());
             Ok(())
         }
     }

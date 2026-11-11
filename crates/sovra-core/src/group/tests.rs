@@ -2066,3 +2066,77 @@ fn a_growing_answer_is_read_in_pieces_without_splitting_a_character() {
     assert_eq!(buffer.since(7).text, "é ready.");
     assert_eq!(buffer.since(999).text, "");
 }
+
+// ---- departments ------------------------------------------------------------
+
+#[test]
+fn admins_define_departments_whose_lanes_reach_only_current_members() {
+    use crate::swarm::department::DepartmentId;
+    let mut log = family_of_three();
+    let legal = DepartmentId::new("legal").expect("valid slug");
+    let members = std::collections::BTreeSet::from([person(1), person(3)]);
+    // A member who is not an admin cannot create one.
+    let refused = log.push(
+        device(2),
+        3_000,
+        MembershipBody::SetDepartment {
+            slug: legal.clone(),
+            name: "Legal".into(),
+            members: members.clone(),
+        },
+    );
+    assert_eq!(
+        log.state().rejected.get(&refused.hash()),
+        Some(&Rejection::NotAllowed)
+    );
+    // Someone outside the group cannot be put in one.
+    let stranger = log.push(
+        device(1),
+        3_050,
+        MembershipBody::SetDepartment {
+            slug: legal.clone(),
+            name: "Legal".into(),
+            members: std::collections::BTreeSet::from([person(9)]),
+        },
+    );
+    assert_eq!(
+        log.state().rejected.get(&stranger.hash()),
+        Some(&Rejection::UnknownTarget)
+    );
+    log.push(
+        device(1),
+        3_100,
+        MembershipBody::SetDepartment {
+            slug: legal.clone(),
+            name: "Legal".into(),
+            members,
+        },
+    );
+    let roster = log.state();
+    let id = department_ref(&log.group, &legal);
+    let space = Space::Department { id };
+    assert_eq!(roster.departments[&id].name, "Legal");
+    assert_eq!(
+        space.audience(&roster),
+        std::collections::BTreeSet::from([device(1), device(3)])
+    );
+    assert!(!space.reaches(&roster, &device(2)));
+    assert_eq!(space_of_lane(&roster, &space.lane(&log.group)), Some(space));
+    assert!(spaces_of(&roster, &person(3)).contains(&space));
+    assert!(!spaces_of(&roster, &person(2)).contains(&space));
+
+    // Person 3 leaves the group: they leave Legal too, but their past still counts.
+    log.push(
+        device(1),
+        3_200,
+        MembershipBody::RemovePerson { person: person(3) },
+    );
+    let roster = log.state();
+    assert_eq!(
+        space.audience(&roster),
+        std::collections::BTreeSet::from([device(1)])
+    );
+    assert!(space.includes(&roster, &person(3)));
+    assert!(!space.includes_now(&roster, &person(3)));
+    assert!(!space.reaches(&roster, &device(3)));
+}

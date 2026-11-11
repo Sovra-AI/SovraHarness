@@ -69,6 +69,18 @@ pub enum GroupCommand {
         about: Vec<String>,
         with: Option<PersonId>,
     },
+    /// Share a detail with one department only (its own lane and keys).
+    ShareInDepartment {
+        department: OpHash,
+        text: String,
+        about: Vec<String>,
+    },
+    /// Admins: create department `slug` or set its name and members.
+    SetDepartment {
+        slug: crate::swarm::department::DepartmentId,
+        name: String,
+        members: std::collections::BTreeSet<PersonId>,
+    },
     /// Correct one or more shared details (settles a dispute when it names several).
     Correct {
         details: Vec<OpHash>,
@@ -431,6 +443,14 @@ impl GroupsView {
 
     /// "Just you and Dad" for something in a two-person space; `None` for the group.
     pub fn space_label(&self, space: &super::space::Space) -> Option<String> {
+        if let super::space::Space::Department { id } = space {
+            let name = self
+                .group
+                .as_ref()
+                .and_then(|group| group.departments.get(id))
+                .map_or_else(|| "a department".to_owned(), |d| d.name.clone());
+            return Some(format!("Just {name}"));
+        }
         let me = self.my_person()?;
         let other = space.other(&me)?;
         let name = self
@@ -442,6 +462,18 @@ impl GroupsView {
                 |member| member.name.clone(),
             );
         Some(format!("Just you and {name}"))
+    }
+
+    /// The departments this computer's person is in now, by name.
+    pub fn my_departments(&self) -> Vec<(OpHash, String)> {
+        match (self.my_person(), self.group.as_ref()) {
+            (Some(me), Some(group)) => group
+                .departments_of(&me)
+                .into_iter()
+                .map(|(id, d)| (id, d.name.clone()))
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// The role of this computer's person, if it is in a group.

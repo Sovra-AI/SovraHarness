@@ -445,7 +445,7 @@ fn fold_lane<'a>(
                 }
             }
         };
-        if !space.includes(&person) {
+        if !space.includes(roster, &person) {
             view.rejected.insert(*hash, KnowledgeRejection::NotAllowed);
             continue;
         }

@@ -29,7 +29,7 @@ pub use federated::{
     MAX_ASK_CHARS, MAX_ASK_LOG, MAX_FEDERATED_ITEMS, MAX_FEDERATED_STATEMENT_CHARS, check_ask,
     federated_items, log_ask,
 };
-pub use fold::{DeviceEntry, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
+pub use fold::{DeviceEntry, GroupDepartment, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
 pub use keys::{
     ContentHash, DeviceId, GroupId, KeyParseError, OpHash, PersonId, Signature, SignatureVerifier,
 };
@@ -56,7 +56,7 @@ pub use shared_artifact::{
     MAX_SHARED_TITLE_CHARS, SharedArtifact, SharingState, check_artifact, lineage_ids,
     sharing_state,
 };
-pub use space::{Space, lanes_of, space_of_lane, spaces_of};
+pub use space::{Space, department_ref, lanes_of, space_of_lane, spaces_of};
 pub use template::{
     MAX_TEMPLATE_INSTRUCTIONS_CHARS, MAX_TEMPLATE_LINE_CHARS, MAX_TEMPLATE_TOPICS, SharedTemplate,
     Template, TemplateError, check_template,

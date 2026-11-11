@@ -457,6 +457,81 @@ async fn the_group_shares_one_checked_audit_history_across_computers() {
     assert!(saved.audit.is_empty(), "Dad's own history is his alone");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_department_share_reaches_only_its_members() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 61);
+    let dad = Computer::start(&net, 62);
+    let gran = Computer::start(&net, 63);
+    mum.send(GroupCommand::Create {
+        name: "Smith Plumbing".into(),
+        your_name: "Mum".into(),
+        computer_name: "Office".into(),
+    });
+    mum.roster(|state| state.name == "Smith Plumbing").await;
+    for (who, name) in [(&dad, "Dad"), (&gran, "Gran")] {
+        mum.send(GroupCommand::InvitePerson {
+            name: name.into(),
+            role: Role::Member,
+        });
+        let link = mum.link().await;
+        who.send(GroupCommand::Join {
+            link,
+            computer_name: format!("{name}'s laptop"),
+        });
+        who.roster(|state| state.admits(&who.device)).await;
+    }
+    let roster = mum.roster(|state| state.people.len() == 3).await;
+    let person_of = |device: &DeviceId| roster.owner_of(device).expect("member").person;
+    let legal = sovra_core::swarm::department::DepartmentId::new("legal").expect("valid");
+    mum.send(GroupCommand::SetDepartment {
+        slug: legal.clone(),
+        name: "Legal".into(),
+        members: BTreeSet::from([person_of(&mum.device), person_of(&gran.device)]),
+    });
+    let roster = mum.roster(|state| !state.departments.is_empty()).await;
+    let id = sovra_core::group::department_ref(&roster.group, &legal);
+    // Dad isn't in Legal: he is told so and nothing is shared.
+    dad.roster(|state| !state.departments.is_empty()).await;
+    dad.send(GroupCommand::ShareInDepartment {
+        department: id,
+        text: "Dad tries Legal".into(),
+        about: Vec::new(),
+    });
+    dad.wait(|event| match event {
+        GroupEvent::Problem(_) => Some(()),
+        _ => None,
+    })
+    .await;
+    gran.roster(|state| !state.departments.is_empty()).await;
+    mum.send(GroupCommand::ShareInDepartment {
+        department: id,
+        text: "The Jones contract renews in June".into(),
+        about: Vec::new(),
+    });
+    mum.knowledge(|details| has(details, "Jones contract"))
+        .await;
+    gran.send(GroupCommand::Load);
+    let seen = gran
+        .knowledge(|details| has(details, "Jones contract"))
+        .await;
+    let detail = seen
+        .iter()
+        .find(|d| d.text.contains("Jones"))
+        .expect("shared");
+    assert_eq!(detail.space, sovra_core::group::Space::Department { id });
+    // Dad syncs too, and gets the whole group's details but never Legal's.
+    mum.send(GroupCommand::Share {
+        text: "The van is booked for Friday".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    dad.send(GroupCommand::Load);
+    let dads = dad.knowledge(|details| has(details, "van is booked")).await;
+    assert!(!dads.iter().any(|d| d.text.contains("Jones")));
+    assert!(!dads.iter().any(|d| d.text.contains("Dad tries")));
+}
+
 fn has(details: &[SharedDetail], text: &str) -> bool {
     details
         .iter()

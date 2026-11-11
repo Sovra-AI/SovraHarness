@@ -73,6 +73,13 @@ pub enum MembershipBody {
     Rename {
         name: String,
     },
+    /// Admins only: creates department `slug`, or replaces its name and members.
+    /// An empty member list closes it to new content; its history stays.
+    SetDepartment {
+        slug: crate::swarm::department::DepartmentId,
+        name: String,
+        members: std::collections::BTreeSet<PersonId>,
+    },
 }
 
 /// Everything an operation commits to, in the order it is signed.

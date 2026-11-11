@@ -58,7 +58,16 @@ code and this page are the ones to trust.
    on one without. The second's chats are answered by the first, which gets
    only the conversation's words and never uses its tools for someone else.
    Each computer in the roster shows **Online now** or when it was last seen.
-9. **History on this computer** lists what this computer shared and each
+9. **Departments** (admins): type a name such as *Legal*, tap the people in
+   it, and choose **Save department**. That signs a `SetDepartment` operation
+   into the membership log, which only admins may write, and only for people
+   in the group. Members then see **Just Legal** beside **Everyone** when
+   sharing. A department is its own lane (`Space::Department`) with its own lane
+   keys, so only its current members' computers receive or can read it. Saving
+   again with fewer people rotates the key, and the people taken out keep only
+   what they already had. Leaving the group leaves every department. Someone who
+   is not in a department is refused if they try to share there.
+10. **History on this computer** lists what this computer shared and each
    memory it gave to someone's helpers, newest first, with a line such as
    "2 records, all checked · fingerprint 3f2a9c01". Each record is signed with
    this computer's key and holds only a BLAKE3 fingerprint of the words, never

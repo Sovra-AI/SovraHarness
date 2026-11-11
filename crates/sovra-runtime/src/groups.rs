@@ -934,7 +934,7 @@ impl Groups {
     fn view_of<'a>(inner: &'a Inner, space: &Space) -> Option<&'a KnowledgeView> {
         match space {
             Space::Group => Some(&inner.view),
-            Space::Pair { .. } => inner.pairs.get(space),
+            Space::Pair { .. } | Space::Department { .. } => inner.pairs.get(space),
         }
     }
 
@@ -1603,6 +1603,50 @@ impl Groups {
                 self.emit(GroupEvent::Pairing(PairingStep::Cancel)).await;
             }
             GroupCommand::Rename { name } => self.membership(MembershipBody::Rename { name }).await,
+            GroupCommand::SetDepartment {
+                slug,
+                name,
+                members,
+            } => {
+                self.membership(MembershipBody::SetDepartment {
+                    slug,
+                    name,
+                    members,
+                })
+                .await;
+            }
+            GroupCommand::ShareInDepartment {
+                department,
+                text,
+                about,
+            } => {
+                let space = Space::Department { id: department };
+                let member_now = {
+                    let inner = self.inner.lock().await;
+                    inner.roster.as_ref().is_some_and(|roster| {
+                        roster
+                            .owner_of(&self.me())
+                            .is_some_and(|m| space.includes_now(roster, &m.person))
+                    })
+                };
+                if member_now {
+                    self.knowledge(
+                        space,
+                        KnowledgeBody::Share {
+                            text,
+                            about,
+                            valid_at: None,
+                            replaces: Vec::new(),
+                        },
+                    )
+                    .await;
+                } else {
+                    self.emit(GroupEvent::Problem(GroupProblem::Other(
+                        "You're not in that department, so you can't share there.".into(),
+                    )))
+                    .await;
+                }
+            }
             GroupCommand::ChangeRole { person, role } => {
                 self.membership(MembershipBody::ChangeRole { person, role })
                     .await;

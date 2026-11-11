@@ -11,6 +11,13 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Departments** (Settings → Groups). Admins set up departments like Legal or
+  Finance with the people in them. Each department is its own locked lane, so
+  only its current members' computers receive what is shared with it: choose
+  **Just Legal** when sharing. Changes are signed into the membership log, and
+  people taken out stop getting new details. Skills has a "Keep each
+  department's knowledge to itself" card.
+
 - **History on this computer** (Settings → Groups). Every share and every
   memory given to someone's helpers is signed into an audit history that holds
   only BLAKE3 fingerprints, never the words. The history is re-checked on every

@@ -51,6 +51,21 @@ impl DepartmentId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The slug for a name a person typed ("Legal & HR" → `legal-hr`), or `None`
+    /// when the name has no letters or digits to keep.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let mut slug = String::new();
+        for c in name.trim().chars().flat_map(char::to_lowercase) {
+            if c.is_ascii_alphanumeric() {
+                slug.push(c);
+            } else if !slug.is_empty() && !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+        let slug: String = slug.chars().take(MAX_DEPARTMENT_ID_CHARS).collect();
+        Self::new(slug.trim_end_matches('-')).ok()
+    }
 }
 
 impl TryFrom<String> for DepartmentId {
@@ -269,6 +284,16 @@ mod tests {
         for bad in ["", "Legal", "-x", "x-", "a b", &"x".repeat(49)] {
             assert!(DepartmentId::new(bad).is_err(), "{bad:?}");
         }
+        assert_eq!(
+            DepartmentId::from_name("  Legal & HR "),
+            Some(id("legal-hr"))
+        );
+        assert_eq!(
+            DepartmentId::from_name("Finance (EMEA)"),
+            Some(id("finance-emea"))
+        );
+        assert_eq!(DepartmentId::from_name("—!"), None);
+        assert!(DepartmentId::from_name(&"a b ".repeat(40)).is_some());
     }
 
     #[test]
