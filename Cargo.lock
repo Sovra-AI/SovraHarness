@@ -14398,7 +14398,7 @@ checksum = "ea06cc588e43c632923a55450401b8f25e628131571d4e1baea1bdfdb2b5ed06"
 
 [[package]]
 name = "sovra-adk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "adk-agent",
  "adk-core",
@@ -14425,7 +14425,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -14452,7 +14452,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "blake3",
@@ -14465,7 +14465,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-files"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bzip2-rs",
  "cap-fs-ext",
@@ -14502,7 +14502,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-google"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -14520,7 +14520,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-mesh"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -14541,7 +14541,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-providers"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2 0.6.0",
  "async-trait",
@@ -14558,7 +14558,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -14583,7 +14583,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-skills"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde-saphyr",
@@ -14592,7 +14592,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-store-surreal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -14605,7 +14605,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-telegram"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -14618,7 +14618,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-train"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "burn",
  "sovra-core",
@@ -14627,7 +14627,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "base64 0.23.1",
@@ -14642,7 +14642,7 @@ dependencies = [
 
 [[package]]
 name = "sovra-whatsapp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -19756,7 +19756,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde_json",

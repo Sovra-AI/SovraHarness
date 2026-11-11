@@ -11,6 +11,8 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-11
+
 - **`sovra-train`** (new adapter crate, not yet scheduled by the app): local
   training on Burn 0.22.1 (MIT OR Apache-2.0) behind the core swarm `Objective`
   port. Pure-Rust CPU with autodiff by default; `--features gpu` adds Burn's
