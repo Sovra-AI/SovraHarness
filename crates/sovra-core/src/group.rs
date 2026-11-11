@@ -62,9 +62,10 @@ pub use template::{
     Template, TemplateError, check_template,
 };
 pub use wire::{
-    GossipHandler, GroupRecord, GroupStore, GroupStoreError, GroupTransport, MAX_PEER_MESSAGE_BYTES,
-    MAX_REPLY_KNOWLEDGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler, PeerRequest, PeerResponse,
-    Refusal, Spawn, TransportError, admits_request, join_transcript, within_budget,
+    GossipHandler, GroupRecord, GroupStore, GroupStoreError, GroupTransport,
+    MAX_PEER_MESSAGE_BYTES, MAX_REPLY_KNOWLEDGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler,
+    PeerRequest, PeerResponse, Refusal, Spawn, TransportError, admits_request, join_transcript,
+    within_budget,
 };
 pub use work::{
     ChatJob, JOBS_PER_MINUTE, JobAnswer, JobBuffer, JobId, JobTurn, MAX_JOB_BYTES, MAX_JOB_TURNS,

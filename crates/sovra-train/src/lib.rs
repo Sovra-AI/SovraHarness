@@ -84,7 +84,10 @@ impl LinearModel {
             TensorData::new(e.features.clone(), [e.rows, e.width]),
             &self.device,
         );
-        let y = Tensor::<2>::from_data(TensorData::new(e.targets.clone(), [e.rows, 1]), &self.device);
+        let y = Tensor::<2>::from_data(
+            TensorData::new(e.targets.clone(), [e.rows, 1]),
+            &self.device,
+        );
         (x, y)
     }
 
@@ -123,7 +126,9 @@ impl Objective for LinearModel {
         let (w, b) = self.weights(params);
         let (w, b) = (w.require_grad(), b.require_grad());
         let grads = self.mse(w.clone(), b.clone()).backward();
-        let mut out = w.grad(&grads).map_or_else(|| vec![0.0; self.examples.width], read);
+        let mut out = w
+            .grad(&grads)
+            .map_or_else(|| vec![0.0; self.examples.width], read);
         out.extend(b.grad(&grads).map_or_else(|| vec![0.0], read));
         out
     }
