@@ -57,6 +57,9 @@ getrandom = "0.4.3"
 # fallback (MIT OR Apache-2.0, rustls over ring, no OpenSSL). Stable wire protocol and
 # API since 1.0; see docs/roadmap/02-a-team.md §8. Metrics off: nothing reports out.
 iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper"] }
+# Fleet-wide broadcast of signed audit checkpoints over the same iroh endpoint
+# (MIT OR Apache-2.0). Metrics off, like iroh: nothing reports out.
+iroh-gossip = { version = "=0.102.0", default-features = false, features = ["net"] }
 directories = "6.0.0"
 futures = "0.3.32"
 # Official MCP server SDK; stdio only, owned by sovra-runtime.

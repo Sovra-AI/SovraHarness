@@ -109,8 +109,10 @@ data stays more than 0.5 away.
 
 1. Runtime: *done* for this computer's own history (shares and federated
    answers; `sovra-runtime/src/groups.rs`). Replication is *done*: copies swap
-   on every sync, with fork detection. Still to do: record AI handoffs, and
-   broadcast signed checkpoints over iroh-gossip with witness co-signatures.
+   on every sync, with fork detection. Witnessing is *done*: signed checkpoints
+   are broadcast over iroh-gossip (`audit::AuditGossip`, `GroupTransport::gossip_*`),
+   and peers co-sign checkpoints that match their copy exactly. Still to do:
+   record AI handoffs.
 2. UI: *done* for the Groups summary. Still to do: a full **Audit history** page (where each item lives, who read it, every
    model change) and approval cards that use `EgressGate` for outbound
    messages. Register both on the Skills page.

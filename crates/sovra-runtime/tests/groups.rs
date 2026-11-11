@@ -44,7 +44,12 @@ struct Network {
     off: Mutex<BTreeSet<DeviceId>>,
     /// Computers showing a same-room code, with its hint.
     pairing: Mutex<BTreeMap<DeviceId, u8>>,
+    /// Broadcast subscribers: who joined which topic, and where to deliver.
+    gossip: Mutex<BTreeMap<DeviceId, Subscriber>>,
 }
+
+/// One computer's broadcast subscription: topic, handler and its spawner.
+type Subscriber = ([u8; 32], Arc<dyn sovra_core::group::GossipHandler>, Spawn);
 
 struct LoopTransport {
     me: DeviceId,
@@ -114,6 +119,43 @@ impl sovra_core::group::GroupCipher for FakeCipher {
 
 #[async_trait::async_trait]
 impl GroupTransport for LoopTransport {
+    async fn gossip_join(
+        &self,
+        topic: [u8; 32],
+        _peers: Vec<PeerAddress>,
+        handler: Arc<dyn sovra_core::group::GossipHandler>,
+        spawn: Spawn,
+    ) {
+        self.net
+            .gossip
+            .lock()
+            .expect("not poisoned")
+            .insert(self.me, (topic, handler, spawn));
+    }
+
+    /// Delivers to every other switched-on computer on the topic, on its own task.
+    async fn gossip_send(&self, topic: [u8; 32], message: Vec<u8>) {
+        let off = self.net.off.lock().expect("not poisoned").clone();
+        if off.contains(&self.me) {
+            return;
+        }
+        let targets: Vec<_> = self
+            .net
+            .gossip
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .filter(|(device, (t, _, _))| {
+                **device != self.me && *t == topic && !off.contains(device)
+            })
+            .map(|(_, (_, handler, spawn))| (handler.clone(), spawn.clone()))
+            .collect();
+        for (handler, spawn) in targets {
+            let message = message.clone();
+            spawn(Box::pin(async move { handler.received(message).await }));
+        }
+    }
+
     fn this_device(&self) -> DeviceId {
         self.me
     }
@@ -455,6 +497,46 @@ async fn the_group_shares_one_checked_audit_history_across_computers() {
     assert_eq!(saved.peer_audit.len(), 1);
     assert_eq!(saved.peer_audit[0].body.author, mum.device);
     assert!(saved.audit.is_empty(), "Dad's own history is his alone");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn computers_witness_each_others_history_over_the_broadcast_topic() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 71);
+    let dad = Computer::start(&net, 72);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Mum's laptop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Dad's desktop".into(),
+    });
+    dad.roster(|state| state.people.len() == 2).await;
+    mum.roster(|state| state.admits(&dad.device)).await;
+    mum.send(GroupCommand::Share {
+        text: "The van's MOT is due in May".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    mum.audit(|s| s.records == 1).await;
+    // Both join the topic on their next sync; Dad hears Mum's checkpoint, catches up
+    // if needed, checks it against his copy and signs for it.
+    dad.send(GroupCommand::Load);
+    dad.audit(|s| s.other_records >= 1).await;
+    mum.send(GroupCommand::Load);
+    let vouched = mum.audit(|s| s.witnesses >= 1).await;
+    assert_eq!(vouched.witnessed_records, 1);
+    let saved = mum.store.0.lock().expect("not poisoned").clone();
+    assert_eq!(saved.audit_witnesses.len(), 1);
+    assert_eq!(saved.audit_witnesses[0].witness, dad.device);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

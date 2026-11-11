@@ -250,10 +250,30 @@ pub trait PeerHandler: Send + Sync {
     async fn handle(&self, from: DeviceId, request: PeerRequest) -> PeerResponse;
 }
 
+/// Receives broadcasts on a topic. Broadcasts carry no trusted sender: handlers
+/// accept only self-verifying, signed content. Implemented by the runtime.
+#[async_trait::async_trait]
+pub trait GossipHandler: Send + Sync {
+    async fn received(&self, message: Vec<u8>);
+}
+
 /// The network as the runtime sees it. Implemented by the mesh adapter, which owns
 /// this computer's device key and never lets it out.
 #[async_trait::async_trait]
 pub trait GroupTransport: Send + Sync {
+    /// Joins (or refreshes) broadcast `topic` with these `peers`; messages go to
+    /// `handler` on tasks from `spawn`. Transports without broadcast keep the default,
+    /// which does nothing: the audit history still syncs computer to computer.
+    async fn gossip_join(
+        &self,
+        _topic: [u8; 32],
+        _peers: Vec<PeerAddress>,
+        _handler: Arc<dyn GossipHandler>,
+        _spawn: Spawn,
+    ) {
+    }
+    /// Broadcasts `message` on `topic`, if joined. Best effort.
+    async fn gossip_send(&self, _topic: [u8; 32], _message: Vec<u8>) {}
     fn this_device(&self) -> DeviceId;
     fn sign(&self, message: &[u8]) -> Signature;
     fn verifier(&self) -> Arc<dyn SignatureVerifier + Send + Sync>;
@@ -303,6 +323,9 @@ pub struct GroupRecord {
     /// Checked copies of the other computers' audit histories, re-checked on start.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub peer_audit: Vec<crate::swarm::ledger::LedgerEntry>,
+    /// Other computers' signed word for this computer's history, re-checked on start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audit_witnesses: Vec<crate::swarm::audit::WitnessMark>,
 }
 
 /// Why the group record could not be read or written.

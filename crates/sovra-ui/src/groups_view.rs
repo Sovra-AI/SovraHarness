@@ -1247,6 +1247,15 @@ impl ModelsView {
                     .whitespace_normal()
                     .child(caption(summary.headline(), cx)),
             );
+        if let Some(line) = summary.witness_line() {
+            section = section.child(
+                div()
+                    .id("groups-audit-witnesses")
+                    .test_support()
+                    .whitespace_normal()
+                    .child(caption(line, cx)),
+            );
+        }
         if let Some(line) = summary.fleet_line() {
             section = section.child(
                 div()

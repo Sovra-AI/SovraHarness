@@ -100,6 +100,25 @@ impl Computer {
             .expect("runtime accepts commands");
     }
 
+    /// Like [`Self::wait`], but gives up quietly after `within`.
+    async fn try_wait<T>(
+        &self,
+        within: Duration,
+        mut pred: impl FnMut(GroupEvent) -> Option<T>,
+    ) -> Option<T> {
+        tokio::time::timeout(within, async {
+            loop {
+                if let Event::Group(event) = self.events.recv().await.expect("runtime running")
+                    && let Some(found) = pred(*event)
+                {
+                    return found;
+                }
+            }
+        })
+        .await
+        .ok()
+    }
+
     async fn wait<T>(&self, what: &str, mut pred: impl FnMut(GroupEvent) -> Option<T>) -> T {
         tokio::time::timeout(WAIT, async {
             loop {
@@ -315,6 +334,24 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
         .await;
     assert!(history.checked);
     assert_eq!(history.recent[0].words, "Gave a memory to Dad's helpers");
+    // Dad's computer copies Mum's history, hears her signed checkpoint over real
+    // iroh-gossip, checks it against his copy and signs for it.
+    let mut vouched = None;
+    for _ in 0..15 {
+        dad.send(GroupCommand::Load);
+        mum.send(GroupCommand::Load);
+        vouched = mum
+            .try_wait(Duration::from_secs(2), |event| match event {
+                GroupEvent::Audit(summary) if summary.witnesses >= 1 => Some(summary),
+                _ => None,
+            })
+            .await;
+        if vouched.is_some() {
+            break;
+        }
+    }
+    let vouched = vouched.expect("Dad's computer vouched for Mum's history over gossip");
+    assert!(vouched.witnessed_records >= 1);
 
     // Mum removes Dad; his computer leaves the group.
     let dad_person = joined

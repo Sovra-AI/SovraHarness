@@ -334,3 +334,84 @@ async fn a_computer_showing_a_code_is_found_on_the_same_network() {
     bystander.close().await;
     while server.join_next().await.is_some() {}
 }
+
+/// Collects broadcasts, for the gossip test.
+#[derive(Default)]
+struct Heard(std::sync::Mutex<Vec<Vec<u8>>>);
+
+#[async_trait::async_trait]
+impl sovra_core::group::GossipHandler for Heard {
+    async fn received(&self, message: Vec<u8>) {
+        self.0.lock().expect("not poisoned").push(message);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn group_members_hear_each_others_broadcasts_over_iroh_gossip() {
+    let a = Mesh::bind([31; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([32; 32], Reach::LocalOnly).await.expect("binds");
+    let quiet = Arc::new(Recorder {
+        seen_from: std::sync::Mutex::new(Vec::new()),
+        calls: AtomicUsize::new(0),
+    });
+    let mut a_server = serve(&a, quiet.clone());
+    let mut b_server = serve(&b, quiet);
+    let (spawn_a, _a_tasks) = spawner();
+    let (spawn_b, _b_tasks) = spawner();
+    let heard_by_a = Arc::new(Heard::default());
+    let heard_by_b = Arc::new(Heard::default());
+    let topic = [5; 32];
+    a.gossip_join(topic, vec![b.address()], heard_by_a.clone(), spawn_a)
+        .await;
+    b.gossip_join(topic, vec![a.address()], heard_by_b.clone(), spawn_b)
+        .await;
+    // Broadcasts reach only current neighbours, so keep announcing until heard,
+    // as the runtime does on every sync.
+    let heard = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            a.gossip_send(topic, b"checkpoint from a".to_vec()).await;
+            if heard_by_b
+                .0
+                .lock()
+                .expect("not poisoned")
+                .iter()
+                .any(|m| m == b"checkpoint from a")
+            {
+                return;
+            }
+            n0_future::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(heard.is_ok(), "b heard a's broadcast");
+    b.gossip_send(topic, b"cosigned by b".to_vec()).await;
+    let back = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            if heard_by_a
+                .0
+                .lock()
+                .expect("not poisoned")
+                .iter()
+                .any(|m| m == b"cosigned by b")
+            {
+                return;
+            }
+            n0_future::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(back.is_ok(), "a heard b's reply");
+    // A computer never hears its own broadcast back.
+    assert!(
+        heard_by_a
+            .0
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .all(|m| m != b"checkpoint from a")
+    );
+    a.close().await;
+    b.close().await;
+    while a_server.join_next().await.is_some() {}
+    while b_server.join_next().await.is_some() {}
+}

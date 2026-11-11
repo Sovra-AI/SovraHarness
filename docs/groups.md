@@ -80,6 +80,15 @@ code and this page are the ones to trust.
    group holds one shared record. Only the computer that wrote a history can
    add to it. If a computer ever shows two different signed versions of the
    same record, the screen warns that it showed two different histories.
+   On every sync, each computer also joins the group's broadcast topic
+   (iroh-gossip, on the same endpoint) and announces a signed checkpoint of its
+   history: the record count and the BLAKE3 Merkle root. Other computers check it
+   against their copy. If it matches, they sign for it, and the owner keeps those
+   **witness marks**, re-checked on start; the screen reads "2 other computers
+   checked and signed for this history". If it doesn't match, the author is
+   flagged. If they are behind, they first fetch the missing records. Broadcasts
+   carry no trusted sender, so only signed checkpoints and co-signatures from
+   current members count.
 
 Admins change a person between **Admin** and **Member**, and they remove a
 person. Removing a person or another computer asks for a second click

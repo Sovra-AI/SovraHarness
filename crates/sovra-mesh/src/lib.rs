@@ -68,6 +68,13 @@ pub struct Mesh {
     /// from the moment the group service starts. Discovery only reports new or
     /// changed computers, so a code shown before someone presses Join is still here.
     heard: Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, Heard>>>,
+    /// Broadcast trees (iroh-gossip) on this same endpoint, for audit checkpoints.
+    gossip: iroh_gossip::net::Gossip,
+    /// Addresses the group already knows, so gossip can dial members by key alone.
+    known: iroh::address_lookup::memory::MemoryLookup,
+    /// Joined topics and their senders.
+    topics:
+        Arc<std::sync::Mutex<std::collections::BTreeMap<[u8; 32], iroh_gossip::api::GossipSender>>>,
 }
 
 /// One computer heard on this network.
@@ -92,10 +99,15 @@ impl Mesh {
         };
         let endpoint = builder
             .secret_key(secret.clone())
-            .alpns(vec![PEER_ALPN.to_vec()])
+            .alpns(vec![
+                PEER_ALPN.to_vec(),
+                iroh_gossip::net::GOSSIP_ALPN.to_vec(),
+            ])
             .bind()
             .await
             .map_err(|error| MeshError::Bind(error.to_string()))?;
+        let gossip = iroh_gossip::net::Gossip::builder().spawn(endpoint.clone());
+        let known = iroh::address_lookup::memory::MemoryLookup::new();
         tracing::info!(device = %endpoint.id().fmt_short(), ?reach, "group network ready");
         let cipher = Arc::new(cipher::MeshCipher::new(&device_secret));
         let nearby = iroh_mdns_address_lookup::MdnsAddressLookup::builder()
@@ -103,8 +115,11 @@ impl Mesh {
             .build(endpoint.id())
             .map_err(|error| tracing::info!(%error, "same-room codes unavailable on this network"))
             .ok();
-        if let (Some(nearby), Ok(lookup)) = (&nearby, endpoint.address_lookup()) {
-            lookup.add(nearby.clone());
+        if let Ok(lookup) = endpoint.address_lookup() {
+            if let Some(nearby) = &nearby {
+                lookup.add(nearby.clone());
+            }
+            lookup.add(known.clone());
         }
         Ok(Self {
             endpoint,
@@ -112,6 +127,9 @@ impl Mesh {
             cipher,
             nearby,
             heard: Arc::default(),
+            gossip,
+            known,
+            topics: Arc::default(),
         })
     }
 
@@ -190,7 +208,11 @@ async fn listen_nearby(
 }
 
 /// Serves every stream on one accepted connection until the peer closes it.
-async fn serve_connection(incoming: iroh::endpoint::Incoming, handler: Arc<dyn PeerHandler>) {
+async fn serve_connection(
+    incoming: iroh::endpoint::Incoming,
+    handler: Arc<dyn PeerHandler>,
+    gossip: iroh_gossip::net::Gossip,
+) {
     let connection = match incoming.await {
         Ok(connection) => connection,
         Err(error) => {
@@ -198,6 +220,12 @@ async fn serve_connection(incoming: iroh::endpoint::Incoming, handler: Arc<dyn P
             return;
         }
     };
+    if connection.alpn() == iroh_gossip::net::GOSSIP_ALPN {
+        if let Err(error) = gossip.handle_connection(connection).await {
+            tracing::debug!(%error, "gossip connection ended");
+        }
+        return;
+    }
     let from = DeviceId(*connection.remote_id().as_bytes());
     loop {
         let Ok((mut send, mut recv)) = connection.accept_bi().await else {
@@ -221,8 +249,85 @@ async fn serve_connection(incoming: iroh::endpoint::Incoming, handler: Arc<dyn P
     }
 }
 
+/// Hands every message on one joined topic to `handler` until the topic closes.
+async fn listen_topic(
+    mut receiver: iroh_gossip::api::GossipReceiver,
+    handler: Arc<dyn sovra_core::group::GossipHandler>,
+) {
+    use n0_future::StreamExt as _;
+    while let Some(event) = receiver.next().await {
+        match event {
+            Ok(iroh_gossip::api::Event::Received(message)) => {
+                handler.received(message.content.to_vec()).await;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::debug!(%error, "broadcast topic closed");
+                return;
+            }
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl GroupTransport for Mesh {
+    async fn gossip_join(
+        &self,
+        topic: [u8; 32],
+        peers: Vec<PeerAddress>,
+        handler: Arc<dyn sovra_core::group::GossipHandler>,
+        spawn: Spawn,
+    ) {
+        let mut ids = Vec::new();
+        for peer in &peers {
+            if let Ok(addr) = Self::target(peer) {
+                ids.push(addr.id);
+                self.known.add_endpoint_info(addr);
+            }
+        }
+        let existing = self
+            .topics
+            .lock()
+            .expect("topic table lock is never poisoned")
+            .get(&topic)
+            .cloned();
+        if let Some(sender) = existing {
+            if let Err(error) = sender.join_peers(ids).await {
+                tracing::debug!(%error, "couldn't add peers to the broadcast topic");
+            }
+            return;
+        }
+        match self
+            .gossip
+            .subscribe(iroh_gossip::proto::TopicId::from_bytes(topic), ids)
+            .await
+        {
+            Ok(joined) => {
+                let (sender, receiver) = joined.split();
+                self.topics
+                    .lock()
+                    .expect("topic table lock is never poisoned")
+                    .insert(topic, sender);
+                spawn(Box::pin(listen_topic(receiver, handler)));
+            }
+            Err(error) => tracing::debug!(%error, "couldn't join the broadcast topic"),
+        }
+    }
+
+    async fn gossip_send(&self, topic: [u8; 32], message: Vec<u8>) {
+        let sender = self
+            .topics
+            .lock()
+            .expect("topic table lock is never poisoned")
+            .get(&topic)
+            .cloned();
+        if let Some(sender) = sender
+            && let Err(error) = sender.broadcast(message.into()).await
+        {
+            tracing::debug!(%error, "broadcast not sent");
+        }
+    }
+
     fn this_device(&self) -> DeviceId {
         DeviceId(*self.endpoint.id().as_bytes())
     }
@@ -284,7 +389,11 @@ impl GroupTransport for Mesh {
             spawn(Box::pin(listen_nearby(nearby, heard, me)));
         }
         while let Some(incoming) = self.endpoint.accept().await {
-            spawn(Box::pin(serve_connection(incoming, handler.clone())));
+            spawn(Box::pin(serve_connection(
+                incoming,
+                handler.clone(),
+                self.gossip.clone(),
+            )));
         }
     }
 

@@ -176,6 +176,147 @@ impl FleetAudit {
     }
 }
 
+/// The largest audit message sent over the group's broadcast topic.
+pub const MAX_AUDIT_GOSSIP_BYTES: usize = 4096;
+
+/// The group's broadcast topic for audit checkpoints.
+pub fn audit_topic(group: &crate::group::GroupId) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"sovra-audit-topic-v1");
+    hasher.update(group.as_bytes());
+    *hasher.finalize().as_bytes()
+}
+
+/// What computers broadcast to the whole group. Broadcasts carry no trusted sender,
+/// so every message is self-verifying: signed by the computer it speaks for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "audit", rename_all = "snake_case")]
+pub enum AuditGossip {
+    /// "My history now has this many records and this root", signed by its author.
+    Checkpoint(super::ledger::SignedCheckpoint),
+    /// "I checked your checkpoint against my copy and vouch for it."
+    Cosigned {
+        checkpoint: super::ledger::Checkpoint,
+        cosignature: super::ledger::Cosignature,
+    },
+}
+
+impl AuditGossip {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("audit gossip is plain data")
+    }
+
+    /// Parses a broadcast, refusing anything oversized or malformed.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        (bytes.len() <= MAX_AUDIT_GOSSIP_BYTES)
+            .then(|| serde_json::from_slice(bytes).ok())
+            .flatten()
+    }
+}
+
+/// What a witness should do with someone's checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Witnessing {
+    /// It matches this computer's copy exactly: sign these bytes and send them back.
+    Cosign(Vec<u8>),
+    /// This computer's copy is shorter: sync with the author, then check again.
+    Behind,
+    /// It contradicts this computer's copy: the author rewrote its history.
+    Fork,
+    /// Not a valid checkpoint from a computer whose history this one keeps.
+    Ignore,
+}
+
+impl FleetAudit {
+    /// Checks another computer's signed checkpoint against the copy held here.
+    pub fn witness(
+        &mut self,
+        me: &DeviceId,
+        signed: &super::ledger::SignedCheckpoint,
+        verifier: &dyn crate::group::SignatureVerifier,
+    ) -> Witnessing {
+        let author = signed.signer;
+        if author == *me
+            || signed.checkpoint.origin != origin_for(&author)
+            || !signed.verify(&author, &std::collections::BTreeSet::new(), 0, verifier)
+        {
+            return Witnessing::Ignore;
+        }
+        let Some(local) = self
+            .ledgers
+            .get(&author)
+            .and_then(|ledger| ledger.checkpoint_at(signed.checkpoint.size))
+        else {
+            return Witnessing::Behind;
+        };
+        if local == signed.checkpoint {
+            Witnessing::Cosign(signed.checkpoint.cosigning_bytes())
+        } else {
+            self.forked.insert(author);
+            Witnessing::Fork
+        }
+    }
+}
+
+/// A witness's signed word that this computer's history up to `size` is the one it
+/// holds a copy of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WitnessMark {
+    pub witness: DeviceId,
+    pub size: u64,
+    pub signature: crate::group::Signature,
+}
+
+/// Keeps `cosignature` if it signs exactly a checkpoint of this computer's `own`
+/// history and is newer than that witness's last mark. Returns whether it was kept.
+pub fn accept_cosignature(
+    own: &AuditLedger,
+    marks: &mut Vec<WitnessMark>,
+    checkpoint: &super::ledger::Checkpoint,
+    cosignature: &super::ledger::Cosignature,
+    verifier: &dyn crate::group::SignatureVerifier,
+) -> bool {
+    let exact = own.checkpoint_at(checkpoint.size).as_ref() == Some(checkpoint);
+    let signed = verifier.verify(
+        &cosignature.witness,
+        &checkpoint.cosigning_bytes(),
+        &cosignature.signature,
+    );
+    let newer = marks
+        .iter()
+        .find(|m| m.witness == cosignature.witness)
+        .is_none_or(|m| m.size < checkpoint.size);
+    if !(exact && signed && newer) {
+        return false;
+    }
+    marks.retain(|m| m.witness != cosignature.witness);
+    marks.push(WitnessMark {
+        witness: cosignature.witness,
+        size: checkpoint.size,
+        signature: cosignature.signature,
+    });
+    true
+}
+
+/// Re-checks saved marks against this computer's history at start.
+pub fn verified_marks(
+    own: &AuditLedger,
+    marks: Vec<WitnessMark>,
+    verifier: &dyn crate::group::SignatureVerifier,
+) -> Vec<WitnessMark> {
+    let mut kept = Vec::new();
+    for mark in marks {
+        if let Some(checkpoint) = own.checkpoint_at(mark.size) {
+            let cosignature = super::ledger::Cosignature {
+                witness: mark.witness,
+                signature: mark.signature,
+            };
+            accept_cosignature(own, &mut kept, &checkpoint, &cosignature, verifier);
+        }
+    }
+    kept
+}
+
 /// One line of history in plain words.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditLine {
@@ -202,9 +343,28 @@ pub struct AuditSummary {
     pub other_records: u64,
     /// Fingerprints of computers caught showing two different histories.
     pub forked: Vec<String>,
+    /// Other computers that checked and signed for this computer's history.
+    pub witnesses: u64,
+    /// How many of this computer's records the furthest witness signed for.
+    pub witnessed_records: u64,
 }
 
 impl AuditSummary {
+    /// The line about who vouches for this computer's history, if anyone does.
+    pub fn witness_line(&self) -> Option<String> {
+        match self.witnesses {
+            0 => None,
+            1 => Some(format!(
+                "1 other computer checked and signed for the first {} records.",
+                self.witnessed_records
+            )),
+            n => Some(format!(
+                "{n} other computers checked and signed for this history (up to record {}).",
+                self.witnessed_records
+            )),
+        }
+    }
+
     /// The line about the rest of the group's histories, if there is anything to say.
     pub fn fleet_line(&self) -> Option<String> {
         if !self.forked.is_empty() {
@@ -274,7 +434,12 @@ fn words(event: &AuditEvent) -> String {
 
 /// The summary for this computer's `ledger` and its copies of the group's others.
 /// `checked` says whether its own saved entries all verified.
-pub fn summarize(ledger: &AuditLedger, checked: bool, fleet: &FleetAudit) -> AuditSummary {
+pub fn summarize(
+    ledger: &AuditLedger,
+    checked: bool,
+    fleet: &FleetAudit,
+    marks: &[WitnessMark],
+) -> AuditSummary {
     let entries = ledger.entries();
     let count =
         |f: fn(&AuditEvent) -> bool| entries.iter().filter(|e| f(&e.body.event)).count() as u64;
@@ -296,6 +461,8 @@ pub fn summarize(ledger: &AuditLedger, checked: bool, fleet: &FleetAudit) -> Aud
         other_computers: fleet.computers(),
         other_records: fleet.records(),
         forked: fleet.forked().iter().map(DeviceId::fingerprint).collect(),
+        witnesses: marks.len() as u64,
+        witnessed_records: marks.iter().map(|m| m.size).max().unwrap_or(0),
     }
 }
 
@@ -342,7 +509,7 @@ mod tests {
                 .append(body.sign_with(signature), &FakeVerifier)
                 .expect("valid");
         }
-        let summary = summarize(&ledger, true, &FleetAudit::default());
+        let summary = summarize(&ledger, true, &FleetAudit::default(), &[]);
         assert_eq!(
             (summary.records, summary.shared, summary.given_out),
             (2, 1, 1)
@@ -350,11 +517,11 @@ mod tests {
         assert_eq!(summary.recent[0].words, "Gave a memory to Sam's helpers");
         assert_eq!(summary.fingerprint.len(), 8);
         assert!(summary.headline().starts_with("2 records, all checked"));
-        let empty = summarize(&AuditLedger::new("x"), true, &FleetAudit::default());
+        let empty = summarize(&AuditLedger::new("x"), true, &FleetAudit::default(), &[]);
         assert_eq!(empty.records, 0);
         assert!(empty.headline().starts_with("Nothing recorded yet"));
         assert!(
-            summarize(&ledger, false, &FleetAudit::default())
+            summarize(&ledger, false, &FleetAudit::default(), &[])
                 .headline()
                 .contains("didn't check out")
         );
@@ -427,7 +594,7 @@ mod tests {
         // Sam's computer later shows a different, validly signed first entry.
         fleet.merge(&me, history(sam, 2, 9).entries().to_vec(), &FakeVerifier);
         assert!(fleet.forked().contains(&sam));
-        let summary = summarize(&history(me, 0, 0), true, &fleet);
+        let summary = summarize(&history(me, 0, 0), true, &fleet, &[]);
         assert!(
             summary
                 .fleet_line()
@@ -442,10 +609,100 @@ mod tests {
         other.merge(&me, vec![forged], &FakeVerifier);
         assert!(other.forked().is_empty());
         assert!(
-            summarize(&history(me, 0, 0), true, &other)
+            summarize(&history(me, 0, 0), true, &other, &[])
                 .fleet_line()
                 .expect("one copy")
                 .contains("1 other computer")
+        );
+    }
+
+    fn signed_checkpoint(
+        ledger: &AuditLedger,
+        author: DeviceId,
+    ) -> super::super::ledger::SignedCheckpoint {
+        let checkpoint = ledger.checkpoint();
+        super::super::ledger::SignedCheckpoint {
+            signature: fake_sign(&author, &checkpoint.signing_bytes()),
+            signer: author,
+            checkpoint,
+            cosignatures: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn witnesses_vouch_for_matching_checkpoints_and_catch_rewrites() {
+        let (me, sam) = (DeviceId([1; 32]), DeviceId([2; 32]));
+        let sams = history(sam, 3, 0);
+        let mut fleet = FleetAudit::default();
+        // Not holding Sam's history yet: catch up first.
+        assert_eq!(
+            fleet.witness(&me, &signed_checkpoint(&sams, sam), &FakeVerifier),
+            Witnessing::Behind
+        );
+        fleet.merge(&me, sams.entries().to_vec(), &FakeVerifier);
+        let Witnessing::Cosign(bytes) =
+            fleet.witness(&me, &signed_checkpoint(&sams, sam), &FakeVerifier)
+        else {
+            panic!("an exact match is vouched for");
+        };
+        // Sam keeps my mark only if it signs exactly his history.
+        let cosignature = super::super::ledger::Cosignature {
+            witness: me,
+            signature: fake_sign(&me, &bytes),
+        };
+        let mut marks = Vec::new();
+        let checkpoint = sams.checkpoint();
+        assert!(accept_cosignature(
+            &sams,
+            &mut marks,
+            &checkpoint,
+            &cosignature,
+            &FakeVerifier
+        ));
+        assert!(
+            !accept_cosignature(&sams, &mut marks, &checkpoint, &cosignature, &FakeVerifier),
+            "not twice"
+        );
+        let wrong = super::super::ledger::Cosignature {
+            witness: DeviceId([7; 32]),
+            signature: fake_sign(&me, &bytes),
+        };
+        assert!(!accept_cosignature(
+            &sams,
+            &mut marks,
+            &checkpoint,
+            &wrong,
+            &FakeVerifier
+        ));
+        assert_eq!(verified_marks(&sams, marks.clone(), &FakeVerifier), marks);
+        let summary = summarize(&sams, true, &FleetAudit::default(), &marks);
+        assert!(
+            summary
+                .witness_line()
+                .expect("one")
+                .contains("first 3 records")
+        );
+
+        // Sam later signs a checkpoint of a different history of the same size.
+        let rewritten = history(sam, 3, 9);
+        assert_eq!(
+            fleet.witness(&me, &signed_checkpoint(&rewritten, sam), &FakeVerifier),
+            Witnessing::Fork
+        );
+        assert!(fleet.forked().contains(&sam));
+        // A checkpoint someone else signed for Sam is ignored.
+        let mut forged = signed_checkpoint(&sams, sam);
+        forged.signature = fake_sign(&me, &forged.checkpoint.signing_bytes());
+        assert_eq!(
+            fleet.witness(&me, &forged, &FakeVerifier),
+            Witnessing::Ignore
+        );
+        // Broadcasts round-trip and oversized ones are refused.
+        let message = AuditGossip::Checkpoint(signed_checkpoint(&sams, sam));
+        assert_eq!(AuditGossip::from_bytes(&message.to_bytes()), Some(message));
+        assert_eq!(
+            AuditGossip::from_bytes(&vec![b' '; MAX_AUDIT_GOSSIP_BYTES + 1]),
+            None
         );
     }
 }

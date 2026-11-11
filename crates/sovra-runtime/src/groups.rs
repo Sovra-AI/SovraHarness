@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use sovra_core::group::ContentHash;
+use sovra_core::group::GossipHandler;
 use sovra_core::group::check_template;
 use sovra_core::group::{
     AskLimiter, AskRecord, Bytes, GroupCipher, OpHash, SharedHit, Space, check_ask,
@@ -34,7 +35,9 @@ use sovra_core::group::{
     normalise_code, short_auth_string, short_code_secret,
 };
 use sovra_core::swarm::audit::{self, FleetAudit};
-use sovra_core::swarm::ledger::{AuditEvent, AuditLedger, UnsignedEntry};
+use sovra_core::swarm::ledger::{
+    AuditEvent, AuditLedger, Cosignature, SignedCheckpoint, UnsignedEntry,
+};
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
 
@@ -760,6 +763,12 @@ impl Groups {
             record.peer_audit.clone(),
             verifier.as_ref(),
         );
+        let mut record = record;
+        record.audit_witnesses = audit::verified_marks(
+            &audit,
+            std::mem::take(&mut record.audit_witnesses),
+            verifier.as_ref(),
+        );
         let groups = Self {
             qr,
             transport,
@@ -834,10 +843,117 @@ impl Groups {
         }
     }
 
+    /// Broadcasts this computer's signed checkpoint, if it has a history to vouch for.
+    async fn announce_checkpoint(&self) {
+        let (group, checkpoint) = {
+            let inner = self.inner.lock().await;
+            let Some(group) = inner.record.group else {
+                return;
+            };
+            if !inner.audit_checked || inner.audit.is_empty() {
+                return;
+            }
+            (group, inner.audit.checkpoint())
+        };
+        let message = audit::AuditGossip::Checkpoint(SignedCheckpoint {
+            signature: self.transport.sign(&checkpoint.signing_bytes()),
+            signer: self.me(),
+            checkpoint,
+            cosignatures: Vec::new(),
+        });
+        self.transport
+            .gossip_send(audit::audit_topic(&group), message.to_bytes())
+            .await;
+    }
+
+    /// A broadcast on the audit topic: a checkpoint to witness, or a co-signature
+    /// for this computer's own history. Only current members' signatures count.
+    async fn on_audit_gossip(self: &Arc<Self>, bytes: &[u8]) {
+        let Some(message) = audit::AuditGossip::from_bytes(bytes) else {
+            return;
+        };
+        match message {
+            audit::AuditGossip::Checkpoint(signed) => {
+                let (verdict, group, author_address) = {
+                    let mut inner = self.inner.lock().await;
+                    let (Some(roster), Some(group)) = (inner.roster.clone(), inner.record.group)
+                    else {
+                        return;
+                    };
+                    if roster.owner_of(&signed.signer).is_none() {
+                        return;
+                    }
+                    let me = self.me();
+                    let verdict = inner.fleet.witness(&me, &signed, self.verifier.as_ref());
+                    (
+                        verdict,
+                        group,
+                        Self::address_of(&inner.record, signed.signer),
+                    )
+                };
+                match verdict {
+                    audit::Witnessing::Cosign(bytes) => {
+                        let reply = audit::AuditGossip::Cosigned {
+                            checkpoint: signed.checkpoint,
+                            cosignature: Cosignature {
+                                witness: self.me(),
+                                signature: self.transport.sign(&bytes),
+                            },
+                        };
+                        self.transport
+                            .gossip_send(audit::audit_topic(&group), reply.to_bytes())
+                            .await;
+                    }
+                    audit::Witnessing::Behind => {
+                        // Fetch the missing records; the next checkpoint is then vouched for.
+                        self.sync_audit(group, &author_address).await;
+                    }
+                    audit::Witnessing::Fork => self.publish_audit().await,
+                    audit::Witnessing::Ignore => {}
+                }
+            }
+            audit::AuditGossip::Cosigned {
+                checkpoint,
+                cosignature,
+            } => {
+                let kept = {
+                    let mut inner = self.inner.lock().await;
+                    let member = inner
+                        .roster
+                        .as_ref()
+                        .is_some_and(|roster| roster.owner_of(&cosignature.witness).is_some());
+                    if !member || cosignature.witness == self.me() {
+                        return;
+                    }
+                    let Inner { audit, record, .. } = &mut *inner;
+                    let kept = audit::accept_cosignature(
+                        audit,
+                        &mut record.audit_witnesses,
+                        &checkpoint,
+                        &cosignature,
+                        self.verifier.as_ref(),
+                    );
+                    if kept {
+                        self.persist(&inner).await;
+                    }
+                    kept
+                };
+                if kept {
+                    self.publish_audit().await;
+                }
+            }
+        }
+    }
+
     async fn publish_audit(&self) {
         let summary = {
             let inner = self.inner.lock().await;
-            audit::summarize(&inner.audit, inner.audit_checked, &inner.fleet)
+            audit::summarize(
+                &inner.audit,
+                inner.audit_checked,
+                &inner.fleet,
+                &inner.record.audit_witnesses,
+            )
         };
         self.emit(GroupEvent::Audit(summary)).await;
     }
@@ -1422,13 +1538,25 @@ impl Groups {
 
     /// Asks every other computer what this one missed, and sends what they missed.
     async fn sync_all(self: &Arc<Self>) {
-        let peers = {
+        let (peers, group) = {
             let inner = self.inner.lock().await;
-            if inner.record.group.is_none() {
+            let Some(group) = inner.record.group else {
                 return;
-            }
-            self.peers(&inner)
+            };
+            (self.peers(&inner), group)
         };
+        // Keep the group's broadcast topic joined with everyone known, and remind it
+        // where this computer's history stands so witnesses can vouch for it.
+        let handler: Arc<dyn GossipHandler> = Arc::new(GroupHandler(self.clone()));
+        self.transport
+            .gossip_join(
+                audit::audit_topic(&group),
+                peers.clone(),
+                handler,
+                self.spawn.clone(),
+            )
+            .await;
+        self.announce_checkpoint().await;
         for peer in peers {
             // A large history arrives over several rounds; stop once a round brings
             // nothing new.
@@ -2202,6 +2330,7 @@ impl Groups {
             // History outlives any one group.
             audit: std::mem::take(&mut inner.record.audit),
             peer_audit: std::mem::take(&mut inner.record.peer_audit),
+            audit_witnesses: std::mem::take(&mut inner.record.audit_witnesses),
         };
         self.refold(&mut inner).await;
         self.persist(&inner).await;
@@ -2762,6 +2891,13 @@ impl Groups {
 /// Serves other computers. Holds the shared handle because admitting a computer
 /// broadcasts its addition on owned tasks.
 struct GroupHandler(Arc<Groups>);
+
+#[async_trait::async_trait]
+impl GossipHandler for GroupHandler {
+    async fn received(&self, message: Vec<u8>) {
+        self.0.on_audit_gossip(&message).await;
+    }
+}
 
 #[async_trait::async_trait]
 impl PeerHandler for GroupHandler {

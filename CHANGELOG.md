@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Witnessed histories.** Group computers now broadcast signed checkpoints of
+  their audit history over iroh-gossip (new dependency `iroh-gossip` 0.102, MIT
+  OR Apache-2.0, metrics off). Other members check each one against their copy
+  and sign for it. Settings → Groups shows how many computers vouched for this
+  history, and a checkpoint that contradicts a copy flags its author.
+
 - **Departments** (Settings → Groups). Admins set up departments like Legal or
   Finance with the people in them. Each department is its own locked lane, so
   only its current members' computers receive what is shared with it: choose
