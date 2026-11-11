@@ -196,6 +196,7 @@ impl ModelsView {
                     .child(self.render_templates(cx))
                     .child(self.render_federated(cx))
                     .child(self.render_work(cx))
+                    .child(self.render_audit(cx))
                     .child(
                         h_flex().child(
                             design::button("groups-leave", "Leave this group", cx)
@@ -1093,6 +1094,44 @@ impl ModelsView {
 }
 
 impl ModelsView {
+    /// This computer's signed history of what it shared and gave out. Read-only:
+    /// nothing here can change the record.
+    fn render_audit(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let summary = &self.groups.audit;
+        let mut section = v_flex()
+            .id("groups-audit")
+            .test_support()
+            .w_full()
+            .gap(t.space.compact)
+            .child(
+                div()
+                    .sovra_text(TextRole::Body, cx)
+                    .child("History on this computer"),
+            )
+            .child(caption(
+                "A record of everything this computer shared and every memory it gave to someone's helpers. Only a fingerprint of the words is kept, and every record is signed, so changes show.",
+                cx,
+            ))
+            .child(
+                div()
+                    .id("groups-audit-headline")
+                    .test_support()
+                    .whitespace_normal()
+                    .child(caption(summary.headline(), cx)),
+            );
+        for (index, line) in summary.recent.iter().enumerate() {
+            section = section.child(
+                div()
+                    .id(("groups-audit-line", index))
+                    .test_support()
+                    .whitespace_normal()
+                    .child(caption(line.words.clone(), cx)),
+            );
+        }
+        section
+    }
+
     /// Helpers and schedules people shared: read the words, then use your own copy.
     fn render_templates(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);

@@ -58,6 +58,14 @@ code and this page are the ones to trust.
    on one without. The second's chats are answered by the first, which gets
    only the conversation's words and never uses its tools for someone else.
    Each computer in the roster shows **Online now** or when it was last seen.
+9. **History on this computer** lists what this computer shared and each
+   memory it gave to someone's helpers, newest first, with a line such as
+   "2 records, all checked · fingerprint 3f2a9c01". Each record is signed with
+   this computer's key and holds only a BLAKE3 fingerprint of the words, never
+   the words. On every start the whole history is re-checked. If anything in
+   the saved file was changed, the screen says the history didn't check out,
+   and nothing new is added to it. The history is kept when you leave a group.
+   It lives in `group.json` under `audit`; see [Sovereign swarm](swarm.md).
 
 Admins change a person between **Admin** and **Member**, and they remove a
 person. Removing a person or another computer asks for a second click

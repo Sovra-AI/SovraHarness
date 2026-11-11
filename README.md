@@ -11,7 +11,9 @@ share memories, documents, lists, helpers and schedules across their computers:
 **Share with my group** (or *Just Dad*) on an artifact, a saved detail, a helper or
 a schedule, **Keep a copy** of what others shared, and edits come back as new
 versions. **Ask my group** asks the memories of computers whose owners allow it,
-without copying those memories. Work handoff remains planned; see
+without copying those memories. **History on this computer** shows a signed,
+tamper-evident record of everything shared and every memory given out. Work
+handoff remains planned; see
 [Groups](docs/groups.md). macOS, Windows and Linux from one codebase.
 
 The Knowledge page includes an interactive map of saved details and their

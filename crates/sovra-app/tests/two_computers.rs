@@ -306,6 +306,15 @@ async fn two_computers_form_a_group_and_share_over_the_real_network() {
     assert_eq!(log[0].asked_by, "Dad");
     assert_eq!(log[0].question, "who is the dentist");
     assert!(log[0].answered >= 1);
+    // What left Mum's memory is in her signed history, checked with real Ed25519 keys.
+    let history = mum
+        .wait("Mum's audit history", |event| match event {
+            GroupEvent::Audit(summary) if summary.given_out >= 1 => Some(summary),
+            _ => None,
+        })
+        .await;
+    assert!(history.checked);
+    assert_eq!(history.recent[0].words, "Gave a memory to Dad's helpers");
 
     // Mum removes Dad; his computer leaves the group.
     let dad_person = joined

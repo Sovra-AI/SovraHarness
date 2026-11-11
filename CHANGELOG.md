@@ -11,6 +11,13 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **History on this computer** (Settings → Groups). Every share and every
+  memory given to someone's helpers is signed into an audit history that holds
+  only BLAKE3 fingerprints, never the words. The history is re-checked on every
+  start and kept when leaving a group; a changed file is shown as not checking
+  out and is never extended. Skills has a "See everything this computer shared"
+  card.
+
 - **Sovereign swarm foundations** (`sovra_core::swarm`, not yet wired into the
   app; see [docs/swarm.md](docs/swarm.md)). Added:
   - a BLAKE3 audit ledger (RFC 9162 Merkle log, signed checkpoints, witnesses

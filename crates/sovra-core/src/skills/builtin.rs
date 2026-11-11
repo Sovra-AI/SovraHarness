@@ -42,6 +42,7 @@ impl Skill {
             "add-computer" => "Add another computer to my group",
             "share-helper" => "Share a helper, skill or schedule with your group",
             "share-ai" => "Let a free computer in your group do the answering",
+            "share-history" => "See everything this computer shared",
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
@@ -165,6 +166,10 @@ impl Skill {
             "share-ai" => (
                 "Opens Groups. On the computer with a good AI, turn on Let my group use this computer's AI. On an older laptop with no AI, turn on Use a free computer's AI — then just chat, and the free computer answers.".to_owned(),
                 "/share-ai ".to_owned(),
+            ),
+            "share-history" => (
+                "Opens Groups. Scroll to History on this computer to see each thing you shared and each memory you gave to someone's helpers, and whether the record checks out. Read the fingerprint to your accountant or IT person so they can compare it with theirs.".to_owned(),
+                "/share-history ".to_owned(),
             ),
             "share-helper" => (
                 "Opens your team. On a helper you made, press Share with my group; you can do the same for a skill or a schedule. Others read the words first and press Use this helper to get their own copy. Shared helpers never bring tools with them.".to_owned(),
@@ -452,6 +457,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Open Settings → Groups to let a computer with no AI use a free computer's AI in your group. Only the conversation's words travel; the helping computer never uses its tools for someone else.",
             SkillAction::Settings,
             &["work-handoff", "borrow-ai"],
+        ),
+        action(
+            "share-history",
+            "Sharing history",
+            "Open Settings → Groups to see a signed record of everything this computer shared with your group and every memory it gave to someone's helpers. Only fingerprints of the words are kept, and any change to the record shows.",
+            SkillAction::Settings,
+            &["audit", "audit-history"],
         ),
         action(
             "share-helper",

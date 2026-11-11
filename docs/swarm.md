@@ -1,10 +1,16 @@
 # The sovereign enterprise swarm
 
 Status, 2026-11-11: the **rules and cryptography are implemented and tested**
-(`crates/sovra-core/src/swarm/`, `crates/sovra-mesh/src/swarm.rs`). They are
-**not yet wired into the running app**: no screen, command or background task
-uses them yet, so nothing on this page changes what the desktop app does today.
-The next steps are listed at the end. This is the stage 3 ("a company") and
+(`crates/sovra-core/src/swarm/`, `crates/sovra-mesh/src/swarm.rs`).
+
+*Today* in the app: every computer in a group keeps a **signed audit history**.
+Each share it makes, and each memory it gives to another person's helpers, is
+recorded. The history is re-verified on every start, and Settings → Groups shows
+it under **History on this computer** (see [Groups](groups.md)).
+
+Not yet in the app: departments, the sign-off gate for outbound messages,
+syncing ledgers with witnesses, and training. The next steps are listed at the
+end. This is the stage 3 ("a company") and
 stage 5 ("collective intelligence") direction of the
 [roadmap](roadmap/README.md) turned into code.
 
@@ -97,11 +103,10 @@ data stays more than 0.5 away.
 
 ## Next steps
 
-1. Runtime: a swarm service that persists the ledger (`AuditLedger::restore`
-   re-checks every entry), records group shares, federated answers and AI
-   handoffs as `AuditEvent`s, and syncs checkpoints over iroh (gossip) with
-   witnesses co-signing.
-2. UI: an **Audit history** page (where each item lives, who read it, every
+1. Runtime: *done* for this computer's own history (shares and federated
+   answers; `sovra-runtime/src/groups.rs`). Still to do: record AI handoffs,
+   and sync checkpoints over iroh (gossip) with witnesses co-signing.
+2. UI: *done* for the Groups summary. Still to do: a full **Audit history** page (where each item lives, who read it, every
    model change) and approval cards that use `EgressGate` for outbound
    messages. Register both on the Skills page.
 3. Departments in the group roster (a third `Space` kind beside the whole group

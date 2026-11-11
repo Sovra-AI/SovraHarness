@@ -200,6 +200,8 @@ pub enum GroupEvent {
     /// This computer was removed from, or left, its group.
     LeftGroup,
     Problem(GroupProblem),
+    /// This computer's audit history: what it shared and gave out, re-checked.
+    Audit(crate::swarm::audit::AuditSummary),
 }
 
 /// One row of the roster screen.
@@ -291,6 +293,8 @@ pub struct GroupsView {
     pub work: super::work::WorkSettings,
     /// Chat jobs this computer answered for others, newest first.
     pub recent_work: Vec<super::work::WorkRecord>,
+    /// This computer's audit history. Kept when leaving a group: history is never lost.
+    pub audit: crate::swarm::audit::AuditSummary,
 }
 
 impl Default for GroupsView {
@@ -313,6 +317,7 @@ impl Default for GroupsView {
             last_seen: std::collections::BTreeMap::new(),
             work: super::work::WorkSettings::default(),
             recent_work: Vec::new(),
+            audit: crate::swarm::audit::AuditSummary::default(),
         }
     }
 }
@@ -383,6 +388,7 @@ impl GroupsView {
             }
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
+            GroupEvent::Audit(summary) => self.audit = summary,
         }
     }
 

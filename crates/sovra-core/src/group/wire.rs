@@ -285,6 +285,10 @@ pub struct GroupRecord {
     /// Whether this computer helps with, and hands off, chat work (both off at first).
     #[serde(default)]
     pub work: super::work::WorkSettings,
+    /// This computer's signed audit history (`crate::swarm::audit`). Re-checked
+    /// entry by entry on every start; never trusted as saved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audit: Vec<crate::swarm::ledger::LedgerEntry>,
 }
 
 /// Why the group record could not be read or written.

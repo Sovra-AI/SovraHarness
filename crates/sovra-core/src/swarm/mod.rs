@@ -17,6 +17,7 @@
 //! Transport (iroh, QUIC, Ed25519) is `sovra-mesh`; signing and secure randomness
 //! are behind ports implemented there. See `docs/swarm.md`.
 
+pub mod audit;
 pub mod department;
 pub mod egress;
 pub mod learn;

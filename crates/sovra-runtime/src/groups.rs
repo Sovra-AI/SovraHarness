@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_channel::Sender;
+use sovra_core::group::ContentHash;
 use sovra_core::group::check_template;
 use sovra_core::group::{
     AskLimiter, AskRecord, Bytes, GroupCipher, OpHash, SharedHit, Space, check_ask,
@@ -32,6 +33,8 @@ use sovra_core::group::{
     SHORT_CODE_LIFETIME_MS, ShortCodeWindow, code_hint, code_transcript, format_code,
     normalise_code, short_auth_string, short_code_secret,
 };
+use sovra_core::swarm::audit;
+use sovra_core::swarm::ledger::{AuditEvent, AuditLedger, UnsignedEntry};
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
 
@@ -674,6 +677,11 @@ struct Inner {
     pending_pair: Option<PendingPair>,
     /// A same-room join this computer started, waiting for its person's answer.
     joining: Option<CodeJoin>,
+    /// This computer's signed audit history, rebuilt from `record.audit` at start.
+    audit: AuditLedger,
+    /// Whether every saved entry verified. If not, nothing more is appended, so a
+    /// tampered history is never extended or papered over.
+    audit_checked: bool,
 }
 
 /// A same-room code: its secret, its one-guess window and what it invites.
@@ -736,6 +744,15 @@ impl Groups {
         };
         let verifier = transport.verifier();
         let cipher = transport.cipher();
+        let origin = audit::origin_for(&transport.this_device());
+        let (audit, audit_checked) =
+            match AuditLedger::restore(origin.clone(), record.audit.clone(), verifier.as_ref()) {
+                Ok(ledger) => (ledger, true),
+                Err(error) => {
+                    tracing::warn!(%error, "saved audit history did not verify; not extending it");
+                    (AuditLedger::new(origin), false)
+                }
+            };
         let groups = Self {
             qr,
             transport,
@@ -763,6 +780,8 @@ impl Groups {
                 short: None,
                 pending_pair: None,
                 joining: None,
+                audit,
+                audit_checked,
             }),
         };
         {
@@ -779,6 +798,40 @@ impl Groups {
 
     async fn emit(&self, event: GroupEvent) {
         let _ = self.events.send(Event::Group(Box::new(event))).await;
+    }
+
+    /// Signs `event` with the device key and appends it to this computer's audit
+    /// history. The caller persists. Does nothing if the saved history failed to
+    /// verify at start.
+    fn record_audit(&self, inner: &mut Inner, event: AuditEvent) {
+        if !inner.audit_checked {
+            return;
+        }
+        let me = self.me();
+        let (seq, prev) = inner.audit.next_for(&me);
+        let body = UnsignedEntry {
+            origin: inner.audit.origin.clone(),
+            author: me,
+            seq,
+            prev,
+            at: now(),
+            event,
+        };
+        let entry = body
+            .clone()
+            .sign_with(self.transport.sign(&body.signing_bytes()));
+        match inner.audit.append(entry.clone(), self.verifier.as_ref()) {
+            Ok(_) => inner.record.audit.push(entry),
+            Err(error) => tracing::warn!(%error, "audit entry refused"),
+        }
+    }
+
+    async fn publish_audit(&self) {
+        let summary = {
+            let inner = self.inner.lock().await;
+            audit::summarize(&inner.audit, inner.audit_checked)
+        };
+        self.emit(GroupEvent::Audit(summary)).await;
     }
 
     async fn refold(&self, inner: &mut Inner) {
@@ -1019,6 +1072,7 @@ impl Groups {
         self.publish_shared(shared).await;
         self.emit(GroupEvent::Federated { settings, recent }).await;
         self.publish_work().await;
+        self.publish_audit().await;
     }
 
     async fn publish_work(&self) {
@@ -2049,6 +2103,8 @@ impl Groups {
             addresses: Vec::new(),
             federated: inner.record.federated,
             work: inner.record.work,
+            // History outlives any one group.
+            audit: std::mem::take(&mut inner.record.audit),
         };
         self.refold(&mut inner).await;
         self.persist(&inner).await;
@@ -2365,6 +2421,7 @@ impl Groups {
             return;
         };
         let me = self.me();
+        let audited = audit::shared_item(&body);
         let sealed = serde_json::to_vec(&body).ok().and_then(|plaintext| {
             let aad = sealed_aad(&roster.group, &lane, &key_id, &me);
             self.cipher.encrypt(&key, &aad, &plaintext)
@@ -2407,9 +2464,21 @@ impl Groups {
             (Some(op), None) => {
                 inner.record.knowledge.push(op.clone());
                 new_ops.push(op.clone());
+                if let Some((item, kind)) = audited {
+                    self.record_audit(
+                        &mut inner,
+                        AuditEvent::Stored {
+                            item,
+                            kind,
+                            department: audit::lane_department(&lane),
+                            device: me,
+                        },
+                    );
+                }
                 None
             }
         };
+        let audit_changed = problem.is_none() && audited.is_some();
         self.refold(&mut inner).await;
         self.persist(&inner).await;
         let roster_now = inner.roster.clone();
@@ -2423,6 +2492,9 @@ impl Groups {
             self.emit(GroupEvent::Problem(problem)).await;
         }
         self.publish_changed(roster_now, shared).await;
+        if audit_changed {
+            self.publish_audit().await;
+        }
     }
 
     /// Admits a computer holding a live invite: signs its addition and hands it the history.
@@ -2724,11 +2796,13 @@ impl Groups {
                 reason: Refusal::Malformed,
             };
         };
-        let (owner, asked_by, computer) = {
+        let (owner, asked_by, computer, asker, lane) = {
             let mut inner = self.inner.lock().await;
             let Some(roster) = inner.roster.clone() else {
                 return refused;
             };
+            let asker = roster.owner_of(&from).map(|member| member.person);
+            let lane = Space::Group.lane(&roster.group);
             let reads = roster
                 .role_of(&from)
                 .is_some_and(sovra_core::group::Role::reads);
@@ -2746,6 +2820,8 @@ impl Groups {
                 name_of(&me).unwrap_or_default(),
                 name_of(&from).unwrap_or_default(),
                 computer,
+                asker,
+                lane,
             )
         };
         let found = match self.knowledge.local_reader() {
@@ -2775,6 +2851,23 @@ impl Groups {
         let items = federated_items(found, &owner);
         let (settings, recent) = {
             let mut inner = self.inner.lock().await;
+            // Every memory that leaves for someone else's helpers is on the record.
+            if let Some(asker) = asker {
+                for item in &items {
+                    self.record_audit(
+                        &mut inner,
+                        AuditEvent::Read {
+                            item: ContentHash::of(item.statement.as_bytes()),
+                            department: audit::lane_department(&lane),
+                            person: asker,
+                            helper: Some(format!("{asked_by}'s helpers")),
+                        },
+                    );
+                }
+                if !items.is_empty() {
+                    self.persist(&inner).await;
+                }
+            }
             log_ask(
                 &mut inner.asks,
                 AskRecord {
@@ -2788,6 +2881,9 @@ impl Groups {
             (inner.record.federated, inner.asks.clone())
         };
         self.emit(GroupEvent::Federated { settings, recent }).await;
+        if !items.is_empty() && asker.is_some() {
+            self.publish_audit().await;
+        }
         PeerResponse::Answered { items }
     }
 

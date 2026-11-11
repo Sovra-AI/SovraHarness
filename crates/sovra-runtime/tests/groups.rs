@@ -240,6 +240,20 @@ impl Computer {
         n: u8,
         helper: Option<Arc<dyn sovra_core::group::WorkModel>>,
     ) -> Self {
+        Self::start_full(net, n, helper, Arc::new(MemoryStore::default()))
+    }
+
+    /// The same computer switched on again with what it saved.
+    fn restart(net: &Arc<Network>, n: u8, store: Arc<MemoryStore>) -> Self {
+        Self::start_full(net, n, None, store)
+    }
+
+    fn start_full(
+        net: &Arc<Network>,
+        n: u8,
+        helper: Option<Arc<dyn sovra_core::group::WorkModel>>,
+        store: Arc<MemoryStore>,
+    ) -> Self {
         let device = DeviceId([n; 32]);
         let transport: Arc<dyn GroupTransport> = Arc::new(LoopTransport {
             me: device,
@@ -250,7 +264,6 @@ impl Computer {
                 next: std::sync::atomic::AtomicU64::new(0),
             }),
         });
-        let store = Arc::new(MemoryStore::default());
         let client = sovra_runtime::start_with_services(
             "group-test",
             AgentConfig::default(),
@@ -334,6 +347,75 @@ impl Computer {
         })
         .await
     }
+}
+
+impl Computer {
+    async fn audit(
+        &self,
+        pred: impl Fn(&sovra_core::swarm::audit::AuditSummary) -> bool,
+    ) -> sovra_core::swarm::audit::AuditSummary {
+        self.wait(|event| match event {
+            GroupEvent::Audit(summary) if pred(&summary) => Some(summary),
+            _ => None,
+        })
+        .await
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_share_is_signed_into_an_audit_history_that_is_rechecked_on_start() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 41);
+    mum.send(GroupCommand::Create {
+        name: "Smith Plumbing".into(),
+        your_name: "Mum".into(),
+        computer_name: "Office".into(),
+    });
+    mum.roster(|state| state.name == "Smith Plumbing").await;
+    mum.send(GroupCommand::Share {
+        text: "The van's MOT is due in May".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    let summary = mum.audit(|s| s.shared == 1).await;
+    assert!(summary.checked);
+    assert_eq!(summary.records, 1);
+    assert_eq!(summary.recent[0].words, "Shared a detail with the group");
+    let saved = mum.store.0.lock().expect("not poisoned").clone();
+    assert_eq!(saved.audit.len(), 1);
+    // Only the hash is kept, never the words.
+    let json = serde_json::to_string(&saved.audit).expect("encodes");
+    assert!(!json.contains("MOT"));
+    let fingerprint = summary.fingerprint.clone();
+    let store = mum.store.clone();
+    drop(mum);
+
+    // Switched on again: the history re-verifies and keeps growing.
+    let again = Computer::restart(&net, 41, store.clone());
+    again.send(GroupCommand::Load);
+    let reloaded = again.audit(|s| s.records == 1).await;
+    assert!(reloaded.checked);
+    assert_eq!(reloaded.fingerprint, fingerprint);
+    drop(again);
+
+    // Someone edits the saved history: it no longer verifies and is not extended.
+    {
+        let mut record = store.0.lock().expect("not poisoned");
+        record.audit[0].body.at = sovra_core::Timestamp(0);
+    }
+    let tampered = Computer::restart(&net, 41, store.clone());
+    tampered.send(GroupCommand::Load);
+    let refused = tampered.audit(|s| !s.checked).await;
+    assert_eq!(refused.records, 0);
+    tampered.send(GroupCommand::Share {
+        text: "Another detail".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    tampered
+        .knowledge(|details| has(details, "Another detail"))
+        .await;
+    assert_eq!(store.0.lock().expect("not poisoned").audit.len(), 1);
 }
 
 fn has(details: &[SharedDetail], text: &str) -> bool {

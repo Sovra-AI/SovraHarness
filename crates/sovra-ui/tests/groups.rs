@@ -242,6 +242,7 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
                 },
             );
             group_event(&events, GroupEvent::Knowledge(vec![dads_detail()]));
+            group_event(&events, GroupEvent::Audit(audit_summary()));
             settle(cx);
             group_event(
                 &events,
@@ -268,6 +269,8 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
                     "groups-copy-link",
                     "groups-invite-member",
                     "groups-federated",
+                    "groups-audit",
+                    "groups-audit-headline",
                 ] {
                     let bounds = window.find(id).bounds();
                     assert!(
@@ -283,6 +286,48 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
             .expect("window open");
         }
     }
+}
+
+fn audit_summary() -> sovra_core::swarm::audit::AuditSummary {
+    sovra_core::swarm::audit::AuditSummary {
+        records: 2,
+        checked: true,
+        fingerprint: "3f2a9c01".into(),
+        shared: 1,
+        given_out: 1,
+        recent: vec![
+            sovra_core::swarm::audit::AuditLine {
+                at: Timestamp(6),
+                words: format!("Gave a memory to {}'s helpers", "Dad ".repeat(80)),
+            },
+            sovra_core::swarm::audit::AuditLine {
+                at: Timestamp(5),
+                words: "Shared a detail with the group".into(),
+            },
+        ],
+    }
+}
+
+#[gpui_kit::test]
+fn the_owner_sees_this_computers_checked_history(cx: &mut TestAppContext) {
+    let (window, shell, _commands, events) = open(cx, 1280., 3200.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(&events, GroupEvent::Audit(audit_summary()));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
+        window.render_frame(cx);
+        assert!(window.find("groups-audit").visible());
+        assert!(window.find("groups-audit-headline").visible());
+        assert!(window.find(("groups-audit-line", 1usize)).visible());
+    })
+    .expect("window open");
 }
 
 fn dads_list() -> SharedArtifact {
