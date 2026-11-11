@@ -17,8 +17,8 @@ use gpui_kit::{
 };
 use sovra_core::Command;
 use sovra_core::google::{
-    ClientSecret, DESKTOP_CLIENT_NEEDED, GoogleAccount, GoogleCommand, GoogleConnection,
-    GoogleService, GoogleState, SERVICES, ServiceInfo,
+    ClientSecret, DESKTOP_CLIENT_NEEDED, GOOGLE_NOT_INCLUDED, GoogleAccount, GoogleCommand,
+    GoogleConnection, GoogleService, GoogleState, SERVICES, ServiceInfo,
 };
 
 use crate::RuntimeClient;
@@ -37,6 +37,8 @@ pub(crate) struct GoogleCard {
     shell: WeakEntity<Shell>,
     /// The Disconnect button asks once more before signing out.
     confirm_disconnect: bool,
+    /// The bring-your-own-client form stays folded so most people never see it.
+    show_client_form: bool,
     client_id: Entity<InputState>,
     client_secret: Entity<InputState>,
 }
@@ -52,6 +54,7 @@ impl GoogleCard {
         Self {
             shell,
             confirm_disconnect: false,
+            show_client_form: false,
             client_id: cx.new(|cx| {
                 InputState::new(window, cx).placeholder("Ends with .apps.googleusercontent.com")
             }),
@@ -235,39 +238,59 @@ fn header(state: &GoogleState, cx: &Context<GoogleCard>) -> impl IntoElement + u
 
 fn client_setup(view: &GoogleCard, cx: &mut Context<GoogleCard>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let id_empty = view.client_id.read(cx).value().trim().is_empty();
-    v_flex()
-        .gap(t.space.medium)
-        .child(
-            div()
-                .id("google-client-help")
-                .aria_label(DESKTOP_CLIENT_NEEDED)
-                .test_support()
-                .min_w_0()
-                .sovra_text(TextRole::Body, cx)
-                .child(DESKTOP_CLIENT_NEEDED),
-        )
-        .child(field(
-            "google-client-id",
-            "Desktop client id",
-            &view.client_id,
-            "Copy it from your Google Cloud project. It ends with .apps.googleusercontent.com.",
-            cx,
-        ))
-        .child(field(
-            "google-client-secret",
-            "Secret, if your project has one",
-            &view.client_secret,
-            "Optional. Sovra keeps it on this computer and does not show it again.",
-            cx,
-        ))
-        .child(
+    let lead = v_flex().gap(t.space.medium).child(
+        div()
+            .id("google-not-included")
+            .aria_label(GOOGLE_NOT_INCLUDED)
+            .test_support()
+            .min_w_0()
+            .sovra_text(TextRole::Body, cx)
+            .child(GOOGLE_NOT_INCLUDED),
+    );
+    if !view.show_client_form {
+        return lead.child(
             h_flex().flex_wrap().child(
-                design::primary_button("google-save-client", "Save", cx)
-                    .disabled(id_empty)
-                    .on_click(cx.listener(|view, _, window, cx| view.save_client(window, cx))),
+                design::button("google-own-client", "Use my own Google Cloud client", cx)
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.show_client_form = true;
+                        cx.notify();
+                    })),
             ),
-        )
+        );
+    }
+    let id_empty = view.client_id.read(cx).value().trim().is_empty();
+    lead.child(
+        div()
+            .id("google-client-help")
+            .aria_label(DESKTOP_CLIENT_NEEDED)
+            .test_support()
+            .min_w_0()
+            .sovra_text(TextRole::Body, cx)
+            .child(DESKTOP_CLIENT_NEEDED),
+    )
+    .child(field(
+        "google-client-id",
+        "Desktop client id",
+        &view.client_id,
+        "Copy it from your Google Cloud project. It ends with .apps.googleusercontent.com.",
+        cx,
+    ))
+    .child(field(
+        "google-client-secret",
+        "Secret, if your project has one",
+        &view.client_secret,
+        "Optional. Sovra keeps it on this computer and does not show it again.",
+        cx,
+    ))
+    .child(
+        h_flex().flex_wrap().child(
+            design::primary_button("google-save-client", "Save", cx)
+                .disabled(id_empty)
+                .on_click(cx.listener(|view, _, window, cx| view.save_client(window, cx))),
+        ),
+    )
 }
 
 fn not_connected(cx: &mut Context<GoogleCard>) -> impl IntoElement + use<> {

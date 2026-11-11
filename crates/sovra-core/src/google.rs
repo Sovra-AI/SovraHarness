@@ -179,7 +179,12 @@ impl GoogleAccount {
     }
 }
 
-/// What Settings says when this computer has no desktop client id yet.
+/// What everyone sees when no desktop client is built in or saved. Builds from
+/// Sovra always bake one in, so this mostly reaches people building from source.
+pub const GOOGLE_NOT_INCLUDED: &str = "Google isn't included in this copy of Sovra yet. \
+     Copies from Sovra connect with one click.";
+
+/// The form for bringing your own Google Cloud client, behind a link.
 pub const DESKTOP_CLIENT_NEEDED: &str = "Google needs a desktop client id from your Google Cloud \
      project before it can connect. Paste the id below. A secret is optional, and Sovra does not \
      show it again after you save.";
@@ -283,7 +288,7 @@ impl GoogleState {
     pub fn status_label(&self) -> &'static str {
         match self {
             Self::Loading => "Checking…",
-            Self::Unavailable { .. } => "Needs a client id",
+            Self::Unavailable { .. } => "Not set up yet",
             Self::NotConnected => "Not connected",
             Self::Connecting { .. } => "Waiting for you in your browser",
             Self::Connected(_) => "Connected",

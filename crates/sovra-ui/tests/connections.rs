@@ -9,7 +9,8 @@ use gpui_kit::{
     size,
 };
 use sovra_core::google::{
-    DESKTOP_CLIENT_NEEDED, GoogleAccount, GoogleCommand, GoogleEvent, GoogleService, GoogleState,
+    DESKTOP_CLIENT_NEEDED, GOOGLE_NOT_INCLUDED, GoogleAccount, GoogleCommand, GoogleEvent,
+    GoogleService, GoogleState,
 };
 use sovra_core::models::InterfaceScale;
 use sovra_core::{Command, Event, NavTab};
@@ -246,8 +247,18 @@ fn google_card_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
         );
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            let card = window.find("google-card").bounds();
             let at = format!("{width}x{height}@{scale}");
+            let card = window.find("google-card").bounds();
+            for id in ["google-not-included", "google-own-client"] {
+                let element = window.find(id).bounds();
+                assert!(
+                    element.left() >= card.left() && element.right() <= card.right(),
+                    "{at}: {id} overflows"
+                );
+            }
+            window.click("google-own-client", cx);
+            window.render_frame(cx);
+            let card = window.find("google-card").bounds();
             for id in [
                 "google-client-help",
                 "google-client-id",
@@ -283,6 +294,17 @@ fn saving_a_desktop_client_id_enables_connect_google(cx: &mut TestAppContext) {
         window.render_frame(cx);
         reveal(window, "connection-action-google", cx);
         window.click("connection-action-google", cx);
+        window.render_frame(cx);
+        reveal(window, "google-not-included", cx);
+        let lead = window
+            .find("google-not-included")
+            .label()
+            .map(ToString::to_string);
+        assert_eq!(lead.as_deref(), Some(GOOGLE_NOT_INCLUDED));
+        // The bring-your-own-client form stays folded until asked for.
+        assert!(window.try_find("google-client-id").is_none());
+        reveal(window, "google-own-client", cx);
+        window.click("google-own-client", cx);
         window.render_frame(cx);
         reveal(window, "google-client-help", cx);
         let help = window
