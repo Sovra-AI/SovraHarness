@@ -33,7 +33,7 @@ use sovra_core::group::{
     SHORT_CODE_LIFETIME_MS, ShortCodeWindow, code_hint, code_transcript, format_code,
     normalise_code, short_auth_string, short_code_secret,
 };
-use sovra_core::swarm::audit;
+use sovra_core::swarm::audit::{self, FleetAudit};
 use sovra_core::swarm::ledger::{AuditEvent, AuditLedger, UnsignedEntry};
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
@@ -682,6 +682,8 @@ struct Inner {
     /// Whether every saved entry verified. If not, nothing more is appended, so a
     /// tampered history is never extended or papered over.
     audit_checked: bool,
+    /// Checked copies of the other computers' histories (`record.peer_audit`).
+    fleet: FleetAudit,
 }
 
 /// A same-room code: its secret, its one-guess window and what it invites.
@@ -753,6 +755,11 @@ impl Groups {
                     (AuditLedger::new(origin), false)
                 }
             };
+        let fleet = FleetAudit::restore(
+            &transport.this_device(),
+            record.peer_audit.clone(),
+            verifier.as_ref(),
+        );
         let groups = Self {
             qr,
             transport,
@@ -782,6 +789,7 @@ impl Groups {
                 joining: None,
                 audit,
                 audit_checked,
+                fleet,
             }),
         };
         {
@@ -829,7 +837,7 @@ impl Groups {
     async fn publish_audit(&self) {
         let summary = {
             let inner = self.inner.lock().await;
-            audit::summarize(&inner.audit, inner.audit_checked)
+            audit::summarize(&inner.audit, inner.audit_checked, &inner.fleet)
         };
         self.emit(GroupEvent::Audit(summary)).await;
     }
@@ -1462,6 +1470,50 @@ impl Groups {
             knowledge,
             from: self.transport.address(),
         };
+        let changed = self.sync_ops(group, peer, request).await;
+        self.sync_audit(group, peer).await;
+        changed
+    }
+
+    /// Fetches the audit entries this computer lacks from `peer` and keeps the ones
+    /// that check out. Its own history is never written by anyone else.
+    async fn sync_audit(&self, group: GroupId, peer: &PeerAddress) {
+        let have = self.inner.lock().await.fleet.heads();
+        let entries = match self.ask(peer, PeerRequest::AuditSync { group, have }).await {
+            Ok(PeerResponse::AuditEntries { entries }) => entries,
+            Ok(other) => {
+                tracing::debug!(?other, "unexpected audit sync answer");
+                return;
+            }
+            Err(error) => {
+                tracing::debug!(%error, "audit sync skipped");
+                return;
+            }
+        };
+        let changed = {
+            let mut inner = self.inner.lock().await;
+            let forked_before = inner.fleet.forked().len();
+            let added = inner
+                .fleet
+                .merge(&self.me(), entries, self.verifier.as_ref());
+            let changed = added > 0 || inner.fleet.forked().len() != forked_before;
+            if added > 0 {
+                inner.record.peer_audit = inner.fleet.all_entries();
+                self.persist(&inner).await;
+            }
+            changed
+        };
+        if changed {
+            self.publish_audit().await;
+        }
+    }
+
+    async fn sync_ops(
+        self: &Arc<Self>,
+        group: GroupId,
+        peer: &PeerAddress,
+        request: PeerRequest,
+    ) -> bool {
         match self.ask(peer, request).await {
             Ok(PeerResponse::Synced {
                 membership: theirs,
@@ -2105,6 +2157,7 @@ impl Groups {
             work: inner.record.work,
             // History outlives any one group.
             audit: std::mem::take(&mut inner.record.audit),
+            peer_audit: std::mem::take(&mut inner.record.peer_audit),
         };
         self.refold(&mut inner).await;
         self.persist(&inner).await;
@@ -2772,6 +2825,12 @@ impl Groups {
             } => {
                 self.merge(membership, knowledge).await;
                 PeerResponse::Accepted
+            }
+            PeerRequest::AuditSync { have, .. } => {
+                let inner = self.inner.lock().await;
+                PeerResponse::AuditEntries {
+                    entries: inner.fleet.entries_after(&inner.audit, &self.me(), &have),
+                }
             }
             PeerRequest::Join { .. }
             | PeerRequest::Ask { .. }

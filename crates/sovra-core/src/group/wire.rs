@@ -112,6 +112,12 @@ pub enum PeerRequest {
         group: GroupId,
         id: super::work::JobId,
     },
+    /// "Send the audit-history entries I lack": how far the asker's copy of each
+    /// computer's history goes (see `crate::swarm::audit::FleetAudit`).
+    AuditSync {
+        group: GroupId,
+        have: std::collections::BTreeMap<DeviceId, u64>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +157,10 @@ pub enum PeerResponse {
     },
     Refused {
         reason: Refusal,
+    },
+    /// Signed audit entries the asker lacked; it checks every one itself.
+    AuditEntries {
+        entries: Vec<crate::swarm::ledger::LedgerEntry>,
     },
 }
 
@@ -203,7 +213,8 @@ pub fn admits_request(
         | PeerRequest::Ask { group, .. }
         | PeerRequest::Work { group, .. }
         | PeerRequest::WorkNext { group, .. }
-        | PeerRequest::WorkCancel { group, .. } => group,
+        | PeerRequest::WorkCancel { group, .. }
+        | PeerRequest::AuditSync { group, .. } => group,
     };
     match roster {
         Some(state) if state.group != *group => Err(Refusal::WrongGroup),
@@ -289,6 +300,9 @@ pub struct GroupRecord {
     /// entry by entry on every start; never trusted as saved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub audit: Vec<crate::swarm::ledger::LedgerEntry>,
+    /// Checked copies of the other computers' audit histories, re-checked on start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peer_audit: Vec<crate::swarm::ledger::LedgerEntry>,
 }
 
 /// Why the group record could not be read or written.

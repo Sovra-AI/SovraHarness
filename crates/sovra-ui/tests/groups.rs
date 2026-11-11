@@ -305,6 +305,9 @@ fn audit_summary() -> sovra_core::swarm::audit::AuditSummary {
                 words: "Shared a detail with the group".into(),
             },
         ],
+        other_computers: 3,
+        other_records: 41,
+        forked: Vec::new(),
     }
 }
 
@@ -326,6 +329,7 @@ fn the_owner_sees_this_computers_checked_history(cx: &mut TestAppContext) {
         assert!(window.find("groups-audit").visible());
         assert!(window.find("groups-audit-headline").visible());
         assert!(window.find(("groups-audit-line", 1usize)).visible());
+        assert!(window.find("groups-audit-fleet").visible());
     })
     .expect("window open");
 }

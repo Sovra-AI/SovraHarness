@@ -418,6 +418,45 @@ async fn every_share_is_signed_into_an_audit_history_that_is_rechecked_on_start(
     assert_eq!(store.0.lock().expect("not poisoned").audit.len(), 1);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_group_shares_one_checked_audit_history_across_computers() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 51);
+    let dad = Computer::start(&net, 52);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Mum's laptop".into(),
+    });
+    mum.roster(|state| state.name == "Family").await;
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Dad's desktop".into(),
+    });
+    dad.roster(|state| state.people.len() == 2).await;
+    mum.send(GroupCommand::Share {
+        text: "The van's MOT is due in May".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    mum.audit(|s| s.records == 1).await;
+
+    // Dad's next sync brings a checked copy of Mum's history.
+    dad.send(GroupCommand::Load);
+    let dads = dad.audit(|s| s.other_records >= 1).await;
+    assert_eq!(dads.other_computers, 1);
+    assert_eq!(dads.forked, Vec::<String>::new());
+    let saved = dad.store.0.lock().expect("not poisoned").clone();
+    assert_eq!(saved.peer_audit.len(), 1);
+    assert_eq!(saved.peer_audit[0].body.author, mum.device);
+    assert!(saved.audit.is_empty(), "Dad's own history is his alone");
+}
+
 fn has(details: &[SharedDetail], text: &str) -> bool {
     details
         .iter()

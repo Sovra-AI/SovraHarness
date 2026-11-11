@@ -66,6 +66,11 @@ code and this page are the ones to trust.
    the saved file was changed, the screen says the history didn't check out,
    and nothing new is added to it. The history is kept when you leave a group.
    It lives in `group.json` under `audit`; see [Sovereign swarm](swarm.md).
+   Each sync also swaps histories: every computer keeps a checked copy of every
+   other member computer's history (`peer_audit`) and passes copies on, so the
+   group holds one shared record. Only the computer that wrote a history can
+   add to it. If a computer ever shows two different signed versions of the
+   same record, the screen warns that it showed two different histories.
 
 Admins change a person between **Admin** and **Member**, and they remove a
 person. Removing a person or another computer asks for a second click

@@ -1120,6 +1120,15 @@ impl ModelsView {
                     .whitespace_normal()
                     .child(caption(summary.headline(), cx)),
             );
+        if let Some(line) = summary.fleet_line() {
+            section = section.child(
+                div()
+                    .id("groups-audit-fleet")
+                    .test_support()
+                    .whitespace_normal()
+                    .child(caption(line, cx)),
+            );
+        }
         for (index, line) in summary.recent.iter().enumerate() {
             section = section.child(
                 div()

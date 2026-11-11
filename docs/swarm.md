@@ -6,7 +6,11 @@ Status, 2026-11-11: the **rules and cryptography are implemented and tested**
 *Today* in the app: every computer in a group keeps a **signed audit history**.
 Each share it makes, and each memory it gives to another person's helpers, is
 recorded. The history is re-verified on every start, and Settings → Groups shows
-it under **History on this computer** (see [Groups](groups.md)).
+it under **History on this computer** (see [Groups](groups.md)). Histories are
+replicated on every group sync (`PeerRequest::AuditSync`, `swarm::audit::FleetAudit`).
+Every computer keeps checked, relayed copies of the others' histories, only a
+history's author can extend it, and a computer that shows two different signed
+histories is flagged.
 
 Not yet in the app: departments, the sign-off gate for outbound messages,
 syncing ledgers with witnesses, and training. The next steps are listed at the
@@ -104,8 +108,9 @@ data stays more than 0.5 away.
 ## Next steps
 
 1. Runtime: *done* for this computer's own history (shares and federated
-   answers; `sovra-runtime/src/groups.rs`). Still to do: record AI handoffs,
-   and sync checkpoints over iroh (gossip) with witnesses co-signing.
+   answers; `sovra-runtime/src/groups.rs`). Replication is *done*: copies swap
+   on every sync, with fork detection. Still to do: record AI handoffs, and
+   broadcast signed checkpoints over iroh-gossip with witness co-signatures.
 2. UI: *done* for the Groups summary. Still to do: a full **Audit history** page (where each item lives, who read it, every
    model change) and approval cards that use `EgressGate` for outbound
    messages. Register both on the Skills page.

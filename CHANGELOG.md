@@ -16,7 +16,9 @@ move them under a version heading when the tag is cut.
   only BLAKE3 fingerprints, never the words. The history is re-checked on every
   start and kept when leaving a group; a changed file is shown as not checking
   out and is never extended. Skills has a "See everything this computer shared"
-  card.
+  card. Group syncs also swap histories, so every computer holds checked copies
+  of the others'. Only a history's author can extend it, and a computer showing
+  two different signed histories is flagged on screen.
 
 - **Sovereign swarm foundations** (`sovra_core::swarm`, not yet wired into the
   app; see [docs/swarm.md](docs/swarm.md)). Added:
