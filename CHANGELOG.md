@@ -30,7 +30,8 @@ move them under a version heading when the tag is cut.
   `sovra-core` (`group/guide.rs`) with unit tests. Checked in the running app:
   the family emoji, which this Linux font fallback draws garbled, is replaced
   by 👥 (People) and 🏠 (the group's name), and the second-admin tip no longer
-  says "next to their name" while nobody else has joined.
+  says "next to their name" while nobody else has joined. The join-by-numbers
+  hint names the exact button the other person presses.
 
 ## [0.2.0] — 2026-11-11
 

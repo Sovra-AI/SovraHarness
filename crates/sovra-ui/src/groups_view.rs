@@ -601,7 +601,7 @@ impl ModelsView {
                 "groups-join-code",
                 "1. Type the six numbers from their screen",
                 &form.join_code,
-                "They get these by pressing Show six numbers on their Groups page. Both computers need to be on the same Wi-Fi.",
+                "On their computer they open Groups → Invite someone and press We're in the same room: show six numbers. Both computers need to be on the same Wi-Fi.",
                 cx,
             ))
         } else {
