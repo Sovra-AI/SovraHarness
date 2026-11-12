@@ -1071,6 +1071,7 @@ impl Actor {
             | Event::Teams(_)
             | Event::Artifacts(_)
             | Event::Connections(_)
+            | Event::RemoteControl(_)
             | Event::Development(_)
             | Event::Google(_)
             | Event::Mcp(_)

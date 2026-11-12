@@ -17,6 +17,8 @@ whatsapp-rust = { workspace = true }
 [dev-dependencies]
 # The live check needs a reactor; library code never names tokio.
 async-channel = { workspace = true }
+# History chunks on the wire are zlib. Tests compress a real proto the same way.
+flate2 = { workspace = true }
 tokio = { workspace = true }
 
 [lints]

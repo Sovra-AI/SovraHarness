@@ -142,6 +142,10 @@ pub struct ModelsView {
     pub(crate) connections: sovra_core::connections::ConnectionsState,
     pub(crate) whatsapp_form: crate::connections_view::WhatsAppForm,
     pub(crate) development: sovra_core::development::DevelopmentState,
+    pub(crate) remote_control: sovra_core::remote_control::RemoteState,
+    pub(crate) remote_only: bool,
+    pub(crate) remote_revoked_generation: Option<sovra_core::group::DeviceId>,
+    pub(crate) remote_forgotten_phone: Option<sovra_core::group::DeviceId>,
     /// Terminal settings for the Settings page (host and saved rules only).
     pub(crate) terminal: sovra_core::terminal::TerminalState,
     /// The Google card on the Connections tab. The shell owns the view.
@@ -348,6 +352,10 @@ impl ModelsView {
             connections: sovra_core::connections::ConnectionsState::default(),
             whatsapp_form,
             development: sovra_core::development::DevelopmentState::default(),
+            remote_control: sovra_core::remote_control::RemoteState::default(),
+            remote_only: false,
+            remote_revoked_generation: None,
+            remote_forgotten_phone: None,
             terminal: sovra_core::terminal::TerminalState::default(),
             google_card: None,
             services: sovra_core::mcp::McpState::default(),

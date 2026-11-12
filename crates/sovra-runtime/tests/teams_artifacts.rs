@@ -162,10 +162,15 @@ fn artifacts_save_edit_export_open_and_delete() {
             id: saved.id.clone(),
         }))
         .unwrap();
-    let ArtifactEvent::ReadyToOpen { path, .. } = next_artifact(&events) else {
-        panic!("a browser view is written");
+    let ArtifactEvent::Deployed { url, .. } = next_artifact(&events) else {
+        panic!("browser previews use a reachable HTTP address, never a private temporary file");
     };
-    assert!(std::fs::read_to_string(&path).unwrap().contains("Meals"));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let body = runtime.block_on(async { reqwest::get(url).await.unwrap().text().await.unwrap() });
+    assert!(body.contains("Meals"));
 
     client
         .send(Command::Artifacts(ArtifactCommand::Load))
@@ -173,7 +178,7 @@ fn artifacts_save_edit_export_open_and_delete() {
     let ArtifactEvent::Loaded(all) = next_artifact(&events) else {
         panic!("loaded");
     };
-    assert_eq!(all, [edited]);
+    assert_eq!(all, [*edited]);
     client
         .send(Command::Artifacts(ArtifactCommand::Delete {
             id: saved.id.clone(),
@@ -190,5 +195,122 @@ fn artifacts_save_edit_export_open_and_delete() {
         .unwrap();
     assert!(matches!(next_artifact(&events), ArtifactEvent::Error(_)));
     std::fs::remove_dir_all(dir).ok();
+    client.send(Command::Shutdown).unwrap();
+}
+
+#[test]
+fn website_serves_saved_source_and_stops_without_deleting_it() {
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let (client, events) = started();
+    let content = "<!doctype html><html lang=\"en\"><title>Garden</title><h1>Garden 🌿</h1></html>";
+    client
+        .send(Command::Artifacts(ArtifactCommand::Save(ArtifactDraft {
+            title: "Garden".into(),
+            kind: ArtifactKind::Webpage,
+            language: "html".into(),
+            content: content.into(),
+            source: ArtifactSource::default(),
+        })))
+        .unwrap();
+    let ArtifactEvent::Saved(saved) = next_artifact(&events) else {
+        panic!("saved")
+    };
+    client
+        .send(Command::Artifacts(ArtifactCommand::Deploy {
+            id: saved.id.clone(),
+        }))
+        .unwrap();
+    let ArtifactEvent::Deployed { id, url } = next_artifact(&events) else {
+        panic!("running")
+    };
+    assert_eq!(id, saved.id);
+    let address = url.strip_prefix("http://").unwrap().trim_end_matches('/');
+    assert!(address.starts_with("127.0.0.1:"));
+    let request = |method: &str, path: &str, host: &str| {
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(stream, "{method} {path} HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    };
+    let response = request("GET", "/", address);
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert_eq!(response.split_once("\r\n\r\n").unwrap().1, content);
+    assert!(response.contains(&format!("Content-Length: {}", content.len())));
+    assert!(request("GET", "/", "example.com").starts_with("HTTP/1.1 403"));
+    assert!(request("GET", "/../../etc/passwd", address).starts_with("HTTP/1.1 404"));
+    assert!(request("POST", "/", address).starts_with("HTTP/1.1 405"));
+    assert_eq!(
+        request("HEAD", "/", address)
+            .split_once("\r\n\r\n")
+            .unwrap()
+            .1,
+        ""
+    );
+    client
+        .send(Command::Artifacts(ArtifactCommand::StopDeployment {
+            id: id.clone(),
+        }))
+        .unwrap();
+    assert_eq!(
+        next_artifact(&events),
+        ArtifactEvent::DeploymentStopped { id }
+    );
+    assert!(
+        TcpStream::connect(address).is_err(),
+        "stopped listener is closed before acknowledgement"
+    );
+    client
+        .send(Command::Artifacts(ArtifactCommand::Load))
+        .unwrap();
+    let ArtifactEvent::Loaded(artifacts) = next_artifact(&events) else {
+        panic!("library")
+    };
+    assert_eq!(artifacts, vec![*saved]);
+    client.send(Command::Shutdown).unwrap();
+}
+
+#[test]
+fn organization_updates_metadata_without_rewriting_source() {
+    let (client, events) = started();
+    client
+        .send(Command::Artifacts(ArtifactCommand::Save(ArtifactDraft {
+            title: "Garden".into(),
+            kind: ArtifactKind::Webpage,
+            language: "html".into(),
+            content: "<h1>Garden</h1>".into(),
+            source: ArtifactSource::default(),
+        })))
+        .unwrap();
+    let ArtifactEvent::Saved(original) = next_artifact(&events) else {
+        panic!("saved")
+    };
+    client
+        .send(Command::Artifacts(ArtifactCommand::Organize {
+            id: original.id.clone(),
+            collection: " Garden club ".into(),
+            pinned: true,
+        }))
+        .unwrap();
+    let ArtifactEvent::Saved(organized) = next_artifact(&events) else {
+        panic!("organized")
+    };
+    assert_eq!(organized.collection, "Garden club");
+    assert!(organized.pinned);
+    assert_eq!(organized.content, original.content);
+    assert_eq!(organized.versions, original.versions);
+    client
+        .send(Command::Artifacts(ArtifactCommand::Load))
+        .unwrap();
+    let ArtifactEvent::Loaded(loaded) = next_artifact(&events) else {
+        panic!("loaded")
+    };
+    assert_eq!(loaded, [*organized]);
     client.send(Command::Shutdown).unwrap();
 }

@@ -66,6 +66,14 @@ pub enum AgUiWidget {
     TeamActivity(crate::teams::TeamActivity),
     /// In-chat research kanban: waiting / working / done lanes for deep research.
     ResearchBoard(crate::research::ResearchBoard),
+    /// Source preview while code is being written; never executed in the app.
+    CodeWriting {
+        language: String,
+        content: String,
+        /// Present only after the storage port acknowledges this source.
+        #[serde(default)]
+        artifact_id: Option<String>,
+    },
     /// An artifact an agent saved during the turn, shown as a card to open it.
     ArtifactSaved {
         artifact_id: String,
@@ -84,6 +92,14 @@ pub enum LiveActivity {
     /// Parallel deep research board (`activityType: "sovra.research"`).
     #[serde(rename = "sovra.research")]
     Research(crate::research::ResearchBoard),
+    #[serde(rename = "sovra.code")]
+    CodeWriting {
+        language: String,
+        content: String,
+        /// Present only after the storage port acknowledges this source.
+        #[serde(default)]
+        artifact_id: Option<String>,
+    },
 }
 
 /// Who wrote a message when it was not the default assistant: a team member.

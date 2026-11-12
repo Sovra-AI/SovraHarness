@@ -150,6 +150,13 @@ impl TerminalRuntime {
         Some(Arc::new(Access(Arc::clone(shared))))
     }
 
+    /// Long-lived project builder access; every run still checks the current policy.
+    pub(crate) fn project_access(&self) -> Option<Arc<dyn TerminalAccess>> {
+        self.shared
+            .as_ref()
+            .map(|shared| Arc::new(Access(Arc::clone(shared))) as Arc<dyn TerminalAccess>)
+    }
+
     pub(crate) fn handle(&self, command: TerminalCommand) {
         let Some(shared) = &self.shared else {
             return;

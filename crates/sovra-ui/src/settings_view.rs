@@ -62,7 +62,7 @@ pub(crate) fn settings_section(
         .child(caption(description, cx))
 }
 
-fn settings_page(content: gpui_kit::AnyElement, cx: &App) -> impl IntoElement + use<> {
+pub(crate) fn settings_page(content: gpui_kit::AnyElement, cx: &App) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     v_flex()
         .id("sovra-settings-view")
@@ -86,6 +86,9 @@ fn settings_page(content: gpui_kit::AnyElement, cx: &App) -> impl IntoElement + 
 
 impl ModelsView {
     pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        if self.remote_only {
+            return self.render_remote_page(cx).into_any_element();
+        }
         let t = design::tokens(cx);
         let mut page = v_flex()
             .id("settings-column")
@@ -142,7 +145,8 @@ impl ModelsView {
                     .child(self.render_development_section(cx))
                     .child(self.render_always_context_section(cx))
                     .child(self.render_agent_behavior_section(cx))
-                    .child(self.render_terminal_section(cx)),
+                    .child(self.render_terminal_section(cx))
+                    .child(self.render_remote_section(cx)),
             )
             .into_any_element(),
             cx,

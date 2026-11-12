@@ -48,6 +48,7 @@ impl Skill {
             "connect-service" => "Add an MCP server (extra tools)",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
+            "deploy-website" => "Run your website on this computer",
             "terminal" => "Do things on your computer for you",
             "read-files" => "Read & explain attached files",
             "search-files" => "Search inside your connected folders",
@@ -60,7 +61,7 @@ impl Skill {
             "confirm" => "Show a clear yes/no choice card",
             "alert" => "Highlight an important reminder",
             "progress" => "Show a step-by-step progress bar",
-            "coding" => "Coding & technical problem helper",
+            "coding" => "Build a website or get help with code",
             "deep-research" => "Deep research with a living board",
             "stock-market" => "Stock market & company helper",
             "housing-market" => "Home buying & rental explorer",
@@ -135,6 +136,10 @@ impl Skill {
                 "Opens My AI's to see how Sovra chooses helpers for each task.".to_owned(),
                 "/agents ".to_owned(),
             ),
+            "remote-control" => (
+                "Let me use Sovra from my phone.".to_owned(),
+                "/remote-control ".to_owned(),
+            ),
             "development" => (
                 "Open Settings to let a coding assistant test Sovra while you improve it.".to_owned(),
                 "/development ".to_owned(),
@@ -149,7 +154,7 @@ impl Skill {
                 "/team ".to_owned(),
             ),
             "artifacts" => (
-                "Opens your library of saved documents, checklists, tables, and code.".to_owned(),
+                "Opens your saved documents, checklists, tables, code and website projects. Use folders, favorites, search and sorting to find your work.".to_owned(),
                 "/artifacts ".to_owned(),
             ),
             "connections" => (
@@ -205,6 +210,7 @@ impl Skill {
                 "web-search",
                 "What are three easy, healthy Mediterranean dinner ideas?",
             ),
+            "deploy-website" => sample_pair("deploy-website", "Run the garden club website we just made"),
             "save-artifact" => sample_pair("save-artifact", "Our family trip packing checklist"),
             "terminal" => sample_pair(
                 "terminal",
@@ -243,7 +249,7 @@ impl Skill {
             "progress" => sample_pair("progress", "Show our 4-step moving checklist progress"),
             "coding" => sample_pair(
                 "coding",
-                "Explain what this computer error message means in simple terms",
+                "Build a website for our garden club with meeting times and upcoming events",
             ),
             "deep-research" => sample_pair(
                 "deep-research",
@@ -409,6 +415,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             &["my-ais"],
         ),
         action(
+            "remote-control",
+            "Use Sovra from your phone",
+            "Pair your phone once, then connect to this computer to continue chats and use Sovra.",
+            SkillAction::RemoteControl,
+            &[],
+        ),
+        action(
             "development",
             "Test Sovra while developing",
             "Let a coding assistant use Sovra and check that new features work.",
@@ -432,7 +445,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "artifacts",
             "Artifacts",
-            "Browse saved documents, code, tables and other artifacts.",
+            "Find saved documents, code and website projects using folders, favorites, search and sorting.",
             SkillAction::Artifacts,
             &["saved-work"],
         ),
@@ -535,6 +548,16 @@ pub fn builtin_skills() -> Vec<Skill> {
                 "<what to save>",
             )
         },
+        procedure(
+            "deploy-website",
+            "Run your website",
+            "Open saved web pages or build React, Vue and other frontend website projects on this computer. Keep source together in folders and favorites.",
+            "Computer",
+            &["deploy", "run-website"],
+            &["deploy_artifact"],
+            "Use deploy_artifact only when the user asks to run their saved website. If they mean the website just made in this chat, omit artifact_id to select the latest saved web page or website project. Framework projects need Node.js/npm and terminal access; review build commands in chat. Report the returned local URL only after success. Explain that it stays on this computer and stops when Sovra closes; it is not publicly published.",
+            "<website to run>",
+        ),
         procedure(
             "terminal",
             "Run terminal commands",

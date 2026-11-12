@@ -121,7 +121,7 @@ The compiler lists every `match` that needs the new variant.
   so and offers **Ask Sovra only**.
 - **Nothing is executed inside the app.**
   - HTML, SVG and Mermaid are previewed as source.
-  - **Open in browser** writes a throwaway page to the OS temp directory.
+  - **Open in browser** serves a throwaway preview at a loopback HTTP address.
   - Mermaid diagrams load `mermaid@11.4.1` from jsDelivr, so they need an internet
     connection to render.
 
@@ -149,3 +149,56 @@ The compiler lists every `match` that needs the new variant.
   - **Save** on a reply;
   - library filters, open, open-in-browser and delete;
   - the Artifacts page fitting at every size.
+
+## Writing and running websites locally
+
+The coding helper is instructed to deliver complete source using semantic HTML,
+labelled controls, keyboard focus, responsive layouts, reduced-motion support,
+and working interactions. The parent saves substantial code and websites through
+`save_artifact` before reporting completion. Completed fenced source is also saved after a successful chat turn when the model
+did not call the save tool; unfinished fences are left as previews. Storage
+failures are shown as errors, never as successful saves. These are generation instructions,
+not a claim that generated code has passed automated browser tests.
+
+Visible fenced code streams as `ACTIVITY_SNAPSHOT` with activity type `sovra.code`.
+The native source panel displays up to 32,768 characters, and never executes the
+source. Saved content is not truncated to that preview limit. Wide windows dock
+the panel; narrow windows show it over chat with **Back to chat**.
+
+After saving, ask to run the website, use **Run website** in the panel or Artifacts,
+or try the **Run your website on this computer** skill. `deploy_artifact` uses a
+saved artifact ID, or the latest saved web page from the same chat. The runtime
+serves an immutable HTML snapshot from a new ephemeral IPv4 loopback port. It
+opens that address in the system browser. **View website** reopens it; **Stop
+website** closes hosting. Editing saved source does not change an already running
+snapshot; run it again to serve the new version. Closing Sovra stops hosting.
+
+Self-contained HTML is served directly. `project` artifacts store JSON with
+`files` (relative paths to complete text source) and `output_dir` (default `dist`).
+Include `package.json` with dependencies and a static `build` script. React/Vite,
+Vue, Svelte and other static frontend builds use **Build and open**. Sources stay
+in one artifact, with file selection in its detail view; whole-project edits
+retain versions. JSON copies preserve the project when saved to the computer.
+Builds require installed Node.js/npm and enabled terminal access. `npm install`
+(or `npm ci` with a supplied lockfile) and `npm run build` go through the existing
+terminal approval flow, with lifecycle scripts disabled except the requested
+build script. Commands and failures appear in chat. Source is written into a fresh
+private temporary folder, and bounded static output is loaded into memory before
+that folder is removed. Backends and server-side rendering are not hosted.
+
+**Open in browser** also serves HTML/SVG/diagram previews over HTTP, avoiding
+browser sandbox restrictions on temporary file URLs. Folders and favorites are
+persisted as artifact metadata (older saves default to Unfiled); filters and sort
+order are pure core rules, and the UI shows 24 results per page.
+
+The browser server serves only its in-memory static snapshot. It exposes no shell, filesystem
+routes, or development-control endpoints. Host headers must match the exact local
+address. Requests, connections, page size, and simultaneous sites are bounded.
+Websites can still make network requests from the browser if their source does so.
+Local hosting is not public publishing.
+
+Research informing this implementation:
+
+- [W3C Secure Contexts](https://www.w3.org/TR/secure-contexts/): loopback origin treatment.
+- [MDN semantic HTML and accessibility](https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Accessibility/HTML): native semantics and controls.
+- [web.dev responsive design](https://web.dev/learn/design): layouts for changing viewport and text sizes.

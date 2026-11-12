@@ -5,6 +5,7 @@
 
 mod palette;
 mod responsive;
+pub(crate) mod scan_code;
 mod styles;
 mod tokens;
 

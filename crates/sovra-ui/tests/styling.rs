@@ -1,5 +1,9 @@
 //! Check the design contract where failures affect readability or real UI behaviour.
 
+#[path = "styling/artifact_library.rs"]
+mod artifact_library;
+#[path = "styling/code_panel.rs"]
+mod code_panel;
 #[path = "styling/development.rs"]
 mod development;
 #[path = "styling/file_knowledge.rs"]
@@ -18,6 +22,8 @@ mod memory_graph;
 mod memory_sources;
 #[path = "styling/messaging.rs"]
 mod messaging;
+#[path = "styling/remote_control.rs"]
+mod remote_control;
 #[path = "styling/research_board.rs"]
 mod research_board;
 #[path = "styling/terminal.rs"]

@@ -108,6 +108,16 @@ impl Shell {
                     cx,
                 );
             }
+            SkillAction::RemoteControl => {
+                if !crate::remote_control_view::is_remote_input(cx) {
+                    self.open_remote_control(cx);
+                    let _ = cx.global::<crate::RuntimeClient>().0.send(
+                        sovra_core::Command::RemoteControl(
+                            sovra_core::remote_control::RemoteCommand::Start,
+                        ),
+                    );
+                }
+            }
             SkillAction::Settings => self.select_tab(NavTab::Settings, cx),
             SkillAction::Groups(page) => {
                 self.select_tab(NavTab::Groups, cx);

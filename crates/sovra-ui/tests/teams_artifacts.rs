@@ -595,3 +595,154 @@ fn artifacts_page_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
         cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
     }
 }
+
+#[gpui_kit::test]
+fn saved_website_has_run_and_stop_controls(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 820.);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Saved(Box::new(artifact(
+            "website",
+            ArtifactKind::Webpage,
+            "<h1>Garden</h1>",
+            1,
+        )))))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("website", cx));
+        window.render_frame(cx);
+        window.click("artifact-deploy", cx);
+    })
+    .unwrap();
+    assert!(
+        drain(&commands).contains(&Command::Artifacts(ArtifactCommand::Deploy {
+            id: "website".into()
+        }))
+    );
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Deployed {
+            id: "website".into(),
+            url: "http://127.0.0.1:1234/".into(),
+        }))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("artifact-website-open").visible());
+        window.click("artifact-website-stop", cx);
+    })
+    .unwrap();
+    assert!(
+        drain(&commands).contains(&Command::Artifacts(ArtifactCommand::StopDeployment {
+            id: "website".into()
+        }))
+    );
+}
+
+#[gpui_kit::test]
+fn unfinished_source_never_offers_to_run_an_older_website(cx: &mut TestAppContext) {
+    let (window, _shell, _commands, events) = open(cx, 1280., 820.);
+    let session = sovra_core::WorkspaceState::new(0).session_id;
+    let mut old = artifact("older", ArtifactKind::Webpage, "<h1>Garden old</h1>", 1);
+    old.source.session_id.clone_from(&session);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Saved(Box::new(old))))
+        .unwrap();
+    events
+        .send_blocking(Event::AgUi {
+            session_id: session,
+            event: AgUiEvent::ActivitySnapshot {
+                message_id: "source".into(),
+                activity: LiveActivity::CodeWriting {
+                    artifact_id: None,
+                    language: "html".into(),
+                    content: "<h1>Garden".into(),
+                },
+            },
+        })
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("code-writing-panel").visible());
+        assert!(
+            window.try_find("code-run-website").is_none(),
+            "unfinished source is not the older saved website"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn large_library_pages_folders_and_favorites(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 2560., 1440.);
+    let saved: Vec<_> = (0..30)
+        .map(|i| {
+            let mut item = artifact(
+                &format!("item-{i:02}"),
+                ArtifactKind::Document,
+                "A saved document",
+                i,
+            );
+            item.collection = if i < 5 {
+                "Garden".into()
+            } else {
+                String::new()
+            };
+            item.pinned = i == 0;
+            item
+        })
+        .collect();
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(saved)))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Artifacts, cx));
+        window.render_frame(cx);
+        assert!(!window.find_all(("artifact-card", 23usize)).is_empty());
+        assert!(window.find_all(("artifact-card", 24usize)).is_empty());
+        window.click("artifact-page-next", cx);
+        window.render_frame(cx);
+        assert!(!window.find_all(("artifact-card", 24usize)).is_empty());
+        assert!(window.find_all(("artifact-card", 0usize)).is_empty());
+        window.click(("artifact-folder", 1usize), cx);
+        window.render_frame(cx);
+        assert!(!window.find_all(("artifact-card", 4usize)).is_empty());
+        assert!(window.find_all(("artifact-card", 5usize)).is_empty());
+        window.click("artifact-favorites", cx);
+        window.render_frame(cx);
+        assert!(!window.find_all(("artifact-card", 0usize)).is_empty());
+        assert!(window.find_all(("artifact-card", 1usize)).is_empty());
+        window.click(("artifact-open", 0usize), cx);
+        window.render_frame(cx);
+        window.click("artifact-favorite", cx);
+    })
+    .unwrap();
+    assert!(drain(&commands).iter().any(|command| matches!(command, Command::Artifacts(ArtifactCommand::Organize { collection, pinned: false, .. }) if collection == "Garden")));
+}
+
+#[gpui_kit::test]
+fn framework_project_opens_approval_chat_and_selects_source_files(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 820.);
+    let project = serde_json::json!({"files":{"package.json":"{\"scripts\":{\"build\":\"vite build\"}}", "src/App.jsx":"export default () => <h1>Garden</h1>"}}).to_string();
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Saved(Box::new(artifact(
+            "react",
+            ArtifactKind::Project,
+            &project,
+            1,
+        )))))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("react", cx));
+        window.render_frame(cx);
+        window.click(("artifact-project-file", 1usize), cx);
+        window.render_frame(cx);
+        assert!(!window.find_all("artifact-project-source").is_empty());
+        window.click("artifact-build-project", cx);
+    })
+    .unwrap();
+    assert!(drain(&commands).iter().any(|command| matches!(command, Command::Artifacts(ArtifactCommand::RunProject { id, session_id }) if id == "react" && !session_id.is_empty())));
+}

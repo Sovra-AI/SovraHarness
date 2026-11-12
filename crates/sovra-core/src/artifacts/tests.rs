@@ -140,7 +140,11 @@ fn library_folds_events_filters_and_counts() {
         make("new", ArtifactKind::Document, 2),
     ]));
     assert_eq!(library.artifacts[0].id, "new");
-    library.apply(&ArtifactEvent::Saved(make("newest", ArtifactKind::Code, 3)));
+    library.apply(&ArtifactEvent::Saved(Box::new(make(
+        "newest",
+        ArtifactKind::Code,
+        3,
+    ))));
     assert_eq!(library.artifacts[0].id, "newest");
     assert_eq!(
         library.notice.as_deref(),
@@ -149,11 +153,13 @@ fn library_folds_events_filters_and_counts() {
     let code = ArtifactFilter {
         kind: Some(ArtifactKind::Code),
         query: String::new(),
+        ..Default::default()
     };
     assert_eq!(library.filtered(&code).len(), 2);
     let search = ArtifactFilter {
         kind: None,
         query: "OF OLD".into(),
+        ..Default::default()
     };
     assert_eq!(library.filtered(&search).len(), 1);
     assert_eq!(
@@ -184,4 +190,83 @@ fn browser_pages_escape_text_and_keep_html() {
     artifact.kind = ArtifactKind::Webpage;
     artifact.content = "<h1>Hi</h1>".into();
     assert_eq!(browser_page(&artifact), "<h1>Hi</h1>");
+}
+
+#[test]
+fn deployment_addresses_are_ephemeral_and_removed_on_stop_or_delete() {
+    let mut library = ArtifactLibrary::default();
+    library.apply(&ArtifactEvent::Deployed {
+        id: "site".into(),
+        url: "http://127.0.0.1:1234/".into(),
+    });
+    assert_eq!(
+        library.deployments.get("site").map(String::as_str),
+        Some("http://127.0.0.1:1234/")
+    );
+    library.apply(&ArtifactEvent::DeploymentStopped { id: "site".into() });
+    assert!(library.deployments.is_empty());
+    library.apply(&ArtifactEvent::Deployed {
+        id: "site".into(),
+        url: "http://127.0.0.1:1235/".into(),
+    });
+    library.apply(&ArtifactEvent::Deleted { id: "site".into() });
+    assert!(library.deployments.is_empty());
+}
+
+#[test]
+fn folders_favorites_and_sorting_work_with_old_saved_artifacts() {
+    let mut first = Artifact::from_draft(
+        "a".into(),
+        ArtifactDraft {
+            title: "Zebra".into(),
+            kind: ArtifactKind::Note,
+            language: String::new(),
+            content: "notes".into(),
+            source: source(),
+        },
+        Timestamp(1),
+    );
+    first.collection = "Garden".into();
+    first.pinned = true;
+    let second = Artifact::from_draft(
+        "b".into(),
+        ArtifactDraft {
+            title: "Apple".into(),
+            kind: ArtifactKind::Note,
+            language: String::new(),
+            content: "notes".into(),
+            source: source(),
+        },
+        Timestamp(2),
+    );
+    let mut legacy = serde_json::to_value(&second).unwrap();
+    legacy.as_object_mut().unwrap().remove("collection");
+    legacy.as_object_mut().unwrap().remove("pinned");
+    assert_eq!(serde_json::from_value::<Artifact>(legacy).unwrap(), second);
+    let mut library = ArtifactLibrary::default();
+    library.apply(&ArtifactEvent::Loaded(vec![first, second]));
+    assert_eq!(library.collections().get("Garden"), Some(&1));
+    let filter = ArtifactFilter {
+        collection: Some("Garden".into()),
+        favorites_only: true,
+        ..Default::default()
+    };
+    assert_eq!(library.filtered(&filter)[0].id, "a");
+    let filter = ArtifactFilter {
+        sort: ArtifactSort::Name,
+        ..Default::default()
+    };
+    assert_eq!(
+        library
+            .filtered(&filter)
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect::<Vec<_>>(),
+        ["b", "a"]
+    );
+    let filter = ArtifactFilter {
+        sort: ArtifactSort::Oldest,
+        ..Default::default()
+    };
+    assert_eq!(library.filtered(&filter)[0].id, "a");
 }

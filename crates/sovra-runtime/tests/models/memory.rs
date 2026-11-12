@@ -10,6 +10,7 @@ use sovra_core::{
 
 #[derive(Default)]
 struct Store {
+    artifact_failure: bool,
     chats: Mutex<BTreeMap<String, sovra_core::ChatThread>>,
     chat_started: Option<async_channel::Sender<String>>,
     chat_gate: Option<async_channel::Receiver<()>>,
@@ -56,6 +57,17 @@ impl Store {
 }
 #[async_trait::async_trait]
 impl MemoryStore for Store {
+    async fn save_artifact(
+        &self,
+        _artifact: &sovra_core::artifacts::Artifact,
+    ) -> Result<(), MemoryError> {
+        if self.artifact_failure {
+            Err(MemoryError::Backend("fixture disk failure".into()))
+        } else {
+            Ok(())
+        }
+    }
+
     async fn admit_memory_source(
         &self,
         source: sovra_core::MemorySourceAdmission,
@@ -1930,4 +1942,39 @@ async fn assistant_storage_failure_is_visible_without_failing_the_chat() {
     }
     assert!(failure);
     stop(client).await;
+}
+
+#[tokio::test]
+async fn failed_artifact_storage_never_reports_a_saved_website() {
+    use sovra_core::artifacts::{
+        ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactKind, ArtifactSource,
+    };
+    let server = recall_server();
+    let store = Arc::new(Store {
+        artifact_failure: true,
+        ..Default::default()
+    });
+    let (_fixture, client) = start(&server, store, false).await;
+    client
+        .send(Command::Artifacts(ArtifactCommand::Save(ArtifactDraft {
+            title: "Garden".into(),
+            kind: ArtifactKind::Webpage,
+            language: "html".into(),
+            content: "<h1>Garden</h1>".into(),
+            source: ArtifactSource::default(),
+        })))
+        .unwrap();
+    let result = event(&client, |event| matches!(event, Event::Artifacts(_))).await;
+    assert!(
+        matches!(result, Event::Artifacts(ArtifactEvent::Error(_))),
+        "{result:?}"
+    );
+    client
+        .send(Command::Artifacts(ArtifactCommand::Load))
+        .unwrap();
+    let result = event(&client, |event| matches!(event, Event::Artifacts(_))).await;
+    assert!(
+        matches!(result, Event::Artifacts(ArtifactEvent::Loaded(ref artifacts)) if artifacts.is_empty())
+    );
+    client.send(Command::Shutdown).unwrap();
 }

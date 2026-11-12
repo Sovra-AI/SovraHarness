@@ -670,9 +670,11 @@ pub(crate) fn scan_code(
             if modules == 0 {
                 return;
             }
-            // Leave one module of quiet zone on every side, as the QR standard asks.
-            let module = bounds.size.width / (cells_f32(modules) + 2.);
-            let origin = bounds.origin + point(module, module);
+            let (module, inset) = design::scan_code::geometry(
+                bounds.size.width,
+                u16::try_from(modules).expect("QR dimensions fit u16"),
+            );
+            let origin = bounds.origin + point(inset, inset);
             for (row, cells) in matrix.iter().enumerate() {
                 let mut col = 0;
                 while col < cells.len() {
@@ -696,16 +698,27 @@ pub(crate) fn scan_code(
             }
         },
     )
-    .size(side)
+    .size_full()
     .flex_shrink_0();
 
     div()
         .id(id)
         .test_support()
+        .aria_label("Pairing QR code")
+        .w_full()
+        .max_w(side)
+        .flex_shrink_0()
         .rounded(t.radius.card)
         .border_1()
         .border_color(cx.theme().border)
-        .child(grid)
+        .child(
+            div()
+                .id(format!("{id}-grid"))
+                .test_support()
+                .w_full()
+                .aspect_ratio(1.)
+                .child(grid),
+        )
 }
 
 impl ModelsView {

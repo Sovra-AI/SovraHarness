@@ -28,6 +28,7 @@ pub mod models;
 pub mod people;
 mod protocol;
 pub mod providers;
+pub mod remote_control;
 pub mod research;
 mod routing;
 pub mod routing_eval;

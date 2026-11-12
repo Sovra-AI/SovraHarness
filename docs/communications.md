@@ -15,14 +15,25 @@ connection state and the bounded local recent-message snapshot. This is not a
 complete phone-history API. `find_people` looks up saved people by name. An empty
 question returns a count and does not list everyone. The same phone number or the
 same email joins one person. A shared first name never does. After `WhatsApp` is
-linked and online, contacts the phone shares — including hidden-id (LID) rows that
-still carry a phone number — are recorded in the people book. Groups the linked
-account participates in are stored with a stable group id and subject as soon as
-the live session can list them, without waiting for a group message. Conversation
-metadata from the phone's history bootstrap is processed; message bodies are not
-kept. There is no separate address-book download. An empty or failed sync does not
-invent people or groups and does not erase anyone already saved. A group is a chat,
-not a person: group participants are not turned into saved people.
+linked and online, the people list keeps every one-to-one contact and chat the
+phone names: saved address-book rows, chats that were never saved, the name
+shown on that chat, and chats that are pinned, archived, muted, or marked read.
+A hidden-id chat is kept when that same sync includes its phone number. A phone
+number is never invented when WhatsApp does not provide one. Groups the linked
+account is in stay on the group list, with a stable group id and subject, as
+soon as the live session can list them. A new link asks the phone for the full
+chat backfill (365 days, including chats it can fetch later) while Linked
+Devices still says "Sovra connection". A computer that was already linked asks
+again for its contact and chat lists the next time it connects. Saved versions
+of those lists are set back to the start so the lists are sent again, and the
+link itself is kept. Older message history is only offered when you unlink and
+connect again. Message bodies are
+not downloaded. There is no separate address-book download. An empty or failed
+refresh does not invent people or groups and does not erase anyone already
+saved. Deleting a chat drops that chat only. Removing a contact on the phone
+drops that number. Status updates, broadcast lists, and newsletters are not
+stored. A group is a chat, not a person: group participants are not turned into
+saved people.
 
 `prepare_message` accepts `me`, an exact recent chat id, an explicit international
 `WhatsApp` number, one saved person's full name, `person:<id>` from a card the

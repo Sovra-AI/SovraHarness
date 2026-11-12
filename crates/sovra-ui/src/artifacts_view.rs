@@ -13,7 +13,7 @@
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Selectable as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
@@ -26,7 +26,8 @@ use gpui_kit::{
     TestSupportExt as _, WeakEntity, Window, div,
 };
 use sovra_core::artifacts::{
-    Artifact, ArtifactCommand, ArtifactDraft, ArtifactFilter, ArtifactKind, ArtifactSource, KINDS,
+    Artifact, ArtifactCommand, ArtifactDraft, ArtifactFilter, ArtifactKind, ArtifactSort,
+    ArtifactSource, KINDS,
 };
 use sovra_core::group::{
     DetailStatus, GroupCommand, OpHash, SharedArtifact, SharingState, check_artifact, lineage_ids,
@@ -44,7 +45,7 @@ pub(crate) fn kind_icon(kind: ArtifactKind) -> IconName {
         ArtifactKind::Document => IconName::FileText,
         ArtifactKind::Checklist => IconName::ListChecks,
         ArtifactKind::Table => IconName::Table,
-        ArtifactKind::Code => IconName::Code,
+        ArtifactKind::Code | ArtifactKind::Project => IconName::Code,
         ArtifactKind::Diagram => IconName::Workflow,
         ArtifactKind::Webpage => IconName::Globe,
         ArtifactKind::Picture => IconName::Image,
@@ -65,7 +66,8 @@ fn preview_markdown(kind: ArtifactKind, language: &str, content: &str) -> String
         | ArtifactKind::Diagram
         | ArtifactKind::Webpage
         | ArtifactKind::Picture
-        | ArtifactKind::Data => {
+        | ArtifactKind::Data
+        | ArtifactKind::Project => {
             let fence = if content.contains("```") {
                 "~~~~"
             } else {
@@ -116,7 +118,10 @@ fn now() -> Timestamp {
 pub(crate) struct ArtifactsView {
     shell: WeakEntity<Shell>,
     search: Entity<InputState>,
-    kind: Option<ArtifactKind>,
+    filter: ArtifactFilter,
+    page: usize,
+    folder: Entity<InputState>,
+    project_file: Option<String>,
     /// The artifact shown in detail; `None` shows the library.
     open: Option<String>,
     editing: bool,
@@ -142,15 +147,19 @@ impl ArtifactsView {
         cx: &mut Context<Self>,
     ) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search your artifacts…"));
-        let search_events = cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
+        let search_events = cx.subscribe(&search, |view, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
+                view.page = 0;
                 cx.notify();
             }
         });
         Self {
             shell,
             search,
-            kind: None,
+            filter: ArtifactFilter::default(),
+            page: 0,
+            folder: cx.new(|cx| InputState::new(window, cx).placeholder("Folder name")),
+            project_file: None,
             open: None,
             editing: false,
             confirm_delete: false,
@@ -167,6 +176,7 @@ impl ArtifactsView {
 
     /// Opens one artifact (from a chat card or the library).
     pub(crate) fn show(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.project_file = None;
         self.open = Some(id.to_owned());
         self.open_shared = None;
         self.editing = false;
@@ -431,10 +441,103 @@ impl ArtifactsView {
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let filter = ArtifactFilter {
-            kind: self.kind,
+            kind: self.filter.kind,
+            collection: self.filter.collection.clone(),
+            favorites_only: self.filter.favorites_only,
+            sort: self.filter.sort,
             query: self.search.read(cx).value().to_string(),
         };
         let shown: Vec<Artifact> = library.filtered(&filter).into_iter().cloned().collect();
+        let page_count = shown.len().div_ceil(24).max(1);
+        let page = self.page.min(page_count - 1);
+        let mut folders = h_flex()
+            .id("artifact-folders")
+            .test_support()
+            .w_full()
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(
+                design::button("artifact-folder-all", "All folders", cx)
+                    .small()
+                    .selected(self.filter.collection.is_none())
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.filter.collection = None;
+                        view.page = 0;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                design::button("artifact-favorites", "Favorites", cx)
+                    .small()
+                    .selected(self.filter.favorites_only)
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.filter.favorites_only = !view.filter.favorites_only;
+                        view.page = 0;
+                        cx.notify();
+                    })),
+            );
+        for (index, (folder, count)) in library.collections().into_iter().enumerate() {
+            let label = if folder.is_empty() {
+                "Unfiled"
+            } else {
+                &folder
+            };
+            folders = folders.child(
+                design::button(("artifact-folder", index), format!("{label} ({count})"), cx)
+                    .small()
+                    .selected(self.filter.collection.as_ref() == Some(&folder))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.filter.collection = Some(folder.clone());
+                        view.page = 0;
+                        cx.notify();
+                    })),
+            );
+        }
+        let mut sorting = h_flex().w_full().flex_wrap().gap(t.space.small);
+        for (index, (sort, label)) in [
+            (ArtifactSort::Recent, "Recently updated"),
+            (ArtifactSort::Name, "Name A–Z"),
+            (ArtifactSort::Oldest, "Oldest first"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            sorting = sorting.child(
+                design::button(("artifact-sort", index), label, cx)
+                    .small()
+                    .selected(self.filter.sort == sort)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.filter.sort = sort;
+                        view.page = 0;
+                        cx.notify();
+                    })),
+            );
+        }
+        let paging = h_flex()
+            .w_full()
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(
+                design::button("artifact-page-previous", "Previous", cx)
+                    .disabled(page == 0)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.page = page.saturating_sub(1);
+                        cx.notify();
+                    })),
+            )
+            .child(div().child(format!(
+                "Page {} of {page_count} · {} results",
+                page + 1,
+                shown.len()
+            )))
+            .child(
+                design::button("artifact-page-next", "Next", cx)
+                    .disabled(page + 1 >= page_count)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.page = page + 1;
+                        cx.notify();
+                    })),
+            );
         let now = now();
         let mut chips = h_flex()
             .id("artifact-kind-filters")
@@ -448,9 +551,10 @@ impl ArtifactsView {
                     cx,
                 )
                 .small()
-                .selected(self.kind.is_none())
+                .selected(self.filter.kind.is_none())
                 .on_click(cx.listener(|view, _, _, cx| {
-                    view.kind = None;
+                    view.filter.kind = None;
+                    view.page = 0;
                     cx.notify();
                 })),
             );
@@ -467,9 +571,10 @@ impl ArtifactsView {
                 )
                 .small()
                 .icon(Icon::new(kind_icon(kind)))
-                .selected(self.kind == Some(kind))
+                .selected(self.filter.kind == Some(kind))
                 .on_click(cx.listener(move |view, _, _, cx| {
-                    view.kind = Some(kind);
+                    view.filter.kind = Some(kind);
+                    view.page = 0;
                     cx.notify();
                 })),
             );
@@ -497,6 +602,8 @@ impl ArtifactsView {
                     shown
                         .iter()
                         .enumerate()
+                        .skip(page * 24)
+                        .take(24)
                         .map(|(index, artifact)| artifact_card(artifact, index, now, cx)),
                 )
                 .into_any_element()
@@ -516,7 +623,10 @@ impl ArtifactsView {
                     .child(Input::new(&self.search).aria_label("Search your artifacts")),
             )
             .children(shared_section)
+            .child(folders)
             .child(chips)
+            .child(sorting)
+            .child(paging)
             .child(content)
     }
 
@@ -552,7 +662,7 @@ impl ArtifactsView {
                     .icon(Icon::new(IconName::Download))
                     .on_click(cx.listener(move |view, _, _, cx| view.save_copy(&exported, cx))),
             );
-        if info.opens_in_browser {
+        if info.opens_in_browser && artifact.kind != ArtifactKind::Project {
             actions = actions.child(
                 design::primary_button("artifact-open-browser", "Open in browser", cx)
                     .icon(Icon::new(IconName::ExternalLink))
@@ -565,6 +675,66 @@ impl ArtifactsView {
                         );
                     })),
             );
+        }
+        if artifact.kind == ArtifactKind::Project {
+            let project_id = artifact.id.clone();
+            actions = actions.child(
+                design::primary_button("artifact-build-project", "Build and open", cx)
+                    .disabled(self.library(cx).builds.contains_key(&artifact.id))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        if let Some(shell) = view.shell.upgrade() {
+                            let session_id = shell.read(cx).state.session_id.clone();
+                            Self::send(
+                                ArtifactCommand::RunProject {
+                                    id: project_id.clone(),
+                                    session_id,
+                                },
+                                cx,
+                            );
+                            shell.update(cx, |shell, cx| {
+                                shell.select_tab(sovra_core::NavTab::Chat, cx);
+                            });
+                        }
+                    })),
+            );
+        }
+        if artifact.kind == ArtifactKind::Webpage {
+            let deploy_id = artifact.id.clone();
+            actions = actions.child(
+                design::button("artifact-deploy", "Run website", cx).on_click(cx.listener(
+                    move |_, _, _, cx| {
+                        Self::send(
+                            ArtifactCommand::Deploy {
+                                id: deploy_id.clone(),
+                            },
+                            cx,
+                        );
+                    },
+                )),
+            );
+        }
+        if info.opens_in_browser
+            && let Some(url) = self.library(cx).deployments.get(&artifact.id)
+        {
+            let url = url.clone();
+            let stop_id = artifact.id.clone();
+            actions = actions
+                .child(
+                    design::button("artifact-website-open", "View website", cx)
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                )
+                .child(
+                    design::button("artifact-website-stop", "Stop website", cx).on_click(
+                        cx.listener(move |_, _, _, cx| {
+                            Self::send(
+                                ArtifactCommand::StopDeployment {
+                                    id: stop_id.clone(),
+                                },
+                                cx,
+                            );
+                        }),
+                    ),
+                );
         }
         let mut share_status = None;
         if let (Some(group), Some(sharing)) = (group, sharing) {
@@ -650,6 +820,61 @@ impl ArtifactsView {
                 cx.notify();
             })),
         );
+        let organize = artifact.clone();
+        let favorite = artifact.clone();
+        let folder_name = if artifact.collection.is_empty() {
+            "Unfiled"
+        } else {
+            &artifact.collection
+        };
+        let organization = v_flex()
+            .w_full()
+            .gap(t.space.small)
+            .child(div().child(format!("Folder: {folder_name}")))
+            .child(
+                h_flex()
+                    .w_full()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::button(
+                            "artifact-favorite",
+                            if artifact.pinned {
+                                "Remove from favorites"
+                            } else {
+                                "Add to favorites"
+                            },
+                            cx,
+                        )
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            Self::send(
+                                ArtifactCommand::Organize {
+                                    id: favorite.id.clone(),
+                                    collection: favorite.collection.clone(),
+                                    pinned: !favorite.pinned,
+                                },
+                                cx,
+                            );
+                        })),
+                    )
+                    .child(
+                        Input::new(&self.folder).aria_label("Move to folder (blank for Unfiled)"),
+                    )
+                    .child(
+                        design::button("artifact-move-folder", "Move to folder", cx).on_click(
+                            cx.listener(move |view, _, _, cx| {
+                                Self::send(
+                                    ArtifactCommand::Organize {
+                                        id: organize.id.clone(),
+                                        collection: view.folder.read(cx).value().to_string(),
+                                        pinned: organize.pinned,
+                                    },
+                                    cx,
+                                );
+                            }),
+                        ),
+                    ),
+            );
         let body = if self.editing {
             let id = artifact.id.clone();
             v_flex()
@@ -686,6 +911,50 @@ impl ArtifactsView {
                         ),
                 )
                 .into_any_element()
+        } else if artifact.kind == ArtifactKind::Project {
+            match sovra_core::artifacts::WebsiteProject::parse(&artifact.content) {
+                Ok(project) => {
+                    let selected = self
+                        .project_file
+                        .as_ref()
+                        .filter(|name| project.files.contains_key(*name))
+                        .or_else(|| project.files.keys().next());
+                    let mut files = h_flex().w_full().flex_wrap().gap(t.space.small);
+                    for (index, name) in project.files.keys().enumerate() {
+                        let name = name.clone();
+                        files = files.child(
+                            design::button(("artifact-project-file", index), name.clone(), cx)
+                                .small()
+                                .selected(selected == Some(&name))
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    view.project_file = Some(name.clone());
+                                    cx.notify();
+                                })),
+                        );
+                    }
+                    let source = selected
+                        .and_then(|name| project.files.get(name))
+                        .cloned()
+                        .unwrap_or_default();
+                    v_flex()
+                        .id("artifact-project-source")
+                        .test_support()
+                        .w_full()
+                        .min_w_0()
+                        .gap(t.space.small)
+                        .child(files)
+                        .child(
+                            TextView::markdown(
+                                "artifact-project-code",
+                                preview_markdown(ArtifactKind::Code, "", &source),
+                            )
+                            .selectable(true)
+                            .style(design::markdown_style(cx)),
+                        )
+                        .into_any_element()
+                }
+                Err(error) => div().child(error).into_any_element(),
+            }
         } else {
             div()
                 .id("artifact-preview")
@@ -760,8 +1029,16 @@ impl ArtifactsView {
                     }),
             )
             .child(actions)
+            .children(
+                self.library(cx)
+                    .builds
+                    .get(&artifact.id)
+                    .cloned()
+                    .map(|message| div().child(message)),
+            )
             .children(self.share_feedback(share_status, cx))
             .child(body)
+            .child(organization)
     }
 
     /// The line under the actions: an error, what just happened, or where it stands.
@@ -1079,6 +1356,11 @@ fn artifact_card(
     } else {
         artifact.source.author.clone()
     };
+    let folder = if artifact.collection.is_empty() {
+        "Unfiled"
+    } else {
+        &artifact.collection
+    };
     v_flex()
         .id(("artifact-card", index))
         .test_support()
@@ -1119,6 +1401,11 @@ fn artifact_card(
                 .line_clamp(2)
                 .child(artifact.preview()),
         )
+        .child(div().sovra_text(TextRole::Caption, cx).child(format!(
+            "{}{}",
+            if artifact.pinned { "Favorite · " } else { "" },
+            folder
+        )))
         .child(
             h_flex().child(
                 design::button(("artifact-open", index), "Open", cx)

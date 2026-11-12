@@ -354,6 +354,7 @@ pub struct WorkspaceState {
     /// The composer sends prompts to the whole team instead of Sovra alone.
     pub team_mode: bool,
     pub development: crate::development::DevelopmentState,
+    pub remote_control: crate::remote_control::RemoteState,
     /// AG-UI `subagentRunId` → the member it belongs to, for attributing messages.
     team_subagents: std::collections::BTreeMap<String, crate::agui::Speaker>,
     active_model_problem: Option<String>,
@@ -430,6 +431,7 @@ impl WorkspaceState {
             terminal: crate::terminal::TerminalState::default(),
             team_mode: false,
             development: crate::development::DevelopmentState::default(),
+            remote_control: crate::remote_control::RemoteState::default(),
             team_subagents: std::collections::BTreeMap::new(),
             active_model_problem: None,
             prompt_awaiting_setup: None,
@@ -1085,6 +1087,10 @@ impl WorkspaceState {
                 self.groups.apply((**event).clone());
                 None
             }
+            Event::RemoteControl(event) => {
+                self.remote_control.apply(event);
+                None
+            }
             Event::Development(event) => {
                 self.development.apply(event);
                 None
@@ -1298,6 +1304,18 @@ impl WorkspaceState {
                 activity,
             } => {
                 let (widget, author) = match activity {
+                    crate::agui::LiveActivity::CodeWriting {
+                        language,
+                        content,
+                        artifact_id,
+                    } => (
+                        AgUiWidget::CodeWriting {
+                            language: language.clone(),
+                            content: content.clone(),
+                            artifact_id: artifact_id.clone(),
+                        },
+                        "Code",
+                    ),
                     crate::agui::LiveActivity::Team(team) => {
                         (AgUiWidget::TeamActivity(team.clone()), "Team")
                     }
@@ -1311,7 +1329,16 @@ impl WorkspaceState {
                     let mut message =
                         ChatMessage::assistant(message_id.clone(), "", "Just now", vec![widget]);
                     author.clone_into(&mut message.author);
-                    self.messages.push(message);
+                    if matches!(activity, crate::LiveActivity::CodeWriting { .. })
+                        && self.messages.last().is_some_and(|last| {
+                            last.role == crate::MessageRole::Assistant
+                                && last.timestamp == "Just now"
+                        })
+                    {
+                        self.messages.insert(self.messages.len() - 1, message);
+                    } else {
+                        self.messages.push(message);
+                    }
                 }
                 None
             }
@@ -1430,6 +1457,10 @@ impl WorkspaceState {
         if let Some(last) = self.messages.last_mut()
             && last.role == crate::agui::MessageRole::Assistant
             && last.timestamp == "Just now"
+            && !last
+                .widgets
+                .iter()
+                .any(|widget| matches!(widget, AgUiWidget::CodeWriting { .. }))
         {
             last.text.push_str(chunk);
             return;
@@ -1442,6 +1473,10 @@ impl WorkspaceState {
     fn attach_agui_widget(&mut self, widget: AgUiWidget) {
         if let Some(last) = self.messages.last_mut()
             && last.role == crate::agui::MessageRole::Assistant
+            && !last
+                .widgets
+                .iter()
+                .any(|widget| matches!(widget, AgUiWidget::CodeWriting { .. }))
         {
             if let AgUiWidget::Components { surface_id, version, .. } = &widget
                 && let Some(existing) = last.widgets.iter_mut().find(|existing| {
@@ -1513,6 +1548,48 @@ impl WorkspaceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_activity_does_not_split_or_absorb_the_streamed_reply() {
+        for prefix in ["", "Here is your page:\n```html\n"] {
+            let mut state = WorkspaceState::new(0);
+            let session = state.session_id.clone();
+            if !prefix.is_empty() {
+                state.apply_event(&Event::AgentChunk {
+                    session_id: session.clone(),
+                    text: prefix.into(),
+                });
+            }
+            state.apply_event(&Event::AgUi {
+                session_id: session.clone(),
+                event: crate::AgUiEvent::ActivitySnapshot {
+                    message_id: "source".into(),
+                    activity: crate::LiveActivity::CodeWriting {
+                        language: "html".into(),
+                        content: "<h1>Hello</h1>".into(),
+                        artifact_id: None,
+                    },
+                },
+            });
+            state.apply_event(&Event::AgentChunk {
+                session_id: session,
+                text: "<h1>Hello</h1>\n```".into(),
+            });
+            assert_eq!(
+                state
+                    .messages
+                    .iter()
+                    .find(|message| message.id == "source")
+                    .unwrap()
+                    .text,
+                ""
+            );
+            assert_eq!(
+                state.messages.last().unwrap().text,
+                format!("{prefix}<h1>Hello</h1>\n```")
+            );
+        }
+    }
 
     #[test]
     fn a_new_workspace_starts_with_no_schedules() {

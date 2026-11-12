@@ -7,6 +7,7 @@
 mod admission;
 mod artifacts;
 mod capabilities;
+mod code_activity;
 mod communications;
 pub mod decision_client;
 mod deep_research;
@@ -789,18 +790,15 @@ impl AdkHarness {
 
         let mut deltas = EventTextDeltas::default();
         let mut response_model = Some(self.response_model.clone());
+        let mut code_activity = code_activity::CodeActivity::default();
         let started = std::time::Instant::now();
         while let Some(item) = stream.next().await {
             match item {
                 Ok(adk_event) => {
-                    if !forward_adk_event(
-                        session_id,
-                        &deltas.push(&adk_event),
-                        &mut response_model,
-                        started,
-                        events,
-                    )
-                    .await
+                    let delta = deltas.push(&adk_event);
+                    code_activity.push(session_id, &delta, events).await;
+                    if !forward_adk_event(session_id, &delta, &mut response_model, started, events)
+                        .await
                     {
                         return;
                     }
@@ -822,6 +820,11 @@ impl AdkHarness {
                     return;
                 }
             }
+        }
+        if let Some(saver) = &self.artifact_saver {
+            code_activity
+                .save_completed(session_id, saver, events)
+                .await;
         }
         let _ = events
             .send(Event::AgentCompleted {

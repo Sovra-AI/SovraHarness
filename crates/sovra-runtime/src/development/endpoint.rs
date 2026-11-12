@@ -1,5 +1,8 @@
 //! Private, authenticated, bounded local IPC behind the stdio MCP transport.
 use super::{Incoming, MAX_FRAME, MAX_RESPONSE, REQUEST_TIMEOUT};
+use crate::private_storage::{
+    io_error, private_directory, private_file, random_secret, read_private, write_private,
+};
 use async_channel::Sender;
 use serde::{Deserialize, Serialize};
 use sovra_core::development::UiRequest;
@@ -90,117 +93,6 @@ impl Active {
             tracing::warn!(%error, "could not remove development endpoint; listener is revoked");
         }
     }
-}
-
-fn random_secret() -> Result<String, String> {
-    use std::fmt::Write as _;
-    let mut bytes = [0_u8; 32];
-    getrandom::fill(&mut bytes).map_err(|_| "Secure randomness unavailable.".to_owned())?;
-    let mut result = String::with_capacity(64);
-    for byte in bytes {
-        let _ = write!(result, "{byte:02x}");
-    }
-    Ok(result)
-}
-
-fn private_directory(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        let mut builder = std::fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt as _;
-            builder.mode(0o700);
-        }
-        builder.create(path).map_err(|error| io_error(&error))?;
-    }
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| io_error(&error))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err("Development directory must be a real, private directory.".into());
-    }
-    check_permissions(&metadata)
-}
-
-fn private_file(path: &Path) -> Result<(), String> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| io_error(&error))?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err("Development file must be a real, private file.".into());
-    }
-    check_permissions(&metadata)
-}
-
-fn check_permissions(metadata: &std::fs::Metadata) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            return Err("Development files must be accessible only to their owner (directory 0700, files 0600).".into());
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = metadata;
-    Ok(())
-}
-
-fn io_error(error: &std::io::Error) -> String {
-    format!("Development control IO failed: {}", error.kind())
-}
-
-async fn write_private<T: Serialize>(
-    directory: &Path,
-    name: &str,
-    value: &T,
-) -> Result<(), String> {
-    let root = directory.to_owned();
-    let name = name.to_owned();
-    let bytes = serde_json::to_vec(value)
-        .map_err(|_| "Could not encode development settings.".to_owned())?;
-    tokio::task::spawn_blocking(move || {
-        use std::io::Write as _;
-        private_directory(&root)?;
-        let temporary = root.join(format!(".{}", random_secret()?));
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let result = (|| {
-            let mut file = options.open(&temporary).map_err(|error| io_error(&error))?;
-            file.write_all(&bytes).map_err(|error| io_error(&error))?;
-            file.sync_all().map_err(|error| io_error(&error))?;
-            std::fs::rename(&temporary, root.join(name)).map_err(|error| io_error(&error))
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(temporary);
-        }
-        result
-    })
-    .await
-    .map_err(|_| "Development file task failed.".to_owned())?
-}
-
-async fn read_private(directory: &Path, name: &str) -> Result<Vec<u8>, String> {
-    let directory = directory.to_owned();
-    let name = name.to_owned();
-    tokio::task::spawn_blocking(move || {
-        use std::io::Read as _;
-        private_directory(&directory)?;
-        let path = directory.join(name);
-        private_file(&path)?;
-        let file = File::open(path).map_err(|error| io_error(&error))?;
-        let mut bytes = Vec::new();
-        file.take(4097)
-            .read_to_end(&mut bytes)
-            .map_err(|error| io_error(&error))?;
-        if bytes.len() > 4096 {
-            return Err("Development file exceeds its limit.".into());
-        }
-        Ok(bytes)
-    })
-    .await
-    .map_err(|_| "Development file task failed.".to_owned())?
 }
 
 pub(super) async fn load_enabled(directory: &Path) -> Result<bool, String> {

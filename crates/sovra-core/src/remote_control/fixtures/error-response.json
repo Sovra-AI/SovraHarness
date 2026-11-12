@@ -1,0 +1,5 @@
+{
+  "status": "error",
+  "code": "not_paired",
+  "message": "Pair this phone with your computer first."
+}

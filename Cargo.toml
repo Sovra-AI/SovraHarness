@@ -126,7 +126,7 @@ surrealdb = { version = "3.3.4", features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "2.0.21"
 time = { version = "0.3.55", features = ["formatting"] }
 # `process`: the terminal tool runs shell commands (sovra-runtime only).
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs", "process"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "io-std", "fs", "process"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

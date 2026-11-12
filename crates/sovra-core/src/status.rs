@@ -25,6 +25,7 @@ impl RuntimeStatus {
             | Event::Connections(_)
             | Event::Mcp(_)
             | Event::Terminal(_)
+            | Event::RemoteControl(_)
             | Event::Development(_)
             | Event::Models(_)
             | Event::Skills(_)

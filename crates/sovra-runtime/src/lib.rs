@@ -9,7 +9,12 @@ mod auth;
 mod chat_history;
 mod connections;
 mod development;
+mod private_storage;
+mod remote_control;
+mod remote_reference;
 pub use development::{DevelopmentConfig, run_development_mcp};
+pub use remote_control::{RemoteConfig, RemoteEndpointFactory, RemoteEndpointFuture};
+pub use remote_reference::{RemoteReferenceClient, run_remote_reference};
 mod file_index;
 mod files;
 mod google;
@@ -59,6 +64,8 @@ pub enum Error {
     Stopped,
     #[error("development MCP failed: {0}")]
     Development(String),
+    #[error("remote reference client failed: {0}")]
+    RemoteReference(String),
 }
 
 /// The UI's handle to the runtime. Cheap to clone.
@@ -293,6 +300,7 @@ pub fn start_with_auth(
             signin: google,
             google: None,
             development: None,
+            remote_control: None,
             probes: Vec::new(),
             terminal: None,
             mcp_catalogue: None,
@@ -320,6 +328,8 @@ pub struct RuntimeServices {
     pub google: Option<Arc<dyn sovra_core::google::GoogleConnector>>,
     /// Local control follows the build startup policy and remains revocable in Settings.
     pub development: Option<DevelopmentConfig>,
+    /// Independently paired phones; always starts disabled.
+    pub remote_control: Option<RemoteConfig>,
     /// Extra catalogue probes. Saved messaging links are probed as well.
     pub probes: Vec<Arc<dyn sovra_core::connection_catalogue::LinkProbe>>,
     /// Terminal access for the assistant; `None` leaves the terminal tool out.
@@ -430,6 +440,7 @@ async fn serve(
         signin,
         google,
         development,
+        remote_control,
         probes,
         terminal,
         mcp_catalogue,
@@ -555,6 +566,7 @@ async fn serve(
         memory.clone(),
         events.clone(),
         std::env::temp_dir().join("sovra-artifact-views"),
+        terminal.project_access(),
     );
     let team = teams::TeamRuntime::new(memory.clone(), events.clone());
     connections.attach_store(memory.clone());
@@ -584,6 +596,8 @@ async fn serve(
     if memory.is_some() {
         chat_history.load();
     }
+    let remote_control =
+        remote_control::RemoteRuntime::start(remote_control, events.clone(), &handle);
     let development = development
         .map(|config| development::DevelopmentRuntime::start(config, events.clone(), &handle));
     google.send(sovra_core::google::GoogleCommand::Load);
@@ -797,6 +811,7 @@ async fn serve(
             Command::Teams(command) => team.handle(&handle, command),
             Command::Artifacts(command) => artifact_library.handle(&handle, command),
             Command::Connections(command) => connections.handle(command),
+            Command::RemoteControl(command) => remote_control.send(command),
             Command::Development(command) => {
                 if let Some(worker) = &development {
                     worker.send(command);
@@ -1142,6 +1157,7 @@ async fn serve(
         run.interrupt(&session);
         run.task.abort();
     }
+    artifact_library.stop().await;
     memory_taps.abort_all();
     while memory_taps.join_next().await.is_some() {}
     if let Some(worker) = &mut remembering {
@@ -1150,6 +1166,7 @@ async fn serve(
     memory_review.stop().await;
     memory_semantic.stop().await;
     chat_history.stop().await;
+    remote_control.stop().await;
     if let Some(worker) = development {
         worker.stop().await;
     }

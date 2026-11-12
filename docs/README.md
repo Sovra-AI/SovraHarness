@@ -15,6 +15,7 @@ Map of the top-level guides for SovraHarness. Start at the
 | [Architecture](architecture.md) | Why the crates, Command/Event, and adapters are shaped this way |
 | [Native development](development.md) | One-shot `cargo xtask dev`, cache reclaim, sign-in status |
 | [Development MCP](development-mcp.md) | Inspect and operate the running native window |
+| [Phone remote control](remote-control.md) | Desktop pairing/control and the future mobile app contract |
 | [Reviewing knowledge](knowledge.md) | Check sources, explore connections and stop recall |
 | [Memory capture and recall](memory-capture-and-recall.md) | Current contract for saving and recalling a chat turn |
 | [Agent memory log](agent-memory.md) | Dated audits and measured limits; not the day-to-day contract |

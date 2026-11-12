@@ -15,6 +15,7 @@ and Models. Environment changes require restarting the app.
 | `SOVRA_SEARXNG_URL` | Optional additional web-search source. Omitting it does not disable other web search. |
 | `SOVRA_MEMORY_EXTRACTION_SLOTS` | Background memory-extraction capacity; parsed at startup. See [memory limits](memory-capture-and-recall.md#limits-in-force). |
 | `SOVRA_GROUP_REACH=local` | Direct group networking without Internet discovery/relays. Other values select Internet reach. |
+| `SOVRA_REMOTE_REACH=local` | Direct phone-control networking without Internet discovery/relays. Other values select Internet reach. This does not enable phone control. |
 | `RUST_LOG` | Tracing filter for app logs. |
 | `RUST_BACKTRACE` | Rust backtraces; the dev launcher defaults it to `1` if unset. |
 | `SOVRA_TARGET_BUDGET_GIB` | Advisory build-cache budget for the dev launcher, default 30 GiB. |
@@ -50,10 +51,15 @@ accounts, memory or connections.
 | `connected-services/services.json` | Saved MCP service catalog |
 | `schedules.json` | Scheduled prompts, timed sends and run history |
 | `groups/` | Group records and shared state |
+| `remote-control/phones.json` | Remembered phone public keys and names; access still starts off. An owner lock prevents concurrent writers. |
+| `remote-control-reference/desktop.json` | Public desktop routing hints for the optional `--remote-control-client` developer client. Its separate phone identity is in the credential store. |
 | `terminal/settings.json` | Terminal preferences |
 | `development-control/` | Local development-control state and endpoint descriptor |
 | `dev-credentials/` | Debug-only plaintext credential store |
 | `logs/` | Daily rolling application logs |
+
+Phone control uses the separate `remote-control-device-key` credential, independent
+of Groups and Development MCP. Invitations are temporary and are not saved.
 
 Installed/release credentials use the OS keychain. Debug `SOVRA_DEV=1` credentials
 are separate files with owner-only permissions on Unix. Development and normal

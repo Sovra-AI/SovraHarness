@@ -31,6 +31,27 @@ for and how to use it in numbered steps, and a **Getting started** list shows wh
 a new group still has to do. Under **Invite someone**, **Create invite link** makes
 a one-time link and copies it for you to send.
 
+Ask Sovra to build a website, then ask it to run the saved website. The code
+panel shows source while it is written; **Run website** opens saved HTML in your
+browser at a local address. **Stop website** ends hosting without deleting the
+artifact. **Open in browser** uses a local HTTP address, including for diagrams
+and pictures. React, Vue, Svelte and other frontend projects are saved as one
+multi-file artifact: inspect individual files, then choose **Build and open**.
+Install Node.js/npm and enable terminal access first; review build commands in
+chat. Projects must produce static files (usually `dist`); server backends and
+server-side rendering are not hosted. Hosting ends when Sovra closes.
+
+Organize Artifacts into named folders, mark favorites, search by name or content,
+and sort by recent changes, name or oldest first. Results appear 24 per page.
+Older work appears under **Unfiled** until you move it.
+
+Type `/remote-control` in chat to open **Use Sovra from your phone**, enable
+phone access and show a one-use pairing QR. Paired phones are remembered, but
+access starts off after every restart. **Stop phone control** ends access and
+**Forget** revokes a phone. The mobile app is not built yet; the desktop
+connection, runnable reference client and [mobile integration contract](docs/remote-control.md)
+are ready for integration testing with that future app.
+
 ## Quick start
 
 ```sh
@@ -171,6 +192,7 @@ sequenceDiagram
 | [Architecture](docs/architecture.md) | Crate layering, Command/Event, why each dependency |
 | [Native development](docs/development.md) | One-shot `cargo xtask dev`, cache, sign-in status |
 | [Development MCP](docs/development-mcp.md) | Drive the running app from Codex or Claude Code |
+| [Phone remote control](docs/remote-control.md) | Desktop pairing and control, research and future mobile integration |
 | [Reviewing knowledge](docs/knowledge.md) | Check sources, explore connections and stop recall |
 | [Memory capture and recall](docs/memory-capture-and-recall.md) | One chat turn through save and later recall |
 | [Agent memory log](docs/agent-memory.md) | Dated audits and measured limits |

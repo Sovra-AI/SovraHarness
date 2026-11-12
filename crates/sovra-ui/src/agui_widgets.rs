@@ -21,6 +21,9 @@ pub(crate) fn render_agui_widget(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     match widget {
+        AgUiWidget::CodeWriting { .. } => design::button(("show-code", index), "Show code", cx)
+            .on_click(cx.listener(|shell, _, _, cx| shell.show_code_panel(true, cx)))
+            .into_any_element(),
         AgUiWidget::Components { components, .. } => {
             crate::native_surface::render_surface(components, index, cx)
         }

@@ -190,6 +190,11 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
             "You are {}. {} Answer only the request in this call. Do not invent titles or URLs.",
             spec.id, spec.description
         );
+        if spec.id == "CodingAgent" {
+            instruction.push_str(
+                " For a simple website, deliver complete runnable HTML with embedded CSS and JavaScript. When React or another framework is requested, save one project containing all source files, package.json and a static build script; do not substitute plain HTML for the requested framework. Use semantic landmarks, labelled native controls, visible keyboard focus, sufficient contrast, responsive layouts without horizontal overflow, and reduced-motion support. Keep user data out of HTML injection sinks; never embed secrets. Prefer the platform over unnecessary dependencies. Explain any network dependencies and distinguish implemented behavior from mock data. Include a short validation checklist and be truthful about checks actually run. Show source in a fenced block so the user can follow the work."
+            );
+        }
         for provider in &equipping {
             instruction.push_str(&provider.procedure());
         }
@@ -374,7 +379,11 @@ fn parent_instruction(
          They receive your delegated request, standing instructions, the earlier conversation supplied for this turn, \
          and the same granted knowledge readers, but not sibling work or your live tool-call history. \
          Include the relevant task details and exact attachment IDs in each delegation. \
-         Do not forward unrelated private material or transfer the conversation away from yourself.",
+         Do not forward unrelated private material or transfer the conversation away from yourself. \
+         When producing substantial code or a website, call save_artifact with the complete source before claiming completion. \
+         Simple websites use kind webpage and language html. Framework websites use kind project, language website-project, with content JSON containing files (path-to-source strings) and output_dir (dist by default); include package.json and a static build script. Preserve all source together in the library. \
+         After saving, offer to run the website on this computer; call deploy_artifact only when asked. \
+         Never claim storage, deployment, or tests succeeded without the corresponding result.",
         rules = rules.join("\n")
     )
 }

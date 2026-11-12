@@ -8,6 +8,7 @@
 //! hands in, so the runtime owns cancellation. This crate never names `tokio`.
 
 mod cipher;
+mod remote;
 mod store;
 mod swarm;
 
@@ -21,6 +22,7 @@ use sovra_core::group::{
     PeerRequest, PeerResponse, Signature, SignatureVerifier, Spawn, TransportError,
 };
 
+pub use remote::RemoteMesh;
 pub use store::FileGroupStore;
 pub use swarm::{OsRandom, SwarmKeys};
 
@@ -373,12 +375,7 @@ impl GroupTransport for Mesh {
     }
 
     fn address(&self) -> PeerAddress {
-        let addr = self.endpoint.addr();
-        PeerAddress {
-            device: self.this_device(),
-            relay: addr.relay_urls().next().map(ToString::to_string),
-            addrs: addr.ip_addrs().map(ToString::to_string).collect(),
-        }
+        peer_address(&self.endpoint)
     }
 
     async fn serve(&self, handler: Arc<dyn PeerHandler>, spawn: Spawn) {
@@ -434,3 +431,12 @@ impl GroupTransport for Mesh {
 
 #[cfg(test)]
 mod tests;
+
+fn peer_address(endpoint: &Endpoint) -> PeerAddress {
+    let addr = endpoint.addr();
+    PeerAddress {
+        device: DeviceId(*endpoint.id().as_bytes()),
+        relay: addr.relay_urls().next().map(ToString::to_string),
+        addrs: addr.ip_addrs().map(ToString::to_string).collect(),
+    }
+}

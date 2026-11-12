@@ -3,7 +3,7 @@
 //! A stalled contact pull must not stop another link from reporting its state.
 //! Preparing a unique saved person creates a review and does not send.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use sovra_core::connections::{
     ChannelStartOptions, ConnectionCommand, ConnectionEvent, LinkedDevice, MessagingChannel,
     SyncedGroup, TelegramStatus, WhatsAppStatus,
 };
-use sovra_core::people::SyncedContact;
+use sovra_core::people::{PEOPLE_PULL_FAILED_NOTE, SyncedContact};
 use sovra_core::{AgentConfig, Command, Event, Timestamp};
 use sovra_runtime::{MessagingChannels, RuntimeServices};
 
@@ -460,5 +460,276 @@ async fn synced_contact_can_be_prepared_before_they_write_and_a_stalled_pull_doe
     assert_eq!(whatsapp.session.sent.lock().expect("sent").len(), 0);
     assert!(!seen.kind_probed, "reading contacts must not probe a link");
 
+    client.shutdown_blocking().expect("shutdown");
+}
+
+/// Pull results the test hands the link, one per connect.
+struct QueuedWhatsApp {
+    sink: Mutex<Option<ChannelSink>>,
+    started: AtomicUsize,
+    finished: AtomicUsize,
+    results: async_channel::Receiver<Result<AddressBookSnapshot, ChannelError>>,
+}
+
+#[async_trait::async_trait]
+impl MessagingChannel for QueuedWhatsApp {
+    async fn start(
+        &self,
+        _options: ChannelStartOptions,
+        events: ChannelSink,
+    ) -> Result<Arc<dyn ChannelSession>, ChannelError> {
+        *self.sink.lock().expect("sink") = Some(events);
+        Ok(Arc::new(QuietSession))
+    }
+
+    fn has_saved_link(&self) -> bool {
+        false
+    }
+
+    fn forget(&self) -> Result<(), ChannelError> {
+        Ok(())
+    }
+
+    async fn pull_contacts(&self) -> Result<AddressBookSnapshot, ChannelError> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        let result = self.results.recv().await.expect("queued pull");
+        self.finished.fetch_add(1, Ordering::SeqCst);
+        result
+    }
+}
+
+impl QueuedWhatsApp {
+    fn emit(&self, event: ChannelEvent) {
+        let sink = self
+            .sink
+            .lock()
+            .expect("sink")
+            .clone()
+            .expect("link started");
+        sink(event);
+    }
+}
+
+fn address_book(count: usize) -> (Vec<SyncedContact>, String) {
+    let unsaved = format!("4477{:09}", 0);
+    let contacts = (0..count)
+        .map(|index| SyncedContact {
+            name: if index == 0 {
+                String::new()
+            } else {
+                format!("Person {index}")
+            },
+            phone: format!("4477{index:09}"),
+            removed: false,
+        })
+        .collect();
+    (contacts, unsaved)
+}
+
+async fn reach(flag: &AtomicUsize, count: usize) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while flag.load(Ordering::SeqCst) < count {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("counter did not reach {count}"));
+}
+
+#[tokio::test]
+async fn a_large_pull_and_a_later_event_keep_unsaved_chats_when_refresh_is_empty_or_fails() {
+    let count = 1025;
+    let (contacts, unsaved) = address_book(count);
+    let unsaved_title = format!("+{unsaved}");
+    let (results_tx, results) = async_channel::unbounded();
+    let whatsapp = Arc::new(QueuedWhatsApp {
+        sink: Mutex::new(None),
+        started: AtomicUsize::new(0),
+        finished: AtomicUsize::new(0),
+        results,
+    });
+    let client = sovra_runtime::start_with_services(
+        "contact-sync-full",
+        AgentConfig::default(),
+        RuntimeServices {
+            messaging: MessagingChannels {
+                whatsapp: Some(whatsapp.clone()),
+                telegram: None,
+            },
+            ..RuntimeServices::default()
+        },
+    )
+    .expect("runtime");
+    let mut seen = Seen { kind_probed: false };
+    wait(&client, &mut seen, |event| {
+        matches!(event, Event::Ready { .. })
+    })
+    .await;
+    client
+        .send(Command::Connections(
+            ConnectionCommand::StartWhatsAppPairing,
+        ))
+        .expect("pair");
+    wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::StatusChanged(
+                WhatsAppStatus::Connecting { .. }
+            ))
+        )
+    })
+    .await;
+    client
+        .send(Command::Connections(ConnectionCommand::Load))
+        .expect("load");
+    wait(&client, &mut seen, |event| {
+        matches!(event, Event::Connections(ConnectionEvent::Loaded(_)))
+    })
+    .await;
+
+    whatsapp.emit(ChannelEvent::Connected {
+        device: LinkedDevice {
+            phone_display: "+447700900123".into(),
+            device_jid: OWN_CHAT.into(),
+            companion_name: "fixture".into(),
+            linked_at: Timestamp(0),
+        },
+    });
+    reach(&whatsapp.started, 1).await;
+    results_tx
+        .send(Ok(AddressBookSnapshot {
+            contacts,
+            groups: vec![SyncedGroup {
+                id: "120363111@g.us".into(),
+                subject: "School Gate".into(),
+            }],
+        }))
+        .await
+        .expect("snapshot");
+    wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::PeopleChanged(book))
+                if book.people.len() == count
+                    && book.people.iter().any(|person| person.title() == unsaved_title)
+        )
+    })
+    .await;
+    wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::GroupsChanged(groups))
+                if groups.iter().any(|group| group.subject == "School Gate")
+        )
+    })
+    .await;
+    reach(&whatsapp.finished, 1).await;
+
+    whatsapp.emit(ChannelEvent::Contacts(vec![SyncedContact {
+        name: "Ada Lovelace".into(),
+        phone: "447700900222".into(),
+        removed: false,
+    }]));
+    wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::PeopleChanged(book))
+                if book.people.iter().any(|person| person.title() == "Ada Lovelace")
+                    && book.people.len() == count + 1
+        )
+    })
+    .await;
+    whatsapp.emit(ChannelEvent::Groups(vec![SyncedGroup {
+        id: "120363999@g.us".into(),
+        subject: "Neighbours".into(),
+    }]));
+    wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::GroupsChanged(groups))
+                if groups.iter().any(|group| group.subject == "Neighbours")
+                    && groups.len() == 2
+        )
+    })
+    .await;
+
+    whatsapp.emit(ChannelEvent::Connected {
+        device: LinkedDevice {
+            phone_display: "+447700900123".into(),
+            device_jid: OWN_CHAT.into(),
+            companion_name: "fixture".into(),
+            linked_at: Timestamp(0),
+        },
+    });
+    reach(&whatsapp.started, 2).await;
+    results_tx
+        .send(Ok(AddressBookSnapshot::default()))
+        .await
+        .expect("empty pull");
+    reach(&whatsapp.finished, 2).await;
+    client
+        .send(Command::Connections(ConnectionCommand::Load))
+        .expect("load");
+    let loaded = wait(&client, &mut seen, |event| {
+        matches!(event, Event::Connections(ConnectionEvent::Loaded(_)))
+    })
+    .await;
+    let Event::Connections(ConnectionEvent::Loaded(state)) = loaded else {
+        unreachable!()
+    };
+    assert_eq!(state.people.people.len(), count + 1);
+    assert!(
+        state
+            .people
+            .people
+            .iter()
+            .any(|person| person.title() == unsaved_title)
+    );
+    assert_eq!(state.groups.len(), 2);
+    assert!(state.people.note.is_none());
+
+    whatsapp.emit(ChannelEvent::Connected {
+        device: LinkedDevice {
+            phone_display: "+447700900123".into(),
+            device_jid: OWN_CHAT.into(),
+            companion_name: "fixture".into(),
+            linked_at: Timestamp(0),
+        },
+    });
+    reach(&whatsapp.started, 3).await;
+    results_tx
+        .send(Err(ChannelError::Failed("could not refresh".into())))
+        .await
+        .expect("failed pull");
+    let failed = wait(&client, &mut seen, |event| {
+        matches!(
+            event,
+            Event::Connections(ConnectionEvent::PeopleChanged(book))
+                if book.note.as_deref() == Some(PEOPLE_PULL_FAILED_NOTE)
+        )
+    })
+    .await;
+    let Event::Connections(ConnectionEvent::PeopleChanged(book)) = failed else {
+        unreachable!()
+    };
+    assert_eq!(book.people.len(), count + 1);
+    assert!(
+        book.people
+            .iter()
+            .any(|person| person.title() == unsaved_title)
+    );
+    client
+        .send(Command::Connections(ConnectionCommand::Load))
+        .expect("load");
+    let loaded = wait(&client, &mut seen, |event| {
+        matches!(event, Event::Connections(ConnectionEvent::Loaded(_)))
+    })
+    .await;
+    let Event::Connections(ConnectionEvent::Loaded(state)) = loaded else {
+        unreachable!()
+    };
+    assert_eq!(state.people.people.len(), count + 1);
+    assert_eq!(state.groups.len(), 2);
+    assert_eq!(state.people.note.as_deref(), Some(PEOPLE_PULL_FAILED_NOTE));
     client.shutdown_blocking().expect("shutdown");
 }

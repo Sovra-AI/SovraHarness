@@ -8,6 +8,9 @@
 //! row, and the compiler lists every `match` to update. Content is plain text,
 //! so every artifact can be previewed, copied and saved as a normal file.
 
+mod project;
+pub use project::WebsiteProject;
+
 use serde::{Deserialize, Serialize};
 
 use crate::memory::Timestamp;
@@ -25,6 +28,7 @@ pub enum ArtifactKind {
     Picture,
     Data,
     Note,
+    Project,
 }
 
 /// Facts about one kind. `icon` is a semantic key the UI maps to its icon set.
@@ -46,7 +50,7 @@ pub struct KindInfo {
 }
 
 /// One row per kind, in the order the library's filters show them.
-pub const KINDS: [KindInfo; 9] = [
+pub const KINDS: [KindInfo; 10] = [
     KindInfo {
         kind: ArtifactKind::Document,
         label: "Document",
@@ -137,6 +141,16 @@ pub const KINDS: [KindInfo; 9] = [
         mime: "text/plain",
         opens_in_browser: false,
     },
+    KindInfo {
+        kind: ArtifactKind::Project,
+        label: "Website project",
+        plural: "Website projects",
+        explanation: "A website made of several files, including React, Vue and other frontend frameworks.",
+        icon: "project",
+        extension: "json",
+        mime: "application/json",
+        opens_in_browser: true,
+    },
 ];
 
 impl ArtifactKind {
@@ -151,6 +165,7 @@ impl ArtifactKind {
             Self::Picture => 6,
             Self::Data => 7,
             Self::Note => 8,
+            Self::Project => 9,
         };
         &KINDS[index]
     }
@@ -162,6 +177,7 @@ impl ArtifactKind {
     /// The kind a fenced block's language names (` ```mermaid ` is a diagram).
     pub fn for_language(language: &str) -> Self {
         match language.trim().to_ascii_lowercase().as_str() {
+            "website-project" => Self::Project,
             "mermaid" | "mmd" => Self::Diagram,
             "html" | "htm" => Self::Webpage,
             "svg" => Self::Picture,
@@ -243,6 +259,10 @@ pub struct Artifact {
     pub content: String,
     #[serde(default)]
     pub source: ArtifactSource,
+    #[serde(default)]
+    pub collection: String,
+    #[serde(default)]
+    pub pinned: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     /// Earlier contents, oldest first.
@@ -259,6 +279,8 @@ impl Artifact {
             language: draft.language,
             content: draft.content,
             source: draft.source,
+            collection: String::new(),
+            pinned: false,
             created_at: at,
             updated_at: at,
             versions: Vec::new(),
@@ -578,9 +600,21 @@ fn title_for(text: &str, piece: &Piece, fallback: &str) -> String {
     }
 }
 
+/// Stable sorting choices for large libraries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ArtifactSort {
+    #[default]
+    Recent,
+    Name,
+    Oldest,
+}
+
 /// Which artifacts the library page shows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArtifactFilter {
+    pub collection: Option<String>,
+    pub favorites_only: bool,
+    pub sort: ArtifactSort,
     pub kind: Option<ArtifactKind>,
     pub query: String,
 }
@@ -589,6 +623,22 @@ pub struct ArtifactFilter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactCommand {
     Load,
+    Organize {
+        id: String,
+        collection: String,
+        pinned: bool,
+    },
+    RunProject {
+        id: String,
+        session_id: String,
+    },
+    /// Serve a saved web page on this computer until stopped or Sovra closes.
+    Deploy {
+        id: String,
+    },
+    StopDeployment {
+        id: String,
+    },
     Save(ArtifactDraft),
     Edit {
         id: String,
@@ -603,7 +653,7 @@ pub enum ArtifactCommand {
         id: String,
         path: String,
     },
-    /// Write a viewable copy (HTML, SVG, a Mermaid page) and open it in the browser.
+    /// Serve a browser preview over loopback HTTP and open its URL.
     Open {
         id: String,
     },
@@ -613,19 +663,12 @@ pub enum ArtifactCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactEvent {
     Loaded(Vec<Artifact>),
-    Saved(Artifact),
-    Deleted {
-        id: String,
-    },
-    Exported {
-        id: String,
-        path: String,
-    },
-    /// A viewable copy was written; the UI opens `path` in the browser.
-    ReadyToOpen {
-        id: String,
-        path: String,
-    },
+    BuildStatus { id: String, message: Option<String> },
+    Deployed { id: String, url: String },
+    DeploymentStopped { id: String },
+    Saved(Box<Artifact>),
+    Deleted { id: String },
+    Exported { id: String, path: String },
     Error(String),
 }
 
@@ -633,6 +676,9 @@ pub enum ArtifactEvent {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArtifactLibrary {
     pub artifacts: Vec<Artifact>,
+    /// Ephemeral browser addresses; never restored after application restart.
+    pub deployments: std::collections::BTreeMap<String, String>,
+    pub builds: std::collections::BTreeMap<String, String>,
     pub loaded: bool,
     /// The last thing that happened, in plain words, for a status line.
     pub notice: Option<String>,
@@ -641,6 +687,22 @@ pub struct ArtifactLibrary {
 impl ArtifactLibrary {
     pub fn apply(&mut self, event: &ArtifactEvent) {
         match event {
+            ArtifactEvent::BuildStatus { id, message } => {
+                if let Some(message) = message {
+                    self.builds.insert(id.clone(), message.clone());
+                } else {
+                    self.builds.remove(id);
+                }
+            }
+            ArtifactEvent::Deployed { id, url } => {
+                self.deployments.insert(id.clone(), url.clone());
+                self.notice = Some(format!("Website running on this computer: {url}"));
+            }
+            ArtifactEvent::DeploymentStopped { id } => {
+                self.deployments.remove(id);
+                self.notice =
+                    Some("Website stopped. Your saved source is still in Artifacts.".into());
+            }
             ArtifactEvent::Loaded(artifacts) => {
                 self.artifacts.clone_from(artifacts);
                 self.sort();
@@ -649,20 +711,20 @@ impl ArtifactLibrary {
             ArtifactEvent::Saved(artifact) => {
                 self.notice = Some(format!("Saved “{}” to Artifacts", artifact.title));
                 if let Some(existing) = self.artifacts.iter_mut().find(|a| a.id == artifact.id) {
-                    *existing = artifact.clone();
+                    *existing = artifact.as_ref().clone();
                 } else {
-                    self.artifacts.push(artifact.clone());
+                    self.artifacts.push(artifact.as_ref().clone());
                 }
                 self.sort();
             }
             ArtifactEvent::Deleted { id } => {
                 self.artifacts.retain(|a| a.id != *id);
+                self.deployments.remove(id);
                 self.notice = Some("Deleted".to_owned());
             }
             ArtifactEvent::Exported { path, .. } => {
                 self.notice = Some(format!("Saved a copy to {path}"));
             }
-            ArtifactEvent::ReadyToOpen { .. } => {}
             ArtifactEvent::Error(message) => self.notice = Some(message.clone()),
         }
     }
@@ -678,16 +740,43 @@ impl ArtifactLibrary {
 
     pub fn filtered(&self, filter: &ArtifactFilter) -> Vec<&Artifact> {
         let query = filter.query.trim().to_lowercase();
-        self.artifacts
+        let mut found: Vec<_> = self
+            .artifacts
             .iter()
+            .filter(|a| !filter.favorites_only || a.pinned)
+            .filter(|a| {
+                filter
+                    .collection
+                    .as_ref()
+                    .is_none_or(|folder| &a.collection == folder)
+            })
             .filter(|a| filter.kind.is_none_or(|kind| a.kind == kind))
             .filter(|a| {
                 query.is_empty()
+                    || a.collection.to_lowercase().contains(&query)
                     || a.title.to_lowercase().contains(&query)
                     || a.content.to_lowercase().contains(&query)
                     || a.source.author.to_lowercase().contains(&query)
             })
-            .collect()
+            .collect();
+        found.sort_by(|a, b| {
+            match filter.sort {
+                ArtifactSort::Recent => b.updated_at.cmp(&a.updated_at),
+                ArtifactSort::Name => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
+                ArtifactSort::Oldest => a.created_at.cmp(&b.created_at),
+            }
+            .then(a.id.cmp(&b.id))
+        });
+        found
+    }
+
+    /// Folder names and counts; the empty name represents unfiled work.
+    pub fn collections(&self) -> std::collections::BTreeMap<String, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for artifact in &self.artifacts {
+            *counts.entry(artifact.collection.clone()).or_default() += 1;
+        }
+        counts
     }
 
     /// Kinds present in the library, in filter order, with counts.
@@ -737,7 +826,8 @@ pub fn browser_page(artifact: &Artifact) -> String {
         | ArtifactKind::Table
         | ArtifactKind::Code
         | ArtifactKind::Data
-        | ArtifactKind::Note => format!(
+        | ArtifactKind::Note
+        | ArtifactKind::Project => format!(
             "<!doctype html><meta charset=\"utf-8\"><title>{title}</title>\
              <body style=\"font-family:system-ui;margin:2rem;max-width:48rem\"><h1>{title}</h1>\
              <pre style=\"white-space:pre-wrap\">{}</pre></body>",

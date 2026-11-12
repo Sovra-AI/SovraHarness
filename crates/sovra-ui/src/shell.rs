@@ -40,6 +40,7 @@ pub struct Shell {
     history_compact: bool,
     history_overlay_open: bool,
     inspector_docked: bool,
+    code_panel_open: bool,
     pub(crate) composer_input: Entity<TextareaState>,
     pub(crate) skills: sovra_core::skills::SkillCatalog,
     pub(crate) skill_menu: crate::skill_menu::MenuState,
@@ -288,6 +289,21 @@ impl Shell {
                         _ => batch.push(event),
                     }
                 }
+                let remote_requests = batch
+                    .iter()
+                    .filter_map(|event| {
+                        if let sovra_core::Event::RemoteControl(event) = event
+                            && matches!(
+                                event.as_ref(),
+                                sovra_core::remote_control::RemoteEvent::UiRequest { .. }
+                            )
+                        {
+                            Some((**event).clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 let development_requests = batch
                     .iter()
                     .filter_map(|event| match event {
@@ -387,6 +403,24 @@ impl Shell {
                                 cx.notify();
                             });
                         }
+                        if let sovra_core::Event::RemoteControl(event) = &event {
+                            shell.models.update(cx, |models, cx| {
+                                models.remote_control.apply(event);
+                                if matches!(
+                                    event.as_ref(),
+                                    sovra_core::remote_control::RemoteEvent::State(_)
+                                ) && models.remote_forgotten_phone.is_some_and(|device| {
+                                    !models
+                                        .remote_control
+                                        .phones
+                                        .iter()
+                                        .any(|phone| phone.device == device)
+                                }) {
+                                    models.remote_forgotten_phone = None;
+                                }
+                                cx.notify();
+                            });
+                        }
                         if let sovra_core::Event::Development(event) = &event {
                             shell.models.update(cx, |models, cx| {
                                 models.development.apply(event);
@@ -439,10 +473,10 @@ impl Shell {
                             _ => None,
                         };
                         if let sovra_core::Event::Artifacts(
-                            sovra_core::artifacts::ArtifactEvent::ReadyToOpen { path, .. },
+                            sovra_core::artifacts::ArtifactEvent::Deployed { url, .. },
                         ) = &event
                         {
-                            cx.open_url(&format!("file://{path}"));
+                            cx.open_url(url);
                         }
                         // Google's consent page opens in the person's own browser.
                         if let sovra_core::Event::Google(event) = &event {
@@ -541,6 +575,81 @@ impl Shell {
                 if applied.is_err() {
                     break; // view dropped
                 }
+                for event in remote_requests {
+                    let sovra_core::remote_control::RemoteEvent::UiRequest {
+                        generation,
+                        phone,
+                        session,
+                        request_id,
+                        revision,
+                        request,
+                        deadline,
+                    } = event
+                    else {
+                        continue;
+                    };
+                    let output = development_window.update(cx, |_, window, cx| {
+                        let allowed = this.upgrade().is_some_and(|shell| {
+                            let shell = shell.read(cx);
+                            shell
+                                .state
+                                .remote_control
+                                .accepts(generation, phone, session)
+                                && shell.models.read(cx).remote_revoked_generation
+                                    != Some(generation)
+                                && shell.models.read(cx).remote_forgotten_phone != Some(phone)
+                                && shell
+                                    .models
+                                    .read(cx)
+                                    .remote_control
+                                    .accepts(generation, phone, session)
+                        });
+                        if allowed && deadline > std::time::Instant::now() {
+                            crate::remote_control_view::execute(
+                                request,
+                                &format!("{}:{}", generation.to_hex(), session.to_hex()),
+                                revision.as_deref(),
+                                gpui_kit::Bounds::new(
+                                    gpui_kit::Point::default(),
+                                    window.viewport_size(),
+                                ),
+                                window,
+                                cx,
+                            )
+                        } else {
+                            Err(crate::remote_control_view::failure(
+                                sovra_core::remote_control::ErrorCode::Disabled,
+                                "Phone access was revoked or the request expired.",
+                            ))
+                        }
+                    });
+                    let result = match output {
+                        Ok(Ok(output)) => cx
+                            .background_executor()
+                            .spawn(async move { output.encode() })
+                            .await
+                            .map_err(|error| {
+                                crate::remote_control_view::failure(
+                                    sovra_core::remote_control::ErrorCode::OutcomeUnknown,
+                                    &error,
+                                )
+                            }),
+                        Ok(Err(error)) => Err(error),
+                        Err(_) => Err(crate::remote_control_view::failure(
+                            sovra_core::remote_control::ErrorCode::Disabled,
+                            "The app window was closed.",
+                        )),
+                    };
+                    let _ = this.update(cx, |_, cx| {
+                        let _ = cx.global::<RuntimeClient>().0.send(Command::RemoteControl(
+                            sovra_core::remote_control::RemoteCommand::UiReply {
+                                generation,
+                                request_id,
+                                result,
+                            },
+                        ));
+                    });
+                }
                 for (generation, request_id, request, deadline) in development_requests {
                     let output = development_window.update(cx, |_, window, cx| {
                         let allowed = this.upgrade().is_some_and(|shell| {
@@ -633,6 +742,7 @@ impl Shell {
             history_compact: Self::sidebar_rail(window),
             history_overlay_open: false,
             inspector_docked: design::WidthClass::of_window(window).fits_side_pane(),
+            code_panel_open: true,
             composer_input,
             skills: sovra_core::skills::SkillCatalog::default(),
             skill_menu: crate::skill_menu::MenuState::default(),
@@ -744,6 +854,11 @@ impl Shell {
         &self.people_message_input
     }
 
+    pub(crate) fn show_code_panel(&mut self, show: bool, cx: &mut Context<Self>) {
+        self.code_panel_open = show;
+        cx.notify();
+    }
+
     /// Opens one artifact in the Artifacts page (from a chat card).
     pub fn open_artifact(&mut self, id: &str, cx: &mut Context<Self>) {
         self.select_tab(NavTab::Artifacts, cx);
@@ -782,6 +897,7 @@ impl Shell {
                 .update(cx, crate::memory_view::MemoryView::load);
         }
         self.models.update(cx, |models, cx| {
+            models.remote_only = false;
             models.groups_page = tab == NavTab::Groups;
             if tab == NavTab::Connections {
                 // Opening the tab shows the catalogue. A setup already in
@@ -1629,8 +1745,10 @@ impl Render for Shell {
         self.sync_window_title(window);
         self.sync_chrome_placeholders(window, cx);
         let body_view = self.render_body(cx);
-        let title_bar = (Self::app_owns_titlebar(window) || self.state.development.enabled)
-            .then(|| self.render_title_bar(cx));
+        let title_bar = (Self::app_owns_titlebar(window)
+            || self.state.development.enabled
+            || self.state.remote_control.generation.is_some())
+        .then(|| self.render_title_bar(cx));
         v_flex()
             .id("sovra-shell")
             .track_focus(&self.focus_handle)
@@ -1746,6 +1864,11 @@ impl Shell {
                     .text_color(muted_foreground)
                     .child(page),
             )
+            .children(self.state.remote_control.generation.is_some().then(|| {
+                design::title_button("remote-control-badge", "Phone control on", cx)
+                    .accessibility_label("Phone control is on. Open phone controls")
+                    .on_click(cx.listener(|shell, _, _, cx| shell.open_remote_control(cx)))
+            }))
             .children(self.state.development.enabled.then(|| {
                 design::title_button("development-mode-badge", "Development mode", cx)
                     .accessibility_label("Development mode is on. Open Settings")
@@ -1896,6 +2019,23 @@ impl Shell {
                             ))
                         }),
                     );
+                if self.state.active_tab == NavTab::Chat
+                    && self.code_panel_open
+                    && let Some(panel) = crate::code_panel::render(&self.state, cx)
+                {
+                    body = if self.inspector_docked {
+                        body.child(
+                            div()
+                                .w(design::tokens(cx).layout.inspector_width)
+                                .max_w(design::tokens(cx).layout.inspector_width)
+                                .h_full()
+                                .flex_shrink_0()
+                                .child(panel),
+                        )
+                    } else {
+                        body.child(div().absolute().inset_0().occlude().child(panel))
+                    };
+                }
                 if self.state.active_tab == NavTab::Knowledge && self.inspector_docked {
                     body = body.child(render_inspector(&self.state, &self.search_input, cx));
                 }

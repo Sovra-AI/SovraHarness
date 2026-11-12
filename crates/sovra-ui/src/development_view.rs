@@ -26,6 +26,7 @@ impl ModelsView {
         settings_section("settings-development", "Development mode", "Let coding assistants inspect and test this app through a local MCP connection. They can operate real controls and change your data. Use a test workspace for destructive tests.", cx)
             .child(Checkbox::new("development-mode-toggle").cursor_pointer().label("Enable development mode").checked(enabled)
                 .on_click(cx.listener(|view, checked: &bool, _, cx| {
+                    if crate::remote_control_view::is_remote_input(cx) { return; }
                     // Close the UI gate synchronously; queued input cannot overtake the off switch.
                     view.development.enabled = *checked;
                     if !checked { view.development.generation = None; }

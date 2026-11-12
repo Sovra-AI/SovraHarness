@@ -11,6 +11,42 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Phone remote control for the future mobile app.** `/remote-control` opens a
+  pairing card and enables a dedicated encrypted connection without an AI model.
+  Phones pair once and remain remembered; every desktop restart leaves access
+  off. Added a visible enabled indicator, stop/forget controls, bounded native
+  inspection and input, and a researched mobile protocol with JSON fixtures.
+  Added a runnable `--remote-control-client` with saved identity, read reconnect
+  and no automatic input replay; real-network and live native checks cover the
+  integration, including stop/start and revocation. The phone app, push
+  notifications and real mobile interoperability remain future work.
+  Pairing QR cards now preserve the standard four-module clear border so phone
+  cameras can distinguish the code from surrounding controls, and shrink to fit
+  narrow windows at enlarged text sizes.
+
+- **Browser previews, framework projects and organized saved work.** Open in
+  browser now uses loopback HTTP instead of temporary file URLs. React, Vue and
+  other frontend projects keep multiple source files together and build through
+  terminal approvals before serving static output. Artifacts now support saved
+  folders, favorites, sorting and paginated results.
+
+- **Website writing and local hosting.** Code writing streams source into an
+  AG-UI panel. Saved HTML pages can run on this computer from chat or Artifacts,
+  with browser and stop controls. Generated websites are kept as source in the
+  library; local hosting ends when Sovra closes and does not publish to the internet.
+
+- **WhatsApp people and chats.** Knowledge → People now keeps the contacts and
+  one-to-one chats WhatsApp shares after you connect: saved contacts, chats
+  that are not in the phone's address book, the names those chats show, and
+  chats you pin, archive, mute, or mark read. Groups stay on the group list.
+  A new link asks the phone for the full chat backfill, and Linked Devices
+  still says "Sovra connection". An empty or failed refresh leaves people
+  already saved in place. A computer that was linked before this change asks
+  for those contact and chat lists again the next time it connects, including
+  lists it had already saved. The link itself is kept. Older chats are only
+  offered again if you unlink and connect once more. Message text from old
+  chats is still not downloaded.
+
 - **Groups, rebuilt so anyone can use it.** Groups moved out of Settings into
   its own sidebar tab, **Groups** (translated in every Settings language);
   Settings keeps an **Open Groups** card. The page now opens with **What is a

@@ -26,6 +26,21 @@ fn main() -> anyhow::Result<()> {
     let development_directory = data_dir.as_path().join("development-control");
     if std::env::args_os()
         .nth(1)
+        .is_some_and(|arg| arg == "--remote-control-client")
+    {
+        let secret = device_key(
+            credential_store(&data_dir).as_ref(),
+            "remote-control-reference-phone-key",
+        )
+        .context("could not load the reference phone identity safely")?;
+        return sovra_runtime::run_remote_reference(
+            data_dir.join("remote-control-reference"),
+            &remote_transport(secret),
+        )
+        .context("remote reference client failed");
+    }
+    if std::env::args_os()
+        .nth(1)
         .is_some_and(|arg| arg == "--development-mcp")
     {
         return sovra_runtime::run_development_mcp(development_directory)
@@ -120,6 +135,7 @@ fn main() -> anyhow::Result<()> {
             signin: None,
             google: Some(Arc::new(google)),
             development: Some(development),
+            remote_control: remote_services(&data_dir),
             probes: Vec::new(),
             terminal: Some(terminal_config(data_dir.as_path())),
             mcp_sample_program: std::env::current_exe().ok(),
@@ -310,22 +326,24 @@ const GROUP_DEVICE_KEY: &str = "group-device-key";
 
 /// This computer's device key: read from the credential store, or made once and kept
 /// there. Groups stay off rather than keep the key anywhere less safe.
-fn group_device_key(credentials: &dyn sovra_providers::CredentialStore) -> Option<[u8; 32]> {
-    if let Ok(secret) = credentials.get(GROUP_DEVICE_KEY)
-        && let Ok(bytes) = sovra_core::group::DeviceId::from_hex(secret.0.trim())
-    {
-        return Some(bytes.0);
+fn device_key(credentials: &dyn sovra_providers::CredentialStore, entry: &str) -> Option<[u8; 32]> {
+    // A locked or damaged credential store must never rotate a remembered identity.
+    let secret = credentials.get(entry).ok()?;
+    if !secret.0.is_empty() {
+        return sovra_core::group::DeviceId::from_hex(secret.0.trim())
+            .ok()
+            .map(|id| id.0);
     }
     let mut bytes = [0u8; 32];
     if getrandom::fill(&mut bytes).is_err() {
-        tracing::warn!("groups unavailable: no secure randomness for a device key");
+        tracing::warn!("device unavailable: no secure randomness for a device key");
         return None;
     }
     let hex = sovra_core::group::DeviceId(bytes).to_hex();
-    match credentials.set(GROUP_DEVICE_KEY, &sovra_core::models::ModelSecret(hex)) {
+    match credentials.set(entry, &sovra_core::models::ModelSecret(hex)) {
         Ok(()) => Some(bytes),
         Err(error) => {
-            tracing::warn!(%error, "groups unavailable: the device key could not be kept safely");
+            tracing::warn!(%error, "device unavailable: the device key could not be kept safely");
             None
         }
     }
@@ -334,7 +352,7 @@ fn group_device_key(credentials: &dyn sovra_providers::CredentialStore) -> Optio
 /// Groups: the device key, where the group record lives, and how far the network
 /// reaches (`SOVRA_GROUP_REACH=local` keeps it to direct, same-network connections).
 fn group_services(data_dir: &std::path::Path) -> Option<sovra_runtime::GroupServices> {
-    let secret = group_device_key(credential_store(data_dir).as_ref())?;
+    let secret = device_key(credential_store(data_dir).as_ref(), GROUP_DEVICE_KEY)?;
     let reach = if std::env::var_os("SOVRA_GROUP_REACH").is_some_and(|value| value == "local") {
         sovra_mesh::Reach::LocalOnly
     } else {
@@ -353,6 +371,37 @@ fn group_services(data_dir: &std::path::Path) -> Option<sovra_runtime::GroupServ
         // The WhatsApp adapter owns the QR library; invite links reuse its encoder.
         qr: Some(Arc::new(sovra_whatsapp::qr_matrix)),
         helper_model: None,
+    })
+}
+
+/// Phone access has its own key and lifetime, independent of Groups and MCP.
+fn remote_services(data_dir: &std::path::Path) -> Option<sovra_runtime::RemoteConfig> {
+    let secret = device_key(
+        credential_store(data_dir).as_ref(),
+        "remote-control-device-key",
+    )?;
+    Some(sovra_runtime::RemoteConfig {
+        directory: data_dir.join("remote-control"),
+        transport: remote_transport(secret),
+        qr: Arc::new(sovra_whatsapp::qr_matrix),
+    })
+}
+
+fn remote_transport(secret: [u8; 32]) -> sovra_runtime::RemoteEndpointFactory {
+    let reach = if std::env::var_os("SOVRA_REMOTE_REACH").is_some_and(|value| value == "local") {
+        sovra_mesh::Reach::LocalOnly
+    } else {
+        sovra_mesh::Reach::Internet
+    };
+    Arc::new(move || {
+        Box::pin(async move {
+            sovra_mesh::RemoteMesh::bind(secret, reach)
+                .await
+                .map(|endpoint| {
+                    Arc::new(endpoint) as Arc<dyn sovra_core::remote_control::RemoteEndpoint>
+                })
+                .map_err(|error| error.to_string())
+        })
     })
 }
 
