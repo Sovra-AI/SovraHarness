@@ -11,6 +11,15 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Find someone on the People page.** A search box at the top finds people by
+  any part of their name, a few digits of their number (written any way, with
+  or without the leading 0), or the app they use, and says how many matched.
+  The list is now compact rows with initials instead of a big card per
+  person; open a row to write a message, add an email or Telegram chat, or
+  join a likely duplicate ("Same person as Dan Barney New"). Long phone books
+  show 40 at a time with **Show more**. Before, the only box on the page was
+  the message box, so typing a name there filtered nothing.
+
 - **Name your own skills naturally.** Arabic and other non-Latin titles receive
   automatic shortcuts. Repeated names get distinct shortcuts, and an explicitly
   entered shortcut already in the catalogue is rejected instead of replacing

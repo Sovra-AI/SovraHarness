@@ -85,6 +85,11 @@ fn people_list_uses_the_same_words_in_both_themes(cx: &mut TestAppContext) {
                 });
                 window.render_frame(cx);
                 assert!(window.try_find("people-empty").is_none());
+                assert!(
+                    window.try_find(("person-prepare", 0usize)).is_none(),
+                    "rows stay compact until opened"
+                );
+                window.click(("person-card", 0usize), cx);
                 scroll_into(window, ("person-prepare", 0usize), cx);
                 let found = labels_in(window);
                 if let Some(earlier) = &first {
@@ -240,6 +245,8 @@ fn stored_whatsapp_group_shows_on_people_and_prepares_without_sending(cx: &mut T
         });
         window.render_frame(cx);
         scroll_into(window, ("whatsapp-group-card", 0usize), cx);
+        window.click(("whatsapp-group-card", 0usize), cx);
+        window.render_frame(cx);
         let intro = window
             .find("whatsapp-groups-intro")
             .label()
@@ -362,6 +369,7 @@ fn people_list_stays_usable_at_minimum_wide_and_double_text(cx: &mut TestAppCont
                 );
                 assert!(card.bounds().left() >= px(0.));
                 assert!(card.bounds().right() <= px(width));
+                window.click(("person-card", 0usize), cx);
                 scroll_into(window, ("person-prepare", 0usize), cx);
                 let prepare = window.find(("person-prepare", 0usize));
                 let pane = window.find("sovra-knowledge-view").bounds();
@@ -371,6 +379,8 @@ fn people_list_stays_usable_at_minimum_wide_and_double_text(cx: &mut TestAppCont
                 assert!(prepare.bounds().top() >= pane.top());
                 assert!(prepare.bounds().bottom() <= pane.bottom());
                 assert!(prepare.bounds().bottom() <= px(height));
+                scroll_into(window, ("whatsapp-group-card", 0usize), cx);
+                window.click(("whatsapp-group-card", 0usize), cx);
                 scroll_into(window, ("whatsapp-group-prepare", 0usize), cx);
                 let group = window.find(("whatsapp-group-card", 0usize));
                 let group_prepare = window.find(("whatsapp-group-prepare", 0usize));
@@ -388,4 +398,70 @@ fn people_list_stays_usable_at_minimum_wide_and_double_text(cx: &mut TestAppCont
             .expect("layout");
         }
     }
+}
+
+/// Typing in "Find someone" narrows the list to matching names or numbers, and
+/// says how many matched; the message box never filters anything.
+#[gpui_kit::test]
+fn find_someone_filters_by_name_or_number(cx: &mut TestAppContext) {
+    let (client, _commands, events) = Client::loopback();
+    cx.update(|cx| {
+        sovra_ui::init(client, cx);
+        Theme::change(ThemeMode::Dark, None, cx);
+    });
+    let mut book = PeopleBook::default();
+    for (number, name) in [
+        ("+447398923102", "Aiden Hall"),
+        ("+447525817836", "Aaron Dans Mate"),
+        ("+66631418232", "Thai 10"),
+    ] {
+        assert!(book.observe_handle(Reach::WhatsApp, number, name));
+    }
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.expect("shell");
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::PeopleChanged(book)))
+        .expect("people");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    let search = |text: &'static str, cx: &mut TestAppContext| {
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.open_knowledge_people(cx);
+                shell.people_search().update(cx, |input, cx| {
+                    input.set_value(text, window, cx);
+                });
+                cx.notify();
+            });
+            window.render_frame(cx);
+            let rows: Vec<String> = (0..3_usize)
+                .filter_map(|index| window.try_find(("person-card", index)))
+                .map(|row| row.label().unwrap_or("").to_owned())
+                .collect();
+            let count = window.find("people-count").label().unwrap_or("").to_owned();
+            (rows, count)
+        })
+        .expect("people")
+    };
+    let (rows, count) = search("", cx);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(count, "3 people");
+    let (rows, count) = search("dan", cx);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("Aaron Dans Mate"), "{rows:?}");
+    assert_eq!(count, "1 of 3 match “dan”");
+    let (rows, _) = search("07398", cx);
+    assert!(
+        rows.len() == 1 && rows[0].starts_with("Aiden Hall"),
+        "{rows:?}"
+    );
+    let (rows, count) = search("zebra", cx);
+    assert_eq!(rows, Vec::<String>::new());
+    assert!(count.starts_with("No one matches “zebra”"), "{count}");
 }

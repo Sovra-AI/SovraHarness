@@ -121,8 +121,8 @@ pub use memory::{
     validate_memory_batch, validate_memory_searches, validate_memory_vectors,
 };
 pub use people::{
-    EMPTY_PEOPLE_NOTE, Handle, Lookup, NameMatch, PEOPLE_PULL_FAILED_NOTE, PeopleBook, Person,
-    Reach, SyncedContact, phone_digits,
+    EMPTY_PEOPLE_NOTE, Handle, Lookup, NameMatch, PEOPLE_PAGE, PEOPLE_PULL_FAILED_NOTE, PeopleBook,
+    Person, Reach, SyncedContact, phone_digits,
 };
 pub use protocol::{Command, Event};
 pub use providers::{

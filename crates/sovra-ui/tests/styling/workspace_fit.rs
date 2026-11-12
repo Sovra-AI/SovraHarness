@@ -244,11 +244,13 @@ fn knowledge_sections_follow_the_pane(cx: &mut TestAppContext) {
                         window.find("sovra-knowledge-view").bounds(),
                         "people",
                     );
-                    reveal(window, "sovra-knowledge-view", "people-message", cx);
+                    // With no one synced yet the page explains how people
+                    // arrive; the message box only appears in an opened row.
+                    reveal(window, "sovra-knowledge-view", "people-empty", cx);
                     inside_window(
-                        window.find("people-message").bounds(),
+                        window.find("people-empty").bounds(),
                         window_px,
-                        "people message",
+                        "people empty note",
                     );
 
                     window.click("knowledge-files", cx);

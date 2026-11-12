@@ -62,6 +62,65 @@ impl Person {
             .map_or_else(|| "Saved person".to_owned(), |handle| handle.label.clone())
     }
 
+    /// One or two letters for the round badge beside the name ("Aiden Hall" → "AH").
+    pub fn initials(&self) -> String {
+        let name = clean_name(&self.name);
+        let letters: String = name
+            .split_whitespace()
+            .filter_map(|word| word.chars().find(|c| c.is_alphanumeric()))
+            .take(2)
+            .flat_map(char::to_uppercase)
+            .collect();
+        if letters.is_empty() {
+            "#".to_owned()
+        } else {
+            letters
+        }
+    }
+
+    /// Whether `query` finds this person: every word must appear in the name, a
+    /// saved number or address, or an app name. Digits match a number however it
+    /// was written, so "07398 923" and "+44 7398923" both find +447398923102.
+    pub fn matches(&self, query: &str) -> bool {
+        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        if words.is_empty() {
+            return true;
+        }
+        let name = self.title().to_lowercase();
+        let texts: Vec<String> = self
+            .handles
+            .iter()
+            .flat_map(|handle| {
+                [
+                    handle.label.to_lowercase(),
+                    handle.reach.label().to_lowercase(),
+                ]
+            })
+            .collect();
+        let numbers: Vec<String> = self
+            .handles
+            .iter()
+            .map(|handle| digits_only(&handle.label))
+            .filter(|digits| !digits.is_empty())
+            .collect();
+        // A query that is only a number may be typed with spaces or a leading 0.
+        let query_digits = digits_only(query);
+        if !query.chars().any(char::is_alphabetic) && query_digits.len() >= 3 {
+            let trimmed = query_digits.trim_start_matches('0');
+            return numbers.iter().any(|number| {
+                number.contains(&query_digits) || (!trimmed.is_empty() && number.contains(trimmed))
+            });
+        }
+        words.iter().all(|word| {
+            name.contains(word.as_str())
+                || texts.iter().any(|text| text.contains(word.as_str()))
+                || {
+                    let digits = digits_only(word);
+                    digits.len() >= 3 && numbers.iter().any(|number| number.contains(&digits))
+                }
+        })
+    }
+
     /// Channel words in a stable order, with no duplicates.
     pub fn channel_labels(&self) -> Vec<&'static str> {
         [Reach::Phone, Reach::WhatsApp, Reach::Telegram, Reach::Email]
@@ -122,7 +181,86 @@ enum JoinClass {
     Telegram,
 }
 
+/// People listed at once on the People page; "Show more" adds another page,
+/// so a phone book of hundreds stays quick to scroll and to read.
+pub const PEOPLE_PAGE: usize = 40;
+
+/// A name word on more cards than this is too common to suggest a duplicate.
+const RARE_NAME_WORD: usize = 3;
+
+fn name_words(name: &str) -> Vec<String> {
+    clean_name(name)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| word.chars().count() >= 3)
+        .map(str::to_lowercase)
+        .collect()
+}
+
+fn digits_only(text: &str) -> String {
+    text.chars().filter(char::is_ascii_digit).collect()
+}
+
 impl PeopleBook {
+    /// Everyone `query` finds, in list order; an empty query finds everyone.
+    pub fn search(&self, query: &str) -> Vec<&Person> {
+        self.people
+            .iter()
+            .filter(|person| person.matches(query))
+            .collect()
+    }
+
+    /// Cards that might be the same person as `id`: their names share a word of
+    /// three or more letters that few cards use (so "Mate" in "Ben Dans Mate" is
+    /// no evidence when dozens of names end in it). Most shared words first.
+    /// Only a suggestion: a shared first name does not make two people the same.
+    pub fn possible_duplicates(&self, id: &str, limit: usize) -> Vec<&Person> {
+        let Some(person) = self.people.iter().find(|person| person.id == id) else {
+            return Vec::new();
+        };
+        let mut uses: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for other in &self.people {
+            let mut words = name_words(&other.name);
+            words.dedup();
+            for word in words {
+                *uses.entry(word).or_default() += 1;
+            }
+        }
+        let mine = name_words(&person.name);
+        let telling: Vec<String> = mine
+            .clone()
+            .into_iter()
+            .filter(|word| uses.get(word).copied().unwrap_or(0) <= RARE_NAME_WORD)
+            .collect();
+        let mut scored: Vec<(usize, &Person)> = self
+            .people
+            .iter()
+            .filter(|other| other.id != id)
+            .map(|other| {
+                let theirs = name_words(&other.name);
+                // "Dan Barney" inside "Dan Barney New" (or the reverse) is the
+                // strongest sign, even when every word is common in the list.
+                let contained = mine.len() >= 2 && theirs.len() >= 2 && {
+                    let (short, long) = if mine.len() <= theirs.len() {
+                        (&mine, &theirs)
+                    } else {
+                        (&theirs, &mine)
+                    };
+                    short.iter().all(|word| long.contains(word))
+                };
+                let shared = theirs.iter().filter(|word| telling.contains(word)).count();
+                (if contained { usize::MAX } else { shared }, other)
+            })
+            .filter(|(shared, _)| *shared > 0)
+            .collect();
+        // Stable: equal scores keep list order.
+        scored.sort_by_key(|(shared, _)| std::cmp::Reverse(*shared));
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, other)| other)
+            .collect()
+    }
+
     pub fn note_empty_sync(&mut self) {
         if self.people.is_empty() {
             self.note = Some(EMPTY_PEOPLE_NOTE.to_owned());
@@ -503,6 +641,104 @@ fn hint(reach: Reach) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn search_finds_people_by_any_part_of_a_name_number_or_app() {
+        let mut book = PeopleBook::default();
+        book.observe_handle(Reach::WhatsApp, "+447398923102", "Aiden Hall");
+        book.observe_handle(Reach::WhatsApp, "+447525817836", "Aaron Dans Mate");
+        book.observe_handle(Reach::WhatsApp, "+66631418232", "Thai 10");
+        let names = |query: &str| -> Vec<String> {
+            book.search(query)
+                .iter()
+                .map(|person| person.title())
+                .collect()
+        };
+        assert_eq!(names("").len(), 3, "an empty search shows everyone");
+        assert_eq!(names("dan"), ["Aaron Dans Mate"]);
+        assert_eq!(names("DAN"), ["Aaron Dans Mate"], "case does not matter");
+        assert_eq!(names("aiden hall"), ["Aiden Hall"]);
+        assert_eq!(
+            names("hall aiden"),
+            ["Aiden Hall"],
+            "word order does not matter"
+        );
+        assert_eq!(names("+44 7398"), ["Aiden Hall"]);
+        assert_eq!(
+            names("07398 923"),
+            ["Aiden Hall"],
+            "a leading 0 still finds it"
+        );
+        assert_eq!(names("6663"), ["Thai 10"]);
+        assert_eq!(names("whatsapp").len(), 3);
+        assert_eq!(names("zebra"), Vec::<String>::new());
+        assert!(
+            names("12").is_empty(),
+            "two digits are too short to match a number"
+        );
+    }
+
+    #[test]
+    fn possible_duplicates_share_a_real_name_word() {
+        let mut book = PeopleBook::default();
+        book.observe_handle(Reach::WhatsApp, "+447525817836", "Aaron Dans Mate");
+        book.observe_handle(Reach::WhatsApp, "+447495594141", "Ben Dans Mate");
+        book.observe_handle(Reach::WhatsApp, "+447398923102", "Aiden Hall");
+        book.observe_handle(Reach::WhatsApp, "+447000000001", "Al B");
+        for (number, name) in [
+            ("+447000000002", "Alex Pauls Mate"),
+            ("+447000000003", "Barry Chris Mate"),
+            ("+447000000004", "James Luke Mate"),
+        ] {
+            book.observe_handle(Reach::WhatsApp, number, name);
+        }
+        let aaron = book.people[0].id.clone();
+        let names: Vec<String> = book
+            .possible_duplicates(&aaron, 5)
+            .iter()
+            .map(|person| person.title())
+            .collect();
+        assert_eq!(
+            names,
+            ["Ben Dans Mate"],
+            "a word on many cards is no evidence"
+        );
+        for (number, name) in [
+            ("+447000000005", "Dan Barney"),
+            ("+447000000006", "Dan Barney New"),
+            ("+447000000007", "Danielle Barney"),
+            ("+447000000008", "Sue Barney"),
+            ("+447000000009", "Tom Barney"),
+        ] {
+            book.observe_handle(Reach::WhatsApp, number, name);
+        }
+        let dan = book.people[7].id.clone();
+        let names: Vec<String> = book
+            .possible_duplicates(&dan, 5)
+            .iter()
+            .map(|person| person.title())
+            .collect();
+        assert_eq!(
+            names,
+            ["Dan Barney New"],
+            "a whole name inside another counts even when its words are common"
+        );
+        let al = book.people[3].id.clone();
+        assert!(
+            book.possible_duplicates(&al, 5).is_empty(),
+            "short words are not evidence"
+        );
+        assert_eq!(book.possible_duplicates("missing", 5).len(), 0);
+    }
+
+    #[test]
+    fn initials_come_from_the_name() {
+        let mut book = PeopleBook::default();
+        book.observe_handle(Reach::WhatsApp, "+447398923102", "aiden hall");
+        book.observe_handle(Reach::WhatsApp, "+447525817836", "");
+        assert_eq!(book.people[0].initials(), "AH");
+        assert_eq!(book.people[1].initials(), "#");
+    }
+
     use super::*;
     use crate::communications::resolve_recipient;
     use crate::connections::ConnectionsState;

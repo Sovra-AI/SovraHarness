@@ -71,6 +71,11 @@ pub struct Shell {
     pub(crate) people_email_input: Entity<InputState>,
     pub(crate) people_telegram_input: Entity<InputState>,
     pub(crate) people_selected: Option<String>,
+    /// "Find someone" on the People page; the list reads it as it renders.
+    pub(crate) people_search_input: Entity<InputState>,
+    /// Rows shown before "Show more"; reset whenever the search changes.
+    pub(crate) people_shown: usize,
+    _people_search_events: Subscription,
     /// Exact text of Message on `WhatsApp`, until that review appears in chat.
     pub(crate) people_open_review: Option<String>,
     models: Entity<crate::ModelsView>,
@@ -191,6 +196,15 @@ impl Shell {
         });
         let people_message_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Write a message"));
+        let people_search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Find someone by name or number"));
+        let people_search_events =
+            cx.subscribe_in(&people_search_input, window, |shell, _, event, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    shell.people_shown = sovra_core::PEOPLE_PAGE;
+                    cx.notify();
+                }
+            });
         let people_email_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("name@example.com"));
         let people_telegram_input =
@@ -820,6 +834,9 @@ impl Shell {
             people_email_input,
             people_telegram_input,
             people_selected: None,
+            people_search_input,
+            people_shown: sovra_core::PEOPLE_PAGE,
+            _people_search_events: people_search_events,
             people_open_review: None,
             models,
             team_view,
@@ -905,6 +922,11 @@ impl Shell {
     }
 
     /// The draft used by Message on `WhatsApp` in Knowledge → People.
+    /// The People page's "Find someone" box.
+    pub fn people_search(&self) -> &Entity<InputState> {
+        &self.people_search_input
+    }
+
     pub fn people_message_draft(&self) -> &Entity<InputState> {
         &self.people_message_input
     }
