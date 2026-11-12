@@ -55,6 +55,7 @@ pub struct Shell {
     schedule_prompt_input: Entity<InputState>,
     schedule_form_open: bool,
     schedule_timeline_range: TimelineRange,
+    login_name_input: Entity<InputState>,
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
     sim_route_input: Entity<InputState>,
@@ -114,6 +115,7 @@ impl Shell {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
         let composer_placeholder = design::chrome(cx, ChromeKey::ChatComposerPlaceholder);
+        let login_name_placeholder = design::chrome(cx, ChromeKey::LoginNamePlaceholder);
         let login_email_placeholder = design::chrome(cx, ChromeKey::LoginEmailPlaceholder);
         let login_password_placeholder = design::chrome(cx, ChromeKey::LoginPasswordPlaceholder);
         let composer_input = cx.new(|cx| {
@@ -168,6 +170,8 @@ impl Shell {
         let schedule_prompt_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Give me a short briefing of what's on today")
         });
+        let login_name_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(login_name_placeholder));
         let login_email_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(login_email_placeholder));
         let login_password_input = cx.new(|cx| {
@@ -757,6 +761,7 @@ impl Shell {
             schedule_prompt_input,
             schedule_form_open: false,
             schedule_timeline_range: TimelineRange::Hours24,
+            login_name_input,
             login_email_input,
             login_password_input,
             sim_route_input,
@@ -1064,18 +1069,19 @@ impl Shell {
     pub fn submit_login(&mut self, cx: &mut Context<Self>) {
         let email = self.login_email_input.read(cx).value().to_string();
         let password = self.login_password_input.read(cx).value().to_string();
+        let full_name = self.login_name_input.read(cx).value().to_string();
         // On a fresh install the first submit creates the account; afterwards it
         // signs in. The runtime validates and answers with friendly errors.
-        let command = if self.state.auth.has_accounts
-            || matches!(self.state.auth.phase, sovra_core::AuthPhase::Unknown)
-        {
-            sovra_core::AuthCommand::SignIn { email, password }
-        } else {
+        let creating = !self.state.auth.has_accounts
+            && !matches!(self.state.auth.phase, sovra_core::AuthPhase::Unknown);
+        let command = if creating {
             sovra_core::AuthCommand::CreateAccount {
                 email,
                 password,
-                full_name: String::new(),
+                full_name,
             }
+        } else {
+            sovra_core::AuthCommand::SignIn { email, password }
         };
         self.state.apply_auth(&sovra_core::AuthEvent::Submitting);
         if let Err(error) = cx.global::<RuntimeClient>().0.send(Command::Auth(command)) {
@@ -1826,6 +1832,12 @@ impl Shell {
                 input.set_placeholder(composer, window, cx);
             }
         });
+        let name = design::chrome(cx, ChromeKey::LoginNamePlaceholder);
+        self.login_name_input.update(cx, |input, cx| {
+            if input.presentation().placeholder().as_ref() != name {
+                input.set_placeholder(name, window, cx);
+            }
+        });
         let email = design::chrome(cx, ChromeKey::LoginEmailPlaceholder);
         self.login_email_input.update(cx, |input, cx| {
             if input.presentation().placeholder().as_ref() != email {
@@ -1916,6 +1928,7 @@ impl Shell {
         self.ensure_turn_ticker(cx);
         match self.state.route {
             ScreenRoute::Login => render_login_screen(
+                &self.login_name_input,
                 &self.login_email_input,
                 &self.login_password_input,
                 &self.state.auth.clone(),

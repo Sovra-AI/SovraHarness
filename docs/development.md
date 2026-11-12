@@ -115,15 +115,20 @@ The sign-in backend and the desktop flow are wired end to end. On
 absence) routes to the workspace or the Login screen. The form sends
 `AuthCommand::SignIn`, or `AuthCommand::CreateAccount` on a fresh install with
 no accounts, and waits for `AuthEvent::SignedIn`; sign-out sends
-`AuthCommand::SignOut`. The Google button sends `AuthCommand::StartGoogleSignIn`;
+`AuthCommand::SignOut`. Creating an account asks for the person's name. Email and a
+password are optional and must be given together; a name alone is enough to sign in.
+A blank name is refused, and the app does not fill the name from the part of an email
+before `@`. The Google button sends `AuthCommand::StartGoogleSignIn`;
 `AuthEvent::GoogleSignInStarted` opens the consent URL in the browser and the
 Login screen shows a waiting panel with *Open the page again* and *Cancel*
 (`AuthCommand::CancelGoogleSignIn`) until the loopback listener reports back.
+Starting or joining a group still asks for the name people in the group see, and
+does not use this login.
 
-Remaining rollout work, in honesty: a dedicated create-account mode (separate
-name field and a live password-strength meter rather than server-side errors),
-and a live end-to-end run of the Google flow against real client credentials —
-the exchange and listener are covered by tests, not by a production Google app.
+Remaining rollout work, in honesty: a live password-strength meter rather than a
+message after submit, and a live end-to-end run of the Google flow against real
+client credentials — the exchange and listener are covered by tests, not by a
+production Google app.
 
 The implemented parts are:
 

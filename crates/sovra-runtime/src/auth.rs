@@ -13,7 +13,7 @@ use std::time::Duration;
 use async_channel::{Receiver, Sender};
 use sovra_core::auth::{
     AuthAccount, AuthCommand, AuthEvent, AuthField, AuthProvider, AuthRecords, AuthSession,
-    OauthCallback, callback_page, normalize_email, parse_oauth_redirect, password_strength,
+    OauthCallback, Signup, callback_page, normalize_email, parse_oauth_redirect, signup_choice,
 };
 use sovra_core::google::GoogleConnector;
 use sovra_core::{Event, MemoryStore};
@@ -197,41 +197,50 @@ impl Actor {
 
     async fn create_account(&mut self, email: String, password: &str, full_name: String) {
         self.emit(AuthEvent::Submitting).await;
-        let email = match normalize_email(&email) {
-            Ok(email) => email,
-            Err(message) => return self.fail(AuthField::Email, message).await,
+        let choice = match signup_choice(&full_name, &email, password) {
+            Ok(choice) => choice,
+            Err((field, message)) => return self.fail(field, message).await,
         };
-        if self.records.account_by_email(&email).is_some() {
-            return self
-                .fail(
-                    AuthField::Email,
-                    "There's already an account with this email. Sign in instead.".into(),
-                )
-                .await;
-        }
-        let strength = password_strength(password);
-        if !strength.accepted() {
-            return self
-                .fail(AuthField::Password, strength.label().into())
-                .await;
-        }
-        let password = password.to_owned();
-        let hashed = tokio::task::spawn_blocking(move || sovra_providers::hash_password(&password))
-            .await
-            .map_err(|_| sovra_providers::AuthError::Hashing)
-            .and_then(|result| result);
-        let password_phc = match hashed {
-            Ok(phc) => phc,
-            Err(error) => return self.fail(AuthField::General, error.to_string()).await,
-        };
-        let full_name = display_name(&full_name, &email);
-        let account = AuthAccount {
-            id: account_id(&self.records),
-            email,
-            full_name,
-            provider: AuthProvider::Password,
-            password_phc: Some(password_phc),
-            created_at: crate::now(),
+        let account = match choice {
+            Signup::NameOnly { full_name } => AuthAccount {
+                id: account_id(&self.records),
+                email: String::new(),
+                full_name,
+                provider: AuthProvider::Password,
+                password_phc: None,
+                created_at: crate::now(),
+            },
+            Signup::WithPassword {
+                email,
+                password,
+                full_name,
+            } => {
+                if self.records.account_by_email(&email).is_some() {
+                    return self
+                        .fail(
+                            AuthField::Email,
+                            "There's already an account with this email. Sign in instead.".into(),
+                        )
+                        .await;
+                }
+                let hashed =
+                    tokio::task::spawn_blocking(move || sovra_providers::hash_password(&password))
+                        .await
+                        .map_err(|_| sovra_providers::AuthError::Hashing)
+                        .and_then(|result| result);
+                let password_phc = match hashed {
+                    Ok(phc) => phc,
+                    Err(error) => return self.fail(AuthField::General, error.to_string()).await,
+                };
+                AuthAccount {
+                    id: account_id(&self.records),
+                    email,
+                    full_name,
+                    provider: AuthProvider::Password,
+                    password_phc: Some(password_phc),
+                    created_at: crate::now(),
+                }
+            }
         };
         self.records.accounts.push(account.clone());
         self.finish_sign_in(&account, true).await;
@@ -252,12 +261,13 @@ impl Actor {
                 .await;
         };
         let Some(phc) = account.password_phc.clone() else {
-            return self
-                .fail(
-                    AuthField::Password,
-                    "This account signs in with Google. Use the Google button.".into(),
-                )
-                .await;
+            let message = match account.provider {
+                AuthProvider::Google => "This account signs in with Google. Use the Google button.",
+                AuthProvider::Password => {
+                    "This account was created with a name only. It has no password to check."
+                }
+            };
+            return self.fail(AuthField::Password, message.into()).await;
         };
         let password = password.to_owned();
         let verified =
@@ -425,16 +435,6 @@ impl Actor {
 /// `account-<n>-<millis>`: readable, unique, and stable across restarts.
 fn account_id(records: &AuthRecords) -> String {
     format!("account-{}-{}", records.accounts.len() + 1, crate::now().0)
-}
-
-/// A friendly display name, falling back to the email's local part.
-fn display_name(full_name: &str, email: &str) -> String {
-    let trimmed = full_name.trim();
-    if trimmed.is_empty() {
-        email.split('@').next().unwrap_or(email).to_owned()
-    } else {
-        trimmed.to_owned()
-    }
 }
 
 /// Waits for the browser redirect, answers it with a friendly page, then

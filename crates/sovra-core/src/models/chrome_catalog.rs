@@ -14,7 +14,7 @@ struct Catalog {
     strings: &'static [&'static str; WIDTH],
 }
 
-const WIDTH: usize = 87;
+const WIDTH: usize = 89;
 const _: [(); WIDTH] = [(); super::ChromeKey::ALL.len()];
 
 const PACK_FR: [&str; WIDTH] = [
@@ -105,6 +105,8 @@ const PACK_FR: [&str; WIDTH] = [
     "Saisissez votre mot de passe",
     "Groupes",
     "Partagez avec votre famille ou votre équipe",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_ES: [&str; WIDTH] = [
@@ -195,6 +197,8 @@ const PACK_ES: [&str; WIDTH] = [
     "Escribe tu contraseña",
     "Grupos",
     "Comparte con tu familia o tu equipo",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_ZH: [&str; WIDTH] = [
@@ -285,6 +289,8 @@ const PACK_ZH: [&str; WIDTH] = [
     "输入你的密码",
     "群组",
     "与家人或团队分享",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_ZH_HANT: [&str; WIDTH] = [
@@ -375,6 +381,8 @@ const PACK_ZH_HANT: [&str; WIDTH] = [
     "輸入你的密碼",
     "群組",
     "與家人或團隊分享",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_JA: [&str; WIDTH] = [
@@ -465,6 +473,8 @@ const PACK_JA: [&str; WIDTH] = [
     "パスワードを入力",
     "グループ",
     "家族やチームと共有",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_HI: [&str; WIDTH] = [
@@ -555,6 +565,8 @@ const PACK_HI: [&str; WIDTH] = [
     "अपना पासवर्ड दर्ज करें",
     "समूह",
     "अपने परिवार या टीम के साथ साझा करें",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_PT: [&str; WIDTH] = [
@@ -645,6 +657,8 @@ const PACK_PT: [&str; WIDTH] = [
     "Introduz a palavra-passe",
     "Grupos",
     "Partilhe com a sua família ou equipa",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_RU: [&str; WIDTH] = [
@@ -735,6 +749,8 @@ const PACK_RU: [&str; WIDTH] = [
     "Введите пароль",
     "Группы",
     "Делитесь с семьёй или командой",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_DE: [&str; WIDTH] = [
@@ -825,6 +841,8 @@ const PACK_DE: [&str; WIDTH] = [
     "Passwort eingeben",
     "Gruppen",
     "Mit Familie oder Team teilen",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_IT: [&str; WIDTH] = [
@@ -915,6 +933,8 @@ const PACK_IT: [&str; WIDTH] = [
     "Inserisci la password",
     "Gruppi",
     "Condividi con la famiglia o il team",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_KO: [&str; WIDTH] = [
@@ -1005,6 +1025,8 @@ const PACK_KO: [&str; WIDTH] = [
     "비밀번호 입력",
     "그룹",
     "가족이나 팀과 공유하기",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_TR: [&str; WIDTH] = [
@@ -1095,6 +1117,8 @@ const PACK_TR: [&str; WIDTH] = [
     "Parolanızı girin",
     "Gruplar",
     "Ailenizle veya ekibinizle paylaşın",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_NL: [&str; WIDTH] = [
@@ -1185,6 +1209,8 @@ const PACK_NL: [&str; WIDTH] = [
     "Vul je wachtwoord in",
     "Groepen",
     "Deel met je familie of team",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_PL: [&str; WIDTH] = [
@@ -1275,6 +1301,8 @@ const PACK_PL: [&str; WIDTH] = [
     "Wpisz hasło",
     "Grupy",
     "Udostępniaj rodzinie lub zespołowi",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_VI: [&str; WIDTH] = [
@@ -1365,6 +1393,8 @@ const PACK_VI: [&str; WIDTH] = [
     "Nhập mật khẩu của bạn",
     "Nhóm",
     "Chia sẻ với gia đình hoặc nhóm của bạn",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_TH: [&str; WIDTH] = [
@@ -1455,6 +1485,8 @@ const PACK_TH: [&str; WIDTH] = [
     "ป้อนรหัสผ่านของคุณ",
     "กลุ่ม",
     "แบ่งปันกับครอบครัวหรือทีมของคุณ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_ID: [&str; WIDTH] = [
@@ -1545,6 +1577,8 @@ const PACK_ID: [&str; WIDTH] = [
     "Masukkan kata sandi Anda",
     "Grup",
     "Berbagi dengan keluarga atau tim Anda",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_MS: [&str; WIDTH] = [
@@ -1635,6 +1669,8 @@ const PACK_MS: [&str; WIDTH] = [
     "Masukkan kata laluan anda",
     "Kumpulan",
     "Kongsi dengan keluarga atau pasukan anda",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_UK: [&str; WIDTH] = [
@@ -1725,6 +1761,8 @@ const PACK_UK: [&str; WIDTH] = [
     "Введіть пароль",
     "Групи",
     "Діліться з родиною або командою",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SV: [&str; WIDTH] = [
@@ -1815,6 +1853,8 @@ const PACK_SV: [&str; WIDTH] = [
     "Skriv ditt lösenord",
     "Grupper",
     "Dela med din familj eller ditt team",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_DA: [&str; WIDTH] = [
@@ -1905,6 +1945,8 @@ const PACK_DA: [&str; WIDTH] = [
     "Skriv din adgangskode",
     "Grupper",
     "Del med din familie eller dit team",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_FI: [&str; WIDTH] = [
@@ -1995,6 +2037,8 @@ const PACK_FI: [&str; WIDTH] = [
     "Kirjoita salasanasi",
     "Ryhmät",
     "Jaa perheesi tai tiimisi kanssa",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_NO: [&str; WIDTH] = [
@@ -2085,6 +2129,8 @@ const PACK_NO: [&str; WIDTH] = [
     "Skriv inn passordet",
     "Grupper",
     "Del med familien eller teamet ditt",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_CS: [&str; WIDTH] = [
@@ -2175,6 +2221,8 @@ const PACK_CS: [&str; WIDTH] = [
     "Zadejte heslo",
     "Skupiny",
     "Sdílejte s rodinou nebo týmem",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_EL: [&str; WIDTH] = [
@@ -2265,6 +2313,8 @@ const PACK_EL: [&str; WIDTH] = [
     "Πληκτρολογήστε τον κωδικό",
     "Ομάδες",
     "Μοιραστείτε με την οικογένεια ή την ομάδα σας",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_HE: [&str; WIDTH] = [
@@ -2355,6 +2405,8 @@ const PACK_HE: [&str; WIDTH] = [
     "הזינו את הסיסמה",
     "קבוצות",
     "שתפו עם המשפחה או הצוות",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_FA: [&str; WIDTH] = [
@@ -2445,6 +2497,8 @@ const PACK_FA: [&str; WIDTH] = [
     "گذرواژه را وارد کنید",
     "گروه‌ها",
     "با خانواده یا تیم خود به اشتراک بگذارید",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_UR: [&str; WIDTH] = [
@@ -2535,6 +2589,8 @@ const PACK_UR: [&str; WIDTH] = [
     "اپنا پاس ورڈ لکھیں",
     "گروپس",
     "اپنے خاندان یا ٹیم کے ساتھ شیئر کریں",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_BN: [&str; WIDTH] = [
@@ -2625,6 +2681,8 @@ const PACK_BN: [&str; WIDTH] = [
     "আপনার পাসওয়ার্ড দিন",
     "গ্রুপ",
     "পরিবার বা দলের সঙ্গে ভাগ করুন",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_TA: [&str; WIDTH] = [
@@ -2715,6 +2773,8 @@ const PACK_TA: [&str; WIDTH] = [
     "உங்கள் கடவுச்சொல்லை உள்ளிடுங்கள்",
     "குழுக்கள்",
     "குடும்பம் அல்லது குழுவுடன் பகிருங்கள்",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_TE: [&str; WIDTH] = [
@@ -2805,6 +2865,8 @@ const PACK_TE: [&str; WIDTH] = [
     "మీ పాస్‌వర్డ్ ఇవ్వండి",
     "సమూహాలు",
     "మీ కుటుంబం లేదా బృందంతో పంచుకోండి",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_MR: [&str; WIDTH] = [
@@ -2895,6 +2957,8 @@ const PACK_MR: [&str; WIDTH] = [
     "तुमचा पासवर्ड टाका",
     "गट",
     "कुटुंब किंवा टीमसोबत शेअर करा",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_GU: [&str; WIDTH] = [
@@ -2985,6 +3049,8 @@ const PACK_GU: [&str; WIDTH] = [
     "તમારો પાસવર્ડ દાખલ કરો",
     "જૂથો",
     "પરિવાર અથવા ટીમ સાથે શેર કરો",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_KN: [&str; WIDTH] = [
@@ -3075,6 +3141,8 @@ const PACK_KN: [&str; WIDTH] = [
     "ನಿಮ್ಮ ಗುಪ್ತಪದ ನಮೂದಿಸಿ",
     "ಗುಂಪುಗಳು",
     "ಕುಟುಂಬ ಅಥವಾ ತಂಡದೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_ML: [&str; WIDTH] = [
@@ -3165,6 +3233,8 @@ const PACK_ML: [&str; WIDTH] = [
     "നിങ്ങളുടെ പാസ്‌വേഡ് നൽകുക",
     "ഗ്രൂപ്പുകൾ",
     "കുടുംബവുമായോ ടീമുമായോ പങ്കിടുക",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_PA: [&str; WIDTH] = [
@@ -3255,6 +3325,8 @@ const PACK_PA: [&str; WIDTH] = [
     "ਆਪਣਾ ਪਾਸਵਰਡ ਦਿਓ",
     "ਸਮੂਹ",
     "ਪਰਿਵਾਰ ਜਾਂ ਟੀਮ ਨਾਲ ਸਾਂਝਾ ਕਰੋ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SW: [&str; WIDTH] = [
@@ -3345,6 +3417,8 @@ const PACK_SW: [&str; WIDTH] = [
     "Weka nenosiri lako",
     "Vikundi",
     "Shiriki na familia au timu yako",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_AM: [&str; WIDTH] = [
@@ -3435,6 +3509,8 @@ const PACK_AM: [&str; WIDTH] = [
     "የይለፍ ቃልዎን ያስገቡ",
     "ቡድኖች",
     "ከቤተሰብዎ ወይም ከቡድንዎ ጋር ያጋሩ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_HA: [&str; WIDTH] = [
@@ -3525,6 +3601,8 @@ const PACK_HA: [&str; WIDTH] = [
     "Shigar da kalmar sirrinka",
     "Ƙungiyoyi",
     "Raba tare da iyalinka ko ƙungiyarka",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_YO: [&str; WIDTH] = [
@@ -3615,6 +3693,8 @@ const PACK_YO: [&str; WIDTH] = [
     "Tẹ ọ̀rọ̀ aṣínà rẹ",
     "Àwọn ẹgbẹ́",
     "Pín pẹ̀lú ìdílé tàbí ẹgbẹ́ rẹ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_IG: [&str; WIDTH] = [
@@ -3705,6 +3785,8 @@ const PACK_IG: [&str; WIDTH] = [
     "Tinye okwuntụghe gị",
     "Otu",
     "Kekọrịta ya na ezinụlọ ma ọ bụ otu gị",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_ZU: [&str; WIDTH] = [
@@ -3795,6 +3877,8 @@ const PACK_ZU: [&str; WIDTH] = [
     "Faka iphasiwedi yakho",
     "Amaqembu",
     "Yabelana nomndeni noma neqembu lakho",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_AF: [&str; WIDTH] = [
@@ -3885,6 +3969,8 @@ const PACK_AF: [&str; WIDTH] = [
     "Voer jou wagwoord in",
     "Groepe",
     "Deel met jou familie of span",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_RO: [&str; WIDTH] = [
@@ -3975,6 +4061,8 @@ const PACK_RO: [&str; WIDTH] = [
     "Scrie parola",
     "Grupuri",
     "Partajează cu familia sau echipa ta",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_HU: [&str; WIDTH] = [
@@ -4065,6 +4153,8 @@ const PACK_HU: [&str; WIDTH] = [
     "Írd be a jelszavad",
     "Csoportok",
     "Ossz meg a családoddal vagy a csapatoddal",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_BG: [&str; WIDTH] = [
@@ -4155,6 +4245,8 @@ const PACK_BG: [&str; WIDTH] = [
     "Въведете паролата",
     "Групи",
     "Споделяйте със семейството или екипа си",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_HR: [&str; WIDTH] = [
@@ -4245,6 +4337,8 @@ const PACK_HR: [&str; WIDTH] = [
     "Upišite lozinku",
     "Grupe",
     "Dijelite s obitelji ili timom",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SK: [&str; WIDTH] = [
@@ -4335,6 +4429,8 @@ const PACK_SK: [&str; WIDTH] = [
     "Zadajte heslo",
     "Skupiny",
     "Zdieľajte s rodinou alebo tímom",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SL: [&str; WIDTH] = [
@@ -4425,6 +4521,8 @@ const PACK_SL: [&str; WIDTH] = [
     "Vpišite geslo",
     "Skupine",
     "Delite z družino ali ekipo",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_LT: [&str; WIDTH] = [
@@ -4515,6 +4613,8 @@ const PACK_LT: [&str; WIDTH] = [
     "Įrašykite slaptažodį",
     "Grupės",
     "Dalykitės su šeima ar komanda",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_LV: [&str; WIDTH] = [
@@ -4605,6 +4705,8 @@ const PACK_LV: [&str; WIDTH] = [
     "Ierakstiet paroli",
     "Grupas",
     "Kopīgojiet ar ģimeni vai komandu",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_ET: [&str; WIDTH] = [
@@ -4695,6 +4797,8 @@ const PACK_ET: [&str; WIDTH] = [
     "Sisesta parool",
     "Grupid",
     "Jagage pere või meeskonnaga",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SR: [&str; WIDTH] = [
@@ -4785,6 +4889,8 @@ const PACK_SR: [&str; WIDTH] = [
     "Унесите лозинку",
     "Групе",
     "Делите са породицом или тимом",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_BS: [&str; WIDTH] = [
@@ -4875,6 +4981,8 @@ const PACK_BS: [&str; WIDTH] = [
     "Unesite lozinku",
     "Grupe",
     "Dijelite s porodicom ili timom",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_MK: [&str; WIDTH] = [
@@ -4965,6 +5073,8 @@ const PACK_MK: [&str; WIDTH] = [
     "Внесете ја лозинката",
     "Групи",
     "Споделете со семејството или тимот",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SQ: [&str; WIDTH] = [
@@ -5055,6 +5165,8 @@ const PACK_SQ: [&str; WIDTH] = [
     "Vendosni fjalëkalimin tuaj",
     "Grupet",
     "Ndani me familjen ose ekipin tuaj",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_KA: [&str; WIDTH] = [
@@ -5145,6 +5257,8 @@ const PACK_KA: [&str; WIDTH] = [
     "შეიყვანეთ პაროლი",
     "ჯგუფები",
     "გაუზიარეთ ოჯახს ან გუნდს",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_HY: [&str; WIDTH] = [
@@ -5235,6 +5349,8 @@ const PACK_HY: [&str; WIDTH] = [
     "Մուտքագրեք ձեր գաղտնաբառը",
     "Խմբեր",
     "Կիսվեք ընտանիքի կամ թիմի հետ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_AZ: [&str; WIDTH] = [
@@ -5325,6 +5441,8 @@ const PACK_AZ: [&str; WIDTH] = [
     "Şifrənizi daxil edin",
     "Qruplar",
     "Ailəniz və ya komandanızla paylaşın",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_KK: [&str; WIDTH] = [
@@ -5415,6 +5533,8 @@ const PACK_KK: [&str; WIDTH] = [
     "Құпиясөзіңізді енгізіңіз",
     "Топтар",
     "Отбасыңызбен немесе командаңызбен бөлісіңіз",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_UZ: [&str; WIDTH] = [
@@ -5505,6 +5625,8 @@ const PACK_UZ: [&str; WIDTH] = [
     "Parolingizni kiriting",
     "Guruhlar",
     "Oilangiz yoki jamoangiz bilan ulashing",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_MN: [&str; WIDTH] = [
@@ -5595,6 +5717,8 @@ const PACK_MN: [&str; WIDTH] = [
     "Нууц үгээ оруулна уу",
     "Бүлгүүд",
     "Гэр бүл эсвэл багтайгаа хуваалцаарай",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_NE: [&str; WIDTH] = [
@@ -5685,6 +5809,8 @@ const PACK_NE: [&str; WIDTH] = [
     "आफ्नो पासवर्ड हाल्नुहोस्",
     "समूहहरू",
     "परिवार वा टोलीसँग साझा गर्नुहोस्",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SI: [&str; WIDTH] = [
@@ -5775,6 +5901,8 @@ const PACK_SI: [&str; WIDTH] = [
     "ඔබේ මුරපදය ඇතුළත් කරන්න",
     "කණ්ඩායම්",
     "පවුල හෝ කණ්ඩායම සමඟ බෙදාගන්න",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_MY: [&str; WIDTH] = [
@@ -5865,6 +5993,8 @@ const PACK_MY: [&str; WIDTH] = [
     "သင့်စကားဝှက်ကို ရိုက်ထည့်ပါ",
     "အုပ်စုများ",
     "မိသားစု သို့မဟုတ် အဖွဲ့နှင့် မျှဝေပါ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_KM: [&str; WIDTH] = [
@@ -5955,6 +6085,8 @@ const PACK_KM: [&str; WIDTH] = [
     "បញ្ចូលពាក្យសម្ងាត់របស់អ្នក",
     "ក្រុម",
     "ចែករំលែកជាមួយគ្រួសារ ឬក្រុមរបស់អ្នក",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_LO: [&str; WIDTH] = [
@@ -6045,6 +6177,8 @@ const PACK_LO: [&str; WIDTH] = [
     "ໃສ່ລະຫັດຜ່ານຂອງທ່ານ",
     "ກຸ່ມ",
     "ແບ່ງປັນກັບຄອບຄົວ ຫຼື ທີມຂອງທ່ານ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_TL: [&str; WIDTH] = [
@@ -6135,6 +6269,8 @@ const PACK_TL: [&str; WIDTH] = [
     "Ilagay ang kontrasenyas mo",
     "Mga Grupo",
     "Magbahagi sa iyong pamilya o team",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_CA: [&str; WIDTH] = [
@@ -6225,6 +6361,8 @@ const PACK_CA: [&str; WIDTH] = [
     "Introdueix la contrasenya",
     "Grups",
     "Comparteix amb la família o l'equip",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_EU: [&str; WIDTH] = [
@@ -6315,6 +6453,8 @@ const PACK_EU: [&str; WIDTH] = [
     "Sartu pasahitza",
     "Taldeak",
     "Partekatu zure familiarekin edo taldearekin",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_GL: [&str; WIDTH] = [
@@ -6405,6 +6545,8 @@ const PACK_GL: [&str; WIDTH] = [
     "Escribe o teu contrasinal",
     "Grupos",
     "Comparte coa túa familia ou equipo",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_CY: [&str; WIDTH] = [
@@ -6495,6 +6637,8 @@ const PACK_CY: [&str; WIDTH] = [
     "Rhowch eich cyfrinair",
     "Grwpiau",
     "Rhannu gyda'ch teulu neu'ch tîm",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_GA: [&str; WIDTH] = [
@@ -6585,6 +6729,8 @@ const PACK_GA: [&str; WIDTH] = [
     "Cuir isteach do phasfhocal",
     "Grúpaí",
     "Roinn le do theaghlach nó d'fhoireann",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_IS: [&str; WIDTH] = [
@@ -6675,6 +6821,8 @@ const PACK_IS: [&str; WIDTH] = [
     "Sláðu inn lykilorðið þitt",
     "Hópar",
     "Deildu með fjölskyldunni eða teyminu",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_MT: [&str; WIDTH] = [
@@ -6765,6 +6913,8 @@ const PACK_MT: [&str; WIDTH] = [
     "Daħħal il-kelma tas-sigurtà tiegħek",
     "Gruppi",
     "Aqsam mal-familja jew mat-tim tiegħek",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_LB: [&str; WIDTH] = [
@@ -6855,6 +7005,8 @@ const PACK_LB: [&str; WIDTH] = [
     "Gitt Äert Passwuert an",
     "Gruppen",
     "Mat der Famill oder dem Team deelen",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_BE: [&str; WIDTH] = [
@@ -6945,6 +7097,8 @@ const PACK_BE: [&str; WIDTH] = [
     "Увядзіце ваш пароль",
     "Групы",
     "Дзяліцеся з сям'ёй або камандай",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_PS: [&str; WIDTH] = [
@@ -7035,6 +7189,8 @@ const PACK_PS: [&str; WIDTH] = [
     "خپل پټنوم ولیکئ",
     "ډلې",
     "له کورنۍ یا ټیم سره یې شریک کړئ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SD: [&str; WIDTH] = [
@@ -7125,6 +7281,8 @@ const PACK_SD: [&str; WIDTH] = [
     "پنهنجو پاسورڊ لکو",
     "گروپ",
     "پنهنجي خاندان يا ٽيم سان شيئر ڪريو",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_KU: [&str; WIDTH] = [
@@ -7215,6 +7373,8 @@ const PACK_KU: [&str; WIDTH] = [
     "Şîfreya xwe binivîse",
     "Kom",
     "Bi malbat an tîma xwe re parve bike",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_CKB: [&str; WIDTH] = [
@@ -7305,6 +7465,8 @@ const PACK_CKB: [&str; WIDTH] = [
     "وشەی نهێنی بنووسە",
     "گرووپەکان",
     "لەگەڵ خێزان یان تیمەکەت هاوبەشی بکە",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_YI: [&str; WIDTH] = [
@@ -7395,6 +7557,8 @@ const PACK_YI: [&str; WIDTH] = [
     "גיט אריין דאס פאסווארט",
     "גרופּעס",
     "טיילט מיט דער משפּחה אָדער מאַנשאַפֿט",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_DV: [&str; WIDTH] = [
@@ -7485,6 +7649,8 @@ const PACK_DV: [&str; WIDTH] = [
     "ޕާސްވޯޑް ލިޔޭ",
     "ގްރޫޕްތައް",
     "އާއިލާ ނުވަތަ ޓީމާ ހިއްސާކުރޭ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_UG: [&str; WIDTH] = [
@@ -7575,6 +7741,8 @@ const PACK_UG: [&str; WIDTH] = [
     "پارولىڭىزنى كىرگۈزۈڭ",
     "گۇرۇپپىلار",
     "ئائىلە ياكى گۇرۇپپىڭىز بىلەن ھەمبەھىرلەڭ",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_SO: [&str; WIDTH] = [
@@ -7665,6 +7833,8 @@ const PACK_SO: [&str; WIDTH] = [
     "Geli eraygaaga sirta",
     "Kooxaha",
     "La wadaag qoyskaaga ama kooxdaada",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_RW: [&str; WIDTH] = [
@@ -7755,6 +7925,8 @@ const PACK_RW: [&str; WIDTH] = [
     "Andika ijambo ryawe ry'ibanga",
     "Amatsinda",
     "Sangiza umuryango wawe cyangwa itsinda ryawe",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_HT: [&str; WIDTH] = [
@@ -7845,6 +8017,8 @@ const PACK_HT: [&str; WIDTH] = [
     "Antre modpas ou",
     "Gwoup",
     "Pataje ak fanmi w oswa ekip ou",
+    "Your name",
+    "Your name",
 ];
 
 const PACK_JV: [&str; WIDTH] = [
@@ -7935,6 +8109,8 @@ const PACK_JV: [&str; WIDTH] = [
     "Lebokaké sandhimu",
     "Grup",
     "Bagekna karo kulawarga utawa tim sampeyan",
+    "Your name",
+    "Your name",
 ];
 
 static CATALOGS: &[Catalog] = &[

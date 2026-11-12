@@ -11,6 +11,12 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Signup asks for your name.** A new account needs the name you type. Email
+  and a password are optional, and you give both or neither. A blank name is
+  refused, and the app no longer fills the name from the part of an email
+  before `@`. Starting or joining a group still asks for the name people in
+  the group see, and still does not need this login.
+
 - **Phone remote control for the future mobile app.** `/remote-control` opens a
   pairing card and enables a dedicated encrypted connection without an AI model.
   Phones pair once and remain remembered; every desktop restart leaves access

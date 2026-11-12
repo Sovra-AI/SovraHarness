@@ -1,4 +1,4 @@
-//! The sign-in gate: email + password (first submit creates the account) and
+//! The sign-in gate: a name on a new account, optional email and password, and
 //! Google Sign-In via the browser (RFC 8252 loopback hand-off).
 //!
 //! Pure rendering over [`sovra_core::AuthState`]; every decision lives in the
@@ -23,6 +23,7 @@ use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::{Shell, logo};
 
 pub(crate) fn render_login_screen(
+    name_input: &Entity<InputState>,
     email_input: &Entity<InputState>,
     password_input: &Entity<InputState>,
     auth: &AuthState,
@@ -93,14 +94,20 @@ pub(crate) fn render_login_screen(
                     AuthPhase::Unknown
                     | AuthPhase::SignedOut
                     | AuthPhase::Submitting
-                    | AuthPhase::SignedIn(_) => {
-                        card.child(login_form(email_input, password_input, auth, creating, cx))
-                    }
+                    | AuthPhase::SignedIn(_) => card.child(login_form(
+                        name_input,
+                        email_input,
+                        password_input,
+                        auth,
+                        creating,
+                        cx,
+                    )),
                 }),
         )
 }
 
 fn login_form(
+    name_input: &Entity<InputState>,
     email_input: &Entity<InputState>,
     password_input: &Entity<InputState>,
     auth: &AuthState,
@@ -119,6 +126,18 @@ fn login_form(
     v_flex()
         .w_full()
         .gap(t.space.small)
+        .when(creating, |form| {
+            form.child(
+                Input::new(name_input)
+                    .id("login-name-input")
+                    .aria_label(design::chrome(cx, ChromeKey::LoginName))
+                    .prefix(
+                        Icon::new(IconName::User)
+                            .small()
+                            .text_color(t.text_secondary),
+                    ),
+            )
+        })
         .child(
             Input::new(email_input)
                 .id("login-email-input")

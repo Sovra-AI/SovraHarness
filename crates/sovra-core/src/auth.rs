@@ -58,7 +58,8 @@ pub struct AuthAccount {
     pub email: String,
     pub full_name: String,
     pub provider: AuthProvider,
-    /// PHC-format Argon2id hash for password accounts; `None` for Google accounts.
+    /// PHC-format Argon2id hash when the person set a password.
+    /// `None` for a name-only account and for Google accounts.
     pub password_phc: Option<String>,
     pub created_at: Timestamp,
 }
@@ -137,6 +138,63 @@ impl PasswordStrength {
     /// Whether account creation accepts this password.
     pub fn accepted(self) -> bool {
         self >= Self::Weak
+    }
+}
+
+/// How a new account is created.
+///
+/// A typed name is required. Email and password are absent together (the
+/// person starts with their name) or present together (the existing email
+/// and password rules). A blank name is never replaced by the part of an
+/// email before `@`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Signup {
+    /// No email and no password. The stored name is the one the person typed.
+    NameOnly { full_name: String },
+    /// Email and password, both checked. `email` is already normalized.
+    WithPassword {
+        email: String,
+        password: String,
+        full_name: String,
+    },
+}
+
+/// The one signup decision: name required; email and password are a pair.
+pub fn signup_choice(
+    full_name: &str,
+    email: &str,
+    password: &str,
+) -> Result<Signup, (AuthField, String)> {
+    let full_name = full_name.trim();
+    if full_name.is_empty() {
+        return Err((AuthField::FullName, "Enter your name.".into()));
+    }
+    let email_blank = email.trim().is_empty();
+    let password_blank = password.is_empty();
+    match (email_blank, password_blank) {
+        (true, true) => Ok(Signup::NameOnly {
+            full_name: full_name.to_owned(),
+        }),
+        (false, false) => {
+            let email = normalize_email(email).map_err(|message| (AuthField::Email, message))?;
+            let strength = password_strength(password);
+            if !strength.accepted() {
+                return Err((AuthField::Password, strength.label().into()));
+            }
+            Ok(Signup::WithPassword {
+                email,
+                password: password.to_owned(),
+                full_name: full_name.to_owned(),
+            })
+        }
+        (false, true) => Err((
+            AuthField::Password,
+            "Add a password with that email, or leave both blank.".into(),
+        )),
+        (true, false) => Err((
+            AuthField::Email,
+            "Add an email address with that password, or leave both blank.".into(),
+        )),
     }
 }
 
@@ -467,6 +525,40 @@ mod tests {
         ] {
             assert!(normalize_email(bad).is_err(), "{bad:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn signup_requires_a_typed_name_and_keeps_email_and_password_a_pair() {
+        assert_eq!(
+            signup_choice("  Sam Rivera  ", "", ""),
+            Ok(Signup::NameOnly {
+                full_name: "Sam Rivera".into(),
+            })
+        );
+        assert!(matches!(
+            signup_choice("   ", "sam@example.com", "longenough"),
+            Err((AuthField::FullName, _))
+        ));
+        assert!(matches!(
+            signup_choice("Sam Rivera", "sam@example.com", ""),
+            Err((AuthField::Password, _))
+        ));
+        assert!(matches!(
+            signup_choice("Sam Rivera", "", "longenough"),
+            Err((AuthField::Email, _))
+        ));
+        assert!(matches!(
+            signup_choice("Sam Rivera", "sam@example.com", "short"),
+            Err((AuthField::Password, _))
+        ));
+        assert_eq!(
+            signup_choice("Sam Rivera", "  Sam@Example.com ", "longenough"),
+            Ok(Signup::WithPassword {
+                email: "sam@example.com".into(),
+                password: "longenough".into(),
+                full_name: "Sam Rivera".into(),
+            })
+        );
     }
 
     #[test]

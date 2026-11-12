@@ -1498,3 +1498,39 @@ async fn stopping_a_handed_off_chat_stops_the_helping_computer_within_a_second()
         "stopped {after:?} after writing"
     );
 }
+
+/// Start and join take the group-facing name they already ask for.
+/// Neither command carries an email or a password, and neither waits for a login.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn starting_and_joining_a_group_needs_no_password_account() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 91);
+    let dad = Computer::start(&net, 92);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Kitchen".into(),
+    });
+    let started = mum.roster(|state| state.name == "Family").await;
+    assert!(
+        started.people.values().any(|person| person.name == "Mum"),
+        "the group-facing name was not kept"
+    );
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Dad's desktop".into(),
+    });
+    let joined = dad.roster(|state| state.people.len() == 2).await;
+    let names: Vec<_> = joined
+        .people
+        .values()
+        .map(|person| person.name.as_str())
+        .collect();
+    assert!(names.contains(&"Mum"), "{names:?}");
+    assert!(names.contains(&"Dad"), "{names:?}");
+}

@@ -227,10 +227,12 @@ pub enum ChromeKey {
     LoginPasswordPlaceholder,
     NavGroups,
     NavGroupsTooltip,
+    LoginName,
+    LoginNamePlaceholder,
 }
 
 impl ChromeKey {
-    pub const ALL: [Self; 87] = [
+    pub const ALL: [Self; 89] = [
         Self::LoginWelcomeTitle,
         Self::LoginWelcomeSubtitle,
         Self::LoginCreateTitle,
@@ -318,6 +320,8 @@ impl ChromeKey {
         Self::LoginPasswordPlaceholder,
         Self::NavGroups,
         Self::NavGroupsTooltip,
+        Self::LoginName,
+        Self::LoginNamePlaceholder,
     ];
 }
 
@@ -901,8 +905,12 @@ fn arabic(key: ChromeKey) -> &'static str {
         ChromeKey::LoginSigningIn => "جارٍ تسجيل الدخول…",
         ChromeKey::LoginCreating => "جارٍ إنشاء حسابك…",
         ChromeKey::LoginGoogle => "المتابعة باستخدام Google",
-        ChromeKey::LoginHintSignIn => "أول زيارة؟ أدخل بريداً وكلمة مرور لإنشاء حسابك.",
-        ChromeKey::LoginHintCreate => "كلمة المرور محمية على هذا الحاسوب ولا تغادره أبداً.",
+        ChromeKey::LoginHintSignIn => {
+            "أول زيارة؟ أدخل اسمك لإنشاء حسابك. البريد وكلمة المرور اختياريان."
+        }
+        ChromeKey::LoginHintCreate => {
+            "اسمك يكفي للبدء. أضف بريداً وكلمة مرور فقط إذا أردت تسجيل الدخول بهما لاحقاً. تبقى كلمة المرور على هذا الحاسوب."
+        }
         ChromeKey::LoginGoogleWaiting => "أكمل تسجيل الدخول عبر Google في المتصفح.",
         ChromeKey::LoginGoogleWaitingHint => "وافق هناك ثم عد — تتحدّث هذه الشاشة من تلقاء نفسها.",
         ChromeKey::LoginOpenAgain => "افتح الصفحة مجدداً",
@@ -981,6 +989,8 @@ fn arabic(key: ChromeKey) -> &'static str {
         ChromeKey::LoginPasswordPlaceholder => "أدخل كلمة المرور",
         ChromeKey::NavGroups => "المجموعات",
         ChromeKey::NavGroupsTooltip => "شارك مع عائلتك أو فريقك",
+        ChromeKey::LoginName => "اسمك",
+        ChromeKey::LoginNamePlaceholder => "اكتب اسمك",
     }
 }
 
@@ -1000,10 +1010,10 @@ fn english(key: ChromeKey) -> &'static str {
         ChromeKey::LoginCreating => "Creating your account…",
         ChromeKey::LoginGoogle => "Continue with Google",
         ChromeKey::LoginHintSignIn => {
-            "First time here? Enter an email and password to create your account."
+            "First time here? Enter your name to create your account. Email and a password are optional."
         }
         ChromeKey::LoginHintCreate => {
-            "Your password is protected on this computer and never leaves it."
+            "Your name is enough to start. Add an email and password only if you want to sign in that way later. A password stays on this computer."
         }
         ChromeKey::LoginGoogleWaiting => "Finish signing in with Google in your browser.",
         ChromeKey::LoginGoogleWaitingHint => {
@@ -1087,6 +1097,8 @@ fn english(key: ChromeKey) -> &'static str {
         ChromeKey::LoginPasswordPlaceholder => "Enter your password",
         ChromeKey::NavGroups => "Groups",
         ChromeKey::NavGroupsTooltip => "Share with your family or team",
+        ChromeKey::LoginName => "Your name",
+        ChromeKey::LoginNamePlaceholder => "What should we call you?",
     }
 }
 
