@@ -206,3 +206,76 @@ fn the_team_card_is_a_kanban_board_of_members_working_side_by_side(cx: &mut Test
         }
     }
 }
+
+/// Replies stream into the chat and push the in-chat board out of view, so while
+/// a team turn runs the board is also docked above the chat box, fully on screen.
+#[gpui_kit::test]
+fn the_live_team_board_stays_in_view_above_the_chat_box(cx: &mut TestAppContext) {
+    let members = default_team();
+    let ids: Vec<String> = members.iter().take(3).map(|m| m.id.clone()).collect();
+    for mode in [ThemeMode::Light, ThemeMode::Dark] {
+        for case in SIZES {
+            let (width, height, _) = case;
+            let (window, events, session) = open(cx, mode, case);
+            events
+                .send_blocking(Event::AgUi {
+                    session_id: session.clone(),
+                    event: AgUiEvent::RunStarted {
+                        run_id: "run".into(),
+                    },
+                })
+                .expect("headless test fixture is available");
+            let mut activity = TeamActivity::new(1, &members, &ids);
+            activity.start_together(&ids[..2]);
+            activity.set_doing(&ids[0], "Searching the web for “soup”");
+            snapshot(&events, &session, LiveActivity::Team(activity.clone()));
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let dock = window.find("team-dock").bounds();
+                assert!(
+                    dock.top() >= px(0.) && dock.bottom() <= px(height),
+                    "the live board is on screen: {dock:?}"
+                );
+                assert_inside(window, "team-dock", width);
+                for lane in ["waiting", "working", "done"] {
+                    assert!(
+                        window
+                            .try_find(gpui_kit::SharedString::from(format!(
+                                "team-dock-lane-{lane}"
+                            )))
+                            .is_some()
+                    );
+                }
+                assert!(
+                    window
+                        .try_find(gpui_kit::SharedString::from(format!(
+                            "team-dock-working-{}",
+                            ids[0]
+                        )))
+                        .is_some(),
+                    "a working member is in the Working lane"
+                );
+            })
+            .unwrap();
+            // When the turn finishes, the dock gives the space back to the chat.
+            activity.finish("Your team is done");
+            snapshot(&events, &session, LiveActivity::Team(activity));
+            events
+                .send_blocking(Event::AgUi {
+                    session_id: session.clone(),
+                    event: AgUiEvent::RunFinished {
+                        run_id: "run".into(),
+                    },
+                })
+                .expect("headless test fixture is available");
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert!(window.try_find("team-dock").is_none());
+            })
+            .unwrap();
+            reset(cx);
+        }
+    }
+}

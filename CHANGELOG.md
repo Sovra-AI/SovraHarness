@@ -23,7 +23,9 @@ move them under a version heading when the tag is cut.
 - **Teams work side by side on a kanban board.** Team members picked for a round
   now answer at the same time instead of one after another. The team card is a
   board with Waiting, Working and Done lanes. Each member's card shows what
-  they are doing and moves to Done as soon as they finish.
+  they are doing and moves to Done as soon as they finish. While your team is
+  answering, the board also sits just above the chat box, so it stays in view
+  as replies come in.
 
 - **Safer agent loops.** Every helper now stops after a bounded number of steps
   (25 for Sovra and specialists, 10 for team members; previously 100). A tool

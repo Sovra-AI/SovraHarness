@@ -346,6 +346,162 @@ fn render_team_activity(
         )
 }
 
+/// The live team board docked above the chat box while a team turn runs: the
+/// same Waiting / Working / Done lanes as the in-chat card, as compact chips, so
+/// it stays in view while replies stream into the chat.
+pub(crate) fn render_docked_team_board(
+    activity: &sovra_core::teams::TeamActivity,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let theme = cx.theme();
+    let (primary, success, muted) = (theme.primary, theme.success, theme.muted_foreground);
+    let lanes = activity.lanes();
+    let together = activity.speaking_count();
+    let round = if together > 1 {
+        format!(
+            "Round {} of {} · {together} side by side",
+            activity.round, activity.max_rounds
+        )
+    } else {
+        format!("Round {} of {}", activity.round, activity.max_rounds)
+    };
+    v_flex()
+        .id("team-dock")
+        .test_support()
+        .aria_label(gpui_kit::SharedString::from(format!(
+            "Your team, live: {}",
+            activity.status
+        )))
+        .w_full()
+        .min_w_0()
+        .max_h(t.layout.team_dock_max_height)
+        .overflow_y_scroll()
+        .gap(t.space.compact)
+        .px(t.space.small)
+        .py(t.space.compact)
+        .rounded(t.radius.card)
+        .border_1()
+        .border_color(t.material_border)
+        .bg(t.subtle)
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .gap(t.space.compact)
+                .items_center()
+                .child(Icon::new(IconName::Users).small().text_color(primary))
+                .child(
+                    div()
+                        .id("team-dock-status")
+                        .test_support()
+                        .flex_1()
+                        .min_w_0()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_ellipsis()
+                        .child(activity.status.clone()),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(round),
+                ),
+        )
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .gap(t.space.small)
+                .items_start()
+                .children([
+                    dock_lane("waiting", "Waiting", &lanes.waiting, muted, cx),
+                    dock_lane("working", "Working", &lanes.working, primary, cx),
+                    dock_lane("done", "Done", &lanes.done, success, cx),
+                ]),
+        )
+}
+
+fn dock_lane(
+    lane_id: &'static str,
+    label: &'static str,
+    members: &[&sovra_core::teams::SpeakerProgress],
+    accent: gpui_kit::Hsla,
+    cx: &Context<Shell>,
+) -> impl IntoElement + use<> {
+    use sovra_core::teams::SpeakerState;
+    let t = design::tokens(cx);
+    let chips = members.iter().map(|row| {
+        let state = match row.state {
+            SpeakerState::Waiting => "waiting",
+            SpeakerState::Speaking => "answering",
+            SpeakerState::Done => "done",
+            SpeakerState::Passed => "nothing to add",
+            SpeakerState::Failed => "couldn't answer",
+        };
+        let detail = row.doing.as_deref().unwrap_or(state);
+        h_flex()
+            .id(gpui_kit::SharedString::from(format!(
+                "team-dock-{lane_id}-{}",
+                row.member_id
+            )))
+            .test_support()
+            .aria_label(gpui_kit::SharedString::from(format!(
+                "{}: {detail}",
+                row.name
+            )))
+            .min_w_0()
+            .gap(t.space.hair)
+            .items_center()
+            .px(t.space.compact)
+            .rounded(t.radius.pill)
+            .border_1()
+            .border_color(accent)
+            .child(crate::chat_view::member_avatar(
+                &row.icon,
+                t.layout.icon_small,
+                cx,
+            ))
+            .child(
+                div()
+                    .min_w_0()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_ellipsis()
+                    .child(match &row.doing {
+                        Some(doing) => format!("{} · {doing}", row.name),
+                        None => row.name.clone(),
+                    }),
+            )
+    });
+    v_flex()
+        .id(gpui_kit::SharedString::from(format!(
+            "team-dock-lane-{lane_id}"
+        )))
+        .test_support()
+        .prefer_width(t.layout.kanban_lane_width)
+        .gap(t.space.hair)
+        .child(
+            h_flex()
+                .gap(t.space.compact)
+                .items_center()
+                .child(div().size(t.space.small).rounded(t.radius.pill).bg(accent))
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(format!("{label} · {}", members.len())),
+                ),
+        )
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .gap(t.space.compact)
+                .children(chips),
+        )
+}
+
 fn team_lane(
     lane_id: &'static str,
     label: &'static str,

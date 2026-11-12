@@ -107,6 +107,9 @@ pub struct LayoutTokens {
     /// Preferred width of one kanban lane (team and research boards, helper lanes):
     /// three fit side by side in a chat card; narrower panes wrap them into a stack.
     pub kanban_lane_width: Rems,
+    /// Tallest the live team board above the chat box gets before it scrolls,
+    /// so the conversation keeps most of a small window.
+    pub team_dock_max_height: Rems,
     /// Side of a QR code shown for a phone to scan; large enough for a camera at arm's length.
     pub scan_code: Rems,
     pub card_max_width: Rems,
@@ -301,6 +304,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
             content_min_width: rem(400.),
             card_min_width: rem(224.),
             kanban_lane_width: rem(144.),
+            team_dock_max_height: rem(132.),
             scan_code: rem(272.),
             card_max_width: rem(560.),
             dialog_width: rem(432.),

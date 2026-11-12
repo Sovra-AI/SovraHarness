@@ -95,6 +95,11 @@ The team card (`activityType: "sovra.team"`) is a kanban board with
 **Waiting / Working / Done** lanes (`TeamActivity::lanes`). Each member card
 shows its latest tool step ("Searching the web for …") and step count. A card
 moves to Done the moment its member finishes, while the others keep working.
+Replies streaming into the chat push that card out of view, so while the turn
+runs the same board is also **docked above the chat box** as compact lanes of
+member chips ("Priya · Searching the web for …"), and the dock gives the space
+back when the turn ends. Found by driving the running app: before the dock, a
+person could not see the board at all while their team was answering.
 
 ## Sources
 

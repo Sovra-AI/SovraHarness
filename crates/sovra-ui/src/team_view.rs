@@ -648,11 +648,15 @@ pub(crate) fn composer_team_button(
     }
 }
 
-/// Shown above the chat box only while the team answers, so it is never a surprise.
-pub(crate) fn composer_team_note(
-    shell: &Shell,
-    cx: &mut Context<Shell>,
-) -> Option<impl IntoElement + use<>> {
+/// Shown above the chat box while the team is on, so it is never a surprise.
+/// While a team turn runs, it becomes the live board instead: replies stream
+/// into the chat above, which scrolls the in-chat board out of view.
+pub(crate) fn composer_team_note(shell: &Shell, cx: &mut Context<Shell>) -> Option<AnyElement> {
+    if let Some(activity) = live_team_activity(shell) {
+        return Some(
+            crate::agui_widgets::render_docked_team_board(&activity, cx).into_any_element(),
+        );
+    }
     if !shell.state.team_mode {
         return None;
     }
@@ -684,6 +688,22 @@ pub(crate) fn composer_team_note(
                         shell.state.team_mode = false;
                         shell.refresh(cx);
                     })),
-            ),
+            )
+            .into_any_element(),
     )
+}
+
+/// The team card of the turn that is still running in this conversation.
+fn live_team_activity(shell: &Shell) -> Option<sovra_core::teams::TeamActivity> {
+    if !shell.state.is_generating {
+        return None;
+    }
+    shell.state.messages.iter().rev().find_map(|message| {
+        message.widgets.iter().find_map(|widget| match widget {
+            sovra_core::AgUiWidget::TeamActivity(activity) if !activity.finished => {
+                Some(activity.clone())
+            }
+            _ => None,
+        })
+    })
 }
