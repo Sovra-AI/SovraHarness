@@ -8,13 +8,14 @@ use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _, button::ButtonVariants as _, h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::{AgUiWidget, BuildStep, BuildStepState, ClarifyChip};
 
-use crate::design::{self, SovraStyled as _, Surface, TextRole};
+use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
 pub(crate) fn render_agui_widget(
@@ -49,6 +50,10 @@ pub(crate) fn render_agui_widget(
         }
         AgUiWidget::ResearchBoard(board) => {
             render_research_board(board, index, cx).into_any_element()
+        }
+        // The chat draws the log at the top of its reply; this is only a fallback.
+        AgUiWidget::WorkLog(work) => {
+            crate::work_log::render(work, index, false, cx).into_any_element()
         }
         AgUiWidget::ArtifactSaved {
             artifact_id,
@@ -132,6 +137,7 @@ fn render_research_board(
                 .id(("research-board-lanes", index))
                 .test_support()
                 .w_full()
+                .flex_wrap()
                 .gap(t.space.small)
                 .items_start()
                 .children([
@@ -168,14 +174,64 @@ fn render_research_lane(
     cx: &Context<Shell>,
 ) -> impl IntoElement + use<> {
     use sovra_core::ResearchGoalState;
+    let cards: Vec<gpui_kit::AnyElement> = goals
+        .iter()
+        .enumerate()
+        .map(|(goal_index, goal)| {
+            let state_label = match goal.state {
+                ResearchGoalState::Waiting => "Waiting",
+                ResearchGoalState::Working => "Looking into…",
+                ResearchGoalState::Done => "Done",
+                ResearchGoalState::Failed => "Couldn't finish",
+            };
+            kanban_card(
+                gpui_kit::SharedString::from(format!(
+                    "research-goal-{lane_id}-{board_index}-{goal_index}"
+                )),
+                cx,
+            )
+            .child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .min_w_0()
+                    .child(goal.text.clone()),
+            )
+            .child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(accent)
+                    .child(state_label),
+            )
+            .test_support()
+            .into_any_element()
+        })
+        .collect();
+    kanban_lane(
+        gpui_kit::SharedString::from(format!("research-lane-{lane_id}-{board_index}")),
+        label,
+        goals.len(),
+        accent,
+        cards,
+        cx,
+    )
+}
+
+/// One column of an in-chat kanban board (research goals, team members): a
+/// coloured heading with a count, then its cards. Lanes prefer
+/// `kanban_lane_width` and wrap into a stack when the pane is narrower.
+fn kanban_lane(
+    id: gpui_kit::SharedString,
+    label: &str,
+    count: usize,
+    accent: gpui_kit::Hsla,
+    cards: Vec<gpui_kit::AnyElement>,
+    cx: &Context<Shell>,
+) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     v_flex()
-        .id(gpui_kit::SharedString::from(format!(
-            "research-lane-{lane_id}-{board_index}"
-        )))
+        .id(id)
         .test_support()
-        .flex_1()
-        .min_w_0()
+        .prefer_width(t.layout.kanban_lane_width)
         .gap(t.space.compact)
         .child(
             h_flex()
@@ -191,43 +247,29 @@ fn render_research_lane(
                     div()
                         .sovra_text(TextRole::Caption, cx)
                         .text_color(t.text_secondary)
-                        .child(format!("{label} · {}", goals.len())),
+                        .child(format!("{label} · {count}")),
                 ),
         )
-        .children(goals.iter().enumerate().map(|(goal_index, goal)| {
-            let state_label = match goal.state {
-                ResearchGoalState::Waiting => "Waiting",
-                ResearchGoalState::Working => "Looking into…",
-                ResearchGoalState::Done => "Done",
-                ResearchGoalState::Failed => "Couldn't finish",
-            };
-            v_flex()
-                .id(gpui_kit::SharedString::from(format!(
-                    "research-goal-{lane_id}-{board_index}-{goal_index}"
-                )))
-                .test_support()
-                .w_full()
-                .min_w_0()
-                .gap(t.space.hair)
-                .px(t.space.small)
-                .py(t.space.compact)
-                .rounded(t.radius.card)
-                .border_1()
-                .border_color(t.material_border)
-                .bg(t.subtle)
-                .child(
-                    div()
-                        .sovra_text(TextRole::Caption, cx)
-                        .min_w_0()
-                        .child(goal.text.clone()),
-                )
-                .child(
-                    div()
-                        .sovra_text(TextRole::Caption, cx)
-                        .text_color(accent)
-                        .child(state_label),
-                )
-        }))
+        .children(cards)
+}
+
+/// A card inside a [`kanban_lane`]; callers add `.test_support()` last.
+fn kanban_card(
+    id: gpui_kit::SharedString,
+    cx: &Context<Shell>,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let t = design::tokens(cx);
+    v_flex()
+        .id(id)
+        .w_full()
+        .min_w_0()
+        .gap(t.space.hair)
+        .px(t.space.small)
+        .py(t.space.compact)
+        .rounded(t.radius.card)
+        .border_1()
+        .border_color(t.material_border)
+        .bg(t.subtle)
 }
 
 /// The live team card (AG-UI `ACTIVITY_SNAPSHOT`, `activityType: "sovra.team"`):
@@ -237,15 +279,10 @@ fn render_team_activity(
     index: usize,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
-    use sovra_core::teams::SpeakerState;
     let t = design::tokens(cx);
     let theme = cx.theme();
-    let (primary, success, muted, danger) = (
-        theme.primary,
-        theme.success,
-        theme.muted_foreground,
-        theme.danger,
-    );
+    let (primary, success, muted) = (theme.primary, theme.success, theme.muted_foreground);
+    let lanes = activity.lanes();
     v_flex()
         .id(("team-activity", index))
         .test_support()
@@ -280,44 +317,140 @@ fn render_team_activity(
                 .text_color(t.text_secondary)
                 .child(activity.status.clone()),
         )
+        .when(activity.speaking_count() > 1, |card| {
+            card.child(
+                div()
+                    .id(("team-activity-parallel", index))
+                    .test_support()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(primary)
+                    .child(format!(
+                        "{} answering side by side",
+                        activity.speaking_count()
+                    )),
+            )
+        })
         .child(
             h_flex()
+                .id(("team-board", index))
+                .test_support()
+                .w_full()
                 .flex_wrap()
                 .gap(t.space.small)
-                .children(activity.speakers.iter().map(|row| {
-                    let (label, color) = match row.state {
-                        SpeakerState::Waiting => ("Waiting", muted),
-                        SpeakerState::Speaking => ("Answering…", primary),
-                        SpeakerState::Done => ("Done", success),
-                        SpeakerState::Passed => ("Nothing to add", muted),
-                        SpeakerState::Failed => ("Couldn't answer", danger),
-                    };
-                    h_flex()
-                        .gap(t.space.compact)
-                        .items_center()
-                        .px(t.space.small)
-                        .py(t.space.compact)
-                        .rounded(t.radius.pill)
-                        .border_1()
-                        .border_color(t.material_border)
-                        .child(crate::chat_view::member_avatar(
-                            &row.icon,
-                            t.layout.icon_medium,
-                            cx,
-                        ))
-                        .child(
-                            div()
-                                .sovra_text(TextRole::Caption, cx)
-                                .child(row.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .sovra_text(TextRole::Caption, cx)
-                                .text_color(color)
-                                .child(label),
-                        )
-                })),
+                .items_start()
+                .children([
+                    team_lane("waiting", "Waiting", &lanes.waiting, muted, index, cx),
+                    team_lane("working", "Working", &lanes.working, primary, index, cx),
+                    team_lane("done", "Done", &lanes.done, success, index, cx),
+                ]),
         )
+}
+
+fn team_lane(
+    lane_id: &'static str,
+    label: &'static str,
+    members: &[&sovra_core::teams::SpeakerProgress],
+    accent: gpui_kit::Hsla,
+    board: usize,
+    cx: &Context<Shell>,
+) -> impl IntoElement + use<> {
+    use sovra_core::teams::SpeakerState;
+    let t = design::tokens(cx);
+    let theme = cx.theme();
+    let (primary, success, muted, danger) = (
+        theme.primary,
+        theme.success,
+        theme.muted_foreground,
+        theme.danger,
+    );
+    let cards: Vec<gpui_kit::AnyElement> = members
+        .iter()
+        .map(|row| {
+            let (state, colour) = match row.state {
+                SpeakerState::Waiting => ("Waiting", muted),
+                SpeakerState::Speaking => ("Answering…", primary),
+                SpeakerState::Done => ("Done", success),
+                SpeakerState::Passed => ("Nothing to add", muted),
+                SpeakerState::Failed => ("Couldn't answer", danger),
+            };
+            let mut card = kanban_card(
+                gpui_kit::SharedString::from(format!(
+                    "team-member-{lane_id}-{board}-{}",
+                    row.member_id
+                )),
+                cx,
+            )
+            .aria_label(gpui_kit::SharedString::from(format!(
+                "{}, {}: {state}",
+                row.name, row.role
+            )))
+            .child(
+                h_flex()
+                    .gap(t.space.compact)
+                    .items_center()
+                    .min_w_0()
+                    .child(crate::chat_view::member_avatar(
+                        &row.icon,
+                        t.layout.icon_medium,
+                        cx,
+                    ))
+                    .child(
+                        v_flex()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::Caption, cx)
+                                    .text_ellipsis()
+                                    .child(row.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::Caption, cx)
+                                    .text_color(t.text_secondary)
+                                    .text_ellipsis()
+                                    .child(row.role.clone()),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(colour)
+                    .child(state),
+            );
+            if let Some(doing) = &row.doing {
+                card = card.child(
+                    div()
+                        .min_w_0()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .text_ellipsis()
+                        .child(doing.clone()),
+                );
+            }
+            if row.steps > 0 {
+                card = card.child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(format!(
+                            "{} {}",
+                            row.steps,
+                            if row.steps == 1 { "step" } else { "steps" }
+                        )),
+                );
+            }
+            card.test_support().into_any_element()
+        })
+        .collect();
+    kanban_lane(
+        gpui_kit::SharedString::from(format!("team-lane-{lane_id}-{board}")),
+        label,
+        members.len(),
+        accent,
+        cards,
+        cx,
+    )
 }
 
 /// In-chat listing of recalled saved details, driven from parsed citation tokens.

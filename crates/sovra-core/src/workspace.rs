@@ -1329,6 +1329,10 @@ impl WorkspaceState {
                     crate::agui::LiveActivity::Research(board) => {
                         (AgUiWidget::ResearchBoard(board.clone()), "Research")
                     }
+                    crate::agui::LiveActivity::Work(work) => {
+                        self.set_work_log(work.clone());
+                        return None;
+                    }
                 };
                 if let Some(message) = self.messages.iter_mut().find(|m| m.id == *message_id) {
                     message.widgets = vec![widget];
@@ -1475,6 +1479,40 @@ impl WorkspaceState {
         let id = self.fresh_message_id("assistant");
         self.messages
             .push(ChatMessage::assistant(id, chunk, "Just now", Vec::new()));
+    }
+
+    /// The agent loop's live log belongs to the reply it is producing: it sits on
+    /// the current assistant message (above its answer) and is replaced in place by
+    /// each snapshot, so the answer streams into the same bubble underneath it.
+    fn set_work_log(&mut self, work: crate::work::WorkActivity) {
+        let widget = AgUiWidget::WorkLog(work);
+        if let Some(last) = self.messages.last_mut()
+            && last.role == crate::agui::MessageRole::Assistant
+            && last.timestamp == "Just now"
+            && last.speaker.is_none()
+            && !last
+                .widgets
+                .iter()
+                .any(|widget| matches!(widget, AgUiWidget::CodeWriting { .. }))
+        {
+            if let Some(existing) = last
+                .widgets
+                .iter_mut()
+                .find(|existing| matches!(existing, AgUiWidget::WorkLog(_)))
+            {
+                *existing = widget;
+            } else {
+                last.widgets.insert(0, widget);
+            }
+            return;
+        }
+        let id = self.fresh_message_id("assistant");
+        self.messages.push(ChatMessage::assistant(
+            id,
+            String::new(),
+            "Just now",
+            vec![widget],
+        ));
     }
 
     fn attach_agui_widget(&mut self, widget: AgUiWidget) {

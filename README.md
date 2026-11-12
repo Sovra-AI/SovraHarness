@@ -31,6 +31,13 @@ for and how to use it in numbered steps, and a **Getting started** list shows wh
 a new group still has to do. Under **Invite someone**, **Create invite link** makes
 a one-time link and copies it for you to send.
 
+While Sovra works, each reply shows a live work log above the answer: every
+step in plain words ("Searching the web for …"), helpers working side by side in
+their own lanes, and how long each step took. Afterwards it folds into one line
+you can reopen. Team turns show a **Waiting / Working / Done** board, and members
+picked for a round answer at the same time. Every helper runs under bounded step,
+failure and repeat limits; see [The agent loop](docs/agent-loop.md).
+
 Ask Sovra to build a website, then ask it to run the saved website. The code
 panel shows source while it is written; **Run website** opens saved HTML in your
 browser at a local address. **Stop website** ends hosting without deleting the
@@ -209,6 +216,7 @@ sequenceDiagram
 | [Google](docs/google.md) | Connect Google, per-service switches |
 | [GitHub](docs/github.md) | Connect GitHub, what the GitHub helper can do |
 | [Terminal](docs/terminal.md) | Allow-once commands on this computer |
+| [The agent loop](docs/agent-loop.md) | How helpers reason and act, loop limits, the live work log |
 | [Teams and artifacts](docs/teams-and-artifacts.md) | Helpers in chat, saveable work |
 | [Styling](docs/styling.md) | Native design system and responsive layout |
 | [Docs index](docs/README.md) | The same map, living next to the files |

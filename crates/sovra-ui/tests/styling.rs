@@ -1,5 +1,7 @@
 //! Check the design contract where failures affect readability or real UI behaviour.
 
+#[path = "styling/agent_progress.rs"]
+mod agent_progress;
 #[path = "styling/artifact_library.rs"]
 mod artifact_library;
 #[path = "styling/code_panel.rs"]

@@ -63,9 +63,17 @@ A team turn is a multi-agent run, so it uses the AG-UI protocol's own events
 | AG-UI event | Meaning in a team turn |
 | --- | --- |
 | `RUN_STARTED` / `RUN_FINISHED` / `RUN_ERROR` | The whole turn starts, finishes or fails; the composer unlocks. |
-| `ACTIVITY_SNAPSHOT` (`activityType: "sovra.team"`) | The live team card: the round, a plain-words status, and each member's state (waiting, answering, done, nothing to add, couldn't answer). |
+| `ACTIVITY_SNAPSHOT` (`activityType: "sovra.team"`) | The live team board: the round, a plain-words status, and each member's card in a **Waiting / Working / Done** lane, with its latest step ("Searching the web for …") and step count. |
 | `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` | One member's invocation. `outcome` is `success`, `passed` or `failed`; `speaker` carries the name, emoji and role shown in chat. |
 | `TEXT_MESSAGE_START` / `CONTENT` / `END` | The member's reply, attributed through `subagent_run_id`. |
+
+Members chosen for the same round **answer side by side**: each sees the
+conversation as it stood when the round began, their replies stream at the same
+time, and a member's card moves to Done as soon as it finishes. The Conductor
+then reads all of them. Reply slots and ids are assigned before the round
+starts, so the reply cap and the event ids do not depend on who finishes first.
+Every member loop has the same guard rails as the rest of Sovra; see
+[The agent loop](agent-loop.md).
 
 Two kinds of text never reach the screen:
 

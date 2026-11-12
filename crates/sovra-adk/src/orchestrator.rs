@@ -137,7 +137,9 @@ impl Tool for DelegateTool {
             %delegate,
             "orchestrator delegating to {delegate}"
         );
-        self.inner.execute(ctx, args).await
+        self.inner
+            .execute(crate::work_log::StepTap::wrap(ctx), args)
+            .await
     }
 }
 
@@ -250,11 +252,14 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
         SourcesFooter::wrap(parts.llm),
         FirstCall::Delegate { procedure_requests },
     );
-    let mut builder = LlmAgentBuilder::new(ORCHESTRATOR_ID)
-        .description(description.clone())
-        .instruction(instruction)
-        .model(parent_llm)
-        .parallelize_agent_delegations(true);
+    let mut builder = crate::work_log::harden(
+        LlmAgentBuilder::new(ORCHESTRATOR_ID)
+            .description(description.clone())
+            .instruction(instruction)
+            .model(parent_llm)
+            .parallelize_agent_delegations(true),
+        sovra_core::work::PARENT_MAX_STEPS,
+    );
     if parent_tools
         .iter()
         .any(|tool| crate::terminal::is_terminal_tool(tool.name()))
@@ -270,6 +275,9 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
             .session_snapshot(AgentToolSessionSnapshot::Isolated)
             .forward_shared_state(false)
             .forward_memory(false)
+            // Forwarded child events only reach `StepTap`, which keeps who called
+            // which tool for the live work log and drops everything else.
+            .forward_events(true)
             .history_max_events(0);
         builder = builder.tool(Arc::new(DelegateTool { inner: agent_tool }));
     }
@@ -311,12 +319,15 @@ fn child_agent(
     // there are no ordering barriers anywhere in this helper's tool set.
     // `Parallel` is never selected: it ignores the read-only flags.
     let strategy = execution_strategy(&tools);
-    let mut builder = LlmAgentBuilder::new(spec.id.as_str())
-        .description(spec.description.clone())
-        .instruction(instruction)
-        .global_instruction(standing_instruction)
-        .model(llm)
-        .tool_execution_strategy(strategy);
+    let mut builder = crate::work_log::harden(
+        LlmAgentBuilder::new(spec.id.as_str())
+            .description(spec.description.clone())
+            .instruction(instruction)
+            .global_instruction(standing_instruction)
+            .model(llm)
+            .tool_execution_strategy(strategy),
+        sovra_core::work::HELPER_MAX_STEPS,
+    );
     for tool in tools {
         builder = builder.tool(tool);
     }

@@ -186,3 +186,46 @@ fn team_prompt_preserves_the_current_request_while_bounding_earlier_text() {
     assert!(prompt.len() < current.len() + crate::MAX_CONTEXT_TEXT_BYTES + 1024);
     assert!(member_prompt(&[], "What shall we build?", 1, false).contains("What shall we build?"));
 }
+
+#[test]
+fn members_answer_side_by_side_on_a_kanban_board() {
+    let members = team();
+    let ids: Vec<String> = members.iter().take(3).map(|m| m.id.clone()).collect();
+    let names: Vec<String> = members.iter().take(3).map(|m| m.name.clone()).collect();
+    let mut activity = TeamActivity::new(1, &members, &ids);
+    assert_eq!(activity.lanes().waiting.len(), 3);
+    activity.start_together(&ids);
+    assert_eq!(
+        activity.status,
+        format!(
+            "{}, {} and {} are answering at the same time…",
+            names[0], names[1], names[2]
+        )
+    );
+    let lanes = activity.lanes();
+    assert_eq!((lanes.waiting.len(), lanes.working.len()), (0, 3));
+    activity.set_doing(&ids[0], "Searching the web for “soup”");
+    assert_eq!(
+        activity.speakers[0].doing.as_deref(),
+        Some("Searching the web for “soup”")
+    );
+    assert_eq!(activity.speakers[0].steps, 1);
+    activity.set(&ids[0], SpeakerState::Done);
+    assert_eq!(activity.speakers[0].doing, None, "a finished card is quiet");
+    assert_eq!(
+        activity.status,
+        format!("{} is done · 2 still answering", names[0])
+    );
+    activity.set(&ids[1], SpeakerState::Passed);
+    let lanes = activity.lanes();
+    assert_eq!((lanes.working.len(), lanes.done.len()), (1, 2));
+}
+
+#[test]
+fn older_saved_team_cards_still_load() {
+    let saved = r#"{"round":1,"max_rounds":3,"status":"Done","finished":true,
+        "speakers":[{"member_id":"kai","name":"Kai","icon":"","role":"r","state":"done"}]}"#;
+    let activity: TeamActivity = serde_json::from_str(saved).expect("old card");
+    assert_eq!(activity.speakers[0].steps, 0);
+    assert_eq!(activity.speakers[0].doing, None);
+}

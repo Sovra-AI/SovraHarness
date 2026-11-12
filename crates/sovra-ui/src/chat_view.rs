@@ -95,6 +95,8 @@ pub(crate) struct ChatPresentation {
     rows: Vec<Row>,
     /// Reasoning disclosures the reader opened (or closed while streaming).
     pub(crate) thinking_toggled: HashSet<usize>,
+    /// Work logs whose steps the reader opened (or folded while still working).
+    pub(crate) work_toggled: HashSet<usize>,
     /// Terminal cards showing all their output, by call id.
     pub(crate) terminal_expanded: HashSet<String>,
     session_id: String,
@@ -260,6 +262,7 @@ impl ChatPresentation {
             markdown: HashMap::new(),
             rows: Vec::new(),
             thinking_toggled: HashSet::new(),
+            work_toggled: HashSet::new(),
             terminal_expanded: HashSet::new(),
             session_id: String::new(),
             turn_started: None,
@@ -274,6 +277,11 @@ impl ChatPresentation {
             .rposition(|row| *row == Row::Message { message, segment })
     }
 
+    /// A reply's first row (reasoning, work log) changed height.
+    pub(crate) fn remeasure_message(&self, message: usize) {
+        self.remeasure(message, 0);
+    }
+
     fn remeasure(&self, message: usize, segment: usize) {
         if let Some(row) = self.row_index(message, segment) {
             self.list.remeasure_items(row..row + 1);
@@ -286,6 +294,7 @@ impl ChatPresentation {
             self.markdown.clear();
             self.rows.clear();
             self.thinking_toggled.clear();
+            self.work_toggled.clear();
             self.list.reset(0);
             self.follow_latest();
         }
@@ -1174,6 +1183,17 @@ fn render_assistant_segment(
         } else if streaming && !answering && msg.widgets.is_empty() && msg.speaker.is_none() {
             content = content.child(waiting_pill("Sovra is thinking…", chat, cx));
         }
+        // The work log replaces the waiting pill: it says what is happening.
+        for widget in &msg.widgets {
+            if let AgUiWidget::WorkLog(work) = widget {
+                content = content.child(crate::work_log::render(
+                    work,
+                    index,
+                    chat.work_toggled.contains(&index),
+                    cx,
+                ));
+            }
+        }
     }
     if let Some(part) = markdown
         .answer
@@ -1250,6 +1270,7 @@ fn render_assistant_segment(
             msg.widgets
                 .iter()
                 .enumerate()
+                .filter(|(_, widget)| !matches!(widget, AgUiWidget::WorkLog(_)))
                 .map(|(widget_index, widget)| {
                     render_agui_widget(
                         widget,

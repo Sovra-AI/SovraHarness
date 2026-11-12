@@ -44,6 +44,7 @@ pub mod teams;
 pub mod terminal;
 mod tool_calls;
 mod web_search;
+pub mod work;
 mod workspace;
 
 pub use agent::{AgentConfig, DEFAULT_GEMINI_MODEL, DEFAULT_SYSTEM_INSTRUCTION};

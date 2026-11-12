@@ -44,6 +44,7 @@ mod team_view;
 mod terminal_card;
 mod terminal_settings;
 mod widgets;
+mod work_log;
 
 use gpui_kit::component::TitleBar;
 use gpui_kit::{App, AppContext as _, Global, TitlebarOptions, WindowBounds, WindowOptions};

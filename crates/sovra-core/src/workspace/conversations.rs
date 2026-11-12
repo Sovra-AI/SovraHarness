@@ -480,4 +480,50 @@ mod tests {
             "a free computer in the group answers instead"
         );
     }
+
+    #[test]
+    fn the_work_log_sits_above_the_answer_in_the_same_reply() {
+        let mut state = WorkspaceState::new_at(1, Timestamp(100));
+        let session = state.session_id.clone();
+        state.submit_prompt("Find me a soup recipe");
+        let mut work = crate::work::WorkActivity::default();
+        let args = serde_json::json!({"query": "soup"});
+        work.start(crate::work::StepCall {
+            id: "c1",
+            helper: "",
+            helper_name: "",
+            tool: "web_search",
+            args: &args,
+            asks_helper: None,
+            at_ms: 0,
+        });
+        let snapshot = |work: &crate::work::WorkActivity| AgUiEvent::ActivitySnapshot {
+            message_id: "work-1".into(),
+            activity: crate::LiveActivity::Work(work.clone()),
+        };
+        team_event(&mut state, &session, snapshot(&work));
+        work.finish_step("c1", true, 900);
+        team_event(&mut state, &session, snapshot(&work));
+        state.apply_event(&Event::AgentChunk {
+            session_id: session.clone(),
+            text: "Try leek soup.".into(),
+        });
+        let replies: Vec<&ChatMessage> = state
+            .messages
+            .iter()
+            .filter(|m| m.role == crate::MessageRole::Assistant)
+            .collect();
+        assert_eq!(replies.len(), 1, "one reply holds the log and the answer");
+        assert_eq!(replies[0].text, "Try leek soup.");
+        let logs: Vec<&crate::work::WorkActivity> = replies[0]
+            .widgets
+            .iter()
+            .filter_map(|widget| match widget {
+                crate::AgUiWidget::WorkLog(work) => Some(work),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(logs.len(), 1, "each snapshot replaces the log in place");
+        assert_eq!(logs[0].steps[0].state, crate::work::StepState::Done);
+    }
 }

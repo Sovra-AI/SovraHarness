@@ -74,6 +74,8 @@ pub enum AgUiWidget {
         #[serde(default)]
         artifact_id: Option<String>,
     },
+    /// The live agent-loop log for this reply: each step, helpers side by side.
+    WorkLog(crate::work::WorkActivity),
     /// An artifact an agent saved during the turn, shown as a card to open it.
     ArtifactSaved {
         artifact_id: String,
@@ -92,6 +94,9 @@ pub enum LiveActivity {
     /// Parallel deep research board (`activityType: "sovra.research"`).
     #[serde(rename = "sovra.research")]
     Research(crate::research::ResearchBoard),
+    /// The agent loop's live steps (`activityType: "sovra.work"`).
+    #[serde(rename = "sovra.work")]
+    Work(crate::work::WorkActivity),
     #[serde(rename = "sovra.code")]
     CodeWriting {
         language: String,

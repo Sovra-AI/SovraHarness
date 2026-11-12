@@ -481,11 +481,14 @@ impl AdkHarness {
         invocation: &str,
         with_search: bool,
     ) -> Result<Runner, crate::Error> {
-        let mut builder = LlmAgentBuilder::new("DeepResearchHelper")
-            .description("Researches one goal on the deep-research board.")
-            .instruction(instruction)
-            .global_instruction(&self.standing_instruction)
-            .model(Arc::clone(&self.llm));
+        let mut builder = crate::work_log::harden(
+            LlmAgentBuilder::new("DeepResearchHelper")
+                .description("Researches one goal on the deep-research board.")
+                .instruction(instruction)
+                .global_instruction(&self.standing_instruction)
+                .model(Arc::clone(&self.llm)),
+            sovra_core::work::HELPER_MAX_STEPS,
+        );
         if with_search {
             for tool in search_tools(&self.base_tools) {
                 builder = builder.tool(tool);

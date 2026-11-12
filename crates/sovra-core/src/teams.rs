@@ -710,6 +710,20 @@ pub struct SpeakerProgress {
     pub icon: String,
     pub role: String,
     pub state: SpeakerState,
+    /// What the member is doing right now ("Searching the web for “soup”").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doing: Option<String>,
+    /// Tool steps the member took this turn.
+    #[serde(default)]
+    pub steps: u32,
+}
+
+/// The team card as a kanban board: who is waiting, working, and finished.
+#[derive(Debug, Default)]
+pub struct TeamLanes<'a> {
+    pub waiting: Vec<&'a SpeakerProgress>,
+    pub working: Vec<&'a SpeakerProgress>,
+    pub done: Vec<&'a SpeakerProgress>,
 }
 
 /// The AG-UI activity content for a team run (`activityType: "sovra.team"`).
@@ -742,6 +756,7 @@ impl TeamActivity {
             if let Some(m) = members.iter().find(|m| m.id == *id) {
                 if let Some(row) = self.speakers.iter_mut().find(|row| row.member_id == *id) {
                     row.state = SpeakerState::Waiting;
+                    row.doing = None;
                 } else {
                     self.speakers.push(SpeakerProgress {
                         member_id: m.id.clone(),
@@ -749,6 +764,8 @@ impl TeamActivity {
                         icon: m.icon.clone(),
                         role: m.role.clone(),
                         state: SpeakerState::Waiting,
+                        doing: None,
+                        steps: 0,
                     });
                 }
             }
@@ -762,19 +779,84 @@ impl TeamActivity {
             .find(|row| row.member_id == member_id)
         {
             row.state = state;
-            self.status = match state {
+            if state != SpeakerState::Speaking {
+                row.doing = None;
+            }
+            let status = match state {
                 SpeakerState::Speaking => format!("{} is answering…", row.name),
                 SpeakerState::Passed => format!("{} had nothing to add", row.name),
                 SpeakerState::Failed => format!("{} couldn't answer", row.name),
-                SpeakerState::Waiting | SpeakerState::Done => self.status.clone(),
+                SpeakerState::Done => format!("{} is done", row.name),
+                SpeakerState::Waiting => self.status.clone(),
             };
+            self.status = status;
+            let still = self.speaking_count();
+            if state != SpeakerState::Speaking && still > 0 {
+                let _ = write!(self.status, " · {still} still answering");
+            }
         }
+    }
+
+    /// Starts several members at once: they all answer side by side this round.
+    pub fn start_together(&mut self, member_ids: &[String]) {
+        let mut names = Vec::new();
+        for row in &mut self.speakers {
+            if member_ids.contains(&row.member_id) {
+                row.state = SpeakerState::Speaking;
+                row.doing = None;
+                names.push(row.name.clone());
+            }
+        }
+        self.status = match names.as_slice() {
+            [] => self.status.clone(),
+            [one] => format!("{one} is answering…"),
+            [rest @ .., last] => format!(
+                "{} and {last} are answering at the same time…",
+                rest.join(", ")
+            ),
+        };
+    }
+
+    /// Records a member's latest tool step on its kanban card.
+    pub fn set_doing(&mut self, member_id: &str, doing: impl Into<String>) {
+        if let Some(row) = self
+            .speakers
+            .iter_mut()
+            .find(|row| row.member_id == member_id)
+        {
+            row.doing = Some(doing.into());
+            row.steps = row.steps.saturating_add(1);
+        }
+    }
+
+    /// Members still answering right now.
+    pub fn speaking_count(&self) -> usize {
+        self.speakers
+            .iter()
+            .filter(|row| row.state == SpeakerState::Speaking)
+            .count()
+    }
+
+    /// The board's three lanes, in roster order.
+    pub fn lanes(&self) -> TeamLanes<'_> {
+        let mut lanes = TeamLanes::default();
+        for row in &self.speakers {
+            match row.state {
+                SpeakerState::Waiting => lanes.waiting.push(row),
+                SpeakerState::Speaking => lanes.working.push(row),
+                SpeakerState::Done | SpeakerState::Passed | SpeakerState::Failed => {
+                    lanes.done.push(row);
+                }
+            }
+        }
+        lanes
     }
 
     pub fn finish(&mut self, status: impl Into<String>) {
         self.finished = true;
         self.status = status.into();
         for row in &mut self.speakers {
+            row.doing = None;
             if matches!(row.state, SpeakerState::Waiting | SpeakerState::Speaking) {
                 row.state = SpeakerState::Passed;
             }

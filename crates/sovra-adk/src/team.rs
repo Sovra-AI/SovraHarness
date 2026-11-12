@@ -3,11 +3,11 @@
 //! `SUBAGENT_STARTED`, `TEXT_MESSAGE_*`, `SUBAGENT_FINISHED`, `RUN_FINISHED`).
 //! The rules — who speaks, passes, verdicts — are pure in `sovra_core::teams`.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use adk_agent::LlmAgentBuilder;
-use adk_core::{Content, EventTextDeltas};
+use adk_core::{Content, EventTextDeltas, Part};
 use adk_runner::Runner;
 use adk_session::{CreateRequest, InMemorySessionService, SessionService};
 use async_channel::Sender;
@@ -38,11 +38,19 @@ enum Reply {
     Failed,
 }
 
+/// A member with a reply slot this round: its AG-UI ids are fixed up front.
+struct Slot<'m> {
+    member: &'m TeamMember,
+    invocation: String,
+    message_id: String,
+}
+
 struct TeamRunState<'a> {
     harness: &'a AdkHarness,
     turn: &'a TeamTurn,
     events: &'a Sender<Event>,
-    activity: TeamActivity,
+    /// Shared by the members answering side by side; locked only between awaits.
+    activity: Mutex<TeamActivity>,
     history: Vec<TranscriptLine>,
     replies: usize,
     activity_id: String,
@@ -50,6 +58,10 @@ struct TeamRunState<'a> {
 
 impl AdkHarness {
     /// Streams a whole team turn. Returns when the run finished or the UI went away.
+    ///
+    /// Within a round, members answer **side by side**: each sees the conversation
+    /// as it stood when the round began, and their replies stream at the same time.
+    /// The Conductor then reads every reply and decides whether another round helps.
     pub async fn run_team(&self, turn: &TeamTurn, events: &Sender<Event>) {
         let speakers = teams::first_round_speakers(&turn.prompt, &turn.members);
         let conductor = teams::conductor_for(&turn.members, &speakers).cloned();
@@ -67,14 +79,14 @@ impl AdkHarness {
             harness: self,
             turn,
             events,
-            activity: TeamActivity::new(1, &turn.members, &speakers),
+            activity: Mutex::new(TeamActivity::new(1, &turn.members, &speakers)),
             history,
             replies: 0,
             activity_id: format!("{}-team", turn.run_id),
         };
         if let Some(lead) = &conductor {
             state
-                .activity
+                .activity_mut()
                 .queue(&turn.members, std::slice::from_ref(&lead.id));
         }
         if !state
@@ -99,21 +111,23 @@ impl AdkHarness {
         let mut spoke_any = false;
         let mut closing = "Your team is done";
         for round in 1..=MAX_ROUNDS {
-            state.activity.round = round;
-            for id in &speakers {
-                let Some(member) = turn.members.iter().find(|m| m.id == *id) else {
-                    continue;
-                };
-                match state.speak(member, round, moderated).await {
-                    None => return,
-                    Some(Reply::Spoke(_)) => spoke_any = true,
-                    Some(Reply::Passed | Reply::Failed) => {}
-                }
-            }
+            state.activity_mut().round = round;
+            let members: Vec<&TeamMember> = speakers
+                .iter()
+                .filter_map(|id| turn.members.iter().find(|m| m.id == *id))
+                .collect();
+            let Some(replies) = state.speak_together(&members, round, moderated).await else {
+                return;
+            };
+            spoke_any |= replies.iter().any(|reply| matches!(reply, Reply::Spoke(_)));
             let Some(lead) = &conductor else {
                 break;
             };
-            let Some(reply) = state.speak(lead, round, true).await else {
+            let Some(reply) = state
+                .speak_together(&[lead], round, true)
+                .await
+                .and_then(|mut replies| replies.pop())
+            else {
                 return;
             };
             let decision = match reply {
@@ -126,10 +140,9 @@ impl AdkHarness {
             match decision.verdict {
                 Verdict::Continue if round < MAX_ROUNDS && state.replies < MAX_REPLIES_PER_TURN => {
                     speakers = teams::next_round_speakers(&decision, &turn.members, &speakers);
-                    state.activity.queue(&turn.members, &speakers);
-                    state
-                        .activity
-                        .queue(&turn.members, std::slice::from_ref(&lead.id));
+                    let activity = state.activity_mut();
+                    activity.queue(&turn.members, &speakers);
+                    activity.queue(&turn.members, std::slice::from_ref(&lead.id));
                 }
                 Verdict::AskUser => {
                     closing = "Your team has a question for you";
@@ -146,7 +159,7 @@ impl AdkHarness {
                 .await;
             return;
         }
-        state.activity.finish(closing);
+        state.activity_mut().finish(closing);
         if state.snapshot().await {
             state
                 .send(AgUiEvent::RunFinished {
@@ -158,6 +171,19 @@ impl AdkHarness {
 }
 
 impl TeamRunState<'_> {
+    fn activity_mut(&mut self) -> &mut TeamActivity {
+        self.activity
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Applies `change` and returns the card to send; the lock never spans an await.
+    fn update(&self, change: impl FnOnce(&mut TeamActivity)) -> TeamActivity {
+        let mut activity = self.activity.lock().unwrap_or_else(PoisonError::into_inner);
+        change(&mut activity);
+        activity.clone()
+    }
+
     async fn send(&self, event: AgUiEvent) -> bool {
         self.events
             .send(Event::AgUi {
@@ -168,27 +194,52 @@ impl TeamRunState<'_> {
             .is_ok()
     }
 
-    async fn snapshot(&self) -> bool {
+    async fn send_card(&self, activity: TeamActivity) -> bool {
         self.send(AgUiEvent::ActivitySnapshot {
             message_id: self.activity_id.clone(),
-            activity: LiveActivity::Team(self.activity.clone()),
+            activity: LiveActivity::Team(activity),
         })
         .await
     }
 
-    /// One member's invocation as an AG-UI subagent. `None` means the UI is gone.
-    async fn speak(&mut self, member: &TeamMember, round: u8, moderated: bool) -> Option<Reply> {
-        if self.replies >= MAX_REPLIES_PER_TURN {
-            return Some(Reply::Passed);
+    async fn snapshot(&self) -> bool {
+        let activity = self.update(|_| {});
+        self.send_card(activity).await
+    }
+
+    /// One round's members, answering at the same time as AG-UI subagents.
+    /// Replies come back in `members` order; `None` means the UI is gone.
+    async fn speak_together(
+        &mut self,
+        members: &[&TeamMember],
+        round: u8,
+        moderated: bool,
+    ) -> Option<Vec<Reply>> {
+        // Reply slots are handed out up front, in order, so the cap and every
+        // AG-UI id are the same however the replies happen to finish.
+        let mut slots = Vec::with_capacity(members.len());
+        for member in members {
+            if self.replies >= MAX_REPLIES_PER_TURN {
+                break;
+            }
+            self.replies += 1;
+            let invocation = format!("{}-{}", self.turn.run_id, self.replies);
+            slots.push(Slot {
+                member,
+                message_id: format!("{invocation}-reply"),
+                invocation,
+            });
         }
-        self.replies += 1;
-        let invocation = format!("{}-{}", self.turn.run_id, self.replies);
-        let message_id = format!("{invocation}-reply");
-        self.activity.set(&member.id, SpeakerState::Speaking);
-        let started = self.snapshot().await
-            && self
+        let ids: Vec<String> = slots.iter().map(|slot| slot.member.id.clone()).collect();
+        self.activity_mut().start_together(&ids);
+        if !self.snapshot().await {
+            return None;
+        }
+        for slot in &slots {
+            let member = slot.member;
+            let started = self
                 .send(AgUiEvent::SubagentStarted {
-                    subagent_run_id: invocation.clone(),
+                    subagent_run_id: slot.invocation.clone(),
                     name: member.id.clone(),
                     description: member.role.clone(),
                     speaker: Speaker {
@@ -199,35 +250,67 @@ impl TeamRunState<'_> {
                     },
                 })
                 .await
-            && self
-                .send(AgUiEvent::TextMessageStart {
-                    message_id: message_id.clone(),
-                    subagent_run_id: Some(invocation.clone()),
-                })
-                .await;
-        if !started {
-            return None;
+                && self
+                    .send(AgUiEvent::TextMessageStart {
+                        message_id: slot.message_id.clone(),
+                        subagent_run_id: Some(slot.invocation.clone()),
+                    })
+                    .await;
+            if !started {
+                return None;
+            }
         }
+        let shared = &*self;
+        let answers = futures::future::join_all(
+            slots
+                .iter()
+                .map(|slot| shared.answer(slot, &shared.history, round, moderated)),
+        )
+        .await;
+        let mut replies = Vec::with_capacity(members.len());
+        for (slot, answer) in slots.iter().zip(answers) {
+            let reply = answer?;
+            if let Reply::Spoke(text) = &reply {
+                let shown = if slot.member.conductor {
+                    teams::parse_conductor_reply(text).0
+                } else {
+                    text.trim().to_owned()
+                };
+                self.history.push(TranscriptLine {
+                    source: None,
+                    speaker: slot.member.name.clone(),
+                    text: shown,
+                });
+            }
+            replies.push(reply);
+        }
+        // Members past the reply cap say nothing this turn.
+        replies.resize_with(members.len(), || Reply::Passed);
+        Some(replies)
+    }
+
+    /// Streams one member's reply and closes its card as soon as it is done, while
+    /// the others may still be answering. `None` means the UI is gone.
+    async fn answer(
+        &self,
+        slot: &Slot<'_>,
+        history: &[TranscriptLine],
+        round: u8,
+        moderated: bool,
+    ) -> Option<Reply> {
+        let member = slot.member;
         let instruction =
             teams::member_instruction(member, &self.turn.members, moderated, "the user");
-        let prompt =
-            teams::member_prompt(&self.history, &self.turn.prompt, round, member.conductor);
+        let prompt = teams::member_prompt(history, &self.turn.prompt, round, member.conductor);
         let mut visible = VisibleStream::default();
         let outcome = self
-            .stream_member(
-                member,
-                &invocation,
-                &message_id,
-                instruction,
-                prompt,
-                &mut visible,
-            )
+            .stream_member(slot, instruction, prompt, &mut visible)
             .await?;
         let tail = visible.finish();
         if !tail.is_empty()
             && !self
                 .send(AgUiEvent::TextMessageContent {
-                    message_id: message_id.clone(),
+                    message_id: slot.message_id.clone(),
                     delta: tail,
                 })
                 .await
@@ -243,58 +326,51 @@ impl TeamRunState<'_> {
             }
         };
         let (outcome, state) = match &reply {
-            Reply::Spoke(text) => {
-                let shown = if member.conductor {
-                    teams::parse_conductor_reply(text).0
-                } else {
-                    text.trim().to_owned()
-                };
-                self.history.push(TranscriptLine {
-                    source: None,
-                    speaker: member.name.clone(),
-                    text: shown,
-                });
-                (SubagentOutcome::Success, SpeakerState::Done)
-            }
+            Reply::Spoke(_) => (SubagentOutcome::Success, SpeakerState::Done),
             Reply::Passed => (SubagentOutcome::Passed, SpeakerState::Passed),
             Reply::Failed => (SubagentOutcome::Failed, SpeakerState::Failed),
         };
-        self.activity.set(&member.id, state);
-        let finished = self.send(AgUiEvent::TextMessageEnd { message_id }).await
+        let card = self.update(|activity| activity.set(&member.id, state));
+        let finished = self
+            .send(AgUiEvent::TextMessageEnd {
+                message_id: slot.message_id.clone(),
+            })
+            .await
             && self
                 .send(AgUiEvent::SubagentFinished {
-                    subagent_run_id: invocation,
+                    subagent_run_id: slot.invocation.clone(),
                     outcome,
                 })
                 .await
-            && self.snapshot().await;
+            && self.send_card(card).await;
         finished.then_some(reply)
     }
 
     /// Streams one member's model output; the outer `None` means the UI is gone.
+    /// Each tool call the member makes shows on its kanban card as it happens.
     async fn stream_member(
         &self,
-        member: &TeamMember,
-        invocation: &str,
-        message_id: &str,
+        slot: &Slot<'_>,
         instruction: String,
         prompt: String,
         visible: &mut VisibleStream,
     ) -> Option<Result<(), String>> {
+        let member = slot.member;
         let runner = match self
             .harness
-            .member_runner(member, instruction, invocation)
+            .member_runner(member, instruction, &slot.invocation)
             .await
         {
             Ok(runner) => runner,
             Err(error) => return Some(Err(self.harness.safe_error(&error))),
         };
         let harness = self.harness;
+        let mut seen_calls = HashSet::new();
         let result = async {
             let mut stream = runner
                 .run_str(
                     DEFAULT_USER_ID,
-                    invocation,
+                    &slot.invocation,
                     Content::new("user").with_text(&prompt),
                 )
                 .await
@@ -302,6 +378,12 @@ impl TeamRunState<'_> {
             let mut deltas = EventTextDeltas::default();
             while let Some(item) = stream.next().await {
                 let event = item.map_err(|error| harness.safe_error(&error))?;
+                for label in new_step_labels(&event, &mut seen_calls) {
+                    let card = self.update(|activity| activity.set_doing(&member.id, label));
+                    if !self.send_card(card).await {
+                        return Ok(false);
+                    }
+                }
                 let delta_event = deltas.push(&event);
                 for widget in crate::artifacts::saved_artifact_widgets(&delta_event) {
                     if self
@@ -321,7 +403,7 @@ impl TeamRunState<'_> {
                     if !shown.is_empty()
                         && !self
                             .send(AgUiEvent::TextMessageContent {
-                                message_id: message_id.to_owned(),
+                                message_id: slot.message_id.clone(),
                                 delta: shown,
                             })
                             .await
@@ -341,6 +423,26 @@ impl TeamRunState<'_> {
     }
 }
 
+/// Plain-words labels for tool calls in `event` not reported before.
+fn new_step_labels(event: &adk_core::Event, seen: &mut HashSet<String>) -> Vec<String> {
+    let Some(content) = &event.llm_response.content else {
+        return Vec::new();
+    };
+    let mut labels = Vec::new();
+    for (index, part) in content.parts.iter().enumerate() {
+        if let Part::FunctionCall { name, args, id, .. } = part {
+            if id.is_none() && event.llm_response.partial {
+                continue;
+            }
+            let key = id.clone().unwrap_or_else(|| format!("{name}#{index}"));
+            if seen.insert(key) {
+                labels.push(sovra_core::work::describe_step(name, args).1);
+            }
+        }
+    }
+    labels
+}
+
 impl AdkHarness {
     /// A plain single agent for one member invocation, on the same model, in its
     /// own throwaway session store: the shared history travels in the prompt, so
@@ -352,19 +454,27 @@ impl AdkHarness {
         instruction: String,
         invocation: &str,
     ) -> Result<Runner, crate::Error> {
-        let mut builder = LlmAgentBuilder::new(member.id.clone())
-            .description(member.role.clone())
-            .instruction(instruction)
-            .global_instruction(&self.standing_instruction)
-            .model(Arc::clone(&self.llm));
-        for tool in crate::capabilities::shared_knowledge_tools(&self.base_tools) {
-            builder = builder.tool(tool);
-        }
+        let mut tools: Vec<Arc<dyn adk_core::Tool>> =
+            crate::capabilities::shared_knowledge_tools(&self.base_tools).collect();
         if let Some(saver) = &self.artifact_saver {
-            builder = builder.tool(crate::artifacts::save_artifact_tool(
+            tools.push(crate::artifacts::save_artifact_tool(
                 saver.clone(),
                 &member.name,
             ));
+        }
+        // Safe reads run together; anything with side effects stays in order.
+        let strategy = crate::orchestrator::execution_strategy(&tools);
+        let mut builder = crate::work_log::harden(
+            LlmAgentBuilder::new(member.id.clone())
+                .description(member.role.clone())
+                .instruction(instruction)
+                .global_instruction(&self.standing_instruction)
+                .model(Arc::clone(&self.llm))
+                .tool_execution_strategy(strategy),
+            sovra_core::work::MEMBER_MAX_STEPS,
+        );
+        for tool in tools {
+            builder = builder.tool(tool);
         }
         let agent = builder.build().map_err(crate::Error::AgentBuild)?;
         let sessions = Arc::new(InMemorySessionService::new());
@@ -530,6 +640,32 @@ mod tests {
         assert_eq!(
             states,
             [SpeakerState::Done, SpeakerState::Passed, SpeakerState::Done]
+        );
+    }
+
+    #[test]
+    fn a_rounds_members_start_together_and_show_on_the_board() {
+        let events = run("What do Priya and Kai think about dinner?");
+        let first_finish = events
+            .iter()
+            .position(|event| matches!(event, AgUiEvent::SubagentFinished { .. }))
+            .expect("members finish");
+        let started_before: Vec<&str> = events[..first_finish]
+            .iter()
+            .filter_map(|event| match event {
+                AgUiEvent::SubagentStarted { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(started_before, ["priya", "kai"], "both answer side by side");
+        let working_together = events.iter().any(|event| {
+            matches!(event, AgUiEvent::ActivitySnapshot {
+                activity: sovra_core::LiveActivity::Team(card), ..
+            } if card.lanes().working.len() == 2 && card.status.contains("at the same time"))
+        });
+        assert!(
+            working_together,
+            "the board shows both members working at once"
         );
     }
 

@@ -104,6 +104,9 @@ pub struct LayoutTokens {
     /// Side panes yield (undock, rail) before the main pane drops below this.
     pub content_min_width: Rems,
     pub card_min_width: Rems,
+    /// Preferred width of one kanban lane (team and research boards, helper lanes):
+    /// three fit side by side in a chat card; narrower panes wrap them into a stack.
+    pub kanban_lane_width: Rems,
     /// Side of a QR code shown for a phone to scan; large enough for a camera at arm's length.
     pub scan_code: Rems,
     pub card_max_width: Rems,
@@ -297,6 +300,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
             reading_width: rem(768.),
             content_min_width: rem(400.),
             card_min_width: rem(224.),
+            kanban_lane_width: rem(144.),
             scan_code: rem(272.),
             card_max_width: rem(560.),
             dialog_width: rem(432.),

@@ -11,6 +11,27 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **See what Sovra is doing while it works.** Each reply that uses tools now
+  shows a live work log above the answer. Every step appears in plain words,
+  such as "Searching the web for “soup recipes”" or "Asking the Web Search
+  helper…", with ticks, failures and how long each step took. Helpers working
+  at the same time get their own lanes, showing what each one is doing now,
+  including the helper's own searches and reads. When the reply is done, the
+  log folds into one line ("Worked through 6 steps with 2 helpers in 14s")
+  that you can open again.
+
+- **Teams work side by side on a kanban board.** Team members picked for a round
+  now answer at the same time instead of one after another. The team card is a
+  board with Waiting, Working and Done lanes. Each member's card shows what
+  they are doing and moves to Done as soon as they finish.
+
+- **Safer agent loops.** Every helper now stops after a bounded number of steps
+  (25 for Sovra and specialists, 10 for team members; previously 100). A tool
+  that fails three times in a row is switched off for the rest of the reply. A
+  helper that repeats the same call with the same details a fourth time is told
+  to change course. Hitting the step limit gives a plain explanation instead of
+  an error. See `docs/agent-loop.md`.
+
 ## [0.3.0] — 2026-11-12
 
 - **Signup asks for your name.** A new account needs the name you type. Email

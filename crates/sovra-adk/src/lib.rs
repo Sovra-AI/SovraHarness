@@ -31,6 +31,7 @@ mod team;
 mod terminal;
 mod text_tool_calls;
 mod web_search;
+mod work_log;
 mod working_context;
 
 pub use artifacts::ArtifactSaver;
@@ -800,9 +801,15 @@ impl AdkHarness {
         let mut response_model = Some(self.response_model.clone());
         let mut code_activity = code_activity::CodeActivity::default();
         let started = std::time::Instant::now();
+        // The log attaches to the reply being written, so its id only needs to
+        // name the conversation.
+        let mut work = work_log::WorkTracker::new(format!("work-{session_id}"), started);
         while let Some(item) = stream.next().await {
             match item {
                 Ok(adk_event) => {
+                    if work.observe(&adk_event) && !work.send(session_id, events).await {
+                        return;
+                    }
                     let delta = deltas.push(&adk_event);
                     code_activity.push(session_id, &delta, events).await;
                     if !forward_adk_event(session_id, &delta, &mut response_model, started, events)
@@ -814,8 +821,14 @@ impl AdkHarness {
                 Err(err) => {
                     let message = self.safe_error(&err);
                     tracing::warn!(%session_id, %message, "ADK stream error");
+                    if !work.is_empty() {
+                        work.finish(false);
+                        work.send(session_id, events).await;
+                    }
                     let message = if err.is_model() && err.is_unauthorized() {
                         rejected_key_message(&self.response_model.provider)
+                    } else if sovra_core::work::is_step_limit_error(&err.to_string()) {
+                        sovra_core::work::STEP_LIMIT_MESSAGE.to_owned()
                     } else {
                         message
                     };
@@ -828,6 +841,10 @@ impl AdkHarness {
                     return;
                 }
             }
+        }
+        if !work.is_empty() {
+            work.finish(true);
+            work.send(session_id, events).await;
         }
         if let Some(saver) = &self.artifact_saver {
             code_activity

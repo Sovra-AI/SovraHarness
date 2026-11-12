@@ -262,3 +262,156 @@ async fn a_helper_never_moves_safe_reads_ahead_of_ordered_tools() {
         ["search_saved_details", "read_attachment"]
     );
 }
+
+/// The live work log shows the parent asking a helper, and the helper's own tool
+/// calls in that helper's lane, without those calls entering the parent history.
+#[tokio::test]
+async fn the_work_log_shows_a_helpers_own_steps_in_its_lane() {
+    let calls = Arc::new(std::sync::Mutex::new(vec![]));
+    let tools: Vec<Arc<dyn adk_core::Tool>> = ["search_saved_details", "read_attachment"]
+        .into_iter()
+        .map(|name| {
+            Arc::new(OrderedTool {
+                name,
+                concurrent: false,
+                calls: calls.clone(),
+            }) as Arc<dyn adk_core::Tool>
+        })
+        .collect();
+    let harness = AdkHarness::with_llm_and_tools(
+        &sovra_core::AgentConfig::default(),
+        Arc::new(OrderedModel),
+        tools,
+    )
+    .unwrap();
+    let (events, received) = async_channel::unbounded();
+    harness
+        .run_prompt("work-log", "Check these sources.", &events)
+        .await;
+    let logs: Vec<sovra_core::work::WorkActivity> = std::iter::from_fn(|| received.try_recv().ok())
+        .filter_map(|event| match event {
+            sovra_core::Event::AgUi {
+                event:
+                    sovra_core::AgUiEvent::ActivitySnapshot {
+                        activity: sovra_core::LiveActivity::Work(work),
+                        ..
+                    },
+                ..
+            } => Some(work),
+            _ => None,
+        })
+        .collect();
+    let last = logs.last().expect("a turn that used tools shows its work");
+    assert!(last.finished && !last.stopped, "{last:?}");
+    let labels: Vec<(&str, &str)> = last
+        .steps
+        .iter()
+        .map(|step| (step.helper.as_str(), step.label.as_str()))
+        .collect();
+    assert_eq!(labels[0].0, "", "Sovra asks the helper");
+    assert!(labels[0].1.starts_with("Asking the Coding"), "{labels:?}");
+    let lane = &last.helpers[0];
+    assert_eq!(lane.id, last.steps[0].id, "the lane is the request");
+    assert_eq!(lane.steps, 2, "{last:?}");
+    assert!(
+        last.steps[1..]
+            .iter()
+            .all(|step| step.helper == lane.id && step.state == sovra_core::work::StepState::Done),
+        "{labels:?}"
+    );
+    assert!(
+        logs.iter().any(|log| log
+            .helpers
+            .first()
+            .and_then(|h| h.doing.as_deref())
+            .is_some()),
+        "while working, the lane says what the helper is doing"
+    );
+}
+
+/// Never stops asking the same helper the same thing.
+struct LoopingModel {
+    helper_runs: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Llm for LoopingModel {
+    fn name(&self) -> &'static str {
+        "looping-parent"
+    }
+    async fn generate_content(
+        &self,
+        request: LlmRequest,
+        _: bool,
+    ) -> adk_core::Result<LlmResponseStream> {
+        let part = if request.tools.contains_key("CodingAgent") {
+            let turn = request.contents.len();
+            Part::FunctionCall {
+                name: "CodingAgent".into(),
+                args: serde_json::json!({"request": "Check it again"}),
+                id: Some(format!("again-{turn}")),
+                thought_signature: None,
+            }
+        } else {
+            self.helper_runs.fetch_add(1, Ordering::SeqCst);
+            Part::Text {
+                text: "Same as before.".into(),
+            }
+        };
+        let response = LlmResponse::new(Content {
+            role: "model".into(),
+            parts: vec![part],
+        });
+        Ok(Box::pin(futures::stream::once(async move { Ok(response) })))
+    }
+}
+
+#[tokio::test]
+async fn a_looping_agent_is_refused_repeats_then_stopped_with_plain_words() {
+    let helper_runs = Arc::new(AtomicUsize::new(0));
+    let harness = AdkHarness::with_llm_and_tools(
+        &sovra_core::AgentConfig::default(),
+        Arc::new(LoopingModel {
+            helper_runs: helper_runs.clone(),
+        }),
+        vec![],
+    )
+    .unwrap();
+    let (events, received) = async_channel::unbounded();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        harness.run_prompt("looping", "Check it.", &events),
+    )
+    .await
+    .expect("the step cap ends the loop");
+    let output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+    assert_eq!(
+        helper_runs.load(Ordering::SeqCst),
+        sovra_core::work::REPEAT_LIMIT as usize,
+        "identical requests past the limit never reach the helper"
+    );
+    assert!(
+        output.iter().any(|event| matches!(event,
+            sovra_core::Event::AgentError { message, .. }
+                if message == sovra_core::work::STEP_LIMIT_MESSAGE)),
+        "{output:?}"
+    );
+    let stopped = output.iter().rev().find_map(|event| match event {
+        sovra_core::Event::AgUi {
+            event:
+                sovra_core::AgUiEvent::ActivitySnapshot {
+                    activity: sovra_core::LiveActivity::Work(work),
+                    ..
+                },
+            ..
+        } => Some(work),
+        _ => None,
+    });
+    let stopped = stopped.expect("the log is closed");
+    assert!(stopped.finished && stopped.stopped);
+    assert!(
+        stopped.status.starts_with("Stopped after"),
+        "{}",
+        stopped.status
+    );
+}
