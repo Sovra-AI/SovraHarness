@@ -746,3 +746,94 @@ fn framework_project_opens_approval_chat_and_selects_source_files(cx: &mut TestA
     .unwrap();
     assert!(drain(&commands).iter().any(|command| matches!(command, Command::Artifacts(ArtifactCommand::RunProject { id, session_id }) if id == "react" && !session_id.is_empty())));
 }
+
+#[gpui_kit::test]
+fn a_saved_web_page_card_opens_the_browser_and_shows_where(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 820.);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("Make me a counter page", window, cx);
+        });
+    })
+    .unwrap();
+    let session = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    for event in [
+        Event::AgentResponseStarted {
+            session_id: session.clone(),
+            model: sovra_core::ResponseModel {
+                model_id: "m".into(),
+                name: "Model".into(),
+                provider: "Test".into(),
+            },
+        },
+        Event::AgentChunk {
+            session_id: session.clone(),
+            text: "Here is your counter page.".into(),
+        },
+        Event::AgentCompleted {
+            session_id: session.clone(),
+        },
+        Event::AgUiSurface {
+            session_id: session.clone(),
+            widget: AgUiWidget::ArtifactSaved {
+                artifact_id: "page-counter".into(),
+                title: "Counter".into(),
+                artifact_kind: ArtifactKind::Webpage,
+            },
+        },
+    ] {
+        events.send_blocking(event).unwrap();
+    }
+    settle(cx);
+    drain(&commands);
+    let index = shell.read_with(cx, |shell, _| {
+        shell
+            .workspace()
+            .messages
+            .iter()
+            .enumerate()
+            .find_map(|(message_index, message)| {
+                message
+                    .widgets
+                    .iter()
+                    .position(|widget| matches!(widget, AgUiWidget::ArtifactSaved { .. }))
+                    .map(|widget_index| message_index * 10 + widget_index)
+            })
+            .expect("web page card on a chat message")
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("artifact-saved-browser", index)).label(),
+            Some("Open in browser")
+        );
+        assert!(window.try_find(("artifact-saved-address", index)).is_none());
+        window.click(("artifact-saved-browser", index), cx);
+    })
+    .unwrap();
+    assert!(
+        drain(&commands).iter().any(|command| matches!(
+            command,
+            Command::Artifacts(ArtifactCommand::Open { id }) if id == "page-counter"
+        )),
+        "the main button opens the page in the browser"
+    );
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Deployed {
+            id: "page-counter".into(),
+            url: "http://127.0.0.1:24680/".into(),
+        }))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find(("artifact-saved-address", index)).visible());
+        assert!(window.find(("artifact-saved-copy-link", index)).visible());
+        assert_eq!(
+            shell.read(cx).workspace().active_tab,
+            NavTab::Chat,
+            "opening the page keeps the person in chat"
+        );
+    })
+    .unwrap();
+}

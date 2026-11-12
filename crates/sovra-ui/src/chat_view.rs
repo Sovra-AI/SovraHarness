@@ -1150,7 +1150,12 @@ fn render_assistant_segment(
                 .iter()
                 .enumerate()
                 .map(|(widget_index, widget)| {
-                    render_agui_widget(widget, index * 10 + widget_index, cx)
+                    render_agui_widget(
+                        widget,
+                        index * 10 + widget_index,
+                        &state.artifacts.deployments,
+                        cx,
+                    )
                 }),
         );
         if streaming && answering {

@@ -199,6 +199,66 @@ fn artifacts_save_edit_export_open_and_delete() {
 }
 
 #[test]
+fn running_and_opening_a_website_keeps_one_address_that_keeps_answering() {
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let (client, events) = started();
+    client
+        .send(Command::Artifacts(ArtifactCommand::Save(ArtifactDraft {
+            title: "Counter".into(),
+            kind: ArtifactKind::Webpage,
+            language: "html".into(),
+            content: "<!doctype html><title>Counter</title><h1>1 to 10</h1>".into(),
+            source: ArtifactSource::default(),
+        })))
+        .unwrap();
+    let ArtifactEvent::Saved(saved) = next_artifact(&events) else {
+        panic!("saved")
+    };
+    let mut addresses = Vec::new();
+    for command in [
+        ArtifactCommand::Deploy {
+            id: saved.id.clone(),
+        },
+        ArtifactCommand::Deploy {
+            id: saved.id.clone(),
+        },
+        ArtifactCommand::Open {
+            id: saved.id.clone(),
+        },
+    ] {
+        client.send(Command::Artifacts(command)).unwrap();
+        let ArtifactEvent::Deployed { url, .. } = next_artifact(&events) else {
+            panic!("running")
+        };
+        addresses.push(url);
+    }
+    assert!(
+        addresses.windows(2).all(|pair| pair[0] == pair[1]),
+        "one website, one address: {addresses:?}"
+    );
+    let address = addresses[0]
+        .strip_prefix("http://")
+        .unwrap()
+        .trim_end_matches('/')
+        .to_owned();
+    let port = address.rsplit(':').next().unwrap().to_owned();
+    for host in [address.clone(), format!("localhost:{port}")] {
+        let mut stream = TcpStream::connect(&address).expect("the first address still answers");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(stream, "GET / HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{host}: {response}");
+        assert!(response.contains("<title>Counter</title>"));
+    }
+}
+
+#[test]
 fn website_serves_saved_source_and_stops_without_deleting_it() {
     use std::io::{Read as _, Write as _};
     use std::net::TcpStream;

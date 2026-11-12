@@ -94,9 +94,7 @@ impl ArtifactRuntime {
             }
             let mut websites = self.inner.websites.lock().await;
             if websites.len() >= 8 && !websites.contains_key(id) { return Err("Stop a running website before starting another.".into()); }
-            let website = hosting::Website::start_files(files, true).await.map_err(|e| format!("Couldn't start the website: {e}"))?;
-            let url = website.url.clone();
-            if let Some(previous) = websites.insert(id.to_owned(), website) { previous.stop().await; }
+            let url = hosting::host(&mut websites, id, files, true).await.map_err(|e| format!("Couldn't start the website: {e}"))?;
             Ok(ArtifactEvent::Deployed { id: id.to_owned(), url })
         }.await;
         if let Err(error) = tokio::fs::remove_dir_all(&path).await {

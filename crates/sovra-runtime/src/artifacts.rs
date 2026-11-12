@@ -268,17 +268,11 @@ impl ArtifactRuntime {
                 "Stop one of your running websites before starting another.".into(),
             );
         }
-        match hosting::Website::start(content).await {
-            Ok(website) => {
-                let url = website.url.clone();
-                if let Some(previous) = websites.insert(id.to_owned(), website) {
-                    previous.stop().await;
-                }
-                ArtifactEvent::Deployed {
-                    id: id.to_owned(),
-                    url,
-                }
-            }
+        match hosting::host(&mut websites, id, hosting::page(content), false).await {
+            Ok(url) => ArtifactEvent::Deployed {
+                id: id.to_owned(),
+                url,
+            },
             Err(error) => {
                 tracing::warn!(%error, "failed to start artifact website");
                 ArtifactEvent::Error("Sovra couldn't start this website. Try again.".into())

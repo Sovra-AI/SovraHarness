@@ -47,6 +47,19 @@ pub(crate) fn render(
             design::button("code-open-saved", "Open saved work", cx)
                 .on_click(cx.listener(move |shell, _, _, cx| shell.open_artifact(&id, cx))),
         );
+        if artifact.kind.info().opens_in_browser {
+            let id = artifact.id.clone();
+            actions = actions.child(
+                design::primary_button("code-open-browser", "Open in browser", cx).on_click(
+                    move |_, _, cx| {
+                        let _ = cx
+                            .global::<RuntimeClient>()
+                            .0
+                            .send(Command::Artifacts(ArtifactCommand::Open { id: id.clone() }));
+                    },
+                ),
+            );
+        }
         if artifact.kind == ArtifactKind::Webpage {
             let id = artifact.id.clone();
             actions = actions.child(

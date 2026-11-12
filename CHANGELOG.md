@@ -17,6 +17,17 @@ move them under a version heading when the tag is cut.
   before `@`. Starting or joining a group still asks for the name people in
   the group see, and still does not need this login.
 
+- **Opening a website Sovra made now works, and its address stays the same.**
+  A saved web page's card in chat now says **Open in browser** (with **See in
+  Artifacts** beside it), and the code panel has the same button, so Open no
+  longer just switches tabs. Once it is open, the card shows "Open in your
+  browser at …" with **Copy link**, in case the browser opened behind other
+  windows. Each saved website keeps one address: opening it again or pressing
+  **Run website** swaps in the newest version at the same address instead of
+  moving it to a new port, and the same website asks for the same port after
+  Sovra restarts. `localhost:PORT` now works as well as `127.0.0.1:PORT`;
+  any other name is still refused.
+
 - **Phone remote control for the future mobile app.** `/remote-control` opens a
   pairing card and enables a dedicated encrypted connection without an AI model.
   Phones pair once and remain remembered; every desktop restart leaves access

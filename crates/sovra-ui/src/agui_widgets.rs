@@ -5,7 +5,9 @@
 //! by `adk-ui`.
 
 use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a small subset
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, Sizable as _, button::ButtonVariants as _, h_flex, v_flex,
+};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
@@ -18,6 +20,7 @@ use crate::shell::Shell;
 pub(crate) fn render_agui_widget(
     widget: &AgUiWidget,
     index: usize,
+    deployments: &std::collections::BTreeMap<String, String>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     match widget {
@@ -52,7 +55,9 @@ pub(crate) fn render_agui_widget(
             title,
             artifact_kind,
         } => {
-            render_artifact_saved(artifact_id, title, *artifact_kind, index, cx).into_any_element()
+            let running = deployments.get(artifact_id).map(String::as_str);
+            render_artifact_saved(artifact_id, title, *artifact_kind, running, index, cx)
+                .into_any_element()
         }
     }
 }
@@ -414,11 +419,41 @@ fn render_artifact_saved(
     artifact_id: &str,
     title: &str,
     kind: sovra_core::artifacts::ArtifactKind,
+    running: Option<&str>,
     index: usize,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let id = artifact_id.to_owned();
+    // Shown once the page is open, so the person sees where it is even when the
+    // browser opened behind other windows.
+    let address = running.map(|url| {
+        let copy = url.to_owned();
+        h_flex()
+            .id(("artifact-saved-address", index))
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .gap(t.space.compact)
+            .child(
+                div()
+                    .min_w_0()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(t.text_secondary)
+                    .child(format!("Open in your browser at {url}")),
+            )
+            .child(
+                design::button(("artifact-saved-copy-link", index), "Copy link", cx)
+                    .small()
+                    .ghost()
+                    .icon(Icon::new(IconName::Copy))
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(copy.clone()));
+                    }),
+            )
+    });
     h_flex()
         .id(("artifact-saved", index))
         .test_support()
@@ -445,13 +480,46 @@ fn render_artifact_saved(
                         .sovra_text(TextRole::Caption, cx)
                         .text_color(t.text_secondary)
                         .child(format!("{} saved to Artifacts", kind.label())),
-                ),
+                )
+                .children(address),
         )
-        .child(
+        .child(if kind.info().opens_in_browser {
+            // A web page is meant to be seen in the browser, so that is the main button.
+            let open_id = id.clone();
+            h_flex()
+                .flex_wrap()
+                .gap(t.space.compact)
+                .child(
+                    design::primary_button(
+                        ("artifact-saved-browser", index),
+                        "Open in browser",
+                        cx,
+                    )
+                    .small()
+                    .icon(Icon::new(IconName::ExternalLink))
+                    .on_click(move |_, _, cx| {
+                        let _ = cx.global::<crate::RuntimeClient>().0.send(
+                            sovra_core::Command::Artifacts(
+                                sovra_core::artifacts::ArtifactCommand::Open {
+                                    id: open_id.clone(),
+                                },
+                            ),
+                        );
+                    }),
+                )
+                .child(
+                    design::button(("artifact-saved-open", index), "See in Artifacts", cx)
+                        .small()
+                        .ghost()
+                        .on_click(cx.listener(move |shell, _, _, cx| shell.open_artifact(&id, cx))),
+                )
+                .into_any_element()
+        } else {
             design::button(("artifact-saved-open", index), "Open", cx)
                 .small()
-                .on_click(cx.listener(move |shell, _, _, cx| shell.open_artifact(&id, cx))),
-        )
+                .on_click(cx.listener(move |shell, _, _, cx| shell.open_artifact(&id, cx)))
+                .into_any_element()
+        })
 }
 
 fn render_build_progress(
