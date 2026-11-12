@@ -15,6 +15,7 @@ mod connections_view;
 pub mod design;
 mod development_view;
 mod file_index_view;
+mod github_card;
 mod google_card;
 mod groups_view;
 mod inspector;

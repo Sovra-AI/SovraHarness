@@ -17,6 +17,7 @@ directories = { workspace = true }
 getrandom = { workspace = true }
 sovra-core = { workspace = true }
 sovra-files = { workspace = true }
+sovra-github = { workspace = true }
 sovra-google = { workspace = true }
 sovra-mesh = { workspace = true }
 sovra-providers = { workspace = true }

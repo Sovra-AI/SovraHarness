@@ -328,7 +328,7 @@ impl Skill {
             ),
             "github" => sample_pair(
                 "github",
-                "Summarize the latest changes and open issues in this repository",
+                "Are there any pull requests on GitHub waiting for my review?",
             ),
             _ => {
                 let sample = if self.argument_hint.is_empty() {

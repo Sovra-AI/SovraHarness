@@ -106,6 +106,7 @@ flowchart TB
     files["sovra-files"]
     skills["sovra-skills"]
     google["sovra-google"]
+    github["sovra-github"]
     providers["sovra-providers"]
     store["sovra-store-surreal"]
     wa["sovra-whatsapp"]
@@ -116,6 +117,7 @@ flowchart TB
   app --> runtime
   app --> files
   app --> google
+  app --> github
   app --> providers
   app --> skills
   app --> store
@@ -131,6 +133,7 @@ flowchart TB
   files --> core
   skills --> core
   google --> core
+  github --> core
   providers --> core
   store --> core
   wa --> core
@@ -204,6 +207,7 @@ sequenceDiagram
 | [MCP servers](docs/connected-services.md) | Extra tools from a URL, a local program, or paste |
 | [Messaging](docs/communications.md) | WhatsApp, Telegram, sending from desktop chat |
 | [Google](docs/google.md) | Connect Google, per-service switches |
+| [GitHub](docs/github.md) | Connect GitHub, what the GitHub helper can do |
 | [Terminal](docs/terminal.md) | Allow-once commands on this computer |
 | [Teams and artifacts](docs/teams-and-artifacts.md) | Helpers in chat, saveable work |
 | [Styling](docs/styling.md) | Native design system and responsive layout |

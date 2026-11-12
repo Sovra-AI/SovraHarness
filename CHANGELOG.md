@@ -53,6 +53,21 @@ move them under a version heading when the tag is cut.
   offered again if you unlink and connect once more. Message text from old
   chats is still not downloaded.
 
+- **Connect GitHub.** Connections has a new **GitHub** card with one **Connect
+  GitHub** button. GitHub's own page opens with a short code that Sovra has
+  already copied; paste it, press **Authorize**, and the card says
+  **Connected** by itself. Copies without a GitHub app (and anyone who prefers
+  it) get three plain steps instead: **Open GitHub** opens the key page already
+  filled in, then paste the key and press **Connect**. Once connected, the
+  **GitHub helper** can list your projects, search issues and pull requests,
+  read an issue with its comments, read a pull request's changes and whether its
+  checks passed, and read any file or folder. It only opens an issue or adds a
+  comment when you ask, and it never merges, pushes or deletes. Disconnect asks
+  once more and links to GitHub's settings. New `sovra-github` adapter crate;
+  the keychain port `SecretVault` moved to `sovra-core` and is shared with
+  Google. Builds bake the public app id from `SOVRA_GITHUB_CLIENT_ID` or the
+  gitignored `github-client.env` (see `docs/github.md`).
+
 - **Groups, rebuilt so anyone can use it.** Groups moved out of Settings into
   its own sidebar tab, **Groups** (translated in every Settings language);
   Settings keeps an **Open Groups** card. The page now opens with **What is a

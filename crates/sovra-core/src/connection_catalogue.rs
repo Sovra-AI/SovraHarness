@@ -1,8 +1,8 @@
 //! The Connections page: one closed list of the links this app ships.
 //!
 //! A new kind is one [`CatalogueKind`] variant plus one row in [`KINDS`]. It does not
-//! add a sidebar item or a Settings section. Microsoft and GitHub are known and
-//! deliberately unavailable, so they are never shown as linked. Each card's status
+//! add a sidebar item or a Settings section. Microsoft is known and deliberately
+//! unavailable, so it is never shown as linked. Each card's status
 //! is independent: folding one kind cannot change another.
 //!
 //! The first screen is everyday words only. A token, secret, client id, or base URL
@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 
 use crate::connections::{TelegramStatus, WhatsAppStatus};
+use crate::github::GitHubState;
 use crate::google::GoogleState;
 use crate::mcp::{McpPhase, McpService};
 use crate::models::{CatalogState, ModelConnection, ProviderKind};
@@ -35,17 +36,19 @@ pub enum CatalogueKind {
     WhatsApp,
     Telegram,
     Google,
+    GitHub,
     WebAddress,
 }
 
 impl CatalogueKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::OnlineAi,
         Self::LocalAi,
         Self::CompatibleService,
         Self::WhatsApp,
         Self::Telegram,
         Self::Google,
+        Self::GitHub,
         Self::WebAddress,
     ];
 
@@ -57,6 +60,7 @@ impl CatalogueKind {
             Self::WhatsApp => "whatsapp",
             Self::Telegram => "telegram",
             Self::Google => "google",
+            Self::GitHub => "github",
             Self::WebAddress => "web-address",
         }
     }
@@ -66,16 +70,14 @@ impl CatalogueKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnavailableKind {
     Microsoft,
-    GitHub,
 }
 
 impl UnavailableKind {
-    pub const ALL: [Self; 2] = [Self::Microsoft, Self::GitHub];
+    pub const ALL: [Self; 1] = [Self::Microsoft];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Microsoft => "Microsoft",
-            Self::GitHub => "GitHub",
         }
     }
 }
@@ -111,7 +113,7 @@ pub struct KindCopy {
 }
 
 /// The closed list. Adding a kind means adding a row here and a variant above.
-pub const KINDS: [KindCopy; 7] = [
+pub const KINDS: [KindCopy; 8] = [
     KindCopy {
         kind: CatalogueKind::OnlineAi,
         title: "An online AI",
@@ -147,6 +149,12 @@ pub const KINDS: [KindCopy; 7] = [
         title: "Google",
         sentence: "Sign in with Google in your browser and choose what Sovra may use.",
         action: "Connect Google",
+    },
+    KindCopy {
+        kind: CatalogueKind::GitHub,
+        title: "GitHub",
+        sentence: "Approve Sovra on GitHub's page and it can help with your code projects there.",
+        action: "Connect GitHub",
     },
     KindCopy {
         kind: CatalogueKind::WebAddress,
@@ -232,10 +240,10 @@ pub fn first_screen_asks_for_secret(text: &str) -> bool {
         .any(|word| lower.contains(word))
 }
 
-/// Microsoft and GitHub stay unavailable. There is no path that marks them linked.
+/// Microsoft stays unavailable. There is no path that marks it linked.
 pub const fn unavailable_phase(kind: UnavailableKind) -> LinkPhase {
     match kind {
-        UnavailableKind::Microsoft | UnavailableKind::GitHub => LinkPhase::NotLinked,
+        UnavailableKind::Microsoft => LinkPhase::NotLinked,
     }
 }
 
@@ -247,6 +255,7 @@ pub struct CatalogueSources<'a> {
     pub whatsapp: &'a WhatsAppStatus,
     pub telegram: &'a TelegramStatus,
     pub google: &'a GoogleState,
+    pub github: &'a GitHubState,
     pub services: &'a [McpService],
     /// A probe result replaces only that kind's derived phase.
     pub probed: &'a BTreeMap<CatalogueKind, LinkPhase>,
@@ -279,6 +288,7 @@ pub fn catalogue_from(sources: &CatalogueSources<'_>) -> ConnectionCatalogue {
         (CatalogueKind::WhatsApp, whatsapp_phase(sources.whatsapp)),
         (CatalogueKind::Telegram, telegram_phase(sources.telegram)),
         (CatalogueKind::Google, google_phase(sources.google)),
+        (CatalogueKind::GitHub, github_phase(sources.github)),
         (CatalogueKind::WebAddress, web_phase(sources.services)),
     ];
     for (kind, phase) in derived {
@@ -358,6 +368,17 @@ pub fn google_phase(state: &GoogleState) -> LinkPhase {
     }
 }
 
+pub fn github_phase(state: &GitHubState) -> LinkPhase {
+    match state {
+        GitHubState::Loading | GitHubState::Connecting { .. } | GitHubState::CheckingKey => {
+            LinkPhase::Working
+        }
+        GitHubState::NeedsSignIn(_) => LinkPhase::NeedsYou,
+        GitHubState::NotConnected => LinkPhase::NotLinked,
+        GitHubState::Connected(_) => LinkPhase::Linked,
+    }
+}
+
 pub fn web_phase(services: &[McpService]) -> LinkPhase {
     if services.is_empty() {
         return LinkPhase::NotLinked;
@@ -424,6 +445,7 @@ mod tests {
             whatsapp,
             telegram,
             google,
+            github: &GitHubState::NotConnected,
             services,
             probed,
         }
@@ -460,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn microsoft_and_github_are_never_linked_or_listed() {
+    fn microsoft_is_never_linked_or_listed() {
         let catalogue = ConnectionCatalogue::fresh();
         let listed = catalogue.first_screen_copy().to_ascii_lowercase();
         for kind in UnavailableKind::ALL {
@@ -470,6 +492,41 @@ mod tests {
                 !listed.contains(&kind.label().to_ascii_lowercase()),
                 "{} must stay off the first screen",
                 kind.label()
+            );
+        }
+    }
+
+    #[test]
+    fn github_card_follows_the_github_connection() {
+        let account = crate::github::GitHubAccount {
+            login: "octocat".into(),
+            name: String::new(),
+        };
+        for (state, phase) in [
+            (GitHubState::Loading, LinkPhase::Working),
+            (GitHubState::NotConnected, LinkPhase::NotLinked),
+            (GitHubState::CheckingKey, LinkPhase::Working),
+            (GitHubState::Connected(account.clone()), LinkPhase::Linked),
+            (GitHubState::NeedsSignIn(account), LinkPhase::NeedsYou),
+        ] {
+            let catalogue = catalogue_from(&CatalogueSources {
+                connections: &[],
+                catalogs: &BTreeMap::new(),
+                whatsapp: &WhatsAppStatus::Disconnected,
+                telegram: &TelegramStatus::Disconnected,
+                google: &GoogleState::NotConnected,
+                github: &state,
+                services: &[],
+                probed: &BTreeMap::new(),
+            });
+            assert_eq!(
+                catalogue.card(CatalogueKind::GitHub).phase,
+                phase,
+                "{state:?}"
+            );
+            assert_eq!(
+                catalogue.card(CatalogueKind::Google).phase,
+                LinkPhase::NotLinked
             );
         }
     }
@@ -543,6 +600,10 @@ mod tests {
         );
         assert_eq!(
             catalogue.card(CatalogueKind::CompatibleService).phase,
+            LinkPhase::NotLinked
+        );
+        assert_eq!(
+            catalogue.card(CatalogueKind::GitHub).phase,
             LinkPhase::NotLinked
         );
 

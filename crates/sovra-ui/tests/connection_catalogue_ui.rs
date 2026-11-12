@@ -33,6 +33,7 @@ fn fresh_sources<'a>(
         whatsapp,
         telegram,
         google,
+        github: &sovra_core::github::GitHubState::NotConnected,
         services,
         probed,
     }
@@ -108,7 +109,6 @@ fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppCo
                 "mcp-service-address",
                 "connection-url",
                 "connection-card-microsoft",
-                "connection-card-github",
             ] {
                 assert!(
                     window.try_find(id).is_none(),

@@ -6,7 +6,7 @@ Design, scopes and sources: `docs/google.md`.
 - Desktop OAuth only: system browser, single-use `127.0.0.1` listener on a random port,
   PKCE S256 and a fresh `state` per attempt. Never embed a webview or use OOB/device flow.
 - Tokens never leave this crate: no core type, event, log line or error carries them.
-  The refresh token lives only in the `SecretVault` the composition root supplies
+  The refresh token lives only in the `SecretVault` (`sovra_core::secrets`) the composition root supplies
   (OS keychain; `SOVRA_DEV` debug builds use the dev file store).
 - Runtime owns blocking calls (`restore`, `begin_sign_in`, `wait`, `save`, `forget`).
   No tokio, no threads, no sleeps here; cancellation wakes the listener by connecting to it.

@@ -30,11 +30,8 @@ pub const VAULT_KEY: &str = "connection.google";
 pub const CLIENT_VAULT_KEY: &str = "connection.google.client";
 
 /// Secret storage supplied by the composition root (OS keychain in release).
-pub trait SecretVault: Send + Sync {
-    fn get(&self, key: &str) -> Result<Option<String>, String>;
-    fn set(&self, key: &str, secret: &str) -> Result<(), String>;
-    fn delete(&self, key: &str) -> Result<(), String>;
-}
+/// Shared with the GitHub adapter through `sovra-core`.
+pub use sovra_core::secrets::SecretVault;
 
 /// This build's Google Cloud "Desktop app" OAuth client. Google documents the
 /// installed-app secret as not confidential, so it may ship in the binary.

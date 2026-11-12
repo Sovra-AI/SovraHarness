@@ -27,6 +27,7 @@ Map of the top-level guides for SovraHarness. Start at the
 | [MCP servers](connected-services.md) | Extra tools from a URL, a local program, or pasted setup |
 | [Messaging](communications.md) | WhatsApp, Telegram, and sending from desktop chat |
 | [Google](google.md) | One-button Google connect and per-service switches |
+| [GitHub](github.md) | One-button GitHub connect (or a pasted key) and the GitHub helper's tools |
 | [Terminal](terminal.md) | Approved commands on this computer |
 | [Teams and artifacts](teams-and-artifacts.md) | Helpers in chat and saveable work |
 | [Styling](styling.md) | Native design system and responsive layout |

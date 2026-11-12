@@ -33,6 +33,7 @@ impl RuntimeStatus {
             | Event::Teams(_)
             | Event::Artifacts(_)
             | Event::Google(_)
+            | Event::GitHub(_)
             | Event::Schedule(_)
             | Event::Group(_)
             | Event::AgUi { .. }

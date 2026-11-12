@@ -1,4 +1,4 @@
-//! The Google card on the Connections tab, end to end through the shell with a scripted runtime.
+//! The Google and GitHub cards on the Connections tab, end to end through the shell with a scripted runtime.
 
 use std::collections::BTreeSet;
 
@@ -8,6 +8,7 @@ use gpui_kit::{
     App, AppContext as _, Entity, ScrollDelta, TestAppContext, Window, WindowHandle, point, px,
     size,
 };
+use sovra_core::github::{GitHubAccount, GitHubCommand, GitHubEvent, GitHubKey, GitHubState};
 use sovra_core::google::{
     DESKTOP_CLIENT_NEEDED, GOOGLE_NOT_INCLUDED, GoogleAccount, GoogleCommand, GoogleEvent,
     GoogleService, GoogleState,
@@ -383,4 +384,178 @@ fn reveal(window: &mut Window, id: &'static str, cx: &mut App) {
         );
     }
     panic!("{id} must be reachable in Connections");
+}
+
+fn github(
+    events: &async_channel::Sender<Event>,
+    state: GitHubState,
+    device_sign_in: bool,
+    cx: &mut TestAppContext,
+) {
+    events
+        .send_blocking(Event::GitHub(GitHubEvent::Changed {
+            state,
+            device_sign_in,
+        }))
+        .expect("headless test fixture is available");
+    settle(cx);
+}
+
+fn github_commands(commands: &async_channel::Receiver<Command>) -> Vec<GitHubCommand> {
+    std::iter::from_fn(|| commands.try_recv().ok())
+        .filter_map(|command| match command {
+            Command::GitHub(command) => Some(command),
+            _ => None,
+        })
+        .collect()
+}
+
+fn octocat() -> GitHubAccount {
+    GitHubAccount {
+        login: "octocat".into(),
+        name: "Mona Lisa".into(),
+    }
+}
+
+#[gpui_kit::test]
+fn github_connects_with_one_button_and_shows_the_code(cx: &mut TestAppContext) {
+    let (window, _shell, commands, events) = open(cx, 1100., 2400.);
+    github(&events, GitHubState::NotConnected, true, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        reveal(window, "connection-action-github", cx);
+        window.click("connection-action-github", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("github-connect").label(),
+            Some("Connect GitHub")
+        );
+        window.click("github-connect", cx);
+    })
+    .unwrap();
+    assert_eq!(github_commands(&commands), [GitHubCommand::Connect]);
+
+    github(
+        &events,
+        GitHubState::Connecting {
+            code: "WDJB-MJHT".into(),
+            url: "https://github.com/login/device".into(),
+        },
+        true,
+        cx,
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("github-code").label(),
+            Some("Your code is WDJB-MJHT")
+        );
+        window.click("github-cancel", cx);
+    })
+    .unwrap();
+    assert_eq!(github_commands(&commands), [GitHubCommand::Cancel]);
+
+    github(&events, GitHubState::Connected(octocat()), true, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("github-account").visible());
+        window.click("github-disconnect", cx);
+        window.render_frame(cx);
+        window.click("github-disconnect-yes", cx);
+    })
+    .unwrap();
+    assert_eq!(github_commands(&commands), [GitHubCommand::Disconnect]);
+}
+
+#[gpui_kit::test]
+fn without_github_sign_in_connect_shows_the_key_steps(cx: &mut TestAppContext) {
+    let (window, _shell, commands, events) = open(cx, 1100., 2400.);
+    github(&events, GitHubState::NotConnected, false, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        reveal(window, "connection-action-github", cx);
+        window.click("connection-action-github", cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("github-use-key").is_none(),
+            "one way in, so no second button"
+        );
+        window.click("github-connect", cx);
+        window.render_frame(cx);
+        assert!(window.find("github-key-steps").visible());
+        assert_eq!(window.find("github-use-key-connect").disabled(), Some(true));
+        reveal(window, "github-key", cx);
+        window.click("github-key", cx);
+        window.input("  ghp_example  ", cx);
+        window.render_frame(cx);
+        reveal(window, "github-use-key-connect", cx);
+        window.click("github-use-key-connect", cx);
+    })
+    .unwrap();
+    assert_eq!(
+        github_commands(&commands),
+        [GitHubCommand::UseKey(
+            GitHubKey::new("ghp_example").expect("key")
+        )]
+    );
+}
+
+#[gpui_kit::test]
+fn github_card_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+        let (window, _shell, _commands, events) = open(cx, width, height);
+        cx.update(|cx| design::set_interface_scale(InterfaceScale::from_percent(scale), cx));
+        github(
+            &events,
+            GitHubState::Connecting {
+                code: "WDJB-MJHT".into(),
+                url: "https://github.com/login/device".into(),
+            },
+            true,
+            cx,
+        );
+        cx.update_window(window.into(), |_, window, cx| {
+            window.click("nav-connections", cx);
+            window.render_frame(cx);
+            reveal(window, "connection-action-github", cx);
+            window.click("connection-action-github", cx);
+            window.render_frame(cx);
+            let at = format!("{width}x{height}@{scale}");
+            let page = window.find("connections-page").bounds();
+            let card = window.find("github-card").bounds();
+            assert!(
+                card.left() >= page.left() && card.right() <= page.right(),
+                "{at}: card"
+            );
+            for id in ["github-status", "github-code", "github-cancel"] {
+                let element = window.find(id).bounds();
+                assert!(element.right() <= card.right(), "{at}: {id} overflows");
+            }
+            if width > 2000. {
+                let cap = design::tokens(cx)
+                    .layout
+                    .reading_width
+                    .to_pixels(window.rem_size());
+                assert!(card.size.width <= cap, "{at}: the card stays readable");
+            }
+        })
+        .unwrap();
+        github(&events, GitHubState::Connected(octocat()), true, cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let at = format!("{width}x{height}@{scale}");
+            let card = window.find("github-card").bounds();
+            for id in ["github-account", "github-disconnect", "github-notice"] {
+                let element = window.find(id).bounds();
+                assert!(
+                    element.left() >= card.left() && element.right() <= card.right(),
+                    "{at}: {id} overflows"
+                );
+            }
+        })
+        .unwrap();
+        cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
+    }
 }

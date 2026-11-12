@@ -21,6 +21,9 @@ const LAYERS: &[(&str, &[&str])] = &[
     // Google sign-in, keychain-held tokens and Google REST are their own IO boundary
     // behind the core GoogleConnector port; runtime receives it from the composition root.
     ("sovra-google", &["sovra-core"]),
+    // GitHub sign-in (device flow or a pasted key), keychain-held access and GitHub REST
+    // are their own IO boundary behind the core GitHubConnector port, like Google.
+    ("sovra-github", &["sovra-core"]),
     // Provider HTTP, catalog persistence and OS credentials form an IO boundary;
     // core stays pure, and UI receives only protocol data through runtime.
     ("sovra-providers", &["sovra-core"]),
@@ -48,6 +51,7 @@ const LAYERS: &[(&str, &[&str])] = &[
         &[
             "sovra-core",
             "sovra-files",
+            "sovra-github",
             "sovra-google",
             "sovra-mesh",
             "sovra-providers",

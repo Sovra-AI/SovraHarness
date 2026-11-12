@@ -74,6 +74,8 @@ pub struct Shell {
     artifacts_view: Entity<crate::artifacts_view::ArtifactsView>,
     /// The Google card on the Connections tab.
     google_card: Entity<crate::google_card::GoogleCard>,
+    github_card: Entity<crate::github_card::GitHubCard>,
+    _github_try_asking: Subscription,
     /// The conversation, rendered as a cached view: composer cursor blinks, sidebar
     /// and timer updates reuse its last frame instead of laying out every message.
     pub(crate) transcript: Entity<crate::chat_view::Transcript>,
@@ -494,6 +496,20 @@ impl Shell {
                                 cx.notify();
                             });
                         }
+                        // GitHub's page opens with the code already on the clipboard.
+                        if let sovra_core::Event::GitHub(event) = &event {
+                            if let sovra_core::github::GitHubEvent::OpenSignIn { url, code } = event
+                            {
+                                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                                    code.clone(),
+                                ));
+                                cx.open_url(url);
+                            }
+                            shell.models.update(cx, |models, cx| {
+                                models.github.apply(event);
+                                cx.notify();
+                            });
+                        }
                         if matches!(event, sovra_core::Event::Ready { .. }) {
                             // The roster and library feed chat (@mentions, Saved).
                             let client = &cx.global::<RuntimeClient>().0;
@@ -713,6 +729,21 @@ impl Shell {
         models.update(cx, |models, _| {
             models.google_card = Some(google_card.clone());
         });
+        let github_card = {
+            let shell = shell_handle.clone();
+            cx.new(|cx| crate::github_card::GitHubCard::new(shell, window, cx))
+        };
+        models.update(cx, |models, _| {
+            models.github_card = Some(github_card.clone());
+        });
+        let github_try_asking = cx.subscribe_in(
+            &github_card,
+            window,
+            |shell, _, ask: &crate::google_card::TryAsking, window, cx| {
+                shell.select_tab(NavTab::Chat, cx);
+                shell.fill_composer_draft(&ask.prompt, window, cx);
+            },
+        );
         let try_asking = cx.subscribe_in(
             &google_card,
             window,
@@ -780,6 +811,8 @@ impl Shell {
             _team_ask: team_ask,
             _try_asking: try_asking,
             google_card,
+            github_card,
+            _github_try_asking: github_try_asking,
             turn_ticker: None,
             window_title: String::new(),
             transcript: cx.new(|_| crate::chat_view::Transcript::new(shell_handle)),
@@ -804,6 +837,7 @@ impl Shell {
             NavTab::Knowledge => self.memory_view.update(cx, |_, cx| cx.notify()),
             NavTab::Settings | NavTab::Connections => {
                 self.google_card.update(cx, |_, cx| cx.notify());
+                self.github_card.update(cx, |_, cx| cx.notify());
             }
             NavTab::Chat
             | NavTab::MyAis

@@ -1074,6 +1074,7 @@ impl Actor {
             | Event::RemoteControl(_)
             | Event::Development(_)
             | Event::Google(_)
+            | Event::GitHub(_)
             | Event::Mcp(_)
             | Event::Terminal(_)
             | Event::Schedule(_)

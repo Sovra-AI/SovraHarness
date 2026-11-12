@@ -126,6 +126,8 @@ pub struct ModelsView {
     pub(crate) open_kind: Option<sovra_core::CatalogueKind>,
     /// Google status for the catalogue. The shell copies each Google event here.
     pub(crate) google: sovra_core::google::GoogleConnection,
+    /// GitHub status for the catalogue. The shell copies each GitHub event here.
+    pub(crate) github: sovra_core::github::GitHubConnection,
     pub(crate) connection_form: Option<ConnectionForm>,
     pub(crate) manual_form: Option<ManualModelForm>,
     pub(crate) form_subscriptions: Vec<Subscription>,
@@ -150,6 +152,8 @@ pub struct ModelsView {
     pub(crate) terminal: sovra_core::terminal::TerminalState,
     /// The Google card on the Connections tab. The shell owns the view.
     pub(crate) google_card: Option<Entity<crate::google_card::GoogleCard>>,
+    /// The GitHub card on the Connections tab. The shell owns the view.
+    pub(crate) github_card: Option<Entity<crate::github_card::GitHubCard>>,
     pub(crate) services: sovra_core::mcp::McpState,
     pub(crate) service_name: Entity<InputState>,
     pub(crate) service_address: Entity<InputState>,
@@ -336,6 +340,7 @@ impl ModelsView {
             groups_page: false,
             open_kind: None,
             google: sovra_core::google::GoogleConnection::default(),
+            github: sovra_core::github::GitHubConnection::default(),
             connection_form: None,
             manual_form: None,
             form_subscriptions: Vec::new(),
@@ -358,6 +363,7 @@ impl ModelsView {
             remote_forgotten_phone: None,
             terminal: sovra_core::terminal::TerminalState::default(),
             google_card: None,
+            github_card: None,
             services: sovra_core::mcp::McpState::default(),
             service_name,
             service_address,

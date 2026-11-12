@@ -736,6 +736,7 @@ impl ModelsView {
             | CatalogueKind::WhatsApp
             | CatalogueKind::Telegram
             | CatalogueKind::Google
+            | CatalogueKind::GitHub
             | CatalogueKind::WebAddress => {
                 self.connections_page = true;
                 self.settings_open = false;
@@ -774,6 +775,7 @@ impl ModelsView {
             whatsapp: &self.connections.whatsapp,
             telegram: &self.connections.telegram,
             google: &self.google.state,
+            github: &self.github.state,
             services: &self.services.services,
             probed: &self.connections.probed,
         })
@@ -938,6 +940,10 @@ impl ModelsView {
             CatalogueKind::Telegram => self.render_telegram_section(cx).into_any_element(),
             CatalogueKind::Google => self.google_card.clone().map_or_else(
                 || caption("Google is not available in this window.", cx).into_any_element(),
+                |card| div().w_full().min_w_0().child(card).into_any_element(),
+            ),
+            CatalogueKind::GitHub => self.github_card.clone().map_or_else(
+                || caption("GitHub is not available in this window.", cx).into_any_element(),
                 |card| div().w_full().min_w_0().child(card).into_any_element(),
             ),
             CatalogueKind::WebAddress => self.render_service_connect_section(cx).into_any_element(),

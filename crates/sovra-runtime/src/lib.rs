@@ -17,6 +17,7 @@ pub use remote_control::{RemoteConfig, RemoteEndpointFactory, RemoteEndpointFutu
 pub use remote_reference::{RemoteReferenceClient, run_remote_reference};
 mod file_index;
 mod files;
+mod github;
 mod google;
 mod groups;
 mod mcp;
@@ -299,6 +300,7 @@ pub fn start_with_auth(
             messaging,
             signin: google,
             google: None,
+            github: None,
             development: None,
             remote_control: None,
             probes: Vec::new(),
@@ -326,6 +328,8 @@ pub struct RuntimeServices {
     pub signin: Option<sovra_providers::GoogleOAuthConfig>,
     /// The person's Google account (Connections page and agent tools).
     pub google: Option<Arc<dyn sovra_core::google::GoogleConnector>>,
+    /// The person's GitHub account (Connections page and agent tools).
+    pub github: Option<Arc<dyn sovra_core::github::GitHubConnector>>,
     /// Local control follows the build startup policy and remains revocable in Settings.
     pub development: Option<DevelopmentConfig>,
     /// Independently paired phones; always starts disabled.
@@ -351,6 +355,7 @@ impl std::fmt::Debug for RuntimeServices {
         f.debug_struct("RuntimeServices")
             .field("messaging", &self.messaging)
             .field("google", &self.google)
+            .field("github", &self.github)
             .finish_non_exhaustive()
     }
 }
@@ -439,6 +444,7 @@ async fn serve(
         messaging,
         signin,
         google,
+        github,
         development,
         remote_control,
         probes,
@@ -470,6 +476,7 @@ async fn serve(
         &handle,
     );
     let google = google::GoogleRuntime::start(google, events.clone(), &handle);
+    let github = github::GitHubRuntime::start(github, events.clone(), &handle);
     let groups = groups::GroupRuntime::start(group_services, events.clone(), &handle);
     let terminal = terminal::TerminalRuntime::start(terminal, events.clone(), &handle).await;
     let mut file_index = file_index::IndexRuntime::start(
@@ -601,6 +608,7 @@ async fn serve(
     let development = development
         .map(|config| development::DevelopmentRuntime::start(config, events.clone(), &handle));
     google.send(sovra_core::google::GoogleCommand::Load);
+    github.send(sovra_core::github::GitHubCommand::Load);
     let (schedules, events) = schedules::SchedulesRuntime::start(
         schedule_store,
         events,
@@ -703,6 +711,7 @@ async fn serve(
             Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
             Command::Google(command) => google.send(command),
+            Command::GitHub(command) => github.send(command),
             Command::Schedule(command) => schedules.send(command),
             Command::Group(command) => groups.send(command),
             Command::FileIndex(command) => file_index.send(command),
@@ -775,6 +784,8 @@ async fn serve(
                 };
                 let google_tools = google.tools().await;
                 let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
+                let github_tools = github.tools().await;
+                let base = base.with_github(github_tools.as_ref()).unwrap_or(base);
                 let schedule_tools = schedules.tools();
                 let base = base.with_schedules(Some(&schedule_tools)).unwrap_or(base);
                 if let Some(previous) = runs.remove(&session_id) {
@@ -880,6 +891,7 @@ async fn serve(
                     files::FilePrompt {
                         messaging: connections.messaging(&session_id),
                         google: google.tools().await,
+                        github: github.tools().await,
                         terminal: if connections.private_access(&session_id) {
                             terminal.access()
                         } else {
@@ -1048,6 +1060,11 @@ async fn serve(
                 } else {
                     None
                 };
+                let github_tools = if private_access {
+                    github.tools().await
+                } else {
+                    None
+                };
                 let selected = selected.map(|base| {
                     if !private_access {
                         return base;
@@ -1056,6 +1073,7 @@ async fn serve(
                         .with_artifact_saver(artifact_library.saver())
                         .unwrap_or(base);
                     let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
+                    let base = base.with_github(github_tools.as_ref()).unwrap_or(base);
                     let base = match terminal.access() {
                         Some(access) => base.with_terminal(access).unwrap_or(base),
                         None => base,

@@ -224,7 +224,7 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             "GitHubAgent",
             "github",
             "GitHub & Pull Request Specialist",
-            "Repositories, issues, pull requests, code reviews, and CI checks.",
+            "Your GitHub projects, once GitHub is connected in Connections: code, issues, pull requests and whether their checks passed. Opens an issue or adds a comment only when you ask.",
             false,
             ModelTier::Deep,
         ),

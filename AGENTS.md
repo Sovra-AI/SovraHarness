@@ -88,6 +88,8 @@ crates/
   sovra-files     Attachment readers, folder indexing and local file IO.
   sovra-skills    Imported skill packages and bounded YAML parsing.
   sovra-google    Google OAuth and REST behind the core GoogleConnector port.
+  sovra-github    GitHub device-flow sign-in (or a pasted key) and REST behind the core
+                  GitHubConnector port.
   sovra-providers  HTTP catalogs, connection validation, OS credentials and model metadata.
   sovra-runtime   tokio on a background thread; serves the UI over channels (Client).
   sovra-store-surreal  SurrealDB adapter for MemoryStore. The only crate naming surrealdb.

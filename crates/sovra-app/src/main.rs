@@ -108,6 +108,12 @@ fn main() -> anyhow::Result<()> {
         Arc::new(CredentialVault(credential_store(&data_dir))),
     )
     .context("failed to prepare Google connections")?;
+    let github = sovra_github::GitHubAdapter::new(
+        read_github_client_id(),
+        sovra_github::Endpoints::default(),
+        Arc::new(CredentialVault(credential_store(&data_dir))),
+    )
+    .context("failed to prepare GitHub connections")?;
     let client = sovra_runtime::start_with_services(
         VERSION,
         agent_config,
@@ -134,6 +140,7 @@ fn main() -> anyhow::Result<()> {
             // environment, else baked. A separate startup config would disagree.
             signin: None,
             google: Some(Arc::new(google)),
+            github: Some(Arc::new(github)),
             development: Some(development),
             remote_control: remote_services(&data_dir),
             probes: Vec::new(),
@@ -288,6 +295,21 @@ fn read_google_sources() -> sovra_google::ClientSources {
     }
 }
 
+/// The public client id of Sovra's GitHub OAuth App (device flow on). The
+/// environment overrides a value baked in at compile time (`SOVRA_GITHUB_CLIENT_ID`).
+/// Without one, Connect GitHub walks the person through pasting a key instead.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sovra-app is the composition root and reads process environment variables once at startup"
+)]
+fn read_github_client_id() -> Option<String> {
+    std::env::var("SOVRA_GITHUB_CLIENT_ID")
+        .ok()
+        .or_else(|| option_env!("SOVRA_GITHUB_CLIENT_ID").map(str::to_owned))
+        .map(|id| id.trim().to_owned())
+        .filter(|id| !id.is_empty())
+}
+
 fn client_config(id: Option<String>, secret: Option<String>) -> Option<sovra_google::ClientConfig> {
     let client_id = id
         .map(|value| value.trim().to_owned())
@@ -301,10 +323,10 @@ fn client_config(id: Option<String>, secret: Option<String>) -> Option<sovra_goo
     })
 }
 
-/// The Google sign-in shares the model keys' store (keychain, or dev files).
+/// Google and GitHub sign-ins share the model keys' store (keychain, or dev files).
 struct CredentialVault(Arc<dyn sovra_providers::CredentialStore>);
 
-impl sovra_google::SecretVault for CredentialVault {
+impl sovra_core::secrets::SecretVault for CredentialVault {
     fn get(&self, key: &str) -> Result<Option<String>, String> {
         self.0
             .get(key)

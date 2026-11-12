@@ -267,6 +267,7 @@ fn shown_phase(state: &ConnectionsState, kind: CatalogueKind) -> LinkPhase {
         whatsapp: &state.whatsapp,
         telegram: &state.telegram,
         google: &google,
+        github: &sovra_core::github::GitHubState::NotConnected,
         services: &[] as &[McpService],
         probed: &state.probed,
     })
