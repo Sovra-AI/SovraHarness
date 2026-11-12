@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{IndexError, IndexPassage, IndexQuery};
+use super::{FileIndex, IndexError, IndexPassage, IndexQuery};
 pub use crate::models::ModelDestination as EmbeddingTarget;
 
 pub const EMBEDDING_BATCH: usize = 8;
@@ -124,6 +124,116 @@ pub trait SemanticIndex: Send + Sync {
         query: &IndexQuery,
         vector: &EmbeddingVector,
     ) -> Result<Vec<IndexPassage>, IndexError>;
+}
+
+/// One consented vector ranking, or the reason that ranking could not be used.
+#[derive(Debug)]
+pub struct SemanticLeg {
+    pub passages: Vec<IndexPassage>,
+    pub embedded: u64,
+    pub total: u64,
+    pub unavailable: Option<String>,
+}
+
+pub fn vector_off_notice() -> &'static str {
+    "Vector search is not turned on for these folders. These matches use the words in the files, so a differently worded question may be missed. This is not proof the fact is absent, and the folders are not fully vectorised."
+}
+
+pub fn vector_partial_notice(embedded: u64, total: u64) -> String {
+    format!(
+        "Vector search has read {embedded} of {total} passages in a connected folder. Word matches are still included. The folder is not fully vectorised, and a missing detail is not proof the fact is absent."
+    )
+}
+
+pub fn vector_unavailable_notice(reason: &str) -> String {
+    format!(
+        "Vector search could not finish ({reason}). Word matches are still included. The folder is not fully vectorised, and a missing detail is not proof the fact is absent."
+    )
+}
+
+pub fn empty_result_notice() -> &'static str {
+    "No indexed passage matched this question. That is not proof the fact is absent."
+}
+
+/// Fuse lexical and vector rankings. Passages both methods rank are preferred.
+/// Notices stay in plain language and never claim a partial index is fully vectorised.
+pub fn retrieval_report(
+    lexical: Vec<IndexPassage>,
+    semantic: Vec<SemanticLeg>,
+    limit: usize,
+    vector_configured: bool,
+) -> SearchReport {
+    let mut notices = Vec::new();
+    if !vector_configured {
+        notices.push(vector_off_notice().to_owned());
+    } else if semantic.is_empty() {
+        notices.push(vector_unavailable_notice(
+            "no vector ranking was available for this question",
+        ));
+    } else {
+        let mut partial = None;
+        for leg in &semantic {
+            if let Some(reason) = &leg.unavailable {
+                notices.push(vector_unavailable_notice(reason));
+            } else if leg.total > leg.embedded {
+                partial = Some((leg.embedded, leg.total));
+            }
+        }
+        if let Some((embedded, total)) = partial {
+            notices.push(vector_partial_notice(embedded, total));
+        }
+    }
+    let mut legs = vec![lexical];
+    legs.extend(semantic.into_iter().map(|leg| leg.passages));
+    let passages = fuse_passages(legs, limit);
+    if passages.is_empty() {
+        notices.push(empty_result_notice().to_owned());
+    }
+    SearchReport { passages, notices }
+}
+
+/// Lexical search plus any consented vectors, then a fresh read so a removed
+/// grant cannot return text that was ranked a moment earlier.
+pub fn answer_from_index(
+    index: &dyn FileIndex,
+    query: &IndexQuery,
+    vectors: &[(&SemanticSetting, &EmbeddingVector)],
+) -> Result<SearchReport, IndexError> {
+    query.validate()?;
+    let lexical = index.search(query)?;
+    let semantic_index = index.semantic();
+    let configured = semantic_index
+        .and_then(|semantic| semantic.settings().ok())
+        .is_some_and(|settings| !settings.is_empty());
+    let mut legs = Vec::new();
+    if let Some(semantic) = semantic_index {
+        for (setting, vector) in vectors {
+            match semantic.nearest(setting, query, vector) {
+                Ok(passages) => {
+                    let status = semantic.status(setting)?;
+                    legs.push(SemanticLeg {
+                        passages,
+                        embedded: status.embedded,
+                        total: status.total,
+                        unavailable: None,
+                    });
+                }
+                Err(error) => legs.push(SemanticLeg {
+                    passages: Vec::new(),
+                    embedded: 0,
+                    total: 0,
+                    unavailable: Some(error.to_string()),
+                }),
+            }
+        }
+    }
+    let mut report = retrieval_report(lexical, legs, query.limit, configured);
+    report.passages = report
+        .passages
+        .into_iter()
+        .filter_map(|passage| index.read(&passage.reference).ok())
+        .collect();
+    Ok(report)
 }
 
 /// Each retrieval method gets one vote per passage. Raw BM25 and cosine scores

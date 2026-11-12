@@ -9,6 +9,7 @@ mod performance;
 #[cfg(unix)]
 mod recovery;
 mod report;
+mod retrieval;
 mod semantic;
 mod structured;
 mod summary;

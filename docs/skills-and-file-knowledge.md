@@ -170,7 +170,7 @@ last presentation slide through index/reopen/reuse, and oversized declared expan
 All 90 file-adapter tests pass; `cargo xtask ci` passes all gates with 602 tests
 passed and 5 opt-in tests skipped. The native development watcher remains running.
 
-Legacy text now uses the same atomic streaming path, with `stream-text-v3` snapshots.
+Legacy text now uses the same atomic streaming path, with `stream-text-v4` snapshots.
 A bounded full-source detection pass follows a failed Unicode attempt, handling
 long ASCII headers and ISO-2022-JP escapes across read boundaries. Strict decoding
 never substitutes characters for malformed sequences in the selected encoding.
@@ -352,7 +352,7 @@ labelled Text. Checks now reach late rows/tables and a 300th column, read beyond
 to reach omitted rows, and preserve prior versions on cancellation. Attachment
 row limits remain separately labelled; unread cells produce explicit warnings.
 Pinned rusqlite 0.39 limits and progress-handler APIs were verified in local source.
-The `extract-v8` revision refreshes older capped representations. Full
+The `extract-v9` revision refreshes older representations and stores each passage with its path and section. Full
 `cargo xtask ci` passes every gate: 645 tests passed, 6 opt-in tests skipped.
 
 The folder overview now surfaces notices before Folder settings is opened. A
@@ -456,15 +456,22 @@ representation generation. Revoking a large scope can use these indexes while
 removing its derived lineage; it need not repeatedly scan every child table for
 each parent row. The follow-up v5 migration adds these indexes to existing histories.
 
-`/search-files` activates the same tool-backed procedure used by model discovery.
-`list_indexed_folders` discovers scope IDs, and `query_indexed_files` narrows source
-selection before `search_indexed_files` and `read_indexed_file` retrieve evidence.
-The runtime supplies an async reader bridge, keeping database IO off its executor.
-Search returns at most eight passages per tool call; source reads require the opaque
-version reference returned by search. The agent loop is tested with invalid queries,
-stale references, source reads and final cited synthesis. Tool-disabled models cannot
-acquire these tools through skill activation. The folder chooser explains that chat
-retrieval sends requested file metadata and matching passages to the user's selected AI service.
+`/search-files` activates the same procedure used by model discovery. On a normal
+chat turn, and on a helper turn that already has indexed-folder access, Sovra searches
+the user's question and attaches a few cited passages before the model answers. The
+question does not need a file name. A follow-up `search_indexed_files` call accepts
+that ordinary question. `query_indexed_files` still ANDs at most 32 literal keywords
+when the person is filtering by filename, date or type. `list_indexed_folders`
+discovers scope IDs. The runtime supplies an async reader bridge, keeping database
+IO off its executor. Search returns a short bounded set; source reads require the
+opaque version reference returned by search. Passages include the relative path and
+the heading or nearby line they were cut from. If embeddings are off or unfinished,
+the result says so in plain language, still returns word matches, and does not claim
+the folder is fully vectorised. An empty result is not proof the fact is absent.
+The agent loop is tested with invalid queries, stale references, source reads and
+final cited synthesis. Tool-disabled models cannot acquire these tools through skill
+activation. The folder chooser explains that chat retrieval sends requested file
+metadata and matching passages to the user's selected AI service.
 
 Source access uses capability directory handles, no-follow opens at each traversed
 component, and bounded reads. Defaults exclude hidden files, generated folders,

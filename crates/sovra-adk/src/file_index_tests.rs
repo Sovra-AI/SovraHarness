@@ -24,6 +24,7 @@ use std::sync::{
 struct Reader {
     searches: AtomicUsize,
     proposals: AtomicUsize,
+    queries: std::sync::Mutex<Vec<String>>,
 }
 
 fn passage() -> IndexPassage {
@@ -197,7 +198,7 @@ impl IndexedFiles for Reader {
     }
 
     async fn search(&self, query: IndexQuery) -> Result<Vec<IndexPassage>, IndexError> {
-        assert_eq!(query.text, "orchid budget");
+        self.queries.lock().expect("query log").push(query.text);
         self.searches.fetch_add(1, Ordering::SeqCst);
         Ok(vec![passage()])
     }
@@ -435,7 +436,15 @@ fn agent_discovers_searches_reads_and_synthesizes_without_expanding_tool_permiss
         let events: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
         assert!(events.iter().any(|event| matches!(event, Event::AgentCompleted { .. })), "{events:?}");
         assert!(events.iter().any(|event| matches!(event, Event::AgentChunk { text, .. } if text.contains("420 dollars"))));
-        assert_eq!(reader.searches.load(Ordering::SeqCst), 1);
+        assert!(reader.searches.load(Ordering::SeqCst) >= 1);
+        assert!(
+            reader
+                .queries
+                .lock()
+                .expect("query log")
+                .iter()
+                .any(|text| text == "orchid budget")
+        );
         assert_eq!(model.calls.load(Ordering::SeqCst), 15);
         assert_eq!(reader.proposals.load(Ordering::SeqCst), 1);
         assert!(harness.with_skill(catalog.find("file-history").unwrap()).is_ok());
@@ -531,11 +540,17 @@ impl Llm for HelperKnowledgeModel {
             }
             assert!(!request.tools.contains_key("propose_file_knowledge"));
             match response {
-                None => call(
-                    "search_indexed_files",
-                    json!({"query":"orchid budget", "roots":["root"]}),
-                    1,
-                ),
+                None => {
+                    assert!(
+                        request_text.contains("The orchid budget is 420 dollars."),
+                        "a helper must receive the passage from the question before it searches"
+                    );
+                    call(
+                        "search_indexed_files",
+                        json!({"query":"orchid budget", "roots":["root"]}),
+                        1,
+                    )
+                }
                 Some(response) if response.name == "search_indexed_files" => {
                     assert_eq!(response.response["passages"][0]["text"], passage().text);
                     call(
@@ -609,7 +624,15 @@ async fn delegated_helper_reads_granted_knowledge_and_returns_cited_evidence() {
         "{output:?}"
     );
     assert!(output.iter().any(|event| matches!(event, Event::AgentChunk { text, .. } if text.contains("notes/budget.md:7"))));
-    assert_eq!(reader.searches.load(Ordering::SeqCst), 1);
+    assert!(reader.searches.load(Ordering::SeqCst) >= 1);
+    assert!(
+        reader
+            .queries
+            .lock()
+            .expect("query log")
+            .iter()
+            .any(|text| text == "orchid budget")
+    );
     assert_eq!(reader.proposals.load(Ordering::SeqCst), 0);
 }
 
@@ -644,6 +667,216 @@ async fn team_member_reads_granted_knowledge_and_streams_cited_evidence() {
     harness.run_team(&turn, &events).await;
     let output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
     assert!(output.iter().any(|event| matches!(event, Event::AgUi { event: sovra_core::AgUiEvent::TextMessageContent { delta, .. }, .. } if delta.contains("notes/budget.md:7"))), "{output:?}");
-    assert_eq!(reader.searches.load(Ordering::SeqCst), 1);
+    assert!(reader.searches.load(Ordering::SeqCst) >= 1);
+    assert!(
+        reader
+            .queries
+            .lock()
+            .expect("query log")
+            .iter()
+            .any(|text| text == "orchid budget")
+    );
     assert_eq!(reader.proposals.load(Ordering::SeqCst), 0);
+}
+
+const GREENHOUSE_QUESTION: &str = "Please tell me what sum was reserved for the greenhouse plot. I do not remember any file name. Look through the connected notes and quote the sentence that states the amount, including the unusual reference code if one is written beside it, so I can check the source myself.";
+
+fn levy_passage() -> IndexPassage {
+    IndexPassage {
+        reference: PassageRef {
+            root_id: "root".into(),
+            file_id: "note".into(),
+            version_id: "v1".into(),
+            ordinal: 0,
+        },
+        path: "aa-misc.txt".into(),
+        text: "The allotment levy ZX-ORCHID-991 is forty-two dinars.".into(),
+        start_line: 3,
+        end_line: 3,
+        mime_type: "text/plain".into(),
+        note: None,
+        observed_at: 100,
+        modified_at: None,
+    }
+}
+
+#[derive(Debug)]
+struct Grant {
+    open: bool,
+    queries: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl IndexedFiles for Grant {
+    async fn history(&self, _: FileHistoryQuery) -> Result<FileHistory, IndexError> {
+        Err(IndexError("History is not used in this test.".into()))
+    }
+    async fn read_history(&self, _: HistoryPassageRef) -> Result<HistoricalPassage, IndexError> {
+        Err(IndexError("History is not used in this test.".into()))
+    }
+    async fn folders(&self) -> Result<Vec<IndexedRoot>, IndexError> {
+        Ok(Vec::new())
+    }
+    async fn catalogue(&self, _: CatalogQuery) -> Result<CatalogPage, IndexError> {
+        Err(IndexError("Catalogue is not used in this test.".into()))
+    }
+    async fn search(&self, query: IndexQuery) -> Result<Vec<IndexPassage>, IndexError> {
+        self.queries.lock().expect("query log").push(query.text);
+        Ok(if self.open {
+            vec![levy_passage()]
+        } else {
+            Vec::new()
+        })
+    }
+    async fn read(&self, reference: PassageRef) -> Result<IndexPassage, IndexError> {
+        if self.open && reference == levy_passage().reference {
+            Ok(levy_passage())
+        } else {
+            Err(IndexError(
+                "This folder grant no longer includes that passage.".into(),
+            ))
+        }
+    }
+}
+
+struct QuestionModel {
+    expect_passage: bool,
+    calls: AtomicUsize,
+    seen: std::sync::Mutex<String>,
+}
+
+#[async_trait::async_trait]
+impl Llm for QuestionModel {
+    fn name(&self) -> &'static str {
+        "folder-question-test"
+    }
+    async fn generate_content(
+        &self,
+        request: LlmRequest,
+        _: bool,
+    ) -> adk_core::Result<LlmResponseStream> {
+        let text = serde_json::to_string(&request).expect("request json");
+        let step = self.calls.fetch_add(1, Ordering::SeqCst);
+        let part = if step == 0 {
+            *self.seen.lock().expect("seen request") = text;
+            if self.expect_passage {
+                call(
+                    "search_indexed_files",
+                    json!({"query": GREENHOUSE_QUESTION}),
+                    step,
+                )
+            } else {
+                Part::Text {
+                    text: "I could not find that in the connected folders.".into(),
+                }
+            }
+        } else if self.expect_passage {
+            let response = request
+                .contents
+                .iter()
+                .rev()
+                .flat_map(|content| content.parts.iter().rev())
+                .find_map(|part| match part {
+                    Part::FunctionResponse {
+                        function_response, ..
+                    } => Some(&function_response.response),
+                    _ => None,
+                })
+                .expect("search response");
+            assert!(
+                response.get("error").is_none(),
+                "a full question must be accepted: {response}"
+            );
+            assert!(
+                response["passages"][0]["text"]
+                    .as_str()
+                    .expect("passage text")
+                    .contains("forty-two dinars")
+            );
+            Part::Text {
+                text: "The connected notes say forty-two dinars.".into(),
+            }
+        } else {
+            panic!("a removed grant must not start another model call");
+        };
+        let response = LlmResponse::new(Content {
+            role: "model".into(),
+            parts: vec![part],
+        });
+        Ok(Box::pin(futures::stream::once(async move { Ok(response) })))
+    }
+}
+
+#[tokio::test]
+async fn question_without_a_filename_puts_the_answering_passage_on_the_model_turn() {
+    assert!(GREENHOUSE_QUESTION.split_whitespace().count() > 32);
+    assert!(!GREENHOUSE_QUESTION.contains("aa-misc"));
+    assert!(!GREENHOUSE_QUESTION.contains("forty-two"));
+    assert!(!GREENHOUSE_QUESTION.contains("ZX-ORCHID"));
+    let reader = Arc::new(Grant {
+        open: true,
+        queries: std::sync::Mutex::new(Vec::new()),
+    });
+    let model = Arc::new(QuestionModel {
+        expect_passage: true,
+        calls: AtomicUsize::new(0),
+        seen: std::sync::Mutex::new(String::new()),
+    });
+    let harness = AdkHarness::with_llm_and_tools(&AgentConfig::default(), model.clone(), vec![])
+        .unwrap()
+        .with_indexed_files(Some(reader.clone()))
+        .unwrap();
+    let (events, received) = async_channel::unbounded();
+    harness
+        .run_prompt("grant-question", GREENHOUSE_QUESTION, &events)
+        .await;
+    let output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+    assert!(
+        output
+            .iter()
+            .any(|event| matches!(event, Event::AgentCompleted { .. })),
+        "{output:?}"
+    );
+    let seen = model.seen.lock().expect("seen request").clone();
+    assert!(
+        seen.contains("forty-two dinars"),
+        "the model request must contain the answering passage"
+    );
+    assert!(seen.contains("aa-misc.txt"));
+    assert!(
+        reader
+            .queries
+            .lock()
+            .expect("query log")
+            .iter()
+            .any(|text| text == GREENHOUSE_QUESTION)
+    );
+    let removed = Arc::new(Grant {
+        open: false,
+        queries: std::sync::Mutex::new(Vec::new()),
+    });
+    let closed = Arc::new(QuestionModel {
+        expect_passage: false,
+        calls: AtomicUsize::new(0),
+        seen: std::sync::Mutex::new(String::new()),
+    });
+    let harness = AdkHarness::with_llm_and_tools(&AgentConfig::default(), closed.clone(), vec![])
+        .unwrap()
+        .with_indexed_files(Some(removed))
+        .unwrap();
+    let (events, received) = async_channel::unbounded();
+    harness
+        .run_prompt("revoked-question", GREENHOUSE_QUESTION, &events)
+        .await;
+    let closed_output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+    assert!(
+        closed_output
+            .iter()
+            .any(|event| matches!(event, Event::AgentCompleted { .. })),
+        "{closed_output:?}"
+    );
+    let closed_seen = closed.seen.lock().expect("seen request").clone();
+    assert!(!closed_seen.contains("forty-two"));
+    assert!(!closed_seen.contains("ZX-ORCHID"));
+    assert!(closed_seen.contains("not proof"));
 }

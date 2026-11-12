@@ -61,7 +61,7 @@ impl Scan<'_> {
         let content_hash = &source.digest;
         let physical = identity(before);
         let file_id = self.file_id(path, &physical)?;
-        let revision = "stream-text-v3";
+        let revision = "stream-text-v4";
         let version = digest(format!("{revision}\0{file_id}\0{content_hash}").as_bytes());
         let known: bool = self
             .db
@@ -94,6 +94,7 @@ impl Scan<'_> {
             file.seek(SeekFrom::Start(0)).map_err(|e| io_error(&e))?;
             let mut ordinal = 0_i64;
             let mut line = 1_u32;
+            let mut carry = None;
             let legacy = match source.encoding {
                 Encoding::Legacy(encoding) => Some(encoding),
                 Encoding::Utf8 | Encoding::Utf16 { .. } | Encoding::Utf32 { .. } => None,
@@ -106,11 +107,21 @@ impl Scan<'_> {
                 legacy,
                 |text| {
                     for chunk in chunks(text) {
-                        let chunk_id = digest(chunk.body.as_bytes());
-                        tx.execute("INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING", params![chunk_id, chunk.body]).map_err(|e| db_error(&e))?;
+                        let stored = sovra_core::file_index::contextual_passage(
+                            path,
+                            text,
+                            chunk.start_line,
+                            chunk.body,
+                            carry.as_deref(),
+                        );
+                        let chunk_id = digest(stored.as_bytes());
+                        tx.execute("INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING", params![chunk_id, stored]).map_err(|e| db_error(&e))?;
                         tx.execute("INSERT INTO index_version_chunks(version_id,ordinal,chunk_id,start_line,end_line) VALUES(?1,?2,?3,?4,?5)",
                         params![version, ordinal, chunk_id, line.saturating_add(chunk.start_line - 1), line.saturating_add(chunk.end_line - 1)]).map_err(|e| db_error(&e))?;
                         ordinal += 1;
+                    }
+                    if let Some(section) = sovra_core::file_index::carried_section(text) {
+                        carry = Some(section);
                     }
                     line = line.saturating_add(
                         u32::try_from(text.bytes().filter(|b| *b == b'\n').count())

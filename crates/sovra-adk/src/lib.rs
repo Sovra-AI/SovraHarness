@@ -187,6 +187,8 @@ pub struct AdkHarness {
     web_search_enabled: bool,
     tools_enabled: bool,
     memory_output: memory::OutputMode,
+    /// Model underneath automatic folder evidence, so a later call can remove it.
+    file_model: Option<Arc<dyn Llm>>,
     /// Set by [`AdkHarness::with_artifact_saver`]; team members inherit it.
     artifact_saver: Option<ArtifactSaver>,
     /// Skills the model may apply unasked; appended only while `load_skill` is offered.
@@ -223,14 +225,20 @@ impl AdkHarness {
         &self,
         reader: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
     ) -> Result<Self, Error> {
-        let mut tools = self.base_tools.clone();
+        let mut prepared = self.clone();
+        if let Some(inner) = prepared.file_model.take() {
+            prepared.llm = inner;
+        }
+        let mut tools = prepared.base_tools.clone();
         tools.retain(|tool| !file_index::TOOL_NAMES.contains(&tool.name()));
-        if self.tools_enabled
+        if prepared.tools_enabled
             && let Some(reader) = reader
         {
             tools.extend(file_index::tools(&reader));
+            prepared.file_model = Some(Arc::clone(&prepared.llm));
+            prepared.llm = file_index::evidence::model(Arc::clone(&prepared.llm), reader);
         }
-        self.rebuild(self.base_instruction.clone(), tools)
+        prepared.rebuild(prepared.base_instruction.clone(), tools)
     }
 
     /// Offer tools from services the person connected. An empty list leaves the turn unchanged.
@@ -724,6 +732,7 @@ impl AdkHarness {
             file_reader: None,
             page_viewer: None,
             memory_output: memory::OutputMode::Prompt,
+            file_model: parent.and_then(|parent| parent.file_model.clone()),
             artifact_saver: None,
             skill_guide: None,
             root,

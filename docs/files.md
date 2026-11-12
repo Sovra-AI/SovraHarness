@@ -301,7 +301,7 @@ Binary property-list indexing uses the selected extracted-text budget and has no
 fixed event-count cap. The 64-level nesting protection remains. Both local readers
 check cancellation while decoding; SQLite also receives the runtime-owned signal
 through its progress handler. Cancellation preserves the previous indexed version.
-The `extract-v8` revision re-reads older capped representations on refresh.
+The `extract-v9` revision re-reads older representations on refresh so each stored passage includes its path and section.
 
 ## Storage and ownership
 

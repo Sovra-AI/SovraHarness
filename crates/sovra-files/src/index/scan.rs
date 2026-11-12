@@ -790,10 +790,17 @@ impl Writer {
                     ""
                 };
             for (ordinal, chunk) in chunks(source_text).into_iter().enumerate() {
-                let chunk_id = digest(chunk.body.as_bytes());
+                let stored = sovra_core::file_index::contextual_passage(
+                    &path,
+                    source_text,
+                    chunk.start_line,
+                    chunk.body,
+                    None,
+                );
+                let chunk_id = digest(stored.as_bytes());
                 tx.execute(
                     "INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING",
-                    params![chunk_id, chunk.body],
+                    params![chunk_id, stored],
                 )
                 .map_err(|error| db_error(&error))?;
                 tx.execute("INSERT INTO index_version_chunks(version_id,ordinal,chunk_id,start_line,end_line) VALUES(?1,?2,?3,?4,?5)",
@@ -1015,7 +1022,8 @@ fn chunks(text: &str) -> Vec<TextChunk<'_>> {
     let mut result = Vec::new();
     let mut start = 0;
     let mut line = 1_u32;
-    for chunk in fastcdc::v2020::FastCDC::new(text.as_bytes(), 512, 2048, 8192) {
+    // Max leaves room for the path and section prefix. Embeddings reject text over 8,196 bytes.
+    for chunk in fastcdc::v2020::FastCDC::new(text.as_bytes(), 512, 2048, 7_680) {
         let end = text.floor_char_boundary(chunk.offset + chunk.length);
         if end <= start {
             continue;

@@ -95,6 +95,22 @@ fn explicit_catalogue_and_text_search_scopes_can_include_more_than_sixteen_folde
     );
 }
 
+/// Stored passages carry a path and section prefix. The extract itself still
+/// covers the file exactly once.
+fn without_passage_context(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix("Source: ") else {
+        return text;
+    };
+    let Some((_, after_source)) = rest.split_once('\n') else {
+        return text;
+    };
+    let after_section = after_source
+        .strip_prefix("Section: ")
+        .and_then(|rest| rest.split_once('\n').map(|(_, body)| body))
+        .unwrap_or(after_source);
+    after_section.strip_prefix('\n').unwrap_or(after_section)
+}
+
 #[test]
 fn inventory_exposes_every_saved_text_part_without_mixing_replaced_or_revoked_versions() {
     use std::fmt::Write as _;
@@ -122,8 +138,9 @@ fn inventory_exposes_every_saved_text_part_without_mixing_replaced_or_revoked_ve
     let mut recovered = String::new();
     for ordinal in 0..count {
         let passage = store.read(&entry.passage_at(ordinal).unwrap()).unwrap();
-        assert!(passage.text.len() <= 8192);
-        recovered.push_str(&passage.text);
+        assert!(passage.text.len() <= sovra_core::file_index::semantic::MAX_EMBEDDING_TEXT_BYTES);
+        assert!(passage.text.contains("Source: notes.txt"));
+        recovered.push_str(without_passage_context(&passage.text));
     }
     assert_eq!(recovered, text);
     let last = entry.passage_at(count - 1).unwrap();

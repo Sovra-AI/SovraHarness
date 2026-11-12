@@ -6,8 +6,8 @@ use sovra_core::{
     file_index::{
         FileIndex, IndexError, IndexEvent, IndexPassage, IndexQuery,
         semantic::{
-            EmbeddingTarget, SearchReport, SemanticIndex, SemanticSetting, SemanticStatus,
-            TextEmbedder, fuse_passages,
+            EmbeddingTarget, SearchReport, SemanticIndex, SemanticLeg, SemanticSetting,
+            SemanticStatus, TextEmbedder, retrieval_report,
         },
     },
 };
@@ -170,60 +170,71 @@ impl Service {
         let store = self.store.clone();
         let keyword_query = query.clone();
         let keywords = super::retrieve(move || store.search(&keyword_query)).await?;
-        let mut notices = vec![];
-        let mut legs = vec![keywords];
         let semantic = tokio::select! {
             biased;
-            _ = changes.changed() => Err(IndexError("Semantic settings changed during this search; keyword results are shown.".into())),
-            result = tokio::time::timeout(Duration::from_secs(10), self.semantic_legs(&query)) => result.unwrap_or_else(|_| Err(IndexError("Semantic search timed out; keyword results are shown.".into()))),
+            _ = changes.changed() => Err(IndexError("Semantic settings changed during this search. Word matches are still included.".into())),
+            result = tokio::time::timeout(Duration::from_secs(10), self.semantic_legs(&query)) => result.unwrap_or_else(|_| Err(IndexError("Vector search took too long. Word matches are still included.".into()))),
         };
-        match semantic {
-            Ok((found, messages)) => {
-                legs.extend(found);
-                notices.extend(messages);
-            }
-            Err(error) => notices.push(error.to_string()),
-        }
-        let passages = fuse_passages(legs, query.limit);
+        let (semantic_legs, configured) = match semantic {
+            Ok(ready) => ready,
+            Err(error) => (
+                vec![SemanticLeg {
+                    passages: Vec::new(),
+                    embedded: 0,
+                    total: 0,
+                    unavailable: Some(error.to_string()),
+                }],
+                true,
+            ),
+        };
+        let mut report = retrieval_report(keywords, semantic_legs, query.limit, configured);
         // Network work may outlive a scan or removal. Resolve every final citation
         // against current grants/versions immediately before returning it.
         let store = self.store.clone();
-        let passages = super::retrieve(move || {
+        let passages = report.passages;
+        report.passages = super::retrieve(move || {
             Ok(passages
                 .into_iter()
-                .filter_map(|p| store.read(&p.reference).ok())
+                .filter_map(|passage| store.read(&passage.reference).ok())
                 .collect())
         })
         .await?;
-        Ok(SearchReport { passages, notices })
+        Ok(report)
     }
 
     async fn semantic_legs(
         self: &Arc<Self>,
         query: &IndexQuery,
-    ) -> Result<(Vec<Vec<IndexPassage>>, Vec<String>), IndexError> {
-        let mut legs = vec![];
-        let mut notices = vec![];
-        for setting in self.settings().await? {
+    ) -> Result<(Vec<SemanticLeg>, bool), IndexError> {
+        let settings = self.settings().await?;
+        if settings.is_empty() {
+            return Ok((Vec::new(), false));
+        }
+        let mut legs = Vec::new();
+        let mut considered = false;
+        for setting in settings {
             if !self.allowed(&setting.root_id)
                 || (!query.roots.is_empty() && !query.roots.contains(&setting.root_id))
             {
                 continue;
             }
+            considered = true;
             match self.semantic_leg(&setting, query).await {
-                Ok((passages, status)) => {
-                    if status.embedded < status.total {
-                        notices.push(format!("Semantic coverage for folder {}: {} of {} unique passages. Keyword search also runs.", setting.root_id,status.embedded,status.total));
-                    }
-                    legs.push(passages);
-                }
-                Err(error) => notices.push(format!(
-                    "Semantic search unavailable for folder {}: {} Keyword search still runs.",
-                    setting.root_id, error
-                )),
+                Ok((passages, status)) => legs.push(SemanticLeg {
+                    passages,
+                    embedded: status.embedded,
+                    total: status.total,
+                    unavailable: None,
+                }),
+                Err(error) => legs.push(SemanticLeg {
+                    passages: Vec::new(),
+                    embedded: 0,
+                    total: 0,
+                    unavailable: Some(error.to_string()),
+                }),
             }
         }
-        Ok((legs, notices))
+        Ok((legs, considered))
     }
 
     async fn semantic_leg(

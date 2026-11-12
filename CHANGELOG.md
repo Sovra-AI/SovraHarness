@@ -11,6 +11,8 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Ask connected folders in your own words.** After you grant a folder, a normal question pulls the sentence that answers it, with the file path and the lines it came from. You do not name the file. When you have already chosen an embedding model for that folder, a differently worded question can still find the passage. Until then, Sovra says the search is using the words in the files and does not claim the folder is fully vectorised. Removing the folder takes that text away. Helpers with folder access receive the same passages. File text stays evidence, never instructions.
+
 - **See what Sovra is doing while it works.** Each reply that uses tools now
   shows a live work log above the answer. Every step appears in plain words,
   such as "Searching the web for “soup recipes”" or "Asking the Web Search

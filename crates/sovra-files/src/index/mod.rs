@@ -405,12 +405,10 @@ impl FileIndex for LocalFileIndex {
     fn search(&self, query: &IndexQuery) -> Result<Vec<IndexPassage>, IndexError> {
         query.validate()?;
         // Literal phrases, never file- or model-provided SQL/FTS operators.
-        let terms = query
-            .text
-            .split_whitespace()
-            .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
-            .collect::<Vec<_>>()
-            .join(" AND ");
+        let terms = sovra_core::file_index::lexical_match(&query.text);
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
         let roots = serde_json::to_string(&query.roots)
             .map_err(|_| IndexError("Invalid folder filter.".into()))?;
         let prefix = query

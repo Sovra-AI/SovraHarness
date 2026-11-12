@@ -611,7 +611,8 @@ pub trait IndexedFiles: Send + Sync + std::fmt::Debug {
     async fn read(&self, reference: PassageRef) -> Result<IndexPassage, IndexError>;
 }
 
-fn validate_search_text(text: &str) -> Result<(), IndexError> {
+/// Catalogue filters stay a short AND of literal keywords.
+pub(crate) fn validate_keyword_text(text: &str) -> Result<(), IndexError> {
     if text.trim().is_empty() || text.len() > 2048 || text.split_whitespace().count() > 32 {
         return Err(IndexError(
             "Use 1–32 search terms, up to 2,048 bytes. Split longer queries into focused searches."
@@ -619,6 +620,174 @@ fn validate_search_text(text: &str) -> Result<(), IndexError> {
         ));
     }
     Ok(())
+}
+
+/// Content search accepts an ordinary question. Callers must not have to
+/// shorten it to a list of at most 32 keywords.
+fn validate_search_text(text: &str) -> Result<(), IndexError> {
+    if text.trim().is_empty() || text.len() > 2048 {
+        return Err(IndexError(
+            "Use a question or a few words, up to 2,048 bytes.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Quoted FTS expression for one content question.
+///
+/// A short keyword list stays an AND of literal terms, so words such as `OR`
+/// cannot change the query. A natural-language question drops function words
+/// and matches any remaining term, ranked later by BM25. Terms are always
+/// quoted, so the question cannot inject FTS operators.
+pub fn lexical_match(text: &str) -> String {
+    let raw: Vec<&str> = text.split_whitespace().collect();
+    if raw.is_empty() {
+        return String::new();
+    }
+    let meaningful = content_terms(text);
+    let question = text.contains('?')
+        || raw.len() > 32
+        || (raw.len() >= 4 && raw.len() - meaningful.len() >= 2);
+    let (terms, joiner) = if question && !meaningful.is_empty() {
+        (meaningful, " OR ")
+    } else {
+        (raw.iter().map(|term| (*term).to_owned()).collect(), " AND ")
+    };
+    terms
+        .into_iter()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(joiner)
+}
+
+/// Distinctive tokens in first-seen order, capped so a long question stays bounded.
+pub fn content_terms(text: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for raw in text.split_whitespace() {
+        let token = raw.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
+        if token.is_empty() || is_stopword(token) {
+            continue;
+        }
+        if terms
+            .iter()
+            .any(|seen: &String| seen.eq_ignore_ascii_case(token))
+        {
+            continue;
+        }
+        terms.push(token.to_owned());
+    }
+    if terms.len() <= 48 {
+        return terms;
+    }
+    let mut identifiers: Vec<String> = terms
+        .iter()
+        .filter(|term| term.chars().any(|c| c.is_ascii_digit()))
+        .cloned()
+        .collect();
+    identifiers.truncate(24);
+    for term in terms {
+        if identifiers.len() >= 48 {
+            break;
+        }
+        if !term.chars().any(|c| c.is_ascii_digit()) {
+            identifiers.push(term);
+        }
+    }
+    identifiers
+}
+
+fn is_stopword(token: &str) -> bool {
+    const STOP: &[&str] = &[
+        "a", "about", "after", "also", "am", "an", "and", "any", "are", "as", "at", "be", "been",
+        "before", "being", "but", "by", "can", "could", "did", "do", "does", "doing", "explain",
+        "find", "for", "from", "here", "how", "i", "if", "in", "into", "is", "it", "its", "just",
+        "many", "me", "much", "my", "no", "not", "of", "on", "only", "or", "our", "over", "please",
+        "show", "so", "some", "such", "tell", "than", "that", "the", "then", "there", "these",
+        "this", "those", "to", "very", "was", "we", "were", "what", "when", "where", "which",
+        "who", "whom", "why", "will", "with", "would", "yes", "you", "your",
+    ];
+    let lower = token.to_ascii_lowercase();
+    STOP.binary_search(&lower.as_str()).is_ok()
+}
+
+/// Stored chunk text: the relative path and the heading or nearby line, then the
+/// extract. Lexical and vector indexes both read this same string.
+pub fn contextual_passage(
+    path: &str,
+    source: &str,
+    start_line: u32,
+    body: &str,
+    carried_section: Option<&str>,
+) -> String {
+    let section = section_before(source, start_line).or_else(|| carried_section.map(str::to_owned));
+    let mut prefix = format!("Source: {}\n", clamp_chars(path, 180));
+    if let Some(section) = section {
+        let section = clamp_chars(section.trim(), 160);
+        if !section.is_empty() {
+            prefix.push_str("Section: ");
+            prefix.push_str(&section);
+            prefix.push('\n');
+        }
+    }
+    prefix.push('\n');
+    let mut text = String::with_capacity(prefix.len() + body.len());
+    text.push_str(&prefix);
+    text.push_str(body);
+    let max = semantic::MAX_EMBEDDING_TEXT_BYTES;
+    if text.len() > max {
+        let room = max.saturating_sub(prefix.len());
+        let end = body.floor_char_boundary(room.min(body.len()));
+        text = prefix;
+        text.push_str(&body[..end]);
+    }
+    text
+}
+
+/// Last heading (or nearby line) in a block, carried into the next streamed block.
+pub fn carried_section(source: &str) -> Option<String> {
+    section_before(source, u32::MAX)
+}
+
+fn section_before(source: &str, start_line: u32) -> Option<String> {
+    let before = usize::try_from(start_line.saturating_sub(1)).unwrap_or(usize::MAX);
+    let mut heading = None;
+    let mut nearby = None;
+    for (index, line) in source.lines().enumerate() {
+        if index >= before {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(title) = markdown_heading(trimmed) {
+            heading = Some(title.to_owned());
+        } else if trimmed.chars().count() <= 120 {
+            nearby = Some(trimmed.to_owned());
+        }
+    }
+    heading.or(nearby)
+}
+
+fn markdown_heading(line: &str) -> Option<&str> {
+    let hashes = line.bytes().take_while(|byte| *byte == b'#').count();
+    if (1..=6).contains(&hashes) && line.as_bytes().get(hashes) == Some(&b' ') {
+        let title = line[hashes + 1..].trim();
+        (!title.is_empty()).then_some(title)
+    } else {
+        None
+    }
+}
+
+fn clamp_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let end = text
+        .char_indices()
+        .nth(max)
+        .map_or(text.len(), |(index, _)| index);
+    text[..end].to_owned()
 }
 
 pub fn validate_relative_path(path: &str) -> Result<(), IndexError> {
@@ -766,10 +935,33 @@ mod tests {
         query.limit = 10;
         query.text.clear();
         assert!(query.validate().is_err());
-        query.text = "word ".repeat(32);
-        assert!(query.validate().is_ok());
-        query.text.push_str("extra");
+        query.text = "word ".repeat(40);
+        assert!(
+            query.validate().is_ok(),
+            "a question longer than 32 words is accepted"
+        );
+        query.text = "x".repeat(2049);
         assert!(query.validate().is_err());
+        let question = "Where is the allotment levy written?";
+        assert!(lexical_match(question).contains(" OR "));
+        assert!(content_terms(question).contains(&"allotment".to_owned()));
+        assert!(!content_terms(question).iter().any(|term| term == "where"));
+        assert_eq!(
+            lexical_match("sunflower OR absent"),
+            "\"sunflower\" AND \"OR\" AND \"absent\""
+        );
+        let source = "# Keeper note\n\nThe allotment levy is forty-two dinars.\n";
+        let stored = contextual_passage(
+            "aa-misc.txt",
+            source,
+            3,
+            "The allotment levy is forty-two dinars.\n",
+            None,
+        );
+        assert!(stored.contains("Source: aa-misc.txt"));
+        assert!(stored.contains("Section: Keeper note"));
+        assert!(stored.contains("forty-two dinars"));
+        assert!(stored.len() <= semantic::MAX_EMBEDDING_TEXT_BYTES);
         for name in [".env", ".git", "target", "node_modules", "DEV-CREDENTIALS"] {
             assert!(excluded_name(name));
         }

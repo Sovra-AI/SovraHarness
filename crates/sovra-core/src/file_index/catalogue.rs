@@ -61,7 +61,7 @@ impl CatalogFilter {
             ));
         }
         if let Some(text) = &self.keywords {
-            super::validate_search_text(text)?;
+            super::validate_keyword_text(text)?;
         }
         for (lower, upper, label) in [
             (
