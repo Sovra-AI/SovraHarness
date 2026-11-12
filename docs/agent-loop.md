@@ -101,6 +101,23 @@ member chips ("Priya · Searching the web for …"), and the dock gives the spac
 back when the turn ends. Found by driving the running app: before the dock, a
 person could not see the board at all while their team was answering.
 
+## How we know we follow these practices
+
+Each practice is enforced in code and proven by a test that runs the real ADK
+loop with a scripted model. The parallel behaviour was also watched in the
+running app on 2026-11-12, on a connected model (claude-haiku-5.5).
+
+| Practice | Enforced by | Proven by |
+| --- | --- | --- |
+| Hard step cap, ends with plain words | `work_log::harden` (`max_iterations`), `STEP_LIMIT_MESSAGE` | `a_looping_agent_is_refused_repeats_then_stopped_with_plain_words`: a model that never stops is cut off at the cap, and the person sees the plain message |
+| Refuse runaway identical calls | `RepeatGuard` in a before-tool callback | Same test: the helper runs exactly `REPEAT_LIMIT` times; `repeat_guard_refuses_the_same_call_after_the_limit` |
+| Tool failures are observations; broken tools switch off | ADK `{"error": …}` results, `circuit_breaker_threshold` | `delegations_open_helper_lanes_and_errors_fail_steps` shows failures as failed steps. The breaker itself is ADK's own and is not separately tested here. |
+| Parallel helpers, bounded | `parallelize_agent_delegations`, `max_concurrency: 4` | `independent_delegations_overlap_with_a_four_call_limit`; live: two Web Search helpers ran at once |
+| Safe reads together, ordered calls in order | `execution_strategy` (`Auto` only when all tools are read-only) | `a_helper_never_moves_safe_reads_ahead_of_ordered_tools` |
+| Show every step, including helpers' own | `WorkTracker`, `StepTap` | `the_work_log_shows_a_helpers_own_steps_in_its_lane`; live: a helper's "Reading louvre.fr/…" step appeared in its lane |
+| Team members in parallel, on a board | `speak_together`, `TeamActivity::lanes` | `a_rounds_members_start_together_and_show_on_the_board`; live: seven members answered at once |
+| The board stays in view while replies stream | `render_docked_team_board` | `the_live_team_board_stays_in_view_above_the_chat_box` at 640×420, 2560×1440 and 200% text, both themes |
+
 ## Sources
 
 - Anthropic, [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents):
