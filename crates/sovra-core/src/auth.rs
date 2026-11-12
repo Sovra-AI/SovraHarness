@@ -64,6 +64,27 @@ pub struct AuthAccount {
     pub created_at: Timestamp,
 }
 
+/// A name-only account that can be reopened on this computer without a password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalProfile {
+    pub account_id: String,
+    pub full_name: String,
+}
+
+impl AuthAccount {
+    pub fn local_profile(&self) -> Option<LocalProfile> {
+        (self.provider == AuthProvider::Password
+            && self.password_phc.is_none()
+            && self.email.is_empty()
+            && !self.id.is_empty()
+            && !self.full_name.trim().is_empty())
+        .then(|| LocalProfile {
+            account_id: self.id.clone(),
+            full_name: self.full_name.clone(),
+        })
+    }
+}
+
 impl std::fmt::Debug for AuthAccount {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // The PHC string is not reversible, but it still never belongs in logs.
@@ -337,6 +358,10 @@ pub enum AuthCommand {
         email: String,
         password: String,
     },
+    /// Reopen only a name-only account; never bypass password or Google sign-in.
+    ContinueLocalProfile {
+        account_id: String,
+    },
     /// Open the Google consent page in the browser and await the loopback redirect.
     StartGoogleSignIn,
     /// Abandon a waiting Google flow (closes the loopback listener).
@@ -356,6 +381,8 @@ pub enum AuthField {
 /// A notification from the runtime about sign-in state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthEvent {
+    /// Public names and IDs only, restricted to accounts created without credentials.
+    LocalProfiles(Vec<LocalProfile>),
     /// Startup answer to [`AuthCommand::Load`].
     Loaded {
         session: Option<AuthSession>,
@@ -405,11 +432,13 @@ pub struct AuthState {
     pub error: Option<(AuthField, String)>,
     pub has_accounts: bool,
     pub google_ready: bool,
+    pub local_profiles: Vec<LocalProfile>,
 }
 
 impl AuthState {
     pub fn apply(&mut self, event: &AuthEvent) {
         match event {
+            AuthEvent::LocalProfiles(profiles) => self.local_profiles.clone_from(profiles),
             AuthEvent::Loaded {
                 session,
                 has_accounts,
@@ -507,6 +536,33 @@ pub fn callback_page(success: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_profiles_never_include_accounts_with_credentials() {
+        let mut account = AuthAccount {
+            id: "local".into(),
+            email: String::new(),
+            full_name: "Sam".into(),
+            provider: AuthProvider::Password,
+            password_phc: None,
+            created_at: Timestamp(1),
+        };
+        let profile = account.local_profile().expect("name-only account");
+        let mut state = AuthState::default();
+        state.apply(&AuthEvent::LocalProfiles(vec![profile.clone()]));
+        assert_eq!(state.local_profiles, vec![profile]);
+        assert_eq!(state.phase, AuthPhase::Unknown);
+        account.password_phc = Some("hash".into());
+        assert!(account.local_profile().is_none());
+        account.password_phc = None;
+        account.email = "sam@example.com".into();
+        assert!(account.local_profile().is_none());
+        account.email.clear();
+        account.provider = AuthProvider::Google;
+        assert!(account.local_profile().is_none());
+        state.apply(&AuthEvent::LocalProfiles(Vec::new()));
+        assert_eq!(state.local_profiles, Vec::new());
+    }
 
     #[test]
     fn emails_normalize_and_reject_typos() {

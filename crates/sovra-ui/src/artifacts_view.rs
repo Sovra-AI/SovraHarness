@@ -23,11 +23,11 @@ use gpui_kit::component::{
 use gpui_kit::{
     AppContext as _, ClipboardItem, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
-    TestSupportExt as _, WeakEntity, Window, div,
+    TestSupportExt as _, WeakEntity, Window, div, prelude::FluentBuilder as _,
 };
 use sovra_core::artifacts::{
-    Artifact, ArtifactCommand, ArtifactDraft, ArtifactFilter, ArtifactKind, ArtifactSort,
-    ArtifactSource, KINDS,
+    Artifact, ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactFilter, ArtifactKind,
+    ArtifactSort, ArtifactSource, KINDS,
 };
 use sovra_core::group::{
     DetailStatus, GroupCommand, OpHash, SharedArtifact, SharingState, check_artifact, lineage_ids,
@@ -115,6 +115,20 @@ fn now() -> Timestamp {
     Timestamp(millis)
 }
 
+enum EditExit {
+    Library,
+    Cancel,
+    Artifact(String),
+    Shared(OpHash),
+}
+
+struct PendingEdit {
+    id: String,
+    title: String,
+    saved_title: String,
+    content: String,
+}
+
 pub(crate) struct ArtifactsView {
     shell: WeakEntity<Shell>,
     search: Entity<InputState>,
@@ -125,6 +139,11 @@ pub(crate) struct ArtifactsView {
     /// The artifact shown in detail; `None` shows the library.
     open: Option<String>,
     editing: bool,
+    edit_original: Option<(String, String)>,
+    pending_exit: Option<EditExit>,
+    pending_save: Option<PendingEdit>,
+    save_error: Option<String>,
+    scroll: gpui_kit::ScrollHandle,
     confirm_delete: bool,
     title: Entity<InputState>,
     content: Entity<TextareaState>,
@@ -146,7 +165,8 @@ impl ArtifactsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search your artifacts…"));
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search your saved work…"));
         let search_events = cx.subscribe(&search, |view, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 view.page = 0;
@@ -162,6 +182,11 @@ impl ArtifactsView {
             project_file: None,
             open: None,
             editing: false,
+            edit_original: None,
+            pending_exit: None,
+            pending_save: None,
+            save_error: None,
+            scroll: gpui_kit::ScrollHandle::new(),
             confirm_delete: false,
             title: cx.new(|cx| InputState::new(window, cx).placeholder("Name")),
             content: cx.new(|cx| TextareaState::new(window, cx).auto_grow(6, 24)),
@@ -176,6 +201,12 @@ impl ArtifactsView {
 
     /// Opens one artifact (from a chat card or the library).
     pub(crate) fn show(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.editing && self.open.as_deref() == Some(id) {
+            return;
+        }
+        if self.confirm_edit_exit(EditExit::Artifact(id.to_owned()), cx) {
+            return;
+        }
         self.project_file = None;
         self.open = Some(id.to_owned());
         self.open_shared = None;
@@ -187,6 +218,9 @@ impl ArtifactsView {
     }
 
     fn show_shared(&mut self, id: OpHash, cx: &mut Context<Self>) {
+        if self.confirm_edit_exit(EditExit::Shared(id), cx) {
+            return;
+        }
         self.open = None;
         self.open_shared = Some(id);
         self.editing = false;
@@ -197,11 +231,45 @@ impl ArtifactsView {
     }
 
     fn back_to_library(&mut self, cx: &mut Context<Self>) {
+        if self.confirm_edit_exit(EditExit::Library, cx) {
+            return;
+        }
         self.open = None;
         self.open_shared = None;
         self.editing = false;
         self.share_error = None;
         self.share_notice = None;
+        cx.notify();
+    }
+
+    fn confirm_edit_exit(&mut self, destination: EditExit, cx: &mut Context<Self>) -> bool {
+        if self.pending_save.is_some() {
+            return true;
+        }
+        let changed = self.editing
+            && self.edit_original.as_ref().is_some_and(|(title, content)| {
+                self.title.read(cx).value().as_str() != title
+                    || self.content.read(cx).value().as_str() != content
+            });
+        if changed {
+            self.pending_exit = Some(destination);
+            self.scroll.set_offset(gpui_kit::Point::default());
+            cx.notify();
+        } else {
+            self.pending_exit = None;
+        }
+        changed
+    }
+
+    fn discard_edit(&mut self, cx: &mut Context<Self>) {
+        self.editing = false;
+        self.edit_original = None;
+        match self.pending_exit.take() {
+            Some(EditExit::Library) => self.back_to_library(cx),
+            Some(EditExit::Artifact(id)) => self.show(&id, cx),
+            Some(EditExit::Shared(id)) => self.show_shared(id, cx),
+            Some(EditExit::Cancel) | None => {}
+        }
         cx.notify();
     }
 
@@ -363,6 +431,10 @@ impl ArtifactsView {
     }
 
     fn start_edit(&mut self, artifact: &Artifact, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_error = None;
+        self.edit_original = Some((artifact.title.clone(), artifact.content.clone()));
+        self.pending_exit = None;
+        self.confirm_delete = false;
         let title = artifact.title.clone();
         let content = artifact.content.clone();
         self.title
@@ -371,6 +443,76 @@ impl ArtifactsView {
             .update(cx, |input, cx| input.set_value(content, window, cx));
         self.editing = true;
         cx.notify();
+    }
+
+    fn save_edit(&mut self, artifact: &Artifact, cx: &mut Context<Self>) {
+        if self.pending_save.is_some() {
+            return;
+        }
+        let title = self.title.read(cx).value().to_string();
+        let content = self.content.read(cx).value().to_string();
+        let mut expected = artifact.clone();
+        expected.edit(&title, &content, artifact.updated_at);
+        let sent = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Artifacts(ArtifactCommand::Edit {
+                id: artifact.id.clone(),
+                title: title.clone(),
+                content: content.clone(),
+            }));
+        self.pending_exit = None;
+        if sent.is_ok() {
+            self.save_error = None;
+            self.pending_save = Some(PendingEdit {
+                id: artifact.id.clone(),
+                title,
+                saved_title: expected.title,
+                content,
+            });
+        } else {
+            self.save_error =
+                Some("Sovra could not start saving. Your changes are still here.".into());
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn artifact_event(&mut self, event: &ArtifactEvent, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_save.as_ref() else {
+            return;
+        };
+        match event {
+            ArtifactEvent::Saved(saved)
+                if saved.id == pending.id
+                    && saved.title == pending.saved_title
+                    && saved.content == pending.content =>
+            {
+                // Typing can continue during IO; a completed save must never hide newer edits.
+                let unchanged = self.title.read(cx).value().as_str() == pending.title
+                    && self.content.read(cx).value().as_str() == pending.content;
+                self.edit_original = Some((saved.title.clone(), saved.content.clone()));
+                self.pending_save = None;
+                self.save_error = None;
+                if unchanged {
+                    self.editing = false;
+                }
+                cx.notify();
+            }
+            ArtifactEvent::Error(message) => {
+                self.pending_save = None;
+                self.save_error = Some(format!(
+                    "Could not confirm the save. Your changes are still here. Try saving again. {message}"
+                ));
+                cx.notify();
+            }
+            ArtifactEvent::Loaded(_)
+            | ArtifactEvent::Saved(_)
+            | ArtifactEvent::BuildStatus { .. }
+            | ArtifactEvent::Deployed { .. }
+            | ArtifactEvent::DeploymentStopped { .. }
+            | ArtifactEvent::Deleted { .. }
+            | ArtifactEvent::Exported { .. } => {}
+        }
     }
 
     fn save_copy(&mut self, artifact: &Artifact, cx: &mut Context<Self>) {
@@ -413,6 +555,7 @@ impl Render for ArtifactsView {
             .min_w_0()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .p(t.space.large)
             .child(
                 v_flex()
@@ -586,10 +729,30 @@ impl ArtifactsView {
         let content = if library.artifacts.is_empty() {
             empty_state(cx).into_any_element()
         } else if shown.is_empty() {
-            div()
-                .sovra_text(TextRole::Body, cx)
-                .text_color(t.text_secondary)
-                .child("Nothing matches. Try a different word, or choose All.")
+            v_flex()
+                .id("artifacts-no-results")
+                .test_support()
+                .w_full()
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .text_color(t.text_secondary)
+                        .child("No saved work matches this search and these filters."),
+                )
+                .child(h_flex().flex_wrap().child(
+                    design::button("artifact-clear-filters", "Show all saved work", cx).on_click(
+                        cx.listener(|view, _, window, cx| {
+                            view.filter.kind = None;
+                            view.filter.collection = None;
+                            view.filter.favorites_only = false;
+                            view.search
+                                .update(cx, |input, cx| input.set_value("", window, cx));
+                            view.page = 0;
+                            cx.notify();
+                        }),
+                    ),
+                ))
                 .into_any_element()
         } else {
             h_flex()
@@ -616,17 +779,17 @@ impl ArtifactsView {
                 "Everything you and your AI made and kept — letters, lists, tables, code, diagrams and more. Open one to read it, copy it or save it to your computer.",
                 cx,
             ))
-            .child(
+            .children((!library.artifacts.is_empty()).then(||
                 div()
                     .w_full()
                     .max_w(t.layout.reading_width)
-                    .child(Input::new(&self.search).aria_label("Search your artifacts")),
-            )
+                    .child(Input::new(&self.search).id("artifact-search").aria_label("Search your saved work"))
+            ))
             .children(shared_section)
-            .child(folders)
-            .child(chips)
-            .child(sorting)
-            .child(paging)
+            .children((!library.artifacts.is_empty()).then_some(folders))
+            .children((!library.artifacts.is_empty()).then_some(chips))
+            .children((library.artifacts.len() > 1).then_some(sorting))
+            .children((page_count > 1).then_some(paging))
             .child(content)
     }
 
@@ -876,40 +1039,64 @@ impl ArtifactsView {
                     ),
             );
         let body = if self.editing {
-            let id = artifact.id.clone();
+            let edited = artifact.clone();
             v_flex()
                 .id("artifact-edit-form")
                 .test_support()
                 .gap(t.space.small)
-                .child(Input::new(&self.title).aria_label("Artifact name"))
-                .child(Textarea::new(&self.content).aria_label("Artifact content"))
+                .child(
+                    Input::new(&self.title)
+                        .id("artifact-edit-title")
+                        .aria_label("Name"),
+                )
+                .child(
+                    div()
+                        .id("artifact-edit-content")
+                        .test_support()
+                        .w_full()
+                        .child(Textarea::new(&self.content).aria_label("Content")),
+                )
                 .child(
                     h_flex()
+                        .flex_wrap()
                         .gap(t.space.small)
                         .child(
-                            design::primary_button("artifact-edit-save", "Save changes", cx)
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    Self::send(
-                                        ArtifactCommand::Edit {
-                                            id: id.clone(),
-                                            title: view.title.read(cx).value().to_string(),
-                                            content: view.content.read(cx).value().to_string(),
-                                        },
-                                        cx,
-                                    );
-                                    view.editing = false;
-                                    cx.notify();
-                                })),
+                            design::primary_button(
+                                "artifact-edit-save",
+                                if self.pending_save.is_some() {
+                                    "Saving…"
+                                } else {
+                                    "Save changes"
+                                },
+                                cx,
+                            )
+                            .disabled(self.pending_save.is_some())
+                            .on_click(cx.listener(
+                                move |view, _, _, cx| {
+                                    view.save_edit(&edited, cx);
+                                },
+                            )),
                         )
                         .child(
-                            design::button("artifact-edit-cancel", "Cancel", cx).on_click(
-                                cx.listener(|view, _, _, cx| {
-                                    view.editing = false;
+                            design::button("artifact-edit-cancel", "Cancel", cx)
+                                .disabled(self.pending_save.is_some())
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    if !view.confirm_edit_exit(EditExit::Cancel, cx) {
+                                        view.editing = false;
+                                    }
                                     cx.notify();
-                                }),
-                            ),
+                                })),
                         ),
                 )
+                .children(self.save_error.as_ref().map(|message| {
+                    div()
+                        .id("artifact-save-error")
+                        .test_support()
+                        .w_full()
+                        .min_w_0()
+                        .sovra_text(TextRole::Body, cx)
+                        .child(design::paragraph(message.clone()))
+                }))
                 .into_any_element()
         } else if artifact.kind == ArtifactKind::Project {
             match sovra_core::artifacts::WebsiteProject::parse(&artifact.content) {
@@ -983,10 +1170,52 @@ impl ArtifactsView {
             .w_full()
             .max_w(t.chat.column_width)
             .gap(t.space.medium)
+            .when(self.pending_exit.is_some(), |detail| {
+                detail.child(
+                    v_flex()
+                        .id("artifact-unsaved-choice")
+                        .test_support()
+                        .w_full()
+                        .min_w_0()
+                        .gap(t.space.small)
+                        .p(t.space.medium)
+                        .sovra_surface(Surface::Subtle, cx)
+                        .child(div().sovra_text(TextRole::Body, cx).child(
+                            "You have unsaved changes. Keep editing, or discard them to continue.",
+                        ))
+                        .child(
+                            h_flex()
+                                .flex_wrap()
+                                .gap(t.space.small)
+                                .child(
+                                    design::primary_button(
+                                        "artifact-keep-editing",
+                                        "Keep editing",
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(
+                                        |view, _, _, cx| {
+                                            view.pending_exit = None;
+                                            cx.notify();
+                                        },
+                                    )),
+                                )
+                                .child(
+                                    design::button(
+                                        "artifact-discard-changes",
+                                        "Discard changes",
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(|view, _, _, cx| view.discard_edit(cx))),
+                                ),
+                        ),
+                )
+            })
             .child(
                 h_flex().child(
-                    design::button("artifact-back", "← All artifacts", cx)
+                    design::button("artifact-back", "← All saved work", cx)
                         .ghost()
+                        .disabled(self.pending_save.is_some())
                         .on_click(cx.listener(|view, _, _, cx| view.back_to_library(cx))),
                 ),
             )
@@ -1028,7 +1257,7 @@ impl ArtifactsView {
                         )
                     }),
             )
-            .child(actions)
+            .when(!self.editing, |detail| detail.child(actions))
             .children(
                 self.library(cx)
                     .builds
@@ -1038,7 +1267,7 @@ impl ArtifactsView {
             )
             .children(self.share_feedback(share_status, cx))
             .child(body)
-            .child(organization)
+            .when(!self.editing, |detail| detail.child(organization))
     }
 
     /// The line under the actions: an error, what just happened, or where it stands.
@@ -1340,6 +1569,16 @@ fn empty_state(cx: &mut Context<ArtifactsView>) -> impl IntoElement + use<> {
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
                 .child("When Sovra or your team writes something worth keeping, press Save under the answer. You can also ask: “save this as a document”."),
+        )
+        .child(
+            h_flex().flex_wrap().child(
+                design::primary_button("artifacts-open-chat", "Open chat", cx)
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        if let Some(shell) = view.shell.upgrade() {
+                            shell.update(cx, |shell, cx| shell.select_tab(sovra_core::NavTab::Chat, cx));
+                        }
+                    })),
+            ),
         )
 }
 

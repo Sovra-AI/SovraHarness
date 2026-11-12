@@ -393,3 +393,107 @@ async fn timed_send_create_rejects_a_first_name() {
     assert!(listed.iter().all(|item| item.send.is_none()));
     client.shutdown_blocking().expect("shutdown");
 }
+
+#[derive(Debug, Default)]
+struct UnavailableStore {
+    fail: std::sync::atomic::AtomicBool,
+}
+
+impl sovra_core::ScheduleStore for UnavailableStore {
+    fn load(&self) -> Result<sovra_core::ScheduleBook, sovra_core::ScheduleError> {
+        Ok(sovra_core::ScheduleBook::default())
+    }
+    fn save(&self, _: &sovra_core::ScheduleBook) -> Result<(), sovra_core::ScheduleError> {
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(sovra_core::ScheduleError("Test disk unavailable".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[tokio::test]
+async fn failed_schedule_write_is_not_published_as_saved_and_can_be_retried() {
+    let store = Arc::new(UnavailableStore::default());
+    let client = sovra_runtime::start_with_services(
+        "schedule-write-failure",
+        AgentConfig::default(),
+        RuntimeServices {
+            schedules: Some(store.clone()),
+            ..RuntimeServices::default()
+        },
+    )
+    .unwrap();
+    let events = client.events();
+    wait_ready(&events).await;
+    send(&client, ScheduleCommand::Load);
+    wait_snapshot(&events, |_, _| true).await;
+    store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    let create = ScheduleCommand::Create {
+        name: "Garden reminder".into(),
+        cadence: "every day at 9".into(),
+        prompt: "Check the garden".into(),
+        send: None,
+    };
+    send(&client, create.clone());
+    wait_until(&events, |event| {
+        matches!(event, Event::Schedule(ScheduleEvent::Error(_)))
+    })
+    .await;
+    let (schedules, _) = wait_snapshot(&events, |_, _| true).await;
+    assert!(
+        schedules.is_empty(),
+        "failed creation must not become an active task"
+    );
+    store.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+    send(&client, create);
+    let (schedules, _) = wait_snapshot(&events, |items, _| items.len() == 1).await;
+    let created = wait_until(&events, |event| {
+        matches!(event, Event::Schedule(ScheduleEvent::Created { .. }))
+    })
+    .await;
+    assert!(
+        matches!(created, Event::Schedule(ScheduleEvent::Created { schedule }) if schedule.id == schedules[0].id)
+    );
+    store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    for command in [
+        ScheduleCommand::RunNow {
+            id: schedules[0].id.clone(),
+            session_id: Some("must-not-start".into()),
+        },
+        ScheduleCommand::Pause {
+            id: schedules[0].id.clone(),
+        },
+        ScheduleCommand::Delete {
+            id: schedules[0].id.clone(),
+        },
+    ] {
+        send(&client, command);
+        wait_until(&events, |event| {
+            matches!(event, Event::Schedule(ScheduleEvent::Error(_)))
+        })
+        .await;
+        let (after, runs) = wait_snapshot(&events, |_, _| true).await;
+        assert_eq!(
+            after, schedules,
+            "failed changes must preserve the saved task"
+        );
+        assert!(
+            runs.is_empty(),
+            "failed run setup must not become a recorded run"
+        );
+        // A read acts as a barrier after any incorrectly dispatched run events.
+        send(&client, ScheduleCommand::Load);
+        loop {
+            let event = recv(&events).await;
+            assert!(
+                !matches!(event, Event::Schedule(ScheduleEvent::Fired { .. })),
+                "failed persistence must not dispatch work"
+            );
+            if matches!(event, Event::Schedule(ScheduleEvent::Snapshot { .. })) {
+                break;
+            }
+        }
+    }
+    client.shutdown_blocking().unwrap();
+}

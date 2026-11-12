@@ -948,6 +948,30 @@ impl ModelsView {
             ),
             CatalogueKind::WebAddress => self.render_service_connect_section(cx).into_any_element(),
         };
+        let feedback = matches!(
+            kind,
+            CatalogueKind::OnlineAi | CatalogueKind::CompatibleService
+        )
+        .then(|| {
+            if let Some(error) = &self.state.error {
+                Some(
+                    div()
+                        .id("connection-model-error")
+                        .test_support()
+                        .aria_label(error.clone())
+                        .child(caption(error.clone(), cx).text_color(cx.theme().danger)),
+                )
+            } else {
+                self.state.notice.as_ref().map(|notice| {
+                    div()
+                        .id("connection-model-notice")
+                        .test_support()
+                        .aria_label(notice.clone())
+                        .child(caption(notice.clone(), cx))
+                })
+            }
+        })
+        .flatten();
         v_flex()
             .w_full()
             .min_w_0()
@@ -963,6 +987,7 @@ impl ModelsView {
                     },
                 )),
             )
+            .children(feedback)
             .child(editor)
             .into_any_element()
     }

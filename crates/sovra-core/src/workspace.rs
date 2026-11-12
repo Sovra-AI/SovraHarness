@@ -177,11 +177,11 @@ impl TourStep {
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::WelcomeChat => "1. Chat Naturally in Your Own Words",
-            Self::AutomaticRouting => "2. Explore AI choices",
-            Self::KnowledgeMemory => "3. How memory works",
-            Self::AutomatedSchedules => "4. Save a task to run again",
-            Self::PersonalizeSettings => "5. Your Personal Sticky Note & Tone (Settings)",
+            Self::WelcomeChat => "Ask a question",
+            Self::AutomaticRouting => "Explore AI choices",
+            Self::KnowledgeMemory => "Find what Sovra remembers",
+            Self::AutomatedSchedules => "Set up a repeating task",
+            Self::PersonalizeSettings => "Make Sovra suit you",
         }
     }
 
@@ -194,13 +194,13 @@ impl TourStep {
                 "Try a simulation of how Sovra could choose an AI for different tasks. Chat currently uses the AI you selected in Models."
             }
             Self::KnowledgeMemory => {
-                "Follow a sample story showing a saved event, a current belief, and an older belief kept as history. This page explains memory; it does not show facts extracted from your chats."
+                "Find saved details from your conversations and files. Open a detail to see where it came from, correct it, or tell Sovra to stop using it."
             }
             Self::AutomatedSchedules => {
-                "Save a summary or checklist here, then click “Run now” to send it into Chat. Automatic background runs are not available yet."
+                "Choose what Sovra should do and when to repeat it. Keep Sovra open for tasks to run automatically. Use “Run now” to try a task, or pause it anytime."
             }
             Self::PersonalizeSettings => {
-                "Write your “Always-On Context” (like a sticky note on Sovra's desk so you never repeat yourself) and pick how Sovra explains things (such as Simple & Friendly or Step-by-Step)."
+                "Use “Personal instructions” to save preferences you want Sovra to follow. You can also change the language, appearance and text size here."
             }
         }
     }
@@ -870,7 +870,7 @@ impl WorkspaceState {
                     self.schedule_runs.push(run.clone());
                 }
             }
-            ScheduleEvent::Error(_) => {}
+            ScheduleEvent::Created { .. } | ScheduleEvent::Error(_) => {}
         }
     }
 

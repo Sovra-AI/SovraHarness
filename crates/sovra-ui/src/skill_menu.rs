@@ -559,6 +559,18 @@ mod tests {
             let service_use = format!("/{} ", service.name);
             assert_ne!(service_copy.sample_draft, service_use);
             let service_index = card_with_title(window, &service_copy.friendly_title);
+            shell.update(cx, |shell, cx| {
+                shell.fill_composer_draft("Keep my unfinished question", window, cx);
+            });
+            click_visible(window, ("skill-use", service_index), cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).state.active_tab, NavTab::Connections);
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                "Keep my unfinished question"
+            );
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
             click_visible(window, ("skill-try-example", service_index), cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
@@ -676,6 +688,71 @@ mod tests {
             )
         });
         assert!(imported, "import sends the chosen folder");
+    }
+
+    #[gpui_kit::test]
+    fn custom_skill_names_do_not_require_english_or_replace_existing_skills(
+        cx: &mut TestAppContext,
+    ) {
+        let (client, commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let (shell, window) = open(cx, size(px(1280.), px(820.)));
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
+            click_visible(window, "skill-create", cx);
+            shell.update(cx, |shell, cx| {
+                shell.skill_library.set_editor_fields_for_test(
+                    "",
+                    "قائمة التسوق",
+                    "Help plan shopping.",
+                    "Make a shopping list.",
+                    window,
+                    cx,
+                );
+            });
+            window.render_frame(cx);
+            click_visible(window, "skill-save", cx);
+        })
+        .unwrap();
+        let saved = std::iter::from_fn(|| commands.try_recv().ok())
+            .find_map(|command| match command {
+                Command::Skills(sovra_core::skills::SkillCommand::Save(skill)) => Some(skill),
+                _ => None,
+            })
+            .expect("an Arabic title saves without an advanced shortcut");
+        assert_eq!(saved.title, "قائمة التسوق");
+        assert!(sovra_core::skills::valid_name(&saved.name));
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                let mut skills = shell.skills.skills().to_vec();
+                skills.push(*saved.clone());
+                shell
+                    .skills
+                    .apply(&sovra_core::skills::SkillEvent::Loaded {
+                        skills,
+                        issues: vec![],
+                    })
+                    .unwrap();
+                shell.skill_library.set_editor_fields_for_test(
+                    &saved.name,
+                    "Different shopping list",
+                    "Another plan.",
+                    "Different instructions.",
+                    window,
+                    cx,
+                );
+            });
+            window.render_frame(cx);
+            click_visible(window, "skill-save", cx);
+        })
+        .unwrap();
+        assert!(
+            !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+                command,
+                Command::Skills(sovra_core::skills::SkillCommand::Save(_))
+            ))
+        );
     }
 
     #[gpui_kit::test]

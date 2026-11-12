@@ -54,6 +54,10 @@ pub struct Shell {
     schedule_cadence_input: Entity<InputState>,
     schedule_prompt_input: Entity<InputState>,
     schedule_form_open: bool,
+    schedule_pending: Option<sovra_core::ScheduleItem>,
+    schedule_error: Option<String>,
+    schedule_reset_on_open: bool,
+    schedule_scroll: gpui_kit::ScrollHandle,
     schedule_timeline_range: TimelineRange,
     login_name_input: Entity<InputState>,
     login_email_input: Entity<InputState>,
@@ -478,6 +482,14 @@ impl Shell {
                             }
                             _ => None,
                         };
+                        if let sovra_core::Event::Schedule(event) = &event {
+                            shell.observe_schedule_save(event);
+                        }
+                        if let sovra_core::Event::Artifacts(event) = &event {
+                            shell
+                                .artifacts_view
+                                .update(cx, |view, cx| view.artifact_event(event, cx));
+                        }
                         if let sovra_core::Event::Artifacts(
                             sovra_core::artifacts::ArtifactEvent::Deployed { url, .. },
                         ) = &event
@@ -791,6 +803,10 @@ impl Shell {
             schedule_cadence_input,
             schedule_prompt_input,
             schedule_form_open: false,
+            schedule_pending: None,
+            schedule_error: None,
+            schedule_reset_on_open: false,
+            schedule_scroll: gpui_kit::ScrollHandle::new(),
             schedule_timeline_range: TimelineRange::Hours24,
             login_name_input,
             login_email_input,
@@ -1117,6 +1133,17 @@ impl Shell {
         } else {
             sovra_core::AuthCommand::SignIn { email, password }
         };
+        self.submit_auth(command, cx);
+    }
+
+    pub(crate) fn continue_local_profile(&mut self, account_id: String, cx: &mut Context<Self>) {
+        self.submit_auth(
+            sovra_core::AuthCommand::ContinueLocalProfile { account_id },
+            cx,
+        );
+    }
+
+    fn submit_auth(&mut self, command: sovra_core::AuthCommand, cx: &mut Context<Self>) {
         self.state.apply_auth(&sovra_core::AuthEvent::Submitting);
         if let Err(error) = cx.global::<RuntimeClient>().0.send(Command::Auth(command)) {
             self.state.apply_auth(&sovra_core::AuthEvent::Failed {
@@ -1500,44 +1527,103 @@ impl Shell {
         self.refresh(cx);
     }
 
-    pub fn toggle_schedule_form(&mut self, cx: &mut Context<Self>) {
-        self.schedule_form_open = !self.schedule_form_open;
-        self.refresh(cx);
+    pub fn toggle_schedule_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.schedule_form_open {
+            self.schedule_form_open = false;
+            self.refresh(cx);
+        } else {
+            self.open_schedule_form(window, cx);
+        }
     }
 
-    pub fn open_schedule_form(&mut self, cx: &mut Context<Self>) {
+    pub fn open_schedule_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.schedule_reset_on_open {
+            for input in [
+                &self.schedule_name_input,
+                &self.schedule_cadence_input,
+                &self.schedule_prompt_input,
+            ] {
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+            self.schedule_reset_on_open = false;
+            self.schedule_error = None;
+        }
         self.schedule_form_open = true;
         self.refresh(cx);
     }
 
-    pub fn submit_new_schedule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn observe_schedule_save(&mut self, event: &sovra_core::ScheduleEvent) {
+        match event {
+            sovra_core::ScheduleEvent::Created { schedule } => {
+                if self.schedule_pending.as_ref().is_some_and(|pending| {
+                    pending.name == schedule.name
+                        && pending.prompt == schedule.prompt
+                        && pending.cadence == schedule.cadence
+                        && pending.send == schedule.send
+                }) {
+                    self.schedule_pending = None;
+                    self.schedule_error = None;
+                    self.schedule_form_open = false;
+                    self.schedule_reset_on_open = true;
+                    self.schedule_scroll.set_offset(gpui_kit::Point::default());
+                }
+            }
+            sovra_core::ScheduleEvent::Error(message) => {
+                self.schedule_error = Some(if self.schedule_pending.take().is_some() {
+                    format!("Your task is still here. Try saving again. {message}")
+                } else {
+                    message.clone()
+                });
+                self.schedule_scroll.set_offset(gpui_kit::Point::default());
+            }
+            sovra_core::ScheduleEvent::Snapshot { .. }
+            | sovra_core::ScheduleEvent::Fired { .. }
+            | sovra_core::ScheduleEvent::RunRecorded { .. } => {}
+        }
+    }
+
+    pub fn submit_new_schedule(&mut self, cx: &mut Context<Self>) {
+        if self.schedule_pending.is_some() {
+            return;
+        }
         let name = self.schedule_name_input.read(cx).value().to_string();
         let cadence = self.schedule_cadence_input.read(cx).value().to_string();
         let prompt = self.schedule_prompt_input.read(cx).value().to_string();
-        if self
-            .state
-            .create_schedule(&name, &cadence, &prompt)
-            .is_some()
-        {
-            Self::send_schedule(
-                ScheduleCommand::Create {
-                    name,
-                    cadence,
-                    prompt,
-                    send: None,
-                },
-                cx,
-            );
-            self.schedule_name_input.update(cx, |input, cx| {
-                input.set_value("", window, cx);
-            });
-            self.schedule_cadence_input.update(cx, |input, cx| {
-                input.set_value("", window, cx);
-            });
-            self.schedule_prompt_input.update(cx, |input, cx| {
-                input.set_value("", window, cx);
-            });
-            self.schedule_form_open = false;
+        // Validate using domain rules without adding an unconfirmed task to the workspace.
+        let expected = sovra_core::create_in_book(
+            &mut sovra_core::ScheduleBook::default(),
+            &name,
+            &cadence,
+            &prompt,
+            None,
+            wall_time(),
+            0,
+        );
+        match expected {
+            Ok(expected) => {
+                if cx
+                    .global::<RuntimeClient>()
+                    .0
+                    .send(Command::Schedule(ScheduleCommand::Create {
+                        name,
+                        cadence,
+                        prompt,
+                        send: None,
+                    }))
+                    .is_ok()
+                {
+                    self.schedule_error = None;
+                    self.schedule_pending = Some(expected);
+                } else {
+                    self.schedule_error = Some(
+                        "Sovra could not start saving. Your task is still here; try again.".into(),
+                    );
+                }
+            }
+            Err(error) => self.schedule_error = Some(error.to_string()),
+        }
+        if self.schedule_error.is_some() {
+            self.schedule_scroll.set_offset(gpui_kit::Point::default());
         }
         self.refresh(cx);
     }
@@ -1997,6 +2083,23 @@ impl Shell {
                             cadence: &self.schedule_cadence_input,
                             prompt: &self.schedule_prompt_input,
                             open: self.schedule_form_open,
+                            status: if self.schedule_pending.is_some() {
+                                crate::schedules_view::ScheduleFormStatus::Saving
+                            } else if !self.schedule_reset_on_open
+                                && [
+                                    &self.schedule_name_input,
+                                    &self.schedule_cadence_input,
+                                    &self.schedule_prompt_input,
+                                ]
+                                .iter()
+                                .any(|input| !input.read(cx).value().is_empty())
+                            {
+                                crate::schedules_view::ScheduleFormStatus::Draft
+                            } else {
+                                crate::schedules_view::ScheduleFormStatus::Empty
+                            },
+                            scroll: &self.schedule_scroll,
+                            error: self.schedule_error.as_deref(),
                             compact: self.history_compact,
                             range: self.schedule_timeline_range,
                             can_share: self

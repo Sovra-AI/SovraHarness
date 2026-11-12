@@ -381,6 +381,10 @@ pub enum ScheduleCommand {
 /// Runtime → UI schedule notifications.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScheduleEvent {
+    /// A specific creation was persisted; list refreshes alone are not save acknowledgements.
+    Created {
+        schedule: Box<ScheduleItem>,
+    },
     Snapshot {
         schedules: Vec<ScheduleItem>,
         runs: Vec<ScheduleRun>,

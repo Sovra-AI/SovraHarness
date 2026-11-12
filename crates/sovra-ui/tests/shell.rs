@@ -7,6 +7,103 @@ use sovra_core::{AgUiWidget, Command, Event, NavTab, RuntimeStatus, ScreenRoute}
 use sovra_runtime::Client;
 use sovra_ui::Shell;
 
+fn confirm_schedule(
+    cx: &mut TestAppContext,
+    events: &async_channel::Sender<Event>,
+    name: &str,
+    cadence: &str,
+    prompt: &str,
+) {
+    let mut book = sovra_core::ScheduleBook::default();
+    let schedule = sovra_core::create_in_book(
+        &mut book,
+        name,
+        cadence,
+        prompt,
+        None,
+        sovra_core::Timestamp(1),
+        0,
+    )
+    .expect("schedule test fixture is available");
+    events
+        .send_blocking(Event::Schedule(sovra_core::snapshot_event(&book)))
+        .expect("schedule test fixture is available");
+    events
+        .send_blocking(Event::Schedule(sovra_core::ScheduleEvent::Created {
+            schedule: Box::new(schedule),
+        }))
+        .expect("schedule test fixture is available");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn name_only_signin_waits_for_the_runtime_before_opening_the_workspace(cx: &mut TestAppContext) {
+    use sovra_core::auth::{AuthCommand, AuthEvent, AuthProvider, AuthSession, LocalProfile};
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    for event in [
+        AuthEvent::Loaded {
+            session: None,
+            has_accounts: true,
+            google_ready: false,
+        },
+        AuthEvent::LocalProfiles(vec![LocalProfile {
+            account_id: "local-sam".into(),
+            full_name: "Sam Rivera".into(),
+        }]),
+    ] {
+        events.send_blocking(Event::Auth(event)).unwrap();
+    }
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .find(("login-local-profile", 0usize))
+                .label()
+                .unwrap()
+                .contains("Sam Rivera")
+        );
+        window.click(("login-local-profile", 0usize), cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().route, ScreenRoute::Login);
+    })
+    .unwrap();
+    assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command|
+        matches!(command, Command::Auth(AuthCommand::ContinueLocalProfile { account_id }) if account_id == "local-sam")
+    ));
+    events
+        .send_blocking(Event::Auth(AuthEvent::SignedIn {
+            session: AuthSession {
+                account_id: "local-sam".into(),
+                email: String::new(),
+                full_name: "Sam Rivera".into(),
+                provider: AuthProvider::Password,
+                signed_in_at: sovra_core::Timestamp(1),
+            },
+            new_account: false,
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    assert_eq!(
+        shell.read_with(cx, |shell, _| shell.workspace().route),
+        ScreenRoute::MainWorkspace
+    );
+}
+
 #[gpui_kit::test]
 fn status_follows_runtime_events(cx: &mut TestAppContext) {
     let (client, _commands, events) = Client::loopback();
@@ -68,6 +165,16 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
         assert!(window.try_find("agui-build-progress-card").is_none());
         assert!(window.try_find("sovra-inspector").is_none());
 
+        // Capability discovery belongs with everyday work, before setup options.
+        assert!(
+            window.find("nav-skills").bounds().origin.y
+                < window.find("sidebar-group-ai-setup").bounds().origin.y
+        );
+        window.click("nav-skills", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Skills);
+        assert!(window.find("skill-search").visible());
+
         // Switch to Schedules tab -> empty invite, then create one and run it.
         window.click("nav-schedules", cx);
         window.render_frame(cx);
@@ -86,6 +193,21 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
         window.input("Give me a short briefing of what's on today", cx);
         window.click("schedule-save-btn", cx);
         window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().schedules,
+            Vec::<sovra_core::ScheduleItem>::new()
+        );
+    })
+    .unwrap();
+    confirm_schedule(
+        cx,
+        &events,
+        "Weekday briefing",
+        "every weekday at 9",
+        "Give me a short briefing of what's on today",
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().schedules.len(), 1);
         assert!(window.find("schedules-timeline").visible());
         assert!(window.find(("schedule-lane", 0usize)).visible());
@@ -95,7 +217,11 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
 
-        // Sign out via user profile -> renders Login screen, then sign back in.
+        // The footer names its immediate action instead of promising an account menu.
+        assert_eq!(
+            window.find("sidebar-user-profile").label(),
+            Some("Sign out")
+        );
         window.click("sidebar-user-profile", cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().route, ScreenRoute::Login);
@@ -431,7 +557,7 @@ fn composer_enter_sends_shift_enter_adds_line_and_stop_clears_queue(cx: &mut Tes
 
 #[gpui_kit::test]
 fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppContext) {
-    let (client, commands, _events) = Client::loopback();
+    let (client, commands, events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell = None;
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
@@ -528,6 +654,21 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
         window.click("schedule-prompt-input", cx);
         window.input("Summarize top semiconductor and AI news.", cx);
         window.click("schedule-save-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().schedules,
+            Vec::<sovra_core::ScheduleItem>::new()
+        );
+    })
+    .unwrap();
+    confirm_schedule(
+        cx,
+        &events,
+        "Daily Tech Digest",
+        "",
+        "Summarize top semiconductor and AI news.",
+    );
+    cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().schedules.len(), 1);
         assert_eq!(
@@ -681,7 +822,6 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
         let nav_schedules_bounds = window.find("nav-schedules").bounds();
         let group_header_bounds = window.find("sidebar-group-ai-setup").bounds();
         let nav_models_bounds = window.find("nav-models").bounds();
-        let chat_main_bounds = window.find("sovra-chat-main").bounds();
 
         assert!(
             history_bounds.left() >= sidebar_bounds.left()
@@ -713,6 +853,17 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
         window.input("Give me a short briefing of what's on today", cx);
         window.click("schedule-save-btn", cx);
         window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().schedules, Vec::<sovra_core::ScheduleItem>::new());
+    }).unwrap();
+    confirm_schedule(
+        cx,
+        &events,
+        "Weekday briefing",
+        "",
+        "Give me a short briefing of what's on today",
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
         window.click("nav-chat", cx);
         window.render_frame(cx);
         assert!(
@@ -721,6 +872,8 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
                 .visible(),
             "Schedules tab must display live count badge when schedules exist"
         );
+        let sidebar_bounds = window.find("sovra-sidebar").bounds();
+        let chat_main_bounds = window.find("sovra-chat-main").bounds();
         if sovra_ui::design::is_rtl(cx) {
             assert!(
                 (sidebar_bounds.left() - chat_main_bounds.right()).abs() < px(4.),
@@ -1579,4 +1732,110 @@ fn late_source_receipt_saves_the_originating_transcript_without_changing_selecti
     assert!(saves.iter().any(|thread| thread.id == first.id
         && thread.updated_at == first.updated_at
         && thread.messages[0].source == Some(sovra_core::EpisodeId("episode:receipt".into()))));
+}
+
+#[gpui_kit::test]
+fn schedule_save_keeps_the_draft_until_confirmed_and_can_retry(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(1000.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Schedules, cx));
+        window.render_frame(cx);
+        window.click("schedule-empty-create-btn", cx);
+        window.click("schedule-name-input", cx);
+        window.input("Garden reminder", cx);
+        window.click("schedule-cadence-input", cx);
+        window.input("every day at 9", cx);
+        window.click("schedule-prompt-input", cx);
+        window.input("Check the garden", cx);
+        window.click("schedule-save-btn", cx);
+        assert!(window.find("schedule-create-form").visible());
+        assert_eq!(
+            shell.read(cx).workspace().schedules,
+            Vec::<sovra_core::ScheduleItem>::new()
+        );
+    })
+    .unwrap();
+    let first = std::iter::from_fn(|| commands.try_recv().ok())
+        .find(|command| {
+            matches!(
+                command,
+                Command::Schedule(sovra_core::ScheduleCommand::Create { .. })
+            )
+        })
+        .unwrap();
+    events
+        .send_blocking(Event::Schedule(sovra_core::ScheduleEvent::Error(
+            "Test storage unavailable".into(),
+        )))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("schedule-error").visible());
+        window.click("schedule-save-btn", cx);
+        assert!(window.find("schedule-create-form").visible());
+    })
+    .unwrap();
+    assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| command == first));
+    let mut book = sovra_core::ScheduleBook::default();
+    let saved = sovra_core::create_in_book(
+        &mut book,
+        "Garden reminder",
+        "every day at 9",
+        "Check the garden",
+        None,
+        sovra_core::Timestamp(1),
+        0,
+    )
+    .unwrap();
+    events
+        .send_blocking(Event::Schedule(sovra_core::snapshot_event(&book)))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.find("schedule-create-form").visible(),
+            "a list refresh is not a save acknowledgement"
+        );
+    })
+    .unwrap();
+    events
+        .send_blocking(Event::Schedule(sovra_core::ScheduleEvent::Created {
+            schedule: Box::new(saved),
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("schedule-create-form").is_none());
+        assert_eq!(shell.read(cx).workspace().schedules.len(), 1);
+        window.click("schedule-create-toggle-btn", cx);
+        window.click("schedule-save-btn", cx);
+        assert!(
+            window.find("schedule-error").visible(),
+            "the next task must start with blank fields"
+        );
+    })
+    .unwrap();
+    assert!(
+        !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+            command,
+            Command::Schedule(sovra_core::ScheduleCommand::Create { .. })
+        ))
+    );
 }

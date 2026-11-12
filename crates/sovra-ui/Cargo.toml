@@ -11,6 +11,8 @@ publish.workspace = true
 base64 = { workspace = true }
 image = { workspace = true }
 gpui-kit = { workspace = true, features = ["test-support"] }
+gpui-bidi = { workspace = true }
+unicode-bidi = { workspace = true }
 sovra-core = { workspace = true }
 sovra-runtime = { workspace = true }
 tracing = { workspace = true }

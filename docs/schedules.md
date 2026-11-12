@@ -10,6 +10,11 @@ service. Prompt runs use the configured chat model and may incur provider costs.
 2. Give it a name, a cadence in ordinary words, and the prompt to run.
 3. Choose **Save schedule**, then check the next-run time in the list.
 
+The form stays open while saving. If saving fails, your entries remain available
+to retry. **Hide form** keeps the unfinished task for this session; **Continue
+task** reopens it. After a confirmed save, the next new task starts with empty
+fields. A blank timing field means every day at 9:00.
+
 Examples of supported cadence text are `in 1 minute`, `just once`,
 `every weekday at 9`, `Fridays at 4`, and `every 4 hours`. You can also ask the
 schedule helper in chat to create or manage a task. Check the saved task rather
@@ -19,6 +24,11 @@ The page shows active and paused tasks, recent results and a timeline. Use
 **Run in chat**, **Pause**, **Resume**, or **Delete** on a task. Pause prevents future
 scheduled starts; it does not cancel work already running. One-shot tasks pause
 after firing. Resuming one schedules its delay again.
+
+If saving a change fails, the previously saved task stays in effect. A new task
+does not become active, and a requested run does not start, until the scheduler
+has saved the change. Automatic runs retry after 30 seconds when storage is
+unavailable; other controls remain available during that wait.
 
 ## Timing and results
 

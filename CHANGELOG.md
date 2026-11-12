@@ -11,7 +11,48 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Name your own skills naturally.** Arabic and other non-Latin titles receive
+  automatic shortcuts. Repeated names get distinct shortcuts, and an explicitly
+  entered shortcut already in the catalogue is rejected instead of replacing
+  another skill from the new-skill form.
+
+- **Keep saved details available during background checks.** A remembering job
+  that finds no new facts no longer cancels an unrelated memory lookup. Actual
+  edits, removals and fact writes still invalidate older lookup results.
+
+- **Continue with an existing AI key.** Setup recognises keys supplied by the
+  computer's settings, skips new-key instructions and offers model selection.
+  Using a different key stays optional; failed checks remain retryable.
+  The Connections page now displays AI connection errors and check results,
+  which were previously hidden on that page.
+
+- **Clearer AI setup.** Key status describes whether a key is saved without
+  claiming the service has been tested. Setup explains that OpenRouter offers
+  both free and paid AI choices, and defines a connection key in plain words.
+
+- **Schedule forms keep your work.** Saving waits for confirmation; failures
+  retain every field for retry. **Hide form** keeps a draft and **Continue task**
+  reopens it. Persistent field labels and timing examples remain available at
+  small sizes, with a reminder to keep Sovra open for tasks to run.
+
+- **Failed schedule saves no longer take effect.** Creating, pausing, deleting or
+  starting a task keeps the previous saved state if storage fails. A run is
+  dispatched only after its record is saved, and automatic retries back off
+  while storage is unavailable.
+
 - **Ask connected folders in your own words.** After you grant a folder, a normal question pulls the sentence that answers it, with the file path and the lines it came from. You do not name the file. When you have already chosen an embedding model for that folder, a differently worded question can still find the passage. Until then, Sovra says the search is using the words in the files and does not claim the folder is fully vectorised. Removing the folder takes that text away. Helpers with folder access receive the same passages. File text stays evidence, never instructions.
+
+- **Keep edits when saving fails.** Saved-work forms show **Saving…** until a
+  matching result arrives. Errors leave the draft available to retry, and a
+  completed save never closes newer changes typed while it was running.
+
+- **Protect unfinished saved-work edits.** Back, Cancel and opening another item
+  ask whether to keep editing or discard changes. Unchanged forms close directly.
+  Sharing, deletion and folder actions stay out of the way while editing.
+
+- **Readable sign-in instructions.** Name, email and password fields keep their
+  labels visible while you type. Arabic page headings and sign-in instructions
+  wrap in reading order inside their available space.
 
 - **See what Sovra is doing while it works.** Each reply that uses tools now
   shows a live work log above the answer. Every step appears in plain words,
@@ -35,6 +76,25 @@ move them under a version heading when the tag is cut.
   helper that repeats the same call with the same details a fourth time is told
   to change course. Hitting the step limit gives a plain explanation instead of
   an error. See `docs/agent-loop.md`.
+
+- **Reopen accounts created with just a name.** After signing out or restarting,
+  choose the sign-in button with your name. Only accounts created
+  without email, password or Google sign-in get this option; other accounts
+  still require their original sign-in method.
+
+- **Find saved work again with one click.** When search, folders, file types or
+  Favorites hide all results, **Show all saved work** clears those filters
+  together. An empty library offers **Open chat** instead of unused search and
+  filter controls; page navigation appears only when there is more than one page.
+
+- **Clearer everyday navigation.** Skills now sits directly below Chat so you
+  can discover what Sovra can do without looking through AI setup. The account
+  footer explicitly says **Sign out**, matching its action instead of suggesting
+  that it opens an account or workspace menu.
+  Skills' **Open now** buttons open their destination immediately and preserve
+  unfinished chat drafts; chat recipes are labelled **Try in chat**.
+  The quick tour now describes live saved knowledge and automatic schedules,
+  including the need to keep Sovra open, and uses the current settings labels.
 
 ## [0.3.0] — 2026-11-12
 

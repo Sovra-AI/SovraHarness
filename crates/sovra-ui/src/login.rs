@@ -127,8 +127,40 @@ fn login_form(
     v_flex()
         .w_full()
         .gap(t.space.small)
+        .when(!creating && !auth.local_profiles.is_empty(), |form| {
+            form.child(
+                v_flex().w_full().gap(t.space.small).children(
+                    auth.local_profiles
+                        .iter()
+                        .enumerate()
+                        .map(|(index, profile)| {
+                            let account_id = profile.account_id.clone();
+                            let label = format!(
+                                "{} · {}",
+                                design::chrome(cx, ChromeKey::LoginSignIn),
+                                profile.full_name
+                            );
+                            design::primary_button(("login-local-profile", index), "", cx)
+                                .w_full()
+                                .min_w_0()
+                                .accessibility_label(label.clone())
+                                .tooltip(label.clone())
+                                .child(div().min_w_0().w_full().truncate().child(label))
+                                .disabled(busy)
+                                .on_click(cx.listener(move |shell, _, _, cx| {
+                                    shell.continue_local_profile(account_id.clone(), cx);
+                                }))
+                        }),
+                ),
+            )
+        })
         .when(creating, |form| {
             form.child(
+                design::paragraph(design::chrome(cx, ChromeKey::LoginName))
+                    .id("login-name-label")
+                    .sovra_text(TextRole::Caption, cx),
+            )
+            .child(
                 Input::new(name_input)
                     .id("login-name-input")
                     .aria_label(design::chrome(cx, ChromeKey::LoginName))
@@ -140,6 +172,11 @@ fn login_form(
             )
         })
         .child(
+            design::paragraph(design::chrome(cx, ChromeKey::LoginEmail))
+                .id("login-email-label")
+                .sovra_text(TextRole::Caption, cx),
+        )
+        .child(
             Input::new(email_input)
                 .id("login-email-input")
                 .aria_label(design::chrome(cx, ChromeKey::LoginEmail))
@@ -148,6 +185,11 @@ fn login_form(
                         .small()
                         .text_color(t.text_secondary),
                 ),
+        )
+        .child(
+            design::paragraph(design::chrome(cx, ChromeKey::LoginPassword))
+                .id("login-password-label")
+                .sovra_text(TextRole::Caption, cx),
         )
         .child(
             Input::new(password_input)
@@ -168,7 +210,7 @@ fn login_form(
                     .w_full()
                     .text_color(cx.theme().danger)
                     .sovra_text(TextRole::Caption, cx)
-                    .child(message),
+                    .child(design::paragraph(message)),
             )
         })
         .child(
@@ -200,11 +242,11 @@ fn login_form(
                 .w_full()
                 .text_color(t.text_secondary)
                 .sovra_text(TextRole::Caption, cx)
-                .child(if creating {
+                .child(design::paragraph(if creating {
                     design::chrome(cx, ChromeKey::LoginHintCreate)
                 } else {
                     design::chrome(cx, ChromeKey::LoginHintSignIn)
-                }),
+                })),
         )
 }
 
@@ -265,15 +307,19 @@ fn google_waiting(auth_url: &str, cx: &mut Context<Shell>) -> impl IntoElement +
         .items_center()
         .gap(t.space.small)
         .child(
-            div()
-                .sovra_text(TextRole::Body, cx)
-                .child(design::chrome(cx, ChromeKey::LoginGoogleWaiting)),
+            div().sovra_text(TextRole::Body, cx).child(
+                design::paragraph(design::chrome(cx, ChromeKey::LoginGoogleWaiting))
+                    .id("google-waiting-title"),
+            ),
         )
         .child(
             div()
                 .text_color(t.text_secondary)
                 .sovra_text(TextRole::Caption, cx)
-                .child(design::chrome(cx, ChromeKey::LoginGoogleWaitingHint)),
+                .child(
+                    design::paragraph(design::chrome(cx, ChromeKey::LoginGoogleWaitingHint))
+                        .id("google-waiting-hint"),
+                ),
         )
         .child(
             h_flex()

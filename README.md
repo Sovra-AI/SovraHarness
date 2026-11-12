@@ -22,6 +22,12 @@ or choose **Read as a list**. **Focus on these connections** opens a smaller
 map around the selected detail; **Show all** restores the overview. The map
 renders natively inside the app, with no extra runtime or browser dependency.
 
+AI setup guides you through adding a service's connection key and choosing an
+AI. OpenRouter offers free and paid choices. A saved key means Sovra has stored
+it; use **Check key** to check whether the service accepts it.
+If a key is already supplied by this computer's settings, continue straight to
+**Next: pick a chat model**. You do not need to create or save another key.
+
 The **Groups** tab explains itself in plain words: *What is a group?*, what you
 can do in one, and how it works. You choose **Start a new group** or **Join a
 group** and answer two or three labelled questions. Inside a group, one page at a
@@ -51,6 +57,12 @@ server-side rendering are not hosted. Hosting ends when Sovra closes.
 Organize Artifacts into named folders, mark favorites, search by name or content,
 and sort by recent changes, name or oldest first. Results appear 24 per page.
 Older work appears under **Unfiled** until you move it.
+If no results match, **Show all saved work** clears the search, folder, type and
+Favorites filters together without changing anything you saved.
+When editing saved work, Back and Cancel ask before discarding changes. Choose
+**Keep editing** to return to your draft or **Discard changes** to leave it.
+Saving keeps the editor open until confirmed. If it fails, your changes remain
+in the form so you can retry; typing during a save keeps the newer draft open.
 
 Type `/remote-control` in chat to open **Use Sovra from your phone**, enable
 phone access and show a one-use pairing QR. Paired phones are remembered, but
@@ -60,6 +72,24 @@ connection, runnable reference client and [mobile integration contract](docs/rem
 are ready for integration testing with that future app.
 
 ## Quick start
+
+Scheduled tasks keep their previous saved state when an update cannot be saved.
+The creation form preserves entries on failure and waits for confirmation before closing.
+Runs start only after their run record is saved; see [Schedules](docs/schedules.md).
+
+Open **Skills**, directly below **Chat** in the expanded sidebar, to discover
+what Sovra can do and try an example. The account footer's **Sign out** action
+returns to the sign-in screen.
+If you created your account with only a name, choose the sign-in button with your name
+to reopen it on this computer. Email/password and Google accounts use their
+usual sign-in methods.
+Sign-in fields keep their labels visible while you type; translated page headings
+and sign-in instructions support right-to-left paragraph wrapping.
+Skills' **Open now** buttons open the relevant feature directly; **Try in chat**
+and **Try the example** prepare a draft for you to review before sending.
+When adding your own skill, use a name in your language and leave **Shortcut**
+blank. Sovra chooses an unused shortcut automatically, including for Arabic
+names. To change an existing skill, open its **Edit** action.
 
 ```sh
 just dev
@@ -170,6 +200,9 @@ A private chat message is saved as raw evidence immediately. The reply uses
 facts already in the store. Extracting a new fact runs in the background and
 can only appear on a later turn. Full path:
 [memory capture and recall](docs/memory-capture-and-recall.md).
+Background checks that find no new facts leave ongoing lookups intact. Corrections,
+removals and new fact writes still invalidate older results so replies do not use
+outdated details.
 
 ```mermaid
 sequenceDiagram

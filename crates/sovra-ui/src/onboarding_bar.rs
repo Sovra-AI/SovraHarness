@@ -77,7 +77,7 @@ fn render_tour_coach_bar(
         );
     } else if step == TourStep::AutomaticRouting {
         actions = actions.child(
-            design::button("tour-try-sim-btn", "Try routing simulation", cx)
+            design::button("tour-try-sim-btn", "Preview an AI choice", cx)
                 .small()
                 .on_click(cx.listener(|shell, _, _, cx| {
                     if !shell.my_ais_advanced_open {
@@ -167,11 +167,7 @@ fn render_setup_coach_strip(
         } => (
             "STEP 2 OF 2",
             hint.map_or_else(
-                || {
-                    format!(
-                        "{connected_service} is connected. Now pick the AI you want to talk to."
-                    )
-                },
+                || format!("{connected_service} is set up. Now pick the AI you want to talk to."),
                 str::to_owned,
             ),
             "setup-strip-pick-model",
@@ -192,7 +188,7 @@ fn render_setup_coach_strip(
         ),
         SetupStage::Loading | SetupStage::NeedsConnection | SetupStage::Ready { .. } => (
             "STEP 1 OF 2",
-            "Connect an AI service to start chatting. A free OpenRouter key is the easiest."
+            "Connect an AI service to start chatting. OpenRouter offers free and paid AI choices."
                 .to_owned(),
             "setup-strip-connect",
             "Connect an AI service →",
@@ -236,7 +232,7 @@ fn render_setup_coach_strip(
                         })),
                 )
                 .child(
-                    design::button("setup-strip-tour-btn", "System Tour", cx)
+                    design::button("setup-strip-tour-btn", "Quick tour", cx)
                         .small()
                         .ghost()
                         .on_click(cx.listener(|shell, _, _, cx| {

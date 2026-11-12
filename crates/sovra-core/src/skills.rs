@@ -162,6 +162,46 @@ impl SkillCatalog {
         &self.skills
     }
 
+    /// Suggests an unused shortcut while leaving the human-readable title intact.
+    pub fn available_command_name(&self, title: &str) -> String {
+        let mut base = String::new();
+        for ch in title.chars() {
+            if ch.is_ascii_alphanumeric() {
+                base.push(ch.to_ascii_lowercase());
+            } else if !base.is_empty() && !base.ends_with('-') {
+                base.push('-');
+            }
+            if base.len() >= 64 {
+                break;
+            }
+        }
+        base = base.trim_end_matches('-').to_owned();
+        if base.is_empty() {
+            base = "my-skill".into();
+        }
+        let used: BTreeSet<_> = self
+            .skills
+            .iter()
+            .flat_map(|skill| {
+                std::iter::once(skill.name.as_str()).chain(skill.aliases.iter().map(String::as_str))
+            })
+            .collect();
+        // There are more candidates than occupied names, including aliases and
+        // disabled skills. Truncating only ASCII preserves the protocol limit.
+        (1..=used.len() + 1)
+            .map(|index| {
+                if index == 1 {
+                    base.clone()
+                } else {
+                    let suffix = format!("-{index}");
+                    let prefix = &base[..base.len().min(64 - suffix.len())];
+                    format!("{}{suffix}", prefix.trim_end_matches('-'))
+                }
+            })
+            .find(|candidate| !used.contains(candidate.as_str()))
+            .expect("more distinct candidate names than occupied names")
+    }
+
     pub fn apply(&mut self, event: &SkillEvent) -> Result<Vec<String>, SkillError> {
         match event {
             SkillEvent::Loaded { skills, issues } => {

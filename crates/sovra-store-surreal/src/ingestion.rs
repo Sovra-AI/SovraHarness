@@ -344,6 +344,8 @@ impl SurrealStore {
             write.same_as = same_as;
             writes.push(write);
         }
+        // Empty extraction only advances the job. Revoking concurrent recall in
+        // that case can hide valid details from a question asked just afterwards.
         let sql = format!("BEGIN TRANSACTION;
             LET $job = (SELECT * FROM ONLY $job_id);
             LET $policy = (SELECT * FROM ONLY meta:remembering);
@@ -355,7 +357,7 @@ impl SurrealStore {
                     THROW 'memory lease is stale or remembering is paused';
                 }};
                 IF (SELECT VALUE revision FROM ONLY meta:memory_facts) != $revision {{ THROW 'memory reconciliation is stale'; }};
-                UPDATE meta:memory_facts SET revision += 1;
+                IF array::len($writes) > 0 {{ UPDATE meta:memory_facts SET revision += 1; }};
 
                 FOR $write IN $writes {{
                     LET $same = IF $write.same_as != NONE {{ (SELECT * FROM ONLY $write.same_as) }} ELSE {{ NONE }};
@@ -653,6 +655,7 @@ mod scheduling_tests {
             .unwrap();
         source(&store).await;
         let revision = fence(&store).await;
+        let recall_revision = store.memory_revision().await.unwrap();
         let first = store.claim_memory(Timestamp(2_000)).await.unwrap().unwrap();
         assert_eq!(
             fence(&store).await,
@@ -686,6 +689,11 @@ mod scheduling_tests {
             .await
             .unwrap();
         assert_eq!(fence(&store).await, revision);
+        assert_eq!(
+            store.memory_revision().await.unwrap(),
+            recall_revision,
+            "finishing without any facts must not invalidate an unrelated recall"
+        );
     }
 
     #[tokio::test]

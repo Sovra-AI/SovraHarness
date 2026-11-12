@@ -21,19 +21,19 @@ use crate::chat_history_view::render_chat_history_section;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::{Shell, logo};
 
-const PRIMARY_TABS: [NavTab; 5] = [
+const PRIMARY_TABS: [NavTab; 6] = [
     NavTab::Chat,
+    NavTab::Skills,
     NavTab::Team,
     NavTab::Artifacts,
     NavTab::Schedules,
     NavTab::Groups,
 ];
 
-const AI_SETUP_TABS: [NavTab; 6] = [
+const AI_SETUP_TABS: [NavTab; 5] = [
     NavTab::Models,
     NavTab::MyAis,
     NavTab::Knowledge,
-    NavTab::Skills,
     NavTab::Connections,
     NavTab::Settings,
 ];
@@ -169,23 +169,18 @@ fn render_collapsed_sidebar(
     )
     .child(Icon::new(IconName::Plus).small().text_color(link))
     .on_click(cx.listener(|shell, _, window, cx| shell.start_new_chat(window, cx)));
-    let profile = rail_btn(
-        "sidebar-user-profile",
-        "Account & sign out",
-        "User profile and sign out",
-        cx,
-    )
-    .child(
-        h_flex()
-            .size(t.layout.icon_medium)
-            .items_center()
-            .justify_center()
-            .rounded(t.radius.pill)
-            .bg(t.nav_active_background)
-            .sovra_text(TextRole::Caption, cx)
-            .child(state.user.initials.clone()),
-    )
-    .on_click(cx.listener(|shell, _, _, cx| shell.logout(cx)));
+    let profile = rail_btn("sidebar-user-profile", "Sign out", "Sign out", cx)
+        .child(
+            h_flex()
+                .size(t.layout.icon_medium)
+                .items_center()
+                .justify_center()
+                .rounded(t.radius.pill)
+                .bg(t.nav_active_background)
+                .sovra_text(TextRole::Caption, cx)
+                .child(state.user.initials.clone()),
+        )
+        .on_click(cx.listener(|shell, _, _, cx| shell.logout(cx)));
 
     let mut collapsed_sidebar = v_flex()
         .id("sovra-sidebar")
@@ -497,12 +492,12 @@ fn render_user_profile(
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
                 .truncate()
-                .child(state.user.workspace_label.clone()),
+                .child("Sign out"),
         );
 
     design::button("sidebar-user-profile", "", cx)
-        .tooltip("Sign out or switch workspace")
-        .accessibility_label("User profile and sign out")
+        .tooltip("Sign out")
+        .accessibility_label("Sign out")
         .ghost()
         .h_auto()
         .w_full()
@@ -518,11 +513,6 @@ fn render_user_profile(
                 .gap(t.space.small)
                 .child(avatar)
                 .child(labels),
-        )
-        .child(
-            Icon::new(IconName::ChevronDown)
-                .xsmall()
-                .text_color(t.text_secondary),
         )
         .on_click(cx.listener(|shell, _, _, cx| shell.logout(cx)))
 }

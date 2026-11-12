@@ -5,7 +5,8 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
 };
 use gpui_kit::{
-    App, Div, ElementId, FontWeight, ParentElement as _, SharedString, Styled, div, relative, rems,
+    App, Div, ElementId, FontWeight, InteractiveElement as _, ParentElement as _, SharedString,
+    Styled, div, relative, rems,
 };
 
 use super::tokens;
@@ -205,7 +206,7 @@ pub fn page_header(
                 .min_w_0()
                 .whitespace_normal()
                 .sovra_text(TextRole::PageTitle, cx)
-                .child(title.into()),
+                .child(super::paragraph(title).id("page-title")),
         )
         .child(
             div()
@@ -214,6 +215,6 @@ pub fn page_header(
                 .whitespace_normal()
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
-                .child(description.into()),
+                .child(super::paragraph(description).id("page-description")),
         )
 }

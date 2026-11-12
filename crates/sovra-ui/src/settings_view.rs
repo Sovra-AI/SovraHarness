@@ -518,6 +518,7 @@ impl ModelsView {
     ) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let saved = form.original.has_credential;
+        let has_key = saved || form.original.environment_credential;
         let has_draft = !form.key.read(cx).value().trim().is_empty();
         let saving = self.pending_save.is_some();
         let status = credential_status(&form.original);
@@ -527,7 +528,7 @@ impl ModelsView {
         );
         let remove = form.original.clone();
         let mut steps = v_flex().gap(t.space.compact);
-        if !saved {
+        if !has_key {
             steps = steps
                 .child(
                     h_flex()
@@ -574,6 +575,10 @@ impl ModelsView {
                     .sovra_text(TextRole::SectionTitle, cx)
                     .child("Your OpenRouter API Key"),
             )
+            .child(caption(
+                "An API key is a connection key from OpenRouter. It lets Sovra use the AI choices in your OpenRouter account.",
+                cx,
+            ))
             .child(
                 div()
                     .id("settings-key-status")
@@ -581,7 +586,7 @@ impl ModelsView {
                     .aria_label(status)
                     .sovra_surface(Surface::Subtle, cx)
                     .p(t.space.small)
-                    .text_color(if saved || form.original.environment_credential {
+                    .text_color(if has_key {
                         cx.theme().success
                     } else {
                         t.text_secondary
@@ -595,17 +600,17 @@ impl ModelsView {
                     .aria_label(active_preview.clone())
                     .child(pill(active_preview, cx)),
             )
-            .children((saved && self.state.preferences.active.is_none()).then(|| {
+            .children((has_key && self.state.preferences.active.is_none()).then(|| {
                 div()
                     .id("settings-key-next-step")
                     .test_support()
                     .sovra_text(TextRole::Body, cx)
-                    .child("Key saved. Now pick the model you want to chat with — free ones are listed first.")
+                    .child("A key is already available. Next, pick the AI you want to chat with — free choices are listed first.")
             }))
             .child(steps)
             .child(field(
                 "connection-key",
-                if saved {
+                if has_key {
                     "Replace OpenRouter key"
                 } else {
                     "Paste your OpenRouter key"
@@ -613,8 +618,10 @@ impl ModelsView {
                 &form.key,
                 if saved {
                     "Your active key is shown above. Only fill this in if you want to replace it with a different OpenRouter key."
+                } else if form.original.environment_credential {
+                    "You can continue without entering anything. Paste a different key here only if you want Sovra to use it instead of the key from this computer's settings."
                 } else {
-                    "It starts with “sk-or-”. Sovra locks it inside this computer's keychain and shows a masked preview above."
+                    "It starts with “sk-or-”. Sovra saves it on this computer and shows a masked preview above."
                 },
                 cx,
             ))
@@ -663,7 +670,7 @@ impl ModelsView {
                                 );
                             }))
                     }))
-                    .child(if saved && self.state.preferences.active.is_none() {
+                    .child(if has_key && self.state.preferences.active.is_none() {
                         design::primary_button(
                             "settings-key-choose-model",
                             "Next: pick a chat model →",

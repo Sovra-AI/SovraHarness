@@ -6,6 +6,8 @@ mod agent_progress;
 mod artifact_library;
 #[path = "styling/code_panel.rs"]
 mod code_panel;
+#[path = "styling/connection_feedback.rs"]
+mod connection_feedback;
 #[path = "styling/development.rs"]
 mod development;
 #[path = "styling/file_knowledge.rs"]
@@ -28,6 +30,8 @@ mod messaging;
 mod remote_control;
 #[path = "styling/research_board.rs"]
 mod research_board;
+#[path = "styling/schedules.rs"]
+mod schedules;
 #[path = "styling/terminal.rs"]
 mod terminal;
 #[path = "styling/workspace_fit.rs"]
@@ -270,7 +274,7 @@ fn routing_choices_are_keyboard_operable(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
-    let (client, _commands, _events) = Client::loopback();
+    let (client, _commands, events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let dimensions = size(px(640.), px(420.));
     let window = cx.open_window(dimensions, |window, cx| {
@@ -283,11 +287,45 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
         window.render_frame(cx);
         window.click("schedule-create-toggle-btn", cx);
         window.render_frame(cx);
+        schedules::reveal(window, "schedule-name-input", cx);
         window.click("schedule-name-input", cx);
         window.input("Weekday briefing", cx);
+        schedules::reveal(window, "schedule-prompt-input", cx);
         window.click("schedule-prompt-input", cx);
         window.input("Give me a short briefing of what's on today", cx);
+        schedules::reveal(window, "schedule-save-btn", cx);
         window.click("schedule-save-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("schedule-create-form").visible());
+    })
+    .unwrap();
+    let mut book = sovra_core::ScheduleBook::default();
+    let saved = sovra_core::create_in_book(
+        &mut book,
+        "Weekday briefing",
+        "",
+        "Give me a short briefing of what's on today",
+        None,
+        sovra_core::Timestamp(1),
+        0,
+    )
+    .unwrap();
+    events
+        .send_blocking(sovra_core::Event::Schedule(sovra_core::snapshot_event(
+            &book,
+        )))
+        .unwrap();
+    events
+        .send_blocking(sovra_core::Event::Schedule(
+            sovra_core::ScheduleEvent::Created {
+                schedule: Box::new(saved),
+            },
+        ))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find("schedules-timeline").visible());
         assert!(window.find(("schedule-lane", 0usize)).visible());
@@ -340,31 +378,137 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn login_controls_stay_inside_the_minimum_window(cx: &mut TestAppContext) {
+fn local_profile_signin_fits_both_themes_and_large_text(cx: &mut TestAppContext) {
+    use sovra_core::auth::{AuthEvent, LocalProfile};
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (client, _commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(scale),
+                    cx,
+                );
+            });
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let shell = cx.new(|cx| Shell::new(0, window, cx));
+                Root::new(shell, window, cx)
+            });
+            for event in [
+                AuthEvent::Loaded {
+                    session: None,
+                    has_accounts: true,
+                    google_ready: false,
+                },
+                AuthEvent::LocalProfiles(vec![LocalProfile {
+                    account_id: "local".into(),
+                    full_name: "A person with a very long name that still needs to fit".into(),
+                }]),
+            ] {
+                events
+                    .send_blocking(sovra_core::Event::Auth(event))
+                    .unwrap();
+            }
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                let id = ("login-local-profile", 0usize);
+                let mut reached = false;
+                for _ in 0..40 {
+                    window.render_frame(cx);
+                    let page = window.find("sovra-login-screen").bounds();
+                    let button = window.find(id).bounds();
+                    assert!(
+                        button.left() >= page.left() && button.right() <= page.right(),
+                        "{button:?} overflows {page:?}"
+                    );
+                    if button.top() >= page.top() && button.bottom() <= page.bottom() {
+                        reached = true;
+                        break;
+                    }
+                    let delta = if button.top() < page.top() {
+                        page.top() - button.top()
+                    } else {
+                        page.bottom() - button.bottom()
+                    };
+                    window.scroll(
+                        "sovra-login-screen",
+                        gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), delta)),
+                        cx,
+                    );
+                }
+                assert!(
+                    reached,
+                    "sign-in must be reachable at {width}x{height}, {scale}%, {mode:?}"
+                );
+                assert!(window.find(id).focused().is_some());
+            })
+            .unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn login_controls_remain_reachable_at_every_interface_size(cx: &mut TestAppContext) {
     let (client, _commands, _events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
-    let dimensions = size(px(640.), px(420.));
-    let window = cx.open_window(dimensions, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(0, window, cx));
-        Root::new(shell, window, cx)
-    });
-    cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
-        window.click("sidebar-user-profile", cx);
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
-            Theme::change(mode, Some(window), cx);
-            window.render_frame(cx);
-            let page = window.find("sovra-login-screen").bounds();
-            for id in ["login-glass-card", "login-submit-btn", "login-language"] {
-                let bounds = window.find(id).bounds();
-                assert!(
-                    bounds.top() >= page.top() && bounds.bottom() <= page.bottom(),
-                    "{id} must fit the login viewport"
+            cx.update(|cx| {
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(scale),
+                    cx,
                 );
-            }
+            });
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let shell = cx.new(|cx| Shell::new(0, window, cx));
+                Root::new(shell, window, cx)
+            });
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.click("sidebar-user-profile", cx);
+                for id in [
+                    "login-email-input",
+                    "login-password-input",
+                    "login-submit-btn",
+                    "login-language",
+                ] {
+                    let mut reached = false;
+                    for _ in 0..40 {
+                        window.render_frame(cx);
+                        let page = window.find("sovra-login-screen").bounds();
+                        let bounds = window.find(id).bounds();
+                        assert!(
+                            bounds.left() >= page.left() && bounds.right() <= page.right(),
+                            "{id} exceeds the viewport width"
+                        );
+                        if bounds.top() >= page.top() && bounds.bottom() <= page.bottom() {
+                            reached = true;
+                            break;
+                        }
+                        let delta = if bounds.top() < page.top() {
+                            page.top() - bounds.top()
+                        } else {
+                            page.bottom() - bounds.bottom()
+                        };
+                        window.scroll(
+                            "sovra-login-screen",
+                            gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), delta)),
+                            cx,
+                        );
+                    }
+                    assert!(
+                        reached,
+                        "{id} must remain reachable at {width}x{height}, {scale}%, {mode:?}"
+                    );
+                }
+            })
+            .unwrap();
         }
-    })
-    .unwrap();
+    }
 }
 
 #[gpui_kit::test]

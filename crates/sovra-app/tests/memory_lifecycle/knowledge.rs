@@ -90,7 +90,10 @@ fn model(request: &Request) -> Reply {
                         "stop",
                     )
                 } else {
-                    assert_eq!(passages[0]["text"], SOURCE_TEXT);
+                    assert_eq!(
+                        passages[0]["text"],
+                        format!("Source: budget.txt\n\n{SOURCE_TEXT}")
+                    );
                     call(
                         request,
                         "read_indexed_file",
@@ -98,7 +101,10 @@ fn model(request: &Request) -> Reply {
                     )
                 }
             } else {
-                assert_eq!(result["passage"]["text"], SOURCE_TEXT);
+                assert_eq!(
+                    result["passage"]["text"],
+                    format!("Source: budget.txt\n\n{SOURCE_TEXT}")
+                );
                 reply(
                     request,
                     json!({"role":"assistant","content":format!("{SOURCE_TEXT} [budget.txt:1]")}),

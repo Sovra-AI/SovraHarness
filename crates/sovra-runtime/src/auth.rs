@@ -152,6 +152,21 @@ impl Actor {
                 full_name,
             } => self.create_account(email, &password, full_name).await,
             AuthCommand::SignIn { email, password } => self.sign_in(email, &password).await,
+            AuthCommand::ContinueLocalProfile { account_id } => {
+                self.stop_browser_wait();
+                let account = self
+                    .records
+                    .accounts
+                    .iter()
+                    .find(|account| account.id == account_id && account.local_profile().is_some())
+                    .cloned();
+                if let Some(account) = account {
+                    self.emit(AuthEvent::Submitting).await;
+                    self.finish_sign_in(&account, false).await;
+                } else {
+                    self.fail(AuthField::General, "This account needs its original sign-in method. Use email and password or Google.".into()).await;
+                }
+            }
             AuthCommand::StartGoogleSignIn => self.start_google().await,
             AuthCommand::CancelGoogleSignIn => {
                 self.stop_browser_wait();
@@ -163,6 +178,7 @@ impl Actor {
                 self.save().await;
                 self.forget_refresh_token().await;
                 self.emit(AuthEvent::SignedOut).await;
+                self.emit_local_profiles().await;
             }
         }
     }
@@ -174,6 +190,18 @@ impl Actor {
             has_accounts: !self.records.accounts.is_empty(),
             google_ready,
         })
+        .await;
+        self.emit_local_profiles().await;
+    }
+
+    async fn emit_local_profiles(&self) {
+        self.emit(AuthEvent::LocalProfiles(
+            self.records
+                .accounts
+                .iter()
+                .filter_map(AuthAccount::local_profile)
+                .collect(),
+        ))
         .await;
     }
 

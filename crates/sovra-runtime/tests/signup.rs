@@ -212,6 +212,86 @@ fn create(session: &Session, email: &str, password: &str, full_name: &str) {
 }
 
 #[test]
+fn name_only_accounts_reopen_after_signout_and_restart_without_bypassing_other_accounts() {
+    use sovra_core::auth::AuthProvider;
+    let accounts = vec![
+        AuthAccount {
+            id: "local".into(),
+            email: String::new(),
+            full_name: "Sam".into(),
+            provider: AuthProvider::Password,
+            password_phc: None,
+            created_at: Timestamp(1),
+        },
+        AuthAccount {
+            id: "password".into(),
+            email: "sam@example.com".into(),
+            full_name: "Sam".into(),
+            provider: AuthProvider::Password,
+            password_phc: Some("protected".into()),
+            created_at: Timestamp(1),
+        },
+        AuthAccount {
+            id: "google".into(),
+            email: "sam@gmail.com".into(),
+            full_name: "Sam".into(),
+            provider: AuthProvider::Google,
+            password_phc: None,
+            created_at: Timestamp(1),
+        },
+    ];
+    let store = Arc::new(AuthMemory(Mutex::new(Some(AuthRecords {
+        accounts,
+        session: None,
+    }))));
+    for _ in 0..2 {
+        let mut session = Session::start(store.clone());
+        session.send(Command::Auth(AuthCommand::Load));
+        session.wait_for(|event| {
+            matches!(
+                event,
+                Event::Auth(AuthEvent::Loaded {
+                    has_accounts: true,
+                    ..
+                })
+            )
+            .then_some(())
+        });
+        let profiles = session.wait_for(|event| match event {
+            Event::Auth(AuthEvent::LocalProfiles(profiles)) => Some(profiles.clone()),
+            _ => None,
+        });
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].account_id, "local");
+        for id in ["password", "google", "missing"] {
+            session.send(Command::Auth(AuthCommand::ContinueLocalProfile {
+                account_id: id.into(),
+            }));
+            session.wait_for(|event| {
+                matches!(event, Event::Auth(AuthEvent::Failed { .. })).then_some(())
+            });
+            assert!(store.0.lock().unwrap().as_ref().unwrap().session.is_none());
+        }
+        session.send(Command::Auth(AuthCommand::ContinueLocalProfile {
+            account_id: "local".into(),
+        }));
+        let reopened = session.wait_for(|event| match event {
+            Event::Auth(AuthEvent::SignedIn {
+                session,
+                new_account: false,
+            }) => Some(session.clone()),
+            _ => None,
+        });
+        assert_eq!(reopened.account_id, "local");
+        assert_eq!(reopened.full_name, "Sam");
+        assert_eq!(store.accounts().len(), 3);
+        session.send(Command::Auth(AuthCommand::SignOut));
+        session.wait_for(|event| matches!(event, Event::Auth(AuthEvent::SignedOut)).then_some(()));
+        session.shutdown();
+    }
+}
+
+#[test]
 fn signup_stores_the_typed_name_and_keeps_email_password_optional() {
     let store = Arc::new(AuthMemory(Mutex::new(None)));
     let mut session = Session::start(store.clone());

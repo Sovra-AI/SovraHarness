@@ -267,18 +267,31 @@ impl Worker {
                     .await;
             }
         }
-        if fail_stale_runs(&mut self.book, now()) {
-            self.persist().await;
+        if fail_stale_runs(&mut self.book, now())
+            && let Err(error) = self.persist().await
+        {
+            self.report_error(error).await;
         }
+        let mut retry_at: Option<tokio::time::Instant> = None;
         loop {
-            let wait = next_wake(&self.book, now());
+            let wait = next_wake(&self.book, now()).max(retry_at.map_or(Duration::ZERO, |at| {
+                at.saturating_duration_since(tokio::time::Instant::now())
+            }));
             tokio::select! {
                 message = inbox.recv() => {
                     let Ok(message) = message else { break };
                     self.handle(message).await;
                 }
                 () = tokio::time::sleep(wait) => {
-                    self.apply_tick(now()).await;
+                    if let Err(error) = self.apply_tick(now()).await {
+                        self.report_error(error).await;
+                        self.publish_snapshot().await;
+                        // A due task stays due after a failed write. Avoid hammering
+                        // unavailable storage while still accepting manual commands.
+                        retry_at = Some(tokio::time::Instant::now() + Duration::from_secs(30));
+                    } else {
+                        retry_at = None;
+                    }
                 }
             }
         }
@@ -290,8 +303,12 @@ impl Worker {
                 session_id,
                 succeeded,
             } => {
-                if complete_run(&mut self.book, &session_id, succeeded, None, now()) {
-                    self.persist_and_snapshot().await;
+                if complete_run(&mut self.book, &session_id, succeeded, None, now())
+                    && let Err(error) = self.persist_and_snapshot().await
+                {
+                    // The reply already finished; retain its truthful in-memory status.
+                    self.report_error(error).await;
+                    self.publish_snapshot().await;
                 }
             }
             Message::Command { command, reply } => {
@@ -304,25 +321,45 @@ impl Worker {
     }
 
     async fn apply_command(&mut self, command: ScheduleCommand) -> Result<ScheduleBook, String> {
+        let previous = self.book.clone();
+        let result = self.apply_command_inner(command).await;
+        if let Err(error) = &result {
+            self.book = previous;
+            self.report_error(error.clone()).await;
+            self.publish_snapshot().await;
+        }
+        result
+    }
+
+    async fn apply_command_inner(
+        &mut self,
+        command: ScheduleCommand,
+    ) -> Result<ScheduleBook, String> {
         let at = now();
+        let mut created = None;
         match command {
-            ScheduleCommand::Load => {}
+            ScheduleCommand::Load => {
+                self.publish_snapshot().await;
+                return Ok(self.book.clone());
+            }
             ScheduleCommand::Create {
                 name,
                 cadence,
                 prompt,
                 send,
             } => {
-                create_in_book(
-                    &mut self.book,
-                    &name,
-                    &cadence,
-                    &prompt,
-                    send,
-                    at,
-                    self.tz_offset_minutes,
-                )
-                .map_err(|error| error.to_string())?;
+                created = Some(
+                    create_in_book(
+                        &mut self.book,
+                        &name,
+                        &cadence,
+                        &prompt,
+                        send,
+                        at,
+                        self.tz_offset_minutes,
+                    )
+                    .map_err(|error| error.to_string())?,
+                );
             }
             ScheduleCommand::Pause { id } => {
                 pause_in_book(&mut self.book, &id).map_err(|error| error.to_string())?;
@@ -336,7 +373,7 @@ impl Worker {
             ScheduleCommand::RunNow { id, session_id } => {
                 match run_now_in_book(&mut self.book, &id, session_id, at) {
                     Ok(Some(fire)) => {
-                        self.persist_and_snapshot().await;
+                        self.persist_and_snapshot().await?;
                         self.dispatch_fire(fire).await;
                         return Ok(self.book.clone());
                     }
@@ -345,7 +382,7 @@ impl Worker {
                 }
             }
             ScheduleCommand::Tick { now } => {
-                self.apply_tick(now).await;
+                self.apply_tick(now).await?;
                 return Ok(self.book.clone());
             }
             ScheduleCommand::FinishRun {
@@ -356,19 +393,32 @@ impl Worker {
                 complete_run(&mut self.book, &session_id, succeeded, error, at);
             }
         }
-        self.persist_and_snapshot().await;
+        self.persist_and_snapshot().await?;
+        if let Some(schedule) = created {
+            let _ = self
+                .events
+                .send(Event::Schedule(ScheduleEvent::Created {
+                    schedule: Box::new(schedule),
+                }))
+                .await;
+        }
         Ok(self.book.clone())
     }
 
-    async fn apply_tick(&mut self, at: Timestamp) {
+    async fn apply_tick(&mut self, at: Timestamp) -> Result<(), String> {
+        let previous = self.book.clone();
         let effect = tick(&mut self.book, at);
         if effect.fire.is_empty() && effect.skipped.is_empty() {
-            return;
+            return Ok(());
         }
-        self.persist_and_snapshot().await;
+        if let Err(error) = self.persist_and_snapshot().await {
+            self.book = previous;
+            return Err(error);
+        }
         for fire in effect.fire {
             self.dispatch_fire(fire).await;
         }
+        Ok(())
     }
 
     async fn dispatch_fire(&mut self, fire: DueFire) {
@@ -396,31 +446,29 @@ impl Worker {
         let _ = self.commands_tx.send(command).await;
     }
 
-    async fn persist(&self) {
+    async fn persist(&self) -> Result<(), String> {
         let store = self.store.clone();
         let book = self.book.clone();
-        let persist = tokio::task::spawn_blocking(move || store.save(&book)).await;
-        match persist {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                let _ = self
-                    .events
-                    .send(Event::Schedule(ScheduleEvent::Error(error.to_string())))
-                    .await;
-            }
-            Err(_) => {
-                let _ = self
-                    .events
-                    .send(Event::Schedule(ScheduleEvent::Error(
-                        "Could not save schedules.".into(),
-                    )))
-                    .await;
-            }
-        }
+        tokio::task::spawn_blocking(move || store.save(&book))
+            .await
+            .map_err(|_| "Could not save schedules.".to_owned())?
+            .map_err(|error| error.to_string())
     }
 
-    async fn persist_and_snapshot(&self) {
-        self.persist().await;
+    async fn report_error(&self, message: String) {
+        let _ = self
+            .events
+            .send(Event::Schedule(ScheduleEvent::Error(message)))
+            .await;
+    }
+
+    async fn persist_and_snapshot(&self) -> Result<(), String> {
+        self.persist().await?;
+        self.publish_snapshot().await;
+        Ok(())
+    }
+
+    async fn publish_snapshot(&self) {
         let _ = self
             .events
             .send(Event::Schedule(snapshot_event(&self.book)))

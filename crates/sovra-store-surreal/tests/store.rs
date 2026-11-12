@@ -1019,11 +1019,16 @@ async fn ingestion_batch_is_atomic_idempotent_and_preserves_evidence() {
             .is_none()
     );
     let candidates = vec![candidate("User lives in Lisbon")];
+    let revision = store.memory_revision().await.unwrap();
     let ids = store
         .complete_memory(&claim, candidates.clone(), "test-model", Timestamp(2_010))
         .await
         .unwrap();
     assert_eq!(ids.len(), 1);
+    assert!(
+        store.memory_revision().await.unwrap() > revision,
+        "saving facts must still invalidate older recall results"
+    );
     assert_eq!(
         store
             .complete_memory(&claim, candidates, "test-model", Timestamp(2_020))

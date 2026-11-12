@@ -674,6 +674,56 @@ fn unfinished_source_never_offers_to_run_an_older_website(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn no_results_can_clear_combined_filters_without_losing_saved_work(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 2560., 1440.);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Artifacts, cx));
+        window.render_frame(cx);
+        assert!(window.find("artifacts-empty").visible());
+        assert!(window.try_find("artifact-search").is_none());
+        assert!(window.try_find("artifact-favorites").is_none());
+        assert!(window.try_find("artifact-page-next").is_none());
+        window.click("artifacts-open-chat", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
+    })
+    .unwrap();
+    let mut garden = artifact("garden", ArtifactKind::Document, "Planting list", 1);
+    garden.collection = "Garden".into();
+    garden.pinned = true;
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![
+            garden,
+            artifact("recipe", ArtifactKind::Note, "Bread recipe", 2),
+        ])))
+        .unwrap();
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Artifacts, cx));
+        window.render_frame(cx);
+        window.click(("artifact-folder", 1usize), cx);
+        window.click("artifact-favorites", cx);
+        window.click(("artifact-kind", 0usize), cx);
+        window.click("artifact-search", cx);
+        window.input("no such saved work", cx);
+        window.render_frame(cx);
+        assert!(window.find_all(("artifact-card", 0usize)).is_empty());
+        window.click("artifact-clear-filters", cx);
+        window.render_frame(cx);
+        assert!(window.find(("artifact-card", 0usize)).visible());
+        assert!(window.find(("artifact-card", 1usize)).visible());
+        assert!(window.try_find("artifact-clear-filters").is_none());
+    })
+    .unwrap();
+    assert!(
+        !drain(&commands)
+            .iter()
+            .any(|c| matches!(c, Command::Artifacts(_)))
+    );
+}
+
+#[gpui_kit::test]
 fn large_library_pages_folders_and_favorites(cx: &mut TestAppContext) {
     let (window, shell, commands, events) = open(cx, 2560., 1440.);
     let saved: Vec<_> = (0..30)
@@ -836,4 +886,171 @@ fn a_saved_web_page_card_opens_the_browser_and_shows_where(cx: &mut TestAppConte
         );
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn leaving_an_edited_artifact_requires_a_choice_and_keeps_the_draft(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 1000.);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![
+            artifact("doc", ArtifactKind::Document, "Original content", 1),
+            artifact("other", ArtifactKind::Document, "Other content", 2),
+        ])))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("doc", cx));
+        window.render_frame(cx);
+        window.click("artifact-edit", cx);
+        window.click("artifact-edit-title", cx);
+        window.press("end", cx);
+        window.input(" changed", cx);
+        window.click("artifact-back", cx);
+        assert!(window.find("artifact-unsaved-choice").visible());
+        window.click("artifact-keep-editing", cx);
+        assert!(window.find("artifact-edit-form").visible());
+        window.click("artifact-edit-save", cx);
+    })
+    .unwrap();
+    assert!(drain(&commands).iter().any(|command| matches!(command,
+        Command::Artifacts(ArtifactCommand::Edit { id, title, .. }) if id == "doc" && title.contains("changed")
+    )));
+}
+
+#[gpui_kit::test]
+fn cancel_and_open_another_artifact_protect_changes_but_clean_edits_leave_freely(
+    cx: &mut TestAppContext,
+) {
+    let (window, shell, commands, events) = open(cx, 1280., 1000.);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![
+            artifact("doc", ArtifactKind::Document, "Original content", 1),
+            artifact("other", ArtifactKind::Document, "Other content", 2),
+        ])))
+        .unwrap();
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("doc", cx));
+        window.render_frame(cx);
+        window.click("artifact-edit", cx);
+        window.click("artifact-edit-cancel", cx);
+        assert!(window.try_find("artifact-unsaved-choice").is_none());
+        window.click("artifact-edit", cx);
+        window.click("artifact-edit-content", cx);
+        window.input("Changed", cx);
+        window.click("artifact-edit-cancel", cx);
+        assert!(window.find("artifact-unsaved-choice").visible());
+        window.click("artifact-keep-editing", cx);
+        shell.update(cx, |shell, cx| shell.open_artifact("other", cx));
+        window.render_frame(cx);
+        assert!(window.find("artifact-unsaved-choice").visible());
+        window.click("artifact-discard-changes", cx);
+        window.click("artifact-edit", cx);
+        window.click("artifact-edit-save", cx);
+    })
+    .unwrap();
+    let edits: Vec<_> = drain(&commands)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Artifacts(ArtifactCommand::Edit { id, title, .. }) => Some((id, title)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edits, vec![("other".into(), "other title".into())]);
+}
+
+#[gpui_kit::test]
+fn artifact_save_waits_for_confirmation_and_preserves_changes_after_failure(
+    cx: &mut TestAppContext,
+) {
+    let (window, shell, commands, events) = open(cx, 1280., 1000.);
+    let original = artifact("doc", ArtifactKind::Document, "Original content", 1);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![
+            original.clone(),
+        ])))
+        .unwrap();
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("doc", cx));
+        window.render_frame(cx);
+        window.click("artifact-edit", cx);
+        window.click("artifact-edit-title", cx);
+        window.input("Changed", cx);
+        window.click("artifact-edit-save", cx);
+        assert!(window.find("artifact-edit-form").visible());
+    })
+    .unwrap();
+    let first = drain(&commands)
+        .into_iter()
+        .find(|command| matches!(command, Command::Artifacts(ArtifactCommand::Edit { .. })))
+        .unwrap();
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Error(
+            "Test storage unavailable".into(),
+        )))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("artifact-save-error").visible());
+        window.click("artifact-edit-save", cx);
+        assert!(window.find("artifact-edit-form").visible());
+    })
+    .unwrap();
+    assert!(drain(&commands).contains(&first));
+    let mut saved = original;
+    if let Command::Artifacts(ArtifactCommand::Edit { title, content, .. }) = first {
+        saved.title = title;
+        saved.content = content;
+    }
+    saved.updated_at = Timestamp(2);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Saved(Box::new(saved))))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("artifact-edit-form").is_none());
+        assert!(window.find("artifact-detail").visible());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn completed_artifact_save_does_not_hide_newer_typing(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 1000.);
+    let original = artifact("doc", ArtifactKind::Document, "Original content", 1);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![
+            original.clone(),
+        ])))
+        .unwrap();
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("doc", cx));
+        window.render_frame(cx);
+        window.click("artifact-edit", cx);
+        window.click("artifact-edit-save", cx);
+        window.click("artifact-edit-title", cx);
+        window.input("Newer", cx);
+    })
+    .unwrap();
+    drain(&commands);
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Saved(Box::new(original))))
+        .unwrap();
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("artifact-edit-form").visible());
+        window.click("artifact-edit-save", cx);
+    })
+    .unwrap();
+    assert!(drain(&commands).iter().any(|command| matches!(command,
+        Command::Artifacts(ArtifactCommand::Edit {title, ..}) if title.contains("Newer")
+    )));
 }

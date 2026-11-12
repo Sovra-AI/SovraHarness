@@ -1350,7 +1350,7 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
                 .find("settings-key-status")
                 .label()
                 .unwrap()
-                .contains("saved in this computer's keychain")
+                .contains("Key saved on this computer")
         );
         assert!(window.find("connection-key").visible());
         assert_eq!(
@@ -1371,7 +1371,7 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
                 .find("settings-key-status")
                 .label()
                 .unwrap()
-                .contains("saved in this computer's keychain")
+                .contains("Key saved on this computer")
         );
         window.click("connection-test", cx);
     })
@@ -1431,11 +1431,78 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
         window.render_frame(cx);
         assert_eq!(
             window.find("settings-key-status").label(),
-            Some("Not connected yet")
+            Some("No key added yet")
         );
         assert!(window.find("connection-key").visible());
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn existing_system_key_can_continue_without_creating_or_saving_another_key(
+    cx: &mut TestAppContext,
+) {
+    let (client, commands, events) = Client::loopback();
+    let (window, _) = open_shell(cx, client, 1000., 760.);
+    let mut connection = ModelConnection::new("router", ProviderKind::OpenRouter);
+    connection.environment_credential = true;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection],
+            preferences: ModelPreferences::default(),
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("nav-connections", cx);
+        window.click("connection-action-online-ai", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("openrouter-open-browser").is_none());
+        assert!(window.find("settings-key-next-step").visible());
+        assert!(window.try_find("settings-remove-key").is_none());
+        assert_eq!(window.find("connection-save").disabled(), Some(true));
+        window.click("connection-test", cx);
+    })
+    .unwrap();
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+            command,
+            Command::Models(ModelCommand::TestConnection {
+                credential: sovra_core::models::CredentialChange::Keep,
+                ..
+            })
+        ))
+    );
+    events
+        .send_blocking(Event::Models(ModelEvent::Error(
+            "Could not reach the service. Check your internet connection and try again.".into(),
+        )))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("settings-key-form").visible());
+        assert_eq!(
+            window.find("connection-model-error").label(),
+            Some("Could not reach the service. Check your internet connection and try again.")
+        );
+        assert_ne!(window.find("connection-test").disabled(), Some(true));
+        window.click("settings-key-choose-model", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("settings-key-form").is_none());
+    })
+    .unwrap();
+    assert!(
+        !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+            command,
+            Command::Models(ModelCommand::SaveConnection { .. })
+        ))
+    );
 }
 
 #[gpui_kit::test]

@@ -4,6 +4,7 @@
 //! [`SovraStyled`]. All raw visual values belong in this module tree.
 
 mod palette;
+mod paragraph;
 mod responsive;
 pub(crate) mod scan_code;
 mod styles;
@@ -16,6 +17,7 @@ use gpui_kit::component::{Theme, ThemeConfig, ThemeMode, highlighter::HighlightT
 use gpui_kit::{App, Global};
 use sovra_core::models::{ChromeKey, UiLanguage};
 
+pub use paragraph::paragraph;
 pub use responsive::{
     WidthClass, initial_window_bounds, interface_scale, set_interface_scale, width_probe,
 };

@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn automatic_shortcuts_support_any_title_and_avoid_names_and_aliases() {
+    let mut existing = installed("weekly-plan", "Plan the week.", &[]);
+    existing.enabled = false;
+    existing.aliases = vec!["weekly-plan-2".into(), "my-skill".into()];
+    let catalog = SkillCatalog::new(vec![existing]).unwrap();
+    assert_eq!(
+        catalog.available_command_name("Weekly Plan"),
+        "weekly-plan-3"
+    );
+    assert_eq!(catalog.available_command_name("قائمة التسوق"), "my-skill-2");
+    assert_eq!(
+        catalog.available_command_name("Sunday Family Dinner"),
+        "sunday-family-dinner"
+    );
+    let long = "a".repeat(64);
+    let catalog = SkillCatalog::new(vec![installed(&long, "A long name.", &[])]).unwrap();
+    let generated = catalog.available_command_name(&long);
+    assert!(valid_name(&generated));
+    assert_eq!(generated.len(), 64);
+    assert_ne!(generated, long);
+}
+
+#[test]
 fn builtins_are_valid_unique_and_aliases_resolve() {
     let catalog = SkillCatalog::new(builtin_skills()).unwrap();
     assert_eq!(catalog.find("FILE-SYSTEM").unwrap().name, "files");

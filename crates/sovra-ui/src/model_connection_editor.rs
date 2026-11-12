@@ -162,11 +162,11 @@ impl ConnectionForm {
 
 pub(crate) fn credential_status(connection: &ModelConnection) -> &'static str {
     if connection.has_credential {
-        "Connected · your key is saved in this computer's keychain"
+        "Key saved on this computer"
     } else if connection.environment_credential {
-        "Connected · using a key from this computer's system settings"
+        "Using a key from this computer's settings"
     } else {
-        "Not connected yet"
+        "No key added yet"
     }
 }
 
@@ -420,7 +420,7 @@ impl ModelsView {
         } else if form.original.environment_credential {
             "A key from this computer's system settings is being used. Paste one here only to override it."
         } else {
-            "Leave empty for programs on your own computer. Keys are kept in this computer's keychain."
+            "A connection key (API key) lets Sovra use this service. Paste the key the service gives you, or leave empty if it does not require one."
         };
         let title = if self
             .state

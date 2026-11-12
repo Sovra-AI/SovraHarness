@@ -6263,6 +6263,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-bidi"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12ca465817de1670c6c1a830c0f4a0a665434e4d02c30a7ffc6362e0194f9cc9"
+dependencies = [
+ "gpui-pre",
+ "unicode-bidi",
+]
+
+[[package]]
 name = "gpui-component"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14647,6 +14657,7 @@ version = "0.3.0"
 dependencies = [
  "async-channel",
  "base64 0.23.1",
+ "gpui-bidi",
  "gpui-kit",
  "image",
  "serde_json",
@@ -14654,6 +14665,7 @@ dependencies = [
  "sovra-runtime",
  "time",
  "tracing",
+ "unicode-bidi",
 ]
 
 [[package]]

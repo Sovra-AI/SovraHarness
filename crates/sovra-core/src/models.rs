@@ -1025,16 +1025,16 @@ impl ModelsState {
             SetupStage::NeedsModelKey {
                 connection_name, ..
             } => Some(format!(
-                "Your AI is chosen. {connection_name} just needs your key again so it can reply."
+                "Your AI is chosen. Add your {connection_name} connection key so it can reply."
             )),
             SetupStage::NeedsModelSelection {
                 connected_service, ..
             } => Some(self.active_problem.as_ref().map_or_else(
-                || format!("{connected_service} is connected. Now pick the AI you want to talk to."),
+                || format!("{connected_service} is set up. Now pick the AI you want to talk to."),
                 |problem| format!("The AI you chose can't answer right now: {problem} Please pick another one."),
             )),
             SetupStage::NeedsConnection => Some(
-                "To start, connect an AI service. The easiest is a free OpenRouter key, or Ollama on this computer.".to_owned(),
+                "To start, connect an AI service. OpenRouter offers free and paid AI choices. You can also use Ollama on this computer.".to_owned(),
             ),
         }
     }

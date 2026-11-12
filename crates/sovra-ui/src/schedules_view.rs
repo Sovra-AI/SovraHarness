@@ -1,7 +1,7 @@
 //! Schedules command center: plain-words create, live stats, and a swimlane of runs.
 
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Sizable as _,
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputState},
@@ -20,11 +20,30 @@ use sovra_core::{
 use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScheduleFormStatus {
+    Empty,
+    Draft,
+    Saving,
+}
+
+impl ScheduleFormStatus {
+    fn saving(self) -> bool {
+        self == Self::Saving
+    }
+    fn has_draft(self) -> bool {
+        self != Self::Empty
+    }
+}
+
 pub(crate) struct ScheduleForm<'a> {
     pub name: &'a Entity<InputState>,
     pub cadence: &'a Entity<InputState>,
     pub prompt: &'a Entity<InputState>,
     pub open: bool,
+    pub status: ScheduleFormStatus,
+    pub scroll: &'a gpui_kit::ScrollHandle,
+    pub error: Option<&'a str>,
     pub compact: bool,
     pub range: TimelineRange,
     /// This computer is in a group and may add to it: offer "Share with my group".
@@ -57,20 +76,30 @@ pub(crate) fn render_schedules_view(
         .max_w(t.layout.page_width)
         .mx_auto()
         .gap(gap)
-        .child(render_header(form.open, form.compact, cx));
+        .child(render_header(
+            form.open,
+            form.status.has_draft(),
+            form.compact,
+            cx,
+        ));
 
     if !form.compact || !form.open {
         page = page.child(render_stats(stats, form.compact, cx));
     }
 
+    if let Some(error) = form.error {
+        page = page.child(
+            div()
+                .id("schedule-error")
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .sovra_text(TextRole::Body, cx)
+                .child(design::paragraph(error.to_owned())),
+        );
+    }
     if form.open {
-        page = page.child(render_schedule_form(
-            form.name,
-            form.cadence,
-            form.prompt,
-            form.compact,
-            cx,
-        ));
+        page = page.child(render_schedule_form(form, cx));
     }
 
     let show_empty = state.schedules.is_empty() && !form.open;
@@ -78,7 +107,7 @@ pub(crate) fn render_schedules_view(
     let show_list = !state.schedules.is_empty();
 
     if show_empty {
-        page = page.child(render_schedules_placeholder(cx));
+        page = page.child(render_schedules_placeholder(form.status.has_draft(), cx));
     }
     if show_timeline {
         page = page.child(render_timeline(state, form.compact, form.range, cx));
@@ -94,12 +123,14 @@ pub(crate) fn render_schedules_view(
         .min_w_0()
         .h_full()
         .overflow_y_scroll()
+        .track_scroll(form.scroll)
         .p(pad)
         .child(page)
 }
 
 fn render_header(
     schedule_form_open: bool,
+    has_draft: bool,
     compact: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
@@ -112,7 +143,7 @@ fn render_header(
     } else {
         design::page_header(
             "Schedules",
-            "Repeating tasks run on their own, even while you're doing something else. Pause one anytime.",
+            "Run a task once or repeatedly. Keep Sovra open and your computer awake. Pause a task anytime.",
             cx,
         )
         .into_any_element()
@@ -132,14 +163,16 @@ fn render_header(
                     design::button(
                         "schedule-create-toggle-btn",
                         if schedule_form_open {
-                            "Cancel"
+                            "Hide form"
+                        } else if has_draft {
+                            "Continue task"
                         } else {
                             "Create schedule"
                         },
                         cx,
                     )
-                    .on_click(cx.listener(|shell, _, _, cx| {
-                        shell.toggle_schedule_form(cx);
+                    .on_click(cx.listener(|shell, _, window, cx| {
+                        shell.toggle_schedule_form(window, cx);
                     })),
                 )
                 .child(
@@ -153,81 +186,28 @@ fn render_header(
 }
 
 fn render_schedule_form(
-    schedule_name_input: &Entity<InputState>,
-    schedule_cadence_input: &Entity<InputState>,
-    schedule_prompt_input: &Entity<InputState>,
-    compact: bool,
+    form: &ScheduleForm<'_>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let pad = if compact {
-        t.space.small
-    } else {
-        t.space.medium
-    };
-    let mut form = v_flex()
-        .id("schedule-create-form")
-        .test_support()
-        .w_full()
-        .p(pad)
-        .gap(t.space.small)
+    v_flex().id("schedule-create-form").test_support().w_full().min_w_0()
+        .max_w(t.layout.reading_width).mx_auto().p(t.space.medium).gap(t.space.small)
         .sovra_surface(Surface::Matte, cx)
-        .child(
-            div()
-                .sovra_text(TextRole::SectionTitle, cx)
-                .child("New repeating task"),
-        );
-    if !compact {
-        form = form.child(
-            div()
-                .sovra_text(TextRole::Caption, cx)
-                .text_color(t.text_secondary)
-                .child("Name it, say how often in ordinary words, and write what Sovra should do."),
-        );
-    }
-    form = form
-        .child(
-            h_flex()
-                .w_full()
-                .flex_wrap()
-                .gap(t.space.small)
-                .child(
-                    div().flex_1().min_w_0().child(
-                        Input::new(schedule_name_input)
-                            .id("schedule-name-input")
-                            .aria_label("Schedule name"),
-                    ),
-                )
-                .child(
-                    div().flex_1().min_w_0().child(
-                        Input::new(schedule_cadence_input)
-                            .id("schedule-cadence-input")
-                            .aria_label("How often, in ordinary words"),
-                    ),
-                ),
-        )
-        .child(
-            Input::new(schedule_prompt_input)
-                .id("schedule-prompt-input")
-                .aria_label("What Sovra should do each time"),
-        );
-    if !compact {
-        form = form.child(
-            div()
-                .sovra_text(TextRole::Caption, cx)
-                .text_color(t.text_secondary)
-                .child(
-                    "Try: in 1 minute, just once, every weekday at 9, Fridays at 4, every 4 hours.",
-                ),
-        );
-    }
-    form.child(h_flex().w_full().justify_end().child(
-        design::primary_button("schedule-save-btn", "Save schedule", cx).on_click(cx.listener(
-            |shell, _, window, cx| {
-                shell.submit_new_schedule(window, cx);
-            },
-        )),
-    ))
+        .child(div().sovra_text(TextRole::SectionTitle, cx).child("New scheduled task"))
+        .child(div().id("schedule-name-label").test_support().sovra_text(TextRole::Caption, cx).child("Task name"))
+        .child(Input::new(form.name).id("schedule-name-input").aria_label("Task name").disabled(form.status.saving()))
+        .child(div().id("schedule-cadence-label").test_support().sovra_text(TextRole::Caption, cx).child("When should it run?"))
+        .child(Input::new(form.cadence).id("schedule-cadence-input").aria_label("When should it run?").disabled(form.status.saving()))
+        .child(div().id("schedule-cadence-help").test_support().sovra_text(TextRole::Caption, cx)
+            .text_color(t.text_secondary).child("Try: every weekday at 9, every 4 hours, or in 1 minute. Leave blank for every day at 9:00."))
+        .child(div().id("schedule-prompt-label").test_support().sovra_text(TextRole::Caption, cx).child("What should Sovra do?"))
+        .child(Input::new(form.prompt).id("schedule-prompt-input").aria_label("What should Sovra do?").disabled(form.status.saving()))
+        .child(div().sovra_text(TextRole::Caption, cx).text_color(t.text_secondary)
+            .child("Keep Sovra open and your computer awake for the task to run."))
+        .child(h_flex().w_full().flex_wrap().justify_end().child(
+            design::primary_button("schedule-save-btn", if form.status.saving() { "Saving…" } else { "Save schedule" }, cx)
+                .disabled(form.status.saving()).on_click(cx.listener(|shell, _, _, cx| shell.submit_new_schedule(cx)))
+        ))
 }
 
 fn render_schedule_list(
@@ -249,7 +229,10 @@ fn render_schedule_list(
         )
 }
 
-fn render_schedules_placeholder(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+fn render_schedules_placeholder(
+    has_draft: bool,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     v_flex()
         .id("schedules-empty-placeholder")
@@ -273,9 +256,9 @@ fn render_schedules_placeholder(cx: &mut Context<Shell>) -> impl IntoElement + u
                 ),
         )
         .child(
-            design::primary_button("schedule-empty-create-btn", "Create schedule", cx).on_click(
-                cx.listener(|shell, _, _, cx| {
-                    shell.open_schedule_form(cx);
+            design::primary_button("schedule-empty-create-btn", if has_draft { "Continue task" } else { "Create schedule" }, cx).on_click(
+                cx.listener(|shell, _, window, cx| {
+                    shell.open_schedule_form(window, cx);
                 }),
             ),
         )

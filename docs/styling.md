@@ -284,3 +284,268 @@ A missing size is a new semantic token in `design/tokens.rs`, never a literal in
 Headless tests do not prove GPU pixel fidelity. Also look at a real window at a
 small size, on a large monitor and at a 1.0 or 2.0 scale factor.
 
+## Beginner usability review (November 12, in progress)
+
+The review covers the whole product, including first use, discovery, everyday
+tasks, recovery, keyboard access and small windows. A completed source review
+is not proof that a feature is usable in the running application.
+
+Research checked on 2026-11-12:
+
+- [Nielsen Norman Group: usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/):
+  visible choices, familiar words, predictable actions and useful error recovery.
+- [W3C: clear purpose](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o1p01-clear-purpose/):
+  explain what a page is for and make the next action recognizable.
+- [W3C: step-by-step instructions](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o4p07-step-instructions/):
+  divide unfamiliar tasks into clear steps.
+
+Changes in the first pass put Skills beside Chat, name the account footer's
+actual Sign out action, and make Skills' Open now controls open their feature
+instead of requiring a second command submission. Navigation shortcuts preserve
+an unfinished chat draft; starting a new chat remains an explicit separate action.
+The tour's stale sample-memory and unavailable-scheduling descriptions were
+replaced after checking the live memory view and runtime scheduler. Schedule
+instructions now explain that Sovra must remain open.
+
+The second pass adds one-step recovery from combined saved-work filters,
+removes unused controls from an empty library, and adds a direct Open chat
+action there. It also fixes name-only account recovery: the sign-in page offers
+the saved name, and the runtime accepts that path only for accounts created
+without email, password or Google credentials. Password and Google accounts are
+excluded by a pure domain rule and checked again by the runtime.
+
+Remaining review and verification scope:
+
+| Flow | Evidence still needed |
+| --- | --- |
+| Sign-in, first chat and AI setup | Follow each setup stage, missing-key errors and recovery in the native app. |
+| Sidebar, Skills and tour | Verify shortcuts and examples, keyboard access, compact navigation and tour accuracy. |
+| Chat, attachments, history and saved work | Follow create, find, edit, save and remove paths; inspect empty and error states. |
+| Models, personal helpers and teams | Check beginner defaults, optional advanced controls and disabled-state explanations. |
+| Knowledge and file indexing | Follow add, review, find, correct and remove paths with test data. |
+| Schedules | Tour wording checked against the runtime; exercise create, automatic run, pause and failure recovery. |
+| Connections and groups | Follow connection, invitation, sharing and disconnect flows without sending real messages. |
+| Settings, terminal and phone access | Verify labels, prerequisites, confirmations and revocation. |
+| Cross-cutting layout | Minimum, wide and 200% text tests; both themes; actual native screenshots where supported. |
+
+Native MCP inspection is available on the current Linux renderer; screenshot
+capture returned “Screenshot capture is unavailable on this platform renderer.”
+An OS window capture subsequently worked. It revealed Arabic login description
+and hint text painting outside the card despite passing element-bounds tests.
+Fix and recheck this actual rendering defect; do not treat headless bounds as
+evidence that all visible text fits.
+
+The shared `design::paragraph` helper uses logical-order wrapping for static
+right-to-left text in page headers and sign-in instructions. It uses pinned
+`gpui-bidi` 0.1.1 with the existing GPUI 0.3.9 shaper; it does not replace editable
+inputs or rich chat content. See the library's
+[paragraph implementation notes](https://docs.rs/gpui-bidi/0.1.1/gpui_bidi/paragraph/index.html).
+Its regression checks actual shaped text runs and reading order, in addition to
+container bounds. Sign-in fields also keep translated labels visible while typing,
+following [W3C form-label guidance](https://www.w3.org/WAI/tutorials/forms/labels/).
+The Arabic paragraph regression and sign-in control reachability checks pass at
+minimum/wide/200% sizes in both themes. The paragraph check permits the shaper's
+measured trailing-space advance; native captures separately confirm the painted
+glyphs. Development MCP plus OS window captures verified the fresh-account and
+returning-account Arabic screens, including the long first-use subtitle and hint.
+Entering a name and submitting the fresh-account form reached the workspace.
+These checks do not cover bidirectional text editing or all rich-text surfaces.
+
+Third-pass verification: all 186 UI tests pass. The full gate passed fmt, Clippy,
+layering, styling, documentation, dependency policy and unused-dependency checks,
+then stopped after 169 workspace tests (167 passed, two failed). The failures were
+linked-helper memory evidence after restart and the indexed-knowledge provider
+fixture expecting text without its new `Source: budget.txt` prefix. Full CI is
+still not green. The next recovery issue found in source is saved-work editing:
+Back and Cancel leave the edit without an unsaved-change confirmation.
+
+First-pass verification is incomplete: two full CI runs stopped on different
+memory lifecycle assertions (the first failing test passed alone). A subsequent
+UI test build and development reload encountered incomplete concurrent WorkLog
+enum/render changes. Re-run the full gate and live checks once the shared tree
+builds; do not treat these attempts as passing verification.
+
+Second-pass targeted evidence: all 12 authentication domain/runtime tests passed,
+including sign-out/restart recovery and rejection of password/Google account IDs.
+The headless native-control tests passed for profile sign-in, combined-filter
+recovery, and both flows' minimum/wide/200% layouts in both themes. The broader
+UI run finished with 183 passed and two failures in concurrent progress-board
+tests; the full gate remains required. Through Development MCP with a temporary
+data folder, creating a name-only account, signing out and reopening it passed.
+The empty-library Open chat action and Skills' direct Open now navigation also
+passed in the live native app. Combined-filter recovery has headless coverage;
+it still needs a live populated-library check.
+
+
+Saved-work editing now checks for changed name/content before Back, Cancel or
+opening another item. The inline choice keeps the original draft until the user
+chooses Keep editing or Discard changes, and scrolls the choice into view.
+Unchanged forms leave directly. Editing hides sharing, deletion and organization
+actions that operate on the saved version. This follows the
+[warn-before-leaving pattern](https://design-system.agriculture.gov.au/patterns/warn-before-leaving)
+and W3C's guidance to [let users go back without losing work](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o4p02-back-undo/).
+The regression first reproduced the missing confirmation; targeted tests then
+passed for keeping the draft, Cancel, changing items and unchanged forms, plus
+minimum/wide/200% layouts in both themes. Live verification is pending a native
+build; the first attempt failed on concurrent file-index API changes.
+Save-failure recovery and closing the entire app still need review; this change
+does not promise crash recovery or durable draft storage.
+
+Latest editor verification: the three targeted artifact tests passed after the
+content-control change. An earlier confirmation-layout run passed all six
+size/theme combinations. Re-running that layout check against the newest shared
+tree stopped at a concurrent ADK visibility error (`file_index::evidence::model`
+is private), before executing tests. The latest full CI attempt stopped at fmt
+in the concurrently added `sovra-ui/examples/site_shot.rs`. Native verification
+remains unavailable: initial builds failed against inconsistent core APIs, and
+the final launch was rejected because another live development session owns the
+checkout. Do not start a second GUI or claim the new editor flow was tested live.
+
+Saved-work save recovery now waits for a matching Saved event before closing the
+form. A failed send or Error event leaves the draft visible with retry guidance.
+Typing remains possible during IO; a matching save does not close newer edits.
+Five targeted artifact tests passed, including failed-save retry and newer typing.
+The extended error/retry layout check has not completed successfully yet.
+
+Build investigation found a separate HarnessSite scratch checkout running Cargo
+with `CARGO_TARGET_DIR` pointing at this checkout's `target`. Its baseline core
+outputs explain the repeated missing-API errors despite current source and an
+intervening passing rebuild. Do not infer a source regression from those stale
+outputs. The latest full CI attempt stopped on a redundant clone in ADK test code
+(subsequently removed in the shared tree); full CI still needs a clean verification
+run. The existing native GUI belongs to another live session, so live editor/save
+verification remains pending. Coordination was requested to stop cross-checkout
+writes to the shared target; source review can continue independently.
+
+Next source-review findings: the schedule form still relies on placeholders and
+hides its cadence examples in compact layouts. `submit_new_schedule` also clears
+all inputs and closes the form immediately after queuing Create; verify failure
+recovery against the scheduler reducer/runtime before changing it. The first-use
+setup strip recommends a free OpenRouter key without explaining what a key is;
+review that wording and the actual connection flow for complete beginners.
+
+Schedule review found a runtime persistence defect, reproduced by a failing test:
+creating a task on unavailable storage still published it as active. The scheduler
+now rolls back failed commands and publishes the prior state; runs dispatch only
+after persistence. Automatic failures wait 30 seconds before retrying instead of
+repeatedly hitting unavailable storage. All five scheduler integration tests pass,
+including create/retry, pause/delete rollback and no dispatch after failed Run now.
+The schedule form itself still clears inputs optimistically and ignores errors;
+retaining that draft and adding visible labels remain required next steps.
+
+The full gate then reached 868 workspace tests (867 passed, one failed) at an
+outdated knowledge fixture. Its exact expectations now include the new source
+header as well as the original content; the focused integration test passes.
+The full-gate rerun passed: 1,416 tests passed, 14 skipped, and all static gates passed.
+This includes the previously pending artifact error/retry layout checks.
+Native schedule-storage failure verification remains
+unavailable in the other session's running GUI; the controlled-store runtime test
+is the current evidence for this failure path.
+
+Schedule forms now validate without inserting an optimistic task. The runtime
+emits a specific Created acknowledgement only after persistence; a Snapshot alone
+does not dismiss the form. Errors retain the entries and offer retry guidance.
+Hide form keeps the draft for this session, Continue task reopens it, and a new
+form after confirmed creation starts blank. Field labels, timing examples and
+blank-timing behavior remain visible in compact layouts; inputs disable during
+saving to preserve the submitted draft.
+
+Targeted evidence: all 22 shell tests, the five scheduler integration tests and
+the minimum/wide/200% form/retry layout checks passed. Through Development MCP
+in an isolated profile, empty-instructions validation kept the name, Hide/Continue
+kept the task, and confirmed creation closed the form. The schedule file contained
+the intended task. The next form was blank; the temporary task was deleted and
+its removal verified on disk. An OS capture confirmed readable form labels and
+examples. Storage-failure retry is covered by controlled runtime/headless tests,
+not by deliberately breaking the live profile's filesystem.
+
+The shared-target conflict was worked around for verification using Cargo's
+[workspace-wrapper cache separation](https://doc.rust-lang.org/cargo/reference/environment-variables.html).
+The temporary wrapper passes compiler arguments through unchanged; it changes
+cache identity, not source or compiler policy. Only UI package build outputs were
+cleaned to reclaim disk space while no app/build was active. Full CI passed after adapting legacy tests that assumed immediate schedule
+creation: 1,421 tests passed, 14 skipped, and all static gates passed.
+
+AI setup wording now distinguishes a saved key from a tested service. It explains
+API key in plain words, removes the claim that OpenRouter is the easiest/free
+route, and accurately describes local key storage in both development and release
+builds without naming the wrong storage backend. Research:
+[W3C clear words](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o3p01-clear-words/)
+and [OpenRouter free choices](https://openrouter.ai/collections/free-models/).
+The existing save/replace/remove integration test first reproduced the old status.
+Native MCP verified the environment-key status, Back and Chat navigation; an OS
+capture confirmed readable explanatory copy. No credential was changed or chat
+request sent. An environment key still shows new-key instructions; improving that
+branch and exercising provider-error recovery remain pending.
+Full CI passed with this copy: 1,421 tests passed, 14 skipped, all static gates
+passed. An earlier run failed the corrected-memory lifecycle assertion (zero
+memories instead of one); its isolated rerun and the subsequent full runs passed
+without changing that test. This intermittent failure remains worth investigating.
+
+The existing-system-key branch now skips key-creation instructions and presents
+model selection as the next step. Replacement remains optional and the UI does
+not offer to remove a system key it does not own. A regression first reproduced
+the detour, then verified checking the existing key, retry after an error and
+continuing without a SaveConnection command. Native MCP confirmed that route.
+
+Error-path inspection also found that Connections bypassed the model page's
+error/notice renderer. Online and compatible-service editors now display these
+results with stable accessible IDs. The regression reproduced the missing error;
+native testing against an unavailable loopback address then showed the actual
+failure, kept the address editable and left the connection unsaved. An OS capture
+confirmed visible error text. The temporary draft was cleared and the test app
+closed. Dedicated minimum/wide/200% checks of this new feedback branch remain
+pending, alongside the broader feature review.
+Full CI passed after this fix: 1,422 tests passed, 14 skipped and all static
+gates passed. The preceding run ended with SIGTERM before its last test completed;
+the final run was performed with the native test app closed.
+
+Dedicated connection-feedback layout coverage now passes for both online and
+compatible-service editors at 640×420, 2560×1440 and 200% interface size, in both
+themes. The test checks horizontal bounds, scroll reachability, actual retry
+commands, successful-check feedback and return navigation. Loaded preferences
+explicitly retain each test's theme and scale, so the event cannot reset the
+test to default appearance.
+
+Next Skills findings from source inspection: the UI's automatic shortcut builder
+discards non-ASCII letters, so an entirely Arabic name produces an invalid empty
+shortcut. Creating a skill whose shortcut already exists also reaches the store's
+replacement path without distinguishing creation from editing. Regressions and
+a safe automatic-name rule are still needed; no fix is claimed yet.
+
+The full gate for the connection layout test is currently failing intermittently
+at `memory_lifecycle.rs:541`: corrected-memory recall returned zero facts instead
+of one. The layout test itself passes. The runtime invalidates recall before
+acknowledging a correction, so a simple acknowledgement-before-invalidation race
+is not established. Further investigation must distinguish recall cancellation,
+store revision changes and temporal visibility before changing code or tests.
+
+Investigation found an independently reproducible recall-invalidation defect:
+completing extraction with zero fact writes still incremented the database fact
+revision. Concurrent recall rejects results when that revision changes, even
+though this completion changed no facts. A real-engine regression failed with
+revision 1 instead of 0; completion now advances that revision only when writes
+are present. A companion assertion verifies real writes still advance it.
+All 107 store tests passed (three ignored), including correction/removal checks.
+Twenty isolated correction-flow runs passed before the fix, so those runs alone
+did not reproduce the timing-dependent full-suite failure or prove its cause.
+The regression proves the empty-job defect; full-suite verification follows.
+Live verification of concurrent correction and background completion has not
+been performed: another development GUI is running, and the race is covered by
+deterministic store assertions rather than claims based on a single native run.
+Full CI passed after the fix: 1,423 tests passed, 14 skipped and all static gates
+passed, including the connection-feedback layout test. The first full run passed
+the corrected-memory test but timed out on group-history witnessing over the real
+network; that unchanged network test passed alone and in the final full run.
+
+Custom-skill naming now uses a pure catalogue rule to choose an unused shortcut.
+The visible title stays unchanged, including Arabic. Automatic names avoid both
+names and aliases of enabled or disabled skills and retain the 64-character
+limit. The new-skill form rejects explicitly entered shortcuts already present
+in its catalogue; ordinary editing still uses the existing shortcut. This is a
+form safeguard, not a new atomic create-only storage operation.
+The headless regression failed on an Arabic title before the fix and now saves
+it without advanced options, then verifies that a conflicting explicit shortcut
+sends no save command. Core regressions cover fallback, collisions and truncation.
+Native verification of this form change remains pending while another development
+GUI is running; no second GUI was launched and that session was not disturbed.

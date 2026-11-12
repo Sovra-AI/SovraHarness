@@ -196,27 +196,6 @@ impl SkillLibrary {
     }
 }
 
-fn slugify_command_name(title: &str) -> String {
-    let mut out = String::new();
-    let mut prev_hyphen = false;
-    for ch in title.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            prev_hyphen = false;
-        } else if !out.is_empty() && !prev_hyphen {
-            out.push('-');
-            prev_hyphen = true;
-        }
-        if out.len() >= 64 {
-            break;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    out
-}
-
 impl Shell {
     pub(crate) fn show_skill_help(
         &mut self,
@@ -261,12 +240,19 @@ impl Shell {
         let raw_name = view.name.read(cx).value().trim().to_owned();
         skill.title = raw_title;
         skill.name = if raw_name.is_empty() {
-            slugify_command_name(&skill.title)
+            self.skills.available_command_name(&skill.title)
         } else if valid_name(&raw_name) {
             raw_name
         } else {
-            slugify_command_name(&raw_name)
+            self.skill_library.notice = "Use lowercase letters, numbers and hyphens for the shortcut, or leave it blank so Sovra can make one.".into();
+            cx.notify();
+            return;
         };
+        if view.creating && self.skills.find(&skill.name).is_some() {
+            self.skill_library.notice = "That shortcut is already in use. Leave Shortcut blank to make a new one, or go back and edit the existing skill.".into();
+            cx.notify();
+            return;
+        }
         skill.description = view.description.read(cx).value().trim().into();
         skill.tools = view
             .tools
@@ -745,6 +731,7 @@ fn card(
     let editing = skill.clone();
     let enabled = skill.enabled;
     let is_action = matches!(skill.kind, SkillKind::Action(_));
+    let kind = skill.kind.clone();
     let copy = skill.friendly_card_copy();
     let sample_draft = copy.sample_draft.clone();
     let use_draft = format!("/{run_name} ");
@@ -757,7 +744,8 @@ fn card(
         visible.push_str("\nOff");
     }
 
-    let primary_cta_label = if is_action { "Open now" } else { "Use it" };
+    let primary_cta_label = if is_action { "Open now" } else { "Try in chat" };
+    let primary_accessible_label = format!("{primary_cta_label}: {}", copy.friendly_title);
 
     let mut card = v_flex()
         .id(("skill-card", index))
@@ -822,10 +810,19 @@ fn card(
             design::primary_button(("skill-use", index), primary_cta_label, cx)
                 .small()
                 .disabled(!enabled)
-                .accessibility_label(format!("Use {} in chat", skill.title))
+                .accessibility_label(primary_accessible_label)
                 .on_click(cx.listener(move |shell, _, window, cx| {
-                    shell.select_tab(NavTab::Chat, cx);
-                    shell.fill_composer_draft(&use_draft, window, cx);
+                    match kind {
+                        SkillKind::Action(action) => {
+                            // Opening a page must not replace an unfinished chat draft.
+                            let draft = shell.composer_input.read(cx).value().to_string();
+                            shell.run_skill_action(action, &draft, window, cx);
+                        }
+                        SkillKind::Procedure => {
+                            shell.select_tab(NavTab::Chat, cx);
+                            shell.fill_composer_draft(&use_draft, window, cx);
+                        }
+                    }
                 })),
         )
         .children(show_example.then(|| {

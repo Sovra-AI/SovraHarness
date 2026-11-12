@@ -538,7 +538,12 @@ fn real_disk_memory_lifecycle_reaches_provider_and_survives_runtime_restart() {
     let question = "Which tea or coffee do I prefer now?";
     driver.prompt("corrected-chat", question, ConversationContext::default());
     let recalled = evidence(&fixture.request_for(question)).unwrap();
-    assert_eq!(recalled["memories"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        recalled["memories"].as_array().unwrap().len(),
+        1,
+        "recall: {recalled}; facts: {:?}",
+        driver.facts(false)
+    );
     assert_eq!(recalled["memories"][0]["quote"], CORRECTION);
     assert_eq!(recalled["memories"][0]["fact_id"], replacement.0);
     assert_eq!(recalled["memories"][0]["interpretation"], false);
