@@ -12,6 +12,17 @@ use sovra_runtime::{Client, RuntimeServices};
 
 const CLIENT_ID: &str = "saved-desktop.apps.googleusercontent.com";
 const SECRET: &str = "fixture-desktop-secret-9c2e";
+/// The client a local launch supplies through the environment (or the bake),
+/// before anyone pastes an id in Settings.
+const LAUNCH_CLIENT_ID: &str = "launch-desktop.apps.googleusercontent.com";
+const LAUNCH_SECRET: &str = "fixture-launch-secret-4a7b";
+/// Website OAuth callbacks. A desktop handoff must not use them.
+const WEBSITE_CALLBACKS: [&str; 4] = [
+    "localhost:8080",
+    "localhost%3A8080",
+    "/api/google/callback",
+    "run.app",
+];
 const ACCOUNT_ENTRY: &str = r#"{"refresh_token":"1//refresh-fixture","scope":"openid","account":{"email":"sam@example.com","name":"Sam","granted":[],"turned_off":[]}}"#;
 
 #[derive(Default)]
@@ -79,13 +90,19 @@ impl Drop for DevCredentialFiles {
 
 impl Session {
     fn start(vault: Arc<dyn SecretVault>) -> Self {
+        Self::start_with(vault, ClientSources::default())
+    }
+
+    /// `sources` is the same pair `main` passes in: startup environment, else
+    /// the client baked from `google-client.env`. The vault starts empty.
+    fn start_with(vault: Arc<dyn SecretVault>, sources: ClientSources) -> Self {
         let client = sovra_runtime::start_with_services(
             "test",
             AgentConfig::default(),
             RuntimeServices {
                 signin: None,
                 google: Some(Arc::new(
-                    GoogleAdapter::new(ClientSources::default(), vault).expect("google adapter"),
+                    GoogleAdapter::new(sources, vault).expect("google adapter"),
                 )),
                 ..RuntimeServices::default()
             },
@@ -160,30 +177,47 @@ impl Drop for Session {
     }
 }
 
-fn assert_google_handoff(url: &str) {
+fn assert_google_handoff(url: &str, client_id: &str, secret: &str, sign_in: bool) {
     assert!(
         url.starts_with("https://accounts.google.com/"),
-        "authorization URL must be Google's page"
+        "authorization URL must be Google's page: {url}"
     );
     assert!(
-        url.contains(CLIENT_ID),
-        "authorization URL must name this desktop client"
+        url.contains(client_id),
+        "authorization URL must name this desktop client: {url}"
     );
     assert!(
         url.contains("127.0.0.1"),
-        "authorization URL must use the loopback redirect"
+        "authorization URL must use the loopback redirect: {url}"
     );
     assert!(
-        !url.contains(SECRET),
+        !url.contains(secret),
         "authorization URL must not carry the client secret"
     );
-    assert!(
-        !url.contains("isn't set up"),
-        "a saved client must start the browser hand-off"
-    );
+    for website in WEBSITE_CALLBACKS {
+        assert!(
+            !url.contains(website),
+            "authorization URL must not use a website callback ({website}): {url}"
+        );
+    }
+    if sign_in {
+        assert!(
+            url.contains("%2Fcallback"),
+            "Continue with Google listens on 127.0.0.1:<port>/callback: {url}"
+        );
+    } else {
+        assert!(
+            !url.contains("callback"),
+            "Connect Google listens on the 127.0.0.1 port root: {url}"
+        );
+    }
 }
 
 fn both_buttons(session: &Session) {
+    both_buttons_for(session, CLIENT_ID, SECRET);
+}
+
+fn both_buttons_for(session: &Session, client_id: &str, secret: &str) {
     session.send(Command::Google(GoogleCommand::Connect));
     let connect_url = session.wait_for(Duration::from_secs(20), |event| match event {
         Event::Google(GoogleEvent::OpenSignIn { url }) => Some(url.clone()),
@@ -194,8 +228,8 @@ fn both_buttons(session: &Session) {
         Event::Auth(AuthEvent::GoogleSignInStarted { auth_url }) => Some(auth_url.clone()),
         _ => None,
     });
-    assert_google_handoff(&connect_url);
-    assert_google_handoff(&sign_in_url);
+    assert_google_handoff(&connect_url, client_id, secret, false);
+    assert_google_handoff(&sign_in_url, client_id, secret, true);
     session.send(Command::Google(GoogleCommand::Cancel));
     session.send(Command::Auth(AuthCommand::CancelGoogleSignIn));
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -295,6 +329,48 @@ fn saved_desktop_client_starts_both_buttons_and_survives_restart() {
         "a dotted credential name is not a directory"
     );
     restarted.shutdown();
+}
+
+/// A local launch with the Desktop client in the startup environment (the
+/// same slot as a value baked from `google-client.env`) is ready before
+/// anyone uses **Use my own Google Cloud client**.
+#[test]
+fn launch_time_desktop_client_starts_both_buttons_on_loopback_without_save_client() {
+    let creds = DevCredentialFiles::new();
+    let vault = creds.vault.clone();
+    let sources = ClientSources {
+        environment: Some(sovra_google::ClientConfig {
+            client_id: LAUNCH_CLIENT_ID.into(),
+            client_secret: Some(LAUNCH_SECRET.into()),
+        }),
+        baked: None,
+    };
+    let mut session = Session::start_with(vault.clone(), sources);
+    let first = session.wait_for(Duration::from_secs(20), |event| match event {
+        Event::Google(GoogleEvent::Changed(state)) => Some(state.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        first,
+        GoogleState::NotConnected,
+        "a launch-time desktop client starts ready to connect"
+    );
+    assert_eq!(
+        vault
+            .get(sovra_google::CLIENT_VAULT_KEY)
+            .expect("vault read"),
+        None,
+        "the empty store has no pasted client"
+    );
+    both_buttons_for(&session, LAUNCH_CLIENT_ID, LAUNCH_SECRET);
+    assert_eq!(
+        vault
+            .get(sovra_google::CLIENT_VAULT_KEY)
+            .expect("vault read"),
+        None,
+        "starting the buttons does not save a client id"
+    );
+    session.shutdown();
 }
 
 #[test]
