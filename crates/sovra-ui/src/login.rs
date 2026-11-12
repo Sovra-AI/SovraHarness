@@ -7,7 +7,7 @@
 
 use gpui_kit::assets::IconName; // full Lucide catalog; component::IconName is a small subset
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, h_flex,
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, h_flex,
     input::{Input, InputState},
     v_flex,
 };
@@ -17,7 +17,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _,
 };
 use sovra_core::auth::{AuthPhase, AuthState};
-use sovra_core::models::ChromeKey;
+use sovra_core::models::{ChromeKey, ModelCommand, UiLanguage};
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::{Shell, logo};
@@ -67,6 +67,7 @@ pub(crate) fn render_login_screen(
                 .items_center()
                 .gap(t.space.small)
                 .p(t.space.large)
+                .child(language_switch(cx))
                 .child({
                     let mut row = h_flex()
                         .w_full()
@@ -178,18 +179,22 @@ fn login_form(
                     shell.submit_login(cx);
                 })),
         )
-        .child(
-            design::button(
-                "login-google-btn",
-                design::chrome(cx, ChromeKey::LoginGoogle),
-                cx,
+        // Only offered when this copy can sign in with Google; otherwise the button
+        // would lead to an error about setup the person cannot do yet.
+        .when(auth.google_ready, |form| {
+            form.child(
+                design::button(
+                    "login-google-btn",
+                    design::chrome(cx, ChromeKey::LoginGoogle),
+                    cx,
+                )
+                .w_full()
+                .disabled(busy)
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    shell.start_google_signin(cx);
+                })),
             )
-            .w_full()
-            .disabled(busy)
-            .on_click(cx.listener(|shell, _, _, cx| {
-                shell.start_google_signin(cx);
-            })),
-        )
+        })
         .child(
             div()
                 .w_full()
@@ -201,6 +206,51 @@ fn login_form(
                     design::chrome(cx, ChromeKey::LoginHintSignIn)
                 }),
         )
+}
+
+/// English or Arabic, before anything else, so nobody has to read a language they
+/// don't know to get in. Every other language is in Settings.
+fn language_switch(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let current = design::ui_language(cx);
+    let choices = [
+        (
+            UiLanguage::english(),
+            "login-language-en",
+            "English",
+            "Show Sovra in English",
+        ),
+        (
+            UiLanguage::arabic(),
+            "login-language-ar",
+            "العربية",
+            "اعرض Sovra بالعربية",
+        ),
+    ];
+    h_flex()
+        .id("login-language")
+        .test_support()
+        .w_full()
+        .flex_wrap()
+        .justify_end()
+        .gap(t.space.compact)
+        .children(choices.into_iter().map(|(language, id, label, a11y)| {
+            let selected = current.tag() == language.tag();
+            design::button(id, label, cx)
+                .small()
+                .selected(selected)
+                .accessibility_label(a11y)
+                .on_click(move |_, _, cx| {
+                    design::set_ui_language(language.clone(), cx);
+                    let _ =
+                        cx.global::<crate::RuntimeClient>()
+                            .0
+                            .send(sovra_core::Command::Models(ModelCommand::SetLanguage {
+                                language: language.clone(),
+                            }));
+                    cx.refresh_windows();
+                })
+        }))
 }
 
 /// The browser hand-off: Google is open in the person's browser; the loopback

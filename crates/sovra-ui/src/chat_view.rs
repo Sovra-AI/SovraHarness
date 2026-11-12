@@ -599,6 +599,9 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
         .unwrap_or(guest);
     let title = design::chrome(cx, ChromeKey::ChatWelcomeTitle).replace("{name}", first_name);
     let subtitle = design::chrome(cx, ChromeKey::ChatWelcomeSubtitle);
+    let first_step = render_first_step(state, cx);
+    // Starter questions only help once an AI can answer them.
+    let starters = first_step.is_none();
     let mut title_el = div()
         .id("chat-welcome-title")
         .test_support()
@@ -631,10 +634,11 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
                 .my_auto()
                 .max_w(t.chat.welcome_width)
                 .gap(t.space.medium)
-                .child(logo("chat-welcome-logo", t.layout.logo_hero))
+                .children(starters.then(|| logo("chat-welcome-logo", t.layout.logo_hero)))
                 .child(title_el)
-                .child(subtitle_el)
-                .child(
+                .children(starters.then_some(subtitle_el))
+                .children(first_step)
+                .children(starters.then(|| {
                     h_flex()
                         .flex_wrap()
                         .gap(t.space.compact)
@@ -656,9 +660,106 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
                                         cx,
                                     );
                                 }))
-                        })),
-                ),
+                        }))
+                })),
         )
+}
+
+/// Whether a new person still has to connect an AI before Sovra can answer.
+pub(crate) fn needs_setup(state: &WorkspaceState) -> bool {
+    state.models_loaded && !state.has_active_llm && !state.group_can_answer
+}
+
+/// The one thing to do next, in place of the starter chips, until an AI is ready.
+fn render_first_step(
+    state: &WorkspaceState,
+    cx: &mut Context<Shell>,
+) -> Option<gpui_kit::AnyElement> {
+    use sovra_core::models::{FirstRunKey, SetupStage, first_run_text};
+    if !needs_setup(state) {
+        return None;
+    }
+    let t = design::tokens(cx);
+    let language = design::ui_language(cx);
+    let text = |key| first_run_text(&language, key);
+    let (step, title, body, action, target) = match &state.setup_stage {
+        SetupStage::NeedsModelSelection {
+            connected_service, ..
+        } => (
+            text(FirstRunKey::StepTwo),
+            text(FirstRunKey::PickTitle),
+            text(FirstRunKey::PickBody).replace("{service}", connected_service),
+            text(FirstRunKey::PickAction),
+            "recommended-models",
+        ),
+        SetupStage::NeedsModelKey {
+            connection_name, ..
+        } => (
+            text(FirstRunKey::StepTwo),
+            text(FirstRunKey::KeyTitle),
+            text(FirstRunKey::KeyBody).replace("{service}", connection_name),
+            text(FirstRunKey::KeyAction),
+            "selected-key",
+        ),
+        SetupStage::Loading | SetupStage::NeedsConnection | SetupStage::Ready { .. } => (
+            text(FirstRunKey::StepOne),
+            text(FirstRunKey::ConnectTitle),
+            text(FirstRunKey::ConnectBody).to_owned(),
+            text(FirstRunKey::ConnectAction),
+            "openrouter-key",
+        ),
+    };
+    let first = matches!(
+        state.setup_stage,
+        SetupStage::Loading | SetupStage::NeedsConnection | SetupStage::Ready { .. }
+    );
+    let local = text(FirstRunKey::LocalAction);
+    Some(
+        v_flex()
+            .id("chat-first-step")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.small)
+            .p(t.space.medium)
+            .sovra_surface(Surface::Elevated, cx)
+            .child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(t.text_secondary)
+                    .child(step),
+            )
+            .child(
+                div()
+                    .id("chat-first-step-title")
+                    .test_support()
+                    .aria_label(title)
+                    .sovra_text(TextRole::SectionTitle, cx)
+                    .child(title),
+            )
+            .child(div().min_w_0().sovra_text(TextRole::Body, cx).child(body))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .pt(t.space.compact)
+                    .child(
+                        design::primary_button("chat-first-step-action", action, cx).on_click(
+                            cx.listener(move |shell, _, window, cx| {
+                                shell.handle_llm_setup_action(target, window, cx);
+                            }),
+                        ),
+                    )
+                    .children(first.then(|| {
+                        design::button("chat-first-step-local", local, cx)
+                            .ghost()
+                            .on_click(cx.listener(|shell, _, window, cx| {
+                                shell.handle_llm_setup_action("ollama", window, cx);
+                            }))
+                    })),
+            )
+            .into_any_element(),
+    )
 }
 
 fn render_row(

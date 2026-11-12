@@ -576,16 +576,23 @@ fn interactive_system_tour_walks_through_all_five_tabs_and_state_aware_chat_setu
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        // Top setup coach strip must show Step 2 (Pick Model), NOT Step 1 (Connect Key).
-        assert!(window.find("sovra-setup-coach-strip").visible());
-        assert!(window.find("setup-strip-pick-model").visible());
-        assert!(window.try_find("setup-strip-connect").is_none());
+        // The empty chat's one card shows Step 2 (Pick your AI), NOT Step 1 (Connect),
+        // and the top strip stays hidden so there is a single thing to press.
+        assert_eq!(
+            window.find("chat-first-step-action").label(),
+            Some("Pick your AI")
+        );
+        assert!(window.try_find("sovra-setup-coach-strip").is_none());
 
         // Sending a message in Chat when key is set must ONLY show Step 2 model selection in chat.
         shell.update(cx, |shell, cx| {
             shell.send_prompt_text("Hi there!", window, cx);
         });
         window.render_frame(cx);
+        // Once the chat has a message, the top strip keeps the next step in view.
+        assert!(window.find("sovra-setup-coach-strip").visible());
+        assert!(window.find("setup-strip-pick-model").visible());
+        assert!(window.try_find("setup-strip-connect").is_none());
         assert!(window.find("surface-setup-recommended-models").visible());
         assert!(window.try_find("surface-setup-openrouter-key").is_none());
 

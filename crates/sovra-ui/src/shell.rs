@@ -1649,6 +1649,10 @@ impl Shell {
             "ollama" => {
                 self.show_local_ai(window, cx);
             }
+            "other-ways" => {
+                self.models.update(cx, |models, _| models.setup_flow = true);
+                self.present_connections(None, false, window, cx);
+            }
             "openai-url" => {
                 self.models.update(cx, |models, _| models.setup_flow = true);
                 self.present_connections(

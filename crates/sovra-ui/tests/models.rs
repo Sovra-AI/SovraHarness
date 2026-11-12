@@ -1579,7 +1579,7 @@ fn reveal_language_choice(window: &mut gpui_kit::Window, tag: &str, cx: &mut gpu
 }
 
 #[gpui_kit::test]
-fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestAppContext) {
+fn default_chrome_is_english_and_choosing_another_language_updates_labels(cx: &mut TestAppContext) {
     let (client, commands, events) = Client::loopback();
     let (window, shell) = open_shell(cx, client, 1000., 760.);
     cx.update_window(window.into(), |_, window, cx| {
@@ -1600,10 +1600,10 @@ fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestApp
             Some(welcome.as_str())
         );
         assert!(
-            welcome
+            !welcome
                 .chars()
                 .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c)),
-            "default chat welcome is Arabic script: {welcome}"
+            "a new person reads the chat welcome in English: {welcome}"
         );
         assert_eq!(
             window.find("chat-welcome-subtitle").label(),
@@ -1668,11 +1668,10 @@ fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestApp
             window.find("nav-settings").label(),
             Some(chrome(&UiLanguage::default(), ChromeKey::NavSettings))
         );
-        assert!(
-            chrome(&UiLanguage::default(), ChromeKey::NavSettings)
-                .chars()
-                .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c)),
-            "default nav Settings is Arabic script"
+        assert_eq!(
+            chrome(&UiLanguage::default(), ChromeKey::NavSettings),
+            "Settings",
+            "default nav Settings is English"
         );
         assert_eq!(
             window.find("settings-restart-tour").label(),
@@ -1704,8 +1703,8 @@ fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestApp
             "the chooser must offer more than one distinct language: {arabic_choice:?} vs {english_choice:?}"
         );
         assert!(
-            sovra_ui::design::is_rtl(cx),
-            "default Settings chrome is right to left"
+            !sovra_ui::design::is_rtl(cx),
+            "default Settings chrome is left to right"
         );
         reveal_language_choice(window, "tr", cx);
         assert!(
@@ -1782,7 +1781,7 @@ fn default_chrome_is_arabic_and_choosing_english_updates_labels(cx: &mut TestApp
         );
         assert_eq!(
             window.find("settings-restart-tour").label(),
-            Some(chrome(&UiLanguage::default(), ChromeKey::SettingsTour)),
+            Some(chrome(&UiLanguage::arabic(), ChromeKey::SettingsTour)),
             "choosing Arabic must restore Arabic Settings chrome"
         );
     })
@@ -2088,4 +2087,111 @@ fn saving_a_key_during_setup_continues_to_the_next_step(cx: &mut TestAppContext)
         })
         .unwrap();
     }
+}
+
+#[gpui_kit::test]
+fn a_new_person_sees_one_next_step_in_an_empty_chat(cx: &mut TestAppContext) {
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+        let (client, _commands, events) = Client::loopback();
+        let (window, shell) = open_shell(cx, client, width, height);
+        cx.update(|cx| {
+            sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+        });
+        for event in fixture_events(Vec::new()) {
+            events
+                .send_blocking(Event::Models(event))
+                .expect("event delivered");
+        }
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let at = format!("{width}x{height}@{scale}");
+            assert!(window.find("chat-first-step").visible(), "{at}");
+            assert_eq!(
+                window.find("chat-first-step-title").label(),
+                Some("First, connect an AI"),
+                "{at}: a new person reads the first step in English"
+            );
+            assert!(
+                window.try_find(("chat-starter", 0usize)).is_none(),
+                "{at}: no starter questions before an AI can answer"
+            );
+            assert!(
+                window.try_find("sovra-setup-coach-strip").is_none(),
+                "{at}: one call to action, not two"
+            );
+            let action = window.find("chat-first-step-action").bounds();
+            let viewport = window.viewport_size();
+            assert!(
+                action.left() >= px(0.) && action.right() <= viewport.width,
+                "{at}: the button fits the window"
+            );
+            window.click("chat-first-step-action", cx);
+            window.render_frame(cx);
+            assert_eq!(
+                shell.read(cx).workspace().active_tab,
+                sovra_core::NavTab::Connections,
+                "{at}: the button goes straight to connecting an AI"
+            );
+        })
+        .expect("window exists");
+        cx.update(|cx| {
+            sovra_ui::design::set_interface_scale(InterfaceScale::default(), cx);
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn sign_in_starts_in_english_offers_arabic_and_hides_google_until_set_up(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    let (window, _shell) = open_shell(cx, client, 1000., 760.);
+    let loaded = |google_ready| {
+        Event::Auth(sovra_core::AuthEvent::Loaded {
+            session: None,
+            has_accounts: false,
+            google_ready,
+        })
+    };
+    events.send_blocking(loaded(false)).expect("auth loaded");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("sovra-login-screen").visible());
+        assert_eq!(
+            window.find("login-welcome-title").label(),
+            Some("Create your account")
+        );
+        assert!(window.find("login-language-en").visible());
+        assert!(window.find("login-language-ar").visible());
+        assert!(
+            window.try_find("login-google-btn").is_none(),
+            "Google stays hidden until this copy can sign in with it"
+        );
+        window.click("login-language-ar", cx);
+        window.render_frame(cx);
+        assert!(sovra_ui::design::is_rtl(cx), "Arabic reads right to left");
+        assert_eq!(
+            window.find("login-welcome-title").label(),
+            Some(chrome(&UiLanguage::arabic(), ChromeKey::LoginCreateTitle))
+        );
+        window.click("login-language-en", cx);
+        window.render_frame(cx);
+        assert!(!sovra_ui::design::is_rtl(cx));
+    })
+    .expect("window exists");
+    let chosen: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter_map(|command| match command {
+            Command::Models(ModelCommand::SetLanguage { language }) => Some(language),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(chosen, [UiLanguage::arabic(), UiLanguage::english()]);
+
+    events.send_blocking(loaded(true)).expect("auth loaded");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("login-google-btn").visible());
+    })
+    .expect("window exists");
 }

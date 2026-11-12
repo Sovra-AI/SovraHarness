@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 mod destination;
 mod language;
 pub use destination::{ModelDestination, ModelWork, model_destinations};
-pub use language::{ChromeKey, LanguageInfo, UiLanguage, chrome, world_languages};
+pub use language::{
+    ChromeKey, FirstRunKey, LanguageInfo, UiLanguage, chrome, first_run_text, world_languages,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ProviderKind {

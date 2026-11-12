@@ -534,9 +534,9 @@ fn workspace_pages_follow_the_pane(cx: &mut TestAppContext) {
                     }),
                 );
                 inside_window(
-                    window.find("login-google-btn").bounds(),
+                    window.find("login-language").bounds(),
                     fit.window_px,
-                    "google",
+                    "language switch",
                 );
             })
             .unwrap();

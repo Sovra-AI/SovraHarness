@@ -36,6 +36,10 @@ pub(crate) fn render_onboarding_bar(
         // explicitly opens the interactive tour.
         return None;
     }
+    // An empty chat already shows the first step as a card; one thing to press is enough.
+    if state.active_tab == NavTab::Chat && state.messages.is_empty() {
+        return None;
+    }
     if state.models_loaded && !state.has_active_llm {
         return Some(
             render_setup_coach_strip(&state.setup_stage, state.llm_setup_hint.as_deref(), cx)

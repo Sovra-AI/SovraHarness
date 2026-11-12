@@ -5,8 +5,8 @@
 
 Native Rust desktop app for the Sovra agent harness: a GPUI chat UI, a tokio
 runtime, local memory (vector + graph + full-text behind a `MemoryStore` port),
-and Velopack installers. Chrome defaults to Arabic, with a Settings language
-picker and right-to-left layout. The **Groups** tab lets a family or small team
+and Velopack installers. Chrome defaults to English, with a language picker (on the
+sign-in screen and in Settings) and right-to-left layout for Arabic. The **Groups** tab lets a family or small team
 share memories, documents, lists, helpers and schedules across their computers:
 **Share with my group** (or *Just Dad*) on an artifact, a saved detail, a helper or
 a schedule, **Keep a copy** of what others shared, and edits come back as new

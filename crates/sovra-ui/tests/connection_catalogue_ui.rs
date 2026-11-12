@@ -52,6 +52,12 @@ fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppCo
             GoogleState::NotConnected,
         )))
         .expect("loopback accepts the scripted sign-in state");
+    events
+        .send_blocking(Event::GitHub(sovra_core::github::GitHubEvent::Changed {
+            state: sovra_core::github::GitHubState::NotConnected,
+            device_sign_in: true,
+        }))
+        .expect("loopback accepts the scripted GitHub state");
     settle(cx);
 
     let connections = Vec::new();

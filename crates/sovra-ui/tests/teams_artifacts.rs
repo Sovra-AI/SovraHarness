@@ -774,7 +774,7 @@ fn a_saved_web_page_card_opens_the_browser_and_shows_where(cx: &mut TestAppConte
             session_id: session.clone(),
         },
         Event::AgUiSurface {
-            session_id: session.clone(),
+            session_id: session,
             widget: AgUiWidget::ArtifactSaved {
                 artifact_id: "page-counter".into(),
                 title: "Counter".into(),

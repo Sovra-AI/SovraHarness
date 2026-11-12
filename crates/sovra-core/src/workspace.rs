@@ -334,7 +334,7 @@ pub struct WorkspaceState {
     pub tour_step: Option<TourStep>,
     /// Whether the user has completed or dismissed the guided onboarding tutorial.
     pub onboarding_completed: bool,
-    /// Chrome and agent reply language. Defaults to Arabic until preferences load.
+    /// Chrome and agent reply language. Defaults to English until preferences load.
     pub language: crate::models::UiLanguage,
     /// Session IDs for which the user explicitly renamed the title (prevents auto-title overwrite).
     user_renamed_threads: std::collections::BTreeSet<String>,
@@ -2331,7 +2331,7 @@ mod tests {
                 ScreenRoute::MainWorkspace,
                 NavTab::Knowledge,
                 "Sovra",
-                &crate::models::UiLanguage::default(),
+                &crate::models::UiLanguage::arabic(),
             ),
             "المعرفة — Sovra"
         );

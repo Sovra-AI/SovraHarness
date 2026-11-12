@@ -32,7 +32,7 @@ struct UiLanguageState(UiLanguage);
 
 impl Global for UiLanguageState {}
 
-/// Current chrome/agent language. Defaults to Arabic before preferences load.
+/// Current chrome/agent language. Defaults to English before preferences load.
 #[must_use]
 pub fn ui_language(cx: &App) -> UiLanguage {
     cx.try_global::<UiLanguageState>()

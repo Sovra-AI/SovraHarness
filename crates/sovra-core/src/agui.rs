@@ -400,67 +400,44 @@ pub fn llm_setup_widget_for_stage(
         },
         crate::models::SetupStage::NeedsConnection => {
             let hint = custom_hint.unwrap_or(
-                "Step 1 of 2: Connect your AI service. Pick whichever option below suits you best — no technical experience needed.",
+                "1. Get a free key: a website opens where you sign up and copy a key.\n\
+                 2. Paste it here, and Sovra is ready to answer.",
             );
             AgUiWidget::Components {
                 surface_id: LLM_SETUP_SURFACE_ID.to_owned(),
                 version: 1,
                 components: vec![UiComponent::Card {
-                    title: "Welcome to Sovra · 2-Minute Guided Setup".to_owned(),
-                    description: "Before Sovra can answer your message, let's connect its AI brain in 2 quick steps: (1) Connect an AI service, then (2) Pick a recommended model.".to_owned(),
+                    title: "First, connect an AI".to_owned(),
+                    description: "Sovra needs an AI to answer you. The easiest way takes about \
+                        two minutes and has free choices. Your message is kept and sent as soon \
+                        as you're done."
+                        .to_owned(),
                     children: vec![
                         UiComponent::Alert {
-                            title: "Current setup status".to_owned(),
+                            title: "Two steps".to_owned(),
                             description: hint.to_owned(),
-                        },
-                        UiComponent::Card {
-                            title: "Option 1 · Online with an OpenRouter Key (Recommended for Everyone)".to_owned(),
-                            description: "What is OpenRouter? It is a single free account that gives Sovra access to 300+ top AI models (ChatGPT, Claude, Gemini, plus 100% free starter models).\n• Step A: Click “Get Free Key at openrouter.ai” below to open the Keys page in your browser and sign in.\n• Step B: Click “Create Key”, copy the key (starts with sk-or-), and click “Paste OpenRouter Key” below.".to_owned(),
-                            children: vec![UiComponent::Row(vec![
-                                UiComponent::Button {
-                                    label: "1. Get Free Key at openrouter.ai/keys ↗".to_owned(),
-                                    action_id: "setup:open-openrouter-web".to_owned(),
-                                    disabled: false,
-                                },
-                                UiComponent::Button {
-                                    label: "2. Paste OpenRouter Key in Connections →".to_owned(),
-                                    action_id: "setup:openrouter-key".to_owned(),
-                                    disabled: false,
-                                },
-                            ])],
-                        },
-                        UiComponent::Card {
-                            title: "Option 2 · Free & Private on Your Computer with Ollama".to_owned(),
-                            description: "Run AI 100% on your own computer for free with no API key needed. 1) Download and open the free Ollama app from ollama.com. 2) Click the button below to download a local model (such as qwen3:8b) and click “Use this model”.".to_owned(),
-                            children: vec![UiComponent::Button {
-                                label: "Set Up Ollama (Free Local AI)".to_owned(),
-                                action_id: "setup:ollama".to_owned(),
-                                disabled: false,
-                            }],
-                        },
-                        UiComponent::Card {
-                            title: "Option 3 · Standard OpenAI-Compatible Server URL".to_owned(),
-                            description: "Running LM Studio (http://localhost:1234/v1), vLLM (http://localhost:8000/v1), llama.cpp (http://localhost:8080/v1), or a company OpenAI-standard endpoint? Click below to enter its base URL (ending in /v1), optional API key, and activate its model.".to_owned(),
-                            children: vec![UiComponent::Button {
-                                label: "Add OpenAI-Compatible URL".to_owned(),
-                                action_id: "setup:openai-url".to_owned(),
-                                disabled: false,
-                            }],
                         },
                         UiComponent::Row(vec![
                             UiComponent::Button {
-                                label: "Choose Active Model in Models".to_owned(),
-                                action_id: "setup:choose-model".to_owned(),
+                                label: "1. Get a free key (opens a website)".to_owned(),
+                                action_id: "setup:open-openrouter-web".to_owned(),
                                 disabled: false,
                             },
                             UiComponent::Button {
-                                label: "Take Interactive System Tour".to_owned(),
-                                action_id: "setup:start-tour".to_owned(),
+                                label: "2. Paste my key".to_owned(),
+                                action_id: "setup:openrouter-key".to_owned(),
+                                disabled: false,
+                            },
+                        ]),
+                        UiComponent::Row(vec![
+                            UiComponent::Button {
+                                label: "Use a free AI on this computer instead".to_owned(),
+                                action_id: "setup:ollama".to_owned(),
                                 disabled: false,
                             },
                             UiComponent::Button {
-                                label: "Open All AI Settings".to_owned(),
-                                action_id: "setup:settings".to_owned(),
+                                label: "Other ways to connect".to_owned(),
+                                action_id: "setup:other-ways".to_owned(),
                                 disabled: false,
                             },
                         ]),

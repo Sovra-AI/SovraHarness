@@ -9,7 +9,7 @@ model runs on its configured computer.
 
 For a source checkout, follow [Native development](development.md) to install
 the build prerequisites and run `cargo xtask dev`. Installed builds can be
-launched normally. The interface defaults to Arabic; Settings includes a language
+launched normally. The interface starts in English; the sign-in screen and Settings include a language
 picker and **Text size** from 75–200%.
 
 On a fresh workspace, the email/password form creates the first local account.

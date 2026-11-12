@@ -1,42 +1,44 @@
 //! User-facing language: identity, world catalog, chrome lookup, RTL, and the
-//! agent reply-language clause. Arabic is the product default.
+//! agent reply-language clause. English is the product default, so a new person
+//! can always read the first screen; Arabic and every Settings language are one
+//! choice away (also on the sign-in screen).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// BCP-47 tag identifying the UI and agent reply language.
 ///
 /// Unknown tags stay choosable so the agent can still reply in that language.
-/// Tags outside the Settings catalog fall back to Arabic chrome so the screen
+/// Tags outside the Settings catalog fall back to English chrome so the screen
 /// never shows empty text or raw keys. Every catalog language has its own chrome.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiLanguage(String);
 
 impl Default for UiLanguage {
     fn default() -> Self {
-        Self::arabic()
+        Self::english()
     }
 }
 
 impl UiLanguage {
-    /// Product default and complete chrome catalog.
+    /// Complete chrome catalog, written right to left.
     #[must_use]
     pub fn arabic() -> Self {
         Self("ar".into())
     }
 
-    /// Complete secondary chrome catalog.
+    /// Product default and complete chrome catalog.
     #[must_use]
     pub fn english() -> Self {
         Self("en".into())
     }
 
-    /// Parse a saved or chosen tag. Empty input becomes Arabic. Catalog tags are
+    /// Parse a saved or chosen tag. Empty input becomes English. Catalog tags are
     /// canonicalized; anything else is kept in lowercase so the agent can name it.
     #[must_use]
     pub fn from_tag(tag: impl AsRef<str>) -> Self {
         let raw = tag.as_ref().trim().replace('_', "-");
         if raw.is_empty() {
-            return Self::arabic();
+            return Self::english();
         }
         if let Some(info) = world_languages()
             .iter()
@@ -59,7 +61,7 @@ impl UiLanguage {
             .split(['-', '_'])
             .next()
             .filter(|part| !part.is_empty())
-            .unwrap_or("ar")
+            .unwrap_or("en")
     }
 
     #[must_use]
@@ -137,7 +139,7 @@ impl LanguageInfo {
     }
 }
 
-/// User-visible chrome strings that must resolve in Arabic by default.
+/// User-visible chrome strings, resolved in the chosen language (English by default).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChromeKey {
     LoginWelcomeTitle,
@@ -327,21 +329,105 @@ impl ChromeKey {
 
 /// Chrome string for `language`. English and Arabic have their own catalogs.
 /// Every other Settings language has its own wording. A tag outside the catalog
-/// falls back to Arabic so keys never appear.
+/// falls back to English so keys never appear.
 #[must_use]
 pub fn chrome(language: &UiLanguage, key: ChromeKey) -> &'static str {
     let text = if language.tag() == "en" {
         english(key)
+    } else if language.tag() == "ar" {
+        arabic(key)
     } else if let Some(text) = chrome_catalog::localized(language.tag(), key) {
         text
     } else {
-        arabic(key)
+        english(key)
     };
     if text.is_empty() { english(key) } else { text }
 }
 
 #[path = "chrome_catalog.rs"]
 mod chrome_catalog;
+
+/// The first thing a new person sees before any AI is connected: one step at a
+/// time, in words anyone can follow. `{service}` is replaced with the service name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FirstRunKey {
+    StepOne,
+    StepTwo,
+    ConnectTitle,
+    ConnectBody,
+    ConnectAction,
+    LocalAction,
+    PickTitle,
+    PickBody,
+    PickAction,
+    KeyTitle,
+    KeyBody,
+    KeyAction,
+}
+
+impl FirstRunKey {
+    pub const ALL: [Self; 12] = [
+        Self::StepOne,
+        Self::StepTwo,
+        Self::ConnectTitle,
+        Self::ConnectBody,
+        Self::ConnectAction,
+        Self::LocalAction,
+        Self::PickTitle,
+        Self::PickBody,
+        Self::PickAction,
+        Self::KeyTitle,
+        Self::KeyBody,
+        Self::KeyAction,
+    ];
+}
+
+/// First-run guidance for `language`. English and Arabic have their own wording;
+/// other languages read English until their packs are translated.
+#[must_use]
+pub fn first_run_text(language: &UiLanguage, key: FirstRunKey) -> &'static str {
+    let arabic = language.primary() == "ar";
+    match (key, arabic) {
+        (FirstRunKey::StepOne, false) => "Step 1 of 2",
+        (FirstRunKey::StepOne, true) => "الخطوة 1 من 2",
+        (FirstRunKey::StepTwo, false) => "Step 2 of 2",
+        (FirstRunKey::StepTwo, true) => "الخطوة 2 من 2",
+        (FirstRunKey::ConnectTitle, false) => "First, connect an AI",
+        (FirstRunKey::ConnectTitle, true) => "أولاً، اربط ذكاءً اصطناعياً",
+        (FirstRunKey::ConnectBody, false) => {
+            "Sovra needs an AI to answer you. It takes about two minutes, and there are free \
+             choices. After that, just type your question below."
+        }
+        (FirstRunKey::ConnectBody, true) => {
+            "يحتاج Sovra إلى ذكاء اصطناعي ليجيبك. يستغرق ذلك دقيقتين تقريباً، وهناك خيارات \
+             مجانية. بعد ذلك اكتب سؤالك في الأسفل."
+        }
+        (FirstRunKey::ConnectAction, false) => "Connect an AI",
+        (FirstRunKey::ConnectAction, true) => "اربط ذكاءً اصطناعياً",
+        (FirstRunKey::LocalAction, false) => "Use a free AI on this computer",
+        (FirstRunKey::LocalAction, true) => "استخدم ذكاءً اصطناعياً مجانياً على هذا الحاسوب",
+        (FirstRunKey::PickTitle, false) => "Next, pick the AI you want to talk to",
+        (FirstRunKey::PickTitle, true) => "بعد ذلك، اختر الذكاء الاصطناعي الذي تريد التحدث إليه",
+        (FirstRunKey::PickBody, false) => {
+            "{service} is connected. Choose one AI and you can start chatting."
+        }
+        (FirstRunKey::PickBody, true) => {
+            "تم ربط {service}. اختر ذكاءً اصطناعياً واحداً لتبدأ المحادثة."
+        }
+        (FirstRunKey::PickAction, false) => "Pick your AI",
+        (FirstRunKey::PickAction, true) => "اختر الذكاء الاصطناعي",
+        (FirstRunKey::KeyTitle, false) => "Last step: add your key",
+        (FirstRunKey::KeyTitle, true) => "الخطوة الأخيرة: أضف مفتاحك",
+        (FirstRunKey::KeyBody, false) => {
+            "Your AI is chosen. Add your {service} key and you can start chatting."
+        }
+        (FirstRunKey::KeyBody, true) => {
+            "تم اختيار الذكاء الاصطناعي. أضف مفتاح {service} لتبدأ المحادثة."
+        }
+        (FirstRunKey::KeyAction, false) => "Add your key",
+        (FirstRunKey::KeyAction, true) => "أضف مفتاحك",
+    }
+}
 
 /// Every language the Settings picker offers.
 #[must_use]
@@ -1112,38 +1198,42 @@ mod tests {
     }
 
     #[test]
-    fn default_language_is_arabic_and_rtl_while_english_is_ltr() {
+    fn default_language_is_english_and_ltr_while_arabic_is_rtl() {
         let default = UiLanguage::default();
-        assert_eq!(default.tag(), "ar");
-        assert!(default.is_rtl());
-        assert!(!UiLanguage::english().is_rtl());
+        assert_eq!(default.tag(), "en");
+        assert!(!default.is_rtl());
+        assert!(UiLanguage::arabic().is_rtl());
         assert!(UiLanguage::from_tag("he").is_rtl());
         assert!(!UiLanguage::from_tag("fr").is_rtl());
-        assert_eq!(UiLanguage::from_tag(""), UiLanguage::arabic());
+        assert_eq!(UiLanguage::from_tag(""), UiLanguage::english());
         assert_eq!(UiLanguage::from_tag("EN").tag(), "en");
     }
 
     #[test]
-    fn default_chrome_lookup_returns_arabic_script() {
-        let settings = chrome(&UiLanguage::default(), ChromeKey::SettingsTitle);
-        assert!(
-            has_arabic_script(settings),
-            "default Settings title: {settings}"
+    fn default_chrome_is_english_and_arabic_chrome_is_arabic_script() {
+        assert_eq!(
+            chrome(&UiLanguage::default(), ChromeKey::SettingsTitle),
+            "Settings"
         );
+        for key in ChromeKey::ALL {
+            assert!(
+                !has_arabic_script(chrome(&UiLanguage::default(), key)),
+                "default {key:?} must be readable English"
+            );
+        }
+        let arabic = UiLanguage::arabic();
+        let settings = chrome(&arabic, ChromeKey::SettingsTitle);
         assert_eq!(settings, "الإعدادات");
-        let chat = chrome(&UiLanguage::default(), ChromeKey::NavChat);
-        assert!(has_arabic_script(chat), "default Chat label: {chat}");
-        let login = chrome(&UiLanguage::default(), ChromeKey::LoginWelcomeTitle);
-        assert!(has_arabic_script(login), "default login title: {login}");
-        let welcome = chrome(&UiLanguage::default(), ChromeKey::ChatWelcomeSubtitle);
-        assert!(
-            has_arabic_script(welcome),
-            "default chat welcome: {welcome}"
-        );
-        let password = chrome(&UiLanguage::default(), ChromeKey::LoginPasswordPlaceholder);
+        let chat = chrome(&arabic, ChromeKey::NavChat);
+        assert!(has_arabic_script(chat), "Arabic Chat label: {chat}");
+        let login = chrome(&arabic, ChromeKey::LoginWelcomeTitle);
+        assert!(has_arabic_script(login), "Arabic login title: {login}");
+        let welcome = chrome(&arabic, ChromeKey::ChatWelcomeSubtitle);
+        assert!(has_arabic_script(welcome), "Arabic chat welcome: {welcome}");
+        let password = chrome(&arabic, ChromeKey::LoginPasswordPlaceholder);
         assert!(
             has_arabic_script(password),
-            "default login password placeholder: {password}"
+            "Arabic login password placeholder: {password}"
         );
         assert_eq!(
             chrome(&UiLanguage::english(), ChromeKey::SettingsTitle),
@@ -1189,8 +1279,8 @@ mod tests {
         }
         assert_eq!(
             chrome(&UiLanguage::from_tag("zz"), ChromeKey::SettingsTitle),
-            chrome(&UiLanguage::arabic(), ChromeKey::SettingsTitle),
-            "a tag outside the catalog falls back to Arabic"
+            chrome(&UiLanguage::english(), ChromeKey::SettingsTitle),
+            "a tag outside the catalog falls back to English"
         );
         assert_ne!(
             chrome(&UiLanguage::from_tag("fr"), ChromeKey::SettingsTitle),
@@ -1241,19 +1331,30 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_empty_language_stays_arabic_rtl() {
+    fn first_run_steps_read_in_english_or_arabic_and_never_blank() {
+        for key in FirstRunKey::ALL {
+            let english = first_run_text(&UiLanguage::default(), key);
+            let arabic = first_run_text(&UiLanguage::arabic(), key);
+            assert!(
+                !english.is_empty() && !has_arabic_script(english),
+                "{key:?}"
+            );
+            assert!(has_arabic_script(arabic), "{key:?} Arabic: {arabic}");
+            assert_eq!(first_run_text(&UiLanguage::from_tag("fr"), key), english);
+        }
+        assert_eq!(
+            first_run_text(&UiLanguage::default(), FirstRunKey::ConnectAction),
+            "Connect an AI"
+        );
+    }
+
+    #[test]
+    fn missing_or_empty_language_is_english() {
         for tag in ["", "   "] {
             let language = UiLanguage::from_tag(tag);
-            assert_eq!(language.tag(), "ar");
-            assert!(language.is_rtl());
-            assert_eq!(
-                chrome(&language, ChromeKey::SettingsTitle),
-                chrome(&UiLanguage::arabic(), ChromeKey::SettingsTitle)
-            );
-            assert!(has_arabic_script(chrome(
-                &language,
-                ChromeKey::SettingsTitle
-            )));
+            assert_eq!(language.tag(), "en");
+            assert!(!language.is_rtl());
+            assert_eq!(chrome(&language, ChromeKey::SettingsTitle), "Settings");
         }
     }
 
@@ -1361,8 +1462,11 @@ mod tests {
     #[test]
     fn standing_instructions_embed_the_chosen_reply_language() {
         let settings = AgentSettings::default();
-        let arabic =
+        let english =
             settings.compose_system_instruction("Base instruction.", &UiLanguage::default());
+        assert!(english.contains("Always reply in English"));
+        let arabic =
+            settings.compose_system_instruction("Base instruction.", &UiLanguage::arabic());
         let french =
             settings.compose_system_instruction("Base instruction.", &UiLanguage::from_tag("fr"));
         assert!(arabic.contains("Base instruction."));
@@ -1374,16 +1478,19 @@ mod tests {
     }
 
     #[test]
-    fn missing_saved_language_field_deserializes_as_arabic() {
+    fn missing_saved_language_is_english_and_a_saved_choice_is_kept() {
         let older: ModelPreferences = serde_json::from_str(r#"{"favorites":[],"active":null}"#)
             .expect("preferences saved before language existed");
-        assert_eq!(older.language, UiLanguage::default());
-        assert!(older.language.is_rtl());
+        assert_eq!(older.language, UiLanguage::english());
+        let chosen: ModelPreferences =
+            serde_json::from_str(r#"{"favorites":[],"active":null,"language":"ar"}"#)
+                .expect("a saved Arabic choice");
+        assert_eq!(chosen.language, UiLanguage::arabic());
         let tagged: UiLanguage = serde_json::from_str("\"en\"").expect("tag");
         assert_eq!(tagged, UiLanguage::english());
         assert_eq!(
             serde_json::to_string(&UiLanguage::default()).expect("ser"),
-            "\"ar\""
+            "\"en\""
         );
     }
 }

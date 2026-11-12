@@ -353,7 +353,7 @@ fn login_controls_stay_inside_the_minimum_window(cx: &mut TestAppContext) {
             Theme::change(mode, Some(window), cx);
             window.render_frame(cx);
             let page = window.find("sovra-login-screen").bounds();
-            for id in ["login-glass-card", "login-submit-btn", "login-google-btn"] {
+            for id in ["login-glass-card", "login-submit-btn", "login-language"] {
                 let bounds = window.find(id).bounds();
                 assert!(
                     bounds.top() >= page.top() && bounds.bottom() <= page.bottom(),

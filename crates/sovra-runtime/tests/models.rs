@@ -840,7 +840,7 @@ async fn appearance_choice_survives_restart() {
 }
 
 #[tokio::test]
-async fn language_defaults_to_arabic_and_survives_restart() {
+async fn language_defaults_to_english_and_survives_restart() {
     let server = Server::new(|_| Reply::json(&json!({"data":[]})));
     let mut connection = ModelConnection::new("openrouter", ProviderKind::OpenRouter);
     connection.base_url = format!("{}/api/v1", server.url());
@@ -851,7 +851,7 @@ async fn language_defaults_to_arabic_and_survives_restart() {
     })
     .await;
     assert!(
-        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::default() && preferences.language.tag() == "ar" && preferences.language.is_rtl())
+        matches!(loaded, Event::Models(ModelEvent::Loaded { preferences, .. }) if preferences.language == UiLanguage::default() && preferences.language.tag() == "en" && !preferences.language.is_rtl())
     );
     // Language is stored with preferences. The model catalog is a separate
     // refresh and must not gate saving or reloading the chosen tag.

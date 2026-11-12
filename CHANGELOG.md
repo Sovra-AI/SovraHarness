@@ -11,11 +11,29 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-12
+
 - **Signup asks for your name.** A new account needs the name you type. Email
   and a password are optional, and you give both or neither. A blank name is
   refused, and the app no longer fills the name from the part of an email
   before `@`. Starting or joining a group still asks for the name people in
   the group see, and still does not need this login.
+
+- **Sovra starts in English, and the first thing to do is obvious.** A new
+  install now opens in English instead of Arabic (anyone who already chose a
+  language keeps it, and Arabic and every Settings language are still one
+  click away). The sign-in screen has an **English · العربية** switch at the
+  top, so nobody has to read a language they don't know to get in, and
+  **Continue with Google** only appears when this copy can actually sign in
+  with Google. Before any AI is connected, the empty chat shows one card —
+  **Step 1 of 2 · First, connect an AI**, with **Connect an AI** and **Use a free
+  AI on this computer** — instead of starter questions nothing could answer yet,
+  and the duplicate setup strip above the chat is hidden while that card is on
+  screen. The card follows the setup (**Pick your AI**, then **Add your key**)
+  and is translated into Arabic. Typing a message before setup now shows a much
+  shorter card: **1. Get a free key (opens a website)**, **2. Paste my key**, plus
+  **Use a free AI on this computer instead** and **Other ways to connect**,
+  without the jargon (no "/v1", "vLLM" or long OpenRouter explanation).
 
 - **Opening a website Sovra made now works, and its address stays the same.**
   A saved web page's card in chat now says **Open in browser** (with **See in
