@@ -62,7 +62,7 @@ meant for live, replaceable progress.
   with each snapshot. A reply that used no tools shows no log.
 - **Plain words.** `describe_step` turns each call into a sentence: "Searching
   the web for “soup recipes”", "Reading budget.xlsx", "Asking the Web Search
-  helper to look at “…”". A tool it does not know (an MCP tool, say) still reads
+  helper about “…”". A tool it does not know (an MCP tool, say) still reads
   as words ("Using render table"), never as JSON. Arguments are clipped
   to a short quote.
 - **Parallel helpers have lanes.** Each request to a helper opens its own lane

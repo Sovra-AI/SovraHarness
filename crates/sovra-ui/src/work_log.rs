@@ -234,13 +234,23 @@ fn render_helper(
                         .text_ellipsis()
                         .child(helper.name.clone()),
                 ),
-        )
-        .child(
-            div()
-                .sovra_text(TextRole::Caption, cx)
-                .text_color(accent)
-                .child(state),
         );
+    // Two lanes for the same helper differ by what each was asked.
+    if let Some(task) = &helper.task {
+        lane_card = lane_card.child(
+            div()
+                .min_w_0()
+                .sovra_text(TextRole::Caption, cx)
+                .text_ellipsis()
+                .child(format!("“{task}”")),
+        );
+    }
+    lane_card = lane_card.child(
+        div()
+            .sovra_text(TextRole::Caption, cx)
+            .text_color(accent)
+            .child(state),
+    );
     if let Some(doing) = &helper.doing {
         lane_card = lane_card.child(
             div()

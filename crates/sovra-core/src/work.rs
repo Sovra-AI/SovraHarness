@@ -115,6 +115,10 @@ pub struct WorkHelper {
     pub id: String,
     pub name: String,
     pub state: StepState,
+    /// What it was asked, in a few words, so two lanes for the same helper
+    /// can be told apart ("Louvre opening hours" / "British Museum hours").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
     /// What it is doing right now, in plain words.
     #[serde(default)]
     pub doing: Option<String>,
@@ -172,6 +176,7 @@ impl WorkActivity {
             let lane = self.helper_mut(call.id, name);
             lane.state = StepState::Running;
             lane.doing = Some("Getting started".to_owned());
+            lane.task = quoted_arg(call.args, ASK_KEYS).map(|task| clip_to(&task, MAX_TASK_CHARS));
             (
                 StepKind::Ask,
                 ask_label(name, call.args),
@@ -305,6 +310,7 @@ impl WorkActivity {
                 id: id.to_owned(),
                 name: name.to_owned(),
                 state: StepState::Running,
+                task: None,
                 doing: None,
                 steps: 0,
             });
@@ -331,9 +337,22 @@ impl WorkActivity {
         let running: Vec<&WorkStep> = self.running().collect();
         self.status = match running.as_slice() {
             [] => "Working out what to do next…".to_owned(),
-            [only] => format!("{}…", only.label),
-            [.., latest] => format!("Doing {} things at once — {}…", running.len(), latest.label),
+            [only] => trailing_ellipsis(&only.label),
+            [.., latest] => format!(
+                "Doing {} things at once — {}",
+                running.len(),
+                trailing_ellipsis(&latest.label)
+            ),
         };
+    }
+}
+
+/// "Reading x" → "Reading x…", but never "……" after a clipped label.
+fn trailing_ellipsis(label: &str) -> String {
+    if label.ends_with('…') {
+        label.to_owned()
+    } else {
+        format!("{label}…")
     }
 }
 
@@ -373,10 +392,18 @@ pub fn helper_display_name(specialist_name: &str) -> String {
     }
 }
 
+/// Argument names a helper request uses for what it was asked.
+const ASK_KEYS: &[&str] = &["request", "task", "query", "prompt"];
+/// Longest lane task, in characters.
+const MAX_TASK_CHARS: usize = 40;
+
 fn ask_label(helper: &str, args: &Value) -> String {
-    match quoted_arg(args, &["request", "task", "query", "prompt"]) {
-        Some(quote) => clip(&format!("Asking the {helper} to look at “{quote}”")),
-        None => clip(&format!("Asking the {helper}")),
+    let prefix = format!("Asking the {helper} about");
+    // Clip the quote, not the sentence, so the closing quote mark survives.
+    let room = MAX_LABEL_CHARS.saturating_sub(prefix.chars().count() + 3);
+    match quoted_arg(args, ASK_KEYS) {
+        Some(quote) if room >= 8 => format!("{prefix} “{}”", clip_to(&quote, room)),
+        Some(_) | None => clip(&format!("Asking the {helper}")),
     }
 }
 
@@ -392,7 +419,7 @@ pub fn describe_step(tool: &str, args: &Value) -> (StepKind, String) {
     let (kind, label) = match tool {
         "web_search" => (
             StepKind::Search,
-            with("Searching the web for", &["query", "q"]),
+            with("Searching the web for", &["queries", "query", "q"]),
         ),
         "read_web_page" => (StepKind::Read, with("Reading", &["url", "address"])),
         "search_saved_details" | "query_file_knowledge" | "read_file_knowledge_evidence" => (
@@ -490,8 +517,21 @@ fn quoted_arg(args: &Value, keys: &[&str]) -> Option<String> {
         Value::Number(number) => number.to_string(),
         Value::Null | Value::Bool(_) | Value::Object(_) => return None,
     };
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = readable_address(&text.split_whitespace().collect::<Vec<_>>().join(" "));
     (!flat.is_empty()).then(|| clip_to(&flat, MAX_QUOTE_CHARS))
+}
+
+/// `https://www.louvre.fr/en/visit/` → `louvre.fr/en/visit`: a web address the
+/// way people say it. Anything that is not a web address is unchanged.
+fn readable_address(text: &str) -> String {
+    let Some(rest) = text
+        .strip_prefix("https://")
+        .or_else(|| text.strip_prefix("http://"))
+    else {
+        return text.to_owned();
+    };
+    let rest = rest.strip_prefix("www.").unwrap_or(rest);
+    rest.trim_end_matches('/').to_owned()
 }
 
 fn clip(text: &str) -> String {
@@ -606,6 +646,42 @@ mod tests {
     }
 
     #[test]
+    fn searches_and_addresses_read_naturally() {
+        let (_, label) = describe_step(
+            "web_search",
+            &json!({"queries": ["louvre hours", "british museum hours"]}),
+        );
+        assert_eq!(
+            label,
+            "Searching the web for “louvre hours, british museum hours”"
+        );
+        let (_, label) = describe_step(
+            "read_web_page",
+            &json!({"url": "https://www.louvre.fr/en/visit/"}),
+        );
+        assert_eq!(label, "Reading “louvre.fr/en/visit”");
+    }
+
+    #[test]
+    fn long_requests_keep_their_closing_quote_and_status_has_one_ellipsis() {
+        let mut log = WorkActivity::default();
+        let request = json!({"request": "What are today's opening hours of the Louvre and the British Museum in London?"});
+        log.start(StepCall {
+            asks_helper: Some("Web Search helper"),
+            ..call("a", "WebSearchAgent", &request, 0)
+        });
+        let label = &log.steps[0].label;
+        assert!(label.ends_with("…”"), "{label}");
+        assert!(label.chars().count() <= MAX_LABEL_CHARS, "{label}");
+        assert!(!log.status.contains("……"), "{}", log.status);
+        let task = log.helpers[0]
+            .task
+            .as_deref()
+            .expect("the lane says what it was asked");
+        assert!(task.chars().count() <= MAX_TASK_CHARS);
+    }
+
+    #[test]
     fn helper_names_say_helper() {
         assert_eq!(
             helper_display_name("Web Search Specialist"),
@@ -664,7 +740,7 @@ mod tests {
         assert_eq!(log.helpers[1].state, StepState::Failed);
         assert_eq!(
             log.steps[0].label,
-            "Asking the Web Search helper to look at “find a recipe”"
+            "Asking the Web Search helper about “find a recipe”"
         );
     }
 
