@@ -7,14 +7,12 @@ Follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Report security issues through [SECURITY.md](SECURITY.md), not public issues.
 
-Source on the default branch `main` is under the **Sustainable Use License**
-(see [LICENSE](LICENSE)). This is n8n's Sustainable Use License, which n8n's
-documentation allows other projects to use. The model is fair-code:
-source-available, and free to use and extend for your own internal business
-purposes or for non-commercial or personal use, with the limits in that
-license. It is not an OSI open-source license. Files named `.ee.` or kept in
-a directory whose name contains `.ee` are under
-[LICENSE_EE.md](LICENSE_EE.md) instead. n8n does not own SovraHarness.
+Source on the default branch `main` is under **Sovra's Sustainable Use License**
+(see [LICENSE](LICENSE)). The model is fair-code: source-available, and free
+to use and extend for your own internal business purposes or for
+non-commercial or personal use, with the limits in that license. It is not an OSI open-source license.
+Files named `.ee.` or kept in a directory whose name contains `.ee` are under
+[LICENSE_EE.md](LICENSE_EE.md) instead.
 
 The canonical engineering rules live in [AGENTS.md](AGENTS.md) (plus a short
 `AGENTS.md` per crate) and apply to humans and coding agents alike. This file

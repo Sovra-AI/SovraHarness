@@ -42,14 +42,23 @@ mod tests {
         let enterprise = read(&root, "LICENSE_EE.md");
         let readme = read(&root, "README.md");
         let contributing = read(&root, "CONTRIBUTING.md");
+        let changelog = read(&root, "CHANGELOG.md");
         let security = read(&root, "SECURITY.md");
         let manifest = read(&root, "Cargo.toml");
         let cargo_license = workspace_license(&manifest);
+        eprintln!(
+            "checked shipped license files under {} (LICENSE, LICENSE_EE.md, README.md, CONTRIBUTING.md, CHANGELOG.md, Cargo.toml)",
+            root.display()
+        );
+        eprintln!(
+            "LICENSE_EE.md was left as the Sovra Enterprise License at {}",
+            root.join("LICENSE_EE.md").display()
+        );
 
         assert!(license.contains("Sustainable Use License"));
         assert!(license.contains("Version 1.0"));
         assert!(license.contains("The licensor is Sovra"));
-        assert!(!license.contains("n8n GmbH"));
+        assert!(license.contains("Sovra's Sustainable Use License"));
         assert!(license.contains(
             "non-exclusive, royalty-free, worldwide, non-sublicensable, non-transferable"
         ));
@@ -98,7 +107,6 @@ mod tests {
 
         assert!(enterprise.contains("Sovra Enterprise License"));
         assert!(enterprise.contains("Copyright (c) 2026-present Sovra"));
-        assert!(!enterprise.contains("n8n GmbH"));
         assert!(enterprise.contains("may only be used in production"));
         assert!(enterprise.contains("valid Sovra Enterprise license corresponding to your usage"));
         assert!(enterprise.contains("free to modify this Software and publish patches"));
@@ -122,18 +130,30 @@ mod tests {
                 .contains("original license provided by the owner of the applicable component")
         );
 
-        for notice in [&readme, &contributing, &security] {
+        for (name, notice) in [
+            ("LICENSE", &license),
+            ("LICENSE_EE.md", &enterprise),
+            ("README.md", &readme),
+            ("CONTRIBUTING.md", &contributing),
+            ("CHANGELOG.md", &changelog),
+        ] {
+            assert!(
+                !notice.to_lowercase().contains("n8n"),
+                "{name} must not call this license n8n's"
+            );
+        }
+        for notice in [&readme, &contributing, &changelog, &security] {
             let lower = notice.to_lowercase();
             assert!(!lower.contains("closed source") && !lower.contains("closed-source"));
             assert!(!lower.contains("proprietary"));
             assert!(!notice.contains("NOT licensed for public use"));
             assert!(!notice.contains("Do not copy, distribute, or disclose"));
         }
-        assert!(readme.contains("fair-code") || readme.contains("Fair-code"));
-        assert!(readme.contains("not an OSI open-source license"));
-        assert!(readme.contains("n8n's Sustainable Use License"));
-        assert!(contributing.contains("fair-code"));
-        assert!(contributing.contains("not an OSI open-source license"));
+        for notice in [&readme, &contributing, &changelog] {
+            assert!(notice.contains("fair-code") || notice.contains("Fair-code"));
+            assert!(notice.contains("not an OSI open-source license"));
+            assert!(notice.contains("Sovra's Sustainable Use License"));
+        }
 
         assert!(cargo_license.starts_with("LicenseRef-"));
         assert!(cargo_license.contains("SustainableUse"));

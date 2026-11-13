@@ -25,10 +25,9 @@ Connect a cloud AI service or a local model server such as Ollama, then use
 helpers to work with your knowledge, create documents and websites, and
 schedule tasks.
 
-> **License:** Source on `main` is available under n8n's Sustainable Use License,
-> which n8n's docs allow other projects to use. This is fair-code:
-> source-available, and not an OSI open-source license. Enterprise files have
-> separate terms. See [License](#license).
+> **License:** Source on `main` is available under Sovra's Sustainable Use License.
+> This is fair-code: source-available, and not an OSI open-source license.
+> Enterprise files have separate terms. See [License](#license).
 
 ## What you can do
 
@@ -189,7 +188,7 @@ See the [release guide](docs/releasing.md) for versioning, signing, and verifica
 
 ## License
 
-[LICENSE](LICENSE) contains n8n's Sustainable Use License, Version 1.0, with Sovra
+[LICENSE](LICENSE) is Sovra's Sustainable Use License, Version 1.0, with Sovra
 as the licensor. This is a fair-code license with use and distribution
 restrictions, not an OSI open-source license. It applies to source on `main`;
 the license excludes other branches. Files with `.ee.` in their name or `.ee` in their directory name
