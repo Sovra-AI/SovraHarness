@@ -13,46 +13,24 @@ Two features that work together:
 Both run inside the single desktop binary, on whichever AI the user picked in Models,
 and are designed for someone with no technical experience.
 
-## Where it comes from
+## Ask a team and save work
 
-Teams are ported from `SovraSRXProduction` team chats (the "Team" pages and
-`backend/src/app/services/team_chats`). There, a team member is a *persona*: name,
-icon, tagline, profile and instructions. A **Conductor** (Alex) moderates group chats
-in rounds and ends each reply with a machine-readable verdict tail:
+1. Open **Team**, choose the helpers you want, and use **Ask my team**.
+2. Review the team-mode indicator above the composer, then send your question.
+   **Ask Sovra only** returns to an ordinary chat.
+3. Watch the **Waiting / Working / Done** board as replies arrive. Use Stop to
+   interrupt a run.
+4. Choose **Save** on a reply or code block to keep it in Artifacts.
 
-```
-[[CONDUCTOR: {"verdict":"CONTINUE|YIELD_TO_USER|ASK_USER","next_speakers":[...]}]]
-```
+Helpers use the model selected in Models. Members selected for a round work in
+parallel, then the Conductor decides whether another round is needed. Core rules
+bound rounds and reply counts. A member can pass without showing protocol text.
+Team replies retain their authorship; see [team memory](memory-capture-and-recall.md#one-team-turn).
 
-In moderated chats, members may reply exactly `<pass/>` when they have nothing to add.
-
-What this app keeps from that design:
-
-- The seeded teammates, minus the ones that drive tools this app does not ship yet.
-- The order in which the first speakers are chosen:
-  1. `@handle` mentions,
-  2. names,
-  3. "everyone" words,
-  4. otherwise the members whose expertise best matches the prompt (no classifier call).
-- The Conductor protocol and passes.
-- A cap on rounds and replies per turn.
-
-What changes:
-
-- `MAX_ROUNDS` is 3, not 6, because the user pays for every reply on their own key.
-- Every member uses the user's selected model.
-- Separate persistent memory stores for individual members are not ported. Team
-  prompts use the shared capture path, and visible member replies are saved with
-  their authorship and dependency records; see [team memory](memory-capture-and-recall.md#one-team-turn).
-
-Artifacts follow what AI clients have converged on:
-
-| Source | Artifact kinds |
-| --- | --- |
-| Claude artifacts | Markdown, code, HTML, SVG, Mermaid |
-| ChatGPT / Gemini Canvas | Documents and code |
-| `SovraSRX` `user_artifacts` | Note, document, code, data, spreadsheet, link |
-| A2A protocol | Artifacts are typed parts attached to a task |
+In **Artifacts**, use folders, favorites, search, and sorting to find saved work.
+Editing keeps versions. Back and Cancel ask before discarding unsaved edits;
+a failed save keeps the draft. Deletion is soft and asks for confirmation.
+See the website section below for browser previews and build requirements.
 
 ## Everything streams as AG-UI
 
@@ -204,9 +182,3 @@ routes, or development-control endpoints. Host headers must match the exact loca
 address. Requests, connections, page size, and simultaneous sites are bounded.
 Websites can still make network requests from the browser if their source does so.
 Local hosting is not public publishing.
-
-Research informing this implementation:
-
-- [W3C Secure Contexts](https://www.w3.org/TR/secure-contexts/): loopback origin treatment.
-- [MDN semantic HTML and accessibility](https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Accessibility/HTML): native semantics and controls.
-- [web.dev responsive design](https://web.dev/learn/design): layouts for changing viewport and text sizes.

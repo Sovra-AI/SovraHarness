@@ -72,8 +72,10 @@ installer is signed or notarized.
 - macOS uses the build and installer certificates, P12/keychain passwords,
   Apple ID/app-specific password/team, and signing identity named in the workflow.
   Entitlements are in `packaging/macos/sovra.entitlements`.
-- Windows uses Azure OIDC credentials and
-  `packaging/windows/artifact-signing.json`.
+- Windows signing expects Azure OIDC credentials and a provisioned
+  `packaging/windows/artifact-signing.json`. That JSON file is not included in
+  this checkout. The workflow does not generate it; supply the configuration
+  required by `--azureTrustedSignFile` before enabling Windows signing.
 
 Keep credentials in the release secret store, never in the checkout, package
 staging folder or documentation. The exact secret names and signing arguments
@@ -83,7 +85,7 @@ live in the workflow header and packaging step.
 
 Google OAuth scopes and verification have their own [release requirements](google.md#scopes-and-google-verification-release-blocker).
 Group Internet reach currently uses development relay infrastructure; see
-[Groups](groups.md) and the [roadmap](roadmap/README.md). Neither installer
+[Groups](groups.md). Neither installer
 creation nor a generated update feed proves those rollout requirements are met.
 
 See [SECURITY.md](../SECURITY.md) for reporting and secret handling, and

@@ -18,6 +18,12 @@ package version.
   room, so it no longer stops partway and leaves a version without its Linux
   executable.
 
+- **Current-code documentation.** Removed obsolete plans, investor decks, and
+  dated evaluation dumps; reorganized guides, corrected behavior against source,
+  and expanded documentation checks to nested and contributor Markdown.
+
+- **Branded README.** The repository page opens with the product logo, the project title, and a short description.
+
 - **Public repository documentation.** Streamlined the README around setup,
   capabilities, limitations, and guides; clarified external contributions and
   security reporting, and added community conduct guidance.
@@ -544,7 +550,7 @@ package version.
   around the stage are pale lavender, and the site's list and viewer bar are
   light.
 
-- The decks are one site: [`docs/decks/index.html`](docs/decks/index.html)
+- The decks are one site: `docs/decks/index.html`
   lists every deck with a live preview, routes with the URL hash (`#/pitch`,
   `#/pitch/7`), shows a deck inside the site with a bar to switch decks, and
   works from `file://`. The pitch, value and UAE decks carry an **All decks**
@@ -575,7 +581,7 @@ package version.
   pills, bars and table panels are typography on hairlines; diagrams use
   dots, rings and glows instead of rectangles.
 
-- Investor pitch at [`docs/decks/pitch/`](docs/decks/pitch/index.html)
+- Investor pitch at `docs/decks/pitch/`
   rebuilt as an 18-slide vision deck with a scene on every slide: the
   national border the work leaks across (and then stays inside), the
   sovereign stack with Sovra as the desk layer, the orbit of five
@@ -586,13 +592,13 @@ package version.
   limits stay in `docs/value-realisation/`.
 
 - Non-technical investor brief at
-  [`docs/value-realisation/10-investor-brief.md`](docs/value-realisation/10-investor-brief.md):
+  `docs/value-realisation/10-investor-brief.md`:
   the UAE's AI-native goal, sovereignty as five things that stay yours,
   value realisation through measured pilots, a 10-minute talk track,
   investor questions and a plain-English glossary. Business model and ask
   are left for the founder.
 
-- New [`docs/value-realisation/`](docs/value-realisation/README.md): the
+- New `docs/value-realisation/`: the
   enterprise case for Sovra. Sovereignty in seven layers (data, knowledge,
   model, decisions, learning, operations, jurisdiction) with a scorecard; an
   evidence register citing the code for every Today claim, including every
@@ -602,7 +608,7 @@ package version.
   limits and objections; dated sources. The UAE deck now says a fully local
   setup also needs web search off.
 
-- New UAE deck at [`docs/decks/uae/`](docs/decks/uae/index.html) (Cinema
+- New UAE deck at `docs/decks/uae/` (Cinema
   1920×1080, plain words): AI-native and 100% sovereign, with value you can
   count. Five things stay sovereign (data, knowledge, the AI itself,
   decisions, learning), each marked Today or Direction; a value map, staged
@@ -610,7 +616,7 @@ package version.
   dated sources for every outside figure.
 
 - New value-realisation deck at
-  [`docs/decks/value/`](docs/decks/value/index.html) (Cinema 1920×1080):
+  `docs/decks/value/` (Cinema 1920×1080):
   value is work that is finished, kept with versions, and easier the next
   time. It covers the first day, everyday value moments, why memory
   compounds, sovereignty as how the value stays yours, and where to count it
@@ -624,7 +630,7 @@ package version.
   labels or raw keys.
 
 - The family and small-business Cinema deck
-  ([`docs/decks/group/`](docs/decks/group/index.html)) is a light 1920×1080
+  (`docs/decks/group/`) is a light 1920×1080
   stage: paper `#fbfaff`, dark ink, product violet, Today/Next pills, on-stage
   arrows, and reduced-motion that holds copy at rest. Today is the helper on
   one computer; next is a group of people and their computers sharing helpers

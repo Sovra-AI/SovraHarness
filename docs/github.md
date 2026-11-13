@@ -7,7 +7,8 @@ There is one **Connect GitHub** button. GitHub's own page opens in the browser
 with a short code already on the clipboard. The person pastes it and presses
 **Authorize**, and the card turns to **Connected** by itself. The **GitHub
 helper** (`GitHubAgent`) then appears to the assistant with the tools below.
-Everything ships in the single binary: no server, no listener and no secret.
+The device flow needs no callback listener or client secret. Your account access
+token is still a secret and is stored in the credential store.
 
 ## Retrying a key connection
 
@@ -33,8 +34,8 @@ and press **Connect** to retry; the submitted key is cleared from the field.
   person only scrolls down, presses **Generate token** and copies the key.
 - **The pasted key is never shown again.** The box is masked and cleared when
   sent. `GitHubKey`'s `Debug` output is redacted.
-- **Disconnect** removes the access from this computer. GitHub has no way for a
-  public desktop app to revoke its own token, so the confirm row links to
+- **Disconnect** removes the access from this computer. This adapter does not revoke the
+  token at GitHub, so the confirm row links to
   GitHub's **Applications** settings for a full removal.
 
 ## What the agent can do
@@ -113,8 +114,8 @@ callback listener. That is why it was chosen over the loopback flow Google uses.
 ## Setting up the GitHub app (once per release pipeline)
 
 1. Create an OAuth App at <https://github.com/settings/applications/new> (or
-   under an organisation). Name it **Sovra**. Any homepage and callback URL will
-   do; device flow does not use the callback.
+   under an organisation). Name it **Sovra**. Use your project's real homepage and an appropriate callback value; this device-flow path
+   does not use a callback listener.
 2. On the app's page, tick **Enable Device Flow** and save.
 3. Copy the **Client ID**. It is public, so it may ship in the binary.
 4. Locally, copy `github-client.env.example` to the gitignored
@@ -126,20 +127,10 @@ Without an id, the key path still works end to end. Organisations that restrict
 OAuth Apps must approve **Sovra** before their private repositories are visible.
 Until then, GitHub returns 403 and the tool says so in plain words.
 
-## Not yet
+## Limits
 
 - No notifications inbox, review submission, labels or assignees.
 - Fine-grained keys work, but the key page link creates a classic key, because
   fine-grained keys cannot be pre-filled by URL.
 - GitHub Enterprise Server addresses are not configurable from the screen
   (`sovra_github::Endpoints` supports them in code).
-
-## Sources
-
-Checked on 2026-11-12:
-
-- GitHub Docs, *Authorizing OAuth apps → Device flow*
-- GitHub Docs, *Scopes for OAuth apps*
-- GitHub REST API docs: users, repositories, search, issues, issue comments,
-  pulls, check runs, repository contents
-- RFC 8628, *OAuth 2.0 Device Authorization Grant*

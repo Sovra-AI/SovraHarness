@@ -1,11 +1,11 @@
 //! Groups: people and their computers sharing helpers, memory and work.
 //!
-//! This module is the pure half of the team stage (`docs/roadmap/02-a-team.md`):
+//! This module is the pure group domain (`docs/groups.md`):
 //! identities, the signed membership log and the fold that turns it into a roster,
 //! the pairing steps, and the code both screens show. It never touches the network,
 //! a clock or a crypto library — the `sovra-mesh` adapter does, and reports here.
 //!
-//! "Group" is the user-facing word (roadmap decision D1); "team" stays the AI helpers.
+//! "Group" is the user-facing word; "team" stays the AI helpers.
 
 mod dag;
 mod federated;

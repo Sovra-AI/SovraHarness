@@ -62,13 +62,9 @@ file-taking tools such as `mkdir`).
    (`python3 manage.py`) or module (`python -m pytest`). A compound command saves
    one rule per unapproved part, at most five.
 
-These rules follow Claude Code's Bash permission model: compound-command
-splitting, wrapper stripping, the read-only set, the exec-wrapper and `find`
-exceptions, and a one-time-only prompt when the command can't be fully read.
-Codex CLI's "untrusted" approval policy works the same way: trusted read-only
-commands run, everything else asks. Text rules are a convenience, not a sandbox.
-`/bin/rm` or `bash -c 'rm …'` are different text, so they ask rather than
-match. An approved command runs with the person's own rights.
+Text allow rules are a convenience, not a sandbox. An approved command runs with
+your OS permissions. Review the full command, working directory, and side effects
+before approving it. Use Settings to remove a saved rule when it is no longer needed.
 
 ## Running a command
 
@@ -122,8 +118,9 @@ BSD flags on macOS and so on.
 `<app data>/terminal/settings.json` with write-then-rename. Settings → Terminal
 switches access on or off and lists the always-allowed rules, each with
 **Remove**. Switching off declines waiting cards, stops running commands and
-removes the tool from the next turn. The terminal is offered only in private
-conversations, never to WhatsApp or Telegram senders.
+removes the tool from the next turn. The terminal is restricted to sessions with
+private access. That includes the desktop and authenticated messaging-owner
+sessions; other senders do not receive private tools. See [Messaging](communications.md).
 
 ## Where the code is
 

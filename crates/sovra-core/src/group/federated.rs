@@ -1,7 +1,7 @@
 //! Federated recall: a helper's question travels to the computers that hold the
 //! memories, is searched there, and only a few short, attributed answers come back.
 //!
-//! This is the "Federated" sharing mode (`docs/roadmap/05-collective-intelligence.md`):
+//! This is the federated sharing mode (`docs/groups.md`):
 //! memory stays on its owner's computer and nothing is copied into the group. Both
 //! sides opt in separately — answering ("let my group's helpers ask my memory") and
 //! asking ("ask my group when I chat"), because the asker's question leaves their

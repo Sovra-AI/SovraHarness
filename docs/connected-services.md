@@ -21,8 +21,7 @@ network:
 **Try the sample MCP server** (`McpCommand::AddSample`) adds it as a program pointing
 at the running executable. It is approved automatically: it is Sovra itself, so there
 is nothing to review. Developers can also point any MCP client at it as a test server.
-For a full-featured third-party test server, use `npx -y
-@modelcontextprotocol/server-everything`.
+
 
 Connected services give the assistant tools from outside Sovra through the
 [Model Context Protocol](https://modelcontextprotocol.io). A person can add as many
@@ -131,7 +130,7 @@ automatically on later launches. Any change to those asks again.
 | Tool exposure to the model | `crates/sovra-adk/src/remote_tools.rs` |
 | Screen | `crates/sovra-ui/src/service_connect_view.rs` |
 
-## Not yet
+## Limits
 
 - No approval card per tool call. The person controls which tools are on instead.
 - Tool annotations (read-only/destructive hints) are not used.

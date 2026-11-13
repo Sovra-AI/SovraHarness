@@ -1,5 +1,5 @@
-//! Docs front-door guardrails: mermaid graphs in the map files, and relative
-//! markdown links in `README.md` plus top-level `docs/*.md` must resolve.
+//! Documentation guardrails: required architecture diagrams and relative links
+//! across repository Markdown, including nested guides and contribution files.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,10 @@ const MERMAID_FILES: &[&str] = &[
     "docs/architecture.md",
     "docs/memory-capture-and-recall.md",
 ];
+
+/// The product mark already shipped with the app. The README shows this file;
+/// it does not add a second logo beside it.
+const README_LOGO: &str = "crates/sovra-ui/assets/branding/sovra-logo.svg";
 
 /// Tokens the README mermaid blocks must name so the graphs stay the real
 /// layering and protocol, not a second invented architecture.
@@ -36,40 +40,52 @@ pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
             if let Err(error) = require_readme_mermaid_needles(&source) {
                 errors.push(error.to_string());
             }
+            if let Err(error) = require_readme_logo(root, &source) {
+                errors.push(error.to_string());
+            }
         }
         Err(error) => errors.push(error.to_string()),
     }
-    if let Err(error) = check_links(root, &root.join("README.md")) {
-        errors.push(error.to_string());
+    let mut documents = Vec::new();
+    collect_markdown(root, false, &mut documents)?;
+    for directory in ["docs", ".github", "crates", "tests"] {
+        let path = root.join(directory);
+        if path.is_dir() {
+            collect_markdown(&path, true, &mut documents)?;
+        }
     }
-    let docs = root.join("docs");
-    for entry in fs::read_dir(&docs).with_context(|| format!("read {}", docs.display()))? {
-        let path = entry?.path();
-        if path.extension().is_some_and(|ext| ext == "md")
-            && path.is_file()
-            && let Err(error) = check_links(root, &path)
-        {
+    documents.sort();
+    for path in &documents {
+        if let Err(error) = check_links(root, path) {
             errors.push(error.to_string());
         }
     }
     if !errors.is_empty() {
         bail!("{}", errors.join("\n"));
     }
-    let pitch = root.join("docs/decks/pitch/index.html");
-    if pitch.exists()
-        && let Err(error) = check_pitch_slide4(&pitch)
-    {
-        bail!("{error}");
-    }
-    let doc_count = fs::read_dir(docs)?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.path().extension().is_some_and(|ext| ext == "md") && entry.path().is_file()
-        })
-        .count();
+    let doc_count = documents.len();
     println!(
-        "check-docs: mermaid graphs in README, architecture, and memory-capture-and-recall; {doc_count} top-level docs/*.md links resolve; pitch slide 4 names the sovereign-stack play"
+        "check-docs: required architecture diagrams present; {doc_count} repository Markdown files have resolving relative links; README logo {README_LOGO} has an accessible name"
     );
+    Ok(())
+}
+
+fn collect_markdown(
+    directory: &Path,
+    recursive: bool,
+    documents: &mut Vec<PathBuf>,
+) -> anyhow::Result<()> {
+    for entry in fs::read_dir(directory).with_context(|| format!("read {}", directory.display()))? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let path = entry.path();
+        // Never follow a symlink into generated output or outside the checkout.
+        if kind.is_dir() && recursive {
+            collect_markdown(&path, true, documents)?;
+        } else if kind.is_file() && path.extension().is_some_and(|ext| ext == "md") {
+            documents.push(path);
+        }
+    }
     Ok(())
 }
 
@@ -79,6 +95,57 @@ fn require_mermaid(path: &Path, relative: &str) -> anyhow::Result<()> {
         bail!("{relative}: add a GitHub mermaid fence (```mermaid) so the architecture is visible");
     }
     Ok(())
+}
+
+fn require_readme_logo(root: &Path, source: &str) -> anyhow::Result<()> {
+    let Some((src, alt)) = html_img_named(source, README_LOGO) else {
+        bail!(
+            "README.md must include an HTML <img> whose src is {README_LOGO} and whose alt text is a non-empty accessible name"
+        );
+    };
+    if alt.trim().is_empty() {
+        bail!("README.md logo <img> needs a non-empty accessible name (alt)");
+    }
+    let path = root.join(&src);
+    if !path.is_file() {
+        bail!(
+            "README.md logo src `{src}` does not resolve to {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// The `<img>` whose `src` is the shipped logo, and that image's alt text.
+fn html_img_named(source: &str, src_value: &str) -> Option<(String, String)> {
+    let mut rest = source;
+    while let Some(start) = rest.find("<img") {
+        let tag = &rest[start..];
+        let end = tag.find('>').map_or(tag.len(), |index| index + 1);
+        let tag = &tag[..end];
+        let src = html_attr(tag, "src");
+        let alt = html_attr(tag, "alt");
+        if src.as_deref() == Some(src_value) {
+            return Some((src_value.to_string(), alt.unwrap_or_default()));
+        }
+        rest = &rest[start + end..];
+    }
+    None
+}
+
+fn html_attr(tag: &str, name: &str) -> Option<String> {
+    let needle = format!("{name}=");
+    let start = tag.find(&needle)? + needle.len();
+    let value = &tag[start..];
+    let bytes = value.as_bytes();
+    let quote = *bytes.first()?;
+    if quote == b'"' || quote == b'\'' {
+        let inner = &value[1..];
+        let end = inner.find(quote as char)?;
+        return Some(inner[..end].to_string());
+    }
+    let end = value.find(char::is_whitespace).unwrap_or(value.len());
+    Some(value[..end].trim_end_matches('>').to_string())
 }
 
 fn require_readme_mermaid_needles(source: &str) -> anyhow::Result<()> {
@@ -225,99 +292,6 @@ fn read(path: impl AsRef<Path>) -> anyhow::Result<String> {
     fs::read_to_string(path).with_context(|| format!("read {}", path.display()))
 }
 
-/// Fourth Cinema slide of the investor pitch: owning the sovereign stack is the play.
-fn check_pitch_slide4(path: &Path) -> anyhow::Result<()> {
-    let html = read(path)?;
-    let slide = nth_slide(&html, 4).ok_or_else(|| {
-        anyhow::anyhow!(
-            "{}: missing fourth <section class=\"slide\">",
-            path.display()
-        )
-    })?;
-    pitch_slide4_play_holds(slide)
-}
-
-fn nth_slide(html: &str, n: usize) -> Option<&str> {
-    let mut rest = html;
-    let mut found = 0usize;
-    while let Some(start) = rest.find("<section") {
-        let after = &rest[start..];
-        let end = after.find("</section>")? + "</section>".len();
-        let block = &after[..end];
-        rest = &after[end..];
-        if block.contains("class=\"slide") || block.contains("class='slide") {
-            found += 1;
-            if found == n {
-                return Some(block);
-            }
-        }
-    }
-    None
-}
-
-fn visible_text(html: &str) -> String {
-    let mut out = String::new();
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-                out.push(' ');
-            }
-            _ if !in_tag => out.push(ch),
-            _ => {}
-        }
-    }
-    out.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn contains_own_word(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    let mut word = String::new();
-    for ch in lower.chars().chain(std::iter::once(' ')) {
-        if ch.is_ascii_alphabetic() {
-            word.push(ch);
-            continue;
-        }
-        if matches!(word.as_str(), "own" | "owns" | "owned" | "owning") {
-            return true;
-        }
-        word.clear();
-    }
-    false
-}
-
-fn pitch_slide4_play_holds(slide: &str) -> anyhow::Result<()> {
-    let visible = visible_text(slide);
-    let lower = visible.to_ascii_lowercase();
-    if !lower.contains("sovereign stack") {
-        bail!("pitch slide 4 must name the sovereign stack in visible copy; got: {visible}");
-    }
-    if !contains_own_word(&lower) {
-        bail!("pitch slide 4 must say own/owning the sovereign stack; got: {visible}");
-    }
-    if !(lower.contains("the play")
-        || lower.contains("this is the bet")
-        || lower.contains("the bet after"))
-    {
-        bail!("pitch slide 4 must call owning the stack the play (or the bet); got: {visible}");
-    }
-    for layer in ["compute", "models", "talent", "policy", "desk"] {
-        if !lower.contains(layer) {
-            bail!("pitch slide 4 must name stack layer `{layer}`; got: {visible}");
-        }
-    }
-    if !visible.contains("Sovra") {
-        bail!("pitch slide 4 must name Sovra on the desk layer; got: {visible}");
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,10 +319,19 @@ mod tests {
     }
 
     fn write_minimal_graphs(root: &Path) {
+        let logo = root.join("crates/sovra-ui/assets/branding");
+        fs::create_dir_all(&logo).unwrap();
+        fs::write(
+            logo.join("sovra-logo.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+        )
+        .unwrap();
         let mermaid = "```mermaid\nflowchart TB\n  app[\"sovra-app\"] --> ui[\"sovra-ui\"]\n  ui --> runtime[\"sovra-runtime\"]\n  runtime --> core[\"sovra-core\"]\n  ui -->|Command RunPrompt| runtime\n  runtime -->|Event| ui\n```\n";
         fs::write(
             root.join("README.md"),
-            format!("# App\n\n{mermaid}\nSee [architecture](docs/architecture.md).\n"),
+            format!(
+                "<img src=\"crates/sovra-ui/assets/branding/sovra-logo.svg\" alt=\"Sovra logo\">\n\n# App\n\n{mermaid}\nSee [architecture](docs/architecture.md).\n"
+            ),
         )
         .unwrap();
         fs::write(
@@ -366,6 +349,32 @@ mod tests {
     #[test]
     fn workspace_readme_and_docs_pass_the_shipped_check() {
         check(&workspace_root()).expect("README and top-level docs must satisfy check-docs");
+    }
+
+    #[test]
+    fn shipped_readme_html_header_uses_the_product_logo() {
+        let root = workspace_root();
+        let readme = root.join("README.md");
+        let source = fs::read_to_string(&readme).expect("shipped README");
+        require_readme_logo(&root, &source).expect("shipped README logo");
+        let logo = root.join(README_LOGO);
+        assert!(logo.is_file(), "shipped logo missing at {}", logo.display());
+        eprintln!(
+            "checked shipped README {} for HTML img src {README_LOGO} with a non-empty alt; file {}",
+            readme.display(),
+            logo.display()
+        );
+    }
+
+    #[test]
+    fn readme_logo_without_an_accessible_name_fails() {
+        let root = scratch();
+        let logo = root.join(README_LOGO);
+        fs::create_dir_all(logo.parent().expect("logo parent")).unwrap();
+        fs::write(&logo, "<svg xmlns=\"http://www.w3.org/2000/svg\"/>").unwrap();
+        let source = format!("<img src=\"{README_LOGO}\" alt=\"\">\n");
+        let error = require_readme_logo(&root, &source).expect_err("empty alt must fail");
+        assert!(error.to_string().contains("accessible name"), "{error:#}");
     }
 
     #[test]
@@ -449,28 +458,28 @@ mod tests {
     }
 
     #[test]
-    fn pitch_slide_4_states_owning_the_sovereign_stack_is_the_play() {
-        let html = fs::read_to_string(workspace_root().join("docs/decks/pitch/index.html"))
-            .expect("shipped pitch deck");
-        let slide = nth_slide(&html, 4).expect("fourth <section class=\"slide\">");
-        pitch_slide4_play_holds(slide)
-            .expect("slide 4 visible copy must name owning the sovereign stack as the play");
-        let visible = visible_text(slide);
-        assert!(
-            visible.contains("National compute"),
-            "compute layer missing: {visible}"
-        );
-        assert!(
-            visible.contains("National models"),
-            "models layer missing: {visible}"
-        );
-        assert!(
-            visible.contains("Talent and policy"),
-            "talent/policy layer missing: {visible}"
-        );
-        assert!(
-            visible.contains("The desk") && visible.contains("Sovra"),
-            "desk/Sovra layer missing: {visible}"
-        );
+    fn nested_guides_and_contributor_files_are_checked() {
+        let root = scratch();
+        write_minimal_graphs(&root);
+        fs::create_dir_all(root.join("docs/nested")).unwrap();
+        fs::write(root.join("docs/nested/guide.md"), "[missing](missing.md)\n").unwrap();
+        fs::write(root.join("CONTRIBUTING.md"), "[missing](missing.md)\n").unwrap();
+        let error = check(&root).expect_err("nested and contributor links must be checked");
+        let message = error.to_string();
+        assert!(message.contains("docs/nested/guide.md"), "{message}");
+        assert!(message.contains("CONTRIBUTING.md"), "{message}");
+    }
+
+    #[test]
+    fn nested_links_resolve_from_their_own_directory() {
+        let root = scratch();
+        write_minimal_graphs(&root);
+        fs::create_dir_all(root.join("docs/nested")).unwrap();
+        fs::write(
+            root.join("docs/nested/guide.md"),
+            "[architecture](../architecture.md)\n",
+        )
+        .unwrap();
+        check(&root).expect("nested relative links use the guide's directory");
     }
 }

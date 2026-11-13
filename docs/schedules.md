@@ -71,8 +71,10 @@ another message; service acceptance does not establish delivery or reading.
 
 Tasks and run history live in `schedules.json` under the [app data directory](configuration.md).
 The file contains prompt and timed-message text. Writes use a temporary file and
-rename. A save error is reported, but the current runtime may still execute the
-in-memory task; persistence is not a transactional dispatch guarantee.
+rename. The runtime restores the previous schedule book after a failed save and
+does not dispatch a run until its run record has been saved. This prevents a
+failed persistence operation from silently starting an unsaved task; it does not
+guarantee exactly-once delivery by an external messaging service.
 
 - [Core rules](../crates/sovra-core/src/schedules.rs): cadence parsing, due times,
   overlap handling, bounded history and reducers.

@@ -63,7 +63,7 @@ Local account sign-in does not establish per-account data isolation. Terminal
 commands and approved local MCP programs run with the person's OS rights; they
 are not sandboxes. Remote model and tool connections can receive content needed
 for the request. Group Internet reach uses discovery and encrypted relays by
-default. Review the [network inventory](docs/value-realisation/03-sovereignty-evidence.md)
+default. Review the [network inventory](docs/network.md)
 when assessing an offline deployment.
 
 Development-control access is authenticated and local, with a visible indicator

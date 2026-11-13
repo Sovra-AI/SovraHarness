@@ -1,13 +1,29 @@
-# SovraHarness
+<p align="center">
+  <img src="crates/sovra-ui/assets/branding/sovra-logo.svg" alt="Sovra logo" width="160">
+</p>
 
-A native desktop workspace for AI chat, local memory, files, and shared work.
-Built in Rust with GPUI for macOS, Windows, and Linux. Connect a cloud AI service
-or a local model server such as Ollama, then use helpers to work with your
-knowledge, create documents and websites, and schedule tasks.
+<h1 align="center">SovraHarness</h1>
 
-[Getting started](docs/getting-started.md) · [Documentation](docs/README.md) ·
-[Releases](https://github.com/Sovra-AI/SovraHarness/releases) ·
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+<p align="center">
+  A native desktop workspace for AI chat, local memory, files, and shared work.<br>
+  Built in Rust with GPUI for macOS, Windows, and Linux.
+</p>
+
+<p align="center">
+  <a href="docs/getting-started.md">Getting started</a>
+  ·
+  <a href="docs/README.md">Documentation</a>
+  ·
+  <a href="https://github.com/Sovra-AI/SovraHarness/releases">Releases</a>
+  ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+  ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+Connect a cloud AI service or a local model server such as Ollama, then use
+helpers to work with your knowledge, create documents and websites, and
+schedule tasks.
 
 > **License:** Source on `main` is available under n8n's Sustainable Use License,
 > which n8n's docs allow other projects to use. This is fair-code:
@@ -86,11 +102,11 @@ additional prerequisites in the [release guide](docs/releasing.md).
 ## Status and data boundaries
 
 Sovra is under active development. Read the [changelog](CHANGELOG.md) for changes
-and the [roadmap](docs/roadmap/README.md) for planned work.
+and the [documentation](docs/README.md) for current behavior.
 
 - Local storage does not make every operation offline. Cloud models and connected
   tools receive the content needed for their requests; group networking can use
-  discovery and encrypted relays. Review the [network inventory](docs/value-realisation/03-sovereignty-evidence.md).
+  discovery and encrypted relays. Review the [network inventory](docs/network.md).
 - Local accounts do not provide separate encrypted data stores. Terminal commands
   and local MCP programs run with your OS permissions, without a sandbox.
 - **My AIs** offers routing previews; these do not change the model answering chat
@@ -98,7 +114,7 @@ and the [roadmap](docs/roadmap/README.md) for planned work.
 - Website hosting supports static output; server backends and server-side
   rendering are not hosted. Hosting stops when Sovra closes.
 - Phone control has a desktop connection and reference client; the mobile app
-  is not built yet. Group work handoff remains planned.
+  is not built yet. Groups support borrowing another computer's AI for chat; embedding and indexing work are not handed off.
 
 See [Security](SECURITY.md) for credential storage and execution boundaries.
 

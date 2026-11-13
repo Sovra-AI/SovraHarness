@@ -65,7 +65,7 @@ allow = [
 # LICENSE-UNICODE is exactly SPDX Unicode-3.0 (whitespace normalized). Preserve
 # the MIT/Apache choice and additional Unicode obligation; no allow-list change.
 # Exact version + all three text hashes require review on upstream changes.
-# Evidence and SHA-256 fingerprints: docs/agent-memory.md, License clarification.
+# Evidence and SHA-256 fingerprints: docs/dependency-licenses.md.
 [[licenses.clarify]]
 crate = "finl_unicode@1.5.0"
 expression = "(MIT OR Apache-2.0) AND Unicode-3.0"

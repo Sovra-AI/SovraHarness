@@ -1,193 +1,136 @@
 # Native development
 
-How to build and launch SovraHarness locally: a one-shot `cargo xtask dev`,
-no file-watcher reload, and how Development mode stores keys.
-
-`cargo xtask dev` is a **manual, one-shot** debug launch. It builds and runs the
-app once with `SOVRA_DEV=1`. There is **no file watcher and no auto-reload**.
-After you edit Rust, manifests or assets, run `cargo xtask dev` again yourself
-to pick up the changes. In-memory UI/runtime state resets on each launch.
-
-The user-approved development mode sets `SOVRA_DEV=1`. Debug builds then keep
-model keys in the OS app data directory under `dev-credentials/` (plaintext,
-owner-only directory and files on Unix), avoiding repeated macOS keychain prompts
-after rebuilds. This store is separate from release credentials and is never
-included in packages or source control. Release builds always use the OS keychain,
-even when that variable is set. No keys are copied between the two stores.
+Build and launch Sovra from a source checkout. Install Git and Rust through
+rustup first; [rust-toolchain.toml](../rust-toolchain.toml) selects the toolchain.
+Commands below run from the repository root. Environment-variable examples use
+POSIX shell syntax; in PowerShell, set variables with `$env:NAME = "value"` before
+running the command.
 
 ## One-time setup
 
+| Platform | Build prerequisites |
+| --- | --- |
+| Linux | Run `./scripts/install-linux-deps.sh` to install the native system packages |
+| macOS | Install Xcode command-line tools |
+| Windows | Install Visual Studio C++ build tools and Windows SDK; use the MSVC Rust target |
+
 ```sh
-cargo xtask setup   # pinned CI tools (cargo-deny, nextest, shear)
-cargo xtask dev     # one-shot build + launch; re-run to reload
+cargo xtask setup
+cargo xtask dev
 ```
 
-Install Rust with rustup; `rust-toolchain.toml` pins the workspace toolchain.
-On Linux, install system packages once first with `./scripts/install-linux-deps.sh`.
-On macOS, install the Xcode command-line build tools. On Windows, use the MSVC
-Rust target with the Visual Studio C++ build tools and Windows SDK.
-`just` is optional: it delegates to the same xtask commands.
+Setup installs the pinned check/test tools. `just` is optional and delegates to
+xtask. The app needs no Node.js or Python runtime. Generated frontend builds and
+optional evaluation scripts have separate prerequisites in their guides.
+Packaging needs additional tools; see [Releasing](releasing.md).
 
-For first-launch steps see [Getting started](getting-started.md); startup
-variables and local paths are in [Configuration](configuration.md). Packaging
-has additional prerequisites in [Releasing](releasing.md).
+## Launch and rebuild
 
-`cargo xtask setup` prefers cargo-binstall when available. Watchexec is **not**
-part of the supported workflow and is not installed by setup.
+`cargo xtask dev` builds and launches **once**, with `SOVRA_DEV=1`. There is no
+file watcher, save-triggered rebuild, or automatic relaunch. Close the running
+session and rerun the command after source changes. Do not start `cargo watch`
+or a competing reload loop.
 
-The runner takes an OS-held exclusive lock at `target/dev/watch.lock` for the
-life of that one-shot session. A stale file does not block a new run: the
-operating system releases the lock when its owner exits. Do not remove the lock
-file or run `just clear-cache` while a `dev` session is live.
+An OS-held lock at `target/dev/watch.lock` prevents concurrent dev sessions.
+The operating system releases it when the owner exits; do not delete the file
+to bypass a running session. Inspect build and runtime output in the launching
+terminal. Daily application logs also live under the [app data root](configuration.md).
 
-## How a launch works
+`cargo xtask run` starts a debug build without setting the development flag.
+Development mode's automatic startup requires a debug build and `SOVRA_DEV=1`.
+Ordinary launches start control off unless the flag was explicitly inherited;
+release builds ignore it. Use [Development MCP](development-mcp.md) to attach a
+client to the existing native window.
 
-`xtask/src/dev.rs` owns the one-shot path:
+## Development data and credentials
 
-- Reports the effective Cargo target size (from `cargo metadata`, so
-  `CARGO_TARGET_DIR` is honoured) against the advisory budget (default 30 GiB,
-  `SOVRA_TARGET_BUDGET_GIB=<n>` to change).
-- Runs `cargo run --package sovra-app` with `SOVRA_DEV=1`.
-- Defaults `RUST_BACKTRACE` to `1` when unset; keeps an existing value.
-- Inherits `RUST_LOG`; without it, the app's focused debug filter applies.
-- The xtask launcher removes its inherited Cargo package metadata before starting
-  child tools so build-script fingerprints do not change merely because a build
-  came through xtask; user Cargo configuration, target directories and logging
-  variables remain intact.
-- Child stdout/stderr are inherited directly. There is no `tee`/`tail` process.
-  Daily rolling logs remain under the OS data directory.
+A debug development launch stores connection keys in separate plaintext files
+under `<app data>/dev-credentials/`, with owner-only permissions on Unix. Release
+builds use the OS keychain. Keys are not copied between stores.
 
-There is **no** Watchexec (or other) supervisor, no save-triggered rebuild, and
-no automatic relaunch when the app window closes. Closing the app ends the
-session; start again with `cargo xtask dev` when you want another run.
+Other workspace data normally shares the same app-data root. A development launch
+is not automatically an isolated test workspace. To use one:
+
+```sh
+SOVRA_DATA_DIR=/absolute/path/to/sovra-test-data cargo xtask dev
+```
+
+The override is honored only in debug builds with `SOVRA_DEV=1`; the dev launcher
+sets that flag. Keep test data and credentials outside the checkout. See
+[Configuration](configuration.md) for storage paths and backup limitations.
+
+## Checks
+
+| Command | Purpose |
+| --- | --- |
+| `cargo xtask ci` | All required local gates |
+| `cargo xtask check-docs` | Documentation link and diagram checks |
+| `cargo xtask check-deps` | Allowed crate dependencies and ownership |
+| `cargo xtask check-styles` | Native styling boundaries |
+| `cargo xtask fix` | Apply formatting and Clippy fixes; review the diff afterward |
+| `cargo nextest run -p <crate>` | Test one crate |
+
+For UI behavior changes, inspect and exercise the native app using Development
+MCP as required by [AGENTS.md](../AGENTS.md). Headless tests complement that check.
+A local pass does not prove macOS/Windows/Linux installer behavior; CI and release
+verification have their own platform coverage.
 
 ## Monitoring the build cache
 
-Cargo never garbage-collects a target directory: every lockfile bump, feature
-change or flag change leaves a stale copy of the affected dependencies in
-`target/debug/deps`. A long-lived target plus the per-edit clippy hook once grew
-it to 85 GiB. Each `cargo xtask dev` reports growth without deleting outputs that
-a running session or test command may still need:
+The dev launcher reports the effective Cargo target size, including
+`CARGO_TARGET_DIR`, against an advisory 30 GiB budget. Set
+`SOVRA_TARGET_BUDGET_GIB` to change the warning threshold. It does not clean
+while building or automatically delete output.
 
-- Above the warning threshold (default 30 GiB, `SOVRA_TARGET_BUDGET_GIB=<n>` to
-  change) it reports the size and keeps building. This is an advisory threshold,
-  not an enforced disk limit; `dev` never runs `cargo clean`.
-- To reclaim space explicitly, stop any live `cargo xtask dev` session and finish
-  other Cargo work, then run `just free-cache` (`just clear-cache` also works; same as
-  `cargo xtask clean-cache reclaim`). That command reports the effective target
-  size, refuses while `target/dev/watch.lock` is held, and runs profile-scoped
-  `cargo clean` for reclaimable `dev` and `release` artefacts. Optional
-  `--cargo-home` also deletes recreatable `~/.cargo` registry/src, registry/cache
-  and git checkouts — never `bin`, config or credentials. Use
-  `just clean-cache` (status) or `just free-cache --dry-run` to inspect without
-  deleting. Do not wipe the cache after every build.
-- Per-crate builds (the hook's `clippy -p <crate>`, per-crate tests) can resolve
-  different dependency features than `cargo run` and so add duplicate dependency
-  builds. Workspace feature unification would prevent that but is nightly-only in
-  Cargo 1.99. The warning makes this growth visible without interrupting builds.
-- Dependencies build without debug info in the dev profile; workspace crates keep
-  line tables for backtraces.
-- `build.jobs = 8` caps concurrent rustc/linker processes so a rebuild beside
-  rust-analyzer and the running app does not exhaust RAM.
-- On macOS, `target` may be a symlink to a `*.noindex` directory outside the
-  checkout so Spotlight does not index build output.
+Stop dev sessions and other Cargo commands before reclaiming cache:
 
-The first build can take longer; later manual `dev` runs reuse the incremental
-target directory. The full CI gates remain separate: do not run the entire test
-suite on every save.
+```sh
+cargo xtask clean-cache
+cargo xtask clean-cache reclaim --dry-run
+cargo xtask clean-cache reclaim
+```
 
-## Agent workflow
+`just clear-cache` and `just free-cache` are aliases for reclaim. Inspect the
+command's output before deleting caches. Optional `--cargo-home` also reclaims
+recreatable registry/cache/source directories; it does not remove credentials or
+installed Cargo binaries. Cache cleanup does not reset the app's data.
 
-Read the shared root `AGENTS.md`.
-
-- Edit sources as needed. Saving does **not** reload the app.
-- When a reload is required, run `cargo xtask dev` (stop any previous session
-  first if the lock is held).
-- Run `cargo xtask ci` for the definition of done.
-- Do not start Watchexec, `cargo watch`, or another auto-rebuild loop.
-- Prefer `cargo xtask dev` over a bare `target/.../sovra` when you need the
-  development credential store and Development-mode startup policy.
+Build profiles live in [Cargo.toml](../Cargo.toml), and the job limit in
+[.cargo/config.toml](../.cargo/config.toml). Different feature combinations and
+profiles can produce additional dependency artifacts; do not clean after every edit.
 
 ## Sign-in integration status
 
-The sign-in backend and the desktop flow are wired end to end. On
-`Event::Ready` the shell sends `AuthCommand::Load`; the restored session (or its
-absence) routes to the workspace or the Login screen. The form sends
-`AuthCommand::SignIn`, or `AuthCommand::CreateAccount` on a fresh install with
-no accounts, and waits for `AuthEvent::SignedIn`; sign-out sends
-`AuthCommand::SignOut`. Creating an account asks for the person's name. Email and a
-password are optional and must be given together; a name alone is enough to sign in.
-A blank name is refused, and the app does not fill the name from the part of an email
-before `@`. The Google button sends `AuthCommand::StartGoogleSignIn`;
-`AuthEvent::GoogleSignInStarted` opens the consent URL in the browser and the
-Login screen shows a waiting panel with *Open the page again* and *Cancel*
-(`AuthCommand::CancelGoogleSignIn`) until the loopback listener reports back.
-Starting or joining a group still asks for the name people in the group see, and
-does not use this login.
+Local account creation accepts a name, optionally paired email/password, and
+Google sign-in with a configured desktop OAuth client. The runtime persists
+account/session records through `MemoryStore`; passwords use Argon2id hashes.
+Signing out clears the session without deleting the account or workspace data.
+Local accounts are not separate encrypted data stores or company SSO.
 
-Remaining rollout work, in honesty: a live password-strength meter rather than a
-message after submit, and a live end-to-end run of the Google flow against real
-client credentials — the exchange and listener are covered by tests, not by a
-production Google app.
+Google client precedence is saved setup, startup environment, then build-time
+values. See [Google](google.md). Sign-in persistence errors are logged rather
+than propagated as failed sign-in events, so a successful visible sign-in does
+not by itself guarantee the session survives restart.
 
-The implemented parts are:
+Implementation: `sovra-core::auth`, `sovra-providers::auth`,
+`sovra-runtime::auth`, and the store's auth-record adapter.
 
-- `sovra-core::auth`: account/session types, validation, commands/events and the
-  reducer used to update the workspace route and displayed profile.
-- `sovra-providers::auth`: Argon2id password hashing and verification, Google
-  authorization-code exchange with PKCE, and user-info retrieval.
-- `sovra-runtime::auth`: the account worker, loopback listener, browser-wait
-  cancellation, credential-store access and orderly task shutdown.
-- `sovra-store-surreal`: account records and the current session persisted as JSON
-  in the existing `team:auth` record. Passwords are stored as PHC hashes; signing
-  out clears the session without deleting accounts. Google refresh tokens use
-  the OS keychain, or the existing debug-only `SOVRA_DEV=1` credential store.
+## Two Sovra computers on one machine
 
-The Google adapter uses the desktop client saved in Settings, falling back to
-`SOVRA_GOOGLE_CLIENT_ID` and optional `SOVRA_GOOGLE_CLIENT_SECRET` read once at
-startup, then build-time values. Without a client, Settings offers setup and
-Google sign-in stays unavailable. Supply environment values outside tracked
-files. The backend binds an
-OS-assigned port on `127.0.0.1` for `/callback`, waits up to five minutes for a
-browser response, and gives HTTP requests a 30-second timeout.
+Groups can be exercised with two isolated debug instances. The dev lock permits
+one launcher, so use its built binary for the second instance:
 
-Tests cover domain parsing/reducers, password verification, PKCE URL construction,
-account/session storage round-trips, runtime dispatch/shutdown and the UI's wait
-for sign-in confirmation. These checks do not establish a completed browser sign-in
-flow or account-based data isolation. Save failures are currently logged rather
-than propagated as sign-in failures; this remains rollout work.
-
-## Autonomous native app testing
-
-Use the opt-in [Development MCP server](development-mcp.md) to attach Codex, Claude
-Code, or another MCP client to the running app. Its Settings switch, explicit
-top-bar indicator, and authenticated local transport are separate from the
-`SOVRA_DEV` credential exception. Agent verification rules are in `AGENTS.md`.
-
-## Two Sovra computers on one machine (groups)
-
-Groups need at least two computers. In a debug build with `SOVRA_DEV=1`,
-`SOVRA_DATA_DIR` points one launch at its own data folder, which gives it its
-own device key, group, memory and artifacts. Release builds ignore it.
-
-1. Start the first one as usual: `cargo xtask dev`.
-2. Start the second from the binary that build produced (the dev lock allows
-   only one `cargo xtask dev`):
+1. Run `SOVRA_GROUP_REACH=local cargo xtask dev` for the first instance.
+2. Launch a second instance from the same build with a separate data directory:
 
    ```sh
-   SOVRA_DEV=1 SOVRA_DATA_DIR="$HOME/.local/share/sovra-second" \
-     SOVRA_GROUP_REACH=local target/debug/sovra
+   SOVRA_DEV=1 SOVRA_GROUP_REACH=local \
+   SOVRA_DATA_DIR=/absolute/path/to/sovra-second-data target/debug/sovra
    ```
 
-   Set `SOVRA_GROUP_REACH=local` on both to keep group traffic on direct,
-   same-machine connections instead of relays.
-3. Create a group in one window (the **Groups** tab), copy the invite link and
-   paste it into the other.
+   Adjust the binary path if using `CARGO_TARGET_DIR`; Windows uses `sovra.exe`.
+3. Start a group in one instance and join it from the other.
 
-Each instance has its own `development-control/` folder under its data folder,
-so Development mode can drive both through separate MCP servers.
-
-## Related docs
-
-- [`docs/development-mcp.md`](development-mcp.md) — Development mode MCP bridge
-- [`AGENTS.md`](../AGENTS.md) — agent rules for the manual `dev` workflow
+Each instance has its own identity, data, and Development MCP endpoint. This
+explicit multi-computer test is separate from the normal single-window workflow.
+It does not establish two-device Internet connectivity or production relay availability.

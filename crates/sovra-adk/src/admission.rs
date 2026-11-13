@@ -560,10 +560,9 @@ mod tests {
         // Provider-reported counts from synthetic inputs, not estimated tokenizer truth.
         // The current media estimator reads MIME only, so image payload bytes do not
         // affect this check. A future dimensional estimator needs the PNG fixtures too.
-        let report: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../docs/evaluations/memory-2026-10-27/context-usage.json"
-        ))
-        .unwrap();
+        let report: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/context-usage.json"))
+                .unwrap();
         assert_eq!(report["status"], "observations_complete");
         let observations = report["observations"].as_array().unwrap();
         assert_eq!(observations.len(), 9);

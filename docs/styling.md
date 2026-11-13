@@ -5,33 +5,11 @@ follow the pane at every window size.
 
 The product design lives in `crates/sovra-ui/src/design/`. GPUI Component receives
 registered **Sovra Dark** and **Sovra Light** themes during `sovra_ui::init`, before
-the first window. Dark is the initial mode, matching the source app. The
+the first window. Dark is the initial mode. The
 **Settings → Appearance** control switches modes and is saved with model
 preferences (`ModelCommand::SetAppearance`), so it is restored on the next launch.
 
-## Source and migration
-
-Imported on 2026-10-23 from the local `SovraSRXProduction` working tree, revision
-`732fad30f3e233bd0b9c69b4b8c6ccd617a0d6c7`. The older sibling `SovraSRX/ui` has an
-earlier MUI theme and no Sovra SVG. Production contains the current product token
-system and logo. The working-tree files, rather than an assumed clean revision,
-were the migration source:
-
-| Source under `SovraSRXProduction/frontend/` | Native home |
-| --- | --- |
-| `src/app/globals.css` product dark/light variables | `design/palette.rs`, `design/tokens.rs` |
-| `src/lib/theme/{dark,light,shared,component-overrides}.ts` | component theme adapter and styling recipes |
-| `src/lib/design-tokens.ts` | shared violet accents and focus policy |
-| `public/SovraLOGO.svg` | `assets/branding/sovra-logo.svg` (byte-identical) |
-
-Source SHA-256 fingerprints:
-
-```text
-globals.css      56ae8cb34704958728cf178d45390b053507f3500f42d9d8089ede6bc74a7874
-shared.ts        d9dbd8b2b521400cbd2521d6c368226620f8802ff70b45324a916bd3478b3a7e
-design-tokens.ts 075a0a954634013c421afc050e1ac736c2d552e3056c644c9f7eea3d865cfd5e
-SovraLOGO.svg    d777d67fe37af097692113efbbd00c4b8444ffe664f72e9ace19f523a966cd1d
-```
+## Branding
 
 Only the Sovra mark is imported as an image asset. It remains SVG, including its
 original radial gradient. `assets.rs` embeds it with `include_bytes!` and delegates
@@ -88,24 +66,16 @@ Extend recipes when behaviour is already supplied by GPUI, and extract a widget
 when two real callers share behaviour. Avoid wrapper frameworks and parallel
 theme globals.
 
-## Native adaptations
+## Native materials and controls
 
-| Source treatment | Desktop decision |
-| --- | --- |
-| Original black canvas and purple light-mode ink | The October 25 refinement uses charcoal and paper surfaces with neutral ink. Violet remains the identity, selected-state and primary-action accent. |
-| Glass blur, saturation, layered backdrop glows | Precompose material fills on the known canvas. Preserve material borders and neutral elevation; no per-frame backdrop filters or animated marketing decorations. Material colours remain opaque and predictable on all desktop renderers. |
-| Three-stop 102° violet/deep-violet/indigo button gradient | GPUI 0.8 supports two stops. Use 102° violet → indigo, with deep-violet hover. Darken violet and indigo (`#5566e6` for filled controls) to keep white labels above 4.5:1. The SVG logo itself is unchanged. |
-| Low-alpha light-mode captions and hairline input boundaries | Use opaque purple captions and stronger input/focus roles. Decorative borders keep source alpha. Status fills use contrast-safe foregrounds; light green/amber are darkened. |
-| SF/Jakarta browser font stack | GPUI's installed system sans and monospace resolution; SF on macOS, native fallback elsewhere. No assumed/downloaded font. |
-| Fluid browser typography/spacing | Native roles: 36px welcome, 28px page title, 16px section title, 14px UI body, 16px reading text, 12px captions. Spacing: 2/4/6/8/16/24/32/48 (as rems of a 16px root); radii: 6/10/10/14/18. Native flex layout and rem width classes handle resizing. Letter spacing stays with font shaping. |
-| Desktop controls | 2.25rem (36px at 100%) for standard controls/navigation, 1.75rem (28px) for compact actions. Icon actions retain accessible names and tooltips. Width classes replace CSS media queries; no browser safe-area rules. |
-| Web enter/exit/press motion | Named 240/160/100ms durations; control/material 180/220ms. `tokens.motion` returns zero durations/displacement when `cx.reduce_motion()` is enabled. The shell adds no decorative animation. GPUI's reduction flag is not a claim of automatic OS preference synchronization. |
-| Button hover elevation | The source shadow tokens are available for app-owned controls. GPUI buttons keep one neutral shadow while their built-in hover/pressed fill and focus treatments remain intact. |
+Use the current palettes and tokens in `design/` as the source of truth. Material
+fills are precomposed against the canvas; the app does not use browser CSS or
+per-frame backdrop filters. Controls use system fonts, native keyboard behavior,
+visible focus, and labelled icon actions. The logo preserves its original SVG colors.
 
-Marketing landing-page layouts, web resets, mobile navigation clearance, feature
-page-specific layouts and obsolete glow aliases are not desktop styling primitives.
-Their shared product equivalents are covered above; future native features consume
-the same tokens instead of importing web component implementations.
+Theme and token tests check contrast and scale behavior. Motion tokens honor
+`cx.reduce_motion()`. This does not establish automatic synchronization with every
+operating system's accessibility settings.
 
 ## Checks
 
@@ -123,8 +93,8 @@ windows when changing typography, layout or renderer behaviour.
 
 ## Researched guidance
 
-Checked online on 2026-10-23, then verified APIs in the pinned local
-`gpui-kit 0.8.0`, `gpui-component 0.8.0`, `gpui-pre 0.3.9` sources:
+Use the pinned crate source for APIs; the following references explain the
+design and accessibility principles:
 
 - [GPUI Kit theme guidance](https://gpui-kit.com/component/theme/): semantic colours,
   registered themes and renderable gradient tokens.
@@ -142,14 +112,9 @@ claims that the upstream library prescribes Sovra's visual design.
 
 ## Conversational chat
 
-The normal chat follows `SovraSRXProduction`'s `assistant-message.tsx`, shared
-`sovra-chat-column` width and `use-stick-to-bottom.ts` reading behaviour: plain
-assistant prose, a compact user bubble, and aligned transcript/composer widths.
-The native layout uses `layout.reading_width`, with no task banner or fabricated
-attachment/voice actions. Enter submits and Shift+Enter inserts a newline.
-
-[GPUI TextView guidance](https://gpui-kit.com/component/text-view/) was checked
-on 2026-10-24 and verified against the pinned 0.8.0 sources. Each assistant
+Chat uses plain assistant prose, a compact user bubble, and aligned transcript
+and composer widths. `chat.column_width` caps the reading column. Enter submits
+and Shift+Enter inserts a newline. Each assistant
 message retains a `TextViewState`: incremental Markdown parsing preserves text
 selection and supports incomplete formatting while streaming. Code and tables
 scroll horizontally within the reading column; copy controls use native buttons.
@@ -164,15 +129,15 @@ Jump to latest. Sending a new message also resumes following. This uses the
 native list's layout/scroll state rather than estimated text heights or timers.
 
 
-## October 25 refinement: a calm native workspace
+## Workspace composition
 
 The original migration is provenance, not a constraint to preserve every web
 visual. The current native design emphasizes reading and one obvious next action.
 It retains the embedded Sovra SVG, registered light/dark themes and violet identity.
 
-### Research and application
+### Design principles
 
-Reviewed on 2026-10-25. These are product decisions drawn from the guidance, not
+These are product decisions drawn from the guidance, not
 claims that a design system prescribes this exact palette or layout.
 
 | Evidence | Application in Sovra |
@@ -227,8 +192,7 @@ headless layout, focus and protocol tests.
 
 ## Responsive layout
 
-Researched on 2026-10-25 and verified against the pinned `gpui-pre 0.3.9` /
-`gpui-component 0.8.0` sources. The rules for agents are in root `AGENTS.md` →
+The rules for agents are in root `AGENTS.md` →
 *Responsive layout*. `check-styles` enforces literal sizes and window reads.
 
 ### Scale: rems everywhere, one root
@@ -278,7 +242,7 @@ A missing size is a new semantic token in `design/tokens.rs`, never a literal in
 
 ### Verification
 
-`tests/styling.rs` covers:
+`crates/sovra-ui/tests/styling.rs` covers:
 
 - every workspace page at the minimum window, and again at 200% text size;
 - a 2560×1440 window, where the chat column stays capped and centred;
@@ -287,413 +251,3 @@ A missing size is a new semantic token in `design/tokens.rs`, never a literal in
 
 Headless tests do not prove GPU pixel fidelity. Also look at a real window at a
 small size, on a large monitor and at a 1.0 or 2.0 scale factor.
-
-## Beginner usability review (November 12, in progress)
-
-The review covers the whole product, including first use, discovery, everyday
-tasks, recovery, keyboard access and small windows. A completed source review
-is not proof that a feature is usable in the running application.
-
-Research checked on 2026-11-12:
-
-- [Nielsen Norman Group: usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/):
-  visible choices, familiar words, predictable actions and useful error recovery.
-- [W3C: clear purpose](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o1p01-clear-purpose/):
-  explain what a page is for and make the next action recognizable.
-- [W3C: step-by-step instructions](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o4p07-step-instructions/):
-  divide unfamiliar tasks into clear steps.
-
-Changes in the first pass put Skills beside Chat, name the account footer's
-actual Sign out action, and make Skills' Open now controls open their feature
-instead of requiring a second command submission. Navigation shortcuts preserve
-an unfinished chat draft; starting a new chat remains an explicit separate action.
-The tour's stale sample-memory and unavailable-scheduling descriptions were
-replaced after checking the live memory view and runtime scheduler. Schedule
-instructions now explain that Sovra must remain open.
-
-The second pass adds one-step recovery from combined saved-work filters,
-removes unused controls from an empty library, and adds a direct Open chat
-action there. It also fixes name-only account recovery: the sign-in page offers
-the saved name, and the runtime accepts that path only for accounts created
-without email, password or Google credentials. Password and Google accounts are
-excluded by a pure domain rule and checked again by the runtime.
-
-The following table records the original review backlog. Later entries below
-record fixes and verification; the current completion audit at the end of this
-section identifies what is still unverified.
-
-Remaining review and verification scope:
-
-| Flow | Evidence still needed |
-| --- | --- |
-| Sign-in, first chat and AI setup | Follow each setup stage, missing-key errors and recovery in the native app. |
-| Sidebar, Skills and tour | Verify shortcuts and examples, keyboard access, compact navigation and tour accuracy. |
-| Chat, attachments, history and saved work | Follow create, find, edit, save and remove paths; inspect empty and error states. |
-| Models, personal helpers and teams | Check beginner defaults, optional advanced controls and disabled-state explanations. |
-| Knowledge and file indexing | Follow add, review, find, correct and remove paths with test data. |
-| Schedules | Tour wording checked against the runtime; exercise create, automatic run, pause and failure recovery. |
-| Connections and groups | Follow connection, invitation, sharing and disconnect flows without sending real messages. |
-| Settings, terminal and phone access | Verify labels, prerequisites, confirmations and revocation. |
-| Cross-cutting layout | Minimum, wide and 200% text tests; both themes; actual native screenshots where supported. |
-
-Native MCP inspection is available on the current Linux renderer; screenshot
-capture returned “Screenshot capture is unavailable on this platform renderer.”
-An OS window capture subsequently worked. It revealed Arabic login description
-and hint text painting outside the card despite passing element-bounds tests.
-Fix and recheck this actual rendering defect; do not treat headless bounds as
-evidence that all visible text fits.
-
-The shared `design::paragraph` helper uses logical-order wrapping for static
-right-to-left text in page headers and sign-in instructions. It uses pinned
-`gpui-bidi` 0.1.1 with the existing GPUI 0.3.9 shaper; it does not replace editable
-inputs or rich chat content. See the library's
-[paragraph implementation notes](https://docs.rs/gpui-bidi/0.1.1/gpui_bidi/paragraph/index.html).
-Its regression checks actual shaped text runs and reading order, in addition to
-container bounds. Sign-in fields also keep translated labels visible while typing,
-following [W3C form-label guidance](https://www.w3.org/WAI/tutorials/forms/labels/).
-The Arabic paragraph regression and sign-in control reachability checks pass at
-minimum/wide/200% sizes in both themes. The paragraph check permits the shaper's
-measured trailing-space advance; native captures separately confirm the painted
-glyphs. Development MCP plus OS window captures verified the fresh-account and
-returning-account Arabic screens, including the long first-use subtitle and hint.
-Entering a name and submitting the fresh-account form reached the workspace.
-These checks do not cover bidirectional text editing or all rich-text surfaces.
-
-Third-pass verification: all 186 UI tests pass. The full gate passed fmt, Clippy,
-layering, styling, documentation, dependency policy and unused-dependency checks,
-then stopped after 169 workspace tests (167 passed, two failed). The failures were
-linked-helper memory evidence after restart and the indexed-knowledge provider
-fixture expecting text without its new `Source: budget.txt` prefix. Full CI is
-still not green. The next recovery issue found in source is saved-work editing:
-Back and Cancel leave the edit without an unsaved-change confirmation.
-
-First-pass verification is incomplete: two full CI runs stopped on different
-memory lifecycle assertions (the first failing test passed alone). A subsequent
-UI test build and development reload encountered incomplete concurrent WorkLog
-enum/render changes. Re-run the full gate and live checks once the shared tree
-builds; do not treat these attempts as passing verification.
-
-Second-pass targeted evidence: all 12 authentication domain/runtime tests passed,
-including sign-out/restart recovery and rejection of password/Google account IDs.
-The headless native-control tests passed for profile sign-in, combined-filter
-recovery, and both flows' minimum/wide/200% layouts in both themes. The broader
-UI run finished with 183 passed and two failures in concurrent progress-board
-tests; the full gate remains required. Through Development MCP with a temporary
-data folder, creating a name-only account, signing out and reopening it passed.
-The empty-library Open chat action and Skills' direct Open now navigation also
-passed in the live native app. Combined-filter recovery has headless coverage;
-it still needs a live populated-library check.
-
-
-Saved-work editing now checks for changed name/content before Back, Cancel or
-opening another item. The inline choice keeps the original draft until the user
-chooses Keep editing or Discard changes, and scrolls the choice into view.
-Unchanged forms leave directly. Editing hides sharing, deletion and organization
-actions that operate on the saved version. This follows the
-[warn-before-leaving pattern](https://design-system.agriculture.gov.au/patterns/warn-before-leaving)
-and W3C's guidance to [let users go back without losing work](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o4p02-back-undo/).
-The regression first reproduced the missing confirmation; targeted tests then
-passed for keeping the draft, Cancel, changing items and unchanged forms, plus
-minimum/wide/200% layouts in both themes. Live verification is pending a native
-build; the first attempt failed on concurrent file-index API changes.
-Save-failure recovery and closing the entire app still need review; this change
-does not promise crash recovery or durable draft storage.
-
-Latest editor verification: the three targeted artifact tests passed after the
-content-control change. An earlier confirmation-layout run passed all six
-size/theme combinations. Re-running that layout check against the newest shared
-tree stopped at a concurrent ADK visibility error (`file_index::evidence::model`
-is private), before executing tests. The latest full CI attempt stopped at fmt
-in the concurrently added `sovra-ui/examples/site_shot.rs`. Native verification
-remains unavailable: initial builds failed against inconsistent core APIs, and
-the final launch was rejected because another live development session owns the
-checkout. Do not start a second GUI or claim the new editor flow was tested live.
-
-Saved-work save recovery now waits for a matching Saved event before closing the
-form. A failed send or Error event leaves the draft visible with retry guidance.
-Typing remains possible during IO; a matching save does not close newer edits.
-Five targeted artifact tests passed, including failed-save retry and newer typing.
-The extended error/retry layout check has not completed successfully yet.
-
-Build investigation found a separate HarnessSite scratch checkout running Cargo
-with `CARGO_TARGET_DIR` pointing at this checkout's `target`. Its baseline core
-outputs explain the repeated missing-API errors despite current source and an
-intervening passing rebuild. Do not infer a source regression from those stale
-outputs. The latest full CI attempt stopped on a redundant clone in ADK test code
-(subsequently removed in the shared tree); full CI still needs a clean verification
-run. The existing native GUI belongs to another live session, so live editor/save
-verification remains pending. Coordination was requested to stop cross-checkout
-writes to the shared target; source review can continue independently.
-
-Next source-review findings: the schedule form still relies on placeholders and
-hides its cadence examples in compact layouts. `submit_new_schedule` also clears
-all inputs and closes the form immediately after queuing Create; verify failure
-recovery against the scheduler reducer/runtime before changing it. The first-use
-setup strip recommends a free OpenRouter key without explaining what a key is;
-review that wording and the actual connection flow for complete beginners.
-
-Schedule review found a runtime persistence defect, reproduced by a failing test:
-creating a task on unavailable storage still published it as active. The scheduler
-now rolls back failed commands and publishes the prior state; runs dispatch only
-after persistence. Automatic failures wait 30 seconds before retrying instead of
-repeatedly hitting unavailable storage. All five scheduler integration tests pass,
-including create/retry, pause/delete rollback and no dispatch after failed Run now.
-The schedule form itself still clears inputs optimistically and ignores errors;
-retaining that draft and adding visible labels remain required next steps.
-
-The full gate then reached 868 workspace tests (867 passed, one failed) at an
-outdated knowledge fixture. Its exact expectations now include the new source
-header as well as the original content; the focused integration test passes.
-The full-gate rerun passed: 1,416 tests passed, 14 skipped, and all static gates passed.
-This includes the previously pending artifact error/retry layout checks.
-Native schedule-storage failure verification remains
-unavailable in the other session's running GUI; the controlled-store runtime test
-is the current evidence for this failure path.
-
-Schedule forms now validate without inserting an optimistic task. The runtime
-emits a specific Created acknowledgement only after persistence; a Snapshot alone
-does not dismiss the form. Errors retain the entries and offer retry guidance.
-Hide form keeps the draft for this session, Continue task reopens it, and a new
-form after confirmed creation starts blank. Field labels, timing examples and
-blank-timing behavior remain visible in compact layouts; inputs disable during
-saving to preserve the submitted draft.
-
-Targeted evidence: all 22 shell tests, the five scheduler integration tests and
-the minimum/wide/200% form/retry layout checks passed. Through Development MCP
-in an isolated profile, empty-instructions validation kept the name, Hide/Continue
-kept the task, and confirmed creation closed the form. The schedule file contained
-the intended task. The next form was blank; the temporary task was deleted and
-its removal verified on disk. An OS capture confirmed readable form labels and
-examples. Storage-failure retry is covered by controlled runtime/headless tests,
-not by deliberately breaking the live profile's filesystem.
-
-The shared-target conflict was worked around for verification using Cargo's
-[workspace-wrapper cache separation](https://doc.rust-lang.org/cargo/reference/environment-variables.html).
-The temporary wrapper passes compiler arguments through unchanged; it changes
-cache identity, not source or compiler policy. Only UI package build outputs were
-cleaned to reclaim disk space while no app/build was active. Full CI passed after adapting legacy tests that assumed immediate schedule
-creation: 1,421 tests passed, 14 skipped, and all static gates passed.
-
-AI setup wording now distinguishes a saved key from a tested service. It explains
-API key in plain words, removes the claim that OpenRouter is the easiest/free
-route, and accurately describes local key storage in both development and release
-builds without naming the wrong storage backend. Research:
-[W3C clear words](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o3p01-clear-words/)
-and [OpenRouter free choices](https://openrouter.ai/collections/free-models/).
-The existing save/replace/remove integration test first reproduced the old status.
-Native MCP verified the environment-key status, Back and Chat navigation; an OS
-capture confirmed readable explanatory copy. No credential was changed or chat
-request sent. An environment key still shows new-key instructions; improving that
-branch and exercising provider-error recovery remain pending.
-Full CI passed with this copy: 1,421 tests passed, 14 skipped, all static gates
-passed. An earlier run failed the corrected-memory lifecycle assertion (zero
-memories instead of one); its isolated rerun and the subsequent full runs passed
-without changing that test. This intermittent failure remains worth investigating.
-
-The existing-system-key branch now skips key-creation instructions and presents
-model selection as the next step. Replacement remains optional and the UI does
-not offer to remove a system key it does not own. A regression first reproduced
-the detour, then verified checking the existing key, retry after an error and
-continuing without a SaveConnection command. Native MCP confirmed that route.
-
-Error-path inspection also found that Connections bypassed the model page's
-error/notice renderer. Online and compatible-service editors now display these
-results with stable accessible IDs. The regression reproduced the missing error;
-native testing against an unavailable loopback address then showed the actual
-failure, kept the address editable and left the connection unsaved. An OS capture
-confirmed visible error text. The temporary draft was cleared and the test app
-closed. Dedicated minimum/wide/200% checks of this new feedback branch remain
-pending, alongside the broader feature review.
-Full CI passed after this fix: 1,422 tests passed, 14 skipped and all static
-gates passed. The preceding run ended with SIGTERM before its last test completed;
-the final run was performed with the native test app closed.
-
-Dedicated connection-feedback layout coverage now passes for both online and
-compatible-service editors at 640×420, 2560×1440 and 200% interface size, in both
-themes. The test checks horizontal bounds, scroll reachability, actual retry
-commands, successful-check feedback and return navigation. Loaded preferences
-explicitly retain each test's theme and scale, so the event cannot reset the
-test to default appearance.
-
-Next Skills findings from source inspection: the UI's automatic shortcut builder
-discards non-ASCII letters, so an entirely Arabic name produces an invalid empty
-shortcut. Creating a skill whose shortcut already exists also reaches the store's
-replacement path without distinguishing creation from editing. Regressions and
-a safe automatic-name rule are still needed; no fix is claimed yet.
-
-The full gate for the connection layout test is currently failing intermittently
-at `memory_lifecycle.rs:541`: corrected-memory recall returned zero facts instead
-of one. The layout test itself passes. The runtime invalidates recall before
-acknowledging a correction, so a simple acknowledgement-before-invalidation race
-is not established. Further investigation must distinguish recall cancellation,
-store revision changes and temporal visibility before changing code or tests.
-
-Investigation found an independently reproducible recall-invalidation defect:
-completing extraction with zero fact writes still incremented the database fact
-revision. Concurrent recall rejects results when that revision changes, even
-though this completion changed no facts. A real-engine regression failed with
-revision 1 instead of 0; completion now advances that revision only when writes
-are present. A companion assertion verifies real writes still advance it.
-All 107 store tests passed (three ignored), including correction/removal checks.
-Twenty isolated correction-flow runs passed before the fix, so those runs alone
-did not reproduce the timing-dependent full-suite failure or prove its cause.
-The regression proves the empty-job defect; full-suite verification follows.
-Live verification of concurrent correction and background completion has not
-been performed: another development GUI is running, and the race is covered by
-deterministic store assertions rather than claims based on a single native run.
-Full CI passed after the fix: 1,423 tests passed, 14 skipped and all static gates
-passed, including the connection-feedback layout test. The first full run passed
-the corrected-memory test but timed out on group-history witnessing over the real
-network; that unchanged network test passed alone and in the final full run.
-
-Custom-skill naming now uses a pure catalogue rule to choose an unused shortcut.
-The visible title stays unchanged, including Arabic. Automatic names avoid both
-names and aliases of enabled or disabled skills and retain the 64-character
-limit. The new-skill form rejects explicitly entered shortcuts already present
-in its catalogue; ordinary editing still uses the existing shortcut. This is a
-form safeguard, not a new atomic create-only storage operation.
-The headless regression failed on an Arabic title before the fix and now saves
-it without advanced options, then verifies that a conflicting explicit shortcut
-sends no save command. Core regressions cover fallback, collisions and truncation.
-Native verification of this form change remains pending while another development
-GUI is running; no second GUI was launched and that session was not disturbed.
-
-The shared checkout was subsequently rebased to the newer 0.3.0 tree. UX changes
-were preserved in the autostash, with a separate recovery copy made before
-resolving restoration conflicts. Both upstream saved-web-page tests and the UX
-artifact regressions were retained. Login reachability now checks the language
-control, since Google sign-in is conditional on configuration. The first build
-reported a missing match arm already present in source; rebuilding the affected
-runtime source resolved that mismatch without changing its logic. Full CI on the
-restored tree passed: 1,463 tests passed, 14 skipped and all static gates passed.
-File-content checks confirmed the source stayed unchanged during that run.
-The broader review remains open, including Skills save confirmation/native
-verification and the newly merged GitHub connection flow.
-
-Custom-skill saves now have a specific runtime acknowledgement after persistence
-and a successful catalogue reload. A Loaded event alone does not confirm a save.
-The form shows Saving, prevents duplicate submission and keeps the draft on error.
-A matching acknowledgement converts creation into editing the same shortcut;
-newer text typed while saving remains intact with an explicit reminder to save it.
-The runtime regression drives Client with a controlled store and proves failure,
-retry, persistence and the absence of save acknowledgements for Refresh. UI
-regressions cover the delayed acknowledgement, newer edits and stable identity.
-Feedback and retry controls pass minimum/wide/200% checks in both themes.
-Live verification of this change is still pending while the other development
-GUI remains active; no second instance was launched or existing session stopped.
-The 12 targeted Skills/runtime/layout tests passed. Full CI currently stops at
-the recurring `two_computers.rs:353` group-history witnessing timeout (1,414
-passed, one failed; remaining tests cancelled). No timeout was increased and no
-assertion was weakened. Source review found a concrete lead: a Behind checkpoint
-only fetches missing history and relies on a later checkpoint to cosign it.
-Whether repeated identical gossip is suppressed must be verified before changing
-that path; a deterministic first-checkpoint regression is needed.
-
-The pinned gossip implementation does suppress repeated message payloads by
-content hash. A regression reproducing a checkpoint arriving before its history
-failed before the fix. The runtime now retains one verified pending checkpoint
-per current member and rechecks it after successful history syncs, including
-later batches. Membership, group identity and the checkpoint signature are
-rechecked before confirmation; partial history cannot be confirmed. The test
-transport models duplicate suppression and controls history delivery so the
-regression does not depend on whether joining finishes before sharing.
-
-After the group-history fix, all 37 targeted group tests passed, including both
-real-network tests. Full `cargo xtask ci` passed all gates: 1,466 tests passed,
-14 skipped. Native verification of Skills save/retry and this history update
-remains unavailable while the other development GUI owns the running session;
-the coverage above is runtime, headless UI and network testing.
-
-GitHub key setup review: a failed check used to hide the setup form and require
-another Connect action before the user could retry. The form now returns after
-failure while the submitted key is still cleared. This applies
-[NN/g's error-message guidance](https://www.nngroup.com/articles/error-message-guidelines/)
-to keep recovery near the affected controls. The scripted regression failed
-before the fix because the key steps disappeared; it exercises retry with a
-replacement key at minimum, wide and 200% sizes in both themes. Native verification
-remains pending while another development GUI is running.
-
-Skills exit review found Back could abandon a draft and Add your own could replace
-the open form. Back now compares the current fields with the last confirmed save
-and asks Keep editing or Discard changes when they differ. Add/import/refresh are
-disabled while the form is open. Page navigation retains the existing form state.
-The regression reproduced missing protection before the fix; confirmation controls
-are exercised at minimum/wide/200% sizes in both themes.
-
-The final Skills exit checks cover keeping a draft, discarding it, starting a
-fresh empty form, and closing an unchanged confirmed save without a warning.
-The confirmation scrolls into view. The scrolling test helper now uses the pane's
-visible bounds, preventing clicks behind the top bar. All 11 targeted Skills
-tests and full CI passed (1,466 passed, 14 skipped). Live verification remains
-pending coordination of the existing development GUI.
-
-### Current completion audit — 2026-11-12
-
-The scope is all eleven `NavTab` pages, sign-in, first use and the workflows
-reachable from them. The goal is understandable choices, efficient completion,
-visible progress/results, recoverable errors and retained work. The research
-links above inform the review; green tests alone do not establish usability.
-This table distinguishes existing automated evidence from the native acceptance
-work still needed. Test files below are under `crates/sovra-ui/`.
-
-| Surface | Automated evidence inspected | Native acceptance still needed |
-| --- | --- | --- |
-| Sign-in and first use | `tests/shell.rs` checks name-only sign-in waits for runtime confirmation, sign-out, the five-step tour and first-chat setup. Domain/runtime tests reject the name-only shortcut for password or Google accounts. | Repeat the relevant setup and recovery paths on the final build; earlier Arabic and name-only native checks are recorded above. |
-| Chat | `tests/shell.rs` covers Enter/Shift+Enter/Stop, attachment setup retaining the draft, removed uploads, reopening history and late results remaining attached to their original chat. | Exercise first chat, attachment cancellation, history reopening and saving a reply together with real controls. |
-| My AI's | `tests/shell.rs::my_ais_switches_routing_modes_decision_backends_and_simulates_tree` asserts advanced routing controls start hidden and their actions issue the expected commands. | Inspect default explanations and follow optional routing choices in the running app. |
-| Models | `tests/models.rs` covers one-action initial setup, saved/system keys, model choice confirmation, search, curated choices, custom connections and draft retention. | Repeat final connection-error recovery and model-selection flow; earlier setup observations do not cover every connection type. |
-| Team | `tests/teams_artifacts.rs` covers switching/editing helpers, asking the team and attribution of member output; layout checks include minimum, wide and enlarged interfaces. | Follow helper editing, team selection and saving output using test data. |
-| Artifacts | `tests/teams_artifacts.rs` covers save/browse, combined-filter recovery, folders/favorites/paging, draft exit protection, failed-save retry and edits made during saving. It also covers website controls and project approval routing. | Verify populated-library recovery and editing on the final build, including confirmation placement and browser handoff. |
-| Knowledge | `tests/knowledge.rs` checks section access and destination disclosures. `tests/styling/` exercises profile drafts, file indexing, source review, citations, graph/directory navigation and consent at several sizes. | Walk add/find/correct/remove with test data, and check source navigation and visible progress/errors in the native renderer. |
-| Skills | `src/skill_menu.rs` covers categories/examples, direct actions, naming collisions, delayed save acknowledgement, retry, newer edits, keep/discard and fresh-form reopening. Layout tests cover both themes and 200% size. | Verify the final naming, save/retry and discard controls together in the native app. Earlier direct-action checks predate these edits. |
-| Schedules | `tests/shell.rs` and `tests/styling/schedules.rs` cover creation, confirmed saves, retained drafts, retries and action reachability. Runtime tests cover persistence failure and dispatch ordering. | Finish native error-path verification; previous successful create/run/pause observations are recorded above. |
-| Connections | `tests/connections.rs` covers Google/GitHub states, key retry and disconnect confirmation. `tests/mcp_manage.rs` exercises service search, approvals and switches. Shell/messaging tests cover pairing and prepared messages. | Check the final GitHub failure/retry form and service recovery with safe fixtures; do not send real messages as a verification shortcut. |
-| Groups | `tests/groups.rs` covers start/join choices, invitations, sharing, history, templates and leave confirmations. Runtime and app tests include history arriving in batches and real-network communication. | Follow invitation/share/leave controls on test groups and inspect resulting history feedback. |
-| Settings and secondary controls | `tests/models.rs` verifies advanced options are hidden until requested and appearance/language changes. Terminal layout tests exercise approval controls; remote-control tests check local revocation rejects further input. | Inspect settings, terminal consent and phone-access start/stop in the native app; restore temporary changes. |
-| Cross-cutting | Headless layout tests cover minimum/wide/200% sizes and both themes; static gates cover styling, layering and documentation. Arabic paragraph tests inspect shaping rather than only container bounds. | Check final rendered pixels and keyboard paths. Headless bounds do not prove glyph visibility, focus appearance or native browser/clipboard handoff. |
-
-At the time of this audit, native acceptance was waiting for coordination of a
-running development session. The user subsequently approved taking control of
-this checkout's app. It was relaunched with a temporary data folder; the other
-worktree's app was left alone. Per [Development MCP](development-mcp.md), use one
-driver, fresh observed target IDs and bounded completion checks. The observations
-below supersede the earlier coordination blocker. Preserve the full scope above;
-do not mark the review complete from automated results alone.
-
-
-Native verification resumed with user approval in a temporary profile. The
-GitHub worktree's GUI was left untouched. Through Development MCP, an Arabic
-skill title saved and received runtime confirmation after Keep editing; explicit
-Discard returned to the catalogue, and an empty recipe closed without warning.
-Two deliberately invalid GitHub keys each returned to the setup steps with the
-field cleared. An OS window capture confirmed the error, instructions and retry
-controls were visibly readable. Appearance and text-size changes were observed
-and restored. My AI's advanced controls opened and folded correctly.
-
-A test group was created and a note shared; the getting-started state marked the
-share done, and a native capture showed one checked history record. Leaving
-could be cancelled, but attempting to leave as the sole person exposed a dead
-end: the last-admin rule required another person who did not exist. A core
-regression reproduced that failure. The rule now allows the sole person to leave
-and end the group; it still prevents leaving other members without an admin.
-The confirmation also accurately says all of the person's computers leave and
-that separately saved copies remain, rather than promising shared items stay
-in this view. Runtime regression checks leaving and creating a different group.
-Final-build native re-verification and full CI are required below.
-
-The history-delivery test also exposed a fixture race: a shared delivery budget
-could be consumed by another request or a duplicate request for the same entry.
-It now exposes a chosen prefix of history instead, so overlapping syncs cannot
-consume the next test phase. This retains duplicate-gossip suppression and the
-assertion that incomplete history must not be confirmed.
-
-
-Final verification of the group-exit fix: full CI passed all gates, with 1,468
-tests passed and 14 skipped. After another manual development launch, native
-controls successfully left the previously trapped test group, created a new
-group, and left that replacement group too. No data-folder reset was needed.
-The confirmation's accessible label states that all the person's computers
-leave. Temporary group state was cleaned up. Multi-member and last-admin
-protections remain covered by the passing core/runtime/network regressions.
-The broader native acceptance table still has unverified flows; the completed
-checks above are not a claim that every workflow has been exercised.

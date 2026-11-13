@@ -1,25 +1,25 @@
-# Model library
+# Models and connections
 
-How the **Models** tab connects an AI service, lists the catalog, and picks a chat model.
+Connect an AI service, choose a chat model, and check where your requests will go.
+A catalog entry describes advertised capabilities; only an actual chat verifies
+that a service can answer with your account and available credit.
 
-Start in **Models**. The setup screen uses a state-aware 2-step stepper (`1 · Connect an AI service` → `2 · Pick your AI` → chat) that only shows what is still needed for your saved setup:
+## Connect and choose a model
 
-1. **Connect OpenRouter** opens the guided account-key form (with a 1-click **Get Free Key at openrouter.ai ↗** browser button). Paste and save your connection key; release builds store it in the OS credential store (`keyring`), and a masked preview (`sk-or-••••1234`) stays visible so you can verify, test, replace, or remove it anytime.
-   Sovra checks a new OpenRouter key against `auth/key` before saving it (the model list itself is public, so it cannot prove a key works); a refused key is not saved. Saving the key from setup moves straight on to step 2 (or to Chat, when a model was already chosen).
-2. **Pick your AI**: Once a key is connected, step 1 collapses into a confirmation line (`✓ OpenRouter is connected`) and the setup screen, titled **Pick a chat model**, shows up to three suggestions derived from live catalog data: **Free** (a zero-price chat model), **Everyday** (the newest paid model that supports tools and costs at most about 3¢ per typical message) and **Thinks longer** (the same for reasoning models, up to about 6¢). Each shows an estimated cost per message (~1,500 tokens read, ~500 written). Unknown prices and capabilities never qualify. **Use this model** opens the conversation as soon as the runtime confirms the choice; a message typed before setup finished is sent automatically.
+1. Open **Models**. Use the guided OpenRouter setup or configure a local/compatible
+   service from Connections. Start local model servers separately.
+2. Save a connection key if required. **Check key** checks whether OpenRouter
+   accepts it; saving a key and checking a key are distinct actions. A saved key
+   is not proof of successful inference.
+3. Choose **Next: pick a chat model**, then **Use this model** on a suitable choice.
+   Wait for the saved selection to be confirmed.
+4. Open Chat and send a short question. If it fails, review the connection error,
+   exact model ID, provider permissions, and available credit.
 
-If the saved key is missing from this computer's credential store, or the chosen model can no longer run (for example, it left the catalog), setup says so and asks for the key or a new model. It never reports "ready" for a choice that cannot answer. The guided tour starts on its own the first time someone signs in, and its second step offers OpenRouter or Ollama with the buttons to set either up. **Take a tour** replays the 11-step walkthrough at any time.
-
-**Browse all models** opens the full library. Every row in the catalog includes a direct **Use Model** / **✓ Active** / **Add Key** button on the right for 1-click activation, while clicking the row title opens the inspection panel. Filters start closed; open them when
-you need specific capabilities. **Back to Models** returns to the guided screen. A saved
-selection is shown by name, and an empty selection is never described as a working
-default AI. Local/other connections are optional, separate paths; the online path
-requires no extra installed app.
-
-Use **Models → Browse all models** to browse OpenRouter, installed Ollama models and
-your own local or remote connections. The library refreshes in the background;
-saved results remain visible when a server is offline. **Refresh** requests current
-metadata. Connection cards identify live, cached, loading and failed discovery.
+Suggestions use catalog prices and advertised capabilities. Estimates are not
+billing guarantees, model-quality rankings, or promises that a free model will
+remain available. **Browse all models** opens the full catalog. Cached results
+remain visible during refresh or when a server is offline.
 
 ## A focused Models home
 
@@ -32,35 +32,7 @@ confirms it. Switching starts fresh provider history, explained beside the choic
 assignments. The tour stays in the page header. **Browse all models** opens the
 advanced catalogue, including connections, filters, favourites and comparisons.
 
-### Research informing the layout
-
-Reviewed on 2026-11-13; these are native application adaptations, not a claim of
-web accessibility conformance or usability testing with beginners.
-
-- [NN/g: progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/):
-  keep the frequent chat choice prominent; reveal file assignments on request and
-  retain advanced catalogue tools separately. Avoid repeating switch suggestions
-  below the same task.
-- [NN/g: recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/):
-  put names, estimated costs and advertised strengths together, with explicit action labels.
-- [GOV.UK: radios](https://design-system.service.gov.uk/components/radios/):
-  distinguish a single choice from multiple selections. Sovra uses native action
-  buttons because choosing is an immediate saved action, rather than an unsubmitted form.
-- [W3C: consistent help](https://www.w3.org/WAI/WCAG22/Understanding/consistent-help.html):
-  keep the tour in one predictable header location.
-- [W3C: reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html):
-  retain a bounded reading column, wrapping actions and vertical scrolling at small
-  widths and enlarged interface sizes.
-
 ## Find and choose a model
-
-The setup flow follows [recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/):
-actions and explanations appear together, while technical filters stay in the full
-library. Free model availability and limits come from the live catalog and
-[OpenRouter's pricing documentation](https://openrouter.ai/pricing), checked on
-2026-10-24. Suggestions use listed prices and advertised text/reasoning support;
-they do not rank answer quality or infer speed from a model name. Unknown prices
-remain visible as unknown and never qualify for the free starting choice.
 
 OpenRouter discovery requests `/api/v1/models?output_modalities=all`. This includes
 the complete public catalog, including non-chat outputs; the default API response
@@ -75,7 +47,7 @@ any other type, or every type at once.
 Search names, exact IDs, creators, descriptions and connection names. Combine
 provider tabs, a connection, creator, input modality, minimum context,
 free/paid usage, tool calling, reasoning and structured output. Modality options
-come from the catalog, including future values. Sort by name, release time,
+come from the catalog. Sort by name, release time,
 context or reported token price. Unknown prices remain unknown; they are never
 treated as free. Lists show an estimated cost per typical message; details show
 exact per-million-token prices, and other pricing dimensions retain their provider
@@ -118,7 +90,7 @@ backend sends the routing prompt to OpenRouter's decisions endpoint. Failures
 fall back to embedded evaluation after a bounded 1.2-second request. Selecting
 **Embedded Rust Heuristic** avoids that decision request; merely selecting
 **One AI for everything** does not disable the backend request. Route simulation
-also contacts the selected backend. See the [network inventory](value-realisation/03-sovereignty-evidence.md#2-every-network-destination).
+also contacts the selected backend. See the [network inventory](network.md#network-destinations).
 
 Implementation: `sovra-core/src/routing_tree.rs`,
 `sovra-adk/src/decision_client.rs`, `sovra-runtime/src/lib.rs`, and
@@ -197,42 +169,11 @@ owns HTTP, keychain and metadata storage behind `ModelProvider`;
 No network or keychain work runs on the UI thread. Development uses the
 one-shot [native launch](development.md) (`cargo xtask dev`; re-run after edits).
 
-## Primary references
+## Native structured results
 
-Verified 2026-10-24 and against pinned dependencies:
-
-- [OpenRouter model catalog](https://openrouter.ai/docs/api/api-reference/models/get-models):
-  the `all` modality parameter and model/pricing metadata.
-- [Ollama model details](https://docs.ollama.com/api-reference/show-model-details)
-  and [authentication](https://github.com/ollama/ollama/blob/main/docs/api/authentication.mdx).
-- [LM Studio OpenAI compatibility](https://lmstudio.ai/docs/developer/openai-compat).
-- [vLLM OpenAI-compatible serving](https://github.com/vllm-project/vllm/blob/main/docs/serving/online_serving/openai_compatible_server.md).
-- [llama.cpp server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server).
-- [Anthropic model discovery](https://platform.claude.com/docs/en/api/models/list):
-  pagination and advertised capabilities/limits. The pinned ADK integration uses
-  the supported `2023-06-01` protocol; optional newer metadata is consumed when present.
-- [keyring 4.2](https://docs.rs/keyring/4.2.0/keyring/): OS credential storage.
-
-Discovery success establishes connectivity and catalog access, not inference
-permission, billing balance or support for every advertised feature. Tool use is
-enabled only when reported by the catalog or explicitly declared for a manual model.
-
-## Native agent UI
-
-Research checked on 2026-10-24: [AG-UI](https://github.com/ag-ui-protocol/ag-ui)
-is an interaction protocol, not a desktop widget toolkit. The standalone
-[Rust ag-ui SDK](https://docs.rs/ag-ui/latest/ag_ui/) offers protocol/client/server
-types; it does not supply GPUI components. For this ADK-based harness,
-[ADK-UI](https://adk-rust.com/en/docs/tools/ui-tools) is the best fit because its
-Rust toolset already generates structured UI and an AG-UI surface event profile.
-The implementation is verified against the pinned `adk-ui 2.2.0` source.
-
-Sovra requests `ag_ui` output from the card, confirmation, table, alert and progress
-tools, decodes their `adk.ui.surface` CUSTOM events, and translates the embedded
-component tree to pure domain types. GPUI renders these natively without a WebView.
-Repeated revisions replace the current surface. Buttons send the button's visible
-label as the next prompt in the same session. Connected MCP tools may also return a
-native card by putting `protocol: "ag_ui"` and a domain widget in MCP
-`structuredContent` (the sample `roll_dice` tool does this).
-Only tools with native renderers are advertised; browser forms, charts, 3D scenes,
-and arbitrary remote AG-UI HTTP endpoints are not currently exposed.
+Supported tools can return cards, confirmations, tables, alerts, and progress
+through AG-UI surface events. GPUI renders the supported components without a
+WebView. Buttons send their visible label as a follow-up prompt in the same
+session. The built-in MCP sample also demonstrates a native card.
+Arbitrary remote AG-UI endpoints and browser-only widgets are not exposed.
+See [MCP servers](connected-services.md) and [Teams and artifacts](teams-and-artifacts.md).

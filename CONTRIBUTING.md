@@ -38,7 +38,8 @@ Read before writing code:
 - [docs/architecture.md](docs/architecture.md) — why the layering is what it is
 - [docs/development.md](docs/development.md) — the one-shot dev session
 - [docs/styling.md](docs/styling.md) — the native design system (required for UI work)
-- [docs/README.md](docs/README.md) — map of every top-level guide
+- [docs/README.md](docs/README.md) — documentation map
+- [docs/documentation.md](docs/documentation.md) — writing and verifying documentation
 
 ## Best practices
 

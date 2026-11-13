@@ -6,7 +6,7 @@ folder is being read**.
 Code: `crates/sovra-core/src/file_index/ontology.rs` (taxonomy),
 `crates/sovra-core/src/file_index/live.rs` (wording and estimates),
 `crates/sovra-files/src/index/scan*` (parallel reader), and
-`crates/sovra-ui/src/file_index_view/live.rs` (panel). Research checked 2026-10-31.
+`crates/sovra-ui/src/file_index_view/live.rs` (panel).
 
 ## Layered model
 
@@ -32,26 +32,16 @@ chain: media type → kind → DCMI class, so a reasoner can walk upwards.
    Partial words never match ("billboard" is not a bill).
 4. Life areas come from whole words in folder and file names ("Taxes 2024", "Holiday Spain").
    People already sort their lives this way, so it is an explainable first signal that needs
-   no model. Content-based topics come later from clustering. No cue means no guess.
+   no model. No cue means no guess.
 
 All of this is pure, deterministic and unit-tested. Cue words cover English plus common
 French, German, Spanish, Italian, Dutch and Portuguese terms, with and without accents.
 Ambiguous words are left out on purpose (French *vol* is also "volume"; German *Rezept* is
 both prescription and recipe), and compound words are not split ("Mietvertrag").
 
-### Licensing decisions
-
-| Source | Licence | What we embed |
-|---|---|---|
-| DCMI Type Vocabulary | Openly published IRIs | IRIs only |
-| schema.org | [CC BY-SA 3.0](https://schema.org/docs/terms.html) | Type IRIs only, never copied descriptions |
-| NEPOMUK NFO/NMO | Openly published IRIs | IRIs only |
-| IPTC Media Topics | CC BY 4.0 | Top-level codes 01, 02, 04, 05, 07 (confirmed) |
-| freedesktop shared-mime-info | GPL | **Nothing.** Only its design idea (subclass + generic icon) |
-| Dewey Decimal | Proprietary | **Nothing** |
-
-Wikidata Q-IDs (CC0) would make a good cross-reference hub but are not yet included; add
-them only after checking each ID against wikidata.org.
+The taxonomy stores external identifiers and mappings in the source; it is not a
+claim that external vocabularies have been copied wholesale. Review the actual
+constants and dependency licenses when extending the taxonomy.
 
 ## Live progress (what a person sees)
 
@@ -112,11 +102,6 @@ walker (1 thread) ──bounded jobs (2×readers)──▶ readers (N threads) �
 - **A writer failure stops extraction too**: extractors watch a combined stop signal, so a
   failed scan does not keep decoding files nobody will save.
 
-Not yet done (follow-up): slowing down while the person is busy or the laptop is on battery,
-as Windows Search and Apple Photos do. It needs OS idle and power-state APIs this codebase
-does not use yet.
-
-Sources: [async: what is blocking](https://ryhl.io/blog/async-what-is-blocking/),
-[tokio mpsc backpressure](https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html),
-[memmap2 safety](https://docs.rs/memmap2/latest/memmap2/struct.Mmap.html) (why buffered reads,
-not mmap, for files users may be editing).
+The reader does not reduce scanning based on OS idle or battery state. Use Pause
+when you want to stop automatic work. Cooperative cancellation is not a hard
+execution deadline for every third-party decoder; see [Files](files.md).

@@ -9,6 +9,8 @@ and Models. Environment changes require restarting the app.
 | Variable | Current use |
 | --- | --- |
 | `SOVRA_DEV=1` | Debug builds use separate development credentials and start Development mode on. Release builds ignore this exception. `cargo xtask dev` sets it. |
+| `SOVRA_DATA_DIR` | Overrides the app data root only in debug builds with `SOVRA_DEV=1`; ignored in release builds. Use a separate directory for isolated development data. |
+| `SOVRA_GITHUB_CLIENT_ID` | GitHub device-flow client ID, from startup environment or build-time values. Without it, use a pasted key. |
 | `OPENROUTER_API_KEY`, `OLLAMA_API_KEY` | Fallback keys for the built-in connections at their default destinations. A saved key takes precedence. |
 | `GEMINI_API_KEY`, `GOOGLE_API_KEY` | Agent configuration fallback; Gemini takes precedence. This does not replace the Models setup flow. |
 | `SOVRA_GOOGLE_CLIENT_ID`, `SOVRA_GOOGLE_CLIENT_SECRET` | Desktop OAuth client fallback: saved Settings client, then startup environment, then build-time values. See [Google](google.md). |

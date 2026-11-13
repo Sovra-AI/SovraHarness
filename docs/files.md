@@ -234,8 +234,7 @@ never rewritten to perform matching.
 
 Text, catalogue, reviewed-knowledge and summary queries accept any number of valid
 granted folder IDs. Their result-page, graph-depth and user-selected summary call
-budgets remain independent. This removes the old 16-folder selection ceiling
-without expanding a query beyond the user's selected grants.
+budgets remain independent. Queries remain bounded by the user's selected grants.
 
 Document indexing now has its own text-only preparation mode. It does not inherit
 the attachment reader's 500-page/slide cutoff or rasterize a no-text PDF for a
@@ -284,8 +283,7 @@ because the file is named `.txt` or another text-like extension. Such files reta
 metadata, an unreadable notice, and guidance to attach them in chat for byte
 inspection or export a readable copy. Index preparation does not allocate a byte
 inspection report or duplicate the raw payload for these files. Chat attachments
-still preserve the original bytes and label inspection fragments. The `extract-v7`
-revision replaces affected prior representations on refresh without editing history.
+still preserve the original bytes and label inspection fragments. Refresh updates older representations without editing history.
 
 SQLite/GeoPackage indexing removes the attachment row/table caps and uses SQLite's
 native column ceiling. Its record-length and extracted-text budgets follow the
@@ -301,7 +299,7 @@ Binary property-list indexing uses the selected extracted-text budget and has no
 fixed event-count cap. The 64-level nesting protection remains. Both local readers
 check cancellation while decoding; SQLite also receives the runtime-owned signal
 through its progress handler. Cancellation preserves the previous indexed version.
-The `extract-v9` revision re-reads older representations on refresh so each stored passage includes its path and section.
+Stored passages include their path and section.
 
 ## Storage and ownership
 
@@ -317,83 +315,3 @@ retained for saved chat history; soft-deleting a chat does not delete evidence.
 Abandoned drafts are not restored across process restarts and may leave managed
 copies. No attachment content is copied into application logs or used to generate
 conversation titles. Text-only follow-ups use the latest file-bearing turn.
-
-## Research and decisions (2026-10-25)
-
-- [Xberg 1.3.10](https://crates.io/crates/xberg/1.3.10) provides a maintained Rust
-  document reader with a native PDF engine. The published manifest/source and
-  selected features were inspected locally. Its broad document support avoids
-  introducing Python, Pandoc, PDFium installation, or a hosted extraction service.
-- [Kreuzberg v4 LTS policy](https://docs.kreuzberg.dev/lts/) says its maintenance
-  window ends in 2026; new development moved to Xberg. This ruled out starting
-  new work on its older PDFium-based line.
-- [pdf-extract 0.12.1](https://docs.rs/crate/pdf-extract/0.12.1) and
-  [Calamine](https://docs.rs/calamine/latest/calamine/) are narrower alternatives.
-  Xberg already integrates spreadsheet parsing and adds the other document families.
-- The exact sources under `adk-model-2.3.0/src/{openrouter,openai,anthropic}` were
-  checked for inline image/audio/video conversion. OpenRouter's generic PDF path
-  enables a file-parser plugin; Sovra extracts locally or sends rendered page
-  images instead, avoiding an implicit hosted parser choice.
-- Xberg's archive feature brings a bzip2 license outside the workspace allowlist.
-  Its optional HWPX reader introduces the same dependency through `unhwp`.
-  Both optional paths are disabled; HWPX uses bounded ZIP/XML member reading.
-  That archive feature is disabled; the adapter owns bounded archive readers instead.
-  `finl_unicode` 1.5.0 has stale manifest license metadata: its packaged
-  `LICENSE-UNICODE` is **UNICODE LICENSE V3**. `deny.toml` records that factual
-  clarification to the already-approved `Unicode-3.0`, without changing the
-  allowlist. Recheck this clarification when upgrading that crate.
-- 7z stays an inspected format (decision 2026-11-01). The pure-Rust
-  [`sevenz-rust2` 0.24.1](https://crates.io/crates/sevenz-rust2/0.24.1) was
-  checked locally. Its member decoders are bounded by our expansion budget,
-  but an encoded (compressed) header is decoded with
-  `MAX_MEM_LIMIT_KB = usize::MAX` and read to its end inside
-  `ArchiveReader::new`, before any caller check. A small hostile file could
-  therefore inflate to gigabytes during folder indexing, the same class of
-  attack the ZIP probe in `detection.rs` guards against. Its bzip2 method also
-  needs the license outside the allowlist. Revisit when the reader accepts a
-  memory and header-size limit. RAR has no maintained pure-Rust decoder
-  (UnRAR is proprietary C++), so it also stays inspected.
-
-Synthetic fixtures cover DOCX, XLSX, email, ZIP, text PDF and scanned PDF. Tests also
-cover expansion limits, normalized pictures, persistent copies, capability setup,
-real image bytes on a mock HTTP transport, retrieval and native chat guidance.
-
-- [Apache Tika detection](https://tika.apache.org/3.2.3/detection.html) documents why
-  signatures and container inspection precede filename hints. Its
-  [format list](https://tika.apache.org/3.2.3/formats.html) explicitly distinguishes
-  recognition from metadata/text extraction; Sovra makes the same distinction.
-- [encoding_rs](https://docs.rs/encoding_rs/0.8.42/encoding_rs/) and
-  [chardetng](https://docs.rs/chardetng/1.0.0/chardetng/) support strict decoding and
-  detection. UTF-32 is handled explicitly because encoding_rs does not support it.
-- [SQLite defensive guidance](https://sqlite.org/security.html) informed the
-  read-only configuration, schema distrust, disabled features and limits.
-- Exact local sources for `file-format` 0.29.0, `resvg` 0.46.0, `lzma-rust2` 0.23.0,
-  `ruzstd` 0.9.1, `bzip2-rs` 0.1.2, `object` 0.40.0 and `plist` 1.10.3 were checked.
-  The optional file-format ZIP reader is disabled: its `mimetype` probe allocates
-  a header-declared size before reading. Sovra uses a 256-byte bounded probe instead.
-  Plist's streaming API is pinned exactly to enforce depth before building a tree.
-  The Zstandard reader is explicitly looped because its default streaming wrapper
-  reads only one frame. BZip2's first-stream limitation is surfaced, not hidden.
-- `sevenz-rust2` 0.24.1 was evaluated but not enabled: its header decompression path
-  exposed no caller-supplied memory ceiling. Enabling it would need bounded
-  preflight/process isolation before accepting hostile compressed headers.
-- [memchr byte search](https://docs.rs/memchr/2.8.3/memchr/memmem/index.html) avoids
-  naive per-offset substring comparisons over a potentially 20 MiB binary.
-
-The `.rs` regression was reproduced before the content-first fix. Synthetic tests
-exercise source filename variants, misleading container extensions, Unicode/legacy
-encodings, compressed streams, actual SVG pixels, read-only SQLite, binary plists,
-empty files, malformed input, expansion limits, byte-tool bounds and managed reload.
-These tests establish concrete coverage, not universal semantic decoding.
-
-### Local search measurement
-
-A synthetic 4,194,288-byte Rust/Unicode document (repeated
-`fn invoice_total() -> u32 { 93 } // multilingual 你好` lines) was queried 30 times
-for `invoice total multilingual`, returning three sections. On this Mac with the
-dev-profile core library, the initial index took 189.0 ms; cached searches averaged
-1.06 ms versus 203.9 ms when rebuilding the index for each query. This is a local
-microbenchmark during concurrent compilation, not a release-performance guarantee
-or a benchmark of document codecs/network inference. No private file was used.
-
-The retrieval ranking follows the [inverse-document-frequency principle](https://nlp.stanford.edu/IR-book/html/htmledition/inverse-document-frequency-1.html): terms present in fewer sections are more discriminating. The implementation uses smoothed presence weighting, not a claim to implement all of BM25. Offline ADK harness tests exercise actual tool calls, rejected unattached IDs, later result pages, line citations and disabled tools.

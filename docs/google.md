@@ -9,7 +9,8 @@ switch per service afterwards. The agent then gets tools for the services that
 are connected and switched on. Everything is in the single binary: no server,
 sidecar or browser extension.
 
-Sources were checked on 2026-10-27; they are listed at the end.
+Start with **Connections → Connect Google**. If this copy has no configured
+client, use **Use my own Google Cloud client** as described below.
 
 ## What the person sees
 
@@ -47,21 +48,11 @@ Sources were checked on 2026-10-27; they are listed at the end.
 | Contacts | `search_contacts` | None. |
 | To-dos (Tasks) | `list_todos`, `add_todo` | To-dos on the default list. |
 
-**Prompt injection is the main risk.** Email, documents and invites are written
-by other people. Combined with private data and a way to send something out,
-that is the "lethal trifecta". The mitigations are layered:
-
-- **No send path.** Email is draft-only and events have no guests. A hidden
-  instruction cannot send anything out without the person.
-- **Labelled content.** Text from mail, files and event notes is clipped and sits
-  under an `untrusted` notice in every tool result.
-- **Ask-first wording.** Every tool that adds something says it may be used only
-  when the person asked in this conversation, never because content said so.
-- **Checked ids.** Ids from the model are restricted to Google id characters
-  before they are put into a URL path.
-- **Clean headers.** Draft headers are made single-line, so a model cannot add a
-  `Bcc:` header, and recipients must be email addresses.
-- **Bounded reads.** Responses are size-capped: 4 MB for JSON, 10 MB for files.
+Treat retrieved mail, files, and event notes as untrusted content. Tool results
+are bounded and labelled; draft headers and resource IDs are validated. Gmail
+has no send tool and calendar events do not invite guests. These controls do not
+make all connected tools safe from prompt injection or prevent content from
+being included in model requests. Review drafts before sending them in Gmail.
 
 ## How it works
 
@@ -125,54 +116,25 @@ granted therefore re-runs the whole consent for *granted + that one*.
 Cancelling is clean: it sets a flag and connects to the listener, which wakes
 the blocked `accept` without polling or sleeping.
 
-**Saved sign-ins expire.** Google refresh tokens die with `invalid_grant` in these
-cases, and all of them show as **Sign in again**:
-
-- revoked by the person;
-- unused for 6 months;
-- a Gmail-scope password change;
-- seven days in *Testing* publishing status;
-- more than 100 tokens per account per client.
+Saved sign-ins can expire or be revoked. **Sign in again** starts a new consent
+flow. Testing/publishing status and account policies can affect token lifetime;
+consult Google's current documentation instead of assuming a saved token is permanent.
 
 ## Scopes and Google verification (release blocker)
 
-| Service | Scope | Google class |
-| --- | --- | --- |
-| Identity | `openid email profile` | non-sensitive |
-| Email | `gmail.readonly`, `gmail.compose` | **restricted** |
-| Calendar | `calendar.events` | sensitive |
-| Files | `drive.readonly` | **restricted** |
-| Contacts | `contacts.readonly` | sensitive |
-| To-dos | `tasks` | sensitive (confirm in Cloud Console) |
+The requested scopes are defined by `SERVICES` in
+[core Google rules](../crates/sovra-core/src/google.rs): identity, Gmail read/compose,
+Calendar events, Drive read-only, Contacts read-only, and Tasks.
+A runtime service switch controls tool availability; it does not narrow an
+already issued Google token.
 
-Email and Files need **restricted** scopes. Reading mail is impossible with
-anything less, and `gmail.compose` (drafts) is itself restricted. Shipping them
-to the public needs:
-
-- the OAuth consent screen set to *In production*;
-- **sensitive-scope verification** (about 3–5 business days), for Calendar,
-  Contacts and Tasks;
-- **restricted-scope verification plus a yearly CASA security assessment**
-  (several weeks), for Gmail and Drive;
-- a privacy policy stating the Google API **Limited Use** terms. In particular,
-  Workspace data is never used to train models.
-
-**Until it is verified:**
-
-- People see Google's "unverified app" warning.
-- The project has a **100-user lifetime cap**.
-
-**Two ways to ship before CASA:**
-
-- Narrow v1 to sensitive scopes. Calendar, Contacts and Tasks work as they are.
-  Email could become `gmail.send` with an in-app confirmation step, at the cost
-  of reading mail. Files could become `drive.file` with Google's desktop Picker
-  as a separate flow.
-- Let advanced users supply their own Google Cloud client (the environment
-  variables below), which uses Google's personal-use exemption.
-
-The scopes live in one table (`SERVICES` in `sovra-core/src/google.rs`), so
-either choice is a data change plus tool tweaks.
+Before distributing a shared OAuth client, check the actual Cloud project's
+consent configuration, API enablement, requested scopes, and verification state.
+Sensitive/restricted scope verification and security-assessment requirements
+depend on usage and data flow, including third-party servers. A successful local
+sign-in does not establish approval for public distribution. Follow Google's
+[restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+and [desktop OAuth documentation](https://developers.google.com/identity/protocols/oauth2/native-app).
 
 ## Setting up the Google client (once per release pipeline)
 
@@ -197,39 +159,12 @@ either choice is a data change plus tool tweaks.
    use their own client. Without a client id anywhere, the card asks for one.
    **Connect Google** and **Continue with Google** stay off until a desktop
    client id is saved, set in the environment, or baked in.
-5. Use a separate client for development. *Testing* status expires refresh
-   tokens after seven days.
+5. Use a separate client for development and check the configured test-user and
+   publishing restrictions before testing.
 
-## Adding a service or a connection
+## Extending the adapter
 
-- **A Google service:** add a `GoogleService` variant and a `SERVICES` row in
-  core, the `GoogleRequest` variants and their adapter calls, the tools in
-  `sovra-adk/src/google.rs`, and an icon and example in `google_card.rs`.
-- **Another connection** (WhatsApp is in progress in parallel): add its own
-  `Command`/`Event` pair and state, and add its card as one more child of the
-  `settings-connections` section (`render_connections_section`).
-
-## Sources
-
-- Google: [OAuth for desktop apps](https://developers.google.com/identity/protocols/oauth2/native-app),
-  [OAuth overview](https://developers.google.com/identity/protocols/oauth2),
-  [discovery document](https://accounts.google.com/.well-known/openid-configuration),
-  [device flow limits](https://developers.google.com/identity/protocols/oauth2/limited-input-device),
-  [webview ban](https://developers.googleblog.com/en/upcoming-security-changes-to-googles-oauth-20-authorization-endpoint-in-embedded-webviews/)
-- IETF: [RFC 8252](https://datatracker.ietf.org/doc/html/rfc8252) (native apps), RFC 7636 (PKCE; the test vector is used in `loopback.rs`)
-- Scopes: [Gmail](https://developers.google.com/workspace/gmail/api/auth/scopes),
-  [Drive](https://developers.google.com/workspace/drive/api/guides/api-specific-auth),
-  [Calendar](https://developers.google.com/workspace/calendar/api/auth),
-  [Tasks](https://developers.google.com/tasks/auth),
-  [all scopes](https://developers.google.com/identity/protocols/oauth2/scopes)
-- Verification: [restricted scopes](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification),
-  [production readiness](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview),
-  [unverified apps](https://support.google.com/cloud/answer/13464321)
-- APIs: [Gmail sending](https://developers.google.com/workspace/gmail/api/guides/sending),
-  [Gmail quota](https://developers.google.com/workspace/gmail/api/reference/quota),
-  [Drive export](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/export),
-  [People searchContacts](https://developers.google.com/people/api/rest/v1/people/searchContacts),
-  [Drive desktop Picker](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker)
-- UX and safety: [Thunderbird OAuth](https://source-docs.thunderbird.net/en/latest/backend/oauth.html),
-  [preconnect sockets (bug 2060544)](https://bugzilla.mozilla.org/show_bug.cgi?id=2060544),
-  OWASP LLM01 prompt injection, Simon Willison's "lethal trifecta"
+Add service definitions and request variants in core, bounded API calls in
+`sovra-google`, tools in `sovra-adk`, and native controls in `google_card.rs`.
+Register any new user-facing capability on the Skills page. The runtime owns
+sign-in tasks, cancellation, and per-call permission checks.

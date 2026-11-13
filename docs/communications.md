@@ -3,6 +3,33 @@
 How WhatsApp, Telegram, and sending a message from the desktop chat work, including
 who is answered and what stays private.
 
+## Connect a messaging account
+
+For WhatsApp, open **Connections → Connect WhatsApp**. On your phone, open
+WhatsApp's **Linked devices → Link a device** and scan the QR code. If scanning
+is unavailable, use **Link with your phone number** and follow the displayed
+instructions. Wait for the desktop to show the linked account as online.
+This uses a WhatsApp Web client adapter, not the WhatsApp Business API.
+
+For Telegram, create a bot through `@BotFather` using `/newbot`, paste its token
+into the Telegram card, and choose **Connect Telegram**. Send the displayed
+six-digit code to that bot from your own Telegram account to become its owner.
+Keep the token and ownership code private. The bot is not a login to your normal
+Telegram user account.
+
+Review the automatic-reply settings before leaving a channel connected. Sovra
+must be running to answer. Use the connection's disconnect control to unlink it.
+
+## Send from desktop chat
+
+Ask Sovra to prepare a message with the recipient and exact text. Review the
+native card and choose **Send**, **Cancel**, or **Save**. A prepared draft is not
+a sent message. Check the resulting receipt; service acceptance does not prove
+that the recipient received or read it. Timed messages use [Schedules](schedules.md)
+and are authorized when the schedule is created.
+
+## Tool and recipient rules
+
 The desktop orchestrator offers `CommunicationsAgent` when a messaging adapter is
 available. Its tools reach the existing connections actor through a core port
 bound to the desktop conversation. Normal chat and attachment turns both carry
@@ -105,19 +132,13 @@ Sender names and retrieved text are untrusted data. Pairing credentials and toke
 are never passed to the model. Existing automatic answers still use the separate
 per-channel settings and never answer groups or offline backlog.
 
-This design follows the human-control and input-validation guidance in the
-[MCP tools specification](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/server/tools.mdx).
-The shared message limit follows Telegram's
-[`sendMessage` contract](https://core.telegram.org/bots/api#sendmessage).
 WhatsApp uses the existing pinned Web-client adapter; this change does not add a
 Business API, bulk sending, media sending or arbitrary protocol access. A new
 link registers as **Sovra connection** under Linked Devices on the phone. An
 already-linked session keeps its previous label until you unlink and connect
 again.
 
-Verification uses fake transports and loopback model providers, never real
-outbound messages. Domain tests cover recipient validation and review scope;
-ADK tests execute real delegation; runtime tests exercise native approval,
-duplicate clicks, cancellation, uncertainty, link changes and disconnects.
-Headless UI tests cover both themes, 640×420 and 2560×1440 windows, and 200% text.
-The running app must also be inspected through Development MCP before completion.
+Implementation: [core connection rules](../crates/sovra-core/src/connections.rs),
+[messaging runtime](../crates/sovra-runtime/src/connections/messaging.rs), and
+[communication tools](../crates/sovra-adk/src/communications.rs). Tests use fake
+transports and loopback providers; they do not send real messages.

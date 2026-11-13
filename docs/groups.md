@@ -10,149 +10,65 @@ group, described in [messaging](communications.md), is a chat id (`…@g.us`)
 and a subject; it is never turned into a saved person and it is never answered
 automatically.
 
-This page is the current behaviour of the app. What is still planned —
-handing off embedding and indexing work, production relays, and an external
-security review — stays in the [group roadmap](roadmap/02-a-team.md). The roadmap's own checklist is an acceptance plan for that
-design; where it still has an open box for something this page describes, the
-code and this page are the ones to trust.
+## Start or join
 
-## What you do on the screen
+1. Open **Groups**. A computer can belong to one group at a time.
+2. Choose **Start a new group**, then enter the group name, your name, and the
+   name of this computer. Alternatively choose **Join a group** and paste an
+   invitation link or enter the same-room code.
+3. Keep the inviting computer online until joining finishes. Same-room pairing
+   asks both people to compare the pictures and digits, then confirm they match.
+4. Use the **Getting started** list to invite someone, share a note, and make a
+   second admin if appropriate.
 
-Groups has its own tab in the sidebar (**Groups**, under Chat, Team, Artifacts and
-Schedules). Settings keeps a short **Groups** card with **Open Groups** for people
-who look there. The page is written for someone with no technical background:
-every page says what it is for and how to use it in numbered steps. The wording
-and the "what's next" rules are pure data in `sovra_core::group` (`guide.rs`:
-`WHAT_IS_A_GROUP`, `BENEFITS`, `HOW_IT_WORKS`, `PRIVACY_PROMISE`, `GroupPage`,
-`GroupsView::first_steps`, `GroupsView::starting_page`) and are unit-tested there.
+An admin can create an invitation link under **Invite someone**. It is copied
+for sharing privately and also shown as a QR code. Links are single-use and
+expire after ten minutes. Same-room codes allow one attempt within two minutes.
+**Add another of my own computers** associates another computer with your identity.
+Restarting the inviting app invalidates outstanding invitations.
 
-**Outside a group** the page opens with **What is a group?** in one sentence,
-then **What would you like to do?** with two choices, one at a time. Below them,
-**More about groups** lists four things you can do in one (share notes, share
-letters and lists, ask each other, borrow an AI), three steps under **How it
-works**, and the privacy promise (nothing is shared until you press Share; what
-you share goes straight from computer to computer, locked to the group):
+## Share work
 
-1. **Start a new group** asks three labelled questions (*What should the group be
-   called?*, *What's your name?*, *What do you call this computer?*), then
-   **Start the group**. **Back** returns to the choice.
-2. **Join a group** asks **How did they invite you?**: **They sent me a link**
-   (paste it) or **We're in the same room** (type the six numbers from their
-   screen). Then name this computer and press **Join the group**. The screen says
-   "Connecting to the other computer…" while the request is in flight; the
-   inviting computer has to stay online until it finishes. Joining by numbers
-   then shows **One last check**: both screens show the same four pictures with
-   their names and six digits, and each person presses **Yes, they match**. A
-   code allows one try within two minutes; a wrong try ends it.
+- In **Shared notes**, write a detail, choose **Everyone**, a person, or a smaller
+  circle, then press **Share**. Wait for confirmation before assuming it is saved.
+  The draft stays available on failure; **Write another note** clears a confirmed draft.
+- In **Knowledge** or **Artifacts**, use the sharing action on the selected item.
+  Review the audience. Others can use **Keep a copy** for shared artifacts.
+- On **Shared helpers**, review shared helper/skill instructions before using them.
+  **Add to my schedules** copies a shared schedule to this computer.
+- **Smaller circles** lets admins choose a subset of members. The code calls these
+  departments. Only members of that circle receive its new encrypted records.
 
-**Inside a group** the page shows the group's name with how many people and
-computers are in it, who you are in it ("You're in this group as Mum, an admin"),
-and **How do groups work?**, which opens the explanation again. A **Getting
-started** list shows what a new group still has to do (**Invite someone**,
-**Share your first note**, **Make a second admin**), each with **Do this**; it
-disappears once everything is done. Then **What would you like to do?** lists the
-four everyday pages (**Invite someone**, **Shared notes**, **Ask the group**,
-**People**); **More…** adds **Shared helpers**, **Borrow an AI**, **Smaller
-circles** and **History** (`GroupPage::is_everyday`). The open one is selected. An admin alone in a new group starts on **Invite
-someone**; everyone else starts on **Shared notes**. When an invite link or six
-numbers arrive, the page switches to **Invite someone** so they stay in view.
+Sharing a newer version preserves its original audience. Offline computers receive
+changes on reconnect. **Stop sharing** and deletion use confirmation and wait for
+saved results. Copies already kept separately are not recalled by these actions.
+Private chat history and files are not automatically copied to Shared notes.
 
-3. **Invite someone.** Admins type the person's name, then **Create invite
-   link**. The confirmed `sovra://join/…` link is copied automatically; the card
-   says to paste it into an email or message (with how to paste), that the other
-   person needs Sovra installed, what they do, and to keep Sovra open. **Copy the
-   link again** copies it again; the link is also shown as a QR code. **More ways
-   to invite…** reveals **Create admin invite link** and adding your own computers. Links work once and expire after
-   ten minutes; a warning beside the button says so in plain words, and a new link
-   or code appears at the top of the page. **They're sitting next to me** shows a code with
-   the three steps for the other computer. **Add another of my own computers**
-   (**Create a link for my other computer**, **Show six numbers for my other
-   computer**) adds a computer to your own identity and is open to members too.
-4. **Shared notes.** Under **Share a note**, write one detail, choose who should
-   see it (**Everyone**, **Just <name>** or **Just <department>**), and press
-   **Share**. The words stay in the field while **Sharing…** is shown. Once the
-   matching note is saved, a confirmation explains that other computers receive
-   it when they connect. **Write another note** clears only that confirmed,
-   unchanged draft. Edits typed while sharing stay in the field; failures retain
-   the draft for retry. Blank or oversized notes and repeat clicks are disabled.
-   Nothing in private chats or files is copied into that list. Helpers
-   that use a note are told who shared it and which computer it came from. Each
-   note offers **👍 I agree** and, for its author or an admin, **Stop sharing with
-   everyone** and **Delete for everyone…**, which asks **Yes, delete it from every
-   computer** first. The page also counts the documents, lists
-   and pictures shared on the Artifacts page.
-5. **Share what you already have:** a saved detail in **Knowledge** has
-   **Share with …** (reworded with your name, checked by you first); an
-   artifact has **Share with my group** or **Just <name>**; your own helpers,
-   skills and schedules have **Share with my group**. Others find artifacts
-   under **Shared in …** on the Artifacts page (**Keep a copy**), and helpers,
-   skills and schedules on **Shared helpers** (read the words, then **Use this
-   helper**, **Use this skill** or **Add to my schedules**). Artifact sharing,
-   **Keep a copy**, and **Stop sharing** show a waiting message until the matching
-   saved result arrives. Repeated clicks stay disabled while waiting; failures
-   keep the saved artifact available and offer a retry. Sharing a newer version
-   keeps the original audience, including private shares. Offline computers
-   receive changes when they reconnect.
-6. **Ask the group.** **Ask my group** sends one question. Two switches, each
-   with an **On**/**Off** label and a **Turn on**/**Turn off** button:
-   **Answer questions from my group** answers others from this computer's
-   memory with a few short, named answers (every question is listed under
-   **Questions your group asked this computer**), and **Ask the group while I
-   chat** asks during chats. Both start off.
-7. **Borrow an AI.** **Lend this computer's AI** on a computer with an AI, and
-   **Borrow an AI when this computer has none** on one without. The second's
-   chats are answered by the first, which gets only the conversation's words and
-   never uses its tools for someone else.
-8. **People.** Everyone in the group with their role and computers; each
-   computer shows **Online now** or when it was last seen. The key fingerprint
-   is not shown; it meant nothing to most people. Admins see a tip to make a
-   second admin.
-9. **Smaller circles** (departments in the code; admins make them, under
-   **More…**): type a name such as *Legal*, tap the people in it, and choose
-   **Save circle**. That signs a `SetDepartment`
-   operation into the membership log, which only admins may write, and only for
-   people in the group. Members then see **Just Legal** beside **Everyone** when
-   sharing. A department is its own lane (`Space::Department`) with its own lane
-   keys, so only its current members' computers receive or can read it. Saving
-   again with fewer people rotates the key, and the people taken out keep only
-   what they already had. Leaving the group leaves every department. Someone who
-   is not in a department is refused if they try to share there.
-10. **History** lists what this computer shared and each
-   memory it gave to someone's helpers, newest first, with a line such as
-   "2 records, all checked · fingerprint 3f2a9c01". Each record is signed with
-   this computer's key and holds only a BLAKE3 fingerprint of the words, never
-   the words. On every start the whole history is re-checked. If anything in
-   the saved file was changed, the screen says the history didn't check out,
-   and nothing new is added to it. The history is kept when you leave a group.
-   It lives in `group.json` under `audit`; see [Sovereign swarm](swarm.md).
-   Each sync also swaps histories: every computer keeps a checked copy of every
-   other member computer's history (`peer_audit`) and passes copies on, so the
-   group holds one shared record. Only the computer that wrote a history can
-   add to it. If a computer ever shows two different signed versions of the
-   same record, the screen warns that it showed two different histories.
-   On every sync, each computer also joins the group's broadcast topic
-   (iroh-gossip, on the same endpoint) and announces a signed checkpoint of its
-   history: the record count and the BLAKE3 Merkle root. Other computers check it
-   against their copy. If it matches, they sign for it, and the owner keeps those
-   **witness marks**, re-checked on start; the screen reads "2 other computers
-   checked and signed for this history". If it doesn't match, the author is
-   flagged. If they are behind, they first fetch the missing records. Broadcasts
-   carry no trusted sender, so only signed checkpoints and co-signatures from
-   current members count.
+## Ask the group or borrow an AI
 
-On **People**, admins change a person between **Admin** and **Member** (**Make
-admin**, **Make a member again**), and they remove a person (**Remove from
-group**). Removing a person or another computer asks for a second click
-(**Yes, remove** or **Yes, remove them**). Removing a computer shows this
-warning first: that computer will stop getting new group information, and
-things it already has stay on it. **Leave this group** asks first and explains
-that all your computers leave together. Shared group items disappear from this
-view; copies saved separately remain. If other people remain and you are their
-only admin, the app refuses and says to make someone else an admin first.
-If you are the only person, leaving ends the group so you can start another.
+**Ask my group** sends a question to participating computers. **Answer questions
+from my group** lets this computer answer from its memory; **Ask the group while
+I chat** permits asking during chat. Both switches start off. Questions answered
+by this computer are visible in the group history/requests views.
 
-A computer can be in one group. Starting or joining while one is already
-recorded says to leave first.
+**Borrow an AI** has separate lending and borrowing switches. A computer without
+an available model can hand off chat to a willing peer. The peer receives the
+conversation text and answers without its private tools. This does not hand off
+embedding or indexing jobs. The relevant computers must be online.
+
+## People, leaving, and history
+
+**People** lists members, roles, computers, and presence. Admins can change Admin/
+Member roles or remove people/computers after confirmation. The last admin cannot
+leave other people without an admin: appoint another first. If you are alone,
+leaving ends the group. Leaving removes all computers belonging to your person.
+
+Removed computers stop receiving new group data after applying the updated
+membership. This cannot erase copies they retained elsewhere. **History** shows
+signed records of sharing and federated memory access. Records contain content
+hashes rather than the shared words. Checked peer copies and witness signatures
+help expose conflicting histories; they do not prove that shared claims are true.
+See [Audit internals](swarm.md).
 
 ## Words
 
@@ -161,16 +77,16 @@ recorded says to leave first.
 | Group | `GroupId` | One set of people and their computers. |
 | Person | `PersonId` | A human. Several computers can belong to one person. |
 | Computer | `DeviceId` | One install of Sovra. Its network identity and its signing key are the same public key. |
-| Admin, Member | `Role` | What the roster currently allows. See [Roles](#roles). |
+| Admin, Member | `Role` | What the roster currently allows. See [Who may change what](#people-leaving-and-history). |
 | Shared detail | `SharedDetail` | One paragraph someone chose to share, plus its history. |
 | Team | `sovra_core::teams` | AI helpers in a chat. Unrelated to this roster. |
 | WhatsApp group | `SyncedGroup` | A messaging chat. `ConnectionEvent::GroupsChanged` updates that address book. An empty snapshot does not wipe saved people. It does not create or update a Groups roster. |
 
 `Role` also contains **Viewer** ("can read") and **Contributor** ("can add,
 can't read"). The Groups screen never assigns those two. The knowledge fold
-does not consult `Role::reads` or `Role::writes` either, so those labels are
-not enforced on shared text today. Admin checks that the code does enforce
-are listed under [Who may change what](#who-may-change-what).
+checks `Role::writes` for additions and rejects Viewers. `Role::reads` is not
+a separate shared-text read gate, so Contributor must not be described as an
+enforced write-only role. Admin checks are listed under [Who may change what](#people-leaving-and-history).
 
 ## Where a group's data lives
 
@@ -208,401 +124,22 @@ exist on `GroupProblem::NoKeychain` and are not emitted today. A later
 command, if one were sent, would say "Groups aren't available in this session."
 or "Groups can't connect on this computer right now: …".
 
-## How a turn on the screen becomes a signed operation
-
-The UI and the runtime share no group objects. Settings sends
-`Command::Group(GroupCommand)`. The runtime answers with `Event::Group`.
-`GroupsView::apply` is the only function that updates what the screen shows.
-
-On `Event::Ready` the shell sends `GroupCommand::Load`. That publishes the
-saved roster and starts one sync. After that, sync runs every 20 seconds
-while the process is up. Opening Settings again does not send another Load.
-
-The worker's command channel holds 32 commands. If it is full or stopped, the
-runtime reports that the request was not sent and asks the person to retry.
-
-```mermaid
-flowchart LR
-  screen["Groups tab"] -->|Command::Group| runtime["sovra-runtime groups worker"]
-  runtime -->|Event::Group| screen
-  runtime --> fold["sovra-core fold"]
-  runtime --> disk["groups/group.json"]
-  runtime --> mesh["sovra-mesh iroh"]
-  mesh -->|PeerRequest| runtime
-```
-
-`sovra-core` never opens a socket, never sleeps, and never calls Ed25519.
-`sovra-mesh` owns the secret and the sockets and decides nothing about
-membership. The runtime owns every task: mesh receives a spawner and does not
-depend on tokio.
-
-## Identities
-
-All ids are 32 bytes and are stored as lowercase hex.
-
-**Computer (`DeviceId`).** The 32-byte secret's Ed25519 public key. iroh dials
-that same key, so a signature and a connection prove the same computer. The
-roster shows a fingerprint of the first eight hex characters, grouped
-`abcd · efgh`. The secret never leaves the mesh adapter. Core only asks a
-`SignatureVerifier`, and the mesh answers with Ed25519.
-
-**Person (`PersonId`).** 32 random bytes chosen when this computer founds a
-group, or when it joins as a new person. The person is not a computer. The
-type comment mentions recovery from a recovery code; no recovery code is
-created or accepted anywhere in the app.
-
-**Group (`GroupId`).** `SHA-256("sovra-group-v1" ‖ founder device key ‖ 16-byte
-nonce)`. Genesis is accepted only when it is sequence 1 from that founder
-device and the nonce reproduces this id. Another computer cannot invent a
-second genesis for the same group.
-
-**Operation (`OpHash`).** `SHA-256` of the bytes that were signed. Re-delivery
-of the same operation is a no-op because merge keeps the first copy of each
-hash.
-
-**Signature.** 64-byte detached Ed25519 over those same bytes.
-
-## The membership log
-
-Membership is a set of signed operations. There is no central order and no
-server that picks one. Each computer keeps its own chain: `seq` starts at 1,
-`prev` is that computer's previous operation (`None` only when `seq` is 1),
-and `deps` names the other operations this computer had already applied.
-Those parent links make a causal DAG. Any computer that has the same set of
-operations, duplicates included, in any order, folds them to the same roster.
-
-An operation commits to, in struct order, then signs that JSON after the
-domain tag `sovra-membership-v1\n`:
-
-| Field | Role |
-| --- | --- |
-| `group` | Which group. |
-| `author` | The computer that signed it. |
-| `seq`, `prev` | That computer's own chain. |
-| `deps` | Everything else it had already applied. The next draft uses the current heads, excluding its own `prev`. |
-| `at` | The author's clock in Unix milliseconds. A display hint and a tie-break. It is not an authority. |
-| `body` | The change below. |
-
-| Body | Effect when the fold accepts it |
-| --- | --- |
-| `Genesis` | Names the group, the founder person, and the founding computer. The founder is an admin. |
-| `AddPerson` | Inserts a person with a role. Clears a previous removal of that same person id. |
-| `AddDevice` | Attaches a computer to a person who is already in the roster. |
-| `RemoveDevice` | Detaches one computer. The person stays. |
-| `RemovePerson` | Removes the person and every computer of theirs. |
-| `ChangeRole` | Replaces that person's role. |
-| `Rename` | Replaces the group name. |
-
-Names are trimmed. Empty names and names longer than 80 characters are
-rejected.
-
-### How the fold decides
-
-The fold in `crates/sovra-core/src/group/fold.rs` applies seven rules, in
-this order. Rules 4–6 repeat until the set of voided operations stops growing.
-The void set only grows, so the loop finishes, and every computer finishes on
-the same roster.
-
-1. **Shape.** Wrong group, a signature the verifier rejects, `seq == 0`, or a
-   sequence-1 operation that has a `prev` (or a later one that lacks it) is
-   rejected.
-2. **Forks.** Two different operations from the same computer at the same
-   `seq` fork that computer. Every operation of theirs from that sequence on
-   is rejected. The roster records the computer in `forked`.
-3. **Causality.** An operation waits in `pending` until every parent is
-   present. A parent that was rejected rejects the child. Ready operations
-   are ordered so parents come first. Ties break by the author's clock, then
-   by the operation hash, using a sorted set so the order is fixed. When an
-   operation is taken, its `prev` must be the same author's previous
-   sequence. A broken link rejects that operation and its waiting descendants.
-4. **Authority.** In that order, each operation must descend from genesis and
-   come from a computer that is in the roster at that moment, with a role
-   that allows the body. See the next section.
-5. **Strong removal.** Once a person or computer is removed, anything they
-   authored that neither saw the removal nor was seen by it is void, except
-   further removals. Removals are left to the authority rule. Two admins who
-   remove each other concurrently therefore keep one admin: the removal that
-   sorts first applies, and the other fails because its author is already
-   gone.
-6. **Remove wins.** An add of the same person or computer that is concurrent
-   with a removal is void. Putting them back requires an add that has seen
-   the removal.
-7. **No people without an admin.** Removing the last admin while other people
-   remain, or demoting the last admin, is rejected (`WouldLeaveNoAdmin`).
-   The sole person may leave and end the group: no remaining member needs an admin.
-   This exception prevents a new, unused group trapping its creator. The screen says "A group needs at least one admin.
-   Make someone else an admin first."
-
-Operations that are waiting for a missing parent stay pending. They do not
-change the roster until the parent arrives and a later fold sees both.
-
-### Who may change what
-
-The runtime trial-folds every change it is about to sign. It keeps and
-broadcasts the operation only when the fold applies it. A rejection becomes
-the problem text on the screen.
-
-| Action | Allowed when |
-| --- | --- |
-| Invite a new person | This computer's person is an admin. |
-| Add another of my computers | This computer is in the group. The signed body is `AddDevice` for the inviter's own person. An admin may also add a computer onto someone else's person; the screen's button always adds it onto the inviter. |
-| Change a role, rename the group, remove another person | Admin. |
-| Remove a computer | Admin, or the person who owns that computer. |
-| Leave | This computer signs `RemovePerson` for its own person. That removes every computer of that person. The last admin cannot leave while other people remain; a sole person can end the group. |
-| Share, agree, stop using, erase | See [Shared knowledge](#shared-knowledge). |
-
-The roster lists admins first, then this computer's person, then names
-case-insensitively. Each row shows the role sentence ("Admin — can add and
-remove people", "Member — can read and add"). The second-admin caption is
-shown when this computer's person is an admin and the roster has fewer than
-two admins.
-
-The role buttons on the screen are only **Make admin** and **Make member**.
-Removing your own row is **Leave this group**, not **Remove**. From a second
-computer of the same person you can remove the other computer without being
-an admin, because you own it. You cannot press Remove on the computer you are
-using.
-
-## Invites and joining
-
-A link is the invite. It is `sovra://join/` plus RFC 4648 base32, lowercase,
-without padding, of the JSON for a `JoinLink` (version 1). Parsing trims
-whitespace and ignores letter case. Links longer than 2,048 characters are
-refused before decoding. A higher version byte is "that link needs a newer
-Sovra". A damaged or truncated body is "that link is damaged". Expiry is
-`now >= expires_at`.
-
-The JSON carries the group id and name, the inviting computer's id and the
-inviter's display name, the invite kind, a 16-byte secret, the expiry, and
-the inviter's relay URL and direct addresses at the moment the link was made.
-Those addresses can go stale if the inviter's network changes before anyone
-uses the link. The secret is inside the link. Treat the link as a password:
-send it in a private channel, and expect a forwarded copy to be enough to
-join until it is used or it expires.
-
-Two kinds exist.
-
-| Kind | Who joins | What the inviter signs |
-| --- | --- | --- |
-| `Person { name, role }` | A new person. The screen offers Member or Admin. The name is whatever was in **Their name** when the link was made. | `AddPerson`, then `AddDevice` for the joining computer. |
-| `OwnDevice` | Another computer of the inviter. The joiner still types a computer name. | `AddDevice` onto the inviter's person. The person id the joiner generated is ignored. |
-
-The inviting app stores `SHA-256(secret)` in an in-memory book, prunes expired
-unused invites when it issues a new one, and burns an invite on the first
-successful proof. Lifetime is ten minutes (`INVITE_LIFETIME_MS`). Comparison
-of a presented proof with each live invite is constant time per invite.
-
-The proof is `SHA-256("sovra-invite-proof-v1" ‖ secret ‖ SHA-256(transcript))`.
-The transcript is `SHA-256("sovra-join-v1" ‖ inviter device ‖ joiner device ‖
-group id)`. A captured proof is useless for a different pair of computers or
-a different group. The secret itself, from the link, is what lets someone
-build a fresh proof.
-
-```mermaid
-sequenceDiagram
-  participant A as Inviting computer
-  participant B as Joining computer
-  A->>A: Issue 16-byte secret, show sovra://join/…
-  B->>B: Parse link, refuse if expired or damaged
-  B->>A: Join: group, proof, person id, computer name, B's address
-  A->>A: Redeem invite, sign AddPerson and/or AddDevice
-  A->>B: Joined: full membership log and knowledge log
-  A->>A: Remember B's address, broadcast the new operations
-  B->>B: Fold. Keep the record only if this computer is on the roster
-```
-
-The join request is one QUIC bidirectional stream. The joiner waits at most
-15 seconds. Failure to connect is "Couldn't reach the other computer. Check
-both are online and try again." A refused invite is expired, already used, or
-not valid. After a `Joined` response the joiner folds the history. It keeps
-the record only when the fold shows this computer on the roster, and it
-learns its person id from that roster (for an own-computer invite, that is
-the inviter's person). Otherwise it drops the history and says the other
-computer did not add this one.
-
-The core pairing machine can show four emoji and six digits
-(`short_auth_string`) so two people can reject a forwarded link, and it has
-a two-minute, one-guess window for a same-room numeric code. The running app
-does not use either. Join emits "skip the code check" and then "admitted".
-`ShowShortCode` and `JoinWithCode` answer "Same-room codes aren't ready yet.
-Use the link or QR code instead." There is no QR control on the screen;
-the link is the only invite the screen can show. `ConfirmCode` is ignored.
-
-## What computers say to each other
-
-The QUIC protocol name is the bytes `sovra/group/1`. One JSON request travels
-on one bidirectional stream. A single message either way is capped at 8 MiB.
-The mesh serves every stream of an accepted connection until the peer closes
-it. An outbound request opens a stream, writes one request, reads one
-response, and closes the connection.
-
-The handler trusts `from` because the handshake proved that public key. It
-then applies `admits_request`:
-
-| Request | Who may send it |
-| --- | --- |
-| `Join` | A computer that is not on the roster yet. The group id must be this computer's group. |
-| `Sync`, `Push` | A computer the current roster `admits` (it belongs to a person who is still in the group). |
-| `Ask`, `Work` | A member, and only if this computer's owner turned answering (memories) or helping (AI) on; rate-limited per computer. |
-| `JoinByCode`, `ConfirmJoin` | Any nearby computer, but only while a code is showing here; one guess, then both people must press **They match**. |
-| Anything for a different group id | Refused as the wrong group. |
-
-`Join` is handled by the admit path above. The other two are set reconciliation:
-
-- **Sync** says "here are the membership hashes and knowledge hashes I have,
-  and here is how to reach me." The answer contains the operations the asker
-  lacks, plus the hashes the answerer lacks. The asker then **Push**es those.
-- **Push** delivers new operations as soon as this computer signs them, and
-  also answers a sync. Merge inserts an operation only when its hash is new,
-  its group id is this computer's group, and it belongs to a space this
-  computer is in, then refolds.
-
-Replies carry at most 6 MB of shared operations; a large history (many shared
-artifacts) arrives over several sync rounds. A two-person space's operations
-are only ever sent to, synced with, or handed in a join to that pair's
-computers.
-
-Both sides remember the `from` address on the request, replacing any older
-address for that computer. Addresses are hints (`PeerAddress`: device key,
-optional relay URL, optional direct socket addresses). With Internet reach,
-iroh can look a computer up from the key alone once it is online. With
-`SOVRA_GROUP_REACH=local` there is no discovery and no relay, so a peer this
-computer has never recorded an address for can stay unreachable.
-
-A push that fails is logged at debug. The 20-second sync retries. Every
-successful exchange marks the other computer as seen; the roster shows
-**Online now** within a minute of that. There is no separate gossip channel.
-
-### After a removal arrives
-
-When a fold shows that this computer is no longer on the roster, the runtime
-clears the local record: group id, both logs, and saved addresses. It emits
-`LeftGroup`, and the screen returns to Start / Join. That includes **Leave**
-on this computer and a removal that another admin signed.
-
-The warning on the screen is still true about copies outside the group file:
-chats, personal memory, and any backup already taken are not hunted down or
-rewritten. Erase, described below, propagates through the replicated log. It
-cannot pull back a copy someone already saved elsewhere. A computer that
-never comes online again keeps the `group.json` it had. A computer that does
-apply its own removal deletes that file's group contents as part of leaving.
-
-Everyone who remains keeps the log, including operations from people who
-left. Details those computers shared stay visible with the caption "From
-someone no longer in the group — not used", and helpers skip them.
-
-## Encryption and spaces
-
-Everything shared is sealed before it is saved or sent. A space (the whole
-group, or one pair of people) has lane keys: 32 random bytes each, handed to
-each member computer in a signed `KeyGrant`, sealed to that computer's device
-key (X25519 from its Ed25519 key). Other operations travel as `Sealed`: the
-inner operation, AES-256-GCM-encrypted and bound to the group, lane, key and
-author. A key may encrypt new content only while every computer that holds it
-is still in that space, so removing someone makes the next share use a fresh
-key. Newcomers are granted older keys so they can read history; removed
-computers keep only what they already had. `group.json` holds no shared words.
-
-## Shared knowledge
-
-Shared knowledge is a second signed log, folded against the current roster.
-Today every group has one lane, `LaneId` =
-`SHA-256("sovra-lane-v1/group" ‖ group id)`. The type exists so later
-person-to-person lanes can be a different id. Operations for any other lane
-are rejected as the wrong lane. The signing domain is `sovra-knowledge-v1\n`
-plus the canonical JSON of the unsigned operation. The chain fields match
-membership: `seq`, `prev`, `deps`, author clock.
-
-| Body | Meaning |
-| --- | --- |
-| `Share` | A detail. Optional topic names (`about`), an optional `valid_at`, and the ids of details this one replaces. |
-| `Corroborate` | "I agree" from a different person. |
-| `Withdraw` | Stop using the detail. The words stay in the log. |
-| `Redact` | Clear the words and the topics on every computer that folds the log. The fact that a detail existed stays. |
-
-The screen's **Share with the group** sends a `Share` with no topics, no
-`valid_at`, and an empty replace list. The text box is cleared locally as
-soon as the command is sent. Empty text is "there's nothing to share". More
-than 2,000 characters is "that's too long to share as one detail". More than
-eight topics is rejected; the screen never sends topics. The runtime checks
-that again before signing, and the fold checks it on every computer.
-
-`GroupCommand::Correct` signs a `Share` whose `replaces` list is the details
-being corrected. Nothing on the Groups screen sends Correct. The fold still
-implements corrections so a log that contains them converges.
-
-### How a detail is folded
-
-Signature, group, and lane are checked first. The causal order and fork rules
-are the same shape as membership (`dag::order`). Then, in that order:
-
-- The author must be a current computer on the roster, or a computer recorded
-  in `former_devices` (it used to be in the group). Anyone else is an unknown
-  author and the operation is rejected.
-- A `Share` from a current member becomes a detail attributed to that person
-  and that computer's name. A share from a former computer is kept and marked
-  `from_former_member`.
-- A replacement is accepted only when every id it names is already in the
-  view and is an ancestor of the new operation (the author had seen it).
-  Replacements from former members do not retire anything.
-- Two replacements of the same detail that did not see each other, and that
-  do not say the same thing, are a **dispute**. "The same thing" means the
-  same alphanumeric words in the same order and the same `valid_at`. Both
-  stay visible. The display choice is the later `valid_at`, then the later
-  share time, then the greater hash. A later correction that names both
-  settles them by replacing them. The screen's caption for a dispute is
-  "People disagree — both are shown".
-- "I agree" from the same person who shared the detail is rejected. Agreement
-  from a former member is stored as an operation and does not add to
-  `agreed_by`. Each other person is counted once.
-- **Stop using** and **Erase the words** are allowed for the author's person
-  or an admin. Withdraw sets status `Withdrawn` unless the detail was already
-  redacted. Redact clears `text` and `about` and sets `Redacted`. The screen
-  shows "(erased)" when the text is empty, and "Words erased" / "Stopped —
-  not used" / "Corrected — not used" for the other inactive states.
-
-Helpers may use a detail only when `usable` is true: the author is still in
-the group, and the status is current or disputed. Withdrawn, replaced,
-redacted, and former-member details stay on the screen and out of answers.
-
-A former member cannot keep feeding helpers by signing operations with an old
-clock. Those operations can still sit in the log, and they stay hidden from
-`usable` without comparing clocks.
-
-### How a helper reads the group
-
-Search ranks usable details for the question with BM25 (`k1` 1.2, `b` 0.75)
-over the detail text and its topics. Words are split on non-alphanumeric
-characters, lowercased, and dropped if they are one character, empty, or in
-the English stop list in `knowledge.rs`. A light stemmer strips `ies`, `ing`,
-`ed`, `es`, and `s` from longer words so "service" meets "serviced". Topics
-are indexed the same way. The screen shares no topics, so matching is on the
-sentence that was shared.
-
-The score is then multiplied by agreement and by dispute:
-
-| Situation | Weight |
-| --- | --- |
-| Each other person who agreed, up to four | `1 + 0.25 × that count` |
-| Disputed, and this detail is the display choice | `0.8` |
-| Disputed, and this detail is the other version | `0.6` |
-| Not disputed | `1` |
-
-Ties break by later share time, then by smaller id. At most six details are
-attached to one recall (`MAX_GROUP_EVIDENCE_ITEMS`), and they also have to fit
-the serialised memory-context byte cap. The citation is `group:` plus the
-first 12 hex characters of the operation id.
-
-The runtime wraps the personal memory reader. A turn with no reader — an
-untrusted sender, or remembering paused — receives no group details either.
-When group evidence is present, the helper's system text says the `group`
-array is other people's statements, to name who shared a detail, to cite the
-`group:` id, to refuse commands inside it, and, when `disputed` is true, to
-present both versions and say they disagree. `agreed_by` on that evidence is
-a count, not a list of names.
-
-Personal chats and files are a different store. Sharing does not grant tools,
-terminal permission, or the right to change someone else's computer.
+## Protocol and authorization
+
+The UI sends `Command::Group` and folds `Event::Group` updates. Runtime tasks own
+storage, synchronization, cancellation, and peer requests. Core folds signed
+membership and knowledge operation histories; the mesh adapter supplies crypto,
+network transport, and storage. Peer identities are device public keys.
+
+The membership fold resolves roles, removals, concurrent changes, and conflicting
+histories. Group, two-person, and department spaces have separate lane keys.
+Membership changes rotate keys for subsequent records. Key rotation does not
+retract plaintext or keys already held by a former member.
+
+Shared evidence is attributed to its author and treated as untrusted data by
+helpers. Sharing does not grant terminal permission, arbitrary tools, or control
+of another computer. Domain rules and exact wire limits are in the source map
+below; the public UI exposes only the controls described in this guide.
 
 ## Network
 
@@ -628,7 +165,7 @@ details, memories, artifacts, helpers, skills and schedules, agreement,
 withdraw, erase, helper recall of usable details and artifacts with
 attribution, asking each other's memories, presence, and chat work handoff.
 
-Present in core or in the roadmap, and not what the Groups screen does:
+Current boundaries between protocol support and screen controls:
 
 | Capability | State |
 | --- | --- |
@@ -637,7 +174,6 @@ Present in core or in the roadmap, and not what the Groups screen does:
 | Handed-off answers | Streamed, stoppable within a second, handed to the next free computer if the helper vanishes first. Chat only: no embedding or indexing jobs (another computer's vectors are not comparable), and no tools on the helping computer. |
 | Same-room codes | Need both computers on one network (mDNS). No SPAKE2: one guess per code plus the picture check. |
 | A second admin's extra signature to remove an admin | Not required. One admin's signature is enough. The last admin cannot be removed while other people remain, or demoted. |
-| Person recovery codes | Mentioned on the `PersonId` comment only. |
 | Production relays and a relay URL you configure | Internet reach uses n0's public relays. `local` turns relays off. There is no separate relay-URL setting. |
 
 Removed computers stop receiving new operations once they are off the roster.
@@ -669,7 +205,7 @@ in `crates/sovra-ui/tests/groups.rs` (the screen), and in
 `crates/sovra-adk/src/recall.rs` (`group_guidance_arrives_with_shared_details`).
 
 
-## History rebuild benchmark
+## Optional group verification
 
 Run `cargo test -p sovra-core benchmark_group_history -- --ignored` to exercise
 2,000 sequential shares (1,000 notes and 1,000 approximately 1 KiB documents),
@@ -677,25 +213,6 @@ then rebuild that history three times. The fixture uses deterministic test
 signatures and the production fold, including its signature/hash caches. It
 asserts that all notes and artifacts survive without rejected or pending items.
 This measures local CPU work, not disk persistence, Ed25519 or network delivery.
-
-On the development Linux host, using the default debug test profile on
-2026-11-13, three separate test-process runs measured with `/usr/bin/time`
-produced these results (build time excluded; other development work was running):
-
-| Representation | Elapsed seconds, three runs | Median | Peak process memory |
-| --- | --- | --- | --- |
-| Full ancestor hash sets | 8.57, 6.85, 6.72 | 6.85 s | 143.6–144.1 MiB |
-| Per-computer causal clocks | 0.54, 0.47, 0.39 | 0.47 s | 19.5–19.8 MiB |
-
-The roughly 14.6× median improvement applies to this workload. Each valid
-computer history is contiguous; forked histories are excluded before ordering.
-Remembering the highest seen sequence per computer therefore preserves ancestry
-without storing every earlier hash. A regression compares every causal query
-against explicit parent walks across seven interleaved computer histories.
-Existing tests also cover concurrent edits, invalid replacements, missing parents,
-permissions and deterministic folds. These figures are not an end-to-end sharing
-latency claim or a release-build performance guarantee.
-
 
 ### Complete local network transfer
 
@@ -708,9 +225,6 @@ successive batches until every item arrives, verifies every signature and
 compares the complete ordered content after each round. The operation chain is
 valid; later requests advertise the hashes already received.
 
-On the same development host and debug profile, three standalone executions of
-the compiled test on 2026-11-13 took 3.92, 3.86 and 3.89 seconds (median 3.89 s),
-with peak process memory of 77.8, 82.6 and 77.2 MiB. Timing includes endpoint
-setup, fixture signing, transfer, verification and shutdown, with concurrent
-compilation on the host. This is a repeatable local-network regression workload,
-not a claim about Internet relay speed or two separate physical computers.
+These fixtures exercise local CPU and network behavior, not public-relay
+performance or a production service guarantee. Record the revision, workload,
+machine, and build profile when measuring them.

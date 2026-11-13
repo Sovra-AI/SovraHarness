@@ -12,7 +12,9 @@ the build prerequisites and run `cargo xtask dev`. Installed builds can be
 launched normally. The interface starts in English; the sign-in screen and Settings include a language
 picker and **Text size** from 75–200%.
 
-On a fresh workspace, the email/password form creates the first local account.
+On a fresh workspace, create a local account with your name. Email and password
+are optional and must be supplied together. A name-only account can be reopened
+using its named sign-in button on this computer.
 Later launches restore the session or ask you to sign in. Google sign-in needs a
 configured desktop OAuth client; see [Google](google.md). Local accounts do not
 establish separate encrypted data stores or company SSO. The current sign-in
@@ -50,7 +52,7 @@ in Settings, replays it.
 The [Models guide](models.md) explains keys, discovery, costs and capabilities.
 For local models, start the model server separately; Sovra does not install or
 launch it for you. A local chat model alone does not disable web search, remote
-tools or group networking; see [network destinations](value-realisation/03-sovereignty-evidence.md#2-every-network-destination).
+tools or group networking; see [network destinations](network.md#network-destinations).
 
 ## Find the right feature
 
