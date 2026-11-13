@@ -17,7 +17,7 @@ use gpui_kit::{
 };
 use sovra_core::{
     Command, NavTab,
-    skills::{Skill, SkillCommand, SkillKind, valid_name},
+    skills::{Skill, SkillCommand, SkillEvent, SkillKind, valid_name},
 };
 
 use crate::{
@@ -95,6 +95,12 @@ impl SkillCategoryFilter {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EditorExit {
+    Editing,
+    ConfirmDiscard,
+}
+
 pub(crate) struct SkillLibrary {
     search: Entity<InputState>,
     category: SkillCategoryFilter,
@@ -105,6 +111,9 @@ pub(crate) struct SkillLibrary {
     body: Entity<TextareaState>,
     editing: Option<Skill>,
     creating: bool,
+    exit: EditorExit,
+    scroll: gpui_kit::ScrollHandle,
+    pending_save: Option<Skill>,
     advanced_open: bool,
     /// Draft value of [`Skill::auto_apply`]; saved with the form.
     auto_apply: bool,
@@ -117,6 +126,39 @@ pub(crate) struct SkillLibrary {
 }
 
 impl SkillLibrary {
+    pub(crate) fn observe_save(&mut self, event: &SkillEvent, cx: &Context<Shell>) {
+        let Some(pending) = &self.pending_save else {
+            return;
+        };
+        match event {
+            SkillEvent::Saved(saved) if saved.as_ref() == pending => {
+                let unchanged = self.title.read(cx).value().trim() == pending.title
+                    && self.description.read(cx).value().trim() == pending.description
+                    && self.body.read(cx).value().as_ref() == pending.instructions
+                    && self
+                        .tools
+                        .read(cx)
+                        .value()
+                        .split_whitespace()
+                        .eq(pending.tools.iter().map(String::as_str))
+                    && self.auto_apply == pending.auto_apply;
+                self.editing = self.pending_save.take();
+                self.creating = false;
+                self.notice = if unchanged {
+                    "Saved. Your skill is available under Made by you."
+                } else {
+                    "The earlier version was saved. Save again to keep your latest changes."
+                }
+                .into();
+            }
+            SkillEvent::Error(message) => {
+                self.pending_save = None;
+                self.notice = format!("Your changes are still here. Try saving again. {message}");
+            }
+            SkillEvent::Loaded { .. } | SkillEvent::Saved(_) => self.notice = "Saving…".into(),
+        }
+    }
+
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         let search = cx.new(|cx| {
             InputState::new(window, cx)
@@ -146,6 +188,9 @@ impl SkillLibrary {
             }),
             editing: None,
             creating: false,
+            exit: EditorExit::Editing,
+            scroll: gpui_kit::ScrollHandle::new(),
+            pending_save: None,
             advanced_open: false,
             auto_apply: true,
             deleting: None,
@@ -156,7 +201,32 @@ impl SkillLibrary {
         }
     }
 
+    fn has_changes(&self, cx: &Context<Shell>) -> bool {
+        let original = self.editing.as_ref();
+        self.name.read(cx).value().trim() != original.map_or("", |skill| &skill.name)
+            || self.title.read(cx).value().trim() != original.map_or("", |skill| &skill.title)
+            || self.description.read(cx).value().trim()
+                != original.map_or("", |skill| &skill.description)
+            || self.body.read(cx).value().as_ref()
+                != original.map_or("", |skill| &skill.instructions)
+            || !self.tools.read(cx).value().split_whitespace().eq(original
+                .into_iter()
+                .flat_map(|skill| skill.tools.iter().map(String::as_str)))
+            || self.auto_apply != original.is_none_or(|skill| skill.auto_apply)
+    }
+
+    fn close_editor(&mut self) {
+        self.creating = false;
+        self.editing = None;
+        self.exit = EditorExit::Editing;
+        self.notice.clear();
+    }
+
     fn edit(&mut self, skill: Option<Skill>, window: &mut Window, cx: &mut Context<Shell>) {
+        if self.pending_save.is_some() {
+            return;
+        }
+        self.exit = EditorExit::Editing;
         self.creating = skill.is_none();
         self.advanced_open = skill.as_ref().is_some_and(|s| !s.tools.is_empty());
         self.auto_apply = skill.as_ref().is_none_or(|s| s.auto_apply);
@@ -185,6 +255,12 @@ impl SkillLibrary {
         self.editing = skill;
         self.notice.clear();
         cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn confirm_save_for_test(&mut self, cx: &Context<Shell>) {
+        let skill = self.pending_save.clone().expect("test submitted a skill");
+        self.observe_save(&SkillEvent::Saved(Box::new(skill)), cx);
     }
 
     #[cfg(test)]
@@ -228,8 +304,11 @@ impl Shell {
         self.select_tab(NavTab::Skills, cx);
     }
 
-    fn save_skill(&mut self, cx: &mut Context<Self>) {
+    fn save_skill(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = &self.skill_library;
+        if view.pending_save.is_some() {
+            return;
+        }
         let mut skill = view.editing.clone().unwrap_or_else(|| Skill {
             name: String::new(),
             title: String::new(),
@@ -251,7 +330,9 @@ impl Shell {
         let raw_title = view.title.read(cx).value().trim().to_owned();
         let raw_name = view.name.read(cx).value().trim().to_owned();
         skill.title = raw_title;
-        skill.name = if raw_name.is_empty() {
+        skill.name = if let Some(original) = &view.editing {
+            original.name.clone()
+        } else if raw_name.is_empty() {
             self.skills.available_command_name(&skill.title)
         } else if valid_name(&raw_name) {
             raw_name
@@ -276,7 +357,26 @@ impl Shell {
         skill.instructions = view.body.read(cx).value().to_string();
         skill.auto_apply = view.auto_apply;
         match skill.validate() {
-            Ok(()) => self.skill_command(SkillCommand::Save(Box::new(skill)), cx),
+            Ok(()) => {
+                self.skill_library
+                    .name
+                    .update(cx, |input, cx| input.set_value(&skill.name, window, cx));
+                if cx
+                    .global::<RuntimeClient>()
+                    .0
+                    .send(Command::Skills(SkillCommand::Save(Box::new(skill.clone()))))
+                    .is_ok()
+                {
+                    self.skill_library.exit = EditorExit::Editing;
+                    self.skill_library.pending_save = Some(skill);
+                    self.skill_library.notice = "Saving…".into();
+                } else {
+                    self.skill_library.notice =
+                        "Sovra could not save right now. Your changes are still here; try again."
+                            .into();
+                }
+                cx.notify();
+            }
             Err(error) => {
                 self.skill_library.notice = error.to_string();
                 cx.notify();
@@ -336,6 +436,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .min_h_0()
         .h_full()
         .overflow_y_scroll()
+        .track_scroll(&view.scroll)
         .items_center()
         .p(t.space.medium)
         .child(
@@ -354,17 +455,27 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                 .child(design::width_probe(cx, |shell: &mut Shell| {
                     &mut shell.skill_library.width_class
                 }))
-                .child(render_header(shell, view, editing, cx))
+                .child(render_header(
+                    shell,
+                    view,
+                    editing,
+                    view.pending_save.is_some() || editing,
+                    cx,
+                ))
                 .children((!view.notice.is_empty()).then(|| {
                     div()
                         .id("skill-library-notice")
                         .test_support()
+                        .aria_label(view.notice.clone())
                         .w_full()
                         .p(t.space.small)
                         .sovra_surface(Surface::Subtle, cx)
                         .sovra_text(TextRole::Caption, cx)
                         .child(view.notice.clone())
                 }))
+                .children(
+                    (view.exit == EditorExit::ConfirmDiscard).then(|| discard_confirmation(cx)),
+                )
                 .children(editing.then(|| editor(view, cx)))
                 .children((!editing).then(|| render_categories(shell, view, &query, cx)))
                 .children((!editing).then(|| render_skills_catalog(shell, view, &query, cx))),
@@ -376,6 +487,7 @@ fn render_header(
     shell: &Shell,
     view: &SkillLibrary,
     editing: bool,
+    saving: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
@@ -389,6 +501,7 @@ fn render_header(
         .gap(t.space.small)
         .child(
             design::primary_button("skill-create", "Add your own", cx)
+                .disabled(saving)
                 .icon(IconName::Plus)
                 .tooltip("Teach Sovra a reusable step-by-step recipe in your own words")
                 .on_click(cx.listener(|shell, _, window, cx| {
@@ -397,6 +510,7 @@ fn render_header(
         )
         .child(
             design::button("skill-import", "Import", cx)
+                .disabled(saving)
                 .ghost()
                 .icon(IconName::FolderOpen)
                 .tooltip("Add a saved skill folder from your computer")
@@ -404,6 +518,7 @@ fn render_header(
         )
         .child(
             design::button("skill-refresh", "Refresh", cx)
+                .disabled(saving)
                 .ghost()
                 .tooltip("Reload skills from disk")
                 .on_click(cx.listener(|shell, _, _, cx| {
@@ -949,7 +1064,7 @@ fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + us
                 "Leave this blank and Sovra makes one from the name.",
                 Input::new(&view.name)
                     .aria_label("Skill command name")
-                    .readonly(!view.creating)
+                    .readonly(!view.creating || view.pending_save.is_some())
                     .into_any_element(),
                 cx,
             ))
@@ -974,19 +1089,68 @@ fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + us
             .flex_wrap()
             .gap(t.space.small)
             .child(
-                design::primary_button("skill-save", "Save", cx)
-                    .on_click(cx.listener(|shell, _, _, cx| shell.save_skill(cx))),
+                design::primary_button(
+                    "skill-save",
+                    if view.pending_save.is_some() {
+                        "Saving…"
+                    } else {
+                        "Save"
+                    },
+                    cx,
+                )
+                .disabled(view.pending_save.is_some())
+                .on_click(cx.listener(|shell, _, window, cx| shell.save_skill(window, cx))),
             )
             .child(
                 design::button("skill-editor-back", "Back", cx)
+                    .disabled(view.pending_save.is_some())
                     .ghost()
                     .on_click(cx.listener(|shell, _, _, cx| {
-                        shell.skill_library.creating = false;
-                        shell.skill_library.editing = None;
+                        if shell.skill_library.has_changes(cx) {
+                            shell.skill_library.exit = EditorExit::ConfirmDiscard;
+                            shell
+                                .skill_library
+                                .scroll
+                                .set_offset(gpui_kit::Point::default());
+                        } else {
+                            shell.skill_library.close_editor();
+                        }
                         cx.notify();
                     })),
             ),
     )
+}
+
+fn discard_confirmation(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex()
+        .id("skill-discard-confirm")
+        .test_support()
+        .gap(t.space.small)
+        .child(
+            design::paragraph("Leave without saving your changes?").sovra_text(TextRole::Body, cx),
+        )
+        .child(
+            h_flex()
+                .flex_wrap()
+                .gap(t.space.small)
+                .child(
+                    design::primary_button("skill-keep-editing", "Keep editing", cx).on_click(
+                        cx.listener(|shell, _, _, cx| {
+                            shell.skill_library.exit = EditorExit::Editing;
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    design::button("skill-discard", "Discard changes", cx)
+                        .danger()
+                        .on_click(cx.listener(|shell, _, _, cx| {
+                            shell.skill_library.close_editor();
+                            cx.notify();
+                        })),
+                ),
+        )
 }
 
 fn card(

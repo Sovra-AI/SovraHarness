@@ -97,10 +97,14 @@ what the model supports. Switching models starts fresh provider history.
 
 ## My AI's and routing
 
-**My AI's** exposes **One AI for everything**, **Choose per task**, and
-**Automatic**, plus Quick/Balanced/Thorough effort choices. Under **Show details**
-you can inspect the routing tree and test a sample prompt without running the
-answer model.
+**My AIs** shows the chat model chosen in Models and lets you explore routing
+previews. Compare your chosen model, preferred effort per helper, and automatic
+routing rules. These previews do not switch the model answering chats or check
+connection availability; their settings last for the current app session. Expand
+**Preview an AI choice** to try a question without sending a chat.
+
+Choose **One AI for everything**, **Choose per task**, or **Automatic**,
+with Quick/Balanced/Thorough effort choices.
 
 Routing evaluation and actual provider selection are separate. The current
 ordinary-chat runtime emits a route evaluation, then runs the harness built from

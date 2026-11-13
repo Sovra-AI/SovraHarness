@@ -79,6 +79,17 @@ impl Llm for RequiredFirstCall {
         let Some((target, args)) = self.rule.decide(&user_text, &offered) else {
             return self.inner.generate_content(request, stream).await;
         };
+        // This wrapper sits outside the admission filler. Snapshot ids already
+        // on the request so a call we synthesize below does not reuse one.
+        let mut used_ids = request
+            .contents
+            .iter()
+            .flat_map(|content| &content.parts)
+            .filter_map(|part| match part {
+                Part::FunctionCall { id, .. } | Part::FunctionResponse { id, .. } => id.clone(),
+                _ => None,
+            })
+            .collect::<std::collections::HashSet<_>>();
         // The reply may be replaced, so it is gathered before anything is shown.
         let chunks: Vec<adk_core::Result<LlmResponse>> = self
             .inner
@@ -97,16 +108,20 @@ impl Llm for RequiredFirstCall {
             return Ok(Box::pin(stream::iter(chunks)));
         }
         tracing::info!(tool = %target, "model skipped a required call; making it");
+        let mut content = Content {
+            role: "model".to_owned(),
+            parts: vec![Part::FunctionCall {
+                name: target,
+                args,
+                id: None,
+                thought_signature: None,
+            }],
+        };
+        // Fill the id before the call is stored and sent back. A missing id is
+        // omitted on the wire, and the provider then rejects the follow-up.
+        crate::admission::complete_call_ids(&mut content, &mut used_ids);
         let call = LlmResponse {
-            content: Some(Content {
-                role: "model".to_owned(),
-                parts: vec![Part::FunctionCall {
-                    name: target,
-                    args,
-                    id: None,
-                    thought_signature: None,
-                }],
-            }),
+            content: Some(content),
             finish_reason: Some(FinishReason::Stop),
             partial: false,
             turn_complete: true,
@@ -238,6 +253,69 @@ mod tests {
             Content::new("user").with_text("Official Rust website"),
         ]);
         assert!(matches!(&parts(&llm, plain)[..], [Part::Text { .. }]));
+    }
+
+    // A prose reply is replaced by list_schedules. The follow-up request must
+    // still carry that call's id; a missing id is omitted on the wire and the
+    // provider rejects the turn.
+    #[test]
+    fn an_injected_list_schedules_call_keeps_its_id_on_the_follow_up_request() {
+        let llm = RequiredFirstCall::wrap(
+            Arc::new(Stubborn {
+                calls: AtomicUsize::new(0),
+            }),
+            FirstCall::Tool {
+                name: "list_schedules",
+                args: |_| json!({}),
+            },
+        );
+        let mut asked = request(vec![Content::new("user").with_text(
+            "every morning at 615 am search the web for investments in ai in the uae",
+        )]);
+        asked.tools.insert("list_schedules".to_owned(), json!({}));
+        let out = parts(&llm, asked);
+        let [Part::FunctionCall { name, id, .. }] = &out[..] else {
+            panic!("expected the injected list_schedules call, got {out:?}");
+        };
+        assert_eq!(name, "list_schedules");
+        let call_id = id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .expect("injected list_schedules call needs a non-empty id")
+            .to_owned();
+
+        let follow_up = vec![
+            Content::new("user").with_text(
+                "every morning at 615 am search the web for investments in ai in the uae",
+            ),
+            Content {
+                role: "model".to_owned(),
+                parts: out,
+            },
+            Content {
+                role: "function".to_owned(),
+                parts: vec![Part::FunctionResponse {
+                    function_response: adk_core::FunctionResponseData::new(
+                        "list_schedules",
+                        json!({ "schedules": [] }),
+                    ),
+                    id: Some(call_id.clone()),
+                    annotations: None,
+                }],
+            },
+        ];
+        let messages = adk_model::openrouter::adk_contents_to_chat_messages(&follow_up)
+            .expect("follow-up contents convert");
+        let assistant = messages
+            .iter()
+            .find(|message| message.role == "assistant")
+            .expect("assistant message");
+        let wire = serde_json::to_value(assistant).expect("assistant message serializes");
+        let wire_id = wire["tool_calls"][0]["id"]
+            .as_str()
+            .filter(|id| !id.trim().is_empty())
+            .expect("tool_calls[0].id must be a non-empty string");
+        assert_eq!(wire_id, call_id);
     }
 
     #[test]

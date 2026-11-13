@@ -7,6 +7,14 @@ Current launch: [development.md](development.md). Current file behavior:
 [files.md](files.md) and [file-ontology.md](file-ontology.md). The reference
 supplied with the original request was `pasted-text-1.txt` (48,618 bytes).
 
+## Saving custom skills
+
+Custom skill recipes ask before discarding unsaved changes when you go back.
+Keep editing to finish the recipe, or explicitly discard it to return to Skills.
+Saving waits for confirmation and keeps the form available if it fails. After
+confirmation, further saves update that same skill. If you type while saving,
+Sovra keeps those newer changes and reminds you to save them too.
+
 ## Automatic skill application (2026-11-03)
 
 Explicit `/skill` selection forces a procedure. Without it, the orchestrator gets a

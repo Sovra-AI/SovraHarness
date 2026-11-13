@@ -9,6 +9,11 @@ with a short code already on the clipboard. The person pastes it and presses
 helper** (`GitHubAgent`) then appears to the assistant with the tools below.
 Everything ships in the single binary: no server, no listener and no secret.
 
+## Retrying a key connection
+
+GitHub setup keeps its steps open after a failed key check. Paste your key again
+and press **Connect** to retry; the submitted key is cleared from the field.
+
 ## What the person sees
 
 | State | Card shows | Actions |

@@ -312,7 +312,34 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
 
 #[gpui_kit::test]
 fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut TestAppContext) {
-    let (client, commands, _events) = Client::loopback();
+    fn reveal(
+        window: &mut gpui_kit::Window,
+        id: impl Into<gpui_kit::ElementId>,
+        cx: &mut gpui_kit::App,
+    ) {
+        let id = id.into();
+        for _ in 0..40 {
+            window.render_frame(cx);
+            let bounds = window.find(id.clone()).bounds();
+            let pane = window.find("sovra-my-ais-view").bounds();
+            if bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
+                return;
+            }
+            let delta = if bounds.top() < pane.top() {
+                pane.top() - bounds.top()
+            } else {
+                pane.bottom() - bounds.bottom()
+            };
+            window.scroll(
+                "sovra-my-ais-view",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), delta)),
+                cx,
+            );
+        }
+        panic!("My AIs control must be reachable");
+    }
+
+    let (client, commands, events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
 
     let mut shell_entity = None;
@@ -322,6 +349,22 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         Root::new(view, window, cx)
     });
     let shell = shell_entity.unwrap();
+    events
+        .send_blocking(Event::Models(
+            sovra_core::models::ModelEvent::PreferencesChanged(
+                sovra_core::models::ModelPreferences {
+                    active: Some(sovra_core::models::ModelKey {
+                        connection_id: "test".into(),
+                        model_id: "test-model".into(),
+                    }),
+                    ..Default::default()
+                },
+            ),
+        ))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -333,10 +376,12 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         // Engine internals stay folded away until asked for.
         assert!(window.try_find(("decision-backend-btn", 1usize)).is_none());
         assert!(window.try_find(("specialist-tier-btn", 0usize)).is_none());
+        reveal(window, "my-ais-advanced-toggle", cx);
         window.click("my-ais-advanced-toggle", cx);
         window.render_frame(cx);
 
         // Switch decision backend from Laya to OpenJev.
+        reveal(window, ("decision-backend-btn", 1usize), cx);
         window.click(("decision-backend-btn", 1usize), cx);
         window.render_frame(cx);
         assert_eq!(
@@ -345,6 +390,7 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         );
 
         // Simulate a prompt through the routing tree.
+        reveal(window, "simulate-route-btn", cx);
         window.click("simulate-route-btn", cx);
         window.render_frame(cx);
         let eval = shell
@@ -356,13 +402,43 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         assert_eq!(eval.specialist_id.as_deref(), Some("CodingAgent"));
 
         // Switch selection mode to Per-Agent Models.
+        reveal(window, ("routing-mode-btn", 1usize), cx);
         window.click(("routing-mode-btn", 1usize), cx);
         window.render_frame(cx);
         assert_eq!(
             shell.read(cx).workspace().routing.mode,
             sovra_core::SelectionMode::PerAgentModel
         );
+        reveal(window, ("specialist-tier-btn", 0usize), cx);
         assert!(window.find(("specialist-tier-btn", 0usize)).visible());
+        reveal(window, ("specialist-tier-btn", 2usize), cx);
+        window.click(("specialist-tier-btn", 2usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().specialists[0].preferred_tier,
+            sovra_core::ModelTier::Deep
+        );
+        assert_eq!(
+            window.find(("specialist-tier-btn", 2usize)).checked(),
+            Some(true)
+        );
+        assert!(
+            shell.read(cx).workspace().specialists[0]
+                .model_override
+                .is_none(),
+            "Changing effort must not pin the current global model to this helper"
+        );
+        reveal(window, ("specialist-tier-btn", 0usize), cx);
+        window.click(("specialist-tier-btn", 0usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().specialists[0].preferred_tier,
+            sovra_core::ModelTier::Fast
+        );
+        assert_eq!(
+            window.find(("specialist-tier-btn", 0usize)).checked(),
+            Some(true)
+        );
     })
     .unwrap();
 
@@ -377,6 +453,36 @@ fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut T
         commands.recv_blocking().unwrap(),
         Command::SimulateRoute { .. }
     ));
+    let remaining: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    let effort_changes: Vec<_> = remaining
+        .iter()
+        .filter_map(|command| {
+            if let Command::SetSpecialistModel {
+                model_override,
+                preferred_tier,
+                ..
+            } = command
+            {
+                assert!(
+                    model_override.is_none(),
+                    "Effort updates must preserve the unpinned model in the runtime command too"
+                );
+                Some(*preferred_tier)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        effort_changes,
+        vec![sovra_core::ModelTier::Deep, sovra_core::ModelTier::Fast]
+    );
+    assert!(
+        !remaining
+            .iter()
+            .any(|command| matches!(command, Command::RunPrompt { .. })),
+        "Preview controls must not send a chat"
+    );
 }
 
 #[gpui_kit::test]

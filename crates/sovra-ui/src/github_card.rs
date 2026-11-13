@@ -72,7 +72,8 @@ impl GitHubCard {
         self.key.update(cx, |input, cx| {
             input.set_value(String::new(), window, cx);
         });
-        self.show_key_form = false;
+        // Keep the setup steps available if checking fails. The CheckingKey
+        // state temporarily replaces them, and successful connection closes them.
         send(GitHubCommand::UseKey(key), cx);
         cx.notify();
     }
@@ -100,7 +101,7 @@ impl Render for GitHubCard {
         }
         if matches!(
             github.state,
-            GitHubState::Connected(_) | GitHubState::Connecting { .. } | GitHubState::CheckingKey
+            GitHubState::Connected(_) | GitHubState::Connecting { .. }
         ) {
             self.show_key_form = false;
         }

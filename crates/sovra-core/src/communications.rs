@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::Timestamp;
-use crate::connections::{ChannelError, ChannelKind, ConnectionsState};
+use crate::connections::{ChannelError, ChannelKind, ConnectionsState, GroupMatch, SyncedGroup};
 use crate::people::NameMatch;
 
 pub const MAX_MESSAGE_CHARS: usize = 4096;
@@ -191,7 +191,7 @@ fn resolve_group_or_unknown(
 ) -> Result<(String, String), ChannelError> {
     if channel == ChannelKind::WhatsApp {
         match state.resolve_group(input) {
-            crate::connections::GroupMatch::One(group) => {
+            GroupMatch::One(group) => {
                 let label = if group.subject.is_empty() {
                     group.id.clone()
                 } else {
@@ -199,12 +199,12 @@ fn resolve_group_or_unknown(
                 };
                 return Ok((group.id.clone(), label));
             }
-            crate::connections::GroupMatch::Many => {
+            GroupMatch::Many => {
                 return Err(ChannelError::Failed(
                     "More than one WhatsApp group matches that name. Use the exact group id instead of guessing.".into(),
                 ));
             }
-            crate::connections::GroupMatch::None => {}
+            GroupMatch::None => {}
         }
     }
     Err(ChannelError::Failed(
@@ -255,6 +255,31 @@ pub fn concrete_scheduled_recipient(channel: ChannelKind, input: &str) -> Result
                 "For a timed Telegram text, use me, the numeric chat id, or person:<id> from a people lookup. A first name alone is not enough.".into(),
             ))
         }
+    }
+}
+
+/// The one `WhatsApp` group a saved search may message. A name that matches more
+/// than one stored group is refused, and a group that is not stored is refused.
+pub fn resolve_scheduled_group(
+    groups: &[SyncedGroup],
+    channel: ChannelKind,
+    input: &str,
+) -> Result<String, ChannelError> {
+    if channel != ChannelKind::WhatsApp {
+        return Err(ChannelError::Failed(
+            "A search that sends to a group works on WhatsApp.".into(),
+        ));
+    }
+    let mut state = ConnectionsState::default();
+    state.upsert_groups(groups);
+    match state.resolve_group(input) {
+        GroupMatch::One(group) => Ok(group.id.clone()),
+        GroupMatch::Many => Err(ChannelError::Failed(
+            "More than one WhatsApp group matches that name. Use the exact group id instead of guessing.".into(),
+        )),
+        GroupMatch::None => Err(ChannelError::Failed(
+            "I can't find that WhatsApp group. Say the exact group name or its id.".into(),
+        )),
     }
 }
 
@@ -310,7 +335,7 @@ mod tests {
     fn a_unique_stored_group_is_a_review_recipient_and_an_ambiguous_subject_is_not() {
         let mut state = ConnectionsState::default();
         let own = "15550000000@s.whatsapp.net";
-        state.upsert_groups(&[crate::connections::SyncedGroup {
+        state.upsert_groups(&[SyncedGroup {
             id: "120363111@g.us".into(),
             subject: "School Gate".into(),
         }]);
@@ -324,7 +349,7 @@ mod tests {
                 .0,
             "120363111@g.us"
         );
-        state.upsert_groups(&[crate::connections::SyncedGroup {
+        state.upsert_groups(&[SyncedGroup {
             id: "120363222@g.us".into(),
             subject: "School Gate".into(),
         }]);
@@ -409,11 +434,11 @@ mod tests {
     fn group_lookup_matches_words_of_the_name_and_never_lists_everything() {
         let mut state = ConnectionsState::default();
         state.upsert_groups(&[
-            crate::connections::SyncedGroup {
+            SyncedGroup {
                 id: "1@g.us".into(),
                 subject: "School Gate Parents".into(),
             },
-            crate::connections::SyncedGroup {
+            SyncedGroup {
                 id: "2@g.us".into(),
                 subject: "Family".into(),
             },

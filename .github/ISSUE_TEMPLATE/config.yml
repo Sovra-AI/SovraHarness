@@ -1,1 +1,8 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Sovra-AI/SovraHarness/blob/main/SECURITY.md
+    about: Follow the private reporting instructions; do not post vulnerability details in an issue.
+  - name: Setup and documentation
+    url: https://github.com/Sovra-AI/SovraHarness/blob/main/docs/README.md
+    about: Read setup, configuration, and feature guides before filing an issue.

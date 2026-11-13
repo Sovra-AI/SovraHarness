@@ -3,6 +3,11 @@ description: Something is broken or unexpected
 title: "🐛 "
 labels: [bug]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, follow [SECURITY.md](https://github.com/Sovra-AI/SovraHarness/blob/main/SECURITY.md). Do not post security details here.
+        Remove keys, tokens, and personal data from logs and screenshots.
   - type: textarea
     id: what
     attributes:
@@ -14,7 +19,7 @@ body:
     id: repro
     attributes:
       label: How to reproduce
-      description: Numbered steps, starting from a fresh `cargo xtask dev` if you can.
+      description: Numbered steps from launching the app. Say whether you used a release or a source build.
       placeholder: |
         1.
         2.
@@ -37,6 +42,8 @@ body:
     attributes:
       label: Version or commit
       description: App version, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
   - type: textarea
     id: logs
     attributes:

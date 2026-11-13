@@ -318,6 +318,10 @@ the saved name, and the runtime accepts that path only for accounts created
 without email, password or Google credentials. Password and Google accounts are
 excluded by a pure domain rule and checked again by the runtime.
 
+The following table records the original review backlog. Later entries below
+record fixes and verification; the current completion audit at the end of this
+section identifies what is still unverified.
+
 Remaining review and verification scope:
 
 | Flow | Evidence still needed |
@@ -553,3 +557,143 @@ it without advanced options, then verifies that a conflicting explicit shortcut
 sends no save command. Core regressions cover fallback, collisions and truncation.
 Native verification of this form change remains pending while another development
 GUI is running; no second GUI was launched and that session was not disturbed.
+
+The shared checkout was subsequently rebased to the newer 0.3.0 tree. UX changes
+were preserved in the autostash, with a separate recovery copy made before
+resolving restoration conflicts. Both upstream saved-web-page tests and the UX
+artifact regressions were retained. Login reachability now checks the language
+control, since Google sign-in is conditional on configuration. The first build
+reported a missing match arm already present in source; rebuilding the affected
+runtime source resolved that mismatch without changing its logic. Full CI on the
+restored tree passed: 1,463 tests passed, 14 skipped and all static gates passed.
+File-content checks confirmed the source stayed unchanged during that run.
+The broader review remains open, including Skills save confirmation/native
+verification and the newly merged GitHub connection flow.
+
+Custom-skill saves now have a specific runtime acknowledgement after persistence
+and a successful catalogue reload. A Loaded event alone does not confirm a save.
+The form shows Saving, prevents duplicate submission and keeps the draft on error.
+A matching acknowledgement converts creation into editing the same shortcut;
+newer text typed while saving remains intact with an explicit reminder to save it.
+The runtime regression drives Client with a controlled store and proves failure,
+retry, persistence and the absence of save acknowledgements for Refresh. UI
+regressions cover the delayed acknowledgement, newer edits and stable identity.
+Feedback and retry controls pass minimum/wide/200% checks in both themes.
+Live verification of this change is still pending while the other development
+GUI remains active; no second instance was launched or existing session stopped.
+The 12 targeted Skills/runtime/layout tests passed. Full CI currently stops at
+the recurring `two_computers.rs:353` group-history witnessing timeout (1,414
+passed, one failed; remaining tests cancelled). No timeout was increased and no
+assertion was weakened. Source review found a concrete lead: a Behind checkpoint
+only fetches missing history and relies on a later checkpoint to cosign it.
+Whether repeated identical gossip is suppressed must be verified before changing
+that path; a deterministic first-checkpoint regression is needed.
+
+The pinned gossip implementation does suppress repeated message payloads by
+content hash. A regression reproducing a checkpoint arriving before its history
+failed before the fix. The runtime now retains one verified pending checkpoint
+per current member and rechecks it after successful history syncs, including
+later batches. Membership, group identity and the checkpoint signature are
+rechecked before confirmation; partial history cannot be confirmed. The test
+transport models duplicate suppression and controls history delivery so the
+regression does not depend on whether joining finishes before sharing.
+
+After the group-history fix, all 37 targeted group tests passed, including both
+real-network tests. Full `cargo xtask ci` passed all gates: 1,466 tests passed,
+14 skipped. Native verification of Skills save/retry and this history update
+remains unavailable while the other development GUI owns the running session;
+the coverage above is runtime, headless UI and network testing.
+
+GitHub key setup review: a failed check used to hide the setup form and require
+another Connect action before the user could retry. The form now returns after
+failure while the submitted key is still cleared. This applies
+[NN/g's error-message guidance](https://www.nngroup.com/articles/error-message-guidelines/)
+to keep recovery near the affected controls. The scripted regression failed
+before the fix because the key steps disappeared; it exercises retry with a
+replacement key at minimum, wide and 200% sizes in both themes. Native verification
+remains pending while another development GUI is running.
+
+Skills exit review found Back could abandon a draft and Add your own could replace
+the open form. Back now compares the current fields with the last confirmed save
+and asks Keep editing or Discard changes when they differ. Add/import/refresh are
+disabled while the form is open. Page navigation retains the existing form state.
+The regression reproduced missing protection before the fix; confirmation controls
+are exercised at minimum/wide/200% sizes in both themes.
+
+The final Skills exit checks cover keeping a draft, discarding it, starting a
+fresh empty form, and closing an unchanged confirmed save without a warning.
+The confirmation scrolls into view. The scrolling test helper now uses the pane's
+visible bounds, preventing clicks behind the top bar. All 11 targeted Skills
+tests and full CI passed (1,466 passed, 14 skipped). Live verification remains
+pending coordination of the existing development GUI.
+
+### Current completion audit — 2026-11-12
+
+The scope is all eleven `NavTab` pages, sign-in, first use and the workflows
+reachable from them. The goal is understandable choices, efficient completion,
+visible progress/results, recoverable errors and retained work. The research
+links above inform the review; green tests alone do not establish usability.
+This table distinguishes existing automated evidence from the native acceptance
+work still needed. Test files below are under `crates/sovra-ui/`.
+
+| Surface | Automated evidence inspected | Native acceptance still needed |
+| --- | --- | --- |
+| Sign-in and first use | `tests/shell.rs` checks name-only sign-in waits for runtime confirmation, sign-out, the five-step tour and first-chat setup. Domain/runtime tests reject the name-only shortcut for password or Google accounts. | Repeat the relevant setup and recovery paths on the final build; earlier Arabic and name-only native checks are recorded above. |
+| Chat | `tests/shell.rs` covers Enter/Shift+Enter/Stop, attachment setup retaining the draft, removed uploads, reopening history and late results remaining attached to their original chat. | Exercise first chat, attachment cancellation, history reopening and saving a reply together with real controls. |
+| My AI's | `tests/shell.rs::my_ais_switches_routing_modes_decision_backends_and_simulates_tree` asserts advanced routing controls start hidden and their actions issue the expected commands. | Inspect default explanations and follow optional routing choices in the running app. |
+| Models | `tests/models.rs` covers one-action initial setup, saved/system keys, model choice confirmation, search, curated choices, custom connections and draft retention. | Repeat final connection-error recovery and model-selection flow; earlier setup observations do not cover every connection type. |
+| Team | `tests/teams_artifacts.rs` covers switching/editing helpers, asking the team and attribution of member output; layout checks include minimum, wide and enlarged interfaces. | Follow helper editing, team selection and saving output using test data. |
+| Artifacts | `tests/teams_artifacts.rs` covers save/browse, combined-filter recovery, folders/favorites/paging, draft exit protection, failed-save retry and edits made during saving. It also covers website controls and project approval routing. | Verify populated-library recovery and editing on the final build, including confirmation placement and browser handoff. |
+| Knowledge | `tests/knowledge.rs` checks section access and destination disclosures. `tests/styling/` exercises profile drafts, file indexing, source review, citations, graph/directory navigation and consent at several sizes. | Walk add/find/correct/remove with test data, and check source navigation and visible progress/errors in the native renderer. |
+| Skills | `src/skill_menu.rs` covers categories/examples, direct actions, naming collisions, delayed save acknowledgement, retry, newer edits, keep/discard and fresh-form reopening. Layout tests cover both themes and 200% size. | Verify the final naming, save/retry and discard controls together in the native app. Earlier direct-action checks predate these edits. |
+| Schedules | `tests/shell.rs` and `tests/styling/schedules.rs` cover creation, confirmed saves, retained drafts, retries and action reachability. Runtime tests cover persistence failure and dispatch ordering. | Finish native error-path verification; previous successful create/run/pause observations are recorded above. |
+| Connections | `tests/connections.rs` covers Google/GitHub states, key retry and disconnect confirmation. `tests/mcp_manage.rs` exercises service search, approvals and switches. Shell/messaging tests cover pairing and prepared messages. | Check the final GitHub failure/retry form and service recovery with safe fixtures; do not send real messages as a verification shortcut. |
+| Groups | `tests/groups.rs` covers start/join choices, invitations, sharing, history, templates and leave confirmations. Runtime and app tests include history arriving in batches and real-network communication. | Follow invitation/share/leave controls on test groups and inspect resulting history feedback. |
+| Settings and secondary controls | `tests/models.rs` verifies advanced options are hidden until requested and appearance/language changes. Terminal layout tests exercise approval controls; remote-control tests check local revocation rejects further input. | Inspect settings, terminal consent and phone-access start/stop in the native app; restore temporary changes. |
+| Cross-cutting | Headless layout tests cover minimum/wide/200% sizes and both themes; static gates cover styling, layering and documentation. Arabic paragraph tests inspect shaping rather than only container bounds. | Check final rendered pixels and keyboard paths. Headless bounds do not prove glyph visibility, focus appearance or native browser/clipboard handoff. |
+
+At the time of this audit, native acceptance was waiting for coordination of a
+running development session. The user subsequently approved taking control of
+this checkout's app. It was relaunched with a temporary data folder; the other
+worktree's app was left alone. Per [Development MCP](development-mcp.md), use one
+driver, fresh observed target IDs and bounded completion checks. The observations
+below supersede the earlier coordination blocker. Preserve the full scope above;
+do not mark the review complete from automated results alone.
+
+
+Native verification resumed with user approval in a temporary profile. The
+GitHub worktree's GUI was left untouched. Through Development MCP, an Arabic
+skill title saved and received runtime confirmation after Keep editing; explicit
+Discard returned to the catalogue, and an empty recipe closed without warning.
+Two deliberately invalid GitHub keys each returned to the setup steps with the
+field cleared. An OS window capture confirmed the error, instructions and retry
+controls were visibly readable. Appearance and text-size changes were observed
+and restored. My AI's advanced controls opened and folded correctly.
+
+A test group was created and a note shared; the getting-started state marked the
+share done, and a native capture showed one checked history record. Leaving
+could be cancelled, but attempting to leave as the sole person exposed a dead
+end: the last-admin rule required another person who did not exist. A core
+regression reproduced that failure. The rule now allows the sole person to leave
+and end the group; it still prevents leaving other members without an admin.
+The confirmation also accurately says all of the person's computers leave and
+that separately saved copies remain, rather than promising shared items stay
+in this view. Runtime regression checks leaving and creating a different group.
+Final-build native re-verification and full CI are required below.
+
+The history-delivery test also exposed a fixture race: a shared delivery budget
+could be consumed by another request or a duplicate request for the same entry.
+It now exposes a chosen prefix of history instead, so overlapping syncs cannot
+consume the next test phase. This retains duplicate-gossip suppression and the
+assertion that incomplete history must not be confirmed.
+
+
+Final verification of the group-exit fix: full CI passed all gates, with 1,468
+tests passed and 14 skipped. After another manual development launch, native
+controls successfully left the previously trapped test group, created a new
+group, and left that replacement group too. No data-folder reset was needed.
+The confirmation's accessible label states that all the person's computers
+leave. Temporary group state was cleaned up. Multi-member and last-admin
+protections remain covered by the passing core/runtime/network regressions.
+The broader native acceptance table still has unverified flows; the completed
+checks above are not a claim that every workflow has been exercised.

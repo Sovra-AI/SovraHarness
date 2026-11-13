@@ -613,6 +613,9 @@ mod tests {
             window.render_frame(cx);
             click_visible(window, "skill-save", cx);
             window.render_frame(cx);
+            shell.update(cx, |shell, cx| {
+                shell.skill_library.confirm_save_for_test(cx);
+            });
             click_visible(window, "skill-editor-back", cx);
             window.render_frame(cx);
 
@@ -691,10 +694,131 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn saving_a_skill_waits_for_confirmation_and_keeps_a_failed_draft(cx: &mut TestAppContext) {
+        let (client, commands, events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let (shell, window) = open(cx, size(px(1280.), px(820.)));
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            window.render_frame(cx);
+            click_visible(window, "skill-create", cx);
+            shell.update(cx, |shell, cx| {
+                shell.skill_library.set_editor_fields_for_test(
+                    "",
+                    "Garden plan",
+                    "Plan garden jobs.",
+                    "List this week's garden jobs.",
+                    window,
+                    cx,
+                );
+            });
+            window.render_frame(cx);
+            click_visible(window, "skill-editor-back", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("skill-keep-editing").is_some(),
+                "Back must protect an unfinished skill"
+            );
+            click_visible(window, "skill-keep-editing", cx);
+            window.render_frame(cx);
+            click_visible(window, "skill-save", cx);
+            window.render_frame(cx);
+            assert_eq!(window.find("skill-save").disabled(), Some(true));
+        })
+        .unwrap();
+        let saved = std::iter::from_fn(|| commands.try_recv().ok())
+            .find_map(|command| match command {
+                Command::Skills(sovra_core::skills::SkillCommand::Save(skill)) => Some(skill),
+                _ => None,
+            })
+            .unwrap();
+        events
+            .send_blocking(sovra_core::Event::Skills(
+                sovra_core::skills::SkillEvent::Error("Storage unavailable. Try again.".into()),
+            ))
+            .unwrap();
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.find("skill-editor").visible());
+            assert_ne!(window.find("skill-save").disabled(), Some(true));
+            click_visible(window, "skill-save", cx);
+        })
+        .unwrap();
+        let retry = std::iter::from_fn(|| commands.try_recv().ok())
+            .find_map(|command| match command {
+                Command::Skills(sovra_core::skills::SkillCommand::Save(skill)) => Some(skill),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(retry, saved);
+        let mut listed = sovra_core::skills::builtin_skills();
+        listed.push(*saved.clone());
+        events
+            .send_blocking(sovra_core::Event::Skills(
+                sovra_core::skills::SkillEvent::Loaded {
+                    skills: listed,
+                    issues: vec![],
+                },
+            ))
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("skill-save").disabled(),
+                Some(true),
+                "a refresh is not confirmation"
+            );
+            shell.update(cx, |shell, cx| {
+                shell.skill_library.set_editor_fields_for_test(
+                    &saved.name,
+                    "Updated garden plan",
+                    "Plan garden jobs.",
+                    "Newer garden instructions.",
+                    window,
+                    cx,
+                );
+            });
+        })
+        .unwrap();
+        events
+            .send_blocking(sovra_core::Event::Skills(
+                sovra_core::skills::SkillEvent::Saved(saved.clone()),
+            ))
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                shell
+                    .read(cx)
+                    .skill_library
+                    .notice
+                    .contains("latest changes")
+            );
+            click_visible(window, "skill-save", cx);
+        })
+        .unwrap();
+        let update = std::iter::from_fn(|| commands.try_recv().ok())
+            .find_map(|command| match command {
+                Command::Skills(sovra_core::skills::SkillCommand::Save(skill)) => Some(skill),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(update.name, saved.name);
+        assert_eq!(update.instructions, "Newer garden instructions.");
+    }
+
+    #[gpui_kit::test]
     fn custom_skill_names_do_not_require_english_or_replace_existing_skills(
         cx: &mut TestAppContext,
     ) {
-        let (client, commands, _events) = Client::loopback();
+        let (client, commands, events) = Client::loopback();
         cx.update(|cx| crate::init(client, cx));
         let (shell, window) = open(cx, size(px(1280.), px(820.)));
         cx.update_window(window.into(), |_, window, cx| {
@@ -723,7 +847,19 @@ mod tests {
             .expect("an Arabic title saves without an advanced shortcut");
         assert_eq!(saved.title, "قائمة التسوق");
         assert!(sovra_core::skills::valid_name(&saved.name));
+        events
+            .send_blocking(sovra_core::Event::Skills(
+                sovra_core::skills::SkillEvent::Saved(saved.clone()),
+            ))
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            click_visible(window, "skill-editor-back", cx);
+            window.render_frame(cx);
+            click_visible(window, "skill-create", cx);
             shell.update(cx, |shell, cx| {
                 let mut skills = shell.skills.skills().to_vec();
                 skills.push(*saved.clone());
@@ -753,6 +889,194 @@ mod tests {
                 Command::Skills(sovra_core::skills::SkillCommand::Save(_))
             ))
         );
+    }
+
+    #[gpui_kit::test]
+    fn skill_save_feedback_and_retry_fit_every_size(cx: &mut TestAppContext) {
+        for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+            for mode in [ThemeMode::Dark, ThemeMode::Light] {
+                let (client, _commands, events) = Client::loopback();
+                cx.update(|cx| crate::init(client, cx));
+                let (shell, window) = open(cx, size(px(width), px(height)));
+                cx.update_window(window.into(), |_, window, cx| {
+                    design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+                    Theme::change(mode, Some(window), cx);
+                    shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+                    window.render_frame(cx);
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-create",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-create", cx);
+                    shell.update(cx, |shell, cx| {
+                        shell.skill_library.set_editor_fields_for_test(
+                            "",
+                            "Garden",
+                            "Plan the garden.",
+                            "Make a weekly plan.",
+                            window,
+                            cx,
+                        );
+                    });
+                    window.render_frame(cx);
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-editor-back",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-editor-back", cx);
+                    window.render_frame(cx);
+                    for id in ["skill-discard", "skill-keep-editing"] {
+                        reveal_inside(window, "sovra-skills-view", &id, width, height, cx);
+                        let bounds = window.find(id).bounds();
+                        assert!(bounds.left() >= px(0.) && bounds.right() <= px(width));
+                        assert!(bounds.top() >= px(0.) && bounds.bottom() <= px(height));
+                    }
+                    window.click("skill-keep-editing", cx);
+                    window.render_frame(cx);
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-save",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-save", cx);
+                })
+                .unwrap();
+                events.send_blocking(sovra_core::Event::Skills(sovra_core::skills::SkillEvent::Error("Could not save to this computer. Check the available storage and try again.".into()))).unwrap();
+                cx.executor()
+                    .advance_clock(std::time::Duration::from_millis(16));
+                cx.run_until_parked();
+                cx.update_window(window.into(), |_, window, cx| {
+                    window.render_frame(cx);
+                    for id in ["skill-library-notice", "skill-save"] {
+                        reveal_inside(window, "sovra-skills-view", &id, width, height, cx);
+                        let bounds = window.find(id).bounds();
+                        assert!(bounds.left() >= px(0.) && bounds.right() <= px(width));
+                        assert!(bounds.top() >= px(0.) && bounds.bottom() <= px(height));
+                    }
+                    window.click("skill-save", cx);
+                    shell.update(cx, |shell, cx| {
+                        shell.skill_library.confirm_save_for_test(cx);
+                    });
+                    window.render_frame(cx);
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-library-notice",
+                        width,
+                        height,
+                        cx,
+                    );
+                    assert!(
+                        window
+                            .find("skill-library-notice")
+                            .label()
+                            .unwrap()
+                            .starts_with("Saved.")
+                    );
+                    for id in ["skill-create", "skill-import"] {
+                        assert_eq!(window.find(id).disabled(), Some(true));
+                    }
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-editor-back",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-editor-back", cx);
+                    window.render_frame(cx);
+                    assert!(
+                        window.try_find("skill-discard-confirm").is_none(),
+                        "a confirmed unchanged save closes directly"
+                    );
+                    assert!(
+                        window.try_find("skill-editor").is_none(),
+                        "{width}x{height}@{scale}: unchanged form closed"
+                    );
+
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-create",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-create", cx);
+                    shell.update(cx, |shell, cx| {
+                        shell.skill_library.set_editor_fields_for_test(
+                            "",
+                            "Temporary recipe",
+                            "",
+                            "Draft to discard.",
+                            window,
+                            cx,
+                        );
+                    });
+                    window.render_frame(cx);
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-editor-back",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-editor-back", cx);
+                    window.render_frame(cx);
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-discard",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-discard", cx);
+                    window.render_frame(cx);
+                    assert!(window.try_find("skill-editor").is_none());
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-create",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-create", cx);
+                    window.render_frame(cx);
+                    assert!(window.try_find("skill-editor").is_some());
+                    reveal_inside(
+                        window,
+                        "sovra-skills-view",
+                        &"skill-editor-back",
+                        width,
+                        height,
+                        cx,
+                    );
+                    window.click("skill-editor-back", cx);
+                    window.render_frame(cx);
+                    assert!(
+                        window.try_find("skill-editor").is_none(),
+                        "the discarded draft does not survive in the fresh form"
+                    );
+                    assert!(window.try_find("skill-discard-confirm").is_none());
+                })
+                .unwrap();
+            }
+        }
     }
 
     #[gpui_kit::test]
@@ -824,7 +1148,10 @@ mod tests {
         // The full library is several screens tall; 200 steps of 80px cover 16,000px.
         for _ in 0..200 {
             let bounds = window.find(id.clone()).bounds();
-            let vertically_inside = bounds.top() >= px(0.) && bounds.bottom() <= px(height);
+            let pane = window.find(scroller).bounds();
+            let top = pane.top().max(px(0.));
+            let bottom = pane.bottom().min(px(height));
+            let vertically_inside = bounds.top() >= top && bounds.bottom() <= bottom;
             let horizontally_inside = bounds.left() >= px(0.) && bounds.right() <= px(width);
             if vertically_inside && horizontally_inside {
                 return;
@@ -832,11 +1159,7 @@ mod tests {
             if vertically_inside {
                 return;
             }
-            let delta = if bounds.bottom() > px(height) {
-                -80.
-            } else {
-                80.
-            };
+            let delta = if bounds.bottom() > bottom { -80. } else { 80. };
             window.scroll(
                 scroller,
                 gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(delta))),

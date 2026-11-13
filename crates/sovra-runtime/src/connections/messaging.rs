@@ -661,6 +661,7 @@ mod tests {
             refresh_tasks: Vec::new(),
             contact_generation: 0,
             contact_task: None,
+            known_groups: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
     #[tokio::test]

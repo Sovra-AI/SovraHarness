@@ -106,6 +106,8 @@ pub enum SkillEvent {
         skills: Vec<Skill>,
         issues: Vec<String>,
     },
+    /// A requested save completed and its catalogue refresh succeeded.
+    Saved(Box<Skill>),
     Error(String),
 }
 
@@ -209,6 +211,7 @@ impl SkillCatalog {
                 Ok(issues.clone())
             }
             SkillEvent::Error(message) => Err(SkillError(message.clone())),
+            SkillEvent::Saved(_) => Ok(Vec::new()),
         }
     }
 

@@ -35,6 +35,10 @@ impl SkillsRuntime {
                     let _ = output.send(Event::Skills(SkillEvent::Error("User skill storage is unavailable in this session.".into()))).await;
                     continue;
                 };
+                let saved = match &command {
+                    SkillCommand::Save(skill) => Some(skill.clone()),
+                    SkillCommand::Refresh | SkillCommand::Import { .. } | SkillCommand::Remove { .. } | SkillCommand::SetEnabled { .. } => None,
+                };
                 let result = tokio::task::spawn_blocking(move || {
                     match command {
                         SkillCommand::Refresh => {}
@@ -58,6 +62,9 @@ impl SkillsRuntime {
                             Ok(catalog) => {
                                 *current.write().await = Arc::new(catalog);
                                 let _ = output.send(Event::Skills(SkillEvent::Loaded { skills: all, issues: listing.issues })).await;
+                                if let Some(skill) = saved {
+                                    let _ = output.send(Event::Skills(SkillEvent::Saved(skill))).await;
+                                }
                             }
                             Err(error) => { let _ = output.send(Event::Skills(SkillEvent::Error(error.to_string()))).await; }
                         }

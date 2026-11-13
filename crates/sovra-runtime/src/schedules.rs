@@ -7,13 +7,15 @@ use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
 use serde_json::json;
-use sovra_adk::ScheduleTools;
-use sovra_core::connections::ConnectionCommand;
+use sovra_adk::{ScheduleTools, SearchClient};
+use sovra_core::connections::{ConnectionCommand, SyncedGroup};
 use sovra_core::{
     Command, DueFire, Event, ScheduleBook, ScheduleCommand, ScheduleError, ScheduleEvent,
-    ScheduleStore, Timestamp, complete_run, create_in_book, delete_in_book, fail_stale_runs,
-    pause_in_book, resume_in_book, run_now_in_book, snapshot_event, tick,
+    ScheduleStore, Timestamp, complete_run, create_in_book, create_research_in_book,
+    delete_in_book, fail_stale_runs, pause_in_book, resume_in_book, run_now_in_book,
+    snapshot_event, tick,
 };
+use tokio::sync::RwLock;
 use tokio::sync::oneshot;
 
 enum Message {
@@ -113,6 +115,8 @@ impl SchedulesRuntime {
         commands_tx: Sender<Command>,
         tz_offset_minutes: i32,
         handle: &tokio::runtime::Handle,
+        groups: Arc<RwLock<Vec<SyncedGroup>>>,
+        search: SearchClient,
     ) -> (Self, Sender<Event>) {
         let store = store.unwrap_or_else(|| Arc::new(MemoryScheduleStore::default()));
         let (messages, inbox) = async_channel::bounded(64);
@@ -123,6 +127,8 @@ impl SchedulesRuntime {
             events: events.clone(),
             commands_tx,
             tz_offset_minutes,
+            groups,
+            search,
         };
         let task = handle.spawn(worker.run(inbox));
         let tap_inbox = messages.clone();
@@ -190,6 +196,11 @@ impl SchedulesRuntime {
                             "recipient": send.recipient,
                             "text": send.text,
                         })),
+                        "research": item.research.as_ref().map(|research| json!({
+                            "channel": research.channel,
+                            "recipient": research.recipient,
+                            "query": research.query,
+                        })),
                     })).collect::<Vec<_>>(),
                 }))
             }
@@ -241,6 +252,9 @@ struct Worker {
     events: Sender<Event>,
     commands_tx: Sender<Command>,
     tz_offset_minutes: i32,
+    /// Groups the connections actor has stored. Create reads this; it does not send.
+    groups: Arc<RwLock<Vec<SyncedGroup>>>,
+    search: SearchClient,
 }
 
 impl Worker {
@@ -361,6 +375,27 @@ impl Worker {
                     .map_err(|error| error.to_string())?,
                 );
             }
+            ScheduleCommand::CreateResearch {
+                name,
+                cadence,
+                prompt,
+                request,
+            } => {
+                let groups = self.groups.read().await.clone();
+                created = Some(
+                    create_research_in_book(
+                        &mut self.book,
+                        &name,
+                        &cadence,
+                        &prompt,
+                        request,
+                        &groups,
+                        at,
+                        self.tz_offset_minutes,
+                    )
+                    .map_err(|error| error.to_string())?,
+                );
+            }
             ScheduleCommand::Pause { id } => {
                 pause_in_book(&mut self.book, &id).map_err(|error| error.to_string())?;
             }
@@ -430,6 +465,29 @@ impl Worker {
                 name: fire.name,
             }))
             .await;
+        if let Some(research) = fire.research {
+            match self.search.digest(&research.query).await {
+                Ok(summary) => {
+                    let _ = self
+                        .commands_tx
+                        .send(Command::Connections(ConnectionCommand::SendScheduled {
+                            session_id: fire.session_id,
+                            channel: research.channel,
+                            recipient: research.recipient,
+                            text: summary,
+                        }))
+                        .await;
+                }
+                Err(error) => {
+                    complete_run(&mut self.book, &fire.session_id, false, Some(error), now());
+                    if let Err(error) = self.persist().await {
+                        self.report_error(error).await;
+                    }
+                    self.publish_snapshot().await;
+                }
+            }
+            return;
+        }
         let command = match fire.send {
             Some(send) => Command::Connections(ConnectionCommand::SendScheduled {
                 session_id: fire.session_id,

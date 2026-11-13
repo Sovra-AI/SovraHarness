@@ -52,6 +52,18 @@ as an international number, exact chat/group ID or a selected saved person.
 A first name alone is refused. The channel must be connected when the job runs.
 See [Messaging](communications.md) for recipient and delivery limitations.
 
+A confirmed web search can be saved the same way for one WhatsApp group. The
+words to search for are stored; the short note is written when the job fires,
+from that search, and sent to the one group named when you confirmed. A unique
+group name is stored as that group's id. Nothing is sent when the job is saved.
+If the name matches more than one group, or none, the job is refused in plain
+words and is not scheduled. `every morning at 6:15 am` and `every morning at 615 am`
+both mean every day at 06:15 in the task's saved UTC offset. At offset +240
+(Dubai / UAE), 06:15 local is 02:15 UTC. The app must be running and WhatsApp
+connected when the job fires. A disconnected WhatsApp records a failed run and
+sends nothing. A second fire while that run is still going is recorded as
+**Skipped** and does not send again.
+
 A failed send keeps its reason on the run. Inspect the result before scheduling
 another message; service acceptance does not establish delivery or reading.
 

@@ -141,12 +141,13 @@ pub use routing_tree::{
     default_sovra_srx_tree,
 };
 pub use schedules::{
-    DueFire, RunOutcome, ScheduleBook, ScheduleCadence, ScheduleCommand, ScheduleError,
-    ScheduleEvent, ScheduleItem, ScheduleRun, ScheduleStats, ScheduleStatus, ScheduleStore,
-    ScheduledSend, TickEffect, TimelineMark, TimelineMarkKind, TimelineRange, Weekday,
-    complete_run, compute_stats, create_in_book, default_schedules, delete_in_book,
-    fail_stale_runs, next_run_after, parse_cadence, pause_in_book, resume_in_book, run_now_in_book,
-    snapshot_event, tick, timeline_marks,
+    DueFire, ResearchRequest, ResearchSend, RunOutcome, ScheduleBook, ScheduleCadence,
+    ScheduleCommand, ScheduleError, ScheduleEvent, ScheduleItem, ScheduleRun, ScheduleStats,
+    ScheduleStatus, ScheduleStore, ScheduledSend, TickEffect, TimelineMark, TimelineMarkKind,
+    TimelineRange, Weekday, complete_run, compute_stats, create_in_book, create_research_in_book,
+    default_schedules, delete_in_book, fail_stale_runs, next_run_after, parse_cadence,
+    pause_in_book, research_digest, resume_in_book, run_now_in_book, snapshot_event, tick,
+    timeline_marks,
 };
 pub use specialists::{SpecialistAgentSpec, default_sovra_srx_agents, specialist_id_for_route_key};
 pub use status::RuntimeStatus;

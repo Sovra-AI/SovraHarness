@@ -1,7 +1,9 @@
 //! Drives the personal messaging links (`WhatsApp`, Telegram) behind the core
 //! `MessagingChannel` port: starts and resumes each link, turns adapter events into UI
 //! events, persists the state, and answers incoming messages by running them through the
-//! same prompt path as the chat window. One task owns everything, so there are no locks.
+//! same prompt path as the chat window. One task owns the connection state. Stored
+//! `WhatsApp` groups are also copied into a snapshot the schedule worker reads; that
+//! snapshot is not cleared when `WhatsApp` disconnects.
 
 mod messaging;
 
@@ -100,6 +102,7 @@ impl ConnectionsRuntime {
         commands: Sender<Command>,
         handle: &tokio::runtime::Handle,
         probes: Vec<Arc<dyn LinkProbe>>,
+        known_groups: Arc<tokio::sync::RwLock<Vec<sovra_core::connections::SyncedGroup>>>,
     ) -> Self {
         let messaging_available = channels.whatsapp.is_some() || channels.telegram.is_some();
         let (inbox, rx) = async_channel::unbounded();
@@ -123,6 +126,7 @@ impl ConnectionsRuntime {
             refresh_tasks: Vec::new(),
             contact_generation: 0,
             contact_task: None,
+            known_groups,
         };
         drop(handle.spawn(actor.run(rx)));
         Self {
@@ -302,6 +306,9 @@ struct Actor {
     /// Bumped when a contact pull is replaced or cancelled, so a late result is dropped.
     contact_generation: u64,
     contact_task: Option<tokio::task::AbortHandle>,
+    /// Groups a saved search-then-send job may name. Written before the UI hears
+    /// about them, and left in place when the link drops.
+    known_groups: Arc<tokio::sync::RwLock<Vec<sovra_core::connections::SyncedGroup>>>,
 }
 
 impl Actor {
@@ -484,6 +491,7 @@ impl Actor {
                     | TelegramStatus::Connecting
                     | TelegramStatus::Error { .. } => TelegramStatus::Disconnected,
                 };
+                self.remember_groups().await;
             }
             Ok(None) => {}
             Err(error) => {
@@ -1206,9 +1214,16 @@ impl Actor {
     }
 
     async fn publish_groups(&mut self) {
+        // The schedule worker must see the group before a test (or a tool call)
+        // that waited for this event tries to save a job.
+        self.remember_groups().await;
         self.emit(ConnectionEvent::GroupsChanged(self.state.groups.clone()))
             .await;
         self.save().await;
+    }
+
+    async fn remember_groups(&self) {
+        *self.known_groups.write().await = self.state.groups.clone();
     }
 
     async fn emit(&self, event: ConnectionEvent) {

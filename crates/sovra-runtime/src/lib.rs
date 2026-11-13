@@ -309,6 +309,7 @@ pub fn start_with_auth(
             mcp_sample_program: None,
             schedules: None,
             groups: None,
+            schedule_search: None,
         },
     )
 }
@@ -348,6 +349,9 @@ pub struct RuntimeServices {
     pub schedules: Option<Arc<dyn sovra_core::ScheduleStore>>,
     /// Groups of computers sharing helpers and knowledge. `None` turns groups off.
     pub groups: Option<GroupServices>,
+    /// Search used when a saved research job comes due. `None` uses the same
+    /// built-in client as chat, so a test can stub this without replacing chat search.
+    pub schedule_search: Option<SearchClient>,
 }
 
 impl std::fmt::Debug for RuntimeServices {
@@ -453,11 +457,15 @@ async fn serve(
         mcp_sample_program,
         schedules: schedule_store,
         groups: group_services,
+        schedule_search: schedule_search_override,
     } = services;
     let channels = connections::Channels {
         whatsapp: messaging.whatsapp,
         telegram: messaging.telegram,
     };
+    let known_groups = Arc::new(tokio::sync::RwLock::new(Vec::<
+        sovra_core::connections::SyncedGroup,
+    >::new()));
     // Every event passes the connections task first: answers for WhatsApp and Telegram
     // sessions go back to the phone instead of the chat window.
     let connections = connections::ConnectionsRuntime::start(
@@ -466,6 +474,7 @@ async fn serve(
         commands_tx.clone(),
         &handle,
         probes,
+        known_groups.clone(),
     );
     let events = connections.route_events(ui_events, &handle);
     let mut auth = auth::AuthRuntime::start(
@@ -615,6 +624,8 @@ async fn serve(
         commands_tx,
         tz_offset_minutes,
         &handle,
+        known_groups,
+        schedule_search_override.unwrap_or_else(|| search.clone()),
     );
     while let Ok(command) = commands.recv().await {
         tracing::debug!("command received");

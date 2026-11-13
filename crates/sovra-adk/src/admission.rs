@@ -163,7 +163,10 @@ impl Llm for BudgetModel {
 
 // Some compatible providers parse textual tool calls without assigning an ID.
 // Assign before ADK executes the call so its result and saved history share it.
-fn complete_call_ids(content: &mut Content, used: &mut std::collections::HashSet<String>) {
+pub(crate) fn complete_call_ids(
+    content: &mut Content,
+    used: &mut std::collections::HashSet<String>,
+) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     for part in &content.parts {

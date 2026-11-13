@@ -1,4 +1,4 @@
-//! `My AI's` view: choose one of the 3 selection modes (`SingleGlobalModel`,
+//! `My AIs` view: choose one of the 3 selection modes (`SingleGlobalModel`,
 //! `PerAgentModel`, `DynamicTreeRouting`) in plain language, set effort per specialist,
 //! and — folded away for the curious — switch the System-1 decision engine (`Laya`,
 //! `OpenJev`, `EmbeddedHeuristic`) and inspect/test the `SovraSRX` routing tree.
@@ -38,10 +38,8 @@ pub(crate) fn render_my_ais_view(
         .mx_auto()
         .gap(t.space.large)
         .child(render_header(cx))
+        .child(render_current_choice(state, cx))
         .child(render_mode_selector(state.routing.mode, cx));
-    if state.routing.mode == SelectionMode::PerAgentModel {
-        page = page.child(render_specialists_section(state, cx));
-    }
     let mut advanced = v_flex()
         .id("my-ais-advanced")
         .test_support()
@@ -53,13 +51,13 @@ pub(crate) fn render_my_ais_view(
                 .child(
                     div()
                         .sovra_text(TextRole::SectionTitle, cx)
-                        .child("How automatic choice works"),
+                        .child("Preview an AI choice"),
                 )
                 .child(
                     div()
                         .sovra_text(TextRole::Caption, cx)
                         .text_color(t.text_secondary)
-                        .child("Explore routing decisions and try a sample prompt."),
+                        .child("See a model-choice estimate without sending a chat. Advanced engine settings and decision steps are included."),
                 ),
         )
         .child(
@@ -81,6 +79,10 @@ pub(crate) fn render_my_ais_view(
             .child(render_router_engine_and_simulator(state, sim_input, cx))
             .child(render_routing_tree_section(state, cx));
     }
+    page = page.child(advanced);
+    if state.routing.mode == SelectionMode::PerAgentModel {
+        page = page.child(render_specialists_section(state, cx));
+    }
     v_flex()
         .id("sovra-my-ais-view")
         .test_support()
@@ -89,7 +91,7 @@ pub(crate) fn render_my_ais_view(
         .h_full()
         .overflow_y_scroll()
         .p(t.space.large)
-        .child(page.child(advanced))
+        .child(page)
 }
 
 fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
@@ -102,33 +104,58 @@ fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
         .items_center()
         .justify_between()
         .child(design::page_header(
-            "My AI's",
-            "Choose how Sovra finds the right AI for each task.",
+            "My AIs",
+            "See your chat AI and explore model-choice previews.",
             cx,
         ))
         .child(
-            design::button("open-models-catalog-btn", "Pick a model", cx).on_click(cx.listener(
-                |shell, _, _, cx| {
+            design::button("open-models-catalog-btn", "Choose chat model", cx).on_click(
+                cx.listener(|shell, _, _, cx| {
                     shell.select_tab(sovra_core::NavTab::Models, cx);
-                },
-            )),
+                }),
+            ),
         )
+}
+
+fn render_current_choice(state: &WorkspaceState, cx: &Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let model = state.routing.global_model.as_ref().map_or_else(
+        || {
+            "No model chosen. Open Models to connect an AI service and choose a chat model."
+                .to_owned()
+        },
+        |model| format!("Chat model: {}", model.model_id),
+    );
+    v_flex()
+        .id("my-ais-current-choice")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .p(t.space.medium)
+        .gap(t.space.small)
+        .sovra_surface(Surface::Matte, cx)
+        .child(div().sovra_text(TextRole::SectionTitle, cx).child(format!(
+            "Preview mode: {}", mode_copy(state.routing.mode).0
+        )))
+        .child(div().sovra_text(TextRole::Body, cx).child(model))
+        .child(div().sovra_text(TextRole::Caption, cx).text_color(t.text_secondary)
+            .child("Chats use the model chosen in Models. The controls below only change routing previews; they do not switch the model answering your chats. Preview settings last for this app session."))
 }
 
 /// Plain-language title and description; the core labels stay technical for logs.
 fn mode_copy(mode: SelectionMode) -> (&'static str, &'static str) {
     match mode {
         SelectionMode::SingleGlobalModel => (
-            "One AI for everything",
-            "Always use the model you picked in Models.",
+            "Use my chat model",
+            "Preview with the model you picked in Models.",
         ),
         SelectionMode::PerAgentModel => (
-            "Choose per task",
-            "Decide how much effort Sovra puts into each kind of task.",
+            "Preview effort by task",
+            "Compare Quick, Balanced or Thorough preferences for each helper. A chosen model takes priority in this preview.",
         ),
         SelectionMode::DynamicTreeRouting => (
-            "Automatic",
-            "Sovra uses a quick AI for simple questions and a more powerful one for hard ones.",
+            "Preview automatic choice",
+            "See which helper and model tier the routing rules suggest for a question. This does not check whether that model is connected.",
         ),
     }
 }
@@ -163,6 +190,7 @@ fn render_mode_selector(
                     design::button(("routing-mode-btn", idx), "", cx)
                         .accessibility_label(title)
                         .selected(selected)
+                        .toggled(selected)
                         .prefer_width(t.layout.card_min_width)
                         .h_auto()
                         .whitespace_normal()
@@ -236,7 +264,7 @@ fn render_router_engine_and_simulator(
                                 .sovra_text(TextRole::Caption, cx)
                                 .text_color(t.text_secondary)
                                 .child(
-                                    "The small, fast helper that judges how hard each question is.",
+                                    "Used by automatic previews. Other preview modes use their own rules. If the engine is unavailable, Sovra uses built-in rules.",
                                 ),
                         ),
                 )
@@ -249,6 +277,7 @@ fn render_router_engine_and_simulator(
                                 let is_active = state.routing.backend == backend;
                                 design::button(("decision-backend-btn", idx), backend.label(), cx)
                                     .selected(is_active)
+                                    .toggled(is_active)
                                     .small()
                                     .on_click(cx.listener(move |shell, _, _, cx| {
                                         shell.set_decision_backend(backend, cx);
@@ -256,6 +285,10 @@ fn render_router_engine_and_simulator(
                             }),
                     ),
                 ),
+        )
+        .child(
+            div().sovra_text(TextRole::Caption, cx).text_color(t.text_secondary)
+                .child("Enter a question below, or leave it empty to preview a coding example. Run the preview again after changing settings. This estimate does not check connection availability."),
         )
         .child(
             h_flex()
@@ -270,7 +303,7 @@ fn render_router_engine_and_simulator(
                     ),
                 )
                 .child(
-                    design::primary_button("simulate-route-btn", "Try it", cx).on_click(
+                    design::primary_button("simulate-route-btn", "Preview choice", cx).on_click(
                         cx.listener(|shell, _, _, cx| {
                             shell.simulate_route_from_input(cx);
                         }),
@@ -307,7 +340,7 @@ fn render_evaluation_trace(
                 .items_center()
                 .justify_between()
                 .child(div().sovra_text(TextRole::Body, cx).child(format!(
-                    "Sovra would use {} · effort: {}",
+                    "Last preview: {} · effort: {}",
                     eval.selected_model.model_id,
                     tier_copy(eval.tier)
                 )))
@@ -388,7 +421,7 @@ fn render_tree_node_card(node: &TreeNode, cx: &Context<Shell>) -> impl IntoEleme
     };
 
     v_flex()
-        .w(t.layout.side_panel_width)
+        .prefer_width(t.layout.side_panel_width)
         .p(t.space.small)
         .gap(t.space.compact)
         .sovra_surface(Surface::Matte, cx)
@@ -419,14 +452,14 @@ fn render_specialists_section(
         .child(
             div()
                 .sovra_text(TextRole::SectionTitle, cx)
-                .child("Effort per task"),
+                .child("Preview effort per task"),
         )
         .child(
             div()
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
                 .child(
-                    "Quick is fastest and cheapest. Thorough takes longer but thinks harder. Click a button to change it.",
+                    "Select a preferred model tier for each helper in the preview. Quick favours speed; Thorough favours complex work. A helper-specific model or your chosen model takes priority, so changing effort may keep the same model. Prices and speed depend on the service.",
                 ),
         )
         .children(
@@ -444,17 +477,11 @@ fn render_specialist_row(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let spec_id = spec.id.clone();
-    let current_tier = spec.preferred_tier;
-    let next_tier = match current_tier {
-        ModelTier::Fast => ModelTier::Standard,
-        ModelTier::Standard => ModelTier::Deep,
-        ModelTier::Deep => ModelTier::Fast,
-    };
 
     h_flex()
         .id(("specialist-row", idx))
         .test_support()
+        .flex_wrap()
         .w_full()
         .items_center()
         .justify_between()
@@ -463,8 +490,7 @@ fn render_specialist_row(
         .sovra_surface(Surface::Matte, cx)
         .child(
             v_flex()
-                .flex_1()
-                .min_w_0()
+                .prefer_width(t.layout.card_min_width)
                 .gap(t.space.hair)
                 .child(
                     div()
@@ -479,15 +505,36 @@ fn render_specialist_row(
                 ),
         )
         .child(
-            design::button(("specialist-tier-btn", idx), tier_copy(current_tier), cx)
-                .accessibility_label(format!(
-                    "Effort for {}: {}. Activate to change",
-                    spec.name,
-                    tier_copy(current_tier)
-                ))
-                .small()
-                .on_click(cx.listener(move |shell, _, _, cx| {
-                    shell.cycle_specialist_tier(&spec_id, next_tier, cx);
-                })),
+            h_flex()
+                .min_w_0()
+                .max_w_full()
+                .flex_wrap()
+                .gap(t.space.compact)
+                .children(
+                    [ModelTier::Fast, ModelTier::Standard, ModelTier::Deep]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(tier_idx, tier)| {
+                            let spec_id = spec.id.clone();
+                            design::button(
+                                ("specialist-tier-btn", idx * 3 + tier_idx),
+                                tier_copy(tier),
+                                cx,
+                            )
+                            .accessibility_label(format!(
+                                "{} effort for {}",
+                                tier_copy(tier),
+                                spec.name
+                            ))
+                            .selected(spec.preferred_tier == tier)
+                            .toggled(spec.preferred_tier == tier)
+                            .small()
+                            .on_click(cx.listener(
+                                move |shell, _, _, cx| {
+                                    shell.cycle_specialist_tier(&spec_id, tier, cx);
+                                },
+                            ))
+                        }),
+                ),
         )
 }

@@ -79,7 +79,7 @@ impl Skill {
             "communications" => "Send a WhatsApp, Telegram, or group message",
             "google-workspace" => "Gmail, Calendar & Drive helper",
             "microsoft-workspace" => "Outlook, Word & Excel helper",
-            "scheduler" => "Set a one-time or repeating task, including a timed text",
+            "scheduler" => "Set a repeating task, a timed text, or a morning search note",
             "todos" => "Personal to-do list organizer",
             "github" => "GitHub code & issue helper",
             _ => &self.title,
@@ -129,7 +129,7 @@ impl Skill {
                 "/knowledge ".to_owned(),
             ),
             "schedules" => (
-                "Opens Schedules so you can set a one-time or repeating task in plain words (in 1 minute, just once, or every weekday at 9), including a WhatsApp or Telegram text that goes out at that time.".to_owned(),
+                "Opens Schedules so you can set a one-time or repeating task in plain words (in 1 minute, just once, or every morning at 6:15), including a WhatsApp or Telegram text that goes out at that time, or a web search whose short note goes to one WhatsApp group.".to_owned(),
                 "/schedules ".to_owned(),
             ),
             "agents" => (
@@ -320,7 +320,7 @@ impl Skill {
             ),
             "scheduler" => sample_pair(
                 "scheduler",
-                "In 1 minute, just once, send Sam a WhatsApp that the cake is ready",
+                "Every morning at 6:15, search for AI investment news in the UAE and send a short note to my Gentlemen WhatsApp group",
             ),
             "todos" => sample_pair(
                 "todos",
@@ -403,7 +403,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "schedules",
             "Schedules",
-            "Open one-time and repeating tasks that run on their own, including a WhatsApp or Telegram text that goes out at the time you chose.",
+            "Open one-time and repeating tasks that run on their own, including a WhatsApp or Telegram text, or a web search whose short note goes to one WhatsApp group.",
             SkillAction::Schedules,
             &[],
         ),

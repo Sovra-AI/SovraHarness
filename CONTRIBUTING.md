@@ -1,6 +1,11 @@
 # Contributing to SovraHarness
 
-How Sovra people open a branch, pass CI, and land a pull request on `main`.
+Contributions from outside and inside Sovra are welcome: bug reports,
+documentation, tests, and focused code changes. Search existing issues first;
+for a substantial change, open an issue to discuss the approach before coding.
+Follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Report security issues through [SECURITY.md](SECURITY.md), not public issues.
 
 Source on the default branch `main` is under the **Sustainable Use License**
 (see [LICENSE](LICENSE)). This is n8n's Sustainable Use License, which n8n's
@@ -16,6 +21,10 @@ The canonical engineering rules live in [AGENTS.md](AGENTS.md) (plus a short
 covers the workflow around them; it does not duplicate them.
 
 ## Getting started
+
+Fork the repository on GitHub if you do not have write access, clone your fork,
+and create a branch from the upstream `main`. Run the following commands from
+the checkout after installing your [platform prerequisites](docs/development.md#one-time-setup).
 
 ```sh
 # Rust via https://rustup.rs — the pinned toolchain (1.99.1) installs on first build
@@ -56,7 +65,7 @@ Read before writing code:
 Several people work on this repository. Day-to-day work goes through pull
 requests so CI, changelog, and review happen before `main` moves.
 
-1. Branch from the latest `main`. Keep the branch short-lived and focused.
+1. Branch from the latest upstream `main`. Keep the branch short-lived and focused.
    Name it `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, or `chore/<topic>`.
 2. Prefer small, reviewable commits. Prefix every commit message with a
    gitmoji and conventional scope (`✨ feat(ui): …`, `🐛 fix(runtime): …`,
@@ -67,9 +76,11 @@ requests so CI, changelog, and review happen before `main` moves.
    tabs, or commands change. CI fails the pull request if `CHANGELOG.md` is
    untouched; add the `skip-changelog` label only for a docs-only or CI-only
    change that has nothing to record.
-4. Open a pull request against `main`. Fill in the template. Request review
-   from a code owner if GitHub did not already. CI must be green.
-5. Squash-merge the pull request. The squash title is the PR title (gitmoji
+4. Open a pull request against the upstream `main`, including from your fork.
+   Fill in the template and record the checks run and any failures. Maintainers
+   arrange review and apply labels such as `skip-changelog` when appropriate.
+   CI must be green.
+5. Maintainers squash-merge the pull request. The squash title is the PR title (gitmoji
    prefix, same style as commits). Delete the branch on merge.
 
 Do not force-push `main`. Do not commit to `main` on your laptop except for
@@ -90,7 +101,7 @@ plain-English title, description, and example prompt.
 | Test        | macOS         | `cargo nextest` including headless GPUI UI tests    |
 | Compile     | Windows       | `cargo check --workspace --locked --all-targets`    |
 | Changelog   | Ubuntu        | `CHANGELOG.md` changed (pull requests only)         |
-| **CI**      | Ubuntu        | Aggregator — require this check once GitHub Team is on |
+| **CI**      | Ubuntu        | Aggregator — required check for branch protection |
 
 A new push on a pull request cancels the previous run for that PR. Pushes to
 `main` are never cancelled, so a green result on `main` is trustworthy.
@@ -123,8 +134,7 @@ Turn on a ruleset (or classic branch protection) on
 - Require status checks: **CI** (the aggregator job), and do not skip if
   they are pending
 - Block force pushes and branch deletions
-- Optionally require linear history (squash-only is already the merge
-  setting)
+- Optionally require linear history and allow only squash merges
 
 ## Releasing
 

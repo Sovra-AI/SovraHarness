@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use gpui_kit::component::Root;
+use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
     App, AppContext as _, Entity, ScrollDelta, TestAppContext, Window, WindowHandle, point, px,
@@ -470,36 +470,77 @@ fn github_connects_with_one_button_and_shows_the_code(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn without_github_sign_in_connect_shows_the_key_steps(cx: &mut TestAppContext) {
-    let (window, _shell, commands, events) = open(cx, 1100., 2400.);
-    github(&events, GitHubState::NotConnected, false, cx);
-    cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-connections", cx);
-        window.render_frame(cx);
-        reveal(window, "connection-action-github", cx);
-        window.click("connection-action-github", cx);
-        window.render_frame(cx);
-        assert!(
-            window.try_find("github-use-key").is_none(),
-            "one way in, so no second button"
-        );
-        window.click("github-connect", cx);
-        window.render_frame(cx);
-        assert!(window.find("github-key-steps").visible());
-        assert_eq!(window.find("github-use-key-connect").disabled(), Some(true));
-        reveal(window, "github-key", cx);
-        window.click("github-key", cx);
-        window.input("  ghp_example  ", cx);
-        window.render_frame(cx);
-        reveal(window, "github-use-key-connect", cx);
-        window.click("github-use-key-connect", cx);
-    })
-    .unwrap();
-    assert_eq!(
-        github_commands(&commands),
-        [GitHubCommand::UseKey(
-            GitHubKey::new("ghp_example").expect("key")
-        )]
-    );
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            let (window, _shell, commands, events) = open(cx, width, height);
+            cx.update(|cx| {
+                design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+                Theme::change(mode, None, cx);
+            });
+            github(&events, GitHubState::NotConnected, false, cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                window.click("nav-connections", cx);
+                window.render_frame(cx);
+                reveal(window, "connection-action-github", cx);
+                window.click("connection-action-github", cx);
+                window.render_frame(cx);
+                assert!(
+                    window.try_find("github-use-key").is_none(),
+                    "one way in, so no second button"
+                );
+                reveal(window, "github-connect", cx);
+                window.click("github-connect", cx);
+                window.render_frame(cx);
+                reveal(window, "github-key", cx);
+                assert!(window.find("github-key").visible());
+                assert_eq!(window.find("github-use-key-connect").disabled(), Some(true));
+                reveal(window, "github-key", cx);
+                window.click("github-key", cx);
+                window.input("  ghp_example  ", cx);
+                window.render_frame(cx);
+                reveal(window, "github-use-key-connect", cx);
+                window.click("github-use-key-connect", cx);
+            })
+            .unwrap();
+            assert_eq!(
+                github_commands(&commands),
+                [GitHubCommand::UseKey(
+                    GitHubKey::new("ghp_example").expect("key")
+                )]
+            );
+            github(&events, GitHubState::CheckingKey, false, cx);
+            events
+                .send_blocking(Event::GitHub(GitHubEvent::Notice(
+                    "GitHub could not check the key. Paste it again to retry.".into(),
+                )))
+                .unwrap();
+            github(&events, GitHubState::NotConnected, false, cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert!(
+                    window.try_find("github-key-steps").is_some(),
+                    "a failed key check returns directly to the steps and input"
+                );
+                reveal(window, "github-use-key-connect", cx);
+                assert_eq!(window.find("github-use-key-connect").disabled(), Some(true));
+                reveal(window, "github-key", cx);
+                window.click("github-key", cx);
+                window.input("ghp_retry", cx);
+                window.render_frame(cx);
+                reveal(window, "github-use-key-connect", cx);
+                window.click("github-use-key-connect", cx);
+            })
+            .unwrap();
+            assert_eq!(
+                github_commands(&commands),
+                [GitHubCommand::UseKey(
+                    GitHubKey::new("ghp_retry").expect("test key")
+                )]
+            );
+
+            cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
+        }
+    }
 }
 
 #[gpui_kit::test]

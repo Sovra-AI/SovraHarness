@@ -401,6 +401,7 @@ impl Shell {
                                 Ok(issues) => issues.join("\n"),
                                 Err(error) => error.to_string(),
                             };
+                            shell.skill_library.observe_save(event, cx);
                         }
                         if let sovra_core::Event::FilePrepared(prepared) = &event {
                             let applied = shell
@@ -1094,7 +1095,16 @@ impl Shell {
         next_tier: ModelTier,
         cx: &mut Context<Self>,
     ) {
-        let model_override = self.state.routing.global_model.clone();
+        let Some(specialist) = self
+            .state
+            .specialists
+            .iter()
+            .find(|spec| spec.id == specialist_id)
+        else {
+            return;
+        };
+        // Effort changes must not silently pin the current global model to a helper.
+        let model_override = specialist.model_override.clone();
         self.state
             .set_specialist_model(specialist_id, model_override.clone(), next_tier);
         let _ = cx

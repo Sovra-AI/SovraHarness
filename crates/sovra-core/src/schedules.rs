@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::chat_history::format_relative_time;
 use crate::communications::{concrete_scheduled_recipient, validate_message};
-use crate::connections::ChannelKind;
+use crate::connections::{ChannelKind, SyncedGroup};
 use crate::memory::Timestamp;
+use crate::web_search::RankedSearch;
 
 const MINUTE_MS: i64 = 60_000;
 const HOUR_MS: i64 = 3_600_000;
@@ -141,6 +142,25 @@ pub struct ScheduledSend {
     pub text: String,
 }
 
+/// A confirmed search whose short summary is sent when the job fires.
+///
+/// The query is saved. The findings are written at fire time, not frozen here.
+/// `recipient` is a group name or exact group id; saving resolves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResearchRequest {
+    pub channel: ChannelKind,
+    pub recipient: String,
+    pub query: String,
+}
+
+/// Saved search-then-send. `recipient` is the one resolved `WhatsApp` group id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResearchSend {
+    pub channel: ChannelKind,
+    pub recipient: String,
+    pub query: String,
+}
+
 /// A recurring prompt the runtime fires on cadence, optionally a timed send.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduleItem {
@@ -151,6 +171,9 @@ pub struct ScheduleItem {
     /// When set, fire transmits this message instead of running a chat prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send: Option<ScheduledSend>,
+    /// When set, fire searches and sends a short summary. Not combined with [`Self::send`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research: Option<ResearchSend>,
     pub status: ScheduleStatus,
     pub created_at: Timestamp,
     pub next_run_at: Timestamp,
@@ -334,6 +357,7 @@ pub struct DueFire {
     pub prompt: String,
     pub session_id: String,
     pub send: Option<ScheduledSend>,
+    pub research: Option<ResearchSend>,
 }
 
 /// Result of [`tick`]: due Active jobs to fire, plus skipped overlapping ones.
@@ -352,6 +376,13 @@ pub enum ScheduleCommand {
         cadence: String,
         prompt: String,
         send: Option<ScheduledSend>,
+    },
+    /// Search when the job fires, then send one short summary to one group.
+    CreateResearch {
+        name: String,
+        cadence: String,
+        prompt: String,
+        request: ResearchRequest,
     },
     Pause {
         id: String,
@@ -561,6 +592,63 @@ pub fn create_in_book(
         cadence,
         prompt: prompt.to_owned(),
         send,
+        research: None,
+        status: ScheduleStatus::Active,
+        created_at: now,
+        next_run_at: next_run_after(cadence, tz_offset_minutes, now),
+        tz_offset_minutes,
+    };
+    book.schedules.push(item.clone());
+    Ok(item)
+}
+
+/// Saves a search-then-send job. A unique group name or exact group id is stored
+/// as that group's id. Nothing is transmitted here.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "same fields as create_in_book, plus the stored groups used to bind one recipient"
+)]
+pub fn create_research_in_book(
+    book: &mut ScheduleBook,
+    name: &str,
+    cadence: &str,
+    prompt: &str,
+    request: ResearchRequest,
+    groups: &[SyncedGroup],
+    now: Timestamp,
+    tz_offset_minutes: i32,
+) -> Result<ScheduleItem, ScheduleError> {
+    let ResearchRequest {
+        channel,
+        recipient,
+        query,
+    } = request;
+    let name = name.trim();
+    let prompt = prompt.trim();
+    if name.is_empty() || prompt.is_empty() {
+        return Err(ScheduleError(
+            "Give the task a name and say what Sovra should do.".into(),
+        ));
+    }
+    let query = query.trim();
+    if query.is_empty() {
+        return Err(ScheduleError("Say what to search for.".into()));
+    }
+    let recipient = crate::communications::resolve_scheduled_group(groups, channel, &recipient)
+        .map_err(|error| ScheduleError(error.to_string()))?;
+    let cadence = parse_cadence(cadence);
+    let id = book.alloc_id("sched");
+    let item = ScheduleItem {
+        id,
+        name: name.to_owned(),
+        cadence,
+        prompt: prompt.to_owned(),
+        send: None,
+        research: Some(ResearchSend {
+            channel,
+            recipient,
+            query: query.to_owned(),
+        }),
         status: ScheduleStatus::Active,
         created_at: now,
         next_run_at: next_run_after(cadence, tz_offset_minutes, now),
@@ -645,7 +733,61 @@ fn due_fire(item: &ScheduleItem, session_id: String) -> DueFire {
         prompt: format!("[Schedule: {}] {}", item.name, item.prompt),
         session_id,
         send: item.send.clone(),
+        research: item.research.clone(),
     }
+}
+
+/// A short note that contains the search findings and fits in one message.
+/// An empty result is refused so a due run does not send a blank text.
+pub fn research_digest(query: &str, ranked: &RankedSearch) -> Result<String, String> {
+    if ranked.hits.is_empty() {
+        return Err("The search didn't find anything to send.".into());
+    }
+    let mut lines = Vec::new();
+    let heading = plain_line(query);
+    if !heading.is_empty() {
+        lines.push(heading);
+    }
+    let mut wrote_finding = false;
+    for hit in ranked.hits.iter().take(5) {
+        let title = plain_line(&hit.title);
+        let snippet = plain_line(&hit.snippet);
+        let url = plain_line(&hit.url);
+        if title.is_empty() && snippet.is_empty() {
+            continue;
+        }
+        wrote_finding = true;
+        if !title.is_empty() {
+            lines.push(format!("- {title}"));
+        }
+        if !snippet.is_empty() {
+            lines.push(snippet);
+        }
+        if !url.is_empty() {
+            lines.push(url);
+        }
+    }
+    if !wrote_finding {
+        return Err("The search didn't find anything to send.".into());
+    }
+    let mut text = lines.join("\n");
+    if text.chars().count() > crate::communications::MAX_MESSAGE_CHARS {
+        text = text
+            .chars()
+            .take(crate::communications::MAX_MESSAGE_CHARS)
+            .collect();
+    }
+    validate_message(&text).map_err(|error| error.to_string())?;
+    Ok(text)
+}
+
+fn plain_line(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| *c != '\0')
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 fn validated_send(send: ScheduledSend) -> Result<ScheduledSend, ScheduleError> {
@@ -1006,16 +1148,16 @@ fn has_hour_number(s: &str) -> bool {
 
 fn parse_hhmm(token: &str) -> Option<(u8, u8)> {
     let compact = token.replace('.', "");
+    // Own the digits so a trailing am/pm can be stripped without a lifetime tie.
     let (digits, meridiem) = if let Some(rest) = compact.strip_suffix("pm") {
-        (rest, Some(true))
+        (rest.to_owned(), Some(true))
     } else if let Some(rest) = compact.strip_suffix("am") {
-        (rest, Some(false))
+        (rest.to_owned(), Some(false))
     } else {
-        (compact.as_str(), None)
+        (compact, None)
     };
-    let (hour_s, minute_s) = digits
-        .split_once(':')
-        .map_or((digits, "0"), |(h, m)| (h, m));
+    // "615" and "0615" are how people write 6:15 when they skip the colon.
+    let (hour_s, minute_s) = clock_parts(&digits)?;
     let hour: u8 = hour_s.parse().ok()?;
     let minute: u8 = minute_s.parse().ok()?;
     if minute > 59 {
@@ -1030,6 +1172,22 @@ fn parse_hhmm(token: &str) -> Option<(u8, u8)> {
         return None;
     }
     Some((hour, minute))
+}
+
+/// `H`, `HH`, `HMM`, `HHMM`, or `H:MM` / `HH:MM`. Anything else is not a clock.
+fn clock_parts(digits: &str) -> Option<(&str, &str)> {
+    if let Some(split) = digits.split_once(':') {
+        return Some(split);
+    }
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    match digits.len() {
+        1 | 2 => Some((digits, "0")),
+        3 => Some((&digits[..1], &digits[1..])),
+        4 => Some((&digits[..2], &digits[2..])),
+        _ => None,
+    }
 }
 
 struct CivilClock {
@@ -1181,6 +1339,20 @@ mod tests {
             ScheduleCadence::Daily { hour: 9, minute: 0 }
         );
         assert_eq!(
+            parse_cadence("every morning at 6:15 am"),
+            ScheduleCadence::Daily {
+                hour: 6,
+                minute: 15
+            }
+        );
+        assert_eq!(
+            parse_cadence("every morning at 615 am"),
+            ScheduleCadence::Daily {
+                hour: 6,
+                minute: 15
+            }
+        );
+        assert_eq!(
             parse_cadence("in 1 minute"),
             ScheduleCadence::Once {
                 delay_ms: MINUTE_MS
@@ -1309,6 +1481,7 @@ mod tests {
         )
         .expect("old json");
         assert_eq!(missing.send, None);
+        assert_eq!(missing.research, None);
 
         let due = tick(&mut book, Timestamp(MINUTE_MS));
         assert_eq!(due.fire.len(), 1);
@@ -1405,6 +1578,29 @@ mod tests {
     }
 
     #[test]
+    fn morning_615_is_0615_in_dubai_not_nine_or_utc() {
+        const DUBAI: i32 = 240;
+        for phrase in ["every morning at 6:15 am", "every morning at 615 am"] {
+            let cadence = parse_cadence(phrase);
+            assert_eq!(
+                cadence,
+                ScheduleCadence::Daily {
+                    hour: 6,
+                    minute: 15
+                },
+                "{phrase}"
+            );
+            let midnight = from_civil(20_000, 0, 0, DUBAI);
+            let next = next_run_after(cadence, DUBAI, midnight);
+            assert_eq!(next, from_civil(20_000, 6, 15, DUBAI), "{phrase}");
+            let utc = civil_clock(next, 0);
+            assert_eq!((utc.hour, utc.minute), (2, 15), "{phrase}");
+            let dubai = civil_clock(next, DUBAI);
+            assert_eq!((dubai.hour, dubai.minute), (6, 15), "{phrase}");
+        }
+    }
+
+    #[test]
     fn next_run_advances_from_the_supplied_timestamp() {
         let daily = ScheduleCadence::Daily { hour: 9, minute: 0 };
         assert_eq!(next_run_after(daily, 0, Timestamp(0)), Timestamp(NINE));
@@ -1442,6 +1638,7 @@ mod tests {
             cadence: ScheduleCadence::Daily { hour: 9, minute: 0 },
             prompt: "Say hello".into(),
             send: None,
+            research: None,
             status: ScheduleStatus::Paused,
             created_at: Timestamp(0),
             next_run_at: Timestamp(NINE),
@@ -1460,6 +1657,7 @@ mod tests {
             cadence: ScheduleCadence::Daily { hour: 9, minute: 0 },
             prompt: "Say hello".into(),
             send: None,
+            research: None,
             status: ScheduleStatus::Active,
             created_at: Timestamp(0),
             next_run_at: Timestamp(NINE),
@@ -1490,6 +1688,7 @@ mod tests {
             cadence: ScheduleCadence::Daily { hour: 9, minute: 0 },
             prompt: "Say hello".into(),
             send: None,
+            research: None,
             status: ScheduleStatus::Active,
             created_at: Timestamp(0),
             next_run_at: Timestamp(NINE + DAY_MS),
@@ -1539,6 +1738,159 @@ mod tests {
     }
 
     #[test]
+    fn research_job_binds_one_group_and_refuses_a_guess() {
+        let group = SyncedGroup {
+            id: "120363419000000001@g.us".into(),
+            subject: "The Gentlemen".into(),
+        };
+        let request = ResearchRequest {
+            channel: ChannelKind::WhatsApp,
+            recipient: "The Gentlemen".into(),
+            query: "investments in AI in the UAE".into(),
+        };
+        let mut book = ScheduleBook::default();
+        let item = create_research_in_book(
+            &mut book,
+            "UAE AI",
+            "every morning at 615 am",
+            "Search and send a short note",
+            request,
+            std::slice::from_ref(&group),
+            Timestamp(0),
+            240,
+        )
+        .expect("unique group");
+        assert!(item.send.is_none());
+        let saved = item.research.expect("research job");
+        assert_eq!(saved.recipient, group.id);
+        assert_eq!(saved.query, "investments in AI in the UAE");
+        assert_eq!(
+            item.cadence,
+            ScheduleCadence::Daily {
+                hour: 6,
+                minute: 15
+            }
+        );
+        assert_eq!(book.schedules.len(), 1);
+
+        let by_id = create_research_in_book(
+            &mut ScheduleBook::default(),
+            "UAE AI",
+            "every morning at 6:15 am",
+            "Search and send a short note",
+            ResearchRequest {
+                channel: ChannelKind::WhatsApp,
+                recipient: group.id.clone(),
+                query: "investments in AI in the UAE".into(),
+            },
+            std::slice::from_ref(&group),
+            Timestamp(0),
+            240,
+        )
+        .expect("exact id");
+        assert_eq!(by_id.research.expect("bound").recipient, group.id);
+
+        let twin = SyncedGroup {
+            id: "120363419000000002@g.us".into(),
+            subject: "The Gentlemen".into(),
+        };
+        let mut ambiguous = ScheduleBook::default();
+        let err = create_research_in_book(
+            &mut ambiguous,
+            "UAE AI",
+            "every morning at 6:15 am",
+            "Search and send a short note",
+            ResearchRequest {
+                channel: ChannelKind::WhatsApp,
+                recipient: "The Gentlemen".into(),
+                query: "investments in AI in the UAE".into(),
+            },
+            &[group.clone(), twin],
+            Timestamp(0),
+            240,
+        )
+        .expect_err("ambiguous name");
+        assert!(err.0.contains("More than one"), "{err}");
+        assert_eq!(ambiguous.schedules, Vec::new());
+
+        let mut unknown = ScheduleBook::default();
+        let err = create_research_in_book(
+            &mut unknown,
+            "UAE AI",
+            "every morning",
+            "Search and send a short note",
+            ResearchRequest {
+                channel: ChannelKind::WhatsApp,
+                recipient: "Missing".into(),
+                query: "investments in AI in the UAE".into(),
+            },
+            std::slice::from_ref(&group),
+            Timestamp(0),
+            240,
+        )
+        .expect_err("unknown group");
+        assert!(err.0.contains("can't find"), "{err}");
+        assert_eq!(unknown.schedules, Vec::new());
+
+        let err = create_research_in_book(
+            &mut ScheduleBook::default(),
+            "UAE AI",
+            "every morning",
+            "Search and send a short note",
+            ResearchRequest {
+                channel: ChannelKind::Telegram,
+                recipient: "The Gentlemen".into(),
+                query: "investments in AI in the UAE".into(),
+            },
+            std::slice::from_ref(&group),
+            Timestamp(0),
+            240,
+        )
+        .expect_err("telegram");
+        assert!(err.0.contains("WhatsApp"), "{err}");
+
+        let err = create_research_in_book(
+            &mut ScheduleBook::default(),
+            "UAE AI",
+            "every morning",
+            "Search and send a short note",
+            ResearchRequest {
+                channel: ChannelKind::WhatsApp,
+                recipient: "The Gentlemen".into(),
+                query: "  ".into(),
+            },
+            std::slice::from_ref(&group),
+            Timestamp(0),
+            240,
+        )
+        .expect_err("empty query");
+        assert!(err.0.contains("Say what to search for"), "{err}");
+
+        let ranked = RankedSearch {
+            hits: vec![crate::SearchHit {
+                title: "UAE AI fund".into(),
+                url: "https://example.com/uae-ai".into(),
+                snippet: "STUB-FINDING-UAE-AI-FUND".into(),
+                sources: Vec::new(),
+            }],
+            errors: Vec::new(),
+            pages: Vec::new(),
+        };
+        let note = research_digest("investments in AI in the UAE", &ranked).expect("digest");
+        assert!(note.contains("STUB-FINDING-UAE-AI-FUND"), "{note}");
+        assert!(validate_message(&note).is_ok(), "{note}");
+        let empty = research_digest(
+            "investments in AI in the UAE",
+            &RankedSearch {
+                hits: Vec::new(),
+                errors: vec!["offline".into()],
+                pages: Vec::new(),
+            },
+        );
+        assert!(empty.expect_err("no hits").contains("didn't find"));
+    }
+
+    #[test]
     fn labels_stay_in_plain_words() {
         let item = ScheduleItem {
             id: "sched-1".into(),
@@ -1546,6 +1898,7 @@ mod tests {
             cadence: parse_cadence("every morning at 7:30"),
             prompt: "Say hello".into(),
             send: None,
+            research: None,
             status: ScheduleStatus::Active,
             created_at: Timestamp(0),
             next_run_at: Timestamp(7 * HOUR_MS + 30 * MINUTE_MS + DAY_MS),

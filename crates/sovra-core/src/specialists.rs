@@ -208,7 +208,7 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             "SchedulerAgent",
             "scheduler",
             "Automation & Schedule Manager",
-            "Set something to happen in 1 minute, just once, every morning, on weekdays, every few hours, or on a chosen day — including a WhatsApp or Telegram text that goes out at that time — then list, pause, resume, or run it now.",
+            "Set something to happen in 1 minute, just once, every morning, on weekdays, every few hours, or on a chosen day — including a WhatsApp or Telegram text that goes out at that time, or a web search whose short note goes to one WhatsApp group — then list, pause, resume, or run it now.",
             false,
             ModelTier::Standard,
         ),

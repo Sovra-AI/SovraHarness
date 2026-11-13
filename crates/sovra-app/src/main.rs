@@ -156,6 +156,7 @@ fn main() -> anyhow::Result<()> {
             schedules: Some(Arc::new(sovra_runtime::JsonScheduleStore::new(
                 data_dir.as_path().join("schedules.json"),
             ))),
+            schedule_search: None,
         },
     )
     .context("failed to start the runtime")?;

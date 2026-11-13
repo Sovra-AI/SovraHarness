@@ -25,6 +25,8 @@ struct ScriptedSession {
     sent: Mutex<Vec<(String, String)>>,
     logged_out: AtomicBool,
     stopped: AtomicBool,
+    /// When set, the next `send_text` records the message and then waits.
+    hold: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 #[async_trait::async_trait]
@@ -52,9 +54,16 @@ impl MessagingChannel for ScriptedChannel {
 #[async_trait::async_trait]
 impl ChannelSession for ScriptedSession {
     async fn send_text(&self, chat_jid: &str, text: &str) -> Result<String, ChannelError> {
-        let mut sent = self.sent.lock().unwrap();
-        sent.push((chat_jid.to_owned(), text.to_owned()));
-        Ok(format!("SENT{}", sent.len()))
+        let count = {
+            let mut sent = self.sent.lock().unwrap();
+            sent.push((chat_jid.to_owned(), text.to_owned()));
+            sent.len()
+        };
+        let hold = self.hold.lock().unwrap().take();
+        if let Some(hold) = hold {
+            let _ = hold.await;
+        }
+        Ok(format!("SENT{count}"))
     }
 
     async fn logout(&self) {
@@ -362,6 +371,262 @@ async fn confirmed_timed_whatsapp_sends_on_tick_without_review() {
         )]
     );
     stop(client).await;
+}
+
+const GENTLEMEN_ID: &str = "120363419000000001@g.us";
+const GENTLEMEN_TWIN_ID: &str = "120363419000000002@g.us";
+const STUB_FINDING: &str = "STUB-FINDING-UAE-AI-FUND";
+
+fn stub_search() -> sovra_adk::SearchClient {
+    sovra_adk::SearchClient::from_fn(|_query| async {
+        Ok(
+            r#"{"results":[{"title":"UAE AI fund","url":"https://example.com/uae-ai","content":"STUB-FINDING-UAE-AI-FUND"}]}"#
+                .to_owned(),
+        )
+    })
+}
+
+fn research_client(channel: Arc<ScriptedChannel>) -> Client {
+    sovra_runtime::start_with_services(
+        "research-schedule-test",
+        AgentConfig::default(),
+        sovra_runtime::RuntimeServices {
+            messaging: sovra_runtime::MessagingChannels {
+                whatsapp: Some(channel),
+                telegram: None,
+            },
+            schedule_search: Some(stub_search()),
+            ..sovra_runtime::RuntimeServices::default()
+        },
+    )
+    .unwrap()
+}
+
+fn gentlemen(id: &str) -> sovra_core::connections::SyncedGroup {
+    sovra_core::connections::SyncedGroup {
+        id: id.to_owned(),
+        subject: "The Gentlemen".into(),
+    }
+}
+
+fn research_create(recipient: &str) -> sovra_core::ScheduleCommand {
+    use sovra_core::connections::ChannelKind;
+    sovra_core::ScheduleCommand::CreateResearch {
+        name: "UAE AI investments".into(),
+        cadence: "every morning at 615 am".into(),
+        prompt: "Search the web for investments in AI in the UAE and send a short summary to The Gentlemen.".into(),
+        request: sovra_core::ResearchRequest {
+            channel: ChannelKind::WhatsApp,
+            recipient: recipient.into(),
+            query: "investments in AI in the UAE".into(),
+        },
+    }
+}
+
+async fn open_whatsapp(client: &Client, channel: &ScriptedChannel, connect: bool) {
+    event(client, |e| matches!(e, Event::Ready { .. })).await;
+    client
+        .send(Command::Connections(
+            ConnectionCommand::StartWhatsAppPairing,
+        ))
+        .unwrap();
+    status(client, |s| matches!(s, WhatsAppStatus::Connecting { .. })).await;
+    client
+        .send(Command::Connections(ConnectionCommand::Load))
+        .unwrap();
+    event(client, |e| {
+        matches!(e, Event::Connections(ConnectionEvent::Loaded(_)))
+    })
+    .await;
+    if connect {
+        channel.emit(ChannelEvent::Connected {
+            device: LinkedDevice {
+                phone_display: "+447700900123".into(),
+                device_jid: OWN_CHAT.into(),
+                companion_name: "fixture".into(),
+                linked_at: sovra_core::Timestamp(0),
+            },
+        });
+        status(client, WhatsAppStatus::is_connected).await;
+    }
+}
+
+async fn store_groups(
+    client: &Client,
+    channel: &ScriptedChannel,
+    groups: Vec<sovra_core::connections::SyncedGroup>,
+) {
+    let ids: Vec<String> = groups.iter().map(|group| group.id.clone()).collect();
+    channel.emit(ChannelEvent::Groups(groups));
+    event(client, |e| {
+        matches!(
+            e,
+            Event::Connections(ConnectionEvent::GroupsChanged(found))
+                if ids.iter().all(|id| found.iter().any(|group| group.id == *id))
+        )
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn confirmed_search_sends_one_summary_to_the_gentlemen_group() {
+    use sovra_core::communications::MessageDelivery;
+    use sovra_core::{RunOutcome, ScheduleCadence, ScheduleEvent, ScheduleStatus, next_run_after};
+
+    let channel = Arc::new(ScriptedChannel::default());
+    let (release, hold) = tokio::sync::oneshot::channel();
+    *channel.session.hold.lock().unwrap() = Some(hold);
+    let client = research_client(channel.clone());
+    open_whatsapp(&client, &channel, true).await;
+    store_groups(&client, &channel, vec![gentlemen(GENTLEMEN_ID)]).await;
+
+    client
+        .send(Command::Schedule(research_create("The Gentlemen")))
+        .unwrap();
+    let created = event(&client, |e| {
+        matches!(
+            e,
+            Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) if schedules.len() == 1
+        )
+    })
+    .await;
+    let Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) = created else {
+        panic!("{created:?}")
+    };
+    let item = &schedules[0];
+    assert_eq!(item.status, ScheduleStatus::Active);
+    assert_eq!(
+        item.cadence,
+        ScheduleCadence::Daily {
+            hour: 6,
+            minute: 15
+        }
+    );
+    assert!(item.send.is_none());
+    let research = item.research.as_ref().expect("saved research job");
+    assert_eq!(research.recipient, GENTLEMEN_ID);
+    assert_eq!(research.query, "investments in AI in the UAE");
+    assert_eq!(channel.session.sent.lock().unwrap().as_slice(), &[]);
+    let due = item.next_run_at;
+    let due_again = next_run_after(item.cadence, item.tz_offset_minutes, due);
+
+    client
+        .send(Command::Schedule(sovra_core::ScheduleCommand::Tick {
+            now: due,
+        }))
+        .unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let sent = channel.session.sent.lock().unwrap().clone();
+            if !sent.is_empty() {
+                return sent;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the due run sends once");
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].0, GENTLEMEN_ID);
+    assert!(first[0].1.contains(STUB_FINDING));
+
+    client
+        .send(Command::Schedule(sovra_core::ScheduleCommand::Tick {
+            now: due_again,
+        }))
+        .unwrap();
+    event(&client, |e| {
+        matches!(
+            e,
+            Event::Schedule(ScheduleEvent::Snapshot { runs, .. })
+                if runs.iter().any(|run| run.outcome == Some(RunOutcome::Skipped))
+        )
+    })
+    .await;
+    assert_eq!(channel.session.sent.lock().unwrap().len(), 1);
+
+    release.send(()).unwrap();
+    let outbound = event(&client, |e| {
+        matches!(
+            e,
+            Event::Connections(ConnectionEvent::OutboundChanged(message))
+                if message.recipient == GENTLEMEN_ID
+                    && message.text.contains(STUB_FINDING)
+                    && matches!(message.delivery, MessageDelivery::Accepted { .. })
+        )
+    })
+    .await;
+    let Event::Connections(ConnectionEvent::OutboundChanged(message)) = outbound else {
+        unreachable!()
+    };
+    assert_ne!(message.delivery, MessageDelivery::Review);
+    assert_eq!(channel.session.sent.lock().unwrap().len(), 1);
+    stop(client).await;
+
+    let ambiguous = Arc::new(ScriptedChannel::default());
+    let ambiguous_client = research_client(ambiguous.clone());
+    open_whatsapp(&ambiguous_client, &ambiguous, true).await;
+    store_groups(
+        &ambiguous_client,
+        &ambiguous,
+        vec![gentlemen(GENTLEMEN_ID), gentlemen(GENTLEMEN_TWIN_ID)],
+    )
+    .await;
+    ambiguous_client
+        .send(Command::Schedule(research_create("The Gentlemen")))
+        .unwrap();
+    event(&ambiguous_client, |e| {
+        matches!(
+            e,
+            Event::Schedule(ScheduleEvent::Error(message)) if message.contains("More than one")
+        )
+    })
+    .await;
+    let refused = event(&ambiguous_client, |e| {
+        matches!(e, Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) if schedules.is_empty())
+    })
+    .await;
+    assert!(matches!(
+        refused,
+        Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) if schedules.is_empty()
+    ));
+    assert_eq!(ambiguous.session.sent.lock().unwrap().as_slice(), &[]);
+    stop(ambiguous_client).await;
+
+    let offline = Arc::new(ScriptedChannel::default());
+    let offline_client = research_client(offline.clone());
+    open_whatsapp(&offline_client, &offline, false).await;
+    store_groups(&offline_client, &offline, vec![gentlemen(GENTLEMEN_ID)]).await;
+    offline_client
+        .send(Command::Schedule(research_create("The Gentlemen")))
+        .unwrap();
+    let saved = event(&offline_client, |e| {
+        matches!(
+            e,
+            Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) if schedules.len() == 1
+        )
+    })
+    .await;
+    let Event::Schedule(ScheduleEvent::Snapshot { schedules, .. }) = saved else {
+        panic!("{saved:?}")
+    };
+    let due = schedules[0].next_run_at;
+    assert_eq!(offline.session.sent.lock().unwrap().as_slice(), &[]);
+    offline_client
+        .send(Command::Schedule(sovra_core::ScheduleCommand::Tick {
+            now: due,
+        }))
+        .unwrap();
+    event(&offline_client, |e| {
+        matches!(
+            e,
+            Event::Schedule(ScheduleEvent::Snapshot { runs, .. })
+                if runs.iter().any(|run| run.outcome == Some(RunOutcome::Failed))
+        )
+    })
+    .await;
+    assert_eq!(offline.session.sent.lock().unwrap().as_slice(), &[]);
+    stop(offline_client).await;
 }
 
 async fn status(client: &Client, matches: impl Fn(&WhatsAppStatus) -> bool) -> WhatsAppStatus {

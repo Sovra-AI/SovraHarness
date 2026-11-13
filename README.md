@@ -1,293 +1,181 @@
 # SovraHarness
 
-> **Fair-code — Sustainable Use License.** Copyright © 2026 Sovra. Source on
-> `main` is available under n8n's Sustainable Use License, which n8n's docs
-> allow other projects to use. It is source-available and free to use and
-> extend within those limits. It is not an OSI open-source license. n8n does
-> not own SovraHarness. See [LICENSE](LICENSE) and [LICENSE_EE.md](LICENSE_EE.md).
+A native desktop workspace for AI chat, local memory, files, and shared work.
+Built in Rust with GPUI for macOS, Windows, and Linux. Connect a cloud AI service
+or a local model server such as Ollama, then use helpers to work with your
+knowledge, create documents and websites, and schedule tasks.
 
-Native Rust desktop app for the Sovra agent harness: a GPUI chat UI, a tokio
-runtime, local memory (vector + graph + full-text behind a `MemoryStore` port),
-and Velopack installers. Chrome defaults to English, with a language picker (on the
-sign-in screen and in Settings) and right-to-left layout for Arabic. The **Groups** tab lets a family or small team
-share memories, documents, lists, helpers and schedules across their computers:
-**Share with my group** (or *Just Dad*) on an artifact, a saved detail, a helper or
-a schedule, **Keep a copy** of what others shared, and edits come back as new
-versions. **Ask my group** asks the memories of computers whose owners allow it,
-without copying those memories. **History on this computer** shows a signed,
-tamper-evident record of everything shared and every memory given out. Work
-handoff remains planned; see
-[Groups](docs/groups.md). macOS, Windows and Linux from one codebase.
+[Getting started](docs/getting-started.md) · [Documentation](docs/README.md) ·
+[Releases](https://github.com/Sovra-AI/SovraHarness/releases) ·
+[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
-The Knowledge page includes an interactive map of saved details and their
-connections. Select a label to read its story, filter the kinds of connections,
-or choose **Read as a list**. **Focus on these connections** opens a smaller
-map around the selected detail; **Show all** restores the overview. The map
-renders natively inside the app, with no extra runtime or browser dependency.
+> **License:** Source on `main` is available under n8n's Sustainable Use License,
+> which n8n's docs allow other projects to use. This is fair-code:
+> source-available, and not an OSI open-source license. Enterprise files have
+> separate terms. See [License](#license).
 
-The first sign-in opens an 11-step guided tour of every page in everyday words;
-its second step offers OpenRouter (online) or Ollama (on this computer) with the
-buttons to set either up. See [Getting started](docs/getting-started.md#the-guided-tour).
+## What you can do
 
-**Models** shows your current chat model, with **Change model** to switch and
-**Models for files (optional)** for picture, audio and document choices.
+- **Chat with helpers:** choose a model, discover capabilities on the Skills
+  page, and follow the live work log as helpers work together.
+- **Work with your knowledge:** attach files, index local folders, recall saved
+  details, and explore their sources and connections.
+- **Save your work:** organize versioned documents, code, and other artifacts
+  into folders and favorites. Preview saved websites in your browser.
+- **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
+  Connection setup and permissions depend on the service.
+- **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
+  scheduled search note to a WhatsApp group.
+- **Share with a group:** share selected knowledge, artifacts, helpers, and
+  schedules across computers, with a signed history of sharing activity.
 
-AI setup guides you through adding a service's connection key and choosing an
-AI. OpenRouter offers free and paid choices. A saved key means Sovra has stored
-it; use **Check key** to check whether the service accepts it.
-If a key is already supplied by this computer's settings, continue straight to
-**Next: pick a chat model**. You do not need to create or save another key.
-
-The **Groups** tab explains itself in plain words: *What is a group?*, what you
-can do in one, and how it works. You choose **Start a new group** or **Join a
-group** and answer two or three labelled questions. Inside a group, one page at a
-time (**Invite someone**, **Shared notes**, **People**, **Shared helpers**,
-**Ask the group**, and under **More…** **Borrow an AI**, **Smaller circles**, **History**) says what it is
-for and how to use it in numbered steps, and a **Getting started** list shows what
-a new group still has to do. Under **Invite someone**, **Create invite link** makes
-a one-time link and copies it for you to send. Leaving removes you and all your
-computers. If you are alone, it ends the group; if others remain, another admin
-must be available. History confirmations wait for
-the matching records to arrive and continue as computers catch up.
-Sharing a note keeps your draft until you choose **Write another note**.
-**Sharing…** changes to a confirmation after the note is saved; failed shares
-keep your words for retry. Artifact sharing, **Keep a copy**, and **Stop sharing**
-also wait for confirmation and allow retry when a request fails.
-
-While Sovra works, each reply shows a live work log above the answer: every
-step in plain words ("Searching the web for …"), helpers working side by side in
-their own lanes, and how long each step took. Afterwards it folds into one line
-you can reopen. Team turns show a **Waiting / Working / Done** board, and members
-picked for a round answer at the same time. Every helper runs under bounded step,
-failure and repeat limits; see [The agent loop](docs/agent-loop.md).
-
-Ask Sovra to build a website, then ask it to run the saved website. The code
-panel shows source while it is written; **Run website** opens saved HTML in your
-browser at a local address. **Stop website** ends hosting without deleting the
-artifact. **Open in browser** uses a local HTTP address, including for diagrams
-and pictures. React, Vue, Svelte and other frontend projects are saved as one
-multi-file artifact: inspect individual files, then choose **Build and open**.
-Install Node.js/npm and enable terminal access first; review build commands in
-chat. Projects must produce static files (usually `dist`); server backends and
-server-side rendering are not hosted. Hosting ends when Sovra closes.
-
-Organize Artifacts into named folders, mark favorites, search by name or content,
-and sort by recent changes, name or oldest first. Results appear 24 per page.
-Older work appears under **Unfiled** until you move it.
-If no results match, **Show all saved work** clears the search, folder, type and
-Favorites filters together without changing anything you saved.
-When editing saved work, Back and Cancel ask before discarding changes. Choose
-**Keep editing** to return to your draft or **Discard changes** to leave it.
-Saving keeps the editor open until confirmed. If it fails, your changes remain
-in the form so you can retry; typing during a save keeps the newer draft open.
-
-Type `/remote-control` in chat to open **Use Sovra from your phone**, enable
-phone access and show a one-use pairing QR. Paired phones are remembered, but
-access starts off after every restart. **Stop phone control** ends access and
-**Forget** revokes a phone. The mobile app is not built yet; the desktop
-connection, runnable reference client and [mobile integration contract](docs/remote-control.md)
-are ready for integration testing with that future app.
+The interface includes a guided tour, a language picker, Arabic right-to-left
+layout, and adjustable text size. See the [getting started guide](docs/getting-started.md)
+for a tour of the features.
 
 ## Quick start
 
-Scheduled tasks keep their previous saved state when an update cannot be saved.
-The creation form preserves entries on failure and waits for confirmation before closing.
-Runs start only after their run record is saved; see [Schedules](docs/schedules.md).
+### Install a release
 
-Open **Skills**, directly below **Chat** in the expanded sidebar, to discover
-what Sovra can do and try an example. The account footer's **Sign out** action
-returns to the sign-in screen.
-If you created your account with only a name, choose the sign-in button with your name
-to reopen it on this computer. Email/password and Google accounts use their
-usual sign-in methods.
-Sign-in fields keep their labels visible while you type; translated page headings
-and sign-in instructions support right-to-left paragraph wrapping.
-Skills' **Open now** buttons open the relevant feature directly; **Try in chat**
-and **Try the example** prepare a draft for you to review before sending.
-When adding your own skill, use a name in your language and leave **Shortcut**
-blank. Sovra chooses an unused shortcut automatically, including for Arabic
-names. To change an existing skill, open its **Edit** action.
-Ask in chat to send a WhatsApp to a person or to one of your WhatsApp groups by
-name. Sovra shows the message for you to press **Send**; afterwards you can choose
-**Yes, don't ask again** for that chat, and undo it any time from the message or
-Settings → WhatsApp → **Sends without asking**.
+Open [GitHub Releases](https://github.com/Sovra-AI/SovraHarness/releases), choose
+an asset for your operating system and architecture, and follow the release's
+installation notes. Signing depends on the credentials available for that build;
+check its release notes. In-app update checks are not implemented yet.
+
+After launching:
+
+1. Create or open a local account.
+2. Follow the guided tour or open **Models** to connect a service and choose a
+   chat model. Cloud services may require a key and charge for usage. For Ollama,
+   install and start the local model server separately.
+3. Send a message in **Chat**, or open **Skills** to try an example.
+
+For connection problems, see [Models](docs/models.md) and
+[Configuration and local data](docs/configuration.md).
+
+### Build from source
+
+Install Git and Rust through rustup. The repository pins Rust **1.99.1** in
+[rust-toolchain.toml](rust-toolchain.toml). You also need your platform's build tools:
+
+| Platform | Prerequisites |
+| --- | --- |
+| macOS | Xcode command-line tools |
+| Windows | Visual Studio C++ build tools, Windows SDK, and the MSVC Rust target |
+| Linux | System packages installed by `./scripts/install-linux-deps.sh` |
 
 ```sh
-just dev
-```
-
-Or without `just`:
-
-```sh
+git clone https://github.com/Sovra-AI/SovraHarness.git
+cd SovraHarness
+# Linux only: ./scripts/install-linux-deps.sh
 cargo xtask setup
 cargo xtask dev
 ```
 
-On Linux, install system packages once with `./scripts/install-linux-deps.sh`.
-The native app does not require Node or Python. Install Rust and the platform
-build tools first; packaging additionally requires .NET and Velopack. See
-[development](docs/development.md) and [releasing](docs/releasing.md).
+`cargo xtask dev` builds and launches once with `SOVRA_DEV=1`. Close the running
+session and run it again after edits; there is no file watcher or hot reload.
+Development mode enables local authenticated app control and stores development
+keys in separate plaintext files outside the checkout (owner-only on Unix).
+Ordinary launches and release builds start development control off; release keys
+use the OS keychain. See [Native development](docs/development.md).
 
-`cargo xtask dev` is a **one-shot** debug launch with `SOVRA_DEV=1`. There is no
-file watcher and no save-triggered reload — run it again after you edit. Details:
-[native development](docs/development.md). To drive the running window from Codex
-or Claude Code, see [Development MCP](docs/development-mcp.md).
+The native app does not require Node.js or Python. Building generated frontend
+projects requires Node.js/npm and approved terminal access. Packaging has
+additional prerequisites in the [release guide](docs/releasing.md).
 
-## Commands
+## Status and data boundaries
 
-| Command                    | What it does                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------- |
-| `cargo xtask dev`          | One-shot debug build + launch (`SOVRA_DEV=1`); re-run to reload              |
-| `cargo xtask run`          | Launch the app (debug, without `SOVRA_DEV`)                                  |
-| `cargo xtask ci`           | Every gate: fmt, clippy, layering, styles, docs, cargo-deny, unused deps, tests |
-| `cargo xtask fix`          | Auto-apply fmt + clippy fixes                                                |
-| `cargo xtask check-styles` | Native styling boundary and the bundled SVG logo                             |
-| `cargo xtask check-docs`   | README mermaid graphs and relative markdown links                            |
-| `cargo xtask setup`        | Install pinned CI tools (deny, nextest, shear)                               |
-| `cargo xtask dist`         | Release build and verified native installer (Velopack `vpk` 1.2.161)         |
-| `just free-cache`          | Reclaim Cargo build caches when no `dev` session is running (`clear-cache` also works) |
+Sovra is under active development. Read the [changelog](CHANGELOG.md) for changes
+and the [roadmap](docs/roadmap/README.md) for planned work.
 
-## How it is put together
+- Local storage does not make every operation offline. Cloud models and connected
+  tools receive the content needed for their requests; group networking can use
+  discovery and encrypted relays. Review the [network inventory](docs/value-realisation/03-sovereignty-evidence.md).
+- Local accounts do not provide separate encrypted data stores. Terminal commands
+  and local MCP programs run with your OS permissions, without a sandbox.
+- **My AIs** offers routing previews; these do not change the model answering chat
+  or verify connection availability. Preview settings last for the session.
+- Website hosting supports static output; server backends and server-side
+  rendering are not hosted. Hosting stops when Sovra closes.
+- Phone control has a desktop connection and reference client; the mobile app
+  is not built yet. Group work handoff remains planned.
 
-Dependencies point inward toward `sovra-core`. The table in
-`xtask/src/deps.rs` is the architecture; `cargo xtask check-deps` enforces it.
-Why those splits: [architecture](docs/architecture.md).
+See [Security](SECURITY.md) for credential storage and execution boundaries.
+
+## Development
+
+| Command | Purpose |
+| --- | --- |
+| `cargo xtask dev` | One-shot development build and launch |
+| `cargo xtask run` | Debug launch without `SOVRA_DEV` |
+| `cargo xtask ci` | All required formatting, lint, architecture, docs, dependency, and test gates |
+| `cargo xtask fix` | Apply formatting and Clippy fixes |
+| `cargo xtask check-docs` | Check documentation links and required diagrams |
+| `cargo xtask dist` | Build and verify a native installer |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull request workflow and
+[AGENTS.md](AGENTS.md) for engineering rules. To test the running app through an
+MCP client, follow [Development MCP](docs/development-mcp.md).
+
+### Architecture
+
+Domain decisions live in `sovra-core`, IO lives in adapters, and views live in
+`sovra-ui`. The UI sends commands and receives events through
+`sovra_runtime::Client`.
 
 ```mermaid
 flowchart TB
-  app["sovra-app<br/>composition root"]
-  ui["sovra-ui"]
-  runtime["sovra-runtime"]
-  core["sovra-core<br/>Command / Event, reducers, ports"]
-  subgraph adapters["adapters — IO only"]
-    adk["sovra-adk"]
-    files["sovra-files"]
-    skills["sovra-skills"]
-    google["sovra-google"]
-    github["sovra-github"]
-    providers["sovra-providers"]
-    store["sovra-store-surreal"]
-    wa["sovra-whatsapp"]
-    tg["sovra-telegram"]
-    mesh["sovra-mesh"]
-  end
-  app --> ui
-  app --> runtime
-  app --> files
-  app --> google
-  app --> github
-  app --> providers
-  app --> skills
-  app --> store
-  app --> wa
-  app --> tg
-  app --> mesh
-  ui --> runtime
-  ui --> core
+  app["sovra-app: composition root"] --> ui["sovra-ui: native views"]
+  app --> runtime["sovra-runtime: async IO"]
+  ui -->|"Command, e.g. RunPrompt"| runtime
+  runtime -->|"Event"| ui
+  ui --> core["sovra-core: types, reducers, ports"]
   runtime --> core
-  runtime --> adk
-  runtime --> providers
-  adk --> core
-  files --> core
-  skills --> core
-  google --> core
-  github --> core
-  providers --> core
-  store --> core
-  wa --> core
-  tg --> core
-  mesh --> core
+  runtime --> adapters["Adapters: models, files, storage, services"]
+  adapters --> core
 ```
 
-## How the UI talks to the runtime
+The enforced dependency rules live in [xtask/src/deps.rs](xtask/src/deps.rs).
+Read [Architecture](docs/architecture.md) and
+[Memory capture and recall](docs/memory-capture-and-recall.md) for the full design.
 
-The UI never sees tokio. It sends a `Command` and receives an `Event` on
-`sovra_runtime::Client`. Headless UI tests use `Client::loopback()`.
+## Documentation
 
-```mermaid
-flowchart LR
-  person[Person] --> ui["sovra-ui"]
-  ui -->|"Command"| client["sovra_runtime::Client"]
-  client -->|"Event"| ui
-  client --> runtime["sovra-runtime<br/>tokio thread"]
-  runtime --> core["sovra-core"]
-  runtime --> adk["sovra-adk"]
-  runtime --> store["MemoryStore"]
-```
+| Guide | Covers |
+| --- | --- |
+| [Getting started](docs/getting-started.md) | First launch, first chat, and finding features |
+| [Configuration](docs/configuration.md) | Startup variables, data paths, and troubleshooting |
+| [Models](docs/models.md) | Providers, keys, model selection, and routing previews |
+| [Files](docs/files.md) and [Knowledge](docs/knowledge.md) | Attachments, saved details, and sources |
+| [Teams and artifacts](docs/teams-and-artifacts.md) | Helpers and saved work |
+| [Schedules](docs/schedules.md) and [Groups](docs/groups.md) | Recurring work and sharing |
+| [Connections](docs/connected-services.md) | MCP tools and service setup |
+| [Documentation index](docs/README.md) | All guides and technical references |
 
-## How one chat turn is remembered
+## Contributing and support
 
-A private chat message is saved as raw evidence immediately. The reply uses
-facts already in the store. Extracting a new fact runs in the background and
-can only appear on a later turn. Full path:
-[memory capture and recall](docs/memory-capture-and-recall.md).
-Background checks that find no new facts leave ongoing lookups intact. Corrections,
-removals and new fact writes still invalidate older results so replies do not use
-outdated details.
+Bug reports, feature requests, documentation improvements, and code contributions
+are welcome. Search [existing issues](https://github.com/Sovra-AI/SovraHarness/issues)
+before opening a new one, and follow [CONTRIBUTING.md](CONTRIBUTING.md) when
+submitting a pull request. Include your app version, OS, and reproduction steps;
+remove credentials and personal data from logs and screenshots.
 
-```mermaid
-sequenceDiagram
-  participant Person
-  participant UI as sovra-ui
-  participant Runtime as sovra-runtime
-  participant Store as MemoryStore
-  participant Model as ADK / model
-  Person->>UI: Send message
-  UI->>Runtime: Command::RunPrompt
-  Runtime->>Store: record episode
-  Runtime->>Store: recall current facts
-  Runtime->>Model: generate reply
-  Model-->>Runtime: tokens
-  Runtime-->>UI: Event stream
-  UI-->>Person: reply
-  Runtime->>Store: extract fact later
-```
-
-## Docs
-
-| Guide | What it covers |
-| ----- | -------------- |
-| [Getting started](docs/getting-started.md) | First launch, first chat and finding features |
-| [Configuration and local data](docs/configuration.md) | Startup variables, data paths and troubleshooting |
-| [Schedules](docs/schedules.md) | Repeating prompts and confirmed timed messages |
-| [Groups](docs/groups.md) | People, computers and explicitly shared knowledge |
-| [Release guide](docs/releasing.md) | Packaging, signing and release verification |
-| [Roadmap](docs/roadmap/README.md) | Implemented foundations and planned stages |
-| [Architecture](docs/architecture.md) | Crate layering, Command/Event, why each dependency |
-| [Native development](docs/development.md) | One-shot `cargo xtask dev`, cache, sign-in status |
-| [Development MCP](docs/development-mcp.md) | Drive the running app from Codex or Claude Code |
-| [Phone remote control](docs/remote-control.md) | Desktop pairing and control, research and future mobile integration |
-| [Reviewing knowledge](docs/knowledge.md) | Check sources, explore connections and stop recall |
-| [Memory capture and recall](docs/memory-capture-and-recall.md) | One chat turn through save and later recall |
-| [Agent memory log](docs/agent-memory.md) | Dated audits and measured limits |
-| [Knowledge benchmark](docs/knowledge-benchmark.md) | Tool assessment and reproducible source-retrieval diagnostic |
-| [Models](docs/models.md) | Connect a service, pick a chat model |
-| [Files in chat](docs/files.md) | Paperclip attachments and the document reader |
-| [File understanding](docs/file-ontology.md) | What a file is, live folder reading |
-| [Skills and file knowledge](docs/skills-and-file-knowledge.md) | Skills page, folder index, dated implementation log |
-| [MCP servers](docs/connected-services.md) | Extra tools from a URL, a local program, or paste |
-| [Messaging](docs/communications.md) | WhatsApp, Telegram, sending from desktop chat |
-| [Google](docs/google.md) | Connect Google, per-service switches |
-| [GitHub](docs/github.md) | Connect GitHub, what the GitHub helper can do |
-| [Terminal](docs/terminal.md) | Allow-once commands on this computer |
-| [The agent loop](docs/agent-loop.md) | How helpers reason and act, loop limits, the live work log |
-| [Teams and artifacts](docs/teams-and-artifacts.md) | Helpers in chat, saveable work |
-| [Styling](docs/styling.md) | Native design system and responsive layout |
-| [Docs index](docs/README.md) | The same map, living next to the files |
+Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in project spaces. Report
+vulnerabilities using [SECURITY.md](SECURITY.md), without posting exploit details
+in public issues.
 
 ## Shipping
 
-`cargo xtask dist` builds a native installer under `target/dist/` (Velopack
-`vpk` 1.2.161). A push to `main` that bumps the package version in `Cargo.toml`
-builds the macOS, Windows, and Linux release executables and publishes them on
-the GitHub Release and Velopack feed. The version comes from `Cargo.toml`, never
-the branch name `main`. A matching `vX.Y.Z` tag runs the same
-[`.github/workflows/release.yml`](.github/workflows/release.yml) when it matches
-that version. In-app update checking is not wired yet. More:
-[architecture → distribution](docs/architecture.md#distribution-velopack).
+[cargo xtask dist](docs/releasing.md) builds installers under `target/dist/`.
+The release workflow publishes executables and the Velopack feed when a push to
+`main` bumps the package version; a matching `vX.Y.Z` tag can run the same workflow.
+See the [release guide](docs/releasing.md) for versioning, signing, and verification.
 
-## Contributing
+## License
 
-Day-to-day work goes through pull requests against `main`. Workflow:
-[CONTRIBUTING.md](CONTRIBUTING.md). Canonical rules: [AGENTS.md](AGENTS.md).
-Security: [SECURITY.md](SECURITY.md). Changelog: [CHANGELOG.md](CHANGELOG.md).
+[LICENSE](LICENSE) contains n8n's Sustainable Use License, Version 1.0, with Sovra
+as the licensor. This is a fair-code license with use and distribution
+restrictions, not an OSI open-source license. It applies to source on `main`;
+the license excludes other branches. Files with `.ee.` in their name or `.ee` in their directory name
+are covered separately by [LICENSE_EE.md](LICENSE_EE.md). Third-party components
+retain their own licenses.

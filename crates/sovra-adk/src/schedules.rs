@@ -7,7 +7,7 @@ use adk_core::{Tool, ToolContext};
 use serde_json::{Value, json};
 use sovra_core::communications::concrete_scheduled_recipient;
 use sovra_core::connections::ChannelKind;
-use sovra_core::{ScheduleCommand, ScheduledSend};
+use sovra_core::{ResearchRequest, ScheduleCommand, ScheduledSend};
 
 type CallFuture = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 type CallFn = Arc<dyn Fn(ScheduleCommand) -> CallFuture + Send + Sync>;
@@ -69,13 +69,18 @@ name. That job SENDS at the scheduled time; \
 they do not press Send then, and they need not be present. Do not offer only a draft \
 for them to Send, and do not create a reminder-only prompt such as \"remind them to send it\". \
 Live prepare_message still does not send until they press Send. \
+When they confirmed a web search whose short summary should go to one WhatsApp group, \
+create_schedule with search_query, send_channel whats_app, and send_recipient set to that \
+group's name or exact id. Do not write the summary in send_text: the findings are looked \
+up when the job runs, and nothing is sent when it is saved. If more than one group has \
+that name, ask for the exact group id instead of guessing. \
 After a change, list_schedules and tell them the name, when it next runs, and whether \
 it will send the message, in plain words.";
 
 pub(crate) const ROUTING: &str = "For setting up, changing, pausing, listing, or running a \
 task once or on a repeat (in 1 minute, just once, every morning, weekdays, every few hours, \
 or a named weekday), including a WhatsApp or Telegram text that should go out at a chosen \
-time, call SchedulerAgent.";
+time, or a web search whose short note goes to one WhatsApp group, call SchedulerAgent.";
 
 impl Kind {
     fn name(self) -> &'static str {
@@ -92,7 +97,7 @@ impl Kind {
                 "List the person's scheduled tasks, including whether each is on, paused, and when it next runs."
             }
             Self::Create => {
-                "Create a scheduled task. `name` is a short title, `cadence` is the person's own words (in 1 minute, just once, every morning at 7:30, weekdays at 9, every 4 hours, Fridays at 16:00) — pass delay phrases unchanged, never as a clock — and `prompt` is what Sovra should do when it runs. For a confirmed timed WhatsApp or Telegram text, also pass `send_channel`, `send_recipient`, and `send_text`; that job sends at the scheduled time without another Send click."
+                "Create a scheduled task. `name` is a short title, `cadence` is the person's own words (in 1 minute, just once, every morning at 7:30, weekdays at 9, every 4 hours, Fridays at 16:00) — pass delay phrases unchanged, never as a clock — and `prompt` is what Sovra should do when it runs. For a confirmed timed WhatsApp or Telegram text, also pass `send_channel`, `send_recipient`, and `send_text`; that job sends at the scheduled time without another Send click. For a confirmed web search whose short summary goes to one WhatsApp group, pass `search_query`, `send_channel` whats_app, and `send_recipient` as the group name or exact id, and do not pass `send_text`."
             }
             Self::Pause => {
                 "Pause a scheduled task so it stops running until resumed. `id` comes from list_schedules."
@@ -122,9 +127,12 @@ impl Kind {
                         "description": "If this task should send a message, which app. A confirmed timed text goes out at the scheduled time; the person does not press Send then.",
                     },
                     "send_recipient": string(
-                        "Who to message: me, an international WhatsApp number starting with +, an exact chat id, or person:<id> from find_people. Never a first name.",
+                        "Who to message. For exact words: me, an international WhatsApp number starting with +, an exact chat id, or person:<id> from find_people. For a search summary: one WhatsApp group's name or its exact id. Never a first name.",
                     ),
-                    "send_text": string("Exact words to send at the scheduled time."),
+                    "send_text": string("Exact words to send at the scheduled time. Leave this out when search_query is set."),
+                    "search_query": string(
+                        "What to look up on the web when the task runs. The short summary of what is found is sent then. Do not also pass send_text.",
+                    ),
                 },
                 "required": ["name", "prompt"],
             }),
@@ -154,12 +162,7 @@ impl Kind {
         };
         Ok(match self {
             Self::List => ScheduleCommand::Load,
-            Self::Create => ScheduleCommand::Create {
-                name: required("name")?,
-                cadence: text("cadence"),
-                prompt: required("prompt")?,
-                send: optional_send(args)?,
-            },
+            Self::Create => return create_command(&text, &required, args),
             Self::Pause => ScheduleCommand::Pause {
                 id: required("id")?,
             },
@@ -172,6 +175,49 @@ impl Kind {
             },
         })
     }
+}
+
+fn create_command(
+    text: &impl Fn(&str) -> String,
+    required: &impl Fn(&str) -> Result<String, String>,
+    args: &Value,
+) -> Result<ScheduleCommand, String> {
+    let name = required("name")?;
+    let cadence = text("cadence");
+    let prompt = required("prompt")?;
+    let search_query = text("search_query");
+    let send_text = text("send_text");
+    if !search_query.is_empty() && !send_text.is_empty() {
+        return Err("Say either the exact words or a search to send, not both.".into());
+    }
+    if !search_query.is_empty() {
+        let channel: ChannelKind =
+            serde_json::from_value(args.get("send_channel").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "Choose whats_app or telegram for send_channel.".to_owned())?;
+        if channel != ChannelKind::WhatsApp {
+            return Err("A search that sends to a group works on WhatsApp.".into());
+        }
+        let recipient = text("send_recipient");
+        if recipient.is_empty() {
+            return Err("Say which WhatsApp group should get the summary.".into());
+        }
+        return Ok(ScheduleCommand::CreateResearch {
+            name,
+            cadence,
+            prompt,
+            request: ResearchRequest {
+                channel,
+                recipient,
+                query: search_query,
+            },
+        });
+    }
+    Ok(ScheduleCommand::Create {
+        name,
+        cadence,
+        prompt,
+        send: optional_send(args)?,
+    })
 }
 
 fn optional_send(args: &Value) -> Result<Option<ScheduledSend>, String> {
@@ -386,6 +432,36 @@ mod tests {
         }));
         let err = rejected.expect_err("first name is not a timed-send recipient");
         assert!(err.contains("first name"), "{err}");
+
+        let researched = Kind::Create
+            .command(&json!({
+                "name": "UAE AI morning",
+                "cadence": "every morning at 6:15 am",
+                "prompt": "Search for AI investments in the UAE and send a short note",
+                "send_channel": "whats_app",
+                "send_recipient": "The Gentlemen",
+                "search_query": "investments in AI in the UAE",
+            }))
+            .expect("group name is a search recipient");
+        match researched {
+            ScheduleCommand::CreateResearch { request, .. } => {
+                assert_eq!(request.channel, ChannelKind::WhatsApp);
+                assert_eq!(request.recipient, "The Gentlemen");
+                assert_eq!(request.query, "investments in AI in the UAE");
+            }
+            other => panic!("expected a search-then-send job, got {other:?}"),
+        }
+        let both = Kind::Create.command(&json!({
+            "name": "UAE AI morning",
+            "cadence": "every morning at 6:15 am",
+            "prompt": "Search and send",
+            "send_channel": "whats_app",
+            "send_recipient": "The Gentlemen",
+            "send_text": "frozen",
+            "search_query": "investments in AI in the UAE",
+        }));
+        let err = both.expect_err("exact words and a search cannot both be stored");
+        assert!(err.contains("not both"), "{err}");
     }
 
     #[test]

@@ -227,6 +227,18 @@ impl SearchClient {
         indexed.sort_by_key(|(index, _)| *index);
         indexed.into_iter().map(|(_, outcome)| outcome).collect()
     }
+
+    /// One short note for a saved search. Empty and failed searches return an
+    /// error so the caller does not send a blank message.
+    pub async fn digest(&self, query: &str) -> Result<String, String> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err("Say what to search for.".into());
+        }
+        let outcomes = self.search_many(vec![query.to_owned()]).await;
+        let ranked = fuse_engine_outcomes(&outcomes, MAX_FUSED_HITS);
+        sovra_core::research_digest(query, &ranked)
+    }
 }
 
 /// The search helper's tools: always `web_search`, plus `read_web_page` when the

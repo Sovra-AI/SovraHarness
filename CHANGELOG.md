@@ -14,6 +14,10 @@ package version.
 
 ## [Unreleased]
 
+- **Public repository documentation.** Streamlined the README around setup,
+  capabilities, limitations, and guides; clarified external contributions and
+  security reporting, and added community conduct guidance.
+
 - **Sustainable Use License.** Source on `main` is offered under n8n's Sustainable Use License, Version 1.0, with Sovra as the licensor. It is fair-code and source-available, not an OSI open-source license. Enterprise-only files, if any, stay under a separate Sovra enterprise license.
 
 - **Skill messages are announced and readable remotely.** The note under the
@@ -30,6 +34,30 @@ package version.
   of refusing it as a duplicate and leaving it open until it expired.
 
 - **All three executables update together.** A new version on GitHub is updated with the macOS, Windows, and Linux executables. A release that is missing any of them is not treated as finished, and publishing fails unless all three are on that version afterward.
+
+- **Morning search notes to one WhatsApp group.** A confirmed schedule can
+  search the web when it fires and send one short summary to a single WhatsApp
+  group. "Every morning at 6:15 am" and "every morning at 615 am" both mean
+  06:15 in the task's saved UTC offset (06:15 at Dubai's +240 offset is 02:15
+  UTC). The group is resolved when the task is saved, nothing is sent until it
+  is due, an ambiguous or unknown group is refused, a disconnected WhatsApp
+  records a failed run, and a second fire while that run is still going does
+  not send again. The schedule helper's required list call keeps a tool-call
+  id, so that setup no longer stops with an internal error.
+
+- **Clearer My AIs setup.** Shows the chosen chat model and clearly identifies routing controls as session-only previews that do not switch the AI answering chats. Explains model priority and offers explicit Quick, Balanced and Thorough preview choices per helper. Changing effort preserves the helper’s model choice instead of silently pinning the global model.
+
+- **Protect unfinished skill recipes.** Back asks whether to keep editing or
+  discard changed fields. Creation and import actions stay disabled while a
+  recipe is open, so they cannot replace its draft.
+
+- **Retry GitHub setup directly.** A failed key check returns to the setup steps
+  and key field. Paste the key again and retry without reopening setup.
+
+- **Know when a custom skill is saved.** The form shows **Saving…** until a
+  matching confirmation arrives, keeps failed drafts for retry and updates the
+  same skill on later saves. Changes typed during saving stay in the form with
+  a reminder to save the newer version.
 
 ## [0.4.1] — 2026-11-13
 
