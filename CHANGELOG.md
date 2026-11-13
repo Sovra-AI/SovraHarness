@@ -20,6 +20,10 @@ package version.
   upload under their own names instead of clashing, and the Linux build no
   longer fails after it has already succeeded, so a new version reaches the
   download site without manual steps.
+- **Phone pairing works away from home.** Starting phone control waits up to three
+  seconds for an encrypted relay, so the pairing code carries it. Before, the code held
+  only this network's addresses, and a phone on mobile data or another Wi-Fi depended on
+  address lookup alone.
 
 - **Linux download builds reliably.** The Linux release build gets extra memory
   room, so it no longer stops partway and leaves a version without its Linux

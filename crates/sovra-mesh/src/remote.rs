@@ -17,6 +17,11 @@ use sovra_core::{
 
 use crate::{Mesh, MeshError, Reach, peer_address};
 
+/// How long `bind` waits for a home relay, so the pairing code carries the relay URL.
+/// Stays under the runtime's 5 s setup deadline; without a relay in time (no Internet),
+/// the code still has the LAN addresses and phones find the relay later by key.
+const RELAY_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Independent endpoint and key: closing phone access never closes Groups.
 #[derive(Debug)]
 pub struct RemoteMesh {
@@ -43,6 +48,11 @@ impl RemoteMesh {
             .bind()
             .await
             .map_err(|error| MeshError::Bind(error.to_string()))?;
+        // The QR is encoded straight after bind. Without this wait it holds only LAN
+        // addresses, and a phone off that network depends on address lookup alone.
+        if matches!(reach, Reach::Internet) {
+            let _ = n0_future::time::timeout(RELAY_WAIT, endpoint.online()).await;
+        }
         Ok(Self { endpoint })
     }
 }

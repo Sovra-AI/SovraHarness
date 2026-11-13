@@ -51,6 +51,15 @@ async fn remote_protocol_crosses_a_public_relay_with_direct_networking_disabled(
     .expect("relay roundtrip within 45 seconds");
 }
 
+#[tokio::test]
+#[ignore = "requires Internet access to the public Iroh relay; run explicitly"]
+async fn a_fresh_internet_endpoint_puts_its_relay_in_the_pairing_address() {
+    let desktop = RemoteMesh::bind([63; 32], Reach::Internet).await.unwrap();
+    // What the runtime encodes into the QR immediately after bind.
+    assert!(desktop.address().relay.is_some(), "{:?}", desktop.address());
+    desktop.close().await;
+}
+
 async fn connected(
     desktop: &RemoteMesh,
     phone: &RemoteMesh,
