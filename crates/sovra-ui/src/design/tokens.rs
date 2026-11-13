@@ -127,6 +127,11 @@ pub struct LayoutTokens {
     /// Tallest the live team board above the chat box gets before it scrolls,
     /// so the conversation keeps most of a small window.
     pub team_dock_max_height: Rems,
+    /// Tallest the guided tour card gets before it scrolls, so the page it
+    /// explains stays in view even in the smallest window.
+    pub tour_card_max_height: Rems,
+    /// Thickness of one segment in the tour's progress bar.
+    pub tour_progress: Rems,
     /// Side of a QR code shown for a phone to scan; large enough for a camera at arm's length.
     pub scan_code: Rems,
     pub card_max_width: Rems,
@@ -348,6 +353,8 @@ pub fn tokens(cx: &App) -> SovraTokens {
             card_min_width: rem(224.),
             kanban_lane_width: rem(144.),
             team_dock_max_height: rem(132.),
+            tour_card_max_height: rem(380.),
+            tour_progress: rem(4.),
             scan_code: rem(272.),
             card_max_width: rem(560.),
             dialog_width: rem(432.),

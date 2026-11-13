@@ -615,7 +615,7 @@ fn skill_icon(skill: &Skill) -> IconName {
 }
 
 /// A rounded coloured square holding an icon; the colour says which group it is in.
-fn tile(icon: IconName, tone: design::TileTone, cx: &App) -> impl IntoElement + use<> {
+pub(crate) fn tile(icon: IconName, tone: design::TileTone, cx: &App) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     div()
         .flex()

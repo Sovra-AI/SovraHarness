@@ -131,98 +131,177 @@ pub fn window_title(
     }
 }
 
-/// Interactive 5-step guided system tutorial walking new users through Sovra.
+/// One stop on the guided tour a newcomer sees after first signing in. Each stop opens
+/// one page and explains, in everyday words, what it is for and one thing to try.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TourStep {
-    /// Step 1 of 5 (`NavTab::Chat`): Sending your first message and using starter chips.
-    WelcomeChat,
-    /// Step 2 of 5 (`NavTab::MyAis`): How Sovra automatically routes between quick and deep models.
-    AutomaticRouting,
-    /// Step 3 of 5 (`NavTab::Knowledge`): How bi-temporal memory remembers facts without losing history.
-    KnowledgeMemory,
-    /// Step 4 of 5 (`NavTab::Schedules`): Putting recurring prompts and daily briefings on autopilot.
-    AutomatedSchedules,
-    /// Step 5 of 5 (`NavTab::Settings`): Personalizing Always-On Context and response style.
-    PersonalizeSettings,
+    /// Chat: what Sovra is and how the tour works.
+    Welcome,
+    /// Models: give Sovra an AI to think with (`OpenRouter` online, or Ollama on this computer).
+    ConnectAi,
+    /// Chat: ask the first question.
+    AskAnything,
+    /// Skills: every built-in ability, each with an example to try.
+    Skills,
+    /// Knowledge: what Sovra remembers and how to check or correct it.
+    Knowledge,
+    /// Connections: Google, GitHub, `WhatsApp` and Telegram.
+    Connections,
+    /// Team: specialist helpers that think a question through together.
+    Team,
+    /// Schedules: jobs that repeat on their own.
+    Schedules,
+    /// Artifacts: everything made and kept.
+    SavedWork,
+    /// Groups: share with family or a team.
+    Groups,
+    /// Settings: personal instructions, language, look and text size.
+    MakeItYours,
 }
 
 impl TourStep {
-    pub const ALL: [Self; 5] = [
-        Self::WelcomeChat,
-        Self::AutomaticRouting,
-        Self::KnowledgeMemory,
-        Self::AutomatedSchedules,
-        Self::PersonalizeSettings,
+    pub const ALL: [Self; 11] = [
+        Self::Welcome,
+        Self::ConnectAi,
+        Self::AskAnything,
+        Self::Skills,
+        Self::Knowledge,
+        Self::Connections,
+        Self::Team,
+        Self::Schedules,
+        Self::SavedWork,
+        Self::Groups,
+        Self::MakeItYours,
     ];
 
-    pub fn step_number(self) -> usize {
+    /// How many stops the tour has.
+    pub const COUNT: usize = Self::ALL.len();
+
+    fn index(self) -> usize {
         match self {
-            Self::WelcomeChat => 1,
-            Self::AutomaticRouting => 2,
-            Self::KnowledgeMemory => 3,
-            Self::AutomatedSchedules => 4,
-            Self::PersonalizeSettings => 5,
+            Self::Welcome => 0,
+            Self::ConnectAi => 1,
+            Self::AskAnything => 2,
+            Self::Skills => 3,
+            Self::Knowledge => 4,
+            Self::Connections => 5,
+            Self::Team => 6,
+            Self::Schedules => 7,
+            Self::SavedWork => 8,
+            Self::Groups => 9,
+            Self::MakeItYours => 10,
         }
+    }
+
+    /// 1-based position, for "Step 3 of 11".
+    pub fn step_number(self) -> usize {
+        self.index() + 1
     }
 
     pub fn target_tab(self) -> NavTab {
         match self {
-            Self::WelcomeChat => NavTab::Chat,
-            Self::AutomaticRouting => NavTab::MyAis,
-            Self::KnowledgeMemory => NavTab::Knowledge,
-            Self::AutomatedSchedules => NavTab::Schedules,
-            Self::PersonalizeSettings => NavTab::Settings,
+            Self::Welcome | Self::AskAnything => NavTab::Chat,
+            Self::ConnectAi => NavTab::Models,
+            Self::Skills => NavTab::Skills,
+            Self::Knowledge => NavTab::Knowledge,
+            Self::Connections => NavTab::Connections,
+            Self::Team => NavTab::Team,
+            Self::Schedules => NavTab::Schedules,
+            Self::SavedWork => NavTab::Artifacts,
+            Self::Groups => NavTab::Groups,
+            Self::MakeItYours => NavTab::Settings,
         }
     }
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::WelcomeChat => "Ask a question",
-            Self::AutomaticRouting => "Explore AI choices",
-            Self::KnowledgeMemory => "Find what Sovra remembers",
-            Self::AutomatedSchedules => "Set up a repeating task",
-            Self::PersonalizeSettings => "Make Sovra suit you",
+            Self::Welcome => "Welcome to Sovra",
+            Self::ConnectAi => "Give Sovra a brain",
+            Self::AskAnything => "Ask anything",
+            Self::Skills => "See everything Sovra can do",
+            Self::Knowledge => "Sovra remembers for you",
+            Self::Connections => "Link your apps",
+            Self::Team => "Meet your AI team",
+            Self::Schedules => "Put jobs on autopilot",
+            Self::SavedWork => "Find your saved work",
+            Self::Groups => "Share with family or a team",
+            Self::MakeItYours => "Make Sovra yours",
         }
     }
 
+    /// What this page is for, in everyday words.
     pub fn explanation(self) -> &'static str {
         match self {
-            Self::WelcomeChat => {
-                "Type a question at the bottom and press Enter. A starter suggestion fills the box for you to review. Answers appear as they arrive; some models also share reasoning."
+            Self::Welcome => {
+                "Sovra is your own AI helper. It can write, research, sort your files, remember what matters to you and send messages for you. This short tour shows you every part, one page at a time. Press Next to go on, or End tour to leave. You can watch it again anytime."
             }
-            Self::AutomaticRouting => {
-                "Try a simulation of how Sovra could choose an AI for different tasks. Chat currently uses the AI you selected in Models."
+            Self::ConnectAi => {
+                "Sovra needs an AI to think with. Choose one of two easy ways. OpenRouter is online: one free account gives you hundreds of AIs, and some cost nothing. Ollama is free and private: the AI runs on this computer, so nothing leaves it, but it works best on a newer computer."
             }
-            Self::KnowledgeMemory => {
-                "Find saved details from your conversations and files. Open a detail to see where it came from, correct it, or tell Sovra to stop using it."
+            Self::AskAnything => {
+                "Type in the box at the bottom and press Enter. Ask the way you would ask a friend. The answer appears as it is written. Type / in the box to see shortcuts, or /help to see every skill."
             }
-            Self::AutomatedSchedules => {
-                "Choose what Sovra should do and when to repeat it. Keep Sovra open for tasks to run automatically. Use “Run now” to try a task, or pause it anytime."
+            Self::Skills => {
+                "Each card is one thing Sovra can do for you, from searching the web to tidying a folder. You never need special words: just ask in chat. If you are not sure what to ask, press Try an example on any card."
             }
-            Self::PersonalizeSettings => {
-                "Use “Personal instructions” to save preferences you want Sovra to follow. You can also change the language, appearance and text size here."
+            Self::Knowledge => {
+                "When you tell Sovra something worth keeping, like a birthday or your doctor's name, it saves it here so you never have to repeat yourself. Open any detail to see where it came from, correct it, or tell Sovra to forget it."
+            }
+            Self::Connections => {
+                "Link Google for Gmail, Calendar and Drive, GitHub for code, or WhatsApp and Telegram for messages. Then Sovra can check your day, find an email or write a message for you. Nothing is sent until you press Send."
+            }
+            Self::Team => {
+                "Sovra has a team of helpers, each good at something different: writing, research, numbers, code and more. Ask a big question and they talk it through together, then one of them sums up what to do."
+            }
+            Self::Schedules => {
+                "Ask Sovra to do something on its own at a set time, like a morning news summary every weekday. You can pause a job anytime. Keep Sovra open so jobs can run."
+            }
+            Self::SavedWork => {
+                "Letters, lists, tables, code and pictures that Sovra makes are kept here, so nothing gets lost. Press Save under any reply to add it. Open a saved piece to read it, copy it or save it to your computer."
+            }
+            Self::Groups => {
+                "Link up with people you trust, like your family or a small team, to pass notes, lists and questions to each other privately. Nothing is shared until you press Share."
+            }
+            Self::MakeItYours => {
+                "Write personal instructions, like \"keep answers short\" or \"I live in Dubai\", and Sovra follows them every time. Here you can also change the language, light or dark look, and text size."
+            }
+        }
+    }
+
+    /// One concrete thing to try on this page, or `None` when the buttons say it.
+    pub fn try_this(self) -> Option<&'static str> {
+        match self {
+            Self::Welcome => Some("The menu on the left marks the page each step is about."),
+            Self::ConnectAi => Some(
+                "Not sure? Choose OpenRouter. It takes about two minutes and works on any computer.",
+            ),
+            Self::AskAnything => {
+                Some("Press Try a question to fill in an example, then press Enter.")
+            }
+            Self::Skills => Some("Try: \"Find the best-rated pizza places near me.\""),
+            Self::Knowledge => {
+                Some("Try telling Sovra in chat: \"Remember that my sister's birthday is 4 May.\"")
+            }
+            Self::Connections => Some(
+                "Open any link to see what it needs. Each one is separate, and you can remove it anytime.",
+            ),
+            Self::Team => Some("Try: \"Plan a week-long family trip to Italy on a budget.\""),
+            Self::Schedules => {
+                Some("Press Create schedule, then type what Sovra should do and when.")
+            }
+            Self::SavedWork | Self::Groups => None,
+            Self::MakeItYours => {
+                Some("Press Take a guided tour at the bottom of the menu to watch this tour again.")
             }
         }
     }
 
     pub fn next(self) -> Option<Self> {
-        match self {
-            Self::WelcomeChat => Some(Self::AutomaticRouting),
-            Self::AutomaticRouting => Some(Self::KnowledgeMemory),
-            Self::KnowledgeMemory => Some(Self::AutomatedSchedules),
-            Self::AutomatedSchedules => Some(Self::PersonalizeSettings),
-            Self::PersonalizeSettings => None,
-        }
+        Self::ALL.get(self.index() + 1).copied()
     }
 
     pub fn previous(self) -> Option<Self> {
-        match self {
-            Self::WelcomeChat => None,
-            Self::AutomaticRouting => Some(Self::WelcomeChat),
-            Self::KnowledgeMemory => Some(Self::AutomaticRouting),
-            Self::AutomatedSchedules => Some(Self::KnowledgeMemory),
-            Self::PersonalizeSettings => Some(Self::AutomatedSchedules),
-        }
+        self.index().checked_sub(1).map(|i| Self::ALL[i])
     }
 }
 
@@ -330,8 +409,10 @@ pub struct WorkspaceState {
     pub setup_stage: crate::models::SetupStage,
     /// Plain-language hint explaining what is needed to finish LLM setup when `!has_active_llm`.
     pub llm_setup_hint: Option<String>,
-    /// Active step of the interactive 5-step system tutorial, when running.
+    /// Active step of the guided tour, when running.
     pub tour_step: Option<TourStep>,
+    /// The tour already started on its own this run, so it never reopens after End tour.
+    pub tour_offered: bool,
     /// Whether the user has completed or dismissed the guided onboarding tutorial.
     pub onboarding_completed: bool,
     /// Chrome and agent reply language. Defaults to English until preferences load.
@@ -421,6 +502,7 @@ impl WorkspaceState {
             setup_stage: crate::models::SetupStage::Loading,
             llm_setup_hint: None,
             tour_step: None,
+            tour_offered: false,
             onboarding_completed: false,
             language: crate::models::UiLanguage::default(),
             user_renamed_threads: std::collections::BTreeSet::new(),
@@ -511,6 +593,7 @@ impl WorkspaceState {
                 workspace_label: "Personal Workspace".to_owned(),
             };
             self.route = ScreenRoute::MainWorkspace;
+            self.offer_first_tour();
         } else if !matches!(self.auth.phase, crate::auth::AuthPhase::Unknown) {
             self.route = ScreenRoute::Login;
         }
@@ -524,17 +607,16 @@ impl WorkspaceState {
         self.active_tab = tab;
     }
 
-    /// Starts the interactive 5-step system tour at Step 1 (`TourStep::WelcomeChat`)
-    /// and switches the workspace to its target tab.
+    /// Starts the guided tour at its first step and switches to that step's page.
     pub fn start_tour(&mut self) -> TourStep {
-        let step = TourStep::WelcomeChat;
+        let step = TourStep::Welcome;
         self.tour_step = Some(step);
         self.active_tab = step.target_tab();
         step
     }
 
     /// Advances to the next step in the interactive system tour, or completes the tour
-    /// if currently on the final step (`TourStep::PersonalizeSettings`).
+    /// if currently on the final step.
     pub fn next_tour_step(&mut self) -> Option<TourStep> {
         let current = self.tour_step?;
         if let Some(next) = current.next() {
@@ -561,6 +643,26 @@ impl WorkspaceState {
     pub fn end_tour(&mut self) {
         self.tour_step = None;
         self.onboarding_completed = true;
+    }
+
+    /// Starts the tour on its own for someone who has never finished or skipped it,
+    /// once they are signed in and their saved settings have loaded (either can
+    /// arrive first). It waits on the opening chat page so it never pulls anyone
+    /// away from a page they chose.
+    fn offer_first_tour(&mut self) {
+        if self.tour_offered
+            || self.onboarding_completed
+            || self.tour_step.is_some()
+            || !self.models_loaded
+            || self.auth.session().is_none()
+            || self.route != ScreenRoute::MainWorkspace
+            || self.active_tab != NavTab::Chat
+            || !self.messages.is_empty()
+        {
+            return;
+        }
+        self.tour_offered = true;
+        self.start_tour();
     }
 
     pub fn set_history_filter(&mut self, filter: ChatHistoryFilter) {
@@ -1132,6 +1234,7 @@ impl WorkspaceState {
                     } => {
                         self.models_loaded = true;
                         self.onboarding_completed = preferences.onboarding_completed;
+                        self.offer_first_tour();
                         self.language.clone_from(&preferences.language);
                         self.model_connections.clone_from(connections);
                         self.routing.global_model.clone_from(&preferences.active);
@@ -2202,34 +2305,130 @@ mod tests {
     }
 
     #[test]
-    fn tour_lifecycle_navigates_across_all_five_tabs_and_completes() {
+    fn tour_visits_every_step_in_order_and_completes() {
         let mut state = WorkspaceState::new(0);
         assert_eq!(state.tour_step, None);
         assert!(!state.onboarding_completed);
 
-        assert_eq!(state.start_tour(), TourStep::WelcomeChat);
+        assert_eq!(state.start_tour(), TourStep::Welcome);
+        assert_eq!(state.active_tab, NavTab::Chat);
+        assert_eq!(state.next_tour_step(), Some(TourStep::ConnectAi));
+        assert_eq!(state.active_tab, NavTab::Models);
+        assert_eq!(state.prev_tour_step(), Some(TourStep::Welcome));
         assert_eq!(state.active_tab, NavTab::Chat);
 
-        assert_eq!(state.next_tour_step(), Some(TourStep::AutomaticRouting));
-        assert_eq!(state.active_tab, NavTab::MyAis);
-
-        assert_eq!(state.prev_tour_step(), Some(TourStep::WelcomeChat));
-        assert_eq!(state.active_tab, NavTab::Chat);
-
-        assert_eq!(state.next_tour_step(), Some(TourStep::AutomaticRouting));
-        assert_eq!(state.next_tour_step(), Some(TourStep::KnowledgeMemory));
-        assert_eq!(state.active_tab, NavTab::Knowledge);
-
-        assert_eq!(state.next_tour_step(), Some(TourStep::AutomatedSchedules));
-        assert_eq!(state.active_tab, NavTab::Schedules);
-
-        assert_eq!(state.next_tour_step(), Some(TourStep::PersonalizeSettings));
-        assert_eq!(state.active_tab, NavTab::Settings);
-
-        assert_eq!(state.next_tour_step(), None);
+        let mut seen = vec![TourStep::Welcome];
+        while let Some(step) = state.next_tour_step() {
+            assert_eq!(state.active_tab, step.target_tab());
+            assert_eq!(step.step_number(), seen.len() + 1);
+            assert_eq!(step.previous(), seen.last().copied());
+            seen.push(step);
+        }
+        assert_eq!(seen, TourStep::ALL);
         assert_eq!(state.tour_step, None);
         assert!(state.onboarding_completed);
         assert_eq!(state.active_tab, NavTab::Chat);
+    }
+
+    #[test]
+    fn tour_explains_every_main_page_in_plain_words() {
+        // Each page a newcomer can open from the menu, except the advanced AI picker
+        // (reached from Models), gets its own stop.
+        for tab in NavTab::ALL {
+            if tab == NavTab::MyAis {
+                continue;
+            }
+            assert!(
+                TourStep::ALL.iter().any(|step| step.target_tab() == tab),
+                "the tour never shows {tab:?}"
+            );
+        }
+        for step in TourStep::ALL {
+            let words = format!("{} {}", step.title(), step.explanation());
+            let used: Vec<&str> = words
+                .split(|c: char| !c.is_alphanumeric() && c != '-')
+                .collect();
+            for jargon in [
+                "LLM",
+                "API",
+                "model",
+                "agent",
+                "persona",
+                "token",
+                "bi-temporal",
+            ] {
+                assert!(
+                    !used.iter().any(|word| word.eq_ignore_ascii_case(jargon)),
+                    "{step:?} uses the word {jargon:?}: {words}"
+                );
+            }
+        }
+        let connect = TourStep::ConnectAi.explanation();
+        assert!(connect.contains("OpenRouter") && connect.contains("Ollama"));
+    }
+
+    fn loaded(onboarding_completed: bool) -> Event {
+        Event::Models(crate::models::ModelEvent::Loaded {
+            connections: Vec::new(),
+            preferences: crate::models::ModelPreferences {
+                onboarding_completed,
+                ..Default::default()
+            },
+        })
+    }
+
+    fn sign_in(state: &mut WorkspaceState) {
+        state.apply_auth(&crate::auth::AuthEvent::SignedIn {
+            session: crate::auth::AuthSession {
+                account_id: "acct-1".into(),
+                email: "new@example.com".into(),
+                full_name: "New Person".into(),
+                provider: crate::auth::AuthProvider::Password,
+                signed_in_at: Timestamp(1),
+            },
+            new_account: true,
+        });
+    }
+
+    #[test]
+    fn the_tour_starts_by_itself_once_for_a_newcomer() {
+        let mut state = WorkspaceState::new(0);
+        sign_in(&mut state);
+        state.apply_event(&loaded(false));
+        assert_eq!(state.tour_step, Some(TourStep::Welcome));
+
+        // Ending it early is remembered; reloading settings does not reopen it.
+        state.end_tour();
+        state.apply_event(&loaded(false));
+        assert_eq!(state.tour_step, None);
+
+        // Someone who already finished it is never interrupted.
+        let mut returning = WorkspaceState::new(0);
+        sign_in(&mut returning);
+        returning.apply_event(&loaded(true));
+        assert_eq!(returning.tour_step, None);
+    }
+
+    #[test]
+    fn the_tour_waits_for_sign_in_and_the_opening_page() {
+        // Settings can load before the account does: the tour waits for the account.
+        let mut state = WorkspaceState::new(0);
+        state.route = ScreenRoute::Login;
+        state.apply_event(&loaded(false));
+        assert_eq!(state.tour_step, None, "not over the sign-in screen");
+        sign_in(&mut state);
+        assert_eq!(state.route, ScreenRoute::MainWorkspace);
+        assert_eq!(state.tour_step, Some(TourStep::Welcome));
+
+        let mut busy = WorkspaceState::new(0);
+        sign_in(&mut busy);
+        busy.select_tab(NavTab::Skills);
+        busy.apply_event(&loaded(false));
+        assert_eq!(
+            busy.tour_step, None,
+            "never pulls someone off a page they chose"
+        );
+        assert_eq!(busy.active_tab, NavTab::Skills);
     }
 
     #[test]

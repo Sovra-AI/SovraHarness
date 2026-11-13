@@ -11,6 +11,18 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **A guided tour on first sign-in.** The first time someone signs in, Sovra now
+  walks them through every part of the app, one page at a time, in everyday words:
+  what Sovra is, giving it an AI to think with, asking a question, Skills, Knowledge,
+  Connections, the AI team, Schedules, saved work, Groups and Settings. The "Give
+  Sovra a brain" step offers the two easy choices side by side, each with numbered
+  steps and its own buttons: **OpenRouter** (online; *Open OpenRouter* and *Paste my
+  key*) or **Ollama** (on this computer; *Get Ollama* and *Set up Ollama*). If an AI
+  is already working it says so instead. Every step shows a progress bar, "Step N of
+  11", one thing to try, and Back, Next and End tour, which stay on screen in the
+  smallest window and at 200% text. Ending or finishing the tour is remembered;
+  **Take a guided tour** in the menu or Settings replays it.
+
 - **A friendlier Skills page.** Skills now opens with a welcome band holding the
   search box and actions, filter chips with icons and counts, and colour-coded
   sections that each say what they are for. Skills sit in a grid of matching cards

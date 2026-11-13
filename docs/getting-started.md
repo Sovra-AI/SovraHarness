@@ -18,6 +18,26 @@ configured desktop OAuth client; see [Google](google.md). Local accounts do not
 establish separate encrypted data stores or company SSO. The current sign-in
 limits are documented in [development](development.md#sign-in-integration-status).
 
+## The guided tour
+
+The first time you sign in, a guided tour opens above each page and walks you
+through Sovra in 11 short steps: what Sovra is, giving it an AI, asking a
+question, **Skills**, **Knowledge**, **Connections**, the AI **Team**,
+**Schedules**, saved work (**Artifacts**), **Groups** and **Settings**. Each step
+says what the page is for in everyday words and suggests one thing to try.
+
+Step 2, *Give Sovra a brain*, offers two choices with numbered steps:
+
+- **OpenRouter** (online, works on any computer): **Open OpenRouter** opens its key
+  page in your browser; make a free account, create a key, copy it, then press
+  **Paste my key**.
+- **Ollama** (free and private, runs on this computer): **Get Ollama** opens its
+  download page; install it, then press **Set up Ollama** to pick a free model.
+
+If an AI already works, the step says so instead. **End tour** leaves at any
+point and is remembered; **Take a guided tour** in the menu, or **Take a tour**
+in Settings, replays it.
+
 ## Send your first message
 
 1. Open **Models** and connect an AI service. The guided path offers OpenRouter;

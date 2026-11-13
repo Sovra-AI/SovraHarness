@@ -686,7 +686,7 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
-fn interactive_system_tour_walks_through_all_five_tabs_and_state_aware_chat_setup(
+fn interactive_system_tour_walks_through_every_page_and_state_aware_chat_setup(
     cx: &mut TestAppContext,
 ) {
     use sovra_core::models::{ModelConnection, ModelEvent, ModelPreferences, ProviderKind};
@@ -756,34 +756,24 @@ fn interactive_system_tour_walks_through_all_five_tabs_and_state_aware_chat_setu
                 .visible()
         );
 
-        // Step 1 -> Step 2 (My AI's)
-        window.click("tour-next-btn", cx);
-        window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::MyAis);
-        assert!(
-            window
-                .find(("nav-spotlight-badge", NavTab::MyAis as usize))
-                .visible()
-        );
+        // Every step opens its page, marks it in the menu and says where it is.
+        for step in sovra_core::TourStep::ALL {
+            assert_eq!(shell.read(cx).workspace().tour_step, Some(step));
+            assert_eq!(shell.read(cx).workspace().active_tab, step.target_tab());
+            assert_eq!(window.find("tour-step-title").label(), Some(step.title()));
+            // The menu marks the page too (it may sit below the fold of a short menu).
+            assert!(
+                window
+                    .try_find(("nav-spotlight-badge", step.target_tab() as usize))
+                    .is_some(),
+                "{step:?} marks its page in the menu"
+            );
+            assert!(window.find("tour-next-btn").visible());
+            window.click("tour-next-btn", cx);
+            window.render_frame(cx);
+        }
 
-        // Step 2 -> Step 3 (Knowledge)
-        window.click("tour-next-btn", cx);
-        window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Knowledge);
-
-        // Step 3 -> Step 4 (Schedules)
-        window.click("tour-next-btn", cx);
-        window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Schedules);
-
-        // Step 4 -> Step 5 (Settings)
-        window.click("tour-next-btn", cx);
-        window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Settings);
-
-        // Finish Tour -> returns to Chat and closes tour bar
-        window.click("tour-next-btn", cx);
-        window.render_frame(cx);
+        // Finishing returns to Chat and closes the tour card.
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
         assert!(window.try_find("sovra-tour-coach-bar").is_none());
         assert!(shell.read(cx).workspace().onboarding_completed);
@@ -797,6 +787,233 @@ fn interactive_system_tour_walks_through_all_five_tabs_and_state_aware_chat_setu
             completed: true
         })
     )));
+}
+
+fn sign_in_newcomer(cx: &mut TestAppContext, events: &async_channel::Sender<Event>) {
+    use sovra_core::models::{ModelEvent, ModelPreferences};
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: Vec::new(),
+            preferences: ModelPreferences::default(),
+        }))
+        .expect("settings delivered");
+    events
+        .send_blocking(Event::Auth(sovra_core::AuthEvent::SignedIn {
+            session: sovra_core::AuthSession {
+                account_id: "new-account".into(),
+                email: "new@example.com".into(),
+                full_name: "New Person".into(),
+                provider: sovra_core::auth::AuthProvider::Password,
+                signed_in_at: sovra_core::Timestamp(1),
+            },
+            new_account: true,
+        }))
+        .expect("sign-in delivered");
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn a_newcomer_is_walked_through_sovra_after_first_signing_in(cx: &mut TestAppContext) {
+    use sovra_core::TourStep;
+
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    sign_in_newcomer(cx, &events);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).workspace().tour_step,
+            Some(TourStep::Welcome)
+        );
+        assert!(window.find("sovra-tour-coach-bar").visible());
+        assert_eq!(
+            window.find("tour-step-count").label(),
+            Some(format!("Guided tour · Step 1 of {}", TourStep::COUNT).as_str())
+        );
+        assert!(window.find("tour-step-explanation").visible());
+        assert!(window.try_find("tour-prev-btn").is_none());
+
+        // Step 2 offers both ways to give Sovra an AI, each with its own buttons.
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Models);
+        assert_eq!(
+            window.find("tour-step-title").label(),
+            Some("Give Sovra a brain")
+        );
+        for id in [
+            "tour-choice-openrouter",
+            "tour-open-openrouter",
+            "tour-openrouter-key",
+            "tour-choice-ollama",
+            "tour-get-ollama",
+            "tour-setup-ollama",
+        ] {
+            assert!(window.find(id).visible(), "{id} is shown");
+        }
+
+        // Paste my key opens the online AI card on Connections; the tour stays open.
+        // The choices fit inside the card at a normal window size, without scrolling.
+        let body = window.find("tour-card-body").bounds();
+        for id in ["tour-openrouter-key", "tour-setup-ollama"] {
+            let button = window.find(id).bounds();
+            assert!(
+                button.bottom() <= body.bottom(),
+                "{id} is cut off by the card ({button:?} in {body:?})"
+            );
+        }
+        window.click("tour-openrouter-key", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Connections);
+        assert_eq!(
+            shell.read(cx).workspace().tour_step,
+            Some(TourStep::ConnectAi)
+        );
+        assert!(window.find("sovra-tour-coach-bar").visible());
+
+        // Set up Ollama opens the on-this-computer setup in Models.
+        window.click("tour-setup-ollama", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Models);
+
+        window.click("tour-skip-btn", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("sovra-tour-coach-bar").is_none());
+    })
+    .unwrap();
+
+    let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+    assert!(sent.iter().any(|cmd| matches!(
+        cmd,
+        Command::Models(sovra_core::models::ModelCommand::SetOnboardingCompleted {
+            completed: true
+        })
+    )));
+
+    // Settings reload on every visit to Models; a tour already ended stays closed.
+    sign_in_newcomer(cx, &events);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().tour_step, None);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn a_connected_ai_is_confirmed_instead_of_asking_again(cx: &mut TestAppContext) {
+    use sovra_core::models::{ModelConnection, ModelEvent, ModelPreferences, ProviderKind};
+
+    let (client, _commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    let mut router = ModelConnection::new("router", ProviderKind::OpenRouter);
+    router.has_credential = true;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![router],
+            preferences: ModelPreferences {
+                active: Some(sovra_core::models::ModelKey {
+                    connection_id: "router".into(),
+                    model_id: "openrouter/free".into(),
+                }),
+                ..ModelPreferences::default()
+            },
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, Shell::start_system_tour);
+        window.render_frame(cx);
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("tour-ai-ready").visible());
+        assert!(window.try_find("tour-ai-choices").is_none());
+    })
+    .unwrap();
+}
+
+fn assert_tour_fits(
+    cx: &mut TestAppContext,
+    width: f32,
+    height: f32,
+    scale: u16,
+    mode: gpui_kit::component::ThemeMode,
+) {
+    use sovra_core::models::InterfaceScale;
+
+    let (client, _commands, events) = Client::loopback();
+    cx.update(|cx| {
+        sovra_ui::init(client, cx);
+        gpui_kit::component::Theme::change(mode, None, cx);
+        sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+    });
+    let mut shell = None;
+    let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.expect("window opened");
+    sign_in_newcomer(cx, &events);
+    cx.update_window(window.into(), |_, window, cx| {
+        let viewport = window.viewport_size();
+        for step in sovra_core::TourStep::ALL {
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).workspace().tour_step, Some(step));
+            let card = window.find("sovra-tour-coach-bar").bounds();
+            assert!(
+                card.size.height <= viewport.height * 0.6,
+                "{step:?} at {width}x{height} {scale}%: the card leaves room for the page ({card:?})"
+            );
+            for id in ["tour-step-title", "tour-skip-btn", "tour-next-btn"] {
+                let found = window.find(id);
+                let bounds = found.bounds();
+                assert!(
+                    found.visible()
+                        && bounds.right() <= viewport.width
+                        && bounds.bottom() <= viewport.height
+                        && bounds.left() >= px(0.)
+                        && bounds.top() >= px(0.),
+                    "{step:?} at {width}x{height} {scale}%: {id} is off screen ({bounds:?})"
+                );
+            }
+            window.click("tour-next-btn", cx);
+        }
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().tour_step, None);
+    })
+    .expect("window exists");
+}
+
+#[gpui_kit::test]
+fn every_tour_step_fits_the_smallest_window(cx: &mut TestAppContext) {
+    assert_tour_fits(cx, 640., 420., 100, gpui_kit::component::ThemeMode::Light);
+}
+
+#[gpui_kit::test]
+fn every_tour_step_fits_the_smallest_window_with_double_text(cx: &mut TestAppContext) {
+    assert_tour_fits(cx, 640., 420., 200, gpui_kit::component::ThemeMode::Dark);
+}
+
+#[gpui_kit::test]
+fn every_tour_step_fits_a_wide_monitor(cx: &mut TestAppContext) {
+    assert_tour_fits(cx, 2560., 1440., 100, gpui_kit::component::ThemeMode::Dark);
 }
 
 #[gpui_kit::test]

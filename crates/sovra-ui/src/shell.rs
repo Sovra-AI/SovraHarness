@@ -1723,6 +1723,9 @@ impl Shell {
             "open-openrouter-web" => {
                 cx.open_url("https://openrouter.ai/keys");
             }
+            "open-ollama-web" => {
+                cx.open_url("https://ollama.com/download");
+            }
             "openrouter-key" => {
                 self.models.update(cx, |models, _| models.setup_flow = true);
                 self.present_connections(
