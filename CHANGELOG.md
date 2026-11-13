@@ -11,6 +11,8 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-13
+
 - **A guided tour on first sign-in.** The first time someone signs in, Sovra now
   walks them through every part of the app, one page at a time, in everyday words:
   what Sovra is, giving it an AI to think with, asking a question, Skills, Knowledge,
