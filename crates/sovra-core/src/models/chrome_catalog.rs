@@ -14,7 +14,7 @@ struct Catalog {
     strings: &'static [&'static str; WIDTH],
 }
 
-const WIDTH: usize = 89;
+const WIDTH: usize = 90;
 const _: [(); WIDTH] = [(); super::ChromeKey::ALL.len()];
 
 const PACK_FR: [&str; WIDTH] = [
@@ -107,6 +107,7 @@ const PACK_FR: [&str; WIDTH] = [
     "Partagez avec votre famille ou votre équipe",
     "Your name",
     "Your name",
+    "Tapez /help pour voir toutes les compétences disponibles.",
 ];
 
 const PACK_ES: [&str; WIDTH] = [
@@ -199,6 +200,7 @@ const PACK_ES: [&str; WIDTH] = [
     "Comparte con tu familia o tu equipo",
     "Your name",
     "Your name",
+    "Escribe /help para ver todas las habilidades disponibles.",
 ];
 
 const PACK_ZH: [&str; WIDTH] = [
@@ -291,6 +293,7 @@ const PACK_ZH: [&str; WIDTH] = [
     "与家人或团队分享",
     "Your name",
     "Your name",
+    "输入 /help 查看所有可用技能。",
 ];
 
 const PACK_ZH_HANT: [&str; WIDTH] = [
@@ -383,6 +386,7 @@ const PACK_ZH_HANT: [&str; WIDTH] = [
     "與家人或團隊分享",
     "Your name",
     "Your name",
+    "輸入 /help 查看所有可用技能。",
 ];
 
 const PACK_JA: [&str; WIDTH] = [
@@ -475,6 +479,7 @@ const PACK_JA: [&str; WIDTH] = [
     "家族やチームと共有",
     "Your name",
     "Your name",
+    "/help と入力すると、使えるスキルをすべて表示します。",
 ];
 
 const PACK_HI: [&str; WIDTH] = [
@@ -567,6 +572,7 @@ const PACK_HI: [&str; WIDTH] = [
     "अपने परिवार या टीम के साथ साझा करें",
     "Your name",
     "Your name",
+    "सभी उपलब्ध कौशल देखने के लिए /help लिखें।",
 ];
 
 const PACK_PT: [&str; WIDTH] = [
@@ -659,6 +665,7 @@ const PACK_PT: [&str; WIDTH] = [
     "Partilhe com a sua família ou equipa",
     "Your name",
     "Your name",
+    "Escreva /help para ver todas as habilidades disponíveis.",
 ];
 
 const PACK_RU: [&str; WIDTH] = [
@@ -751,6 +758,7 @@ const PACK_RU: [&str; WIDTH] = [
     "Делитесь с семьёй или командой",
     "Your name",
     "Your name",
+    "Напишите /help, чтобы увидеть все доступные навыки.",
 ];
 
 const PACK_DE: [&str; WIDTH] = [
@@ -843,6 +851,7 @@ const PACK_DE: [&str; WIDTH] = [
     "Mit Familie oder Team teilen",
     "Your name",
     "Your name",
+    "Schreibe /help, um alle verfügbaren Fähigkeiten zu sehen.",
 ];
 
 const PACK_IT: [&str; WIDTH] = [
@@ -935,6 +944,7 @@ const PACK_IT: [&str; WIDTH] = [
     "Condividi con la famiglia o il team",
     "Your name",
     "Your name",
+    "Scrivi /help per vedere tutte le abilità disponibili.",
 ];
 
 const PACK_KO: [&str; WIDTH] = [
@@ -1027,6 +1037,7 @@ const PACK_KO: [&str; WIDTH] = [
     "가족이나 팀과 공유하기",
     "Your name",
     "Your name",
+    "/help를 입력하면 사용할 수 있는 모든 기술을 볼 수 있어요.",
 ];
 
 const PACK_TR: [&str; WIDTH] = [
@@ -1119,6 +1130,7 @@ const PACK_TR: [&str; WIDTH] = [
     "Ailenizle veya ekibinizle paylaşın",
     "Your name",
     "Your name",
+    "Tüm kullanılabilir becerileri görmek için /help yazın.",
 ];
 
 const PACK_NL: [&str; WIDTH] = [
@@ -1211,6 +1223,7 @@ const PACK_NL: [&str; WIDTH] = [
     "Deel met je familie of team",
     "Your name",
     "Your name",
+    "Typ /help om alle beschikbare vaardigheden te zien.",
 ];
 
 const PACK_PL: [&str; WIDTH] = [
@@ -1303,6 +1316,7 @@ const PACK_PL: [&str; WIDTH] = [
     "Udostępniaj rodzinie lub zespołowi",
     "Your name",
     "Your name",
+    "Wpisz /help, aby zobaczyć wszystkie dostępne umiejętności.",
 ];
 
 const PACK_VI: [&str; WIDTH] = [
@@ -1395,6 +1409,7 @@ const PACK_VI: [&str; WIDTH] = [
     "Chia sẻ với gia đình hoặc nhóm của bạn",
     "Your name",
     "Your name",
+    "Gõ /help để xem tất cả kỹ năng hiện có.",
 ];
 
 const PACK_TH: [&str; WIDTH] = [
@@ -1487,6 +1502,7 @@ const PACK_TH: [&str; WIDTH] = [
     "แบ่งปันกับครอบครัวหรือทีมของคุณ",
     "Your name",
     "Your name",
+    "พิมพ์ /help เพื่อดูทักษะทั้งหมดที่ใช้ได้",
 ];
 
 const PACK_ID: [&str; WIDTH] = [
@@ -1579,6 +1595,7 @@ const PACK_ID: [&str; WIDTH] = [
     "Berbagi dengan keluarga atau tim Anda",
     "Your name",
     "Your name",
+    "Ketik /help untuk melihat semua keterampilan yang tersedia.",
 ];
 
 const PACK_MS: [&str; WIDTH] = [
@@ -1671,6 +1688,7 @@ const PACK_MS: [&str; WIDTH] = [
     "Kongsi dengan keluarga atau pasukan anda",
     "Your name",
     "Your name",
+    "Taip /help untuk melihat semua kemahiran yang tersedia.",
 ];
 
 const PACK_UK: [&str; WIDTH] = [
@@ -1763,6 +1781,7 @@ const PACK_UK: [&str; WIDTH] = [
     "Діліться з родиною або командою",
     "Your name",
     "Your name",
+    "Напишіть /help, щоб побачити всі доступні навички.",
 ];
 
 const PACK_SV: [&str; WIDTH] = [
@@ -1855,6 +1874,7 @@ const PACK_SV: [&str; WIDTH] = [
     "Dela med din familj eller ditt team",
     "Your name",
     "Your name",
+    "Skriv /help för att se alla tillgängliga färdigheter.",
 ];
 
 const PACK_DA: [&str; WIDTH] = [
@@ -1947,6 +1967,7 @@ const PACK_DA: [&str; WIDTH] = [
     "Del med din familie eller dit team",
     "Your name",
     "Your name",
+    "Skriv /help for at se alle tilgængelige færdigheder.",
 ];
 
 const PACK_FI: [&str; WIDTH] = [
@@ -2039,6 +2060,7 @@ const PACK_FI: [&str; WIDTH] = [
     "Jaa perheesi tai tiimisi kanssa",
     "Your name",
     "Your name",
+    "Kirjoita /help nähdäksesi kaikki käytettävissä olevat taidot.",
 ];
 
 const PACK_NO: [&str; WIDTH] = [
@@ -2131,6 +2153,7 @@ const PACK_NO: [&str; WIDTH] = [
     "Del med familien eller teamet ditt",
     "Your name",
     "Your name",
+    "Skriv /help for å se alle tilgjengelige ferdigheter.",
 ];
 
 const PACK_CS: [&str; WIDTH] = [
@@ -2223,6 +2246,7 @@ const PACK_CS: [&str; WIDTH] = [
     "Sdílejte s rodinou nebo týmem",
     "Your name",
     "Your name",
+    "Napište /help a uvidíte všechny dostupné dovednosti.",
 ];
 
 const PACK_EL: [&str; WIDTH] = [
@@ -2315,6 +2339,7 @@ const PACK_EL: [&str; WIDTH] = [
     "Μοιραστείτε με την οικογένεια ή την ομάδα σας",
     "Your name",
     "Your name",
+    "Γράψτε /help για να δείτε όλες τις διαθέσιμες δεξιότητες.",
 ];
 
 const PACK_HE: [&str; WIDTH] = [
@@ -2407,6 +2432,7 @@ const PACK_HE: [&str; WIDTH] = [
     "שתפו עם המשפחה או הצוות",
     "Your name",
     "Your name",
+    "כתבו /help כדי לראות את כל המיומנויות הזמינות.",
 ];
 
 const PACK_FA: [&str; WIDTH] = [
@@ -2499,6 +2525,7 @@ const PACK_FA: [&str; WIDTH] = [
     "با خانواده یا تیم خود به اشتراک بگذارید",
     "Your name",
     "Your name",
+    "برای دیدن همهٔ مهارت‌های موجود، /help را بنویسید.",
 ];
 
 const PACK_UR: [&str; WIDTH] = [
@@ -2591,6 +2618,7 @@ const PACK_UR: [&str; WIDTH] = [
     "اپنے خاندان یا ٹیم کے ساتھ شیئر کریں",
     "Your name",
     "Your name",
+    "تمام دستیاب مہارتیں دیکھنے کے لیے /help لکھیں۔",
 ];
 
 const PACK_BN: [&str; WIDTH] = [
@@ -2683,6 +2711,7 @@ const PACK_BN: [&str; WIDTH] = [
     "পরিবার বা দলের সঙ্গে ভাগ করুন",
     "Your name",
     "Your name",
+    "সব উপলব্ধ দক্ষতা দেখতে /help লিখুন।",
 ];
 
 const PACK_TA: [&str; WIDTH] = [
@@ -2775,6 +2804,7 @@ const PACK_TA: [&str; WIDTH] = [
     "குடும்பம் அல்லது குழுவுடன் பகிருங்கள்",
     "Your name",
     "Your name",
+    "கிடைக்கும் அனைத்து திறன்களையும் பார்க்க /help என்று எழுதுங்கள்.",
 ];
 
 const PACK_TE: [&str; WIDTH] = [
@@ -2867,6 +2897,7 @@ const PACK_TE: [&str; WIDTH] = [
     "మీ కుటుంబం లేదా బృందంతో పంచుకోండి",
     "Your name",
     "Your name",
+    "అందుబాటులో ఉన్న అన్ని నైపుణ్యాలను చూడటానికి /help అని రాయండి.",
 ];
 
 const PACK_MR: [&str; WIDTH] = [
@@ -2959,6 +2990,7 @@ const PACK_MR: [&str; WIDTH] = [
     "कुटुंब किंवा टीमसोबत शेअर करा",
     "Your name",
     "Your name",
+    "उपलब्ध सर्व कौशल्ये पाहण्यासाठी /help लिहा.",
 ];
 
 const PACK_GU: [&str; WIDTH] = [
@@ -3051,6 +3083,7 @@ const PACK_GU: [&str; WIDTH] = [
     "પરિવાર અથવા ટીમ સાથે શેર કરો",
     "Your name",
     "Your name",
+    "ઉપલબ્ધ બધી કુશળતાઓ જોવા માટે /help લખો.",
 ];
 
 const PACK_KN: [&str; WIDTH] = [
@@ -3143,6 +3176,7 @@ const PACK_KN: [&str; WIDTH] = [
     "ಕುಟುಂಬ ಅಥವಾ ತಂಡದೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ",
     "Your name",
     "Your name",
+    "ಲಭ್ಯವಿರುವ ಎಲ್ಲಾ ಕೌಶಲ್ಯಗಳನ್ನು ನೋಡಲು /help ಎಂದು ಬರೆಯಿರಿ.",
 ];
 
 const PACK_ML: [&str; WIDTH] = [
@@ -3235,6 +3269,7 @@ const PACK_ML: [&str; WIDTH] = [
     "കുടുംബവുമായോ ടീമുമായോ പങ്കിടുക",
     "Your name",
     "Your name",
+    "ലഭ്യമായ എല്ലാ കഴിവുകളും കാണാൻ /help എന്ന് എഴുതുക.",
 ];
 
 const PACK_PA: [&str; WIDTH] = [
@@ -3327,6 +3362,7 @@ const PACK_PA: [&str; WIDTH] = [
     "ਪਰਿਵਾਰ ਜਾਂ ਟੀਮ ਨਾਲ ਸਾਂਝਾ ਕਰੋ",
     "Your name",
     "Your name",
+    "ਸਾਰੇ ਉਪਲਬਧ ਹੁਨਰ ਦੇਖਣ ਲਈ /help ਲਿਖੋ।",
 ];
 
 const PACK_SW: [&str; WIDTH] = [
@@ -3419,6 +3455,7 @@ const PACK_SW: [&str; WIDTH] = [
     "Shiriki na familia au timu yako",
     "Your name",
     "Your name",
+    "Andika /help kuona ujuzi wote unaopatikana.",
 ];
 
 const PACK_AM: [&str; WIDTH] = [
@@ -3511,6 +3548,7 @@ const PACK_AM: [&str; WIDTH] = [
     "ከቤተሰብዎ ወይም ከቡድንዎ ጋር ያጋሩ",
     "Your name",
     "Your name",
+    "ሁሉንም የሚገኙ ክህሎቶች ለማየት /help ይጻፉ።",
 ];
 
 const PACK_HA: [&str; WIDTH] = [
@@ -3603,6 +3641,7 @@ const PACK_HA: [&str; WIDTH] = [
     "Raba tare da iyalinka ko ƙungiyarka",
     "Your name",
     "Your name",
+    "Rubuta /help don ganin duk ƙwarewar da ake da su.",
 ];
 
 const PACK_YO: [&str; WIDTH] = [
@@ -3695,6 +3734,7 @@ const PACK_YO: [&str; WIDTH] = [
     "Pín pẹ̀lú ìdílé tàbí ẹgbẹ́ rẹ",
     "Your name",
     "Your name",
+    "Kọ /help láti rí gbogbo ọgbọ́n tó wà.",
 ];
 
 const PACK_IG: [&str; WIDTH] = [
@@ -3787,6 +3827,7 @@ const PACK_IG: [&str; WIDTH] = [
     "Kekọrịta ya na ezinụlọ ma ọ bụ otu gị",
     "Your name",
     "Your name",
+    "Dee /help ka ịhụ nkà niile dị.",
 ];
 
 const PACK_ZU: [&str; WIDTH] = [
@@ -3879,6 +3920,7 @@ const PACK_ZU: [&str; WIDTH] = [
     "Yabelana nomndeni noma neqembu lakho",
     "Your name",
     "Your name",
+    "Bhala /help ukuze ubone wonke amakhono atholakalayo.",
 ];
 
 const PACK_AF: [&str; WIDTH] = [
@@ -3971,6 +4013,7 @@ const PACK_AF: [&str; WIDTH] = [
     "Deel met jou familie of span",
     "Your name",
     "Your name",
+    "Skryf /help om al die beskikbare vaardighede te sien.",
 ];
 
 const PACK_RO: [&str; WIDTH] = [
@@ -4063,6 +4106,7 @@ const PACK_RO: [&str; WIDTH] = [
     "Partajează cu familia sau echipa ta",
     "Your name",
     "Your name",
+    "Scrie /help ca să vezi toate abilitățile disponibile.",
 ];
 
 const PACK_HU: [&str; WIDTH] = [
@@ -4155,6 +4199,7 @@ const PACK_HU: [&str; WIDTH] = [
     "Ossz meg a családoddal vagy a csapatoddal",
     "Your name",
     "Your name",
+    "Írd be: /help, és láthatod az összes elérhető képességet.",
 ];
 
 const PACK_BG: [&str; WIDTH] = [
@@ -4247,6 +4292,7 @@ const PACK_BG: [&str; WIDTH] = [
     "Споделяйте със семейството или екипа си",
     "Your name",
     "Your name",
+    "Напишете /help, за да видите всички налични умения.",
 ];
 
 const PACK_HR: [&str; WIDTH] = [
@@ -4339,6 +4385,7 @@ const PACK_HR: [&str; WIDTH] = [
     "Dijelite s obitelji ili timom",
     "Your name",
     "Your name",
+    "Upišite /help da vidite sve dostupne vještine.",
 ];
 
 const PACK_SK: [&str; WIDTH] = [
@@ -4431,6 +4478,7 @@ const PACK_SK: [&str; WIDTH] = [
     "Zdieľajte s rodinou alebo tímom",
     "Your name",
     "Your name",
+    "Napíšte /help a uvidíte všetky dostupné zručnosti.",
 ];
 
 const PACK_SL: [&str; WIDTH] = [
@@ -4523,6 +4571,7 @@ const PACK_SL: [&str; WIDTH] = [
     "Delite z družino ali ekipo",
     "Your name",
     "Your name",
+    "Vpišite /help, da vidite vse razpoložljive veščine.",
 ];
 
 const PACK_LT: [&str; WIDTH] = [
@@ -4615,6 +4664,7 @@ const PACK_LT: [&str; WIDTH] = [
     "Dalykitės su šeima ar komanda",
     "Your name",
     "Your name",
+    "Parašykite /help ir pamatysite visus galimus įgūdžius.",
 ];
 
 const PACK_LV: [&str; WIDTH] = [
@@ -4707,6 +4757,7 @@ const PACK_LV: [&str; WIDTH] = [
     "Kopīgojiet ar ģimeni vai komandu",
     "Your name",
     "Your name",
+    "Ierakstiet /help, lai redzētu visas pieejamās prasmes.",
 ];
 
 const PACK_ET: [&str; WIDTH] = [
@@ -4799,6 +4850,7 @@ const PACK_ET: [&str; WIDTH] = [
     "Jagage pere või meeskonnaga",
     "Your name",
     "Your name",
+    "Kirjuta /help, et näha kõiki saadaolevaid oskusi.",
 ];
 
 const PACK_SR: [&str; WIDTH] = [
@@ -4891,6 +4943,7 @@ const PACK_SR: [&str; WIDTH] = [
     "Делите са породицом или тимом",
     "Your name",
     "Your name",
+    "Упишите /help да видите све доступне вештине.",
 ];
 
 const PACK_BS: [&str; WIDTH] = [
@@ -4983,6 +5036,7 @@ const PACK_BS: [&str; WIDTH] = [
     "Dijelite s porodicom ili timom",
     "Your name",
     "Your name",
+    "Upišite /help da vidite sve dostupne vještine.",
 ];
 
 const PACK_MK: [&str; WIDTH] = [
@@ -5075,6 +5129,7 @@ const PACK_MK: [&str; WIDTH] = [
     "Споделете со семејството или тимот",
     "Your name",
     "Your name",
+    "Напишете /help за да ги видите сите достапни вештини.",
 ];
 
 const PACK_SQ: [&str; WIDTH] = [
@@ -5167,6 +5222,7 @@ const PACK_SQ: [&str; WIDTH] = [
     "Ndani me familjen ose ekipin tuaj",
     "Your name",
     "Your name",
+    "Shkruani /help për të parë të gjitha aftësitë e disponueshme.",
 ];
 
 const PACK_KA: [&str; WIDTH] = [
@@ -5259,6 +5315,7 @@ const PACK_KA: [&str; WIDTH] = [
     "გაუზიარეთ ოჯახს ან გუნდს",
     "Your name",
     "Your name",
+    "დაწერეთ /help, რომ ნახოთ ყველა ხელმისაწვდომი უნარი.",
 ];
 
 const PACK_HY: [&str; WIDTH] = [
@@ -5351,6 +5408,7 @@ const PACK_HY: [&str; WIDTH] = [
     "Կիսվեք ընտանիքի կամ թիմի հետ",
     "Your name",
     "Your name",
+    "Գրեք /help՝ բոլոր հասանելի հմտությունները տեսնելու համար։",
 ];
 
 const PACK_AZ: [&str; WIDTH] = [
@@ -5443,6 +5501,7 @@ const PACK_AZ: [&str; WIDTH] = [
     "Ailəniz və ya komandanızla paylaşın",
     "Your name",
     "Your name",
+    "Bütün mövcud bacarıqları görmək üçün /help yazın.",
 ];
 
 const PACK_KK: [&str; WIDTH] = [
@@ -5535,6 +5594,7 @@ const PACK_KK: [&str; WIDTH] = [
     "Отбасыңызбен немесе командаңызбен бөлісіңіз",
     "Your name",
     "Your name",
+    "Барлық қолжетімді дағдыларды көру үшін /help деп жазыңыз.",
 ];
 
 const PACK_UZ: [&str; WIDTH] = [
@@ -5627,6 +5687,7 @@ const PACK_UZ: [&str; WIDTH] = [
     "Oilangiz yoki jamoangiz bilan ulashing",
     "Your name",
     "Your name",
+    "Barcha mavjud ko‘nikmalarni ko‘rish uchun /help deb yozing.",
 ];
 
 const PACK_MN: [&str; WIDTH] = [
@@ -5719,6 +5780,7 @@ const PACK_MN: [&str; WIDTH] = [
     "Гэр бүл эсвэл багтайгаа хуваалцаарай",
     "Your name",
     "Your name",
+    "Боломжтой бүх ур чадварыг харахын тулд /help гэж бичээрэй.",
 ];
 
 const PACK_NE: [&str; WIDTH] = [
@@ -5811,6 +5873,7 @@ const PACK_NE: [&str; WIDTH] = [
     "परिवार वा टोलीसँग साझा गर्नुहोस्",
     "Your name",
     "Your name",
+    "सबै उपलब्ध सीपहरू हेर्न /help लेख्नुहोस्।",
 ];
 
 const PACK_SI: [&str; WIDTH] = [
@@ -5903,6 +5966,7 @@ const PACK_SI: [&str; WIDTH] = [
     "පවුල හෝ කණ්ඩායම සමඟ බෙදාගන්න",
     "Your name",
     "Your name",
+    "ලබා ගත හැකි සියලු කුසලතා බැලීමට /help ලියන්න.",
 ];
 
 const PACK_MY: [&str; WIDTH] = [
@@ -5995,6 +6059,7 @@ const PACK_MY: [&str; WIDTH] = [
     "မိသားစု သို့မဟုတ် အဖွဲ့နှင့် မျှဝေပါ",
     "Your name",
     "Your name",
+    "ရရှိနိုင်သော ကျွမ်းကျင်မှုအားလုံးကို ကြည့်ရန် /help ဟု ရေးပါ။",
 ];
 
 const PACK_KM: [&str; WIDTH] = [
@@ -6087,6 +6152,7 @@ const PACK_KM: [&str; WIDTH] = [
     "ចែករំលែកជាមួយគ្រួសារ ឬក្រុមរបស់អ្នក",
     "Your name",
     "Your name",
+    "សរសេរ /help ដើម្បីមើលជំនាញទាំងអស់ដែលមាន។",
 ];
 
 const PACK_LO: [&str; WIDTH] = [
@@ -6179,6 +6245,7 @@ const PACK_LO: [&str; WIDTH] = [
     "ແບ່ງປັນກັບຄອບຄົວ ຫຼື ທີມຂອງທ່ານ",
     "Your name",
     "Your name",
+    "ພິມ /help ເພື່ອເບິ່ງທັກສະທັງໝົດທີ່ມີ.",
 ];
 
 const PACK_TL: [&str; WIDTH] = [
@@ -6271,6 +6338,7 @@ const PACK_TL: [&str; WIDTH] = [
     "Magbahagi sa iyong pamilya o team",
     "Your name",
     "Your name",
+    "Isulat ang /help para makita ang lahat ng magagamit na kasanayan.",
 ];
 
 const PACK_CA: [&str; WIDTH] = [
@@ -6363,6 +6431,7 @@ const PACK_CA: [&str; WIDTH] = [
     "Comparteix amb la família o l'equip",
     "Your name",
     "Your name",
+    "Escriu /help per veure totes les habilitats disponibles.",
 ];
 
 const PACK_EU: [&str; WIDTH] = [
@@ -6455,6 +6524,7 @@ const PACK_EU: [&str; WIDTH] = [
     "Partekatu zure familiarekin edo taldearekin",
     "Your name",
     "Your name",
+    "Idatzi /help eskuragarri dauden trebetasun guztiak ikusteko.",
 ];
 
 const PACK_GL: [&str; WIDTH] = [
@@ -6547,6 +6617,7 @@ const PACK_GL: [&str; WIDTH] = [
     "Comparte coa túa familia ou equipo",
     "Your name",
     "Your name",
+    "Escribe /help para ver todas as habilidades dispoñibles.",
 ];
 
 const PACK_CY: [&str; WIDTH] = [
@@ -6639,6 +6710,7 @@ const PACK_CY: [&str; WIDTH] = [
     "Rhannu gyda'ch teulu neu'ch tîm",
     "Your name",
     "Your name",
+    "Ysgrifennwch /help i weld yr holl sgiliau sydd ar gael.",
 ];
 
 const PACK_GA: [&str; WIDTH] = [
@@ -6731,6 +6803,7 @@ const PACK_GA: [&str; WIDTH] = [
     "Roinn le do theaghlach nó d'fhoireann",
     "Your name",
     "Your name",
+    "Scríobh /help chun na scileanna go léir atá ar fáil a fheiceáil.",
 ];
 
 const PACK_IS: [&str; WIDTH] = [
@@ -6823,6 +6896,7 @@ const PACK_IS: [&str; WIDTH] = [
     "Deildu með fjölskyldunni eða teyminu",
     "Your name",
     "Your name",
+    "Skrifaðu /help til að sjá alla tiltæka hæfileika.",
 ];
 
 const PACK_MT: [&str; WIDTH] = [
@@ -6915,6 +6989,7 @@ const PACK_MT: [&str; WIDTH] = [
     "Aqsam mal-familja jew mat-tim tiegħek",
     "Your name",
     "Your name",
+    "Ikteb /help biex tara l-ħiliet kollha disponibbli.",
 ];
 
 const PACK_LB: [&str; WIDTH] = [
@@ -7007,6 +7082,7 @@ const PACK_LB: [&str; WIDTH] = [
     "Mat der Famill oder dem Team deelen",
     "Your name",
     "Your name",
+    "Schreif /help, fir all disponibel Fäegkeeten ze gesinn.",
 ];
 
 const PACK_BE: [&str; WIDTH] = [
@@ -7099,6 +7175,7 @@ const PACK_BE: [&str; WIDTH] = [
     "Дзяліцеся з сям'ёй або камандай",
     "Your name",
     "Your name",
+    "Напішыце /help, каб убачыць усе даступныя навыкі.",
 ];
 
 const PACK_PS: [&str; WIDTH] = [
@@ -7191,6 +7268,7 @@ const PACK_PS: [&str; WIDTH] = [
     "له کورنۍ یا ټیم سره یې شریک کړئ",
     "Your name",
     "Your name",
+    "د ټولو شته مهارتونو د لیدو لپاره /help ولیکئ.",
 ];
 
 const PACK_SD: [&str; WIDTH] = [
@@ -7283,6 +7361,7 @@ const PACK_SD: [&str; WIDTH] = [
     "پنهنجي خاندان يا ٽيم سان شيئر ڪريو",
     "Your name",
     "Your name",
+    "سڀ موجود صلاحيتون ڏسڻ لاءِ /help لکو.",
 ];
 
 const PACK_KU: [&str; WIDTH] = [
@@ -7375,6 +7454,7 @@ const PACK_KU: [&str; WIDTH] = [
     "Bi malbat an tîma xwe re parve bike",
     "Your name",
     "Your name",
+    "Ji bo dîtina hemû jêhatîyên berdest /help binivîse.",
 ];
 
 const PACK_CKB: [&str; WIDTH] = [
@@ -7467,6 +7547,7 @@ const PACK_CKB: [&str; WIDTH] = [
     "لەگەڵ خێزان یان تیمەکەت هاوبەشی بکە",
     "Your name",
     "Your name",
+    "بۆ بینینی هەموو تواناکانی بەردەست /help بنووسە.",
 ];
 
 const PACK_YI: [&str; WIDTH] = [
@@ -7559,6 +7640,7 @@ const PACK_YI: [&str; WIDTH] = [
     "טיילט מיט דער משפּחה אָדער מאַנשאַפֿט",
     "Your name",
     "Your name",
+    "שרײַבט /help צו זען אַלע בנימצא סקילז.",
 ];
 
 const PACK_DV: [&str; WIDTH] = [
@@ -7651,6 +7733,7 @@ const PACK_DV: [&str; WIDTH] = [
     "އާއިލާ ނުވަތަ ޓީމާ ހިއްސާކުރޭ",
     "Your name",
     "Your name",
+    "ލިބެން ހުރި ހުރިހާ ހުނަރެއް ބެލުމަށް /help ލިޔުއްވާ.",
 ];
 
 const PACK_UG: [&str; WIDTH] = [
@@ -7743,6 +7826,7 @@ const PACK_UG: [&str; WIDTH] = [
     "ئائىلە ياكى گۇرۇپپىڭىز بىلەن ھەمبەھىرلەڭ",
     "Your name",
     "Your name",
+    "بارلىق ئىشلەتكىلى بولىدىغان ماھارەتلەرنى كۆرۈش ئۈچۈن /help نى يېزىڭ.",
 ];
 
 const PACK_SO: [&str; WIDTH] = [
@@ -7835,6 +7919,7 @@ const PACK_SO: [&str; WIDTH] = [
     "La wadaag qoyskaaga ama kooxdaada",
     "Your name",
     "Your name",
+    "Qor /help si aad u aragto dhammaan xirfadaha la heli karo.",
 ];
 
 const PACK_RW: [&str; WIDTH] = [
@@ -7927,6 +8012,7 @@ const PACK_RW: [&str; WIDTH] = [
     "Sangiza umuryango wawe cyangwa itsinda ryawe",
     "Your name",
     "Your name",
+    "Andika /help urebe ubumenyi bwose buboneka.",
 ];
 
 const PACK_HT: [&str; WIDTH] = [
@@ -8019,6 +8105,7 @@ const PACK_HT: [&str; WIDTH] = [
     "Pataje ak fanmi w oswa ekip ou",
     "Your name",
     "Your name",
+    "Ekri /help pou w wè tout konpetans ki disponib yo.",
 ];
 
 const PACK_JV: [&str; WIDTH] = [
@@ -8111,6 +8198,7 @@ const PACK_JV: [&str; WIDTH] = [
     "Bagekna karo kulawarga utawa tim sampeyan",
     "Your name",
     "Your name",
+    "Tulis /help kanggo ndeleng kabeh katrampilan sing kasedhiya.",
 ];
 
 static CATALOGS: &[Catalog] = &[

@@ -57,6 +57,10 @@ alpha mask and would discard the brand colours. Do not add raster/logo variants.
   flexible containers and `max_w` so the window can shrink. Space, layout and chat
   geometry are rems and radii are root-scaled pixels, so everything follows the
   interface scale with typography. See *Responsive layout* below.
+- Category badges: `tokens.tiles.categories` is a six-tone categorical palette for
+  telling catalogue groups apart (the Skills page gives each section one), and
+  `tokens.tiles.neutral` marks quiet states such as "Off". Each `TileTone` pairs a
+  background with an ink that keeps 4.5:1 in both themes; use the pair together.
 - Code/transcripts: use `theme.mono_font_family` and `mono_font_size`,
   `tokens.code_background` and `assistant_background`; virtualize long lists.
 - Theme changes: `Theme::change(mode, None, cx)` uses the registered Sovra palettes.

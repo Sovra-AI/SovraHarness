@@ -3,7 +3,7 @@
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
+    Disableable as _, Icon, Selectable as _, Sizable as _,
     button::ButtonVariants as _,
     checkbox::Checkbox,
     h_flex,
@@ -11,9 +11,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
-    TestSupportExt as _, Window, div,
+    TestSupportExt as _, Window, div, relative,
 };
 use sovra_core::{
     Command, NavTab,
@@ -26,63 +26,72 @@ use crate::{
     shell::Shell,
 };
 
+/// A filter chip: everything, or exactly one catalogue section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum SkillCategoryFilter {
     #[default]
     All,
-    Workspace,
-    Files,
     Research,
+    Files,
+    Computer,
     Specialists,
     Presentation,
+    Workspace,
     Custom,
 }
 
 impl SkillCategoryFilter {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::All,
-        Self::Workspace,
-        Self::Files,
         Self::Research,
+        Self::Files,
+        Self::Computer,
         Self::Specialists,
         Self::Presentation,
+        Self::Workspace,
         Self::Custom,
     ];
 
     fn id(self) -> &'static str {
         match self {
             Self::All => "skill-filter-all",
-            Self::Workspace => "skill-filter-workspace",
-            Self::Files => "skill-filter-files",
             Self::Research => "skill-filter-research",
+            Self::Files => "skill-filter-files",
+            Self::Computer => "skill-filter-computer",
             Self::Specialists => "skill-filter-specialists",
             Self::Presentation => "skill-filter-presentation",
+            Self::Workspace => "skill-filter-workspace",
             Self::Custom => "skill-filter-custom",
         }
     }
 
+    /// The section this chip shows; `None` shows them all.
+    fn group(self) -> Option<&'static Group> {
+        let key = match self {
+            Self::All => return None,
+            Self::Research => "Research",
+            Self::Files => "Files",
+            Self::Computer => "Computer",
+            Self::Specialists => "Specialists",
+            Self::Presentation => "Presentation",
+            Self::Workspace => "Workspace",
+            Self::Custom => OWN,
+        };
+        GROUPS.iter().find(|group| group.key == key)
+    }
+
     fn label(self) -> &'static str {
-        match self {
-            Self::All => "All skills",
-            Self::Workspace => "Quick actions",
-            Self::Files => "Files & folders",
-            Self::Research => "Web search",
-            Self::Specialists => "AI helpers",
-            Self::Presentation => "Tables & cards",
-            Self::Custom => "Made by you",
-        }
+        self.group().map_or("All skills", |group| group.heading)
+    }
+
+    fn icon(self) -> IconName {
+        self.group()
+            .map_or(IconName::LayoutDashboard, |group| group.icon)
     }
 
     fn matches(self, skill: &Skill) -> bool {
-        match self {
-            Self::All => true,
-            Self::Workspace => skill.category == "Workspace",
-            Self::Files => skill.category == "Files",
-            Self::Research => skill.category == "Research",
-            Self::Specialists => skill.category == "Specialists",
-            Self::Presentation => skill.category == "Presentation",
-            Self::Custom => !skill.builtin || skill.category == "Your skills",
-        }
+        self.group()
+            .is_none_or(|group| group.key == group_key(skill))
     }
 }
 
@@ -101,6 +110,8 @@ pub(crate) struct SkillLibrary {
     auto_apply: bool,
     deleting: Option<String>,
     pub(crate) notice: String,
+    /// Width of the skills column, which sets how many cards fit in a row.
+    width_class: design::WidthClass,
     picker: Option<Task<()>>,
     _search: Subscription,
 }
@@ -139,6 +150,7 @@ impl SkillLibrary {
             auto_apply: true,
             deleting: None,
             notice: String::new(),
+            width_class: design::WidthClass::Compact,
             picker: None,
             _search: subscription,
         }
@@ -330,13 +342,19 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             v_flex()
                 .id("skills-column")
                 .test_support()
+                .relative()
                 .w_full()
                 .max_w(t.layout.page_width)
                 .min_w_0()
                 .mx_auto()
                 .flex_shrink_0()
-                .gap(t.space.medium)
-                .child(render_header(cx))
+                .gap(t.space.large)
+                // The grid follows this column, not the window, so it also fits
+                // beside the sidebar and at large text sizes.
+                .child(design::width_probe(cx, |shell: &mut Shell| {
+                    &mut shell.skill_library.width_class
+                }))
+                .child(render_header(shell, view, editing, cx))
                 .children((!view.notice.is_empty()).then(|| {
                     div()
                         .id("skill-library-notice")
@@ -348,50 +366,102 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                         .child(view.notice.clone())
                 }))
                 .children(editing.then(|| editor(view, cx)))
-                .children((!editing).then(|| render_search_and_categories(shell, view, &query, cx)))
+                .children((!editing).then(|| render_categories(shell, view, &query, cx)))
                 .children((!editing).then(|| render_skills_catalog(shell, view, &query, cx))),
         )
 }
 
-fn render_header(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+/// Page title, the search box and the page's own actions in one welcoming band.
+fn render_header(
+    shell: &Shell,
+    view: &SkillLibrary,
+    editing: bool,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    v_flex()
-        .w_full()
+    let total = shell.skills.search_all("").len();
+    let tip = format!(
+        "{total} skills ready to use. In chat, type / to pick one, or /help to come back here."
+    );
+    let actions = h_flex()
+        .flex_wrap()
+        .items_center()
         .gap(t.space.small)
+        .child(
+            design::primary_button("skill-create", "Add your own", cx)
+                .icon(IconName::Plus)
+                .tooltip("Teach Sovra a reusable step-by-step recipe in your own words")
+                .on_click(cx.listener(|shell, _, window, cx| {
+                    shell.skill_library.edit(None, window, cx);
+                })),
+        )
+        .child(
+            design::button("skill-import", "Import", cx)
+                .ghost()
+                .icon(IconName::FolderOpen)
+                .tooltip("Add a saved skill folder from your computer")
+                .on_click(cx.listener(|shell, _, _, cx| shell.import_skill(cx))),
+        )
+        .child(
+            design::button("skill-refresh", "Refresh", cx)
+                .ghost()
+                .tooltip("Reload skills from disk")
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    shell.skill_command(SkillCommand::Refresh, cx);
+                })),
+        );
+
+    let mut band = v_flex()
+        .id("skills-hero")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.medium)
+        .p(t.space.large)
+        .sovra_surface(Surface::HeroBanner, cx)
+        .rounded(t.radius.panel)
         .child(design::page_header(
             "Skills",
-            "Pick something Sovra can do, then try it in chat.",
+            "Everything Sovra can help with. Pick one and it fills in the chat for you — nothing is sent until you press Send.",
             cx,
-        ))
-        .child(
-            h_flex()
-                .flex_wrap()
-                .gap(t.space.small)
-                .child(
-                    design::primary_button("skill-create", "Add your own", cx)
-                        .icon(IconName::Plus)
-                        .tooltip("Teach Sovra a reusable step-by-step recipe in your own words")
-                        .on_click(cx.listener(|shell, _, window, cx| {
-                            shell.skill_library.edit(None, window, cx);
-                        })),
-                )
-                .child(
-                    design::button("skill-import", "Import", cx)
-                        .tooltip("Add a saved skill folder from your computer")
-                        .on_click(cx.listener(|shell, _, _, cx| shell.import_skill(cx))),
-                )
-                .child(
-                    design::button("skill-refresh", "Refresh", cx)
-                        .ghost()
-                        .tooltip("Reload skills from disk")
-                        .on_click(cx.listener(|shell, _, _, cx| {
-                            shell.skill_command(SkillCommand::Refresh, cx);
-                        })),
-                ),
-        )
+        ));
+    if !editing {
+        band = band.child(
+            div().w_full().max_w(t.layout.reading_width).child(
+                Input::new(&view.search)
+                    .id("skill-search")
+                    .aria_label("Search skills")
+                    .prefix(
+                        Icon::new(IconName::Search)
+                            .small()
+                            .text_color(t.text_secondary),
+                    )
+                    .cleanable(true),
+            ),
+        );
+    }
+    band.child(
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap(t.space.small)
+            .child(actions)
+            .child(
+                div()
+                    .id("skills-tip")
+                    .test_support()
+                    .min_w_0()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(t.text_secondary)
+                    .child(tip),
+            ),
+    )
 }
 
-fn render_search_and_categories(
+fn render_categories(
     shell: &Shell,
     view: &SkillLibrary,
     query: &str,
@@ -400,51 +470,119 @@ fn render_search_and_categories(
     let t = design::tokens(cx);
     let all_matches = shell.skills.search_all(query);
 
-    v_flex()
+    h_flex()
+        .id("skill-category-filters")
+        .test_support()
         .w_full()
-        .gap(t.space.small)
-        .child(
-            div().w_full().max_w(t.layout.reading_width).child(
-                Input::new(&view.search)
-                    .id("skill-search")
-                    .aria_label("Search skills"),
-            ),
-        )
-        .child(
-            h_flex()
-                .id("skill-category-filters")
-                .test_support()
-                .w_full()
-                .flex_wrap()
-                .gap(t.space.compact)
-                .children(SkillCategoryFilter::ALL.into_iter().filter_map(|cat| {
-                    let count = all_matches.iter().filter(|s| cat.matches(s)).count();
-                    if cat == SkillCategoryFilter::Custom && count == 0 && view.category != cat {
-                        return None;
-                    }
-                    Some(
-                        design::button(cat.id(), format!("{} ({count})", cat.label()), cx)
-                            .small()
-                            .ghost()
-                            .selected(view.category == cat)
-                            .on_click(cx.listener(move |shell, _, _, cx| {
-                                shell.skill_library.category = cat;
-                                cx.notify();
-                            })),
-                    )
-                })),
-        )
+        .flex_wrap()
+        .gap(t.space.compact)
+        .children(SkillCategoryFilter::ALL.into_iter().filter_map(|cat| {
+            let count = all_matches.iter().filter(|s| cat.matches(s)).count();
+            if cat == SkillCategoryFilter::Custom && count == 0 && view.category != cat {
+                return None;
+            }
+            let selected = view.category == cat;
+            let chip = design::button(cat.id(), format!("{} · {count}", cat.label()), cx)
+                .small()
+                .icon(cat.icon())
+                .rounded(t.radius.pill)
+                .px(t.space.small)
+                .selected(selected)
+                .accessibility_label(format!("{}, {count} skills", cat.label()));
+            let chip = if selected {
+                chip.primary()
+            } else {
+                chip.ghost().border_1().border_color(t.material_border)
+            };
+            Some(chip.on_click(cx.listener(move |shell, _, _, cx| {
+                shell.skill_library.category = cat;
+                cx.notify();
+            })))
+        }))
 }
 
-fn group_heading(category: &str) -> (&'static str, IconName) {
-    match category {
-        "Workspace" => ("Quick actions", IconName::Sparkles),
-        "Research" => ("Web search", IconName::Globe),
-        "Files" => ("Files & folders", IconName::FileText),
-        "Presentation" => ("Tables & cards", IconName::Table),
-        "Specialists" => ("AI helpers", IconName::Users),
-        _ => ("Made by you", IconName::BookOpen),
+/// One catalogue section: which skills it holds and how it introduces itself.
+struct Group {
+    /// The skill category it gathers; [`OWN`] for skills people made, [`OTHER`]
+    /// for built-in categories this page does not know yet.
+    key: &'static str,
+    heading: &'static str,
+    blurb: &'static str,
+    icon: IconName,
+    tone: fn(&design::TileTokens) -> design::TileTone,
+}
+
+const OWN: &str = "Your skills";
+const OTHER: &str = "";
+
+/// Page order: your own first, everyday helpers next, shortcuts to Sovra's pages last.
+const GROUPS: [Group; 8] = [
+    Group {
+        key: OWN,
+        heading: "Made by you",
+        blurb: "Recipes you taught Sovra in your own words.",
+        icon: IconName::BookOpen,
+        tone: |tiles| tiles.categories[4],
+    },
+    Group {
+        key: "Research",
+        heading: "Web search",
+        blurb: "Look things up online, with sources you can check.",
+        icon: IconName::Globe,
+        tone: |tiles| tiles.categories[1],
+    },
+    Group {
+        key: "Files",
+        heading: "Files & folders",
+        blurb: "Read, find, save and organise your documents.",
+        icon: IconName::FileText,
+        tone: |tiles| tiles.categories[3],
+    },
+    Group {
+        key: "Computer",
+        heading: "Your computer",
+        blurb: "Get things done on this computer. Sovra asks before changing anything.",
+        icon: IconName::SquareTerminal,
+        tone: |tiles| tiles.categories[5],
+    },
+    Group {
+        key: "Specialists",
+        heading: "AI helpers",
+        blurb: "Experts Sovra calls on for a particular kind of job.",
+        icon: IconName::Users,
+        tone: |tiles| tiles.categories[2],
+    },
+    Group {
+        key: "Presentation",
+        heading: "Tables & cards",
+        blurb: "Turn answers into tidy tables and cards.",
+        icon: IconName::Table,
+        tone: |tiles| tiles.neutral,
+    },
+    Group {
+        key: "Workspace",
+        heading: "Quick actions",
+        blurb: "Shortcuts that jump straight to a part of Sovra.",
+        icon: IconName::Sparkles,
+        tone: |tiles| tiles.categories[0],
+    },
+    Group {
+        key: OTHER,
+        heading: "More skills",
+        blurb: "Other things Sovra can help with.",
+        icon: IconName::Sparkles,
+        tone: |tiles| tiles.categories[0],
+    },
+];
+
+fn group_key(skill: &Skill) -> &'static str {
+    if !skill.builtin || skill.category == OWN {
+        return OWN;
     }
+    GROUPS
+        .iter()
+        .find(|group| group.key != OTHER && group.key == skill.category)
+        .map_or(OTHER, |group| group.key)
 }
 
 fn skill_icon(skill: &Skill) -> IconName {
@@ -461,21 +599,74 @@ fn skill_icon(skill: &Skill) -> IconName {
         "schedules" | "scheduler" | "todos" => IconName::Calendar,
         "table" | "spreadsheet" => IconName::Table,
         "coding" | "execution" | "github" => IconName::Code,
+        "terminal" => IconName::SquareTerminal,
+        "deploy-website" => IconName::Globe,
         "stock-market" | "progress" => IconName::TrendingUp,
         "housing-market" | "housing-advisor" => IconName::House,
         "image-search" | "image-generation" => IconName::Image,
         "artifacts" | "save-artifact" => IconName::LibraryBig,
         "settings" => IconName::Settings,
         "models" => IconName::Box,
-        _ => match skill.category.as_str() {
-            "Workspace" => IconName::Sparkles,
-            "Research" => IconName::Globe,
-            "Files" => IconName::FileText,
-            "Presentation" => IconName::Table,
-            "Specialists" => IconName::Users,
-            _ => IconName::BookOpen,
-        },
+        _ => GROUPS
+            .iter()
+            .find(|group| group.key == group_key(skill))
+            .map_or(IconName::BookOpen, |group| group.icon),
     }
+}
+
+/// A rounded coloured square holding an icon; the colour says which group it is in.
+fn tile(icon: IconName, tone: design::TileTone, cx: &App) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(t.layout.icon_tile)
+        .rounded(t.radius.button)
+        .bg(tone.background)
+        .child(
+            Icon::new(icon)
+                .size(t.layout.icon_small)
+                .text_color(tone.foreground),
+        )
+}
+
+fn columns(width: design::WidthClass) -> usize {
+    match width {
+        design::WidthClass::Compact => 1,
+        design::WidthClass::Medium => 2,
+        design::WidthClass::Expanded
+        | design::WidthClass::Large
+        | design::WidthClass::ExtraLarge => 3,
+    }
+}
+
+/// Equal-width rows, so a short last row keeps the same card width as the rest.
+fn grid(cells: Vec<AnyElement>, columns: usize, cx: &App) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let mut rows = Vec::new();
+    let mut cells = cells.into_iter().peekable();
+    while cells.peek().is_some() {
+        let mut row = h_flex()
+            .w_full()
+            .min_w_0()
+            .items_stretch()
+            .gap(t.space.medium);
+        for _ in 0..columns {
+            let cell = div().flex().flex_1().flex_basis(relative(0.)).min_w_0();
+            row = row.child(match cells.next() {
+                Some(card) => cell.child(card),
+                None => cell,
+            });
+        }
+        rows.push(row);
+    }
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.medium)
+        .children(rows)
 }
 
 fn render_skills_catalog(
@@ -502,9 +693,11 @@ fn render_skills_catalog(
             .id("skills-empty-state")
             .test_support()
             .w_full()
-            .p(t.space.large)
+            .items_center()
+            .p(t.space.section)
             .gap(t.space.small)
             .sovra_surface(Surface::Subtle, cx)
+            .child(tile(IconName::Search, t.tiles.neutral, cx))
             .child(
                 div()
                     .sovra_text(TextRole::SectionTitle, cx)
@@ -512,60 +705,141 @@ fn render_skills_catalog(
             )
             .child(
                 div()
+                    .text_center()
                     .sovra_text(TextRole::Body, cx)
                     .text_color(t.text_secondary)
-                    .child("Try a different search word, or choose “All skills” above."),
+                    .child(
+                        "Try a simpler word like “letter”, “photos” or “budget”, or choose “All skills” above.",
+                    ),
             )
             .into_any_element();
     }
 
-    let ordered_categories = [
-        "Your skills",
-        "Workspace",
-        "Research",
-        "Files",
-        "Presentation",
-        "Specialists",
-    ];
-
-    let mut sections = v_flex().w_full().gap(t.space.large);
-    for cat_key in ordered_categories {
-        let group: Vec<(usize, &Skill)> = matches
+    let columns = columns(view.width_class);
+    let has_own = matches
+        .iter()
+        .any(|(_, skill)| group_key(skill) == "Your skills");
+    let offer_own =
+        view.category == SkillCategoryFilter::All && query.trim().is_empty() && !has_own;
+    let mut sections = v_flex().w_full().gap(t.space.section);
+    for group in &GROUPS {
+        let members: Vec<(usize, &Skill)> = matches
             .iter()
             .copied()
-            .filter(|(_, skill)| {
-                if cat_key == "Your skills" {
-                    !skill.builtin || skill.category == "Your skills"
-                } else {
-                    skill.builtin && skill.category == cat_key
-                }
-            })
+            .filter(|(_, skill)| group_key(skill) == group.key)
             .collect();
-        if group.is_empty() {
+        if members.is_empty() {
             continue;
         }
-        let (heading, icon) = group_heading(cat_key);
+        let tone = (group.tone)(&t.tiles);
+        let count = members.len();
+        let cards = members
+            .into_iter()
+            .map(|(index, skill)| card(skill, index, tone, view, can_share, cx).into_any_element())
+            .collect();
         sections = sections.child(
             v_flex()
                 .w_full()
-                .gap(t.space.small)
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap(t.space.small)
-                        .child(Icon::new(icon).small().text_color(cx.theme().link))
-                        .child(div().sovra_text(TextRole::SectionTitle, cx).child(heading)),
-                )
-                .child(
-                    v_flex().w_full().gap(t.space.medium).children(
-                        group
-                            .into_iter()
-                            .map(|(index, skill)| card(skill, index, view, can_share, cx)),
-                    ),
-                ),
+                .min_w_0()
+                .gap(t.space.medium)
+                .child(section_heading(group, tone, count, cx))
+                .child(grid(cards, columns, cx)),
         );
     }
+    if offer_own {
+        sections = sections.child(render_make_your_own(cx));
+    }
     sections.into_any_element()
+}
+
+fn section_heading(
+    group: &Group,
+    tone: design::TileTone,
+    count: usize,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_center()
+        .gap(t.space.small)
+        .child(tile(group.icon, tone, cx))
+        .child(
+            v_flex()
+                .min_w_0()
+                .flex_1()
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .items_center()
+                        .gap(t.space.small)
+                        .child(
+                            div()
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .child(group.heading),
+                        )
+                        .child(
+                            div()
+                                .px(t.space.small)
+                                .rounded(t.radius.pill)
+                                .bg(tone.background)
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(tone.foreground)
+                                .child(count.to_string()),
+                        ),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(group.blurb),
+                ),
+        )
+}
+
+/// Shown until someone saves their first skill, so the editor is easy to find.
+fn render_make_your_own(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    h_flex()
+        .id("skills-make-your-own")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .flex_wrap()
+        .items_center()
+        .gap(t.space.medium)
+        .p(t.space.large)
+        .rounded(t.radius.card)
+        .border_1()
+        .border_dashed()
+        .border_color(t.material_border_strong)
+        .child(tile(IconName::Plus, t.tiles.categories[4], cx))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(t.space.hair)
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("Teach Sovra something new"),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Body, cx)
+                        .text_color(t.text_secondary)
+                        .child("Write the steps once, like you would for a friend, and Sovra follows them whenever you ask."),
+                ),
+        )
+        .child(
+            design::button("skills-make-your-own-start", "Add your own", cx)
+                .icon(IconName::Plus)
+                .on_click(cx.listener(|shell, _, window, cx| {
+                    shell.skill_library.edit(None, window, cx);
+                })),
+        )
 }
 
 fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
@@ -718,6 +992,7 @@ fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + us
 fn card(
     skill: &Skill,
     index: usize,
+    tone: design::TileTone,
     view: &SkillLibrary,
     can_share: bool,
     cx: &mut Context<Shell>,
@@ -753,21 +1028,17 @@ fn card(
         .aria_label(visible)
         .w_full()
         .min_w_0()
-        .max_w(t.layout.card_max_width)
         .gap(t.space.small)
         .p(t.space.medium)
         .sovra_surface(Surface::Glass, cx)
+        .hover(|style| style.border_color(t.material_border_strong))
         .child(
             h_flex()
                 .w_full()
                 .min_w_0()
                 .items_center()
                 .gap(t.space.small)
-                .child(
-                    Icon::new(skill_icon(skill))
-                        .small()
-                        .text_color(cx.theme().link),
-                )
+                .child(tile(skill_icon(skill), tone, cx))
                 .child(
                     div()
                         .min_w_0()
@@ -778,8 +1049,11 @@ fn card(
                 .children((!enabled).then(|| {
                     div()
                         .flex_shrink_0()
+                        .px(t.space.small)
+                        .rounded(t.radius.pill)
+                        .bg(t.tiles.neutral.background)
                         .sovra_text(TextRole::Caption, cx)
-                        .text_color(t.text_secondary)
+                        .text_color(t.tiles.neutral.foreground)
                         .child("Off")
                 })),
         )
@@ -788,27 +1062,39 @@ fn card(
                 .w_full()
                 .min_w_0()
                 .sovra_text(TextRole::Body, cx)
+                .text_color(t.text_secondary)
                 .child(copy.summary),
         )
         .child(
             div()
                 .w_full()
                 .min_w_0()
-                .p(t.space.small)
+                .py(t.space.compact)
+                .px(t.space.small)
                 .rounded(t.radius.input)
+                .border_l_2()
+                .border_color(tone.foreground)
                 .bg(t.subtle)
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
                 .child(copy.example_display),
-        );
+        )
+        // Pushes the buttons to the bottom so cards in a row line up.
+        .child(div().flex_1());
 
     let mut actions = h_flex()
         .flex_wrap()
         .items_center()
         .gap(t.space.small)
+        .pt(t.space.compact)
         .child(
             design::primary_button(("skill-use", index), primary_cta_label, cx)
                 .small()
+                .icon(if is_action {
+                    IconName::ArrowRight
+                } else {
+                    IconName::MessageCircle
+                })
                 .disabled(!enabled)
                 .accessibility_label(primary_accessible_label)
                 .on_click(cx.listener(move |shell, _, window, cx| {
@@ -828,6 +1114,7 @@ fn card(
         .children(show_example.then(|| {
             design::button(("skill-try-example", index), "Try the example", cx)
                 .small()
+                .ghost()
                 .disabled(!enabled)
                 .on_click(cx.listener(move |shell, _, window, cx| {
                     shell.select_tab(NavTab::Chat, cx);

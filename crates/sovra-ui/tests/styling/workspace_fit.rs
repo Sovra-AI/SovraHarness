@@ -478,6 +478,45 @@ fn workspace_pages_follow_the_pane(cx: &mut TestAppContext) {
                         cap: |tokens| tokens.layout.page_width,
                     }),
                 );
+                // Skill cards sit in a grid inside the column: never wider than it,
+                // never squeezed below a readable width, side by side when it is wide.
+                let column = window.find("skills-column").bounds();
+                let cards: Vec<_> = (0usize..)
+                    .map_while(|index| window.try_find(("skill-card", index)))
+                    .map(|card| card.bounds())
+                    .collect();
+                assert!(cards.len() > 1, "the Skills page lists skills");
+                for &card in &cards {
+                    assert!(
+                        card.left() >= column.left() - px(1.)
+                            && card.right() <= column.right() + px(1.),
+                        "skill card overflows its column: {card:?} in {column:?}"
+                    );
+                    assert!(
+                        card.size.width
+                            >= design::tokens(cx)
+                                .layout
+                                .card_min_width
+                                .to_pixels(window.rem_size())
+                                .min(column.size.width),
+                        "skill card squeezed: {card:?}"
+                    );
+                }
+                let wide = column.size.width
+                    >= design::tokens(cx)
+                        .layout
+                        .content_min_width
+                        .to_pixels(window.rem_size())
+                        * 1.6;
+                let side_by_side = cards.iter().any(|a| {
+                    cards
+                        .iter()
+                        .any(|b| (a.top() - b.top()).abs() < px(1.) && a.left() < b.left())
+                });
+                assert_eq!(
+                    side_by_side, wide,
+                    "wide skills columns show cards side by side; narrow ones stack them"
+                );
 
                 shell.update(cx, |shell, cx| shell.select_tab(NavTab::Settings, cx));
                 check_page(

@@ -11,6 +11,17 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **A friendlier Skills page.** Skills now opens with a welcome band holding the
+  search box and actions, filter chips with icons and counts, and colour-coded
+  sections that each say what they are for. Skills sit in a grid of matching cards
+  (one to three across, depending on the room), with the most useful sections first
+  and shortcuts to Sovra's pages last. Built-in skills for running things on your
+  computer were missing from "All skills"; they now have their own **Your
+  computer** section. Until you make your own skill, a card at the end invites you to.
+
+- **Find the skills from chat.** The empty chat screen now says "Write /help to see
+  all the skills available", in every interface language.
+
 - **Confirmed artifact sharing.** Share, Keep a copy and Stop sharing now wait
   for the matching saved result before reporting success. Pending actions prevent
   duplicate clicks, failures offer a retry, and updates retain their original

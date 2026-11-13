@@ -67,6 +67,23 @@ pub struct AccentTokens {
     pub slate: Hsla,
 }
 
+/// A coloured badge behind an icon or short label. Each pair is contrast-tested
+/// (4.5:1) in both themes, so the foreground can carry text as well as icons.
+#[derive(Debug, Clone, Copy)]
+pub struct TileTone {
+    pub background: Hsla,
+    pub foreground: Hsla,
+}
+
+/// Badge colours for catalogue pages (Skills): a categorical palette that tells
+/// groups apart, plus a neutral tone for states such as "Off" or "no results".
+/// Views pick a category by position and never tint accents themselves.
+#[derive(Debug, Clone, Copy)]
+pub struct TileTokens {
+    pub neutral: TileTone,
+    pub categories: [TileTone; 6],
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct SpaceTokens {
     pub hair: Rems,
@@ -126,6 +143,8 @@ pub struct LayoutTokens {
     pub navigation_height: Rems,
     pub icon_small: Rems,
     pub icon_medium: Rems,
+    /// Square badge holding a category icon on catalogue cards.
+    pub icon_tile: Rems,
     pub profile_avatar: Rems,
     pub logo_small: Rems,
     pub logo_medium: Rems,
@@ -204,6 +223,7 @@ pub struct GraphTokens {
 #[derive(Debug, Clone)]
 pub struct SovraTokens {
     pub accent: AccentTokens,
+    pub tiles: TileTokens,
     pub space: SpaceTokens,
     pub radius: RadiusTokens,
     pub layout: LayoutTokens,
@@ -277,6 +297,29 @@ pub fn tokens(cx: &App) -> SovraTokens {
             sky: colour(0x0e_a5_e9),
             slate: colour(0x64_74_8b),
         },
+        tiles: {
+            // Light: pale wash with a deep ink. Dark: the hue at low strength on the
+            // canvas with a light ink. Both keep the ink at 4.5:1 or better.
+            let tone = |hue: u32, light_ink: u32, dark_ink: u32| TileTone {
+                background: if dark {
+                    canvas.blend(colour(hue).alpha(0.2))
+                } else {
+                    colour(WHITE).blend(colour(hue).alpha(0.13))
+                },
+                foreground: colour(if dark { dark_ink } else { light_ink }),
+            };
+            TileTokens {
+                neutral: tone(0x64_74_8b, 0x33_41_55, 0xcb_d5_e1),
+                categories: [
+                    tone(VIOLET, VIOLET_DEEP, 0xc4_b5_fd),
+                    tone(0x0e_a5_e9, 0x07_59_85, 0x7d_d3_fc),
+                    tone(0x22_c5_5e, 0x16_65_34, 0x86_ef_ac),
+                    tone(0xf5_9e_0b, 0x92_40_0e, 0xfc_d3_4d),
+                    tone(0xf4_72_b6, 0x9d_17_4d, 0xf9_a8_d4),
+                    tone(0x14_b8_a6, 0x11_5e_59, 0x5e_ea_d4),
+                ],
+            }
+        },
         space: SpaceTokens {
             hair: rem(2.),
             compact: rem(4.),
@@ -322,6 +365,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
             navigation_height: rem(28.),
             icon_small: rem(20.),
             icon_medium: rem(24.),
+            icon_tile: rem(40.),
             profile_avatar: rem(32.),
             logo_small: rem(28.),
             logo_medium: rem(44.),

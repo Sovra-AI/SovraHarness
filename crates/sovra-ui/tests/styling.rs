@@ -138,6 +138,22 @@ fn both_modes_keep_native_components_and_product_surfaces_readable(cx: &mut Test
                     "filled control contrast"
                 );
             }
+            // Category tiles carry icons and small counts, so they are held to text contrast.
+            let tiles = t.tiles;
+            for (name, tone) in std::iter::once(("neutral", tiles.neutral))
+                .chain(tiles.categories.iter().map(|tone| ("category", *tone)))
+            {
+                assert!(
+                    contrast(tone.foreground, tone.background) >= 4.5,
+                    "{mode:?}: {name} tile contrast {}",
+                    contrast(tone.foreground, tone.background)
+                );
+                assert!(
+                    contrast(tone.foreground, t.glass) >= 3.0,
+                    "{mode:?}: {name} tile ink on a card {}",
+                    contrast(tone.foreground, t.glass)
+                );
+            }
             for token in [
                 theme.tokens.button_primary,
                 theme.tokens.button_primary_hover,

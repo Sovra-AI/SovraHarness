@@ -213,6 +213,7 @@ pub enum ChromeKey {
     ChatWelcomeTitle,
     ChatWelcomeGuest,
     ChatWelcomeSubtitle,
+    ChatWelcomeHelpHint,
     ChatStarterUnderstand,
     ChatStarterUnderstandDraft,
     ChatStarterEmail,
@@ -234,7 +235,7 @@ pub enum ChromeKey {
 }
 
 impl ChromeKey {
-    pub const ALL: [Self; 89] = [
+    pub const ALL: [Self; 90] = [
         Self::LoginWelcomeTitle,
         Self::LoginWelcomeSubtitle,
         Self::LoginCreateTitle,
@@ -324,6 +325,7 @@ impl ChromeKey {
         Self::NavGroupsTooltip,
         Self::LoginName,
         Self::LoginNamePlaceholder,
+        Self::ChatWelcomeHelpHint,
     ];
 }
 
@@ -1057,6 +1059,7 @@ fn arabic(key: ChromeKey) -> &'static str {
         ChromeKey::ChatWelcomeTitle => "ما الذي يدور في بالك، {name}؟",
         ChromeKey::ChatWelcomeGuest => "يا صديقي",
         ChromeKey::ChatWelcomeSubtitle => "سؤال، فكرة، أو مساعدة بسيطة للبدء.",
+        ChromeKey::ChatWelcomeHelpHint => "اكتب /help لترى كل المهارات المتاحة.",
         ChromeKey::ChatStarterUnderstand => "افهم شيئاً",
         ChromeKey::ChatStarterUnderstandDraft => "اشرح لي هذا ببساطة، كأنني جديد عليه: ",
         ChromeKey::ChatStarterEmail => "اكتب رسالة",
@@ -1165,6 +1168,7 @@ fn english(key: ChromeKey) -> &'static str {
         ChromeKey::ChatWelcomeTitle => "What’s on your mind, {name}?",
         ChromeKey::ChatWelcomeGuest => "there",
         ChromeKey::ChatWelcomeSubtitle => "A question, an idea, a little help getting started.",
+        ChromeKey::ChatWelcomeHelpHint => "Write /help to see all the skills available.",
         ChromeKey::ChatStarterUnderstand => "Understand something",
         ChromeKey::ChatStarterUnderstandDraft => "Explain this to me simply, like I'm new to it: ",
         ChromeKey::ChatStarterEmail => "Draft an email",

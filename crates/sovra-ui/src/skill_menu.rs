@@ -769,7 +769,17 @@ mod tests {
                     window.render_frame(cx);
                     assert!(window.find("sovra-skills-view").visible());
                     assert!(window.try_find("skills-how-it-works").is_none());
-                    let action = ("skill-use", 0usize);
+                    // The card shown first on the page, whichever skill that is.
+                    let first = (0usize..)
+                        .map_while(|index| {
+                            window
+                                .try_find(("skill-use", index))
+                                .map(|found| (index, found.bounds().top()))
+                        })
+                        .min_by(|a, b| f32::from(a.1).total_cmp(&f32::from(b.1)))
+                        .map(|(index, _)| index)
+                        .expect("the catalogue lists skills");
+                    let action = ("skill-use", first);
                     reveal_inside(window, "sovra-skills-view", &action, width, height, cx);
                     let bounds = window.find(action).bounds();
                     assert!(

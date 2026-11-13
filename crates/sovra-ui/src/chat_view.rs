@@ -624,9 +624,18 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
         .sovra_text(TextRole::Body, cx)
         .text_color(t.text_secondary)
         .child(subtitle);
+    let help_hint = design::chrome(cx, ChromeKey::ChatWelcomeHelpHint);
+    let mut help_hint_el = div()
+        .id("chat-welcome-help-hint")
+        .test_support()
+        .aria_label(help_hint)
+        .sovra_text(TextRole::Caption, cx)
+        .text_color(t.text_secondary)
+        .child(help_hint);
     if design::is_rtl(cx) {
         title_el = title_el.w_full().text_right();
         subtitle_el = subtitle_el.w_full().text_right();
+        help_hint_el = help_hint_el.w_full().text_right();
     }
     // Scrolls inside its pane in short windows, so the composer always fits.
     h_flex()
@@ -670,7 +679,9 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
                                     );
                                 }))
                         }))
-                })),
+                }))
+                // Points newcomers at the full list of skills without leaving the chat.
+                .children(starters.then_some(help_hint_el)),
         )
 }
 
@@ -1486,6 +1497,13 @@ mod tests {
                 Some(chrome(
                     &UiLanguage::default(),
                     ChromeKey::ChatWelcomeSubtitle
+                ))
+            );
+            assert_eq!(
+                window.find("chat-welcome-help-hint").label(),
+                Some(chrome(
+                    &UiLanguage::default(),
+                    ChromeKey::ChatWelcomeHelpHint
                 ))
             );
             window.click(("chat-starter", 1usize), cx);
