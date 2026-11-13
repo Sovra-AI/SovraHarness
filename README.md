@@ -1,7 +1,10 @@
 # SovraHarness
 
-> **Closed source — proprietary to Sovra.** Copyright © 2026 Sovra. All rights
-> reserved. Do not copy, distribute, or disclose outside Sovra. See [LICENSE](LICENSE).
+> **Fair-code — Sustainable Use License.** Copyright © 2026 Sovra. Source on
+> `main` is available under n8n's Sustainable Use License, which n8n's docs
+> allow other projects to use. It is source-available and free to use and
+> extend within those limits. It is not an OSI open-source license. n8n does
+> not own SovraHarness. See [LICENSE](LICENSE) and [LICENSE_EE.md](LICENSE_EE.md).
 
 Native Rust desktop app for the Sovra agent harness: a GPUI chat UI, a tokio
 runtime, local memory (vector + graph + full-text behind a `MemoryStore` port),

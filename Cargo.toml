@@ -7,7 +7,7 @@ default-members = ["crates/sovra-app"]
 version = "0.4.1"
 edition = "2024"
 rust-version = "1.99.1"
-license = "LicenseRef-Proprietary"
+license = "LicenseRef-SustainableUse-1.0"
 publish = false
 authors = ["Sovra"]
 

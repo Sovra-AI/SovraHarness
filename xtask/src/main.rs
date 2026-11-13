@@ -15,6 +15,7 @@ mod dev;
 mod dist;
 mod docs;
 mod hook;
+mod license;
 mod styles;
 
 use std::path::{Path, PathBuf};

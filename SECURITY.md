@@ -1,7 +1,8 @@
 # Security Policy
 
-SovraHarness is closed-source, proprietary software owned by Sovra. This
-policy applies to everyone with access to the repository.
+SovraHarness is source-available under the Sustainable Use License (see
+[LICENSE](LICENSE)). This policy applies to everyone with access to the
+repository.
 
 ## Reporting a vulnerability
 

@@ -2,10 +2,14 @@
 
 How Sovra people open a branch, pass CI, and land a pull request on `main`.
 
-This repository is **closed source and proprietary to Sovra** (see
-[LICENSE](LICENSE)). Contributions come from Sovra personnel and authorized
-collaborators only. Do not share code, discussions, or artifacts outside
-Sovra.
+Source on the default branch `main` is under the **Sustainable Use License**
+(see [LICENSE](LICENSE)). This is n8n's Sustainable Use License, which n8n's
+documentation allows other projects to use. The model is fair-code:
+source-available, and free to use and extend for your own internal business
+purposes or for non-commercial or personal use, with the limits in that
+license. It is not an OSI open-source license. Files named `.ee.` or kept in
+a directory whose name contains `.ee` are under
+[LICENSE_EE.md](LICENSE_EE.md) instead. n8n does not own SovraHarness.
 
 The canonical engineering rules live in [AGENTS.md](AGENTS.md) (plus a short
 `AGENTS.md` per crate) and apply to humans and coding agents alike. This file

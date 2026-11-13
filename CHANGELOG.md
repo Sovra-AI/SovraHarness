@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+- **Sustainable Use License.** Source on `main` is offered under n8n's Sustainable Use License, Version 1.0, with Sovra as the licensor. It is fair-code and source-available, not an OSI open-source license. Enterprise-only files, if any, stay under a separate Sovra enterprise license.
+
 - **Skill messages are announced and readable remotely.** The note under the
   chat box after a `/` command (for example "Usage: /table <what to present>")
   is now an accessibility alert, so screen readers announce it and the phone
