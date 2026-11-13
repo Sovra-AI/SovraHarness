@@ -90,6 +90,10 @@ and **Try the example** prepare a draft for you to review before sending.
 When adding your own skill, use a name in your language and leave **Shortcut**
 blank. Sovra chooses an unused shortcut automatically, including for Arabic
 names. To change an existing skill, open its **Edit** action.
+Ask in chat to send a WhatsApp to a person or to one of your WhatsApp groups by
+name. Sovra shows the message for you to press **Send**; afterwards you can choose
+**Yes, don't ask again** for that chat, and undo it any time from the message or
+Settings → WhatsApp → **Sends without asking**.
 
 ```sh
 just dev

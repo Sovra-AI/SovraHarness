@@ -11,6 +11,18 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Message a WhatsApp group by name.** Ask "send a WhatsApp to the school
+  group" and Sovra finds the group from part of its name, then shows the
+  review with the group's name instead of a raw id. If more than one group
+  matches, it asks which.
+
+- **Send without asking, when you choose.** After a message goes out, its card
+  asks "Next time, send messages to … without asking you first?" Press
+  **Yes, don't ask again** and later messages Sovra writes to that exact chat
+  go straight out (at most three in one go before it asks again). Press
+  **Ask me first next time** on the card, or **Ask first** under Settings →
+  WhatsApp → Sends without asking, to go back to checking each message.
+
 - **Find someone on the People page.** A search box at the top finds people by
   any part of their name, a few digits of their number (written any way, with
   or without the leading 0), or the app they use, and says how many matched.

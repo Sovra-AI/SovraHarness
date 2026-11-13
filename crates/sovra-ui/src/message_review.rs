@@ -12,9 +12,33 @@ use sovra_core::Command;
 use sovra_core::communications::{MessageDelivery, OutboundMessage};
 use sovra_core::connections::ConnectionCommand;
 
+/// After a real send, ask whether this chat may skip the review next time.
+/// Once allowed, the same card offers to ask first again.
+pub(crate) fn trust_prompt(
+    message: &OutboundMessage,
+    trusted: bool,
+) -> Option<(String, &'static str)> {
+    if !matches!(message.delivery, MessageDelivery::Accepted { .. }) {
+        return None;
+    }
+    let who = &message.recipient_label;
+    Some(if trusted {
+        (
+            format!("Sovra sends to {who} without asking you first."),
+            "Ask me first next time",
+        )
+    } else {
+        (
+            format!("Next time, send messages to {who} without asking you first?"),
+            "Yes, don't ask again",
+        )
+    })
+}
+
 pub(crate) fn render(
     message: &OutboundMessage,
     index: usize,
+    trusted: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
@@ -53,6 +77,43 @@ pub(crate) fn render(
             );
         }
     }
+    let trust = trust_prompt(message, trusted).map(|(question, label)| {
+        let channel = message.channel;
+        let recipient = message.recipient.clone();
+        v_flex()
+            .id(("message-trust", index))
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.compact)
+            .child(
+                div()
+                    .id(("message-trust-question", index))
+                    .test_support()
+                    .aria_label(question.clone())
+                    .sovra_text(TextRole::Caption, cx)
+                    .whitespace_normal()
+                    .child(question),
+            )
+            .child(
+                design::button(("message-trust-toggle", index), label, cx)
+                    .ghost()
+                    .accessibility_label(if trusted {
+                        "Ask me before Sovra sends to this chat again"
+                    } else {
+                        "Let Sovra send to this chat without asking me first"
+                    })
+                    .on_click(move |_, _, cx| {
+                        let _ = cx.global::<RuntimeClient>().0.send(Command::Connections(
+                            ConnectionCommand::TrustRecipient {
+                                channel,
+                                recipient: recipient.clone(),
+                                trusted: !trusted,
+                            },
+                        ));
+                    }),
+            )
+    });
     let text = format!(
         "{}\nFrom: {}\nTo: {} ({})\n\n{}\n\n{}",
         message.channel.label(),
@@ -120,4 +181,5 @@ pub(crate) fn render(
                 .child(message.delivery.label()),
         )
         .child(actions)
+        .children(trust)
 }

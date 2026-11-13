@@ -2,7 +2,7 @@
 use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, ScrollDelta, TestAppContext, point, px, size};
-use sovra_core::communications::{MessageDelivery, OutboundMessage};
+use sovra_core::communications::{MessageDelivery, OutboundMessage, TrustedRecipient};
 use sovra_core::connections::{
     ChannelKind, ConnectionCommand, ConnectionEvent, ConnectionsState, LinkedDevice,
     TelegramStatus, WhatsAppStatus,
@@ -11,6 +11,33 @@ use sovra_core::models::InterfaceScale;
 use sovra_core::{Command, Event, Timestamp};
 use sovra_runtime::Client;
 use sovra_ui::{Shell, design};
+
+/// Scroll `pane` until `id` is fully inside it, then return whether it is.
+fn scroll_into_view(
+    window: &mut gpui_kit::Window,
+    id: &(impl Into<gpui_kit::ElementId> + Clone),
+    pane: &'static str,
+    cx: &mut gpui_kit::App,
+) -> bool {
+    for _ in 0..100 {
+        window.render_frame(cx);
+        let target = window.find(id.clone());
+        let bounds = window.find(pane).bounds();
+        if target.visible()
+            && target.bounds().top() >= bounds.top()
+            && target.bounds().bottom() <= bounds.bottom()
+        {
+            return true;
+        }
+        let delta = if target.bounds().top() < bounds.top() {
+            30.
+        } else {
+            -30.
+        };
+        window.scroll(pane, ScrollDelta::Pixels(point(px(0.), px(delta))), cx);
+    }
+    false
+}
 
 #[gpui_kit::test]
 fn messaging_review_and_settings_work_at_minimum_wide_and_double_size(cx: &mut TestAppContext) {
@@ -106,7 +133,7 @@ fn messaging_review_and_settings_work_at_minimum_wide_and_double_size(cx: &mut T
                     session_id: session.clone(),
                     send: true
                 })));
-            let mut receipt = draft;
+            let mut receipt = draft.clone();
             receipt.delivery = MessageDelivery::Accepted {
                 message_id: "sent-1".into(),
             };
@@ -121,8 +148,63 @@ fn messaging_review_and_settings_work_at_minimum_wide_and_double_size(cx: &mut T
             cx.update_window(window.into(), |_, window, cx| {
                 window.render_frame(cx);
                 assert!(window.try_find(("message-review-send", 0usize)).is_none());
+                assert_eq!(
+                    window.find(("message-trust-question", 0usize)).label(),
+                    Some("Next time, send messages to Your own chat without asking you first?")
+                );
+                assert!(
+                    scroll_into_view(
+                        window,
+                        &("message-trust-toggle", 0usize),
+                        "chat-scroll-area",
+                        cx
+                    ),
+                    "{mode:?} {width}x{height} at {scale}%: the don't-ask-again button is reachable"
+                );
+                assert!(
+                    window
+                        .find(("message-trust-toggle", 0usize))
+                        .bounds()
+                        .right()
+                        <= px(width)
+                );
+                window.click(("message-trust-toggle", 0usize), cx);
             })
             .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|c| c
+                == Command::Connections(ConnectionCommand::TrustRecipient {
+                    channel: ChannelKind::WhatsApp,
+                    recipient: draft.recipient.clone(),
+                    trusted: true,
+                })));
+            let trusted = vec![TrustedRecipient {
+                channel: ChannelKind::WhatsApp,
+                recipient: draft.recipient.clone(),
+                label: draft.recipient_label.clone(),
+            }];
+            events
+                .send_blocking(Event::Connections(ConnectionEvent::TrustChanged(
+                    trusted.clone(),
+                )))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert_eq!(
+                    window.find(("message-trust-question", 0usize)).label(),
+                    Some("Sovra sends to Your own chat without asking you first.")
+                );
+                window.click(("message-trust-toggle", 0usize), cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|c| c
+                == Command::Connections(ConnectionCommand::TrustRecipient {
+                    channel: ChannelKind::WhatsApp,
+                    recipient: draft.recipient.clone(),
+                    trusted: false,
+                })));
             let state = ConnectionsState {
                 whatsapp: WhatsAppStatus::Connected {
                     device: LinkedDevice {
@@ -140,6 +222,7 @@ fn messaging_review_and_settings_work_at_minimum_wide_and_double_size(cx: &mut T
                     linked_at: Timestamp(0),
                     online: true,
                 },
+                trusted_recipients: trusted,
                 ..Default::default()
             };
             events
@@ -184,9 +267,32 @@ fn messaging_review_and_settings_work_at_minimum_wide_and_double_size(cx: &mut T
                 assert!(window.try_find("telegram-send-test-btn").is_none());
                 assert!(window.try_find("telegram-test-msg-input").is_none());
                 assert!(window.try_find("whatsapp-toggle-auto-reply").is_some());
+                assert!(
+                    scroll_into_view(
+                        window,
+                        &("trusted-recipient-ask", 0usize),
+                        "connections-scroll",
+                        cx
+                    ),
+                    "{mode:?} {width}x{height} at {scale}%: Ask first is reachable in settings"
+                );
+                assert!(
+                    window
+                        .find(("trusted-recipient-ask", 0usize))
+                        .bounds()
+                        .right()
+                        <= px(width)
+                );
+                window.click(("trusted-recipient-ask", 0usize), cx);
                 window.remove_window();
             })
             .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|c| c
+                == Command::Connections(ConnectionCommand::TrustRecipient {
+                    channel: ChannelKind::WhatsApp,
+                    recipient: "447700900123@s.whatsapp.net".into(),
+                    trusted: false,
+                })));
         }
     }
 }

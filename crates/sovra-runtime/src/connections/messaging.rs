@@ -5,8 +5,8 @@
 use super::{Actor, ConnectionsRuntime, Input};
 use serde_json::{Value, json};
 use sovra_core::communications::{
-    MAX_OUTBOUND_MESSAGES, MessageDelivery, MessagingAccess, MessagingRequest, OutboundMessage,
-    REVIEW_LIFETIME_MS, resolve_recipient, validate_message,
+    MAX_OUTBOUND_MESSAGES, MAX_SENDS_WITHOUT_REVIEW_PER_TURN, MessageDelivery, MessagingAccess,
+    MessagingRequest, OutboundMessage, REVIEW_LIFETIME_MS, resolve_recipient, validate_message,
 };
 use sovra_core::connections::{
     ChannelError, ChannelKind, ChannelSession, ConnectionEvent, channel_of_session,
@@ -24,6 +24,8 @@ pub(super) struct MessagingState {
     pub sends: JoinSet<(String, Result<String, ChannelError>)>,
     /// Outbound id → schedule session id for confirmed timed sends.
     scheduled: BTreeMap<String, String>,
+    /// Turn → sends that skipped review. Only recent turns are kept.
+    unreviewed: BTreeMap<u64, usize>,
 }
 
 struct Caller {
@@ -167,7 +169,19 @@ impl Actor {
                 .find(|m| m.id == id && m.session_id == session_id)
                 .map(message_result)
                 .ok_or_else(|| unavailable("That message is not in this conversation.")),
-            MessagingRequest::FindPeople { query } => Ok(people_lookup(&self.state.people, &query)),
+            MessagingRequest::FindPeople { query } => {
+                let mut found = people_lookup(&self.state.people, &query);
+                let groups: Vec<_> = self
+                    .state
+                    .find_groups(&query)
+                    .into_iter()
+                    .map(|group| json!({"id":group.id,"subject":group.subject}))
+                    .collect();
+                if let Some(object) = found.as_object_mut() {
+                    object.insert("whatsapp_groups".into(), json!(groups));
+                }
+                Ok(found)
+            }
         }
     }
 
@@ -269,6 +283,7 @@ impl Actor {
             self.messaging.bindings.remove(&removed.id);
         }
         let id = new_outbound_id()?;
+        let without_review = self.may_skip_review(turn, channel, &recipient);
         let message = OutboundMessage {
             id: id.clone(),
             session_id: session_id.into(),
@@ -287,11 +302,17 @@ impl Actor {
             recipient,
             recipient_label,
             text,
-            delivery: MessageDelivery::Review,
+            delivery: if without_review {
+                MessageDelivery::Sending
+            } else {
+                MessageDelivery::Review
+            },
             created_at: now,
             expires_at: sovra_core::Timestamp(now.0.saturating_add(REVIEW_LIFETIME_MS)),
         };
-        self.messaging.bindings.insert(id, (turn, session));
+        self.messaging
+            .bindings
+            .insert(id, (turn, Arc::clone(&session)));
         if !self.publish_message(message.clone()).await {
             let mut failed = message;
             failed.delivery = MessageDelivery::NotSent;
@@ -300,7 +321,50 @@ impl Actor {
                 "The message could not be saved for review. Nothing was sent.",
             ));
         }
+        if without_review {
+            *self.messaging.unreviewed.entry(turn).or_default() += 1;
+            self.spawn_send(
+                message.id.clone(),
+                message.recipient.clone(),
+                message.text.clone(),
+                session,
+            );
+            let mut result = message_result(&message);
+            if let Some(object) = result.as_object_mut() {
+                object.insert(
+                    "sent_without_review".into(),
+                    json!("The person allowed this chat without asking, so it is sending now. Check message_receipt before saying it was sent."),
+                );
+            }
+            return Ok(result);
+        }
         Ok(message_result(&message))
+    }
+
+    /// A chat the person trusted skips review, up to a few sends per turn.
+    /// Turn 0 is a UI-prepared draft, which always shows its review.
+    fn may_skip_review(&mut self, turn: u64, channel: ChannelKind, recipient: &str) -> bool {
+        if turn == 0 || !self.state.is_trusted(channel, recipient) {
+            return false;
+        }
+        let floor = turn.saturating_sub(64);
+        self.messaging.unreviewed.retain(|saved, _| *saved >= floor);
+        self.messaging.unreviewed.get(&turn).copied().unwrap_or(0)
+            < MAX_SENDS_WITHOUT_REVIEW_PER_TURN
+    }
+
+    pub(super) async fn trust_recipient(
+        &mut self,
+        channel: ChannelKind,
+        recipient: &str,
+        trusted: bool,
+    ) {
+        if !self.state.set_trusted(channel, recipient, trusted) {
+            return;
+        }
+        let event = ConnectionEvent::TrustChanged(self.state.trusted_recipients.clone());
+        self.emit(event).await;
+        self.save().await;
     }
 
     pub(super) async fn review_message(&mut self, id: &str, session_id: &str, send: bool) {
@@ -883,5 +947,94 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    fn to_group(text: &str) -> MessagingRequest {
+        MessagingRequest::Prepare {
+            channel: ChannelKind::WhatsApp,
+            recipient: "school gate".into(),
+            text: text.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_group_found_by_part_of_its_name_gets_a_review_then_trust_sends_without_one() {
+        let session = Arc::new(Session::default());
+        let mut actor = actor(session.clone());
+        actor
+            .state
+            .upsert_groups(&[sovra_core::connections::SyncedGroup {
+                id: "120363111@g.us".into(),
+                subject: "School Gate".into(),
+            }]);
+        let found = actor
+            .messaging_request(
+                "desktop",
+                1,
+                MessagingRequest::FindPeople {
+                    query: "school".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(found["whatsapp_groups"][0]["id"], "120363111@g.us");
+
+        let first = actor
+            .messaging_request("desktop", 1, to_group("First"))
+            .await
+            .unwrap();
+        assert_eq!(first["status"], json!("Review"));
+        assert!(first.get("sent_without_review").is_none());
+        let id = first["id"].as_str().unwrap().to_owned();
+        actor
+            .trust_recipient(ChannelKind::WhatsApp, "120363111@g.us", true)
+            .await;
+        assert!(
+            actor.state.trusted_recipients.is_empty(),
+            "a waiting review is not a send, so it cannot be trusted yet"
+        );
+        actor.review_message(&id, "desktop", true).await;
+        let (sent_id, result) = actor.messaging.sends.join_next().await.unwrap().unwrap();
+        actor.sent_message(&sent_id, result).await;
+        actor
+            .trust_recipient(ChannelKind::WhatsApp, "120363111@g.us", true)
+            .await;
+        assert!(
+            actor
+                .state
+                .is_trusted(ChannelKind::WhatsApp, "120363111@g.us")
+        );
+
+        for (index, text) in ["Two", "Three", "Four"].into_iter().enumerate() {
+            let result = actor
+                .messaging_request("desktop", 2, to_group(text))
+                .await
+                .unwrap();
+            assert_eq!(result["status"], json!("Sending"), "{text}");
+            assert!(result.get("sent_without_review").is_some());
+            let (sent_id, result) = actor.messaging.sends.join_next().await.unwrap().unwrap();
+            actor.sent_message(&sent_id, result).await;
+            assert_eq!(session.sent.lock().unwrap().len(), index + 2);
+        }
+        let capped = actor
+            .messaging_request("desktop", 2, to_group("Five"))
+            .await
+            .unwrap();
+        assert_eq!(
+            capped["status"],
+            json!("Review"),
+            "a burst in one turn falls back to a review"
+        );
+        assert_eq!(actor.messaging.sends.len(), 0);
+
+        actor
+            .trust_recipient(ChannelKind::WhatsApp, "120363111@g.us", false)
+            .await;
+        let asked = actor
+            .messaging_request("desktop", 3, to_group("Six"))
+            .await
+            .unwrap();
+        assert_eq!(asked["status"], json!("Review"));
+        assert_eq!(session.sent.lock().unwrap().len(), 4);
     }
 }

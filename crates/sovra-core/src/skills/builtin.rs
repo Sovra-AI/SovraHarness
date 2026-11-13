@@ -308,7 +308,7 @@ impl Skill {
             ),
             "communications" => sample_pair(
                 "communications",
-                "Send Sam Rivera a WhatsApp note that the school gate opens at 3, even though Sam has not written first.",
+                "Send a WhatsApp to my School Gate Parents group saying the gate opens at 3 today.",
             ),
             "google-workspace" => sample_pair(
                 "google-workspace",

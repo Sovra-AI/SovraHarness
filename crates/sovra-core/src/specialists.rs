@@ -184,7 +184,7 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             "CommunicationsAgent",
             "communications",
             "WhatsApp & Telegram helper",
-            "Check connected messaging, look up a saved person or a WhatsApp group, and prepare a message for you to review and send now, even before that person has written first. Groups are never answered automatically. A confirmed timed text is set up with the scheduler so it goes out at the chosen time.",
+            "Check connected messaging, look up a saved person or a WhatsApp group, and prepare a message to a person or a WhatsApp group for you to review and send now, even before that person has written first. After a message goes out you can let Sovra send to that chat without asking next time. Groups are never answered automatically. A confirmed timed text is set up with the scheduler so it goes out at the chosen time.",
             false,
             ModelTier::Standard,
         ),

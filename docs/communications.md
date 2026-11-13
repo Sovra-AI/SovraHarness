@@ -42,8 +42,11 @@ person chose, a unique stored `WhatsApp` group subject, or that group's exact id
 A phone number that is not a `WhatsApp` handle is not used as a `WhatsApp`
 recipient. Telegram still needs a chat that has already written to the bot, or a
 chat added on that person. Sovra does not download a Telegram address book.
-`list_recent_chats` also returns stored `WhatsApp` groups. Looking up people is a
-safe read. Preparing a message stays ordered and does not send. Groups are never
+`list_recent_chats` also returns stored `WhatsApp` groups, and `find_people`
+returns up to eight `whatsapp_groups` whose subject contains every word asked
+for (an empty question returns none), so "message the school group" finds the
+exact group id. A group review shows its subject and "WhatsApp group" rather than
+the raw id. Looking up people is a safe read. Preparing a message stays ordered and does not send. Groups are never
 answered automatically.
 
 A confirmed timed WhatsApp or Telegram text is a schedule job with
@@ -67,6 +70,21 @@ the sender, recipient and exact text, and offers Send, Cancel and Save. Knowledg
 group** opens the same review. No model tool can approve it or replace its
 content. Changing the message requires a new review. `message_receipt` is limited
 to the originating desktop conversation.
+
+### Sending without asking
+
+After a message is accepted, its card asks "Next time, send messages to … without
+asking you first?" **Yes, don't ask again** sends the native-only
+`ConnectionCommand::TrustRecipient`, which no tool can issue. The core rule
+(`ConnectionsState::set_trusted`) only trusts an exact chat id that already has an
+accepted message on that channel, keeps at most 50, and persists them in
+`trusted_recipients`. A later `prepare_message` from a chat turn to that exact
+chat records Sending and transmits at once; its result carries
+`sent_without_review`, and the helper still checks `message_receipt`. A turn may
+skip review at most three times; later requests in that turn fall back to a normal
+review. Drafts the person opens from People always show the review. The same card
+then offers **Ask me first next time**, and Settings → WhatsApp lists these chats
+under **Sends without asking** with **Ask first** on each.
 
 The runtime rechecks the conversation, ten-minute deadline, online status and
 exact linked session before consuming approval. It records Sending before IO;

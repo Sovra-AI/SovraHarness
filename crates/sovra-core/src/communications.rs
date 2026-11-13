@@ -12,6 +12,21 @@ use crate::people::NameMatch;
 pub const MAX_MESSAGE_CHARS: usize = 4096;
 pub const MAX_OUTBOUND_MESSAGES: usize = 40;
 pub const REVIEW_LIFETIME_MS: i64 = 10 * 60 * 1000;
+/// Recipients the person said Sovra may message without a review.
+pub const MAX_TRUSTED_RECIPIENTS: usize = 50;
+/// A trusted recipient still gets a review after this many sends in one turn,
+/// so a runaway helper cannot flood a chat.
+pub const MAX_SENDS_WITHOUT_REVIEW_PER_TURN: usize = 3;
+
+/// A chat the person allowed Sovra to message without asking first. Only the
+/// native "don't ask again" button adds one, and only after a real send to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustedRecipient {
+    pub channel: ChannelKind,
+    /// Exact resolved chat id, never a name.
+    pub recipient: String,
+    pub label: String,
+}
 
 /// A tool cannot approve a message. Only the native review command can do that.
 /// A confirmed timed send stored on a schedule transmits at fire time without
@@ -99,6 +114,9 @@ pub struct OutboundMessage {
 impl OutboundMessage {
     pub fn recipient_display(&self) -> String {
         match self.channel {
+            ChannelKind::WhatsApp if crate::connections::is_whatsapp_group_id(&self.recipient) => {
+                "WhatsApp group".into()
+            }
             ChannelKind::WhatsApp => self
                 .recipient
                 .strip_suffix("@s.whatsapp.net")
@@ -335,6 +353,95 @@ mod tests {
         assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "Ryan").is_err());
         assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "123456").is_ok());
         assert!(concrete_scheduled_recipient(ChannelKind::Telegram, "me").is_ok());
+    }
+
+    fn sent(recipient: &str, delivery: MessageDelivery) -> OutboundMessage {
+        OutboundMessage {
+            id: format!("{recipient}-{delivery:?}"),
+            session_id: "desktop".into(),
+            channel: ChannelKind::WhatsApp,
+            sender: "+15550000000".into(),
+            recipient: recipient.into(),
+            recipient_label: "School Gate".into(),
+            text: "Hi".into(),
+            delivery,
+            created_at: Timestamp(0),
+            expires_at: Timestamp(1),
+        }
+    }
+
+    #[test]
+    fn trust_needs_an_accepted_send_to_that_exact_chat_and_can_be_taken_back() {
+        let mut state = ConnectionsState::default();
+        let group = "120363111@g.us";
+        assert!(!state.set_trusted(ChannelKind::WhatsApp, group, true));
+        state
+            .outbound_messages
+            .push(sent(group, MessageDelivery::Review));
+        state
+            .outbound_messages
+            .push(sent(group, MessageDelivery::Uncertain));
+        assert!(
+            !state.set_trusted(ChannelKind::WhatsApp, group, true),
+            "a review or an unconfirmed send is not a real send"
+        );
+        state.outbound_messages.push(sent(
+            group,
+            MessageDelivery::Accepted {
+                message_id: "m1".into(),
+            },
+        ));
+        assert!(!state.set_trusted(ChannelKind::Telegram, group, true));
+        assert!(state.set_trusted(ChannelKind::WhatsApp, group, true));
+        assert!(!state.set_trusted(ChannelKind::WhatsApp, group, true));
+        assert!(state.is_trusted(ChannelKind::WhatsApp, group));
+        assert!(!state.is_trusted(ChannelKind::WhatsApp, "120363222@g.us"));
+        assert_eq!(state.trusted_recipients[0].label, "School Gate");
+        let saved: ConnectionsState =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert!(saved.is_trusted(ChannelKind::WhatsApp, group));
+        assert!(state.set_trusted(ChannelKind::WhatsApp, group, false));
+        assert!(!state.is_trusted(ChannelKind::WhatsApp, group));
+        assert!(!state.set_trusted(ChannelKind::WhatsApp, group, false));
+    }
+
+    #[test]
+    fn group_lookup_matches_words_of_the_name_and_never_lists_everything() {
+        let mut state = ConnectionsState::default();
+        state.upsert_groups(&[
+            crate::connections::SyncedGroup {
+                id: "1@g.us".into(),
+                subject: "School Gate Parents".into(),
+            },
+            crate::connections::SyncedGroup {
+                id: "2@g.us".into(),
+                subject: "Family".into(),
+            },
+        ]);
+        let ids = |query: &str| -> Vec<String> {
+            state
+                .find_groups(query)
+                .iter()
+                .map(|group| group.id.clone())
+                .collect()
+        };
+        assert_eq!(ids("school"), ["1@g.us"]);
+        assert_eq!(ids("  PARENTS   school "), ["1@g.us"]);
+        assert_eq!(ids("2@g.us"), ["2@g.us"]);
+        assert_eq!(ids(""), Vec::<String>::new());
+        assert_eq!(ids("work"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_group_receipt_shows_a_plain_name_not_a_raw_id() {
+        assert_eq!(
+            sent("120363111@g.us", MessageDelivery::Review).recipient_display(),
+            "WhatsApp group"
+        );
+        assert_eq!(
+            sent("447700900123@s.whatsapp.net", MessageDelivery::Review).recipient_display(),
+            "+447700900123"
+        );
     }
 
     #[test]

@@ -813,8 +813,13 @@ fn render_row(
             None => (div().into_any_element(), Rems::ZERO, Rems::ZERO),
         },
         Some(Row::Outbound { index }) => (
-            crate::message_review::render(&state.connections.outbound_messages[index], index, cx)
-                .into_any_element(),
+            {
+                let message = &state.connections.outbound_messages[index];
+                let trusted = state
+                    .connections
+                    .is_trusted(message.channel, &message.recipient);
+                crate::message_review::render(message, index, trusted, cx).into_any_element()
+            },
             message_gap,
             message_gap,
         ),

@@ -538,6 +538,11 @@ impl Actor {
                 session_id,
                 send,
             } => self.review_message(&id, &session_id, send).await,
+            ConnectionCommand::TrustRecipient {
+                channel,
+                recipient,
+                trusted,
+            } => self.trust_recipient(channel, &recipient, trusted).await,
             ConnectionCommand::Load => {
                 self.emit(ConnectionEvent::Loaded(Box::new(self.state.clone())))
                     .await;

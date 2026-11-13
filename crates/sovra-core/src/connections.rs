@@ -436,6 +436,9 @@ pub struct ConnectionsState {
     /// `WhatsApp` groups this account is in. A group is a chat, not a person.
     #[serde(default)]
     pub groups: Vec<SyncedGroup>,
+    /// Chats the person said Sovra may message without a review.
+    #[serde(default)]
+    pub trusted_recipients: Vec<crate::communications::TrustedRecipient>,
     /// Live probe results. Not saved: a restart reads each link again.
     #[serde(default, skip)]
     pub probed: std::collections::BTreeMap<
@@ -519,6 +522,13 @@ pub enum ConnectionCommand {
         session_id: String,
         send: bool,
     },
+    /// Native button only: let Sovra message this exact chat without a review
+    /// (`trusted`), or ask first again. Tools cannot issue this command.
+    TrustRecipient {
+        channel: ChannelKind,
+        recipient: String,
+        trusted: bool,
+    },
     /// Probe installed links at the same time. A later refresh replaces the previous one.
     Refresh,
     /// Drop every probe from the current refresh. A finished link keeps its result.
@@ -574,6 +584,8 @@ pub enum ConnectionEvent {
     PeopleChanged(crate::people::PeopleBook),
     /// Stored `WhatsApp` groups changed. People and other rows are untouched.
     GroupsChanged(Vec<SyncedGroup>),
+    /// The chats Sovra may message without asking changed.
+    TrustChanged(Vec<crate::communications::TrustedRecipient>),
 }
 
 impl ConnectionsState {
@@ -653,6 +665,9 @@ impl ConnectionsState {
             ConnectionEvent::PeopleChanged(people) => {
                 self.people.clone_from(people);
             }
+            ConnectionEvent::TrustChanged(trusted) => {
+                self.trusted_recipients.clone_from(trusted);
+            }
             ConnectionEvent::GroupsChanged(groups) => {
                 self.groups.clone_from(groups);
             }
@@ -681,6 +696,69 @@ impl ConnectionsState {
             }
         }
         changed
+    }
+
+    /// Whether Sovra may message this exact chat without a review.
+    pub fn is_trusted(&self, channel: ChannelKind, recipient: &str) -> bool {
+        self.trusted_recipients
+            .iter()
+            .any(|trusted| trusted.channel == channel && trusted.recipient == recipient)
+    }
+
+    /// Allow or stop sending to one chat without a review. Trust is only
+    /// granted to a chat that already received an accepted message, so it
+    /// always names a real recipient the person has seen on a receipt.
+    pub fn set_trusted(&mut self, channel: ChannelKind, recipient: &str, trusted: bool) -> bool {
+        if !trusted {
+            let before = self.trusted_recipients.len();
+            self.trusted_recipients
+                .retain(|saved| !(saved.channel == channel && saved.recipient == recipient));
+            return self.trusted_recipients.len() != before;
+        }
+        if self.is_trusted(channel, recipient)
+            || self.trusted_recipients.len() >= crate::communications::MAX_TRUSTED_RECIPIENTS
+        {
+            return false;
+        }
+        let Some(sent) = self.outbound_messages.iter().rev().find(|message| {
+            message.channel == channel
+                && message.recipient == recipient
+                && matches!(
+                    message.delivery,
+                    crate::communications::MessageDelivery::Accepted { .. }
+                )
+        }) else {
+            return false;
+        };
+        let label = sent.recipient_label.clone();
+        self.trusted_recipients
+            .push(crate::communications::TrustedRecipient {
+                channel,
+                recipient: recipient.to_owned(),
+                label,
+            });
+        true
+    }
+
+    /// Groups whose name contains every word of `query`, for a lookup. An empty
+    /// question returns none so the whole list is never sent to a helper.
+    pub fn find_groups(&self, query: &str) -> Vec<&SyncedGroup> {
+        let words: Vec<String> = normalize_group_subject(query)
+            .split(' ')
+            .filter(|word| !word.is_empty())
+            .map(str::to_owned)
+            .collect();
+        if words.is_empty() {
+            return Vec::new();
+        }
+        self.groups
+            .iter()
+            .filter(|group| {
+                let subject = normalize_group_subject(&group.subject);
+                group.id == query.trim() || words.iter().all(|word| subject.contains(word.as_str()))
+            })
+            .take(8)
+            .collect()
     }
 
     /// Exact group id, or a unique subject. Several groups that share a subject
@@ -1135,6 +1213,7 @@ mod tests {
             notice: None,
             people: crate::people::PeopleBook::default(),
             groups: Vec::new(),
+            trusted_recipients: Vec::new(),
             probed: std::collections::BTreeMap::new(),
         };
         let json = serde_json::to_string(&state).unwrap();

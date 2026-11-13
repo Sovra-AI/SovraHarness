@@ -203,6 +203,67 @@ impl ModelsView {
                 );
         }
 
+        if !state.trusted_recipients.is_empty() {
+            section = section.child(
+                v_flex()
+                    .id("trusted-recipients")
+                    .test_support()
+                    .w_full()
+                    .gap(t.space.small)
+                    .child(
+                        div()
+                            .sovra_text(TextRole::SectionTitle, cx)
+                            .child("Sends without asking"),
+                    )
+                    .child(caption(
+                        "Sovra sends to these chats straight away when you ask, without showing Send first. Press Ask first to go back to checking each message.",
+                        cx,
+                    ))
+                    .children(state.trusted_recipients.iter().enumerate().map(
+                        |(idx, trusted)| {
+                            let channel = trusted.channel;
+                            let recipient = trusted.recipient.clone();
+                            let name = format!("{} · {}", trusted.label, channel.label());
+                            h_flex()
+                                .id(("trusted-recipient-row", idx))
+                                .test_support()
+                                .w_full()
+                                .flex_wrap()
+                                .items_center()
+                                .justify_between()
+                                .gap(t.space.small)
+                                .p(t.space.small)
+                                .sovra_surface(Surface::Subtle, cx)
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .sovra_text(TextRole::Body, cx)
+                                        .truncate()
+                                        .child(name.clone()),
+                                )
+                                .child(
+                                    design::button(("trusted-recipient-ask", idx), "Ask first", cx)
+                                        .small()
+                                        .ghost()
+                                        .accessibility_label(format!(
+                                            "Ask me before Sovra sends to {name}"
+                                        ))
+                                        .on_click(cx.listener(move |view, _, _, cx| {
+                                            view.send_connection(
+                                                ConnectionCommand::TrustRecipient {
+                                                    channel,
+                                                    recipient: recipient.clone(),
+                                                    trusted: false,
+                                                },
+                                                cx,
+                                            );
+                                        })),
+                                )
+                        },
+                    )),
+            );
+        }
+
         if !state.recent_messages.is_empty() {
             section = section.child(
                 v_flex()
