@@ -30,8 +30,9 @@ const PRIMARY_TABS: [NavTab; 6] = [
     NavTab::Groups,
 ];
 
-const AI_SETUP_TABS: [NavTab; 5] = [
+const AI_SETUP_TABS: [NavTab; 6] = [
     NavTab::Models,
+    NavTab::Training,
     NavTab::MyAis,
     NavTab::Knowledge,
     NavTab::Connections,
@@ -294,6 +295,7 @@ fn nav_tab_meta(tab: NavTab) -> (&'static str, IconName) {
         NavTab::Settings => ("nav-settings", IconName::Settings),
         NavTab::Connections => ("nav-connections", IconName::Link),
         NavTab::Groups => ("nav-groups", IconName::Heart),
+        NavTab::Training => ("nav-training", IconName::BookOpen),
     }
 }
 

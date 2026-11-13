@@ -21,7 +21,7 @@ The engineering rules are in [AGENTS.md](../AGENTS.md).
 | `sovra-google`, `sovra-github` | OAuth/token setup and service APIs behind core ports |
 | `sovra-whatsapp`, `sovra-telegram` | Messaging adapters behind `MessagingChannel` |
 | `sovra-mesh` | Group storage, signatures, peer transport, and audit replication |
-| `sovra-train` | Burn training adapter; library code, not wired into the desktop app |
+| `sovra-train` | Burn learner behind `TrainingEngine`; linked by the app for the local training preview |
 | `xtask` | Checks, development launch, hooks, and packaging |
 
 ```mermaid
@@ -37,7 +37,8 @@ flowchart TB
   adk --> core
   providers --> core
   adapters --> core
-  train["sovra-train: library only"] --> core
+  app --> train["sovra-train: Burn learner"]
+  train --> core
 ```
 
 The graph summarizes ownership; the dependency table includes the exact allowed

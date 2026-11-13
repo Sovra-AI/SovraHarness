@@ -93,6 +93,7 @@ impl Shell {
                 self.select_tab(NavTab::Skills, cx);
             }
             SkillAction::NewChat => self.start_new_chat(window, cx),
+            SkillAction::Training => self.select_tab(NavTab::Training, cx),
             SkillAction::Models => self.select_tab(NavTab::Models, cx),
             SkillAction::Knowledge => self.select_tab(NavTab::Knowledge, cx),
             SkillAction::Schedules => self.select_tab(NavTab::Schedules, cx),

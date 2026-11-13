@@ -80,6 +80,7 @@ pub struct Shell {
     pub(crate) people_open_review: Option<String>,
     models: Entity<crate::ModelsView>,
     team_view: Entity<crate::team_view::TeamView>,
+    training_view: Entity<crate::training_view::TrainingView>,
     artifacts_view: Entity<crate::artifacts_view::ArtifactsView>,
     /// The Google card on the Connections tab.
     google_card: Entity<crate::google_card::GoogleCard>,
@@ -497,6 +498,11 @@ impl Shell {
                             }
                             _ => None,
                         };
+                        if let sovra_core::Event::Training(event) = &event {
+                            shell
+                                .training_view
+                                .update(cx, |view, cx| view.apply(event, cx));
+                        }
                         if let sovra_core::Event::Schedule(event) = &event {
                             shell.observe_schedule_save(event);
                         }
@@ -843,6 +849,7 @@ impl Shell {
             _people_search_events: people_search_events,
             people_open_review: None,
             models,
+            training_view: cx.new(|cx| crate::training_view::TrainingView::new(window, cx)),
             team_view,
             artifacts_view,
             _team_ask: team_ask,
@@ -881,7 +888,8 @@ impl Shell {
             | NavTab::Models
             | NavTab::Schedules
             | NavTab::Skills
-            | NavTab::Groups => {}
+            | NavTab::Groups
+            | NavTab::Training => {}
         }
         cx.notify();
     }
@@ -973,6 +981,11 @@ impl Shell {
 
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
         self.state.select_tab(tab);
+        if tab == NavTab::Training {
+            let _ = cx.global::<RuntimeClient>().0.send(Command::Training(
+                sovra_core::training::TrainingCommand::Load,
+            ));
+        }
         if tab == NavTab::Knowledge {
             self.memory_view
                 .update(cx, crate::memory_view::MemoryView::load);
@@ -2107,6 +2120,7 @@ impl Shell {
                             .child(self.models.clone())
                             .into_any_element()
                     }
+                    NavTab::Training => self.training_view.clone().into_any_element(),
                     NavTab::MyAis => render_my_ais_view(
                         &self.state,
                         &self.sim_route_input,

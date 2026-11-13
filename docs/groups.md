@@ -141,6 +141,22 @@ helpers. Sharing does not grant terminal permission, arbitrary tools, or control
 of another computer. Domain rules and exact wire limits are in the source map
 below; the public UI exposes only the controls described in this guide.
 
+## Train together
+
+The group can also contribute short training steps to one member's practice
+model. On **Training**, the owner chooses **Start with my group**; each helper
+chooses **Help this computer**. Both choices are explicit. Joining a group,
+answering questions or lending an AI does not enable training.
+
+The owner shares the selected training text and model with participating
+computers. **Groups → Borrow an AI → Help the group train** is a separate
+permission: switching it off revokes sharing, and switching it on alone does
+not expose a local run. Sharing and helping stay off after restarting.
+
+See [Training](training.md) for steps, saved progress and stopping controls.
+This is a tiny next-byte model preview; pretrained SLM fine-tuning is still
+being built.
+
 ## Network
 
 `sovra-mesh` is the only crate that names iroh. `Mesh::bind` builds an

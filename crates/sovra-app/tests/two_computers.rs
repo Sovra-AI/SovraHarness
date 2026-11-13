@@ -16,6 +16,9 @@ use sovra_core::group::{
 use sovra_core::{AgentConfig, Command, Event};
 use sovra_runtime::{Client, GroupServices, RuntimeServices};
 
+#[path = "two_computers/training.rs"]
+mod training;
+
 const WAIT: Duration = Duration::from_secs(60);
 
 struct Computer {
@@ -40,6 +43,10 @@ impl Computer {
 
     /// A computer whose own memory already holds `facts` (in-memory `SurrealDB`).
     fn start_remembering(name: &str, key: u8, facts: &[&str]) -> Self {
+        Self::configured(name, key, facts, false, true)
+    }
+
+    fn configured(name: &str, key: u8, facts: &[&str], training: bool, fresh: bool) -> Self {
         let facts: Vec<String> = facts.iter().map(|fact| (*fact).to_owned()).collect();
         let memory: Option<sovra_runtime::MemoryFactory> = (!facts.is_empty()).then(|| {
             Box::new(move || {
@@ -60,12 +67,18 @@ impl Computer {
         });
         let dir =
             std::env::temp_dir().join(format!("sovra-two-computers-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        if fresh {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
         let store_dir = dir.join("groups");
         let client = sovra_runtime::start_with_services(
             "two-computers",
             AgentConfig::default(),
             RuntimeServices {
+                training: training.then(|| sovra_runtime::TrainingConfig {
+                    engine: Arc::new(sovra_train::BurnTrainingEngine),
+                    directory: dir.join("training"),
+                }),
                 memory,
                 groups: Some(GroupServices {
                     transport: Box::new(move || {

@@ -2401,6 +2401,32 @@ impl ModelsView {
             .gap(t.space.compact)
             .child(heading("Your choices for this computer", cx))
             .child(switch_row(
+                "Help the group train",
+                "Turn this on to let a computer in your group take one short training step on a run you started with your group. It starts off each time Sovra opens. Answering questions or lending this computer's AI does not turn it on. Your chats, memories and shared notes are not used as the training text.",
+                self.groups.training_help,
+                design::button(
+                    "groups-training-help",
+                    if self.groups.training_help {
+                        "Turn off"
+                    } else {
+                        "Turn on"
+                    },
+                    cx,
+                )
+                .accessibility_label(if self.groups.training_help {
+                    "Help the group train: on. Turn off"
+                } else {
+                    "Help the group train: off. Turn on"
+                })
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    send(
+                        GroupCommand::SetTrainingHelp(!view.groups.training_help),
+                        cx,
+                    );
+                })),
+                cx,
+            ))
+            .child(switch_row(
                 "Lend this computer's AI",
                 "Turn this on if this computer has an AI set up. Computers in the group without one can then use it. Any AI costs come from this computer's AI account. It never opens your files or what Sovra remembers for someone else.",
                 settings.help_others,

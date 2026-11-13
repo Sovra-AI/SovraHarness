@@ -63,7 +63,7 @@ fn step_icon(step: TourStep) -> IconName {
         TourStep::ConnectAi => IconName::Brain,
         TourStep::AskAnything => IconName::MessageCircle,
         TourStep::Skills => IconName::LayoutDashboard,
-        TourStep::Knowledge => IconName::BookOpen,
+        TourStep::Knowledge | TourStep::Training => IconName::BookOpen,
         TourStep::Connections => IconName::Plug,
         TourStep::Team => IconName::Users,
         TourStep::Schedules => IconName::Calendar,

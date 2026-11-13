@@ -23,9 +23,9 @@ limits are documented in [development](development.md#sign-in-integration-status
 ## The guided tour
 
 The first time you sign in, a guided tour opens above each page and walks you
-through Sovra in 11 short steps: what Sovra is, giving it an AI, asking a
+through Sovra in 12 short steps: what Sovra is, giving it an AI, asking a
 question, **Skills**, **Knowledge**, **Connections**, the AI **Team**,
-**Schedules**, saved work (**Artifacts**), **Groups** and **Settings**. Each step
+**Schedules**, saved work (**Artifacts**), **Groups**, **Training** and **Settings**. Each step
 says what the page is for in everyday words and suggests one thing to try.
 
 Step 2, *Give Sovra a brain*, offers two choices with numbered steps:
@@ -54,6 +54,17 @@ For local models, start the model server separately; Sovra does not install or
 launch it for you. A local chat model alone does not disable web search, remote
 tools or group networking; see [network destinations](network.md#network-destinations).
 
+## Try training on your computer
+
+Open **Training**, keep **Try the garden sample** selected, and choose
+**Start training**. This runs a tiny practice model inside Sovra without a chat
+provider or API key. Wait for saved progress to appear; **Pause** and
+**Resume saved training** let you continue later.
+
+To let computers in your group contribute, follow [Training together](training.md).
+The preview trains a tiny next-byte model; pretrained SLM fine-tuning is still
+being built, and training does not change the AI answering your chats.
+
 ## Find the right feature
 
 | I want to… | Start here |
@@ -65,6 +76,7 @@ tools or group networking; see [network destinations](network.md#network-destina
 | Ask several helpers together or keep a reply | [Teams and artifacts](teams-and-artifacts.md) |
 | Run something later | [Schedules](schedules.md) |
 | Share a detail with family or colleagues | [Groups](groups.md) |
+| Train a small practice model together | [Training](training.md) |
 | Connect WhatsApp or Telegram | [Messaging](communications.md) |
 | Use Google services | [Google](google.md) |
 | Add tools from another service | [MCP servers](connected-services.md) |

@@ -32,7 +32,7 @@ enum Input {
     Store(Option<Arc<dyn MemoryStore>>),
     Command(ConnectionCommand),
     Channel(ChannelKind, ChannelEvent),
-    Agent(Event),
+    Agent(Box<Event>),
     Messaging {
         session_id: String,
         turn: u64,
@@ -173,7 +173,7 @@ impl ConnectionsRuntime {
                     .session_id()
                     .is_some_and(|id| channel_of_session(id).is_some())
                 {
-                    let _ = inbox.try_send(Input::Agent(event));
+                    let _ = inbox.try_send(Input::Agent(Box::new(event)));
                 } else if ui_events.send(event).await.is_err() {
                     break;
                 }
@@ -336,7 +336,7 @@ impl Actor {
                 Input::Command(command) => self.command(command).await,
                 Input::Channel(ChannelKind::WhatsApp, event) => self.whatsapp_event(event).await,
                 Input::Channel(ChannelKind::Telegram, event) => self.telegram_event(event).await,
-                Input::Agent(event) => self.agent_event(event).await,
+                Input::Agent(event) => self.agent_event(*event).await,
                 Input::Messaging {
                     session_id,
                     turn,
@@ -1091,6 +1091,7 @@ impl Actor {
             | Event::Mcp(_)
             | Event::Terminal(_)
             | Event::Schedule(_)
+            | Event::Training(_)
             | Event::Group(_)
             | Event::ChatHistoryLoaded { .. }
             | Event::Ready { .. }

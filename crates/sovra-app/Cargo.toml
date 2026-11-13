@@ -25,6 +25,7 @@ sovra-runtime = { workspace = true }
 sovra-skills = { workspace = true }
 sovra-store-surreal = { workspace = true }
 sovra-ui = { workspace = true }
+sovra-train = { workspace = true }
 sovra-telegram = { workspace = true }
 sovra-whatsapp = { workspace = true }
 tracing = { workspace = true }
@@ -34,6 +35,7 @@ velopack = { workspace = true }
 
 [dev-dependencies]
 async-channel = { workspace = true }
+async-trait = { workspace = true }
 serde_json = { workspace = true }
 # The two-computer test waits on runtime events with a deadline; the app itself never
 # names tokio (the runtime owns it).

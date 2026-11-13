@@ -5,12 +5,14 @@
 <h1 align="center">SovraHarness</h1>
 
 <p align="center">
-  A native desktop workspace for AI chat, local memory, files, and shared work.<br>
+  Your AI workspace. Your knowledge. Computers that can train together.<br>
   Built in Rust with GPUI for macOS, Windows, and Linux.
 </p>
 
 <p align="center">
   <a href="docs/getting-started.md">Getting started</a>
+  ·
+  <a href="docs/training.md">Train together</a>
   ·
   <a href="docs/README.md">Documentation</a>
   ·
@@ -23,11 +25,38 @@
 
 Connect a cloud AI service or a local model server such as Ollama, then use
 helpers to work with your knowledge, create documents and websites, and
-schedule tasks.
+schedule tasks. Sovra also brings model training into the same native app:
+start on one computer, then invite computers in your group to contribute.
 
 > **License:** Source on `main` is available under Sovra's Sustainable Use License.
 > This is fair-code: source-available, and not an OSI open-source license.
 > Enterprise files have separate terms. See [License](#license).
+
+## Train together on computers you already own
+
+**Sovra's scavenger grid lets a group contribute short training steps to a shared
+model.** One computer starts a run; other members choose to help over the group's
+encrypted connection. Each helper works independently, so an absent computer
+does not hold up the group. Training runs inside the Rust desktop executable,
+with no Python environment or separate training service to install.
+
+- **Choose what it learns:** use the garden sample or paste your own text.
+  Chat history, memories and files are not automatically added.
+- **Choose who helps:** **Start training** keeps the run local;
+  **Start with my group** permits group members to receive the selected text and
+  model. They join with **Help this computer**. Membership alone is not consent.
+- **Keep control:** progress saves after each short step. Pause and resume,
+  stop sharing, or stop helping. Training gives chat priority between steps;
+  sharing and helping stay off after restarting.
+
+**Available in 0.5.0 as a preview:** a tiny next-byte practice model on CPU.
+Pretrained small language model (SLM) fine-tuning is still being built; this
+practice model does not replace your chat AI. Group training shares the chosen
+text and model with participating computers, so use text you intend to share.
+There is no automatic idle-computer detection or demonstrated fleet speedup yet.
+
+Start with the [Training guide](docs/training.md), or read the
+[training architecture and implementation status](docs/swarm.md).
 
 ## What you can do
 
@@ -64,6 +93,10 @@ After launching:
    chat model. Cloud services may require a key and charge for usage. For Ollama,
    install and start the local model server separately.
 3. Send a message in **Chat**, or open **Skills** to try an example.
+
+To try training, open **Training → Try the garden sample → Start training**.
+This preview needs no chat provider or API key. Follow the
+[group training steps](docs/training.md#train-with-your-group) to connect helpers.
 
 For connection problems, see [Models](docs/models.md) and
 [Configuration and local data](docs/configuration.md).

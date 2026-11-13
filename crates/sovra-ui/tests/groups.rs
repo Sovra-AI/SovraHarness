@@ -1036,6 +1036,24 @@ fn this_computers_ai_can_be_offered_to_the_group_and_its_jobs_are_listed(cx: &mu
             }
         )))
     );
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("groups-training-help", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert_eq!(
+        drain(&commands),
+        vec![Command::Group(GroupCommand::SetTrainingHelp(true))]
+    );
+    group_event(&events, GroupEvent::TrainingHelp(true));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, _| {
+        assert_eq!(
+            window.find("groups-training-help").label(),
+            Some("Help the group train: on. Turn off")
+        );
+    })
+    .expect("window open");
 }
 
 #[gpui_kit::test]

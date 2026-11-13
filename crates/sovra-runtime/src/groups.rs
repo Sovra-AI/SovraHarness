@@ -41,6 +41,9 @@ use sovra_core::swarm::ledger::{
 use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
 
+mod training;
+pub(crate) use training::GroupTraining;
+
 /// Builds the transport once the runtime's reactor is running (iroh needs it).
 pub type TransportFuture =
     Pin<Box<dyn Future<Output = Result<Arc<dyn GroupTransport>, String>> + Send>>;
@@ -104,6 +107,7 @@ pub(crate) struct GroupKnowledge(
     Arc<std::sync::RwLock<Option<LocalMemory>>>,
     Arc<std::sync::RwLock<Option<std::sync::Weak<Groups>>>>,
     Arc<std::sync::RwLock<Option<LocalModel>>>,
+    Arc<std::sync::RwLock<Option<crate::training::PeerInbox>>>,
 );
 
 impl GroupKnowledge {
@@ -768,6 +772,9 @@ impl Groups {
             verifier.as_ref(),
         );
         let mut record = record;
+        // Training consent is for this app session. Restoring a paused model
+        // must never let another computer restart work or retrieve its text.
+        record.training_help = false;
         record.audit_witnesses = audit::verified_marks(
             &audit,
             std::mem::take(&mut record.audit_witnesses),
@@ -1190,13 +1197,14 @@ impl Groups {
     }
 
     async fn publish_loaded(&self) {
-        let (roster, shared, settings, recent) = {
+        let (roster, shared, settings, recent, training_help) = {
             let inner = self.inner.lock().await;
             (
                 inner.roster.clone(),
                 Self::shared(&inner),
                 inner.record.federated,
                 inner.asks.clone(),
+                inner.record.training_help,
             )
         };
         self.emit(GroupEvent::Loaded {
@@ -1206,8 +1214,23 @@ impl Groups {
         .await;
         self.publish_shared(shared).await;
         self.emit(GroupEvent::Federated { settings, recent }).await;
+        self.emit(GroupEvent::TrainingHelp(training_help)).await;
         self.publish_work().await;
         self.publish_audit().await;
+    }
+
+    /// Owner's choice to let a group computer take one training step. Starts off.
+    pub(super) async fn set_training_help(&self, on: bool) {
+        {
+            let mut inner = self.inner.lock().await;
+            inner.record.training_help = on;
+            self.persist(&inner).await;
+        }
+        self.emit(GroupEvent::TrainingHelp(on)).await;
+    }
+
+    pub(super) async fn training_help(&self) -> bool {
+        self.inner.lock().await.record.training_help
     }
 
     async fn publish_work(&self) {
@@ -1943,6 +1966,7 @@ impl Groups {
                 };
                 self.emit(GroupEvent::Federated { settings, recent }).await;
             }
+            GroupCommand::SetTrainingHelp(on) => self.set_training_help(on).await,
             GroupCommand::ShareArtifact {
                 title,
                 kind,
@@ -2384,6 +2408,7 @@ impl Groups {
             addresses: Vec::new(),
             federated: inner.record.federated,
             work: inner.record.work,
+            training_help: inner.record.training_help,
             // History outlives any one group.
             audit: std::mem::take(&mut inner.record.audit),
             peer_audit: std::mem::take(&mut inner.record.peer_audit),
@@ -3020,6 +3045,16 @@ impl PeerHandler for GroupHandler {
                 id, from: offset, ..
             } => groups.work_next(from, id, offset).await,
             PeerRequest::WorkCancel { id, .. } => groups.work_cancel(from, id).await,
+            PeerRequest::Training { group, work } => {
+                // Membership is already checked. Answering and chat help do not
+                // count: the owner must turn training help on, and it starts off.
+                if !groups.training_help().await {
+                    return PeerResponse::Refused {
+                        reason: Refusal::NotTraining,
+                    };
+                }
+                groups.knowledge.training_request(group, from, work).await
+            }
             other => groups.serve_peer(from, other).await,
         }
     }
@@ -3097,7 +3132,8 @@ impl Groups {
             | PeerRequest::ConfirmJoin { .. }
             | PeerRequest::Work { .. }
             | PeerRequest::WorkNext { .. }
-            | PeerRequest::WorkCancel { .. } => PeerResponse::Refused {
+            | PeerRequest::WorkCancel { .. }
+            | PeerRequest::Training { .. } => PeerResponse::Refused {
                 reason: Refusal::Malformed,
             },
         }
@@ -3361,6 +3397,10 @@ fn refusal_problem(reason: Refusal) -> GroupProblem {
         Refusal::NotAnswering => {
             GroupProblem::Other("That computer isn't answering questions from the group.".into())
         }
+        Refusal::NotTraining => GroupProblem::Other(
+            "That computer is not helping the group train. The owner turns that on separately."
+                .into(),
+        ),
     }
 }
 

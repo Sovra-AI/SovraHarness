@@ -1,13 +1,15 @@
 # Documentation
 
-SovraHarness is a native desktop workspace for AI chat, files, memory, and shared
-work. These guides describe the current checkout. For a released version, read
+SovraHarness is a native desktop workspace for AI chat, files, memory, shared
+work and training together on computers you own. These guides describe the
+current checkout. For a released version, read
 the documentation at that release's tag. Start with the [project README](../README.md)
 for installation and the [changelog](../CHANGELOG.md) for release history.
 
 ## Start here
 
 - [Getting started](getting-started.md): launch Sovra, connect a model, and send a first message.
+- [Training together](training.md): try the tiny-model preview and let group computers help, with explicit control over sharing.
 - [Models](models.md): choose a provider, check credentials, and change your chat model.
 - [Configuration and local data](configuration.md): settings, environment variables, data paths, and troubleshooting.
 
@@ -21,6 +23,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 | Work with helpers and save their output | [Teams and artifacts](teams-and-artifacts.md) |
 | Run prompts or send messages later | [Schedules](schedules.md) |
 | Share selected work across computers | [Groups](groups.md) |
+| Train a practice model locally or with a group | [Training](training.md) |
 | Connect WhatsApp or Telegram | [Messaging](communications.md) |
 | Use Gmail drafts, Calendar, Drive, Contacts, or Tasks | [Google](google.md) |
 | Work with repositories and issues | [GitHub](github.md) |
@@ -43,8 +46,8 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 - [Agent loop](agent-loop.md): delegation, limits, and streamed progress.
 - [Memory capture and recall](memory-capture-and-recall.md): evidence, extraction, retrieval, and withdrawal.
 - [File understanding](file-ontology.md): classification and bounded folder scanning.
-- [Phone control protocol](remote-control.md): implemented desktop transport and reference client; no mobile app is included.
-- [Swarm internals](swarm.md): audit integration and library-only training components.
+- [Phone control protocol](remote-control.md): desktop transport and reference client; phone apps live in separate repositories linked from the project README.
+- [Swarm internals](swarm.md): the scavenger grid, independent work packets, durable checkpoints, group permissions and remaining SLM work.
 - [Network access](network.md): configured destinations and local-operation limits.
 - [Dependency license evidence](dependency-licenses.md): version-specific clarification.
 

@@ -46,14 +46,16 @@ pub enum NavTab {
     Connections,
     /// Family or team computers joined together (`crate::group`).
     Groups,
+    Training,
 }
 
 impl NavTab {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Chat,
         Self::Team,
         Self::Artifacts,
         Self::Groups,
+        Self::Training,
         Self::MyAis,
         Self::Knowledge,
         Self::Skills,
@@ -76,6 +78,7 @@ impl NavTab {
             Self::Artifacts => "Artifacts",
             Self::Connections => "Connections",
             Self::Groups => "Groups",
+            Self::Training => "Training",
         }
     }
 
@@ -92,6 +95,7 @@ impl NavTab {
             Self::Artifacts => crate::models::ChromeKey::NavArtifacts,
             Self::Connections => crate::models::ChromeKey::NavConnections,
             Self::Groups => crate::models::ChromeKey::NavGroups,
+            Self::Training => crate::models::ChromeKey::NavTraining,
         }
     }
 
@@ -108,6 +112,7 @@ impl NavTab {
             Self::Artifacts => crate::models::ChromeKey::NavArtifactsTooltip,
             Self::Connections => crate::models::ChromeKey::NavConnectionsTooltip,
             Self::Groups => crate::models::ChromeKey::NavGroupsTooltip,
+            Self::Training => crate::models::ChromeKey::NavTrainingTooltip,
         }
     }
 
@@ -157,10 +162,11 @@ pub enum TourStep {
     Groups,
     /// Settings: personal instructions, language, look and text size.
     MakeItYours,
+    Training,
 }
 
 impl TourStep {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Welcome,
         Self::ConnectAi,
         Self::AskAnything,
@@ -171,6 +177,7 @@ impl TourStep {
         Self::Schedules,
         Self::SavedWork,
         Self::Groups,
+        Self::Training,
         Self::MakeItYours,
     ];
 
@@ -189,7 +196,8 @@ impl TourStep {
             Self::Schedules => 7,
             Self::SavedWork => 8,
             Self::Groups => 9,
-            Self::MakeItYours => 10,
+            Self::Training => 10,
+            Self::MakeItYours => 11,
         }
     }
 
@@ -209,6 +217,7 @@ impl TourStep {
             Self::Schedules => NavTab::Schedules,
             Self::SavedWork => NavTab::Artifacts,
             Self::Groups => NavTab::Groups,
+            Self::Training => NavTab::Training,
             Self::MakeItYours => NavTab::Settings,
         }
     }
@@ -225,6 +234,7 @@ impl TourStep {
             Self::Schedules => "Put jobs on autopilot",
             Self::SavedWork => "Find your saved work",
             Self::Groups => "Share with family or a team",
+            Self::Training => "Try training with your text",
             Self::MakeItYours => "Make Sovra yours",
         }
     }
@@ -262,6 +272,9 @@ impl TourStep {
             Self::Groups => {
                 "Link up with people you trust, like your family or a small team, to pass notes, lists and questions to each other privately. Nothing is shared until you press Share."
             }
+            Self::Training => {
+                "Choose a sample or paste your own text, then press Start training. Sovra saves after each short round. Start with my group lets your group's computers help with that text; Help this computer contributes to someone else's job. You can stop either at any time. Help the group train, in Groups, is the same choice and starts off. Answering questions or lending an AI does not turn it on. This early preview does not replace your chat AI. Larger models are still being built."
+            }
             Self::MakeItYours => {
                 "Write personal instructions, like \"keep answers short\" or \"I live in Dubai\", and Sovra follows them every time. Here you can also change the language, light or dark look, and text size."
             }
@@ -289,6 +302,9 @@ impl TourStep {
             Self::Schedules => {
                 Some("Press Create schedule, then type what Sovra should do and when.")
             }
+            Self::Training => Some(
+                "Choose Try the garden sample, then Start training. Nothing starts until you press the button.",
+            ),
             Self::SavedWork | Self::Groups => None,
             Self::MakeItYours => {
                 Some("Press Take a guided tour at the bottom of the menu to watch this tour again.")
@@ -367,6 +383,7 @@ impl Default for UserProfile {
 )]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceState {
+    pub training: crate::training::TrainingState,
     pub runtime_status: RuntimeStatus,
     pub memory_status: crate::MemoryStatus,
     pub route: ScreenRoute,
@@ -490,6 +507,7 @@ impl WorkspaceState {
             ai_building: false,
             config_cards: default_config_cards(),
             schedules: default_schedules(),
+            training: crate::training::TrainingState::default(),
             groups: crate::group::GroupsView::default(),
             schedule_runs: Vec::new(),
             specialists,
@@ -1186,6 +1204,10 @@ impl WorkspaceState {
         match event {
             Event::Schedule(event) => {
                 self.apply_schedule_event(event);
+                None
+            }
+            Event::Training(event) => {
+                self.training.apply(event);
                 None
             }
             Event::Group(event) => {
