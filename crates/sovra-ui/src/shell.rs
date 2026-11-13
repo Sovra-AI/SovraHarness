@@ -561,6 +561,9 @@ impl Shell {
                                 models.groups.group.is_some() && models.groups.work.use_group
                             });
                             shell.state.group_can_answer = can_answer;
+                            shell
+                                .artifacts_view
+                                .update(cx, |view, cx| view.group_event(event, cx));
                         }
                         if let sovra_core::Event::Auth(
                             sovra_core::AuthEvent::GoogleSignInStarted { auth_url },

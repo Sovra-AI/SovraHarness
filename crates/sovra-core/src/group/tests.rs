@@ -369,6 +369,26 @@ fn admins_who_remove_each_other_at_once_leave_exactly_one_admin() {
 }
 
 #[test]
+fn the_only_person_can_leave_an_empty_group() {
+    let mut log = Log::family();
+    let leave = log.push(
+        device(1),
+        3_000,
+        MembershipBody::RemovePerson { person: person(1) },
+    );
+    let state = log.state();
+    assert!(state.applied.contains(&leave.hash()));
+    assert!(state.people.is_empty(), "nobody remains without an admin");
+    assert!(!state.admits(&device(1)));
+    for seed in 0..20 {
+        assert_eq!(
+            roster(&fold(log.group, &shuffled(&log.ops, seed), &FakeVerifier)),
+            roster(&state)
+        );
+    }
+}
+
+#[test]
 fn the_last_admin_cannot_leave_or_step_down() {
     let mut log = Log::family();
     log.add(2, Role::Member, 2_000);
@@ -2139,4 +2159,40 @@ fn admins_define_departments_whose_lanes_reach_only_current_members() {
     assert!(space.includes(&roster, &person(3)));
     assert!(!space.includes_now(&roster, &person(3)));
     assert!(!space.reaches(&roster, &device(3)));
+}
+
+/// Repeatable CPU workload: excludes transport, disk and real Ed25519 verification.
+/// Run alone with `cargo test -p sovra-core benchmark_group_history -- --ignored`.
+#[test]
+#[ignore = "manual group history performance benchmark"]
+fn benchmark_group_history() {
+    let log = family_of_three();
+    let mut shared = Shared::new(&log);
+    let mut previous = None;
+    for seq in 1..=2_000 {
+        let body = if seq % 2 == 0 {
+            artifact_body("Shared document", &"document text ".repeat(80), Vec::new())
+        } else {
+            share_body("A shared note for the family", Vec::new())
+        };
+        let op = sign_knowledge(UnsignedKnowledge {
+            group: log.group,
+            lane: shared.lane,
+            author: device(1),
+            seq,
+            prev: previous,
+            deps: previous.into_iter().collect(),
+            at: Timestamp(i64::try_from(seq).expect("bounded sequence")),
+            body,
+        });
+        previous = Some(op.hash());
+        shared.ops.push(op);
+    }
+    for _ in 0..3 {
+        let view = std::hint::black_box(shared.view());
+        assert_eq!(view.details.len(), 1_000);
+        assert_eq!(view.artifacts.len(), 1_000);
+        assert!(view.rejected.is_empty());
+        assert!(view.pending.is_empty());
+    }
 }

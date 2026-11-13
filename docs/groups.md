@@ -70,7 +70,12 @@ numbers arrive, the page switches to **Invite someone** so they stay in view.
    computer**) adds a computer to your own identity and is open to members too.
 4. **Shared notes.** Under **Share a note**, write one detail, choose who should
    see it (**Everyone**, **Just <name>** or **Just <department>**), and press
-   **Share**. Nothing in private chats or files is copied into that list. Helpers
+   **Share**. The words stay in the field while **Sharing…** is shown. Once the
+   matching note is saved, a confirmation explains that other computers receive
+   it when they connect. **Write another note** clears only that confirmed,
+   unchanged draft. Edits typed while sharing stay in the field; failures retain
+   the draft for retry. Blank or oversized notes and repeat clicks are disabled.
+   Nothing in private chats or files is copied into that list. Helpers
    that use a note are told who shared it and which computer it came from. Each
    note offers **👍 I agree** and, for its author or an admin, **Stop sharing with
    everyone** and **Delete for everyone…**, which asks **Yes, delete it from every
@@ -82,7 +87,12 @@ numbers arrive, the page switches to **Invite someone** so they stay in view.
    skills and schedules have **Share with my group**. Others find artifacts
    under **Shared in …** on the Artifacts page (**Keep a copy**), and helpers,
    skills and schedules on **Shared helpers** (read the words, then **Use this
-   helper**, **Use this skill** or **Add to my schedules**).
+   helper**, **Use this skill** or **Add to my schedules**). Artifact sharing,
+   **Keep a copy**, and **Stop sharing** show a waiting message until the matching
+   saved result arrives. Repeated clicks stay disabled while waiting; failures
+   keep the saved artifact available and offer a retry. Sharing a newer version
+   keeps the original audience, including private shares. Offline computers
+   receive changes when they reconnect.
 6. **Ask the group.** **Ask my group** sends one question. Two switches, each
    with an **On**/**Off** label and a **Turn on**/**Turn off** button:
    **Answer questions from my group** answers others from this computer's
@@ -135,11 +145,11 @@ admin**, **Make a member again**), and they remove a person (**Remove from
 group**). Removing a person or another computer asks for a second click
 (**Yes, remove** or **Yes, remove them**). Removing a computer shows this
 warning first: that computer will stop getting new group information, and
-things it already has stay on it. **Leave this group** is on this computer and
-asks first ("Are you sure?", **Yes, leave the group** or **No, stay**).
-The operation it signs removes the whole person, so every computer that
-belongs to that person leaves the roster together. If that person is the only
-admin, the app refuses and says to make someone else an admin first.
+things it already has stay on it. **Leave this group** asks first and explains
+that all your computers leave together. Shared group items disappear from this
+view; copies saved separately remain. If other people remain and you are their
+only admin, the app refuses and says to make someone else an admin first.
+If you are the only person, leaving ends the group so you can start another.
 
 A computer can be in one group. Starting or joining while one is already
 recorded says to leave first.
@@ -177,6 +187,10 @@ startup.
 App data paths are in [configuration](configuration.md). On Linux the usual
 root is `$XDG_DATA_HOME/sovraharness` or `~/.local/share/sovraharness`.
 
+A new shared note, artifact or helper is saved before it is published to peers
+or exposed to helper recall. If saving fails, the attempted share, new key grants
+and audit entry are rolled back and an error asks you to retry.
+
 `group.json` is rewritten as a whole. The mesh store writes
 `group.json.tmp` with mode `0600` on Unix, syncs it, then renames it over
 `group.json`, so a crash mid-write does not leave a half record. Copying
@@ -204,8 +218,8 @@ On `Event::Ready` the shell sends `GroupCommand::Load`. That publishes the
 saved roster and starts one sync. After that, sync runs every 20 seconds
 while the process is up. Opening Settings again does not send another Load.
 
-The worker's command channel holds 32 commands. A command that arrives while
-it is full is dropped and logged.
+The worker's command channel holds 32 commands. If it is full or stopped, the
+runtime reports that the request was not sent and asks the person to retry.
 
 ```mermaid
 flowchart LR
@@ -313,8 +327,10 @@ the same roster.
 6. **Remove wins.** An add of the same person or computer that is concurrent
    with a removal is void. Putting them back requires an add that has seen
    the removal.
-7. **Never zero admins.** Removing or demoting the last admin is rejected
-   (`WouldLeaveNoAdmin`). The screen says "A group needs at least one admin.
+7. **No people without an admin.** Removing the last admin while other people
+   remain, or demoting the last admin, is rejected (`WouldLeaveNoAdmin`).
+   The sole person may leave and end the group: no remaining member needs an admin.
+   This exception prevents a new, unused group trapping its creator. The screen says "A group needs at least one admin.
    Make someone else an admin first."
 
 Operations that are waiting for a missing parent stay pending. They do not
@@ -332,7 +348,7 @@ the problem text on the screen.
 | Add another of my computers | This computer is in the group. The signed body is `AddDevice` for the inviter's own person. An admin may also add a computer onto someone else's person; the screen's button always adds it onto the inviter. |
 | Change a role, rename the group, remove another person | Admin. |
 | Remove a computer | Admin, or the person who owns that computer. |
-| Leave | This computer signs `RemovePerson` for its own person. That removes every computer of that person. The last admin cannot leave. |
+| Leave | This computer signs `RemovePerson` for its own person. That removes every computer of that person. The last admin cannot leave while other people remain; a sole person can end the group. |
 | Share, agree, stop using, erase | See [Shared knowledge](#shared-knowledge). |
 
 The roster lists admins first, then this computer's person, then names
@@ -620,7 +636,7 @@ Present in core or in the roadmap, and not what the Groups screen does:
 | Correct a detail from the screen | `GroupCommand::Correct` and the dispute fold exist. The screen has no correction button, and Share does not set `replaces` or `valid_at`. |
 | Handed-off answers | Streamed, stoppable within a second, handed to the next free computer if the helper vanishes first. Chat only: no embedding or indexing jobs (another computer's vectors are not comparable), and no tools on the helping computer. |
 | Same-room codes | Need both computers on one network (mDNS). No SPAKE2: one guess per code plus the picture check. |
-| A second admin's extra signature to remove an admin | Not required. One admin's signature is enough. The last admin cannot be removed or demoted. |
+| A second admin's extra signature to remove an admin | Not required. One admin's signature is enough. The last admin cannot be removed while other people remain, or demoted. |
 | Person recovery codes | Mentioned on the `PersonId` comment only. |
 | Production relays and a relay URL you configure | Internet reach uses n0's public relays. `local` turns relays off. There is no separate relay-URL setting. |
 
@@ -651,3 +667,50 @@ Tests that lock the rules live next to the core modules (`group/tests.rs`),
 in `crates/sovra-runtime/tests/groups.rs` (two runtimes, through `Client`),
 in `crates/sovra-ui/tests/groups.rs` (the screen), and in
 `crates/sovra-adk/src/recall.rs` (`group_guidance_arrives_with_shared_details`).
+
+
+## History rebuild benchmark
+
+Run `cargo test -p sovra-core benchmark_group_history -- --ignored` to exercise
+2,000 sequential shares (1,000 notes and 1,000 approximately 1 KiB documents),
+then rebuild that history three times. The fixture uses deterministic test
+signatures and the production fold, including its signature/hash caches. It
+asserts that all notes and artifacts survive without rejected or pending items.
+This measures local CPU work, not disk persistence, Ed25519 or network delivery.
+
+On the development Linux host, using the default debug test profile on
+2026-11-13, three separate test-process runs measured with `/usr/bin/time`
+produced these results (build time excluded; other development work was running):
+
+| Representation | Elapsed seconds, three runs | Median | Peak process memory |
+| --- | --- | --- | --- |
+| Full ancestor hash sets | 8.57, 6.85, 6.72 | 6.85 s | 143.6–144.1 MiB |
+| Per-computer causal clocks | 0.54, 0.47, 0.39 | 0.47 s | 19.5–19.8 MiB |
+
+The roughly 14.6× median improvement applies to this workload. Each valid
+computer history is contiguous; forked histories are excluded before ordering.
+Remembering the highest seen sequence per computer therefore preserves ancestry
+without storing every earlier hash. A regression compares every causal query
+against explicit parent walks across seven interleaved computer histories.
+Existing tests also cover concurrent edits, invalid replacements, missing parents,
+permissions and deterministic folds. These figures are not an end-to-end sharing
+latency claim or a release-build performance guarantee.
+
+
+### Complete local network transfer
+
+`cargo test -p sovra-mesh
+notes_and_artifacts_cross_the_real_network_in_complete_signed_rounds` exercises
+two real local iroh endpoints, real device signatures and bounded sync replies.
+It transfers 20 Unicode notes and 20 documents containing 9,600,000 bytes of
+source text, including quotes and line breaks that expand in JSON. It fetches
+successive batches until every item arrives, verifies every signature and
+compares the complete ordered content after each round. The operation chain is
+valid; later requests advertise the hashes already received.
+
+On the same development host and debug profile, three standalone executions of
+the compiled test on 2026-11-13 took 3.92, 3.86 and 3.89 seconds (median 3.89 s),
+with peak process memory of 77.8, 82.6 and 77.2 MiB. Timing includes endpoint
+setup, fixture signing, transfer, verification and shutdown, with concurrent
+compilation on the host. This is a repeatable local-network regression workload,
+not a claim about Internet relay speed or two separate physical computers.

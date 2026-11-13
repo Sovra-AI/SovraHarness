@@ -501,9 +501,10 @@ fn fold_lane<'a>(
             KnowledgeBody::ShareTemplate { template, replaces } => {
                 if super::template::check_template(template).is_err() {
                     Err(KnowledgeRejection::InvalidDetail)
-                } else if replaces.iter().any(|old| {
-                    !view.templates.contains_key(old) || !order.ancestors[hash].contains(old)
-                }) {
+                } else if replaces
+                    .iter()
+                    .any(|old| !view.templates.contains_key(old) || !order.saw(hash, old))
+                {
                     Err(KnowledgeRejection::UnknownDetail)
                 } else {
                     view.templates.insert(
@@ -537,9 +538,10 @@ fn fold_lane<'a>(
                     || origin.chars().count() > MAX_ORIGIN_CHARS
                 {
                     Err(KnowledgeRejection::InvalidDetail)
-                } else if replaces.iter().any(|old| {
-                    !view.artifacts.contains_key(old) || !order.ancestors[hash].contains(old)
-                }) {
+                } else if replaces
+                    .iter()
+                    .any(|old| !view.artifacts.contains_key(old) || !order.saw(hash, old))
+                {
                     Err(KnowledgeRejection::UnknownDetail)
                 } else {
                     view.artifacts.insert(
@@ -573,9 +575,10 @@ fn fold_lane<'a>(
             } => {
                 if check_share(text, about).is_err() {
                     Err(KnowledgeRejection::InvalidDetail)
-                } else if replaces.iter().any(|old| {
-                    !view.details.contains_key(old) || !order.ancestors[hash].contains(old)
-                }) {
+                } else if replaces
+                    .iter()
+                    .any(|old| !view.details.contains_key(old) || !order.saw(hash, old))
+                {
                     Err(KnowledgeRejection::UnknownDetail)
                 } else {
                     view.details.insert(

@@ -227,6 +227,9 @@ fn the_group_shows_who_is_in_it_and_what_was_shared(cx: &mut TestAppContext) {
             "a group with people in it opens on the shared notes"
         );
         assert!(window.find(("groups-detail", 0usize)).visible());
+        window.click("groups-share-input", cx);
+        window.input("A note for the group", cx);
+        window.render_frame(cx);
         window.click("groups-share", cx);
         window.click(("groups-agree", 0usize), cx);
         page(window, cx, "people");
@@ -325,6 +328,7 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
                             "groups-header",
                             "groups-pages",
                             "groups-knowledge",
+                            "groups-share-status",
                         ][..],
                     ),
                     ("people", &["groups-roster"][..]),
@@ -349,6 +353,29 @@ fn groups_fit_the_minimum_window_a_wide_window_and_double_text(cx: &mut TestAppC
                         );
                     }
                 }
+            })
+            .expect("window open");
+            cx.update_window(window.into(), |_, window, cx| {
+                page(window, cx, "notes");
+                press(window, cx, "groups-share-input");
+                window.input("A short note", cx);
+                window.render_frame(cx);
+                press(window, cx, "groups-share");
+            })
+            .expect("window open");
+            let mut shared = dads_detail();
+            shared.author = MUM;
+            shared.id = OpHash([8; 32]);
+            shared.text = "A short note".into();
+            group_event(&events, GroupEvent::Knowledge(vec![shared]));
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let column = window.find("groups-column").bounds();
+                let button = window.find("groups-new-note").bounds();
+                assert!(button.left() >= column.left() - px(1.));
+                assert!(button.right() <= column.right() + px(1.));
+                press(window, cx, "groups-new-note");
             })
             .expect("window open");
         }
@@ -701,6 +728,8 @@ fn a_detail_can_go_to_just_one_person_and_private_ones_say_so(cx: &mut TestAppCo
         assert!(tag.visible());
         assert_eq!(tag.label(), Some("Just you and Dad"));
         window.click(("groups-share-just", 0usize), cx);
+        window.click("groups-share-input", cx);
+        window.input("A private note", cx);
         window.render_frame(cx);
         window.click("groups-share", cx);
     })
@@ -1264,6 +1293,326 @@ fn the_page_keeps_it_simple_and_asks_before_deleting(cx: &mut TestAppContext) {
         assert!(
             window.try_find("groups-invite-admin").is_none(),
             "extra ways to invite wait behind a toggle"
+        );
+    })
+    .expect("window open");
+}
+
+#[gpui_kit::test]
+fn failed_note_shares_keep_the_draft_and_success_does_not_erase_newer_words(
+    cx: &mut TestAppContext,
+) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    let mut old = dads_detail();
+    old.author = MUM;
+    old.text = "Keep my words".into();
+    group_event(&events, GroupEvent::Knowledge(vec![old.clone()]));
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        assert_eq!(window.find("groups-share").disabled(), Some(true));
+        window.click("groups-share-input", cx);
+        window.input("Keep my words", cx);
+        window.render_frame(cx);
+        window.click("groups-share", cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("groups-share").disabled(), Some(true));
+    })
+    .expect("window open");
+    settle(cx);
+    drain(&commands);
+    // A snapshot of an already shared identical note is not this submission's success.
+    group_event(&events, GroupEvent::Knowledge(vec![old]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("groups-share-status")
+                .label()
+                .is_some_and(|label| label.starts_with("Sharing"))
+        );
+    })
+    .expect("window open");
+    group_event(
+        &events,
+        GroupEvent::Problem(GroupProblem::Other("Couldn't save. Try again.".into())),
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_ne!(window.find("groups-share").disabled(), Some(true));
+        window.click("groups-share", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert!(drain(&commands).iter().any(|command| matches!(command,
+        Command::Group(GroupCommand::Share { text, .. }) if text == "Keep my words"
+    )));
+    // A matching local share confirms only the submitted words, not later edits.
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("groups-share-input", cx);
+        window.input(" and these newer words", cx);
+    })
+    .expect("window open");
+    let mut shared = dads_detail();
+    shared.author = MUM;
+    shared.id = OpHash([8; 32]);
+    shared.text = "Keep my words".into();
+    group_event(&events, GroupEvent::Knowledge(vec![shared]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_ne!(window.find("groups-share").disabled(), Some(true));
+        window.click("groups-share", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert!(drain(&commands).iter().any(|command| matches!(command,
+        Command::Group(GroupCommand::Share { text, .. }) if text == "Keep my words and these newer words"
+    )));
+    let mut newest = dads_detail();
+    newest.author = MUM;
+    newest.id = OpHash([9; 32]);
+    newest.text = "Keep my words and these newer words".into();
+    group_event(&events, GroupEvent::Knowledge(vec![newest]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("groups-share").disabled(), Some(true));
+        assert!(
+            window
+                .find("groups-share-status")
+                .label()
+                .is_some_and(|label| label.starts_with("Shared."))
+        );
+        window.click("groups-new-note", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("groups-share").disabled(),
+            Some(true),
+            "next note starts empty"
+        );
+    })
+    .expect("window open");
+}
+
+#[gpui_kit::test]
+fn artifact_sharing_and_keeping_wait_for_confirmation_and_allow_retry(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 1600.);
+    in_group_with_artifacts(&events);
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("art-letter", cx));
+        window.render_frame(cx);
+        window.click("artifact-share-group", cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("artifact-share-group").disabled(), Some(true));
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.starts_with("Sharing"))
+        );
+    })
+    .expect("window open");
+    group_event(&events, GroupEvent::Artifacts(vec![dads_list()]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("artifact-share-group").disabled(),
+            Some(true),
+            "unrelated snapshots do not confirm the share"
+        );
+    })
+    .expect("window open");
+    group_event(
+        &events,
+        GroupEvent::Problem(GroupProblem::Other("Disk full".into())),
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_ne!(window.find("artifact-share-group").disabled(), Some(true));
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.contains("Disk full"))
+        );
+        window.click("artifact-share-group", cx);
+    })
+    .expect("window open");
+    let mut shared = dads_list();
+    let letter = mums_letter();
+    shared.id = OpHash([9; 32]);
+    shared.author = MUM;
+    shared.origin = letter.id;
+    shared.title = letter.title;
+    shared.kind = letter.kind;
+    shared.language = letter.language;
+    shared.content = letter.content;
+    group_event(&events, GroupEvent::Artifacts(vec![dads_list(), shared]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.starts_with("Shared with Family"))
+        );
+        window.click("artifact-back", cx);
+        window.render_frame(cx);
+        window.click(("shared-artifact-open", 0usize), cx);
+        window.render_frame(cx);
+        window.click("shared-artifact-keep", cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("shared-artifact-keep").disabled(), Some(true));
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.starts_with("Saving"))
+        );
+    })
+    .expect("window open");
+    settle(cx);
+    let draft = drain(&commands)
+        .into_iter()
+        .find_map(|command| match command {
+            Command::Artifacts(ArtifactCommand::Save(draft)) => Some(draft),
+            _ => None,
+        })
+        .expect("copy requested");
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Error("Disk full".into())))
+        .expect("fixture open");
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_ne!(window.find("shared-artifact-keep").disabled(), Some(true));
+        window.click("shared-artifact-keep", cx);
+    })
+    .expect("window open");
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Saved(Box::new(
+            Artifact::from_draft("kept-test".into(), draft, Timestamp(10)),
+        ))))
+        .expect("fixture open");
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("shared-artifact-open-copy").visible());
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.starts_with("Kept a copy"))
+        );
+    })
+    .expect("window open");
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("shared-artifact-withdraw", cx);
+        window.render_frame(cx);
+        window.click("shared-artifact-withdraw", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("shared-artifact-withdraw").disabled(),
+            Some(true)
+        );
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.starts_with("Stopping sharing"))
+        );
+    })
+    .expect("window open");
+    group_event(
+        &events,
+        GroupEvent::Problem(GroupProblem::Other("Couldn't save withdrawal".into())),
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_ne!(
+            window.find("shared-artifact-withdraw").disabled(),
+            Some(true)
+        );
+        window.click("shared-artifact-withdraw", cx);
+        window.render_frame(cx);
+        window.click("shared-artifact-withdraw", cx);
+    })
+    .expect("window open");
+    let mut withdrawn = dads_list();
+    withdrawn.status = DetailStatus::Withdrawn;
+    group_event(&events, GroupEvent::Artifacts(vec![withdrawn]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.starts_with("Stopped sharing."))
+        );
+    })
+    .expect("window open");
+}
+
+#[gpui_kit::test]
+fn changes_to_a_private_artifact_confirm_in_the_original_audience(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 1600.);
+    in_group_with_artifacts(&events);
+    let mut private = dads_list();
+    private.space = sovra_core::group::Space::pair(PersonId([10; 32]), PersonId([20; 32]));
+    group_event(&events, GroupEvent::Artifacts(vec![private.clone()]));
+    let mut local = mums_letter();
+    local.source.shared_from = private.id.to_hex();
+    events
+        .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![local.clone()])))
+        .expect("fixture open");
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.open_artifact("art-letter", cx));
+        window.render_frame(cx);
+        window.click("artifact-share-group", cx);
+    })
+    .expect("window open");
+    settle(cx);
+    assert!(drain(&commands).iter().any(|command| matches!(command,
+        Command::Group(GroupCommand::ShareArtifact { new_version_of: Some(id), .. }) if *id == private.id
+    )));
+    let mut changed = private;
+    changed.id = OpHash([9; 32]);
+    changed.author = MUM;
+    changed.origin = local.id;
+    changed.title = local.title;
+    changed.kind = local.kind;
+    changed.language = local.language;
+    changed.content = local.content;
+    group_event(&events, GroupEvent::Artifacts(vec![changed]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .find("artifact-share-feedback")
+                .label()
+                .is_some_and(|s| s.starts_with("Shared changes with the original audience."))
         );
     })
     .expect("window open");

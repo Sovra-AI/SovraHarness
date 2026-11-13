@@ -713,7 +713,15 @@ async fn serve(
             Command::Google(command) => google.send(command),
             Command::GitHub(command) => github.send(command),
             Command::Schedule(command) => schedules.send(command),
-            Command::Group(command) => groups.send(command),
+            Command::Group(command) => {
+                if let Err(problem) = groups.send(command) {
+                    let _ = events
+                        .send(Event::Group(Box::new(
+                            sovra_core::group::GroupEvent::Problem(problem),
+                        )))
+                        .await;
+                }
+            }
             Command::FileIndex(command) => file_index.send(command),
             Command::Teams(sovra_core::teams::TeamCommand::Run {
                 session_id,

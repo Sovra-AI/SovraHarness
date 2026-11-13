@@ -8,13 +8,13 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     v_flex,
 };
 use gpui_kit::{
     AnyElement, AppContext as _, ClipboardItem, Context, Entity, InteractiveElement as _,
     IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
-    TestSupportExt as _, Window, div,
+    TestSupportExt as _, Window, div, prelude::FluentBuilder as _,
 };
 use sovra_core::Command;
 use sovra_core::group::{
@@ -49,6 +49,12 @@ pub(crate) struct GroupsForm {
     join_link: Entity<InputState>,
     invite_name: Entity<InputState>,
     share: Entity<InputState>,
+    _share_changes: gpui_kit::Subscription,
+    pending_note: Option<(
+        NoteDraft,
+        std::collections::BTreeSet<sovra_core::group::OpHash>,
+    )>,
+    shared_note: Option<NoteDraft>,
     ask: Entity<InputState>,
     join_code: Entity<InputState>,
     /// Share with the whole group (`None`) or just this person.
@@ -69,6 +75,12 @@ pub(crate) struct GroupsForm {
     pub(crate) page: Option<GroupPage>,
     /// Sections the person has opened.
     open: std::collections::BTreeSet<Panel>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct NoteDraft {
+    text: String,
+    space: sovra_core::group::Space,
 }
 
 /// Parts of the page that stay folded until someone asks for them.
@@ -100,13 +112,22 @@ impl GroupsForm {
             |placeholder: &'static str, window: &mut Window, cx: &mut Context<ModelsView>| {
                 cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
             };
+        let share = input("For example: The boiler service is on 12 March", window, cx);
+        let share_changes = cx.subscribe_in(&share, window, |_, _, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
         Self {
             group_name: input("For example: Family", window, cx),
             your_name: input("For example: Mum", window, cx),
             computer_name: input("For example: Mum's laptop", window, cx),
             join_link: input("Paste the link that starts with sovra://join", window, cx),
             invite_name: input("For example: Grandad", window, cx),
-            share: input("For example: The boiler service is on 12 March", window, cx),
+            share,
+            _share_changes: share_changes,
+            pending_note: None,
+            shared_note: None,
             ask: input("For example: Who is our dentist?", window, cx),
             join_code: input("For example: 123 456", window, cx),
             share_with: None,
@@ -216,6 +237,25 @@ fn switch_row(
 
 impl ModelsView {
     pub(crate) fn apply_group_event(&mut self, event: GroupEvent, cx: &mut Context<Self>) {
+        if let GroupEvent::Knowledge(details) = &event
+            && let Some((draft, before)) = &self.groups_form.pending_note
+            && details.iter().any(|detail| {
+                Some(detail.author) == self.groups.this_computer
+                    && detail.text == draft.text
+                    && detail.space == draft.space
+                    && !before.contains(&detail.id)
+            })
+        {
+            self.groups_form.shared_note = Some(draft.clone());
+            self.groups_form.pending_note = None;
+            self.groups.problem = None;
+        }
+        if matches!(event, GroupEvent::Problem(_) | GroupEvent::LeftGroup) {
+            self.groups_form.pending_note = None;
+        }
+        if matches!(event, GroupEvent::LeftGroup) {
+            self.groups_form.shared_note = None;
+        }
         if let GroupEvent::InviteReady { link, .. } = &event {
             if self.groups_form.copy_pending {
                 cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
@@ -1042,7 +1082,7 @@ impl ModelsView {
                 .p(t.space.compact)
                 .sovra_surface(Surface::Subtle, cx)
                 .child(words(
-                    "Are you sure? This computer will stop getting anything new from the group. What it already has stays here. You can join again later with a new invite.",
+                    "Leave the group on all your computers? Shared group items will no longer appear here. Copies you saved separately stay. If you are the only person, this ends the group; otherwise you can join again with a new invite.",
                     cx,
                 ))
                 .child(
@@ -1052,7 +1092,7 @@ impl ModelsView {
                         .child(
                             design::button("groups-leave", "Yes, leave the group", cx)
                                 .small()
-                                .accessibility_label("Yes, leave this group on this computer")
+                                .accessibility_label("Yes, leave this group on all your computers")
                                 .on_click(cx.listener(|view, _, _, cx| {
                                     view.groups_form.confirm_leave = false;
                                     send(GroupCommand::Leave, cx);
@@ -1076,7 +1116,7 @@ impl ModelsView {
                     h_flex().child(
                         design::button("groups-leave-ask", "Leave this group", cx)
                             .small()
-                            .accessibility_label("Leave this group on this computer")
+                            .accessibility_label("Leave this group on all your computers")
                             .on_click(cx.listener(|view, _, _, cx| {
                                 view.groups_form.confirm_leave = true;
                                 cx.notify();
@@ -1580,6 +1620,25 @@ impl ModelsView {
         )
     }
 
+    fn note_draft(&self, cx: &Context<Self>) -> NoteDraft {
+        use sovra_core::group::Space;
+        let space = match (
+            self.groups_form.share_department,
+            self.groups_form.share_with,
+        ) {
+            (Some(id), _) => Space::Department { id },
+            (None, Some(person)) => self
+                .groups
+                .my_person()
+                .map_or(Space::Group, |me| Space::pair(me, person)),
+            (None, None) => Space::Group,
+        };
+        NoteDraft {
+            text: value(&self.groups_form.share, cx),
+            space,
+        }
+    }
+
     fn render_knowledge(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
         let me = self.groups.this_computer;
@@ -1605,6 +1664,19 @@ impl ModelsView {
             .w_full()
             .gap(t.space.medium);
         if can_add {
+            let draft = self.note_draft(cx);
+            let sharing = self.groups_form.pending_note.is_some();
+            let already_shared = self.groups_form.shared_note.as_ref() == Some(&draft);
+            let validation = sovra_core::group::check_share(&draft.text, &[]);
+            let status = if sharing {
+                "Sharing… Your words stay here until the note is saved."
+            } else if already_shared {
+                "Shared. Other computers receive it when they connect."
+            } else if self.groups_form.shared_note.is_some() {
+                "You changed the words or who can see them. Press Share to send a new note."
+            } else {
+                "Your note stays here if sharing fails."
+            };
             let chosen = self.groups_form.share_with;
             let chosen_department = self.groups_form.share_department;
             let mut audience = h_flex()
@@ -1666,29 +1738,45 @@ impl ModelsView {
                     )
                     .child(caption("Who should see it?", cx))
                     .child(audience)
-                    .child(h_flex().child(
-                        design::primary_button("groups-share", "Share", cx).on_click(cx.listener(
-                            |view, _, window, cx| {
-                                let text = value(&view.groups_form.share, cx);
-                                view.groups_form
-                                    .share
-                                    .update(cx, |input, cx| input.set_value("", window, cx));
+                    .child(
+                        div().id("groups-share-status").role(gpui_kit::Role::Status)
+                            .aria_label(status).test_support().child(caption(status, cx)),
+                    )
+                    .when(!draft.text.is_empty() && validation.is_err(), |form| {
+                        form.child(caption("Keep a note to 2,000 characters. Share longer writing from Artifacts.", cx))
+                    })
+                    .child(h_flex().flex_wrap().gap(t.space.small)
+                        .child(design::primary_button("groups-share", if sharing { "Sharing…" } else { "Share" }, cx)
+                            .disabled(sharing || already_shared || validation.is_err())
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                let draft = view.note_draft(cx);
+                                if view.groups_form.pending_note.is_some()
+                                    || view.groups_form.shared_note.as_ref() == Some(&draft)
+                                    || sovra_core::group::check_share(&draft.text, &[]).is_err() { return; }
                                 let command = match view.groups_form.share_department {
-                                    Some(department) => GroupCommand::ShareInDepartment {
-                                        department,
-                                        text,
-                                        about: Vec::new(),
-                                    },
-                                    None => GroupCommand::Share {
-                                        text,
-                                        about: Vec::new(),
-                                        with: view.groups_form.share_with,
-                                    },
+                                    Some(department) => GroupCommand::ShareInDepartment { department, text: draft.text.clone(), about: Vec::new() },
+                                    None => GroupCommand::Share { text: draft.text.clone(), about: Vec::new(), with: view.groups_form.share_with },
                                 };
-                                send(command, cx);
-                            },
-                        )),
-                    )),
+                                match cx.global::<RuntimeClient>().0.send(Command::Group(command)) {
+                                    Ok(()) => {
+                                        view.groups_form.pending_note = Some((draft, view.groups.knowledge.iter().map(|detail| detail.id).collect()));
+                                        view.groups.problem = None;
+                                    }
+                                    Err(_) => view.groups.problem = Some(sovra_core::group::GroupProblem::Other("Sharing isn't available right now. Your note is still here; try again.".into())),
+                                }
+                                cx.notify();
+                            })))
+                        .when(already_shared && !sharing, |row| row.child(
+                            design::button("groups-new-note", "Write another note", cx)
+                                .on_click(cx.listener(|view, _, window, cx| {
+                                    // Only the confirmed, unchanged note can be cleared this way.
+                                    if view.groups_form.shared_note.as_ref() == Some(&view.note_draft(cx)) {
+                                        view.groups_form.share.update(cx, |input, cx| input.set_value("", window, cx));
+                                        view.groups_form.shared_note = None;
+                                        cx.notify();
+                                    }
+                                }))
+                        )))
             );
         }
         section = section.child(

@@ -62,6 +62,7 @@ pub enum GroupCommand {
     RemovePerson {
         person: PersonId,
     },
+    /// Remove this person and all their computers; the sole person ends the group.
     Leave,
     /// Share a detail with the whole group, or (`with`) just one other person.
     Share {

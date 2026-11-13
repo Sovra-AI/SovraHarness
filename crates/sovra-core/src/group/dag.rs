@@ -3,7 +3,7 @@
 //! Each node names its own previous operation (`prev`, same author, `seq - 1`) and any
 //! other operations it had seen (`deps`). Given any set of nodes this computes, the
 //! same way on every computer: which are forked, which wait for a missing parent,
-//! a deterministic causal order, and each node's full ancestry (to tell "saw it"
+//! a deterministic causal order, and each node's causal clock (to tell "saw it"
 //! from "concurrent").
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,7 +39,11 @@ pub(crate) enum DagReject {
 pub(crate) struct DagOrder {
     /// Ready nodes, parents before children; ties by author clock then hash.
     pub(crate) order: Vec<OpHash>,
-    pub(crate) ancestors: BTreeMap<OpHash, BTreeSet<OpHash>>,
+    // Valid own-chains are contiguous and forks are excluded before ordering.
+    // A device's highest seen sequence therefore represents its entire prefix,
+    // avoiding a quadratic collection of hashes for long sharing histories.
+    ancestors: BTreeMap<OpHash, BTreeMap<DeviceId, u64>>,
+    positions: BTreeMap<OpHash, (DeviceId, u64)>,
     pub(crate) pending: BTreeSet<OpHash>,
     pub(crate) rejected: BTreeMap<OpHash, DagReject>,
     pub(crate) forked: BTreeSet<DeviceId>,
@@ -122,13 +126,19 @@ pub(crate) fn order(nodes: &BTreeMap<OpHash, DagNode>) -> DagOrder {
                 continue;
             }
         }
-        let mut ancestry = BTreeSet::new();
+        let mut ancestry = BTreeMap::<DeviceId, u64>::new();
         for parent in node.parents() {
-            ancestry.insert(parent);
+            let parent_node = &nodes[&parent];
+            let seen = ancestry.entry(parent_node.author).or_default();
+            *seen = (*seen).max(parent_node.seq);
             if let Some(grand) = out.ancestors.get(&parent) {
-                ancestry.extend(grand.iter().copied());
+                for (author, seq) in grand {
+                    let seen = ancestry.entry(*author).or_default();
+                    *seen = (*seen).max(*seq);
+                }
             }
         }
+        out.positions.insert(hash, (node.author, node.seq));
         out.ancestors.insert(hash, ancestry);
         out.order.push(hash);
         let tip = out.tips.entry(node.author).or_insert((node.seq, hash));
@@ -150,10 +160,20 @@ pub(crate) fn order(nodes: &BTreeMap<OpHash, DagNode>) -> DagOrder {
 }
 
 impl DagOrder {
+    pub(crate) fn saw(&self, node: &OpHash, ancestor: &OpHash) -> bool {
+        let Some((author, seq)) = self.positions.get(ancestor) else {
+            return false;
+        };
+        self.ancestors
+            .get(node)
+            .and_then(|clock| clock.get(author))
+            .is_some_and(|seen| seen >= seq)
+    }
+
     /// True when neither node is an ancestor of the other.
     pub(crate) fn concurrent(&self, a: &OpHash, b: &OpHash) -> bool {
-        let a_saw_b = self.ancestors.get(a).is_some_and(|set| set.contains(b));
-        let b_saw_a = self.ancestors.get(b).is_some_and(|set| set.contains(a));
+        let a_saw_b = self.saw(a, b);
+        let b_saw_a = self.saw(b, a);
         a != b && !a_saw_b && !b_saw_a
     }
 
@@ -170,5 +190,58 @@ impl DagOrder {
             .copied()
             .filter(|hash| keep.contains(hash) && !parents.contains(hash))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hash(n: u64) -> OpHash {
+        let mut bytes = [0; 32];
+        bytes[..8].copy_from_slice(&n.to_le_bytes());
+        OpHash(bytes)
+    }
+
+    #[test]
+    fn causal_queries_match_parent_walks_across_interleaved_device_histories() {
+        let mut nodes = BTreeMap::new();
+        let mut tips = BTreeMap::<u8, (u64, OpHash)>::new();
+        for n in 1..=120_u64 {
+            let author = u8::try_from(n % 7).expect("seven authors");
+            let previous = tips.get(&author).copied();
+            let seq = previous.map_or(1, |(seq, _)| seq + 1);
+            nodes.insert(
+                hash(n),
+                DagNode {
+                    author: DeviceId([author; 32]),
+                    seq,
+                    prev: previous.map(|(_, hash)| hash),
+                    deps: if n > 3 && n % 3 == 0 {
+                        vec![hash(n - 2)]
+                    } else {
+                        Vec::new()
+                    },
+                    at: Timestamp(i64::try_from(120 - n).expect("bounded time")),
+                },
+            );
+            tips.insert(author, (seq, hash(n)));
+        }
+        let ordered = order(&nodes);
+        assert_eq!(ordered.order.len(), nodes.len());
+        for a in nodes.keys() {
+            let mut expected = BTreeSet::new();
+            let mut pending: Vec<_> = nodes[a].parents().collect();
+            while let Some(parent) = pending.pop() {
+                if expected.insert(parent) {
+                    pending.extend(nodes[&parent].parents());
+                }
+            }
+            for b in nodes.keys() {
+                assert_eq!(ordered.saw(a, b), expected.contains(b), "{a:?} sees {b:?}");
+            }
+        }
+        assert!(!ordered.saw(&hash(500), &hash(1)));
+        assert!(!ordered.saw(&hash(1), &hash(500)));
     }
 }

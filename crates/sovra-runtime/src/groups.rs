@@ -426,10 +426,12 @@ impl GroupRuntime {
             .expect("local memory lock is never poisoned") = Some(open);
     }
 
-    pub(crate) fn send(&self, command: GroupCommand) {
-        if self.commands.try_send(command).is_err() {
-            tracing::warn!("group command dropped: the groups worker is busy or stopped");
-        }
+    pub(crate) fn send(&self, command: GroupCommand) -> Result<(), GroupProblem> {
+        self.commands.try_send(command).map_err(|_| {
+            GroupProblem::Other(
+                "Groups is busy or stopped. Your request wasn't sent. Please try again.".into(),
+            )
+        })
     }
 }
 
@@ -687,6 +689,8 @@ struct Inner {
     audit_checked: bool,
     /// Checked copies of the other computers' histories (`record.peer_audit`).
     fleet: FleetAudit,
+    /// One valid checkpoint per current member, retained until its history catches up.
+    pending_checkpoints: std::collections::BTreeMap<DeviceId, (GroupId, SignedCheckpoint)>,
 }
 
 /// A same-room code: its secret, its one-guess window and what it invites.
@@ -799,6 +803,7 @@ impl Groups {
                 audit,
                 audit_checked,
                 fleet,
+                pending_checkpoints: std::collections::BTreeMap::new(),
             }),
         };
         {
@@ -885,6 +890,20 @@ impl Groups {
                     }
                     let me = self.me();
                     let verdict = inner.fleet.witness(&me, &signed, self.verifier.as_ref());
+                    if matches!(verdict, audit::Witnessing::Behind) {
+                        inner
+                            .pending_checkpoints
+                            .retain(|device, (pending_group, _)| {
+                                *pending_group == group && roster.owner_of(device).is_some()
+                            });
+                        let pending = inner
+                            .pending_checkpoints
+                            .entry(signed.signer)
+                            .or_insert_with(|| (group, signed.clone()));
+                        if pending.1.checkpoint.size <= signed.checkpoint.size {
+                            *pending = (group, signed.clone());
+                        }
+                    }
                     (
                         verdict,
                         group,
@@ -893,19 +912,11 @@ impl Groups {
                 };
                 match verdict {
                     audit::Witnessing::Cosign(bytes) => {
-                        let reply = audit::AuditGossip::Cosigned {
-                            checkpoint: signed.checkpoint,
-                            cosignature: Cosignature {
-                                witness: self.me(),
-                                signature: self.transport.sign(&bytes),
-                            },
-                        };
-                        self.transport
-                            .gossip_send(audit::audit_topic(&group), reply.to_bytes())
-                            .await;
+                        self.cosign_checkpoint(group, signed, &bytes).await;
                     }
                     audit::Witnessing::Behind => {
-                        // Fetch the missing records; the next checkpoint is then vouched for.
+                        // Identical gossip is deduplicated. Recheck the retained
+                        // checkpoint after this and later bounded history syncs.
                         self.sync_audit(group, &author_address).await;
                     }
                     audit::Witnessing::Fork => self.publish_audit().await,
@@ -1603,6 +1614,51 @@ impl Groups {
         changed
     }
 
+    async fn cosign_checkpoint(&self, group: GroupId, signed: SignedCheckpoint, bytes: &[u8]) {
+        let reply = audit::AuditGossip::Cosigned {
+            checkpoint: signed.checkpoint,
+            cosignature: Cosignature {
+                witness: self.me(),
+                signature: self.transport.sign(bytes),
+            },
+        };
+        self.transport
+            .gossip_send(audit::audit_topic(&group), reply.to_bytes())
+            .await;
+    }
+
+    async fn finish_pending_checkpoint(&self, group: GroupId, device: DeviceId) {
+        let (signed, verdict) = {
+            let mut inner = self.inner.lock().await;
+            let Some((pending_group, signed)) = inner.pending_checkpoints.get(&device).cloned()
+            else {
+                return;
+            };
+            if pending_group != group
+                || inner.record.group != Some(group)
+                || inner
+                    .roster
+                    .as_ref()
+                    .is_none_or(|roster| roster.owner_of(&device).is_none())
+            {
+                inner.pending_checkpoints.remove(&device);
+                return;
+            }
+            let verdict = inner
+                .fleet
+                .witness(&self.me(), &signed, self.verifier.as_ref());
+            if !matches!(verdict, audit::Witnessing::Behind) {
+                inner.pending_checkpoints.remove(&device);
+            }
+            (signed, verdict)
+        };
+        match verdict {
+            audit::Witnessing::Cosign(bytes) => self.cosign_checkpoint(group, signed, &bytes).await,
+            audit::Witnessing::Fork => self.publish_audit().await,
+            audit::Witnessing::Behind | audit::Witnessing::Ignore => {}
+        }
+    }
+
     /// Fetches the audit entries this computer lacks from `peer` and keeps the ones
     /// that check out. Its own history is never written by anyone else.
     async fn sync_audit(&self, group: GroupId, peer: &PeerAddress) {
@@ -1634,6 +1690,7 @@ impl Groups {
         if changed {
             self.publish_audit().await;
         }
+        self.finish_pending_checkpoint(group, peer.device).await;
     }
 
     async fn sync_ops(
@@ -2635,6 +2692,12 @@ impl Groups {
             .await;
             return;
         }
+        // A failed write must not escape through later syncs or helper recall.
+        // Keep append boundaries rather than cloning every artifact's content.
+        let saved_knowledge_len = inner.record.knowledge.len();
+        let saved_audit_len = inner.record.audit.len();
+        let saved_audit = inner.audit.clone();
+        let saved_keys: BTreeSet<_> = inner.lane_keys.keys().copied().collect();
         let lane = space.lane(&roster.group);
         // Everything new is sealed with a lane key only this space's computers hold.
         let Some((key_id, key, mut new_ops)) = self.ensure_key(&mut inner, &roster, &space).await
@@ -2705,8 +2768,24 @@ impl Groups {
             }
         };
         let audit_changed = problem.is_none() && audited.is_some();
+        if let Err(error) = self.store.save(&inner.record).await {
+            tracing::warn!(%error, "group share not saved");
+            let unsaved = inner.record.knowledge.split_off(saved_knowledge_len);
+            for op in unsaved {
+                inner.opened.remove(&op.hash());
+            }
+            inner.lane_keys.retain(|id, _| saved_keys.contains(id));
+            inner.record.audit.truncate(saved_audit_len);
+            inner.audit = saved_audit;
+            self.refold(&mut inner).await;
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(format!(
+                "Nothing was shared because this computer couldn't save it: {error}. Try again."
+            ))))
+            .await;
+            return;
+        }
         self.refold(&mut inner).await;
-        self.persist(&inner).await;
         let roster_now = inner.roster.clone();
         let shared = Self::shared(&inner);
         drop(inner);
@@ -3291,6 +3370,25 @@ mod tests {
     use sovra_core::group::{KnowledgeView, LaneId, UnsignedKnowledge, fold_knowledge};
 
     use super::*;
+
+    #[test]
+    fn a_full_or_stopped_group_worker_reports_failure_instead_of_dropping_requests() {
+        let (commands, receiver) = async_channel::bounded(1);
+        let worker = GroupRuntime {
+            commands,
+            knowledge: GroupKnowledge::default(),
+            _tasks: Arc::new(std::sync::Mutex::new(tokio::task::JoinSet::new())),
+        };
+        assert!(worker.send(GroupCommand::Load).is_ok());
+        assert!(worker.send(GroupCommand::Load).is_err());
+        assert_eq!(
+            receiver.try_recv().expect("first request retained"),
+            GroupCommand::Load
+        );
+        assert!(worker.send(GroupCommand::Load).is_ok());
+        drop(receiver);
+        assert!(worker.send(GroupCommand::Load).is_err());
+    }
 
     fn signature(device: &DeviceId, message: &[u8]) -> sovra_core::group::Signature {
         let first: [u8; 32] =

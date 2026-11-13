@@ -129,6 +129,18 @@ struct PendingEdit {
     content: String,
 }
 
+struct PendingShare {
+    local_id: String,
+    title: String,
+    kind: ArtifactKind,
+    language: String,
+    content: String,
+    author: sovra_core::group::DeviceId,
+    space: sovra_core::group::Space,
+    before: std::collections::BTreeSet<OpHash>,
+    notice: String,
+}
+
 pub(crate) struct ArtifactsView {
     shell: WeakEntity<Shell>,
     search: Entity<InputState>,
@@ -156,6 +168,9 @@ pub(crate) struct ArtifactsView {
     share_error: Option<String>,
     /// Shown after Share or Keep a copy, until another artifact opens.
     share_notice: Option<String>,
+    pending_share: Option<PendingShare>,
+    pending_keep: Option<ArtifactDraft>,
+    pending_withdraw: Option<OpHash>,
     _search_events: Subscription,
 }
 
@@ -195,6 +210,9 @@ impl ArtifactsView {
             confirm_withdraw: false,
             share_error: None,
             share_notice: None,
+            pending_share: None,
+            pending_keep: None,
+            pending_withdraw: None,
             _search_events: search_events,
         }
     }
@@ -363,56 +381,178 @@ impl ArtifactsView {
         group: &str,
         cx: &mut Context<Self>,
     ) {
+        if self.pending_share.is_some() || self.pending_withdraw.is_some() {
+            return;
+        }
         if let Err(error) = check_artifact(&artifact.title, &artifact.language, &artifact.content) {
             self.share_error = Some(format!("This can't be shared: {error}."));
             self.share_notice = None;
             cx.notify();
             return;
         }
-        let _ = cx
-            .global::<RuntimeClient>()
-            .0
-            .send(Command::Group(GroupCommand::ShareArtifact {
-                title: artifact.title.clone(),
-                kind: artifact.kind,
-                language: artifact.language.clone(),
-                content: artifact.content.clone(),
-                new_version_of: version_of,
-                local_id: artifact.id.clone(),
-                with: with.map(|(person, _)| *person),
-            }));
-        self.share_error = None;
-        self.share_notice = Some(match with {
-            Some((_, name)) => {
-                format!("Shared with just {name}. Nobody else in {group} can see it.")
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        let groups = shell.read(cx).groups(cx);
+        let Some(author) = groups.this_computer else {
+            return;
+        };
+        let space = if let Some(original) = version_of {
+            groups
+                .artifacts
+                .iter()
+                .find(|item| item.id == original)
+                .map_or(sovra_core::group::Space::Group, |item| item.space)
+        } else {
+            match with {
+                Some((person, _)) => {
+                    let Some(me) = groups.my_person() else {
+                        return;
+                    };
+                    sovra_core::group::Space::pair(me, *person)
+                }
+                None => sovra_core::group::Space::Group,
             }
-            None => format!(
-                "Shared with {group}. Everyone in the group gets it the next time their computer is on."
-            ),
-        });
+        };
+        let before = groups.artifacts.iter().map(|item| item.id).collect();
+        let sent =
+            cx.global::<RuntimeClient>()
+                .0
+                .send(Command::Group(GroupCommand::ShareArtifact {
+                    title: artifact.title.clone(),
+                    kind: artifact.kind,
+                    language: artifact.language.clone(),
+                    content: artifact.content.clone(),
+                    new_version_of: version_of,
+                    local_id: artifact.id.clone(),
+                    with: with.map(|(person, _)| *person),
+                }));
+        self.share_notice = None;
+        if sent.is_ok() {
+            self.share_error = None;
+            let notice = if version_of.is_some() {
+                "Shared changes with the original audience. Their computers receive this version when they connect.".into()
+            } else {
+                match with {
+                    Some((_, name)) => format!(
+                        "Shared with just {name}. Their computers receive it when they connect."
+                    ),
+                    None => {
+                        format!(
+                            "Shared with {group}. Other computers receive it when they connect."
+                        )
+                    }
+                }
+            };
+            self.pending_share = Some(PendingShare {
+                local_id: artifact.id.clone(),
+                title: artifact.title.trim().to_owned(),
+                kind: artifact.kind,
+                language: artifact.language.trim().to_owned(),
+                content: artifact.content.clone(),
+                author,
+                space,
+                before,
+                notice,
+            });
+        } else {
+            self.share_error =
+                Some("Sharing couldn't start. Your saved artifact is safe. Try again.".into());
+        }
         cx.notify();
     }
 
     fn keep_copy(&mut self, artifact: &SharedArtifact, cx: &mut Context<Self>) {
-        Self::send(
-            ArtifactCommand::Save(ArtifactDraft {
-                title: artifact.title.clone(),
-                kind: artifact.kind,
-                language: artifact.language.clone(),
-                content: artifact.content.clone(),
-                source: ArtifactSource {
-                    session_id: String::new(),
-                    message_id: String::new(),
-                    author: artifact.shared_by.clone(),
-                    shared_from: artifact.id.to_hex(),
-                },
-            }),
-            cx,
-        );
-        self.share_notice = Some(
-            "Kept a copy in your artifacts. Edit it, then share your changes back with the group."
-                .into(),
-        );
+        if self.pending_keep.is_some() {
+            return;
+        }
+        let draft = ArtifactDraft {
+            title: artifact.title.clone(),
+            kind: artifact.kind,
+            language: artifact.language.clone(),
+            content: artifact.content.clone(),
+            source: ArtifactSource {
+                session_id: String::new(),
+                message_id: String::new(),
+                author: artifact.shared_by.clone(),
+                shared_from: artifact.id.to_hex(),
+            },
+        };
+        let sent = cx
+            .global::<RuntimeClient>()
+            .0
+            .send(Command::Artifacts(ArtifactCommand::Save(draft.clone())));
+        self.share_notice = None;
+        if sent.is_ok() {
+            self.pending_keep = Some(draft);
+            self.share_error = None;
+        } else {
+            self.share_error = Some(
+                "Couldn't start saving a copy. The shared artifact is still here. Try again."
+                    .into(),
+            );
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn group_event(
+        &mut self,
+        event: &sovra_core::group::GroupEvent,
+        cx: &mut Context<Self>,
+    ) {
+        use sovra_core::group::GroupEvent;
+        if let GroupEvent::Artifacts(items) = event {
+            if let Some(pending) = &self.pending_share
+                && items.iter().any(|item| {
+                    item.author == pending.author
+                        && item.origin == pending.local_id
+                        && item.space == pending.space
+                        && item.title == pending.title
+                        && item.kind == pending.kind
+                        && item.language == pending.language
+                        && item.content == pending.content
+                        && !pending.before.contains(&item.id)
+                })
+            {
+                if self.open.as_ref() == Some(&pending.local_id) {
+                    self.share_notice = Some(pending.notice.clone());
+                    self.share_error = None;
+                }
+                self.pending_share = None;
+            }
+            if let Some(id) = self.pending_withdraw
+                && items.iter().any(|item| {
+                    item.id == id
+                        && matches!(
+                            item.status,
+                            DetailStatus::Withdrawn | DetailStatus::Redacted
+                        )
+                })
+            {
+                if self.open_shared == Some(id) {
+                    self.share_notice =
+                        Some("Stopped sharing. Copies people kept stay theirs.".into());
+                    self.share_error = None;
+                }
+                self.pending_withdraw = None;
+            }
+        }
+        if let GroupEvent::Problem(problem) = event
+            && (self.pending_share.is_some() || self.pending_withdraw.is_some())
+        {
+            self.pending_share = None;
+            self.pending_withdraw = None;
+            self.share_notice = None;
+            self.share_error = Some(format!(
+                "Could not confirm the change. Your saved artifact is safe. Try again. {}",
+                problem.message()
+            ));
+        }
+        if matches!(event, GroupEvent::LeftGroup) {
+            self.pending_share = None;
+            self.pending_withdraw = None;
+            self.share_notice = None;
+        }
         cx.notify();
     }
 
@@ -478,6 +618,33 @@ impl ArtifactsView {
     }
 
     pub(crate) fn artifact_event(&mut self, event: &ArtifactEvent, cx: &mut Context<Self>) {
+        if let Some(pending) = &self.pending_keep {
+            if let ArtifactEvent::Saved(saved) = event
+                && saved.source == pending.source
+                && saved.title == pending.title
+                && saved.kind == pending.kind
+                && saved.language == pending.language
+                && saved.content == pending.content
+            {
+                if self
+                    .open_shared
+                    .is_some_and(|id| id.to_hex() == pending.source.shared_from)
+                {
+                    self.share_notice =
+                        Some("Kept a copy in your artifacts. Open your copy to edit it.".into());
+                    self.share_error = None;
+                }
+                self.pending_keep = None;
+                cx.notify();
+            } else if let ArtifactEvent::Error(message) = event {
+                self.pending_keep = None;
+                self.share_notice = None;
+                self.share_error = Some(format!(
+                    "Couldn't save a copy. The shared artifact is still here. Try again. {message}"
+                ));
+                cx.notify();
+            }
+        }
         let Some(pending) = self.pending_save.as_ref() else {
             return;
         };
@@ -903,14 +1070,9 @@ impl ArtifactsView {
         if let (Some(group), Some(sharing)) = (group, sharing) {
             let label = match &sharing {
                 SharingState::NotShared => Some(format!("Share with {}", group.name)),
-                SharingState::Changed { .. } => {
-                    Some(format!("Share your changes with {}", group.name))
-                }
+                SharingState::Changed { .. } => Some("Share your changes".to_owned()),
                 SharingState::UpToDate => {
-                    share_status = Some(format!(
-                        "Shared with {}. Everyone has this version.",
-                        group.name
-                    ));
+                    share_status = Some("This version is shared. Recipients receive it when their computers connect.".into());
                     None
                 }
             };
@@ -923,6 +1085,7 @@ impl ArtifactsView {
                 let name = group.name.clone();
                 actions = actions.child(
                     design::button("artifact-share-group", label, cx)
+                        .disabled(self.pending_share.is_some() || self.pending_withdraw.is_some())
                         .icon(Icon::new(IconName::Users))
                         .on_click(cx.listener(move |view, _, _, cx| {
                             view.share_with_group(&shared, version_of, None, &name, cx);
@@ -942,6 +1105,9 @@ impl ArtifactsView {
                             )
                             .ghost()
                             .accessibility_label(format!("Share only with {}", other.1))
+                            .disabled(
+                                self.pending_share.is_some() || self.pending_withdraw.is_some(),
+                            )
                             .on_click(cx.listener(
                                 move |view, _, _, cx| {
                                     view.share_with_group(&shared, None, Some(&other), &name, cx);
@@ -1277,7 +1443,26 @@ impl ArtifactsView {
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
         let t = design::tokens(cx);
-        let (text, colour) = match (&self.share_error, &self.share_notice, status) {
+        let pending = if self
+            .pending_share
+            .as_ref()
+            .is_some_and(|p| self.open.as_ref() == Some(&p.local_id))
+        {
+            Some("Sharing… Waiting for this computer to save the shared artifact.")
+        } else if self.pending_keep.as_ref().is_some_and(|p| {
+            self.open_shared
+                .is_some_and(|id| id.to_hex() == p.source.shared_from)
+        }) {
+            Some("Saving your copy…")
+        } else if self.pending_withdraw.is_some() && self.pending_withdraw == self.open_shared {
+            Some("Stopping sharing… Waiting for confirmation.")
+        } else {
+            None
+        };
+        let notice = pending
+            .map(str::to_owned)
+            .or_else(|| self.share_notice.clone());
+        let (text, colour) = match (&self.share_error, &notice, status) {
             (Some(error), _, _) => (error.clone(), cx.theme().danger),
             (None, Some(notice), _) => (notice.clone(), t.text_secondary),
             (None, None, Some(status)) => (status, t.text_secondary),
@@ -1286,6 +1471,8 @@ impl ArtifactsView {
         Some(
             div()
                 .id("artifact-share-feedback")
+                .role(gpui_kit::Role::Status)
+                .aria_label(text.clone())
                 .test_support()
                 .whitespace_normal()
                 .sovra_text(TextRole::Caption, cx)
@@ -1343,6 +1530,7 @@ impl ArtifactsView {
             ),
             None => actions.child(
                 design::primary_button("shared-artifact-keep", "Keep a copy", cx)
+                    .disabled(self.pending_keep.is_some())
                     .icon(Icon::new(IconName::Download))
                     .on_click(cx.listener(move |view, _, _, cx| view.keep_copy(&kept, cx))),
             ),
@@ -1359,15 +1547,24 @@ impl ArtifactsView {
                     cx,
                 )
                 .ghost()
+                .disabled(self.pending_withdraw.is_some())
                 .on_click(cx.listener(move |view, _, _, cx| {
+                    if view.pending_withdraw.is_some() {
+                        return;
+                    }
                     if view.confirm_withdraw {
-                        let _ = cx
+                        let sent = cx
                             .global::<RuntimeClient>()
                             .0
                             .send(Command::Group(GroupCommand::Withdraw { detail: id }));
                         view.confirm_withdraw = false;
-                        view.share_notice =
-                            Some("Stopped sharing. Copies people kept stay theirs.".into());
+                        view.share_notice = None;
+                        if sent.is_ok() {
+                            view.pending_withdraw = Some(id);
+                            view.share_error = None;
+                        } else {
+                            view.share_error = Some("Couldn't stop sharing. Try again.".into());
+                        }
                     } else {
                         view.confirm_withdraw = true;
                     }

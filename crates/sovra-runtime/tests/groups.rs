@@ -46,7 +46,14 @@ struct Network {
     pairing: Mutex<BTreeMap<DeviceId, u8>>,
     /// Broadcast subscribers: who joined which topic, and where to deliver.
     gossip: Mutex<BTreeMap<DeviceId, Subscriber>>,
+    deduplicate_gossip: bool,
+    audit_visible_prefix: Mutex<Option<u64>>,
+    completed_checkpoints: Mutex<BTreeSet<(DeviceId, u64)>>,
+    delivered_gossip: Mutex<BTreeSet<GossipDelivery>>,
 }
+
+/// Recipient, topic and content hash, matching content-based gossip suppression.
+type GossipDelivery = (DeviceId, [u8; 32], [u8; 32]);
 
 /// One computer's broadcast subscription: topic, handler and its spawner.
 type Subscriber = ([u8; 32], Arc<dyn sovra_core::group::GossipHandler>, Spawn);
@@ -148,11 +155,32 @@ impl GroupTransport for LoopTransport {
             .filter(|(device, (t, _, _))| {
                 **device != self.me && *t == topic && !off.contains(device)
             })
-            .map(|(_, (_, handler, spawn))| (handler.clone(), spawn.clone()))
+            .map(|(device, (_, handler, spawn))| (*device, handler.clone(), spawn.clone()))
             .collect();
-        for (handler, spawn) in targets {
+        for (device, handler, spawn) in targets {
+            if self.net.deduplicate_gossip
+                && !self
+                    .net
+                    .delivered_gossip
+                    .lock()
+                    .expect("not poisoned")
+                    .insert((device, topic, Sha256::digest(&message).into()))
+            {
+                continue;
+            }
             let message = message.clone();
-            spawn(Box::pin(async move { handler.received(message).await }));
+            let net = self.net.clone();
+            spawn(Box::pin(async move {
+                handler.received(message.clone()).await;
+                if let Some(sovra_core::swarm::audit::AuditGossip::Checkpoint(signed)) =
+                    sovra_core::swarm::audit::AuditGossip::from_bytes(&message)
+                {
+                    net.completed_checkpoints
+                        .lock()
+                        .expect("not poisoned")
+                        .insert((device, signed.checkpoint.size));
+                }
+            }));
         }
     }
 
@@ -236,7 +264,12 @@ impl GroupTransport for LoopTransport {
         let request: PeerRequest =
             serde_json::from_slice(&serde_json::to_vec(&request).expect("encodes"))
                 .expect("decodes");
-        let response = handler.handle(self.me, request).await;
+        let mut response = handler.handle(self.me, request).await;
+        if let PeerResponse::AuditEntries { entries } = &mut response
+            && let Some(prefix) = *self.net.audit_visible_prefix.lock().expect("not poisoned")
+        {
+            entries.retain(|entry| entry.body.seq <= prefix);
+        }
         Ok(
             serde_json::from_slice(&serde_json::to_vec(&response).expect("encodes"))
                 .expect("decodes"),
@@ -249,7 +282,7 @@ impl GroupTransport for LoopTransport {
 }
 
 #[derive(Default)]
-struct MemoryStore(Mutex<GroupRecord>);
+struct MemoryStore(Mutex<GroupRecord>, std::sync::atomic::AtomicBool);
 
 #[async_trait::async_trait]
 impl GroupStore for MemoryStore {
@@ -258,6 +291,9 @@ impl GroupStore for MemoryStore {
     }
 
     async fn save(&self, record: &GroupRecord) -> Result<(), GroupStoreError> {
+        if self.1.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(GroupStoreError::Write("test disk is full".into()));
+        }
         record.clone_into(&mut self.0.lock().expect("not poisoned"));
         Ok(())
     }
@@ -501,7 +537,11 @@ async fn the_group_shares_one_checked_audit_history_across_computers() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn computers_witness_each_others_history_over_the_broadcast_topic() {
-    let net = Arc::new(Network::default());
+    let net = Arc::new(Network {
+        deduplicate_gossip: true,
+        audit_visible_prefix: Mutex::new(Some(0)),
+        ..Network::default()
+    });
     let mum = Computer::start(&net, 71);
     let dad = Computer::start(&net, 72);
     mum.send(GroupCommand::Create {
@@ -521,19 +561,62 @@ async fn computers_witness_each_others_history_over_the_broadcast_topic() {
     });
     dad.roster(|state| state.people.len() == 2).await;
     mum.roster(|state| state.admits(&dad.device)).await;
-    mum.send(GroupCommand::Share {
-        text: "The van's MOT is due in May".into(),
-        about: Vec::new(),
-        with: None,
-    });
-    mum.audit(|s| s.records == 1).await;
-    // Both join the topic on their next sync; Dad hears Mum's checkpoint, catches up
-    // if needed, checks it against his copy and signs for it.
-    dad.send(GroupCommand::Load);
-    dad.audit(|s| s.other_records >= 1).await;
+    for text in ["The van's MOT is due in May", "Water the garden on Sunday"] {
+        mum.send(GroupCommand::Share {
+            text: text.into(),
+            about: Vec::new(),
+            with: None,
+        });
+    }
+    mum.audit(|s| s.records == 2).await;
+    // A checkpoint must be enough even when its receiver has no history yet.
+    // Real gossip suppresses a repeated payload, so another Load cannot repair it.
+    assert_eq!(
+        dad.store.0.lock().expect("not poisoned").peer_audit,
+        Vec::new()
+    );
+    tokio::time::timeout(WAIT, async {
+        while !net
+            .gossip
+            .lock()
+            .expect("not poisoned")
+            .contains_key(&dad.device)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("Dad joined the broadcast topic");
     mum.send(GroupCommand::Load);
+    tokio::time::timeout(WAIT, async {
+        while !net
+            .completed_checkpoints
+            .lock()
+            .expect("not poisoned")
+            .contains(&(dad.device, 2))
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the checkpoint arrived before its history");
+    *net.audit_visible_prefix.lock().expect("not poisoned") = Some(1);
+    dad.send(GroupCommand::Load);
+    dad.audit(|s| s.other_records == 1).await;
+    assert!(
+        mum.store
+            .0
+            .lock()
+            .expect("not poisoned")
+            .audit_witnesses
+            .is_empty(),
+        "a partial history is not enough to sign"
+    );
+    // A later bounded sync completes the history without another checkpoint.
+    *net.audit_visible_prefix.lock().expect("not poisoned") = Some(2);
+    dad.send(GroupCommand::Load);
     let vouched = mum.audit(|s| s.witnesses >= 1).await;
-    assert_eq!(vouched.witnessed_records, 1);
+    assert_eq!(vouched.witnessed_records, 2);
     let saved = mum.store.0.lock().expect("not poisoned").clone();
     assert_eq!(saved.audit_witnesses.len(), 1);
     assert_eq!(saved.audit_witnesses[0].witness, dad.device);
@@ -1242,8 +1325,19 @@ async fn each_computer_knows_which_others_are_online() {
     });
     dad.roster(|state| state.admits(&dad.device)).await;
 
-    // Opening Groups syncs at once, and the sync reports who answered.
+    // Admission is published before the joiner's catch-up finishes. Wait for its
+    // completed sync so an in-flight join response cannot refresh Mum's presence
+    // after the fixture switches Dad off.
+    dad.wait(|event| match event {
+        GroupEvent::Presence(seen) if seen.contains_key(&mum.device) => Some(()),
+        _ => None,
+    })
+    .await;
+    // Loaded discards any earlier queued presence snapshots; the next one reports
+    // the completed sync requested here, rather than an earlier online timestamp.
     mum.send(GroupCommand::Load);
+    mum.wait(|event| matches!(event, GroupEvent::Loaded { .. }).then_some(()))
+        .await;
     let seen = mum
         .wait(|event| match event {
             GroupEvent::Presence(seen) if seen.contains_key(&dad.device) => Some(seen),
@@ -1259,6 +1353,8 @@ async fn each_computer_knows_which_others_are_online() {
     net.off.lock().expect("not poisoned").insert(dad.device);
     let before = seen[&dad.device];
     mum.send(GroupCommand::Load);
+    mum.wait(|event| matches!(event, GroupEvent::Loaded { .. }).then_some(()))
+        .await;
     let after = mum
         .wait(|event| match event {
             GroupEvent::Presence(seen) => Some(seen),
@@ -1533,4 +1629,102 @@ async fn starting_and_joining_a_group_needs_no_password_account() {
         .collect();
     assert!(names.contains(&"Mum"), "{names:?}");
     assert!(names.contains(&"Dad"), "{names:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_person_alone_can_leave_and_start_a_different_group() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 91);
+    mum.send(GroupCommand::Create {
+        name: "Practice group".into(),
+        your_name: "Mum".into(),
+        computer_name: "Laptop".into(),
+    });
+    mum.roster(|state| state.name == "Practice group").await;
+    mum.send(GroupCommand::Leave);
+    mum.wait(|event| matches!(event, GroupEvent::LeftGroup).then_some(()))
+        .await;
+    assert_eq!(mum.store.0.lock().expect("not poisoned").group, None);
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Laptop".into(),
+    });
+    let state = mum.roster(|state| state.name == "Family").await;
+    assert!(state.admits(&mum.device));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_shares_are_not_visible_or_saved_by_a_later_retry() {
+    let net = Arc::new(Network::default());
+    let mum = Computer::start(&net, 71);
+    mum.send(GroupCommand::Create {
+        name: "Storage failure test".into(),
+        your_name: "Mum".into(),
+        computer_name: "Laptop".into(),
+    });
+    mum.roster(|state| state.name == "Storage failure test")
+        .await;
+    let commands = [
+        GroupCommand::Share {
+            text: "Keep this draft".into(),
+            about: Vec::new(),
+            with: None,
+        },
+        GroupCommand::ShareArtifact {
+            title: "Keep this document".into(),
+            kind: sovra_core::artifacts::ArtifactKind::Document,
+            language: String::new(),
+            content: "Words that must not disappear".into(),
+            new_version_of: None,
+            local_id: String::new(),
+            with: None,
+        },
+    ];
+    for command in &commands {
+        mum.store.1.store(true, std::sync::atomic::Ordering::SeqCst);
+        mum.send(command.clone());
+        mum.wait(|event| match event {
+            GroupEvent::Problem(problem) if problem.message().contains("test disk is full") => {
+                Some(())
+            }
+            _ => None,
+        })
+        .await;
+        // Loaded is a barrier after the failed command; inspect its following snapshot.
+        mum.send(GroupCommand::Load);
+        mum.wait(|event| matches!(event, GroupEvent::Loaded { .. }).then_some(()))
+            .await;
+        assert_eq!(mum.knowledge(|_| true).await, Vec::<SharedDetail>::new());
+        assert_eq!(mum.artifacts(|_| true).await, Vec::<SharedArtifact>::new());
+        let saved = mum.store.0.lock().expect("not poisoned");
+        assert_eq!(
+            saved.knowledge,
+            Vec::<sovra_core::group::KnowledgeOp>::new()
+        );
+        assert_eq!(
+            saved.audit,
+            Vec::<sovra_core::swarm::ledger::LedgerEntry>::new()
+        );
+    }
+    mum.store
+        .1
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    for command in commands {
+        mum.send(command);
+    }
+    assert_eq!(
+        mum.knowledge(|items| items.len() == 1).await[0].text,
+        "Keep this draft"
+    );
+    assert_eq!(
+        mum.artifacts(|items| items.len() == 1).await[0].content,
+        "Words that must not disappear"
+    );
+    let saved = mum.store.0.lock().expect("not poisoned");
+    assert_eq!(
+        saved.audit.len(),
+        2,
+        "failed shares must not enter the history"
+    );
 }

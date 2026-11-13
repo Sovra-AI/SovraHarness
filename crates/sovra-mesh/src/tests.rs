@@ -199,9 +199,21 @@ struct BigLibrary(Vec<sovra_core::group::KnowledgeOp>);
 
 #[async_trait::async_trait]
 impl PeerHandler for BigLibrary {
-    async fn handle(&self, _from: DeviceId, _request: PeerRequest) -> PeerResponse {
+    async fn handle(&self, _from: DeviceId, request: PeerRequest) -> PeerResponse {
+        let PeerRequest::Sync {
+            knowledge: known, ..
+        } = request
+        else {
+            return PeerResponse::Refused {
+                reason: Refusal::NotAMember,
+            };
+        };
         let (knowledge, _) = sovra_core::group::within_budget(
-            self.0.clone(),
+            self.0
+                .iter()
+                .filter(|op| !known.contains(&op.hash()))
+                .cloned()
+                .collect(),
             sovra_core::group::MAX_REPLY_KNOWLEDGE_BYTES,
         );
         PeerResponse::Synced {
@@ -214,7 +226,7 @@ impl PeerHandler for BigLibrary {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_full_round_of_shared_artifacts_crosses_the_real_network_signed() {
+async fn notes_and_artifacts_cross_the_real_network_in_complete_signed_rounds() {
     use sovra_core::group::{KnowledgeBody, LaneId, UnsignedKnowledge};
 
     let a = Mesh::bind([5; 32], Reach::LocalOnly).await.expect("binds");
@@ -224,61 +236,93 @@ async fn a_full_round_of_shared_artifacts_crosses_the_real_network_signed() {
     // encoded bytes rather than characters.
     let content = "- milk\n- \"eggs\"\n".repeat(30_000);
     assert!(content.len() <= sovra_core::group::MAX_SHARED_ARTIFACT_BYTES);
-    let ops: Vec<_> = (1..=20_u64)
+    let mut previous = None;
+    let ops: Vec<_> = (1..=40_u64)
         .map(|seq| {
             let unsigned = UnsignedKnowledge {
                 group,
                 lane: LaneId::whole_group(&group),
                 author: b.this_device(),
                 seq,
-                prev: None,
-                deps: Vec::new(),
+                prev: previous,
+                deps: previous.into_iter().collect(),
                 at: sovra_core::Timestamp(i64::try_from(seq).expect("small")),
-                body: KnowledgeBody::ShareArtifact {
-                    title: format!("List {seq}"),
-                    kind: sovra_core::artifacts::ArtifactKind::Checklist,
-                    language: String::new(),
-                    content: content.clone(),
-                    replaces: Vec::new(),
-                    origin: String::new(),
+                body: if seq % 2 == 0 {
+                    KnowledgeBody::ShareArtifact {
+                        title: format!("List {seq}"),
+                        kind: sovra_core::artifacts::ArtifactKind::Checklist,
+                        language: String::new(),
+                        content: content.clone(),
+                        replaces: Vec::new(),
+                        origin: String::new(),
+                    }
+                } else {
+                    KnowledgeBody::Share {
+                        text: format!("Note {seq}: مرحباً 👋 café\nKeep every character."),
+                        about: Vec::new(),
+                        valid_at: None,
+                        replaces: Vec::new(),
+                    }
                 },
             };
             let signature = b.sign(&unsigned.signing_bytes());
-            unsigned.sign(signature)
+            let op = unsigned.sign(signature);
+            previous = Some(op.hash());
+            op
         })
         .collect();
     let mut server = serve(&b, Arc::new(BigLibrary(ops.clone())));
 
-    let response = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        a.request(
-            &b.address(),
-            PeerRequest::Sync {
-                group,
-                membership: BTreeSet::new(),
-                knowledge: BTreeSet::new(),
-                from: a.address(),
-            },
-        ),
-    )
-    .await
-    .expect("answers in time")
-    .expect("a budget-sized reply fits in one message");
-    let PeerResponse::Synced { knowledge, .. } = response else {
-        panic!("expected a sync answer, got {response:?}");
-    };
-    assert!(
-        knowledge.len() > 1 && knowledge.len() < ops.len(),
-        "a round carries some, not all: {}",
-        knowledge.len()
+    let started = std::time::Instant::now();
+    let mut received = Vec::new();
+    let mut rounds = 0;
+    while received.len() < ops.len() {
+        assert!(rounds < ops.len(), "every round must make progress");
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            a.request(
+                &b.address(),
+                PeerRequest::Sync {
+                    group,
+                    membership: BTreeSet::new(),
+                    knowledge: received
+                        .iter()
+                        .map(sovra_core::group::KnowledgeOp::hash)
+                        .collect(),
+                    from: a.address(),
+                },
+            ),
+        )
+        .await
+        .expect("answers in time")
+        .expect("budget-sized reply fits");
+        let PeerResponse::Synced { knowledge, .. } = response else {
+            panic!("expected a sync answer, got {response:?}");
+        };
+        assert!(!knowledge.is_empty(), "sync must make progress");
+        if rounds == 0 {
+            assert!(knowledge.len() < ops.len(), "exercise multiple rounds");
+        }
+        let verifier = a.verifier();
+        assert!(knowledge.iter().all(|op| verifier.verify(
+            &op.unsigned().author,
+            &op.unsigned().signing_bytes(),
+            op.signature()
+        )));
+        received.extend(knowledge);
+        assert_eq!(
+            received,
+            ops[..received.len()],
+            "exact signed content, oldest first"
+        );
+        rounds += 1;
+    }
+    tracing::info!(
+        rounds,
+        operations = received.len(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "mixed group transfer verified"
     );
-    assert_eq!(knowledge, ops[..knowledge.len()].to_vec(), "oldest first");
-    let verifier = a.verifier();
-    assert!(knowledge.iter().all(|op| verifier.verify(
-        &op.unsigned().author,
-        &op.unsigned().signing_bytes(),
-        op.signature()
-    )));
 
     b.close().await;
     a.close().await;

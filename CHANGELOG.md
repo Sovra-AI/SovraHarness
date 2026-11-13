@@ -11,6 +11,36 @@ move them under a version heading when the tag is cut.
 
 ## [Unreleased]
 
+- **Confirmed artifact sharing.** Share, Keep a copy and Stop sharing now wait
+  for the matching saved result before reporting success. Pending actions prevent
+  duplicate clicks, failures offer a retry, and updates retain their original
+  audience. Confirmation text explains that offline computers receive changes
+  when they reconnect.
+
+- **Share notes without losing your draft.** Groups keeps the words while sharing,
+  confirms the matching saved note and preserves edits typed during the save.
+  Empty notes and repeat clicks are disabled. A failed share keeps the draft for
+  retry; a busy group worker reports an error instead of silently dropping it.
+
+- **Failed group shares stay private.** If saving a note, artifact or shared
+  helper fails, the attempted share and its history entry are rolled back. It
+  cannot reach other computers through a later sync or appear in helper recall.
+  Groups reports the failure and asks you to retry.
+
+- **Faster group history rebuilds.** Shared notes and artifacts track the latest
+  seen operation per computer instead of copying every earlier operation into
+  every item. Version and conflict checks retain the same causal rules while
+  long histories use substantially less CPU and memory.
+
+- **Leave a group you started alone.** A sole member can now leave and start a
+  different group. Groups with other people still require an administrator.
+  The confirmation explains that all your computers leave and distinguishes
+  shared items from copies you saved separately.
+
+- **Group history catches up reliably.** Computers retain a checked history
+  checkpoint while fetching missing records, then confirm it once the history
+  matches, including when records arrive in several batches.
+
 - **Message a WhatsApp group by name.** Ask "send a WhatsApp to the school
   group" and Sovra finds the group from part of its name, then shows the
   review with the group's name instead of a raw id. If more than one group

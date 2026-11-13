@@ -16,10 +16,12 @@
 //!    remover had not seen it, and it had not seen the removal) is void. Removals are
 //!    never voided this way; when two admins remove each other concurrently, the first
 //!    in the fixed order applies and the second fails because its author is gone, so
-//!    the group always keeps an admin.
+//!    any group with remaining people keeps an admin.
 //! 6. **Remove wins.** An add that is concurrent with a removal of the same person or
 //!    device is void. Adding someone back requires having seen the removal.
-//! 7. **Never zero admins.** Removing or demoting the last admin is rejected.
+//! 7. **No people without an admin.** Removing the last admin is rejected while
+//!    other people remain. The sole person may leave, ending the group. Demoting
+//!    the last admin is always rejected.
 //!
 //! Steps 4–6 depend on each other, so they iterate to a fixed point. The void set only
 //! grows, which keeps the loop finite and the result deterministic.
@@ -641,7 +643,7 @@ fn apply_change(op: &MembershipOp, hash: OpHash, out: &mut Applied) -> Result<()
                 return Err(Rejection::NotAllowed);
             }
             let target = state.people.get(person).ok_or(Rejection::UnknownTarget)?;
-            if target.role.manages() && state.admin_count() == 1 {
+            if target.role.manages() && state.admin_count() == 1 && state.people.len() > 1 {
                 return Err(Rejection::WouldLeaveNoAdmin);
             }
             if let Some(member) = state.people.remove(person) {

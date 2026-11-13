@@ -35,7 +35,14 @@ time (**Invite someone**, **Shared notes**, **People**, **Shared helpers**,
 **Ask the group**, and under **More…** **Borrow an AI**, **Smaller circles**, **History**) says what it is
 for and how to use it in numbered steps, and a **Getting started** list shows what
 a new group still has to do. Under **Invite someone**, **Create invite link** makes
-a one-time link and copies it for you to send.
+a one-time link and copies it for you to send. Leaving removes you and all your
+computers. If you are alone, it ends the group; if others remain, another admin
+must be available. History confirmations wait for
+the matching records to arrive and continue as computers catch up.
+Sharing a note keeps your draft until you choose **Write another note**.
+**Sharing…** changes to a confirmation after the note is saved; failed shares
+keep your words for retry. Artifact sharing, **Keep a copy**, and **Stop sharing**
+also wait for confirmation and allow retry when a request fails.
 
 While Sovra works, each reply shows a live work log above the answer: every
 step in plain words ("Searching the web for …"), helpers working side by side in
