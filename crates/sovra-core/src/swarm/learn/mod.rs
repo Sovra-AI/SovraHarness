@@ -1,5 +1,8 @@
 //! Collective training without exporting data.
 //!
+//! The private round protocol below requires consent and masking; the separate
+//! [`scavenger`] scheduler/optimizer primitive does not provide those protections.
+//!
 //! Each computer trains on its own department's approved examples; only a clipped,
 //! noised, masked update leaves it, and only after a person signs off. The fleet
 //! sees the sum, never one computer's contribution.
@@ -19,6 +22,7 @@ pub mod linalg;
 pub mod privacy;
 pub mod round;
 pub mod scaffold;
+pub mod scavenger;
 pub mod secagg;
 
 /// 64 random bits at a time. Production implementations must be cryptographically

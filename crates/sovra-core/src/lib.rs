@@ -43,6 +43,7 @@ pub mod swarm;
 pub mod teams;
 pub mod terminal;
 mod tool_calls;
+pub mod training;
 mod web_search;
 pub mod work;
 mod workspace;

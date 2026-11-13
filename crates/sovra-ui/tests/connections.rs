@@ -49,6 +49,27 @@ fn settle(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
+/// The compact sidebar scrolls when its links exceed the available height.
+fn open_connections(window: &mut Window, cx: &mut App) {
+    for _ in 0..40 {
+        window.render_frame(cx);
+        let Some(rail) = window.try_find("chat-history-rail-collapsed") else {
+            break;
+        };
+        let (rail, link) = (rail.bounds(), window.find("nav-connections").bounds());
+        if link.top() >= rail.top() && link.bottom() <= rail.bottom() {
+            break;
+        }
+        let dy = if link.top() < rail.top() { 40. } else { -40. };
+        window.scroll(
+            "chat-history-rail-collapsed",
+            ScrollDelta::Pixels(point(px(0.), px(dy))),
+            cx,
+        );
+    }
+    window.click("nav-connections", cx);
+}
+
 fn google(events: &async_channel::Sender<Event>, state: GoogleState, cx: &mut TestAppContext) {
     events
         .send_blocking(Event::Google(GoogleEvent::Changed(state)))
@@ -79,7 +100,7 @@ fn one_button_connects_and_every_service_has_a_switch(cx: &mut TestAppContext) {
     let (window, shell, commands, events) = open(cx, 1100., 2400.);
     google(&events, GoogleState::NotConnected, cx);
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-connections", cx);
+        open_connections(window, cx);
         window.render_frame(cx);
         assert!(window.find("connections-page").visible());
         window.click("connection-action-google", cx);
@@ -164,7 +185,7 @@ fn one_button_connects_and_every_service_has_a_switch(cx: &mut TestAppContext) {
     });
 
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-connections", cx);
+        open_connections(window, cx);
         window.render_frame(cx);
         window.click("connection-action-google", cx);
         window.render_frame(cx);
@@ -192,7 +213,7 @@ fn an_expired_sign_in_offers_one_button_to_fix_it(cx: &mut TestAppContext) {
     let (window, _shell, commands, events) = open(cx, 1100., 1600.);
     google(&events, GoogleState::NeedsSignIn(account()), cx);
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-connections", cx);
+        open_connections(window, cx);
         window.render_frame(cx);
         window.click("connection-action-google", cx);
         window.render_frame(cx);
@@ -210,7 +231,7 @@ fn google_card_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
         google(&events, GoogleState::Connected(account()), cx);
         cx.update(|cx| design::set_interface_scale(InterfaceScale::from_percent(scale), cx));
         cx.update_window(window.into(), |_, window, cx| {
-            window.click("nav-connections", cx);
+            open_connections(window, cx);
             window.render_frame(cx);
             reveal(window, "connection-action-google", cx);
             window.click("connection-action-google", cx);
@@ -291,7 +312,7 @@ fn saving_a_desktop_client_id_enables_connect_google(cx: &mut TestAppContext) {
         cx,
     );
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-connections", cx);
+        open_connections(window, cx);
         window.render_frame(cx);
         reveal(window, "connection-action-google", cx);
         window.click("connection-action-google", cx);
@@ -422,7 +443,7 @@ fn github_connects_with_one_button_and_shows_the_code(cx: &mut TestAppContext) {
     let (window, _shell, commands, events) = open(cx, 1100., 2400.);
     github(&events, GitHubState::NotConnected, true, cx);
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-connections", cx);
+        open_connections(window, cx);
         window.render_frame(cx);
         reveal(window, "connection-action-github", cx);
         window.click("connection-action-github", cx);
@@ -479,7 +500,7 @@ fn without_github_sign_in_connect_shows_the_key_steps(cx: &mut TestAppContext) {
             });
             github(&events, GitHubState::NotConnected, false, cx);
             cx.update_window(window.into(), |_, window, cx| {
-                window.click("nav-connections", cx);
+                open_connections(window, cx);
                 window.render_frame(cx);
                 reveal(window, "connection-action-github", cx);
                 window.click("connection-action-github", cx);
@@ -558,7 +579,7 @@ fn github_card_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
             cx,
         );
         cx.update_window(window.into(), |_, window, cx| {
-            window.click("nav-connections", cx);
+            open_connections(window, cx);
             window.render_frame(cx);
             reveal(window, "connection-action-github", cx);
             window.click("connection-action-github", cx);

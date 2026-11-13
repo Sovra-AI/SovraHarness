@@ -271,9 +271,15 @@ mod tests {
         let upload = workflow
             .find("gh release upload")
             .expect("uploads all three executables onto the version release");
-        assert!(workflow.contains("dist/executable-osx/sovra#sovra-macos"));
-        assert!(workflow.contains("dist/executable-win/sovra.exe#sovra.exe"));
-        assert!(workflow.contains("dist/executable-linux/sovra#sovra-linux"));
+        for copy in [
+            "cp dist/executable-osx/sovra named/sovra-macos",
+            "cp dist/executable-win/sovra.exe named/sovra.exe",
+            "cp dist/executable-linux/sovra named/sovra-linux",
+        ] {
+            let rename = workflow.find(copy).expect("unique executable asset name");
+            assert!(rename < upload, "asset is named before upload: {copy}");
+        }
+        assert!(workflow[upload..].contains("named/sovra-macos named/sovra.exe named/sovra-linux"));
         assert!(workflow.contains("for channel in osx win linux"));
         let missing = workflow
             .find("Release $tag is missing the executable")

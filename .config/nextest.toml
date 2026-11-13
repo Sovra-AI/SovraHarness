@@ -1,0 +1,9 @@
+# Real mesh fixtures share the OS multicast discovery service. Concurrent test
+# processes can hide a short-lived pairing announcement from another fixture.
+# Keep the multiple peers within each fixture; isolate unrelated fixtures only.
+[test-groups]
+mesh-network = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(sovra-mesh) | (package(sovra-app) & (binary(two_computers) | binary(training_grid)))'
+test-group = 'mesh-network'

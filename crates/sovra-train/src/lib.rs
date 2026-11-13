@@ -9,6 +9,12 @@
 //! kernels for the computer's GPU (Vulkan, Metal or DX12 through wgpu); without it,
 //! Burn's pure-Rust CPU backend runs everywhere. Gradients come from Burn's autodiff.
 
+mod language;
+mod session;
+pub use session::BurnTrainingEngine;
+
+pub use language::ByteLanguageModel;
+
 use burn::tensor::{Device, Tensor, TensorData};
 use sovra_core::swarm::learn::scaffold::Objective;
 
@@ -17,6 +23,8 @@ use sovra_core::swarm::learn::scaffold::Objective;
 pub enum TrainError {
     #[error("there are no examples to learn from")]
     NoExamples,
+    #[error("choose a text batch containing 2 to 4097 bytes")]
+    InvalidTextBatch,
     #[error("every example needs the same number of features")]
     RaggedExamples,
 }

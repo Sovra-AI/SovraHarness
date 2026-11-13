@@ -118,6 +118,12 @@ pub enum PeerRequest {
         group: GroupId,
         have: std::collections::BTreeMap<DeviceId, u64>,
     },
+    /// Fetch a short training interval or return its result. Sharing and helping
+    /// require separate explicit consent; group membership alone starts no work.
+    Training {
+        group: GroupId,
+        work: crate::training::TrainingPeerRequest,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +168,9 @@ pub enum PeerResponse {
     AuditEntries {
         entries: Vec<crate::swarm::ledger::LedgerEntry>,
     },
+    Training {
+        work: crate::training::TrainingPeerResponse,
+    },
 }
 
 /// Why a request was turned down.
@@ -178,6 +187,8 @@ pub enum Refusal {
     NotAnswering,
     /// This computer is not helping with work now (off, no AI, or busy).
     NotHelping,
+    /// This computer's owner has not turned on helping the group train.
+    NotTraining,
 }
 
 /// The bytes a join proof is bound to: both computers and the group.
@@ -214,7 +225,8 @@ pub fn admits_request(
         | PeerRequest::Work { group, .. }
         | PeerRequest::WorkNext { group, .. }
         | PeerRequest::WorkCancel { group, .. }
-        | PeerRequest::AuditSync { group, .. } => group,
+        | PeerRequest::AuditSync { group, .. }
+        | PeerRequest::Training { group, .. } => group,
     };
     match roster {
         Some(state) if state.group != *group => Err(Refusal::WrongGroup),
@@ -316,6 +328,10 @@ pub struct GroupRecord {
     /// Whether this computer helps with, and hands off, chat work (both off at first).
     #[serde(default)]
     pub work: super::work::WorkSettings,
+    /// Whether a group computer may take one short training step on a run started
+    /// here. Off until the owner turns it on. Answering and chat help do not imply it.
+    #[serde(default)]
+    pub training_help: bool,
     /// This computer's signed audit history (`crate::swarm::audit`). Re-checked
     /// entry by entry on every start; never trusted as saved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

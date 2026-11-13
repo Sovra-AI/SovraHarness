@@ -12,6 +12,7 @@ use crate::routing_tree::{DecisionBackend, RouteEvaluation, SelectionMode};
 /// A request from the UI to the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    Training(crate::training::TrainingCommand),
     RemoteControl(crate::remote_control::RemoteCommand),
     Development(crate::development::DevelopmentCommand),
     Auth(crate::auth::AuthCommand),
@@ -92,6 +93,7 @@ pub enum Command {
 /// A notification from the runtime to the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
+    Training(crate::training::TrainingEvent),
     RemoteControl(Box<crate::remote_control::RemoteEvent>),
     Development(crate::development::DevelopmentEvent),
     Auth(crate::auth::AuthEvent),
@@ -203,6 +205,7 @@ impl Event {
             | Self::Mcp(_)
             | Self::Terminal(_)
             | Self::Schedule(_)
+            | Self::Training(_)
             | Self::Group(_)
             | Self::ChatHistoryLoaded { .. }
             | Self::Ready { .. }

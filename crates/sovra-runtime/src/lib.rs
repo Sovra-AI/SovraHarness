@@ -34,9 +34,11 @@ mod terminal;
 pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
 mod teams;
+mod training;
 pub use groups::{GroupServices, QrEncoder, TransportFactory, TransportFuture};
 pub use models::ModelsConfig;
 pub use schedules::{JsonScheduleStore, MemoryScheduleStore};
+pub use training::TrainingConfig;
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -291,6 +293,7 @@ pub fn start_with_auth(
         version,
         agent_config,
         RuntimeServices {
+            training: None,
             memory_extraction_slots: 0,
             memory,
             models,
@@ -317,6 +320,7 @@ pub fn start_with_auth(
 /// Every adapter the composition root can hand the runtime; each is optional.
 #[derive(Default)]
 pub struct RuntimeServices {
+    pub training: Option<TrainingConfig>,
     /// Background extraction slots, 1–16; zero selects the default of four.
     pub memory_extraction_slots: usize,
     pub memory: Option<MemoryFactory>,
@@ -439,6 +443,7 @@ async fn serve(
     tz_offset_minutes: i32,
 ) {
     let RuntimeServices {
+        training,
         memory: memory_factory,
         memory_extraction_slots,
         models,
@@ -487,6 +492,8 @@ async fn serve(
     let google = google::GoogleRuntime::start(google, events.clone(), &handle);
     let github = github::GitHubRuntime::start(github, events.clone(), &handle);
     let groups = groups::GroupRuntime::start(group_services, events.clone(), &handle);
+    let training =
+        training::TrainingRuntime::start(training, events.clone(), groups.training(), &handle);
     let terminal = terminal::TerminalRuntime::start(terminal, events.clone(), &handle).await;
     let mut file_index = file_index::IndexRuntime::start(
         index,
@@ -718,6 +725,7 @@ async fn serve(
             other => other,
         };
         match command {
+            Command::Training(command) => training.send(command),
             Command::Auth(command) => auth.handle(command),
             Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
@@ -1194,6 +1202,7 @@ async fn serve(
         run.interrupt(&session);
         run.task.abort();
     }
+    training.stop().await;
     artifact_library.stop().await;
     memory_taps.abort_all();
     while memory_taps.join_next().await.is_some() {}

@@ -34,6 +34,8 @@ mod research_board;
 mod schedules;
 #[path = "styling/terminal.rs"]
 mod terminal;
+#[path = "styling/training.rs"]
+mod training;
 #[path = "styling/workspace_fit.rs"]
 mod workspace_fit;
 

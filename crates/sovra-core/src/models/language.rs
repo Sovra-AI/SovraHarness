@@ -228,6 +228,8 @@ pub enum ChromeKey {
     ChatHintFilesGenerating,
     LoginEmailPlaceholder,
     LoginPasswordPlaceholder,
+    NavTraining,
+    NavTrainingTooltip,
     NavGroups,
     NavGroupsTooltip,
     LoginName,
@@ -235,7 +237,7 @@ pub enum ChromeKey {
 }
 
 impl ChromeKey {
-    pub const ALL: [Self; 90] = [
+    pub const ALL: [Self; 92] = [
         Self::LoginWelcomeTitle,
         Self::LoginWelcomeSubtitle,
         Self::LoginCreateTitle,
@@ -326,6 +328,8 @@ impl ChromeKey {
         Self::LoginName,
         Self::LoginNamePlaceholder,
         Self::ChatWelcomeHelpHint,
+        Self::NavTraining,
+        Self::NavTrainingTooltip,
     ];
 }
 
@@ -1076,6 +1080,8 @@ fn arabic(key: ChromeKey) -> &'static str {
         ChromeKey::ChatHintFilesGenerating => "أرسل هذه الملفات بعد انتهاء هذا الرد",
         ChromeKey::LoginEmailPlaceholder => "you@example.com",
         ChromeKey::LoginPasswordPlaceholder => "أدخل كلمة المرور",
+        ChromeKey::NavTraining => "التدريب",
+        ChromeKey::NavTrainingTooltip => "درّب نموذجاً صغيراً على هذا الكمبيوتر",
         ChromeKey::NavGroups => "المجموعات",
         ChromeKey::NavGroupsTooltip => "شارك مع عائلتك أو فريقك",
         ChromeKey::LoginName => "اسمك",
@@ -1185,6 +1191,8 @@ fn english(key: ChromeKey) -> &'static str {
         ChromeKey::ChatHintFilesGenerating => "Send these files after this reply finishes",
         ChromeKey::LoginEmailPlaceholder => "you@example.com",
         ChromeKey::LoginPasswordPlaceholder => "Enter your password",
+        ChromeKey::NavTraining => "Training",
+        ChromeKey::NavTrainingTooltip => "Train a small model on this computer",
         ChromeKey::NavGroups => "Groups",
         ChromeKey::NavGroupsTooltip => "Share with your family or team",
         ChromeKey::LoginName => "Your name",

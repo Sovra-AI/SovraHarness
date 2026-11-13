@@ -27,6 +27,7 @@ pub enum SkillAction {
     Help,
     NewChat,
     Models,
+    Training,
     Knowledge,
     Schedules,
     Agents,

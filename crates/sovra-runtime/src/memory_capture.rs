@@ -167,6 +167,7 @@ pub(crate) fn tap(
                     | Event::Mcp(_)
                     | Event::Terminal(_)
                     | Event::Schedule(_)
+                    | Event::Training(_)
                     | Event::Group(_)
                     | Event::FilePrepared(_)
                     | Event::FileIndex(_)

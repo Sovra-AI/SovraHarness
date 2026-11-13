@@ -59,6 +59,8 @@ const LAYERS: &[(&str, &[&str])] = &[
             "sovra-skills",
             "sovra-store-surreal",
             "sovra-telegram",
+            // Composition root supplies the Burn learner through the core training port.
+            "sovra-train",
             "sovra-ui",
             "sovra-whatsapp",
         ],

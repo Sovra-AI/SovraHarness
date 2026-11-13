@@ -14,8 +14,44 @@ package version.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-13
+
+- **Training as a core capability.** The README and a new Training guide explain
+  how computers in a group train together, what is shared, how to pause or stop,
+  and what the tiny-model preview supports.
+
 - **The README points to the phone apps.** Phone control now links to the SovraiOS and
   SovraAndroid apps, which pair with this desktop, instead of saying no mobile app exists.
+- **Separate permission for group training.** Start with my group enables the
+  Groups permission for the selected run. Turning it off in Groups revokes
+  sharing; turning it on does not expose a local-only run. Membership, answering
+  questions and lending an AI do not authorize training. Permission resets when
+  Sovra opens, and Pause stops both local and remote work. Only matching, finite
+  updates are saved; missing helpers do not block progress. Chats, memories and
+  shared notes are not used as the training text.
+
+- **Train with your group.** Added explicit Start with my group, Help this computer,
+  Stop sharing and Stop helping controls. Current group members exchange bounded
+  Burn work through the existing encrypted connection. Assignments and merged
+  updates are saved before acknowledgement; helping preserves your own saved
+  model. **Start with my group** turns on **Help the group train**. Stopping
+  sharing turns it off. Runtime tests cover consent, durable acknowledgements,
+  pause, group departure and restart. This remains a tiny next-byte model
+  preview; pretrained SLMs are not supported.
+
+- **Independent training work packets.** Split assignment, Burn local training and
+  result merging behind the core learner port, with bounded versioned packets,
+  per-run identities and exact batch/token checks. Existing local checkpoints
+  remain readable. A real iroh/Burn integration test covers worker loss, sender
+  identity and replay; desktop sharing and helping use these same packets.
+
+- **Native training preview.** Added a Skills-listed Training page for a small
+  Burn next-byte model, sample or pasted text, background rounds that yield to
+  chat, Pause/Resume, private atomic checkpoints and saved-file locations. Runs
+  are preserved separately, restart stays paused, and Burn is linked into the
+  single app executable through a core port. This preview is not yet pretrained
+  SLM training.
+
 - **Release publishing finishes on its own.** The macOS and Linux executables
   upload under their own names instead of clashing, and the Linux build no
   longer fails after it has already succeeded, so a new version reaches the
@@ -24,6 +60,16 @@ package version.
   seconds for an encrypted relay, so the pairing code carries it. Before, the code held
   only this network's addresses, and a phone on mobile data or another Wi-Fi depended on
   address lookup alone.
+
+- **Dependency security fix.** Updated the transitive HTML sanitizer `ammonia`
+  from 4.2.4 to 4.2.5 for RUSTSEC-2026-0533, discovered by the training change’s
+  full CI run.
+
+- **Scavenger training engine.** Added bounded independent work
+  leases, replay/expiry/staleness checks, token-weighted age-gated Adam merges,
+  validated optimizer checkpoints, and a Burn next-byte language test workload.
+  Tests cover missing workers and coordinator restore. Pretrained SLM support
+  is still being built.
 
 - **Linux download builds reliably.** The Linux release build gets extra memory
   room, so it no longer stops partway and leaves a version without its Linux

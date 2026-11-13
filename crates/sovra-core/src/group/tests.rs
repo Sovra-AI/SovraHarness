@@ -30,6 +30,45 @@ fn person(n: u8) -> PersonId {
     PersonId([100 + n; 32])
 }
 
+#[test]
+fn training_messages_require_current_membership_in_the_named_group() {
+    let mut log = Log::family();
+    log.add(2, Role::Member, 2000);
+    let request = PeerRequest::Training {
+        group: log.group,
+        work: crate::training::TrainingPeerRequest::Work,
+    };
+    assert_eq!(
+        admits_request(Some(&log.state()), &device(2), &request),
+        Ok(())
+    );
+    assert_eq!(
+        admits_request(Some(&log.state()), &device(3), &request),
+        Err(Refusal::NotAMember)
+    );
+    assert_eq!(
+        admits_request(None, &device(2), &request),
+        Err(Refusal::WrongGroup)
+    );
+    let wrong = PeerRequest::Training {
+        group: GroupId([99; 32]),
+        work: crate::training::TrainingPeerRequest::Work,
+    };
+    assert_eq!(
+        admits_request(Some(&log.state()), &device(2), &wrong),
+        Err(Refusal::WrongGroup)
+    );
+    log.push(
+        device(1),
+        3000,
+        MembershipBody::RemoveDevice { device: device(2) },
+    );
+    assert_eq!(
+        admits_request(Some(&log.state()), &device(2), &request),
+        Err(Refusal::NotAMember)
+    );
+}
+
 fn sign(op: UnsignedOp) -> MembershipOp {
     let signature = fake_signature(&op.author, &op.signing_bytes());
     op.sign(signature)

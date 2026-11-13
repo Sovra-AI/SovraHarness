@@ -118,6 +118,10 @@ fn main() -> anyhow::Result<()> {
         VERSION,
         agent_config,
         sovra_runtime::RuntimeServices {
+            training: Some(sovra_runtime::TrainingConfig {
+                engine: Arc::new(sovra_train::BurnTrainingEngine),
+                directory: data_dir.as_path().join("training"),
+            }),
             memory: Some(memory),
             memory_extraction_slots: read_memory_extraction_slots(),
             models: Some(models),

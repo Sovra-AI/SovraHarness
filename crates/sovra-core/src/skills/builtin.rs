@@ -22,6 +22,7 @@ impl Skill {
     /// Returns grandma-friendly title, summary, example display, and 1-click starter draft.
     pub fn friendly_card_copy(&self) -> SkillCardCopy {
         let friendly_title = match self.name.as_str() {
+            "training" => "Teach a small model with your text",
             "files" => "Attach files or photos",
             "index-folder" => "Connect folders on your computer",
             "help" => "Browse all skills & shortcuts",
@@ -102,6 +103,7 @@ impl Skill {
             );
 
         let (example_display, sample_draft) = match self.name.as_str() {
+            "training" => ("Open Training, choose the garden sample or paste a short story, and press Start training. Pause and resume whenever you like. Choose Start with my group to let your group's computers help with that text.".to_owned(), "/training".to_owned()),
             "files" => (
                 "Opens your computer's file picker so you can attach documents or pictures."
                     .to_owned(),
@@ -391,6 +393,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Models",
             "Choose an AI and manage model connections.",
             SkillAction::Models,
+            &[],
+        ),
+        action(
+            "training",
+            "Teach a small model with your text",
+            "Try a tiny practice model with automatic saving and a pause button. Letting a computer in your group help is a separate choice that starts off. Larger models are still being built.",
+            SkillAction::Training,
             &[],
         ),
         action(

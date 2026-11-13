@@ -104,6 +104,9 @@ pub enum GroupCommand {
     SetFederated(FederatedSettings),
     /// Turn work handoff on or off for this computer.
     SetWork(super::work::WorkSettings),
+    /// Let a computer in the group take one short training step on a run started
+    /// here. Starts off. Answering questions or lending an AI does not turn it on.
+    SetTrainingHelp(bool),
     /// "Ask my group": search the memories of computers that answer, once, now.
     AskGroup {
         question: String,
@@ -205,6 +208,8 @@ pub enum GroupEvent {
         settings: super::work::WorkSettings,
         recent: Vec<super::work::WorkRecord>,
     },
+    /// Whether this computer lets the group help with training. Starts off.
+    TrainingHelp(bool),
     /// What the group's computers answered to an "Ask my group" question.
     Answers {
         question: String,
@@ -306,6 +311,8 @@ pub struct GroupsView {
     pub work: super::work::WorkSettings,
     /// Chat jobs this computer answered for others, newest first.
     pub recent_work: Vec<super::work::WorkRecord>,
+    /// Let the group help with training on this computer. Starts off.
+    pub training_help: bool,
     /// This computer's audit history. Kept when leaving a group: history is never lost.
     pub audit: crate::swarm::audit::AuditSummary,
 }
@@ -330,6 +337,7 @@ impl Default for GroupsView {
             last_seen: std::collections::BTreeMap::new(),
             work: super::work::WorkSettings::default(),
             recent_work: Vec::new(),
+            training_help: false,
             audit: crate::swarm::audit::AuditSummary::default(),
         }
     }
@@ -399,6 +407,7 @@ impl GroupsView {
                 self.work = settings;
                 self.recent_work = recent;
             }
+            GroupEvent::TrainingHelp(on) => self.training_help = on,
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
             GroupEvent::Audit(summary) => self.audit = summary,

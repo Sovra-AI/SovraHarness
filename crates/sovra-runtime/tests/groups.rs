@@ -14,8 +14,14 @@ use sovra_core::group::{
     GroupStoreError, GroupTransport, PeerAddress, PeerHandler, PeerRequest, PeerResponse, Role,
     SharedArtifact, SharedDetail, Signature, SignatureVerifier, Spawn, TransportError,
 };
+use sovra_core::training::{
+    BYTE_MODEL_PARAMETERS, TrainingCommand, TrainingEngine, TrainingError, TrainingEvent,
+    TrainingPeerRequest, TrainingPeerResponse, TrainingPhase, TrainingProgress, TrainingRecipe,
+    TrainingResult, TrainingSession, TrainingSource, TrainingState, TrainingTask,
+    encode_parameters,
+};
 use sovra_core::{AgentConfig, Command, Event};
-use sovra_runtime::{Client, GroupServices, RuntimeServices};
+use sovra_runtime::{Client, GroupServices, RuntimeServices, TrainingConfig};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -332,6 +338,16 @@ impl Computer {
         helper: Option<Arc<dyn sovra_core::group::WorkModel>>,
         store: Arc<MemoryStore>,
     ) -> Self {
+        Self::open(net, n, helper, store, None)
+    }
+
+    fn open(
+        net: &Arc<Network>,
+        n: u8,
+        helper: Option<Arc<dyn sovra_core::group::WorkModel>>,
+        store: Arc<MemoryStore>,
+        training: Option<TrainingConfig>,
+    ) -> Self {
         let device = DeviceId([n; 32]);
         let transport: Arc<dyn GroupTransport> = Arc::new(LoopTransport {
             me: device,
@@ -352,6 +368,7 @@ impl Computer {
                     qr: None,
                     helper_model: helper,
                 }),
+                training,
                 ..RuntimeServices::default()
             },
         )
@@ -1726,5 +1743,667 @@ async fn failed_shares_are_not_visible_or_saved_by_a_later_retry() {
         saved.audit.len(),
         2,
         "failed shares must not enter the history"
+    );
+}
+
+use sovra_core::group::ContentHash;
+use sovra_core::swarm::learn::scavenger::{GridSettings, GridSyncer};
+
+/// Counts assignments. `work` is the learner; the coordinator must not call it.
+struct CountingEngine {
+    assignments: Arc<std::sync::atomic::AtomicU64>,
+    learner_calls: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl CountingEngine {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            assignments: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            learner_calls: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        })
+    }
+}
+
+impl TrainingEngine for CountingEngine {
+    fn create(
+        &self,
+        text: &str,
+        run: ContentHash,
+    ) -> Result<Box<dyn TrainingSession>, TrainingError> {
+        Ok(Box::new(LeaseSession::start(
+            text,
+            run,
+            self.assignments.clone(),
+        )?))
+    }
+
+    fn restore(&self, _: &[u8]) -> Result<Box<dyn TrainingSession>, TrainingError> {
+        Err(TrainingError::InvalidCheckpoint)
+    }
+
+    fn work(&self, _: TrainingTask, _: DeviceId) -> Result<TrainingResult, TrainingError> {
+        self.learner_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(TrainingError::InvalidWork)
+    }
+}
+
+struct LeaseBatch {
+    lease: sovra_core::swarm::learn::scavenger::WorkLease,
+    tokens: u32,
+    cursor_before: usize,
+    cursor_after: usize,
+}
+
+struct LeaseSession {
+    text: String,
+    cursor: usize,
+    grid: GridSyncer,
+    pending: BTreeMap<u64, LeaseBatch>,
+    assignments: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl LeaseSession {
+    fn start(
+        text: &str,
+        run: ContentHash,
+        assignments: Arc<std::sync::atomic::AtomicU64>,
+    ) -> Result<Self, TrainingError> {
+        let grid = GridSyncer::new(
+            run,
+            vec![0.0; BYTE_MODEL_PARAMETERS],
+            GridSettings {
+                local_steps: 4,
+                ..GridSettings::default()
+            },
+        )
+        .map_err(|_| TrainingError::Step)?;
+        Ok(Self {
+            text: text.to_owned(),
+            cursor: 0,
+            grid,
+            pending: BTreeMap::new(),
+            assignments,
+        })
+    }
+}
+
+impl TrainingSession for LeaseSession {
+    fn advance(&mut self, _: u64) -> Result<(), TrainingError> {
+        // These tests isolate received work from local background progress.
+        Ok(())
+    }
+
+    fn progress(&self) -> TrainingProgress {
+        TrainingProgress {
+            rounds: u32::try_from(self.grid.round()).unwrap_or(u32::MAX),
+            total_rounds: 10_000,
+            tokens: self.grid.tokens(),
+            loss_milli: None,
+        }
+    }
+
+    fn checkpoint(&self) -> Result<Vec<u8>, TrainingError> {
+        serde_json::to_vec(&serde_json::json!({
+            "rounds": self.grid.round(),
+            "next_lease": self.grid.next_lease(),
+        }))
+        .map_err(|_| TrainingError::Step)
+    }
+
+    fn abandon(&mut self, worker: DeviceId) {
+        let id = self
+            .pending
+            .iter()
+            .find(|(_, batch)| batch.lease.worker == worker)
+            .map(|(id, _)| *id);
+        if let Some(id) = id
+            && let Some(batch) = self.pending.remove(&id)
+            && self.cursor == batch.cursor_after
+        {
+            self.cursor = batch.cursor_before;
+        }
+        self.grid.release(worker);
+    }
+
+    fn assign(&mut self, worker: DeviceId, now_ms: u64) -> Result<TrainingTask, TrainingError> {
+        if self.progress().is_complete() {
+            return Err(TrainingError::InvalidWork);
+        }
+        self.assignments
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.abandon(worker);
+        let cursor_before = self.cursor;
+        let start = if self.text.len() - self.cursor < 2 {
+            self.text[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map_or(0, |(index, _)| index)
+        } else {
+            self.cursor
+        };
+        let mut end = (start + 512).min(self.text.len());
+        while !self.text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let lease = self
+            .grid
+            .issue(worker, now_ms)
+            .map_err(|_| TrainingError::InvalidWork)?;
+        self.pending
+            .retain(|_, batch| self.grid.has_lease(&batch.lease));
+        let task = TrainingTask {
+            recipe: TrainingRecipe::ByteBigramV1,
+            lease,
+            model: encode_parameters(self.grid.params())?,
+            text: self.text[start..end].to_owned(),
+        };
+        let cursor_after = if end == self.text.len() {
+            0
+        } else {
+            self.text[..end]
+                .char_indices()
+                .next_back()
+                .map_or(end, |(index, _)| index)
+        };
+        self.cursor = cursor_after;
+        self.pending.insert(
+            task.lease.id,
+            LeaseBatch {
+                lease: task.lease.clone(),
+                tokens: task.expected_tokens()?,
+                cursor_before,
+                cursor_after,
+            },
+        );
+        Ok(task)
+    }
+
+    fn merge(
+        &mut self,
+        result: TrainingResult,
+        worker: DeviceId,
+        now_ms: u64,
+    ) -> Result<(), TrainingError> {
+        let Some(batch) = self.pending.get(&result.lease.id) else {
+            return Err(TrainingError::InvalidWork);
+        };
+        if batch.lease != result.lease || batch.tokens != result.tokens {
+            return Err(TrainingError::InvalidWork);
+        }
+        let contribution = result.contribution(worker)?;
+        self.grid
+            .merge(std::slice::from_ref(&contribution), now_ms)
+            .map_err(|_| TrainingError::InvalidWork)?;
+        self.pending.remove(&result.lease.id);
+        Ok(())
+    }
+}
+
+impl Computer {
+    async fn training(&self, pred: impl Fn(&TrainingState) -> bool) -> TrainingState {
+        tokio::time::timeout(WAIT, async {
+            loop {
+                if let Event::Training(TrainingEvent(state)) =
+                    self.events.recv().await.expect("runtime running")
+                    && pred(&state)
+                {
+                    return state;
+                }
+            }
+        })
+        .await
+        .expect("training state in time")
+    }
+}
+
+fn read_saved(path: &str) -> (u64, u64) {
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("saved training")).expect("json");
+    (
+        value["rounds"].as_u64().expect("rounds"),
+        value["next_lease"].as_u64().expect("next lease"),
+    )
+}
+
+fn refusal(response: PeerResponse) -> sovra_core::group::Refusal {
+    match response {
+        PeerResponse::Refused { reason } => reason,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+async fn ask_training(
+    net: &Arc<Network>,
+    from: DeviceId,
+    to: DeviceId,
+    group: sovra_core::group::GroupId,
+    work: TrainingPeerRequest,
+) -> Result<PeerResponse, TransportError> {
+    let transport = LoopTransport {
+        me: from,
+        net: net.clone(),
+        closed: tokio::sync::Notify::new(),
+        cipher: Arc::new(FakeCipher {
+            me: from,
+            next: std::sync::atomic::AtomicU64::new(0),
+        }),
+    };
+    transport
+        .request(
+            &PeerAddress {
+                device: to,
+                relay: None,
+                addrs: vec!["loopback".into()],
+            },
+            PeerRequest::Training { group, work },
+        )
+        .await
+}
+
+struct TrainedFamily {
+    _dir: tempfile::TempDir,
+    net: Arc<Network>,
+    mum: Computer,
+    dad: Computer,
+    outsider: Computer,
+    group: sovra_core::group::GroupId,
+    engine: Arc<CountingEngine>,
+    paused: TrainingState,
+    rounds: u64,
+    next_lease: u64,
+    assignments: u64,
+}
+
+impl TrainedFamily {
+    async fn start(n: u8) -> Self {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let engine = CountingEngine::new();
+        let net = Arc::new(Network::default());
+        let mum = Computer::open(
+            &net,
+            n,
+            None,
+            Arc::new(MemoryStore::default()),
+            Some(TrainingConfig {
+                engine: engine.clone(),
+                directory: dir.path().join("training"),
+            }),
+        );
+        mum.send(GroupCommand::Create {
+            name: "Family".into(),
+            your_name: "Mum".into(),
+            computer_name: "Laptop".into(),
+        });
+        mum.roster(|state| state.name == "Family").await;
+        mum.send(GroupCommand::InvitePerson {
+            name: "Dad".into(),
+            role: Role::Member,
+        });
+        let link = mum.link().await;
+        let dad = Computer::start(&net, n + 1);
+        dad.send(GroupCommand::Join {
+            link,
+            computer_name: "Dad's desktop".into(),
+        });
+        let roster = mum.roster(|state| state.people.len() == 2).await;
+        let outsider = Computer::start(&net, n + 2);
+        mum.client
+            .send(Command::Training(TrainingCommand::Start(
+                TrainingSource::Sample,
+            )))
+            .expect("start");
+        mum.training(|state| state.phase == TrainingPhase::Running)
+            .await;
+        mum.client
+            .send(Command::Training(TrainingCommand::Pause))
+            .expect("pause");
+        let paused = mum
+            .training(|state| state.phase == TrainingPhase::Paused)
+            .await;
+        let path = paused.saved_at.clone().expect("saved path");
+        let (rounds, next_lease) = read_saved(&path);
+        assert_eq!(rounds, u64::from(paused.progress.rounds));
+        Self {
+            _dir: dir,
+            net,
+            mum,
+            dad,
+            outsider,
+            group: roster.group,
+            assignments: engine.assignments.load(std::sync::atomic::Ordering::SeqCst),
+            engine,
+            paused,
+            rounds,
+            next_lease,
+        }
+    }
+
+    fn saved(&self) -> (u64, u64) {
+        read_saved(self.paused.saved_at.as_ref().expect("saved path"))
+    }
+
+    async fn share(&mut self) {
+        self.mum
+            .client
+            .send(Command::Training(TrainingCommand::StartShared(
+                TrainingSource::Sample,
+            )))
+            .expect("share selected text");
+        self.paused = self
+            .mum
+            .training(|state| {
+                state.phase == TrainingPhase::Running && state.sharing == Some(self.group)
+            })
+            .await;
+        (self.rounds, self.next_lease) = self.saved();
+        self.assignments = self
+            .engine
+            .assignments
+            .load(std::sync::atomic::Ordering::SeqCst);
+    }
+
+    async fn ask(&self, from: DeviceId, work: TrainingPeerRequest) -> PeerResponse {
+        ask_training(&self.net, from, self.mum.device, self.group, work)
+            .await
+            .expect("delivered")
+    }
+}
+
+fn zero_result(task: &TrainingTask) -> TrainingResult {
+    TrainingResult {
+        lease: task.lease.clone(),
+        tokens: task.expected_tokens().expect("token count"),
+        pseudo_gradient: encode_parameters(&vec![0.0; BYTE_MODEL_PARAMETERS]).expect("gradient"),
+    }
+}
+
+fn rejected(response: &PeerResponse) -> bool {
+    matches!(
+        response,
+        PeerResponse::Training {
+            work: TrainingPeerResponse::Rejected
+        }
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn group_training_help_starts_off_and_only_a_matching_update_is_saved() {
+    let mut family = TrainedFamily::start(81).await;
+    assert!(!family.mum.store.0.lock().expect("store").training_help);
+
+    assert_eq!(
+        refusal(
+            family
+                .ask(family.outsider.device, TrainingPeerRequest::Work)
+                .await
+        ),
+        sovra_core::group::Refusal::NotAMember
+    );
+    assert_eq!(
+        refusal(
+            ask_training(
+                &family.net,
+                family.dad.device,
+                family.mum.device,
+                sovra_core::group::GroupId([8; 32]),
+                TrainingPeerRequest::Work,
+            )
+            .await
+            .expect("delivered")
+        ),
+        sovra_core::group::Refusal::WrongGroup
+    );
+    assert_eq!(
+        refusal(
+            family
+                .ask(family.dad.device, TrainingPeerRequest::Work)
+                .await
+        ),
+        sovra_core::group::Refusal::NotTraining
+    );
+
+    family.mum.send(GroupCommand::SetFederated(
+        sovra_core::group::FederatedSettings {
+            answer: true,
+            ask: false,
+        },
+    ));
+    family
+        .mum
+        .wait(|event| match event {
+            GroupEvent::Federated { settings, .. } if settings.answer => Some(()),
+            _ => None,
+        })
+        .await;
+    family
+        .mum
+        .send(GroupCommand::SetWork(sovra_core::group::WorkSettings {
+            help_others: true,
+            use_group: false,
+        }));
+    family
+        .mum
+        .wait(|event| match event {
+            GroupEvent::Work { settings, .. } if settings.help_others => Some(()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(
+        refusal(
+            family
+                .ask(family.dad.device, TrainingPeerRequest::Work)
+                .await
+        ),
+        sovra_core::group::Refusal::NotTraining
+    );
+    assert_eq!(
+        family
+            .engine
+            .assignments
+            .load(std::sync::atomic::Ordering::SeqCst),
+        family.assignments
+    );
+    assert_eq!(
+        family
+            .engine
+            .learner_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(family.saved(), (family.rounds, family.next_lease));
+    assert!(!family.mum.store.0.lock().expect("store").training_help);
+
+    family.mum.send(GroupCommand::SetTrainingHelp(true));
+    family
+        .mum
+        .wait(|event| matches!(event, GroupEvent::TrainingHelp(true)).then_some(()))
+        .await;
+    assert!(family.mum.store.0.lock().expect("store").training_help);
+    assert!(
+        matches!(
+            family
+                .ask(family.dad.device, TrainingPeerRequest::Work)
+                .await,
+            PeerResponse::Training {
+                work: TrainingPeerResponse::Unavailable
+            }
+        ),
+        "a general permission does not expose a paused local-only run"
+    );
+    family.share().await;
+
+    let assigned = family
+        .ask(family.dad.device, TrainingPeerRequest::Work)
+        .await;
+    let PeerResponse::Training {
+        work: TrainingPeerResponse::Assigned(task),
+    } = assigned
+    else {
+        panic!("expected one assignment, got {assigned:?}");
+    };
+    assert_eq!(task.lease.worker, family.dad.device);
+    assert!(task.parameters(family.dad.device).is_ok());
+    assert!(task.parameters(DeviceId([9; 32])).is_err());
+    assert_eq!(
+        family
+            .engine
+            .assignments
+            .load(std::sync::atomic::Ordering::SeqCst),
+        family.assignments + 1
+    );
+    assert_eq!(
+        family
+            .engine
+            .learner_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    let (rounds, leased) = family.saved();
+    assert_eq!(rounds, family.rounds);
+    assert!(leased > family.next_lease);
+
+    let good = zero_result(&task);
+    let mut changed_worker = good.clone();
+    changed_worker.lease.worker = DeviceId([9; 32]);
+    let mut short = good.clone();
+    short.pseudo_gradient.0.pop();
+    let mut non_finite = good.clone();
+    non_finite.pseudo_gradient.0[..4].copy_from_slice(&f32::NAN.to_le_bytes());
+    let mut wrong_tokens = good.clone();
+    wrong_tokens.tokens = wrong_tokens.tokens.saturating_add(1);
+    let mut changed_model = good.clone();
+    changed_model.lease.base_model = ContentHash::of(b"changed-model");
+    for bad in [
+        changed_worker,
+        short,
+        non_finite,
+        wrong_tokens,
+        changed_model,
+    ] {
+        let response = family
+            .ask(
+                family.dad.device,
+                TrainingPeerRequest::Submit(Box::new(bad)),
+            )
+            .await;
+        assert!(rejected(&response), "{response:?}");
+        assert_eq!(family.saved(), (rounds, leased));
+    }
+
+    let accepted = family
+        .ask(
+            family.dad.device,
+            TrainingPeerRequest::Submit(Box::new(good.clone())),
+        )
+        .await;
+    let PeerResponse::Training {
+        work: TrainingPeerResponse::Accepted(progress),
+    } = accepted
+    else {
+        panic!("expected the matching update to be saved, got {accepted:?}");
+    };
+    assert_eq!(u64::from(progress.rounds), rounds + 1);
+    assert_eq!(family.saved().0, rounds + 1);
+    let replay = family
+        .ask(
+            family.dad.device,
+            TrainingPeerRequest::Submit(Box::new(good)),
+        )
+        .await;
+    assert!(rejected(&replay), "{replay:?}");
+    assert_eq!(family.saved().0, rounds + 1);
+    assert_eq!(
+        family
+            .engine
+            .learner_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dropped_training_helper_does_not_change_the_saved_run() {
+    let mut family = TrainedFamily::start(91).await;
+    family.share().await;
+    let first = family
+        .ask(family.dad.device, TrainingPeerRequest::Work)
+        .await;
+    let PeerResponse::Training {
+        work: TrainingPeerResponse::Assigned(first),
+    } = first
+    else {
+        panic!("expected an assignment, got {first:?}");
+    };
+    let (rounds, leased) = family.saved();
+    assert_eq!(rounds, family.rounds);
+    assert!(leased > family.next_lease);
+
+    family
+        .net
+        .off
+        .lock()
+        .expect("off")
+        .insert(family.dad.device);
+    assert!(
+        ask_training(
+            &family.net,
+            family.dad.device,
+            family.mum.device,
+            family.group,
+            TrainingPeerRequest::Work,
+        )
+        .await
+        .is_err(),
+        "a switched-off computer cannot deliver an update"
+    );
+    assert_eq!(family.saved(), (rounds, leased));
+
+    family
+        .net
+        .off
+        .lock()
+        .expect("off")
+        .remove(&family.dad.device);
+    let again = family
+        .ask(family.dad.device, TrainingPeerRequest::Work)
+        .await;
+    let PeerResponse::Training {
+        work: TrainingPeerResponse::Assigned(again),
+    } = again
+    else {
+        panic!("expected the same interval again, got {again:?}");
+    };
+    assert_eq!(again.text, first.text);
+    assert!(again.lease.id > first.lease.id);
+    assert_eq!(family.saved().0, rounds);
+
+    let accepted = family
+        .ask(
+            family.dad.device,
+            TrainingPeerRequest::Submit(Box::new(zero_result(&again))),
+        )
+        .await;
+    let PeerResponse::Training {
+        work: TrainingPeerResponse::Accepted(progress),
+    } = accepted
+    else {
+        panic!("expected the later update to be saved, got {accepted:?}");
+    };
+    assert_eq!(u64::from(progress.rounds), rounds + 1);
+    let stale = family
+        .ask(
+            family.dad.device,
+            TrainingPeerRequest::Submit(Box::new(zero_result(&first))),
+        )
+        .await;
+    assert!(rejected(&stale), "{stale:?}");
+    assert_eq!(family.saved().0, rounds + 1);
+    assert_eq!(
+        family
+            .engine
+            .learner_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
     );
 }

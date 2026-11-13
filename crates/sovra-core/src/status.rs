@@ -20,7 +20,8 @@ impl RuntimeStatus {
                     version: version.clone(),
                 };
             }
-            Event::Auth(_)
+            Event::Training(_)
+            | Event::Auth(_)
             | Event::Memory(_)
             | Event::Connections(_)
             | Event::Mcp(_)

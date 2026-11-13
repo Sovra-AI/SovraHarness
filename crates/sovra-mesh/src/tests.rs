@@ -35,7 +35,8 @@ impl PeerHandler for Recorder {
             | PeerRequest::Work { .. }
             | PeerRequest::WorkNext { .. }
             | PeerRequest::WorkCancel { .. }
-            | PeerRequest::AuditSync { .. } => PeerResponse::Refused {
+            | PeerRequest::AuditSync { .. }
+            | PeerRequest::Training { .. } => PeerResponse::Refused {
                 reason: Refusal::NotAMember,
             },
         }

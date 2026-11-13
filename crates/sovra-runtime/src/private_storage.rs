@@ -61,10 +61,18 @@ pub(crate) async fn write_private<T: Serialize>(
     name: &str,
     value: &T,
 ) -> Result<(), String> {
-    let root = directory.to_owned();
-    let name = name.to_owned();
     let bytes =
         serde_json::to_vec(value).map_err(|_| "Could not encode private settings.".to_owned())?;
+    write_private_bytes(directory, name, bytes).await
+}
+
+pub(crate) async fn write_private_bytes(
+    directory: &Path,
+    name: &str,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    let root = directory.to_owned();
+    let name = name.to_owned();
     tokio::task::spawn_blocking(move || {
         use std::io::Write as _;
         private_directory(&root)?;
@@ -97,6 +105,14 @@ pub(crate) async fn write_private<T: Serialize>(
 }
 
 pub(crate) async fn read_private(directory: &Path, name: &str) -> Result<Vec<u8>, String> {
+    read_private_bounded(directory, name, 4096).await
+}
+
+pub(crate) async fn read_private_bounded(
+    directory: &Path,
+    name: &str,
+    limit: u64,
+) -> Result<Vec<u8>, String> {
     let directory = directory.to_owned();
     let name = name.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -106,10 +122,10 @@ pub(crate) async fn read_private(directory: &Path, name: &str) -> Result<Vec<u8>
         private_file(&path)?;
         let file = File::open(path).map_err(|error| io_error(&error))?;
         let mut bytes = Vec::new();
-        file.take(4097)
+        file.take(limit.saturating_add(1))
             .read_to_end(&mut bytes)
             .map_err(|error| io_error(&error))?;
-        if bytes.len() > 4096 {
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
             return Err("Private file exceeds its limit.".into());
         }
         Ok(bytes)
