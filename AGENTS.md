@@ -30,6 +30,7 @@ if it fails, say so and show the output.
 
 - **Gitmoji commits:** Every commit message must start with a relevant gitmoji (e.g. `✨ feat(routing): …`, `🐛 fix(ui): …`, `📝 docs: …`).
 - **Mandatory `CHANGELOG.md` update:** Every commit that adds, changes, fixes, or removes functionality **must** update `CHANGELOG.md` under `## [Unreleased]` as part of the commit, and keep `README.md` in sync when user-facing capabilities or workflows change. Never push a commit to `main` without updating `CHANGELOG.md`.
+- **Downloadable executables on a push to `main`:** A push to `main` that updates the downloadable executables bumps the semantic version in the root `Cargo.toml` above the version already published on the GitHub Release and Velopack feed. The same change moves the matching changelog notes under that version heading, so the changelog and the package version stay together. It builds the three release executables at that version: macOS `sovra` on `macos-15`, Windows `sovra.exe` on `windows-latest`, and Linux `sovra` on `ubuntu-24.04`, with `cargo build --release --locked --package sovra-app`. The package version is never the branch name `main`. The download site stays that GitHub Release and Velopack feed. Signing still skips when its secrets are absent. In-app update checking is not added. A push to `main` that does not publish executables does not bump the version, and a version already on the feed is not published again.
 
 ## Manual development launch (all agents)
 

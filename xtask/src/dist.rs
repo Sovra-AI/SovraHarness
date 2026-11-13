@@ -156,4 +156,95 @@ mod tests {
         assert!(find_installer(&dir, "pkg").is_err());
         std::fs::remove_dir_all(dir).expect("remove test directory");
     }
+
+    /// The release workflow and the workspace manifest on disk, not a copy of either.
+    fn shipped_release_sources() -> (String, String) {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives in the workspace")
+            .to_path_buf();
+        let manifest = std::fs::read_to_string(root.join("Cargo.toml")).expect("root Cargo.toml");
+        let workflow = std::fs::read_to_string(root.join(".github/workflows/release.yml"))
+            .expect("shipped release workflow");
+        (manifest, workflow)
+    }
+
+    fn workspace_package_version(manifest: &str) -> String {
+        let mut in_package = false;
+        for line in manifest.lines() {
+            if line == "[workspace.package]" {
+                in_package = true;
+                continue;
+            }
+            if in_package && line.starts_with('[') {
+                break;
+            }
+            if in_package {
+                let Some(rest) = line.strip_prefix("version = ") else {
+                    continue;
+                };
+                return rest.trim().trim_matches('"').to_string();
+            }
+        }
+        panic!("workspace package version missing from Cargo.toml");
+    }
+
+    fn semver_triple(version: &str) -> (u64, u64, u64) {
+        let mut parts = version.split('.');
+        let major = parts
+            .next()
+            .and_then(|part| part.parse().ok())
+            .expect("major");
+        let minor = parts
+            .next()
+            .and_then(|part| part.parse().ok())
+            .expect("minor");
+        let patch = parts
+            .next()
+            .and_then(|part| part.parse().ok())
+            .expect("patch");
+        assert!(
+            parts.next().is_none(),
+            "package version is major.minor.patch"
+        );
+        (major, minor, patch)
+    }
+
+    #[test]
+    fn main_push_builds_three_os_executables_at_the_package_version() {
+        let (manifest, workflow) = shipped_release_sources();
+        let version = workspace_package_version(&manifest);
+        assert_ne!(
+            version, "main",
+            "the package version is never the branch name"
+        );
+        assert!(
+            semver_triple(&version) > (0, 3, 0),
+            "shipped version {version} must be greater than 0.3.0"
+        );
+        assert!(
+            workflow.contains("branches: [main]"),
+            "a push to main runs the release workflow"
+        );
+        for row in [
+            "{ os: macos-15, channel: osx, exe: sovra }",
+            "{ os: windows-latest, channel: win, exe: sovra.exe }",
+            "{ os: ubuntu-24.04, channel: linux, exe: sovra }",
+        ] {
+            assert!(workflow.contains(row), "missing matrix row {row}");
+        }
+        assert!(workflow.contains("cargo build --release --locked --package sovra-app"));
+        assert!(workflow.contains("[workspace.package]"));
+        assert!(workflow.contains("version = "));
+        assert!(workflow.contains("packVersion \"$version\""));
+        assert!(workflow.contains("tag=\"v$version\""));
+        assert!(workflow.contains("--tag \"$tag\""));
+        assert!(workflow.contains("path: target/release/${{ matrix.exe }}"));
+        assert!(!workflow.contains("VERSION=\"${GITHUB_REF_NAME#v}\""));
+        assert!(!workflow.contains("--tag \"$GITHUB_REF_NAME\""));
+        assert!(workflow.contains("HAS_MAC_SIGNING"));
+        assert!(workflow.contains("HAS_WIN_SIGNING"));
+        assert!(workflow.contains("runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'"));
+        assert!(workflow.contains("runner.os == 'Windows' && env.HAS_WIN_SIGNING == 'true'"));
+    }
 }

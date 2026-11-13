@@ -272,8 +272,12 @@ sequenceDiagram
 ## Shipping
 
 `cargo xtask dist` builds a native installer under `target/dist/` (Velopack
-`vpk` 1.2.161). Push a `vX.Y.Z` tag; [`.github/workflows/release.yml`](.github/workflows/release.yml)
-packages each OS. In-app update checking is not wired yet. More:
+`vpk` 1.2.161). A push to `main` that bumps the package version in `Cargo.toml`
+builds the macOS, Windows, and Linux release executables and publishes them on
+the GitHub Release and Velopack feed. The version comes from `Cargo.toml`, never
+the branch name `main`. A matching `vX.Y.Z` tag runs the same
+[`.github/workflows/release.yml`](.github/workflows/release.yml) when it matches
+that version. In-app update checking is not wired yet. More:
 [architecture → distribution](docs/architecture.md#distribution-velopack).
 
 ## Contributing

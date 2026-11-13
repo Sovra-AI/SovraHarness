@@ -143,7 +143,7 @@ debuginfo; unwinding kept so tool execution can be isolated with `catch_unwind` 
 
 ### Distribution: Velopack
 
-Local packaging and the tag-triggered release procedure are in [releasing.md](releasing.md).
+Local packaging and the release procedure (a `main` push that publishes executables, or a matching version tag) are in [releasing.md](releasing.md).
 Install hooks and update feeds exist; in-app update checking is not implemented.
 
 One tool for installers and signed delta auto-update: `.pkg` (macOS, signed + notarized with

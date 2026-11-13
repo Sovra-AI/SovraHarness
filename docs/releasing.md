@@ -29,9 +29,11 @@ explicitly uses the checkout's `target/`, even if `CARGO_TARGET_DIR` is set.
 | Linux | `.AppImage` | ARM64, x86-64 |
 
 These mappings are not proof that every architecture has been release-tested.
-The tag workflow currently packages macOS on `macos-15`, Windows on
-`windows-latest`, and Linux on `ubuntu-24.04`. It does not provide the full local
-architecture matrix. Build each installer on its target OS.
+A push to `main`, and a matching `vX.Y.Z` tag, packages macOS `sovra` on
+`macos-15`, Windows `sovra.exe` on `windows-latest`, and Linux `sovra` on
+`ubuntu-24.04`, with `cargo build --release --locked --package sovra-app`.
+That workflow does not provide the full local architecture matrix. Build each
+installer on its target OS.
 
 ## Prepare a release
 
@@ -42,12 +44,21 @@ architecture matrix. Build each installer on its target OS.
 4. Build and install-test the packages on their target systems. Verify normal
    startup, credential storage and Development mode starting off.
 5. Verify signing configuration and the resulting signatures before distribution.
-6. After review, publish the matching `vX.Y.Z` tag to trigger
-   [release.yml](../.github/workflows/release.yml).
+6. A push to `main` that updates the downloadable executables publishes them.
+   The workflow reads the package version from `Cargo.toml` (never the branch
+   name `main`), keeps that version and the changelog heading together, builds
+   the three release executables, and publishes that version on the existing
+   GitHub Release and Velopack feed. A matching `vX.Y.Z` tag runs the same
+   [release.yml](../.github/workflows/release.yml) when the tag equals `v` plus
+   that package version. Do not publish a version that is already on the feed.
+   Do not bump the version on a push that does not publish executables.
 
-The workflow builds with the lockfile, packages each platform, then publishes
-all three channels to one GitHub Release with Velopack update feeds. It does not
-run the entire CI suite itself, so release from a reviewed revision with green CI.
+The workflow builds with the lockfile (`cargo build --release --locked --package sovra-app`)
+on `macos-15` (`sovra`), `windows-latest` (`sovra.exe`), and `ubuntu-24.04`
+(`sovra`), packages each platform, then publishes all three channels to one
+GitHub Release with Velopack update feeds. Signing still skips when its secrets
+are absent. In-app update checking is not implemented. It does not run the
+entire CI suite itself, so release from a reviewed revision with green CI.
 
 ## Signing
 

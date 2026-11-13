@@ -1,5 +1,8 @@
-# Tag `vX.Y.Z` → build per OS → sign/notarize → Velopack installers + update feeds →
-# GitHub Release. Update feeds are produced; in-app update checks are not implemented yet.
+# Push to main, or a matching vX.Y.Z tag → build per OS → sign/notarize when
+# secrets exist → Velopack installers + update feeds → GitHub Release.
+# The package version comes from Cargo.toml. It is never the branch name.
+# Update feeds are produced; in-app update checks are not implemented yet.
+# A version already published is not published again.
 #
 # Required secrets (set before the first release; jobs skip signing when absent):
 #   macOS:   BUILD_CERTIFICATE_BASE64, INSTALLER_CERTIFICATE_BASE64, P12_PASSWORD,
@@ -13,6 +16,7 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
@@ -54,12 +58,39 @@ jobs:
           dotnet-version: "8.0.x"
       - run: dotnet tool install -g vpk --version 1.2.161
 
+      - name: Read the package version
+        id: package_version
+        shell: bash
+        run: |
+          # The download feed uses the workspace package version. A push to
+          # main must not publish the branch name.
+          version=$(awk '
+            $0 == "[workspace.package]" { in_pkg = 1; next }
+            in_pkg && /^\[/ { in_pkg = 0 }
+            in_pkg && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.toml)
+          if [[ "$version" == "main" || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Package version must be a semantic version, not the branch name (got: ${version:-empty})."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package version v$version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build
         shell: bash
         run: |
           cargo build --release --locked --package sovra-app
           mkdir -p target/pack
           cp "target/release/${{ matrix.exe }}" target/pack/
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: executable-${{ matrix.channel }}
+          path: target/release/${{ matrix.exe }}
+          if-no-files-found: error
 
       - name: Import macOS signing certificates
         if: runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'
@@ -92,8 +123,8 @@ jobs:
       - name: Package with Velopack
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ARGS=(pack --packId "$PACK_ID" --packVersion "$VERSION" --packDir target/pack
+          version="${{ steps.package_version.outputs.version }}"
+          ARGS=(pack --packId "$PACK_ID" --packVersion "$version" --packDir target/pack
                 --mainExe "${{ matrix.exe }}" --channel "${{ matrix.channel }}" --outputDir target/dist)
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             ARGS+=(--bundleId com.sovra.harness --signEntitlements packaging/macos/sovra.entitlements)
@@ -126,6 +157,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
@@ -137,9 +171,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          version=$(awk '
+            $0 == "[workspace.package]" { in_pkg = 1; next }
+            in_pkg && /^\[/ { in_pkg = 0 }
+            in_pkg && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.toml)
+          if [[ "$version" == "main" || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Refusing to publish the branch name as a version (got: ${version:-empty})."
+            exit 1
+          fi
+          tag="v$version"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "$tag is already published. The same version is not published again."
+            exit 0
+          fi
           for channel in osx win linux; do
             vpk upload github --repoUrl "${{ github.server_url }}/${{ github.repository }}" \
               --token "$GH_TOKEN" --outputDir "dist/dist-$channel" --channel "$channel" \
-              --tag "$GITHUB_REF_NAME" --releaseName "SovraHarness $GITHUB_REF_NAME" \
+              --tag "$tag" --releaseName "SovraHarness $tag" \
               --merge --publish
           done

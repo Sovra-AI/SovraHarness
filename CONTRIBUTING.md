@@ -91,7 +91,9 @@ plain-English title, description, and example prompt.
 A new push on a pull request cancels the previous run for that PR. Pushes to
 `main` are never cancelled, so a green result on `main` is trustworthy.
 
-`.github/workflows/release.yml` still runs on a `vX.Y.Z` tag.
+`.github/workflows/release.yml` runs on every push to `main` and on a
+`vX.Y.Z` tag that matches the package version. The package version comes from
+the root `Cargo.toml`. It is never the branch name `main`.
 
 Dependabot opens weekly grouped PRs for GitHub Actions and Rust patch
 updates. `gpui-kit` is ignored; bump it in a dedicated PR after reading that
@@ -122,9 +124,16 @@ Turn on a ruleset (or classic branch protection) on
 
 ## Releasing
 
-Bump `version` in the root `Cargo.toml`, move the **Unreleased** changelog
-entries under the new version, and push a `vX.Y.Z` tag.
-`.github/workflows/release.yml` builds, signs, packages (Velopack), and
-publishes installers and update feeds. Signing is conditional on configured
-credentials; in-app update checks are not implemented. Follow the
-[release guide](docs/releasing.md) before publishing.
+A push to `main` that updates the downloadable executables bumps `version` in
+the root `Cargo.toml` above the version already published on the GitHub Release
+and Velopack feed, and moves the **Unreleased** changelog entries under that
+same version in the same change. The package version is a semantic version,
+never the branch name `main`. `.github/workflows/release.yml` then
+release-builds the three executables — macOS `sovra` on `macos-15`, Windows
+`sovra.exe` on `windows-latest`, and Linux `sovra` on `ubuntu-24.04` — with
+`cargo build --release --locked --package sovra-app`, and publishes them on
+that existing feed. A matching `vX.Y.Z` tag runs the same workflow when the tag
+equals that package version. Signing is skipped when its secrets are absent.
+In-app update checks are not implemented. Do not bump the version on a push
+that does not publish executables, and do not publish the same version twice.
+Follow the [release guide](docs/releasing.md) before publishing.

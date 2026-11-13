@@ -2,16 +2,21 @@
 
 All notable changes to SovraHarness are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
-[Semantic Versioning](https://semver.org/). Releases are cut by pushing a
-`vX.Y.Z` tag (see [README → Shipping](README.md#shipping)); installed apps
-can use the generated Velopack release feed once update checking is integrated.
+[Semantic Versioning](https://semver.org/). A push to `main` that updates the downloadable executables bumps the
+package version above the one already published on the GitHub Release and
+Velopack feed (see [README → Shipping](README.md#shipping)). A matching
+`vX.Y.Z` tag publishes the same version. The version is never the branch
+name `main`. Installed apps do not yet check that feed.
 
-Add entries under **Unreleased** as part of the change that introduces them;
-move them under a version heading when the tag is cut.
+Add entries under **Unreleased** as part of the change that introduces them.
+Move them under the new version heading in the same change that bumps the
+package version.
 
 ## [Unreleased]
 
 ## [0.4.0] — 2026-11-13
+
+- **Release executables follow the package version.** A push to `main` that updates the downloadable apps uses a semantic version above the one already on the GitHub Release, keeps this changelog heading in step, and builds the macOS, Windows, and Linux executables at that version. The version is never the branch name. Signing is skipped when its secrets are absent. The app still does not check for updates itself.
 
 - **A guided tour on first sign-in.** The first time someone signs in, Sovra now
   walks them through every part of the app, one page at a time, in everyday words:
