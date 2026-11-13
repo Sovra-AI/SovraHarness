@@ -69,6 +69,10 @@ jobs:
           df -h /
       - run: rustup show
       - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+        with:
+          # Saving the large Linux target dir after the build failed the job
+          # (and so skipped publishing) even though the build had succeeded.
+          save-if: ${{ runner.os != 'Linux' }}
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "8.0.x"
@@ -221,10 +225,14 @@ jobs:
               --tag "$tag" --releaseName "SovraHarness $tag" \
               --merge --publish
           done
+          # `file#text` only sets a display label, so copy to the real asset
+          # names; otherwise macOS and Linux both upload as `sovra` and clash.
+          mkdir -p named
+          cp dist/executable-osx/sovra named/sovra-macos
+          cp dist/executable-win/sovra.exe named/sovra.exe
+          cp dist/executable-linux/sovra named/sovra-linux
           gh release upload "$tag" --repo "${{ github.repository }}" --clobber \
-            "dist/executable-osx/sovra#sovra-macos" \
-            "dist/executable-win/sovra.exe#sovra.exe" \
-            "dist/executable-linux/sovra#sovra-linux"
+            named/sovra-macos named/sovra.exe named/sovra-linux
           assets=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name')
           for name in "${required[@]}"; do
             if ! grep -qx "$name" <<< "$assets"; then

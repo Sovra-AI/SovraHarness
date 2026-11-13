@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- **Release publishing finishes on its own.** The macOS and Linux executables
+  upload under their own names instead of clashing, and the Linux build no
+  longer fails after it has already succeeded, so a new version reaches the
+  download site without manual steps.
+
 - **Linux download builds reliably.** The Linux release build gets extra memory
   room, so it no longer stops partway and leaves a version without its Linux
   executable.
