@@ -247,6 +247,42 @@ fn render_ai_choices(state: &WorkspaceState, cx: &mut Context<Shell>) -> gpui_ki
             )
             .into_any_element();
     }
+    // A service is linked but no AI is chosen yet: one step is left, and it is on
+    // the Models page right below, so say that rather than offer a second key.
+    if let SetupStage::NeedsModelSelection {
+        connected_service, ..
+    } = &state.setup_stage
+    {
+        return h_flex()
+            .id("tour-ai-pick")
+            .test_support()
+            .w_full()
+            .flex_wrap()
+            .items_center()
+            .gap(t.space.small)
+            .child(
+                Icon::new(IconName::CircleCheck)
+                    .size(t.layout.icon_small)
+                    .text_color(cx.theme().success),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .sovra_text(TextRole::Body, cx)
+                    .child(format!(
+                        "{connected_service} is connected. One step left: choose the AI you want to talk to and press Use this model."
+                    )),
+            )
+            .child(
+                design::primary_button("tour-pick-ai", "Pick your AI", cx)
+                    .small()
+                    .on_click(cx.listener(|shell, _, window, cx| {
+                        shell.handle_llm_setup_action("recommended-models", window, cx);
+                    })),
+            )
+            .into_any_element();
+    }
     let tiles = &t.tiles;
     let online = choice_card(
         "tour-choice-openrouter",

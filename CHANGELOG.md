@@ -18,7 +18,8 @@ move them under a version heading when the tag is cut.
   Sovra a brain" step offers the two easy choices side by side, each with numbered
   steps and its own buttons: **OpenRouter** (online; *Open OpenRouter* and *Paste my
   key*) or **Ollama** (on this computer; *Get Ollama* and *Set up Ollama*). If an AI
-  is already working it says so instead. Every step shows a progress bar, "Step N of
+  is already working it says so instead; if a key is saved but no AI is chosen yet,
+  it points to that last step with a **Pick your AI** button. Every step shows a progress bar, "Step N of
   11", one thing to try, and Back, Next and End tour, which stay on screen in the
   smallest window and at 200% text. Ending or finishing the tour is remembered;
   **Take a guided tour** in the menu or Settings replays it.

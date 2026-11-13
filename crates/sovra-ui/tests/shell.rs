@@ -948,6 +948,42 @@ fn a_connected_ai_is_confirmed_instead_of_asking_again(cx: &mut TestAppContext) 
     .unwrap();
 }
 
+#[gpui_kit::test]
+fn a_saved_key_without_a_chosen_ai_points_to_the_last_step(cx: &mut TestAppContext) {
+    use sovra_core::models::{ModelConnection, ModelEvent, ModelPreferences, ProviderKind};
+
+    let (client, _commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    let mut router = ModelConnection::new("router", ProviderKind::OpenRouter);
+    router.has_credential = true;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![router],
+            preferences: ModelPreferences::default(),
+        }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, Shell::start_system_tour);
+        window.render_frame(cx);
+        window.click("tour-next-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("tour-ai-pick").visible());
+        assert!(window.try_find("tour-ai-choices").is_none());
+        window.click("tour-pick-ai", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Models);
+    })
+    .unwrap();
+}
+
 fn assert_tour_fits(
     cx: &mut TestAppContext,
     width: f32,
