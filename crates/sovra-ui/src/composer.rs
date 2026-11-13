@@ -7,7 +7,7 @@ use gpui_kit::component::{
     input::Textarea, v_flex,
 };
 use gpui_kit::{
-    Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    Context, InteractiveElement as _, IntoElement, ParentElement as _, Role,
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::files::AttachmentState;
@@ -110,6 +110,9 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
             div()
                 .id("skill-command-notice")
                 .test_support()
+                // Announced, and readable over remote control ("Usage: /table …").
+                .role(Role::Alert)
+                .aria_label(notice.clone())
                 .sovra_text(TextRole::Caption, cx)
                 .child(notice.clone())
         }))

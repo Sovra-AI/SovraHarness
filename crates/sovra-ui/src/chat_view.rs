@@ -927,11 +927,17 @@ fn render_user_message(
                         })),
                 )
                 .child(
-                    div().id(("user-text", index)).test_support().child(
-                        TextView::markdown(("user-text-md", index), msg.text.clone())
-                            .selectable(true)
-                            .scrollable(false),
-                    ),
+                    div()
+                        .id(("user-text", index))
+                        .test_support()
+                        // Phones and screen readers read the conversation through these.
+                        .role(Role::Comment)
+                        .aria_label(msg.text.clone())
+                        .child(
+                            TextView::markdown(("user-text-md", index), msg.text.clone())
+                                .selectable(true)
+                                .scrollable(false),
+                        ),
                 ),
         )
         .child(
@@ -1273,6 +1279,7 @@ fn render_assistant_segment(
         content = content.child(if first {
             body.id(("assistant-answer", index))
                 .test_support()
+                .role(Role::Article)
                 .aria_label(sovra_core::hide_memory_citation_tokens(&msg.text))
                 .into_any_element()
         } else {

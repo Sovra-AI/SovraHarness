@@ -122,11 +122,24 @@ fn failed_pairing_does_not_consume_invitation_or_change_allowlist() {
     assert_eq!(access.phones(), []);
     access.pair(1, PHONE, &"é".repeat(40), &SECRET, 1).unwrap();
     access.invite(&SECRET, 2).unwrap();
-    assert_eq!(
-        access.pair(1, PHONE, "Again", &SECRET, 3),
-        Err(AccessError::DuplicatePhone)
-    );
     access.pair(1, OTHER, "Other", &SECRET, 3).unwrap();
+}
+
+#[test]
+fn paired_phone_rescanning_a_valid_code_consumes_it_without_a_duplicate() {
+    let mut access = enabled();
+    access.invite(&SECRET, 0).unwrap();
+    access.pair(1, PHONE, "Phone", &SECRET, 1).unwrap();
+    access.invite(&SECRET, 2).unwrap();
+    // A phone that forgot this computer locally scans a fresh code: the code closes,
+    // so control is not paused until it expires, and the allowlist is unchanged.
+    access.pair(1, PHONE, "Renamed", &SECRET, 3).unwrap();
+    assert_eq!(access.phones().len(), 1);
+    assert_eq!(access.phones()[0].name, "Phone");
+    assert_eq!(
+        access.pair(1, OTHER, "Other", &SECRET, 4),
+        Err(AccessError::InvalidInvitation)
+    );
 }
 
 #[test]

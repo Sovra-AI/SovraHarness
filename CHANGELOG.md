@@ -14,6 +14,19 @@ package version.
 
 ## [Unreleased]
 
+- **Skill messages are announced and readable remotely.** The note under the
+  chat box after a `/` command (for example "Usage: /table <what to present>")
+  is now an accessibility alert, so screen readers announce it and the phone
+  app can show it instead of silently dropping your message.
+- **Chat messages are readable to screen readers and the phone app.** Your
+  messages and Sovra's answers now carry their text as accessibility labels
+  (roles Comment and Article), so assistive tech and phone remote control can
+  read the conversation instead of only seeing it in screenshots.
+- **Re-pairing a known phone no longer pauses phone control.** When a phone
+  that is already paired (for example after choosing Forget on the phone only)
+  scans a fresh pairing code, Sovra now accepts it and closes the code instead
+  of refusing it as a duplicate and leaving it open until it expired.
+
 - **All three executables update together.** A new version on GitHub is updated with the macOS, Windows, and Linux executables. A release that is missing any of them is not treated as finished, and publishing fails unless all three are on that version afterward.
 
 ## [0.4.1] — 2026-11-13

@@ -181,7 +181,10 @@ impl RemoteAccess {
             return Err(AccessError::InvalidInvitation);
         }
         if self.phones.iter().any(|phone| phone.device == peer) {
-            return Err(AccessError::DuplicatePhone);
+            // Already paired (it forgot this computer locally and scanned again): close
+            // the code so existing control is not paused until it expires.
+            self.invitation = None;
+            return Ok(());
         }
         if self.phones.len() >= MAX_PHONES {
             return Err(AccessError::PhoneLimit);
