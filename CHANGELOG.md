@@ -14,6 +14,10 @@ package version.
 
 ## [Unreleased]
 
+- **Linux download builds reliably.** The Linux release build gets extra memory
+  room, so it no longer stops partway and leaves a version without its Linux
+  executable.
+
 - **Public repository documentation.** Streamlined the README around setup,
   capabilities, limitations, and guides; clarified external contributions and
   security reporting, and added community conduct guidance.

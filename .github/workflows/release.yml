@@ -51,6 +51,22 @@ jobs:
           persist-credentials: false
       - if: runner.os == 'Linux'
         run: ./scripts/install-linux-deps.sh
+      # The thin-LTO, single-codegen-unit release link of this workspace runs
+      # the hosted Linux runner out of memory and it drops off ("lost
+      # communication with the server"). Free disk, add swap and compile fewer
+      # crates at once so the Linux executable finishes.
+      - name: Make room for the Linux release build
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo swapoff -a || true
+          sudo fallocate -l 16G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
+          free -h
+          df -h /
       - run: rustup show
       - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
