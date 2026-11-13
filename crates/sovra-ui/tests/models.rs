@@ -448,6 +448,18 @@ fn changing_the_selected_model_starts_on_its_card(cx: &mut TestAppContext) {
             window
                 .within("models-home-active")
                 .click(("models-home-change-choice", 0usize), cx);
+            window.render_frame(cx);
+            for index in 0..2usize {
+                assert_eq!(
+                    window.find(("models-home-change-choice", index)).disabled(),
+                    Some(true)
+                );
+            }
+            // Keep the saved name until the runtime acknowledges the new choice.
+            assert_eq!(
+                window.find("models-home-active-name").label(),
+                Some("Alpha Writer")
+            );
             chosen.remove(0)
         })
         .expect("window exists");
@@ -707,6 +719,20 @@ fn selected_model_change_control_stays_inside_the_window(cx: &mut TestAppContext
             assert!(bounds.right() <= px(width), "{bounds:?}");
             assert!(bounds.bottom() <= px(height), "{bounds:?}");
             assert!(window.find("models-browse-all").visible());
+            assert!(window.try_find(("model-purpose", 0usize)).is_none());
+            assert!(window.try_find("models-home-take-tour").is_none());
+            assert!(window.try_find(("models-home-rec", 0usize)).is_none());
+            scroll_home_element_into_window(window, "models-file-options", width, height, cx);
+            window.click("models-file-options", cx);
+            window.render_frame(cx);
+            scroll_home_element_into_window(window, ("model-purpose", 0usize), width, height, cx);
+            let file_choice = window.find(("model-purpose", 0usize));
+            assert!(file_choice.visible());
+            assert!(file_choice.bounds().right() <= px(width));
+            scroll_home_element_into_window(window, "models-file-options", width, height, cx);
+            window.click("models-file-options", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("model-purpose", 0usize)).is_none());
         })
         .expect("window exists");
         cx.update(|cx| {
@@ -717,15 +743,16 @@ fn selected_model_change_control_stays_inside_the_window(cx: &mut TestAppContext
 
 fn scroll_home_element_into_window(
     window: &mut gpui_kit::Window,
-    id: &str,
+    id: impl Into<gpui_kit::ElementId>,
     width: f32,
     height: f32,
     cx: &mut gpui_kit::App,
 ) {
+    let id = id.into();
     assert!(window.find("models-setup-home").visible());
     for _ in 0..48 {
         window.render_frame(cx);
-        let element = window.find(id.to_owned());
+        let element = window.find(id.clone());
         let bounds = element.bounds();
         if element.visible()
             && bounds.left() >= px(0.)

@@ -95,6 +95,7 @@ pub struct ModelsView {
     pub(crate) pending_activation: Option<ModelKey>,
     /// The selected-model card is showing the loaded models you can switch to.
     pub(crate) changing_active: bool,
+    pub(crate) file_models_open: bool,
     /// Filters that change list by the name, price, or plain "good for" sentence.
     pub(crate) change_search: Entity<InputState>,
     /// The open key form was reached from a setup step, so saving it moves the user
@@ -312,6 +313,7 @@ impl ModelsView {
             width_class: design::WidthClass::Compact,
             pending_activation: None,
             changing_active: false,
+            file_models_open: false,
             change_search,
             setup_flow: false,
             choosing_purpose: None,
@@ -1002,8 +1004,9 @@ impl ModelsView {
                     )
                     .child(
                         h_flex()
+                            .flex_wrap()
                             .gap(t.space.compact)
-                            .child(design::button("models-back-home", "Setup", cx)
+                            .child(design::button("models-back-home", "Back to Models", cx)
                                 .on_click(cx.listener(|view, _, _, cx| view.open_model_home(cx))))
                             .child(
                                 design::button(

@@ -26,6 +26,9 @@ The first sign-in opens an 11-step guided tour of every page in everyday words;
 its second step offers OpenRouter (online) or Ollama (on this computer) with the
 buttons to set either up. See [Getting started](docs/getting-started.md#the-guided-tour).
 
+**Models** shows your current chat model, with **Change model** to switch and
+**Models for files (optional)** for picture, audio and document choices.
+
 AI setup guides you through adding a service's connection key and choosing an
 AI. OpenRouter offers free and paid choices. A saved key means Sovra has stored
 it; use **Check key** to check whether the service accepts it.

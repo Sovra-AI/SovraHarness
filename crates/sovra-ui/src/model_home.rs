@@ -1,9 +1,8 @@
-//! Guided model setup wizard: clear 3-step progression, state-aware cards that
-//! never repeat completed steps, curated model recommendations, and 1-click tour launch.
+//! State-aware model setup and a focused home for the current chat choice.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, button::ButtonVariants as _, h_flex,
-    input::Input, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _, button::ButtonVariants as _,
+    h_flex, input::Input, v_flex,
 };
 use gpui_kit::{
     App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -341,7 +340,7 @@ impl ModelsView {
                     .child(
                         design::page_header(
                             "Models",
-                            "Find the right AI for the way you work.",
+                            "Choose the AI that answers your messages.",
                             cx,
                         )
                         .flex_1()
@@ -416,7 +415,7 @@ impl ModelsView {
                     .w_full()
                     .min_w_0()
                     .gap(t.space.small)
-                    .child(caption("Your active AI", cx))
+                    .child(caption("Your chat model · Ready", cx))
                     .child(
                         div()
                             .w_full()
@@ -441,7 +440,7 @@ impl ModelsView {
                         cx,
                     ))
                     .child(caption(
-                        "Ready for your next conversation. You can switch models anytime.",
+                        "Used for new messages. Changing models starts a fresh AI conversation.",
                         cx,
                     ))
                     .child(
@@ -455,13 +454,10 @@ impl ModelsView {
                                     .on_click(cx.listener(|_, _, _, cx| cx.emit(GoToChat))),
                             )
                             .child(
-                                design::button("models-home-take-tour", "Take a tour", cx)
-                                    .on_click(cx.listener(|_, _, _, cx| cx.emit(StartSystemTour))),
-                            )
-                            .child(
-                                design::button("models-home-change", "Change", cx)
+                                design::button("models-home-change", if self.changing_active { "Cancel change" } else { "Change model" }, cx)
                                     .small()
                                     .accessibility_label("Change the selected AI")
+                                    .toggled(self.changing_active)
                                     .on_click(cx.listener(|view, _, window, cx| {
                                         view.changing_active = !view.changing_active;
                                         if view.changing_active {
@@ -487,7 +483,7 @@ impl ModelsView {
                                         .w_full(),
                                 )
                                 .child(caption(
-                                    "The price is for one message. The sentence says what that model is good for.",
+                                    "Estimated cost for a typical message. Your actual cost depends on how much you send and receive.",
                                     cx,
                                 ))
                                 .children(alternatives.is_empty().then(|| {
@@ -532,10 +528,11 @@ impl ModelsView {
                                             .child(
                                                 design::button(
                                                     ("models-home-change-choice", index),
-                                                    "Use this model",
+                                                    if self.pending_activation.as_ref() == Some(&choice) { "Choosing…" } else { "Use this model" },
                                                     cx,
                                                 )
                                                 .accessibility_label(accessible)
+                                                .disabled(self.pending_activation.is_some())
                                                 .w_full()
                                                 .on_click(cx.listener(move |view, _, _, cx| {
                                                     view.choose_model(&choice, cx);
@@ -590,7 +587,7 @@ impl ModelsView {
                             })),
                         )
                         .child(
-                            design::button("models-home-pick-other", "Pick a different AI", cx)
+                            design::button("models-home-pick-other", "Choose another model", cx)
                                 .ghost()
                                 .on_click(cx.listener(|view, _, _, cx| view.open_model_catalog(cx))),
                         ),
@@ -737,6 +734,38 @@ impl ModelsView {
         content = content.children(active.is_some().then(|| {
             v_flex()
                 .w_full()
+                .gap(t.space.compact)
+                .child(
+                    design::button(
+                        "models-file-options",
+                        if self.file_models_open {
+                            "Hide file settings"
+                        } else {
+                            "Models for files (optional)"
+                        },
+                        cx,
+                    )
+                    .ghost()
+                    .toggled(self.file_models_open)
+                    .icon(if self.file_models_open {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .justify_start()
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.file_models_open = !view.file_models_open;
+                        cx.notify();
+                    })),
+                )
+                .child(caption(
+                    "Choose a different model for pictures, audio or documents when you need one.",
+                    cx,
+                ))
+        }));
+        content = content.children((active.is_some() && self.file_models_open).then(|| {
+            v_flex()
+                .w_full()
                 .gap(t.space.small)
                 .child(
                     div()
@@ -806,23 +835,6 @@ impl ModelsView {
                         }),
                 )
         }));
-        if active.is_some() && !recommendations.is_empty() {
-            content = content.child(
-                v_flex()
-                    .gap(t.space.small)
-                    .child(
-                        div()
-                            .sovra_text(TextRole::SectionTitle, cx)
-                            .child("Other chat models you can switch to"),
-                    )
-                    .children(
-                        recommendations
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, rec)| self.render_recommendation_card(idx, rec, cx)),
-                    ),
-            );
-        }
         if matches!(stage, SetupStage::NeedsConnection) {
             content = content.child(
                 v_flex()

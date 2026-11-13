@@ -11,7 +11,7 @@ Start in **Models**. The setup screen uses a state-aware 2-step stepper (`1 · C
 If the saved key is missing from this computer's credential store, or the chosen model can no longer run (for example, it left the catalog), setup says so and asks for the key or a new model. It never reports "ready" for a choice that cannot answer. The guided tour starts on its own the first time someone signs in, and its second step offers OpenRouter or Ollama with the buttons to set either up. **Take a tour** replays the 11-step walkthrough at any time.
 
 **Browse all models** opens the full library. Every row in the catalog includes a direct **Use Model** / **✓ Active** / **Add Key** button on the right for 1-click activation, while clicking the row title opens the inspection panel. Filters start closed; open them when
-you need specific capabilities. **Setup** returns to the guided screen. A saved
+you need specific capabilities. **Back to Models** returns to the guided screen. A saved
 selection is shown by name, and an empty selection is never described as a working
 default AI. Local/other connections are optional, separate paths; the online path
 requires no extra installed app.
@@ -20,6 +20,37 @@ Use **Models → Browse all models** to browse OpenRouter, installed Ollama mode
 your own local or remote connections. The library refreshes in the background;
 saved results remain visible when a server is offline. **Refresh** requests current
 metadata. Connection cards identify live, cached, loading and failed discovery.
+
+## A focused Models home
+
+Once connected, the home shows **Your chat model · Ready**, its name, estimated
+message cost and advertised strengths. **Go to chat** is the primary action.
+**Change model** reveals a searchable list of ready alternatives; **Cancel change**
+closes it without changing your selection. A choice stays pending until the runtime
+confirms it. Switching starts fresh provider history, explained beside the choice.
+**Models for files (optional)** reveals the existing picture, audio and document
+assignments. The tour stays in the page header. **Browse all models** opens the
+advanced catalogue, including connections, filters, favourites and comparisons.
+
+### Research informing the layout
+
+Reviewed on 2026-11-13; these are native application adaptations, not a claim of
+web accessibility conformance or usability testing with beginners.
+
+- [NN/g: progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/):
+  keep the frequent chat choice prominent; reveal file assignments on request and
+  retain advanced catalogue tools separately. Avoid repeating switch suggestions
+  below the same task.
+- [NN/g: recognition rather than recall](https://www.nngroup.com/articles/recognition-and-recall/):
+  put names, estimated costs and advertised strengths together, with explicit action labels.
+- [GOV.UK: radios](https://design-system.service.gov.uk/components/radios/):
+  distinguish a single choice from multiple selections. Sovra uses native action
+  buttons because choosing is an immediate saved action, rather than an unsubmitted form.
+- [W3C: consistent help](https://www.w3.org/WAI/WCAG22/Understanding/consistent-help.html):
+  keep the tour in one predictable header location.
+- [W3C: reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html):
+  retain a bounded reading column, wrapping actions and vertical scrolling at small
+  widths and enlarged interface sizes.
 
 ## Find and choose a model
 

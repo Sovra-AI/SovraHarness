@@ -14,6 +14,10 @@ package version.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-13
+
+- **Simpler Models home.** Focuses on your current chat model and one change action, keeps file-specific choices behind optional settings, removes repeated recommendations and tour actions, and explains estimated message costs and the effect of switching models.
+
 ## [0.4.0] — 2026-11-13
 
 - **Release executables follow the package version.** A push to `main` that updates the downloadable apps uses a semantic version above the one already on the GitHub Release, keeps this changelog heading in step, and builds the macOS, Windows, and Linux executables at that version. The version is never the branch name. Signing is skipped when its secrets are absent. The app still does not check for updates itself.
