@@ -181,8 +181,22 @@ jobs:
             exit 1
           fi
           tag="v$version"
-          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "$tag is already published. The same version is not published again."
+          # Asset names are unique. macOS and Linux both build `sovra`, so the
+          # release lists them as sovra-macos and sovra-linux. Windows is sovra.exe.
+          # A tag with no assets, or with only some of these, is not updated yet.
+          required=(sovra-macos sovra.exe sovra-linux)
+          have_all=0
+          if assets=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' 2>/dev/null); then
+            have_all=1
+            for name in "${required[@]}"; do
+              if ! grep -qx "$name" <<< "$assets"; then
+                echo "$tag is missing $name"
+                have_all=0
+              fi
+            done
+          fi
+          if [[ "$have_all" == "1" ]]; then
+            echo "$tag already has the macOS, Windows, and Linux executables. The same version is not published again."
             exit 0
           fi
           for channel in osx win linux; do
@@ -190,4 +204,15 @@ jobs:
               --token "$GH_TOKEN" --outputDir "dist/dist-$channel" --channel "$channel" \
               --tag "$tag" --releaseName "SovraHarness $tag" \
               --merge --publish
+          done
+          gh release upload "$tag" --repo "${{ github.repository }}" --clobber \
+            "dist/executable-osx/sovra#sovra-macos" \
+            "dist/executable-win/sovra.exe#sovra.exe" \
+            "dist/executable-linux/sovra#sovra-linux"
+          assets=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name')
+          for name in "${required[@]}"; do
+            if ! grep -qx "$name" <<< "$assets"; then
+              echo "::error::Release $tag is missing the executable $name."
+              exit 1
+            fi
           done

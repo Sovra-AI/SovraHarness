@@ -246,5 +246,41 @@ mod tests {
         assert!(workflow.contains("HAS_WIN_SIGNING"));
         assert!(workflow.contains("runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'"));
         assert!(workflow.contains("runner.os == 'Windows' && env.HAS_WIN_SIGNING == 'true'"));
+        // A release tag with a missing executable must not count as done.
+        assert!(
+            !workflow.contains("is already published. The same version is not published again."),
+            "tag existence alone must not skip publishing"
+        );
+        let required = workflow
+            .find("required=(sovra-macos sovra.exe sovra-linux)")
+            .expect("the release lists macOS sovra, Windows sovra.exe, and Linux sovra");
+        let assets_check = workflow
+            .find("--json assets")
+            .expect("publishing looks at release assets");
+        let skip_when_complete = workflow
+            .find("already has the macOS, Windows, and Linux executables")
+            .expect("a complete release is not published again");
+        let exit_ok = workflow
+            .find("exit 0")
+            .expect("complete release returns success");
+        assert!(
+            required < assets_check
+                && assets_check < skip_when_complete
+                && skip_when_complete < exit_ok
+        );
+        let upload = workflow
+            .find("gh release upload")
+            .expect("uploads all three executables onto the version release");
+        assert!(workflow.contains("dist/executable-osx/sovra#sovra-macos"));
+        assert!(workflow.contains("dist/executable-win/sovra.exe#sovra.exe"));
+        assert!(workflow.contains("dist/executable-linux/sovra#sovra-linux"));
+        assert!(workflow.contains("for channel in osx win linux"));
+        let missing = workflow
+            .find("Release $tag is missing the executable")
+            .expect("a missing executable fails the publish step");
+        let exit_missing = workflow[missing..]
+            .find("exit 1")
+            .expect("missing executable is a failed publish");
+        assert!(exit_ok < upload && upload < missing && exit_missing > 0);
     }
 }

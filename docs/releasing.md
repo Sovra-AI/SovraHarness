@@ -50,8 +50,11 @@ installer on its target OS.
    the three release executables, and publishes that version on the existing
    GitHub Release and Velopack feed. A matching `vX.Y.Z` tag runs the same
    [release.yml](../.github/workflows/release.yml) when the tag equals `v` plus
-   that package version. Do not publish a version that is already on the feed.
-   Do not bump the version on a push that does not publish executables.
+   that package version. A release that already has the macOS, Windows, and
+   Linux executables is not published again. A release that exists but is
+   missing any of those three is not finished: publishing uploads all three
+   and fails unless they are all on that version afterward. Do not bump the
+   version on a push that does not publish executables.
 
 The workflow builds with the lockfile (`cargo build --release --locked --package sovra-app`)
 on `macos-15` (`sovra`), `windows-latest` (`sovra.exe`), and `ubuntu-24.04`

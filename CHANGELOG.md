@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+- **All three executables update together.** A new version on GitHub is updated with the macOS, Windows, and Linux executables. A release that is missing any of them is not treated as finished, and publishing fails unless all three are on that version afterward.
+
 ## [0.4.1] — 2026-11-13
 
 - **Simpler Models home.** Focuses on your current chat model and one change action, keeps file-specific choices behind optional settings, removes repeated recommendations and tour actions, and explains estimated message costs and the effect of switching models.
