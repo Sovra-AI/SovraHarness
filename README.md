@@ -112,8 +112,9 @@ and the [documentation](docs/README.md) for current behavior.
   or verify connection availability. Preview settings last for the session.
 - Website hosting supports static output; server backends and server-side
   rendering are not hosted. Hosting stops when Sovra closes.
-- Phone control has a desktop connection and reference client; the mobile app
-  is not built yet. Groups support borrowing another computer's AI for chat; embedding and indexing work are not handed off.
+- Phone control pairs with the [SovraiOS](https://github.com/Sovra-AI/SovraiOS) and
+  [SovraAndroid](https://github.com/Sovra-AI/SovraAndroid) apps, built from source;
+  no store release is published yet. Groups support borrowing another computer's AI for chat; embedding and indexing work are not handed off.
 
 See [Security](SECURITY.md) for credential storage and execution boundaries.
 

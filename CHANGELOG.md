@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+- **The README points to the phone apps.** Phone control now links to the SovraiOS and
+  SovraAndroid apps, which pair with this desktop, instead of saying no mobile app exists.
 - **Release publishing finishes on its own.** The macOS and Linux executables
   upload under their own names instead of clashing, and the Linux build no
   longer fails after it has already succeeded, so a new version reaches the
