@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 mod destination;
+mod presets;
+pub use presets::{CONNECTION_PRESETS, ConnectionPreset};
 mod language;
 pub use destination::{ModelDestination, ModelWork, model_destinations};
 pub use language::{
@@ -30,6 +32,14 @@ impl ProviderKind {
         }
     }
 
+    /// Local servers need time to load model weights before the first answer.
+    pub fn default_timeout_seconds(self) -> u64 {
+        match self {
+            Self::Ollama | Self::OpenAiCompatible => 600,
+            Self::OpenRouter | Self::Anthropic => 60,
+        }
+    }
+
     pub fn default_url(self) -> &'static str {
         match self {
             Self::OpenRouter => "https://openrouter.ai/api/v1",
@@ -47,6 +57,14 @@ pub enum Authentication {
     ApiKey,
 }
 
+/// Token-limit spelling accepted by a compatible server.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TokenLimitField {
+    MaxCompletionTokens,
+    #[default]
+    MaxTokens,
+}
+
 /// Public connection metadata. Credentials are deliberately absent from this type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelConnection {
@@ -58,6 +76,11 @@ pub struct ModelConnection {
     #[serde(default = "default_api_key_header")]
     pub api_key_header: String,
     pub timeout_seconds: u64,
+    /// Some compatible servers (for example `GPT4All`) only return complete replies.
+    #[serde(default = "default_streaming")]
+    pub streaming: bool,
+    #[serde(default)]
+    pub token_limit_field: TokenLimitField,
     pub organization: String,
     pub project: String,
     pub has_credential: bool,
@@ -84,7 +107,14 @@ impl ModelConnection {
                 ProviderKind::Ollama | ProviderKind::OpenAiCompatible => Authentication::None,
             },
             api_key_header: default_api_key_header(),
-            timeout_seconds: 60,
+            timeout_seconds: kind.default_timeout_seconds(),
+            streaming: true,
+            token_limit_field: match kind {
+                ProviderKind::Ollama | ProviderKind::OpenAiCompatible => TokenLimitField::MaxTokens,
+                ProviderKind::OpenRouter | ProviderKind::Anthropic => {
+                    TokenLimitField::MaxCompletionTokens
+                }
+            },
             organization: String::new(),
             project: String::new(),
             has_credential: false,
@@ -120,6 +150,10 @@ impl ModelConnection {
             None
         }
     }
+}
+
+fn default_streaming() -> bool {
+    true
 }
 
 fn default_api_key_header() -> String {
@@ -1423,6 +1457,13 @@ pub trait ModelProvider: Send + Sync {
         secret: &ModelSecret,
         model: &ModelInfo,
     ) -> Result<ModelInfo, ModelError>;
+}
+
+/// Runtime-owned preparation before contacting a user-selected model server.
+/// Implementations must not launch programs for remote or unrelated providers.
+#[async_trait::async_trait]
+pub trait ModelReadiness: Send + Sync {
+    async fn ensure_ready(&self, connection: &ModelConnection) -> Result<(), ModelError>;
 }
 
 #[cfg(test)]

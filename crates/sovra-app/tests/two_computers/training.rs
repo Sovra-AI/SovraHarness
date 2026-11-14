@@ -421,6 +421,9 @@ async fn leaving_the_group_stops_helping_without_a_separate_stop_command() {
     helper
         .training_state(|state| helping(state, |help| help.accepted_rounds >= 1))
         .await;
+    // Consume the host's pre-acceptance snapshots before comparing counters.
+    // The helper's acknowledgement does not drain the host's event queue.
+    host.training_state(|state| state.helped_rounds >= 1).await;
 
     helper.send(GroupCommand::Leave);
     helper
@@ -437,6 +440,13 @@ async fn leaving_the_group_stops_helping_without_a_separate_stop_command() {
     let help = stopped.helping.expect("helping");
     assert_eq!(help.phase, HelpingPhase::Stopped);
     assert!(help.notice.is_some(), "the page says why it stopped");
+
+    // Membership propagation is asynchronous; compare after both computers
+    // have observed the departure, not after an arbitrary network delay.
+    host.roster("host observed helper leaving", |state| {
+        state.people.len() == 1
+    })
+    .await;
 
     // The host carries on alone, and nothing more from that computer is used.
     let before = host

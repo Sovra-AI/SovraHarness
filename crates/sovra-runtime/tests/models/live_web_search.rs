@@ -42,6 +42,7 @@ async fn live_chat_turn_searches_the_web_through_the_runtime() {
         config,
         None,
         Some(ModelsConfig {
+            readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(OllamaProvider)],
         }),

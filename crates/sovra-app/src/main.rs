@@ -86,6 +86,9 @@ fn main() -> anyhow::Result<()> {
         read_model_keys(),
     );
     let models = sovra_runtime::ModelsConfig {
+        readiness: Some(Arc::new(sovra_runtime::LocalModelServers::new(
+            ollama_programs(),
+        ))),
         repository: model_repository,
         providers: vec![
             Arc::new(sovra_providers::OpenRouterProvider),
@@ -456,4 +459,26 @@ fn credential_store(data_dir: &std::path::Path) -> Arc<dyn sovra_providers::Cred
     } else {
         Arc::new(sovra_providers::OsCredentialStore)
     }
+}
+
+// Desktop launchers often omit user-installed CLI directories from PATH.
+fn ollama_programs() -> Vec<std::path::PathBuf> {
+    let mut programs = vec![std::path::PathBuf::from("ollama")];
+    if let Some(dirs) = directories::BaseDirs::new() {
+        programs.push(dirs.home_dir().join(".local/bin/ollama"));
+    }
+    #[cfg(target_os = "macos")]
+    programs.extend(
+        [
+            "/Applications/Ollama.app/Contents/Resources/ollama",
+            "/opt/homebrew/bin/ollama",
+            "/usr/local/bin/ollama",
+        ]
+        .map(std::path::PathBuf::from),
+    );
+    #[cfg(windows)]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        programs.push(std::path::PathBuf::from(local).join("Programs/Ollama/ollama.exe"));
+    }
+    programs
 }

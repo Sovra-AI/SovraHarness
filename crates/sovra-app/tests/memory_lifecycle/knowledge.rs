@@ -150,6 +150,7 @@ fn indexed_knowledge_reaches_delegates_and_teams_and_revoked_grants_stop_reads()
         AgentConfig::default(),
         None,
         Some(ModelsConfig {
+            readiness: None,
             repository: fixture.repository.clone(),
             providers: vec![Arc::new(CompatibleProvider)],
         }),

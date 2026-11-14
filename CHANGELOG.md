@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-14
+
 - **Training uses your graphics card when it helps.** Sovra now opens the
   computer's graphics card itself, checks that it gives the same answers as
   the processor, and trains Small, Medium and Large models on it when it is
@@ -42,6 +44,27 @@ package version.
   --features gpu --example training_benchmark` runs real training runs and
   reports speed and loss for each starting point, on the graphics card or the
   processor. See [Training: Measuring it](docs/training.md#measuring-it).
+
+
+- **Connections shows every link that is on.** The sidebar mark names each
+  linked kind: WhatsApp, Telegram, Google, GitHub, an online AI, an AI on
+  this computer, a compatible service, and MCP servers. The Connections page
+  lists every kind with its own status, and WhatsApp connect and unlink stay
+  on the WhatsApp card.
+- **Local AI starts when you need it.** Sovra starts an installed Ollama server
+  for a selected local connection, connection tests, refreshes and downloads.
+  Startup is bounded, concurrent requests share one process, existing services
+  are reused, and only Sovra-owned processes stop with the app. Missing installs
+  and startup failures give actionable errors. Local chat turns allow at least
+  ten minutes for cold model loading instead of expiring after one minute.
+- **More local AI setup choices.** Named presets cover LM Studio, llama.cpp,
+  llama-cpp-python, LocalAI, Jan, GPT4All, vLLM, SGLang, text-generation-webui,
+  KoboldCpp, MLX LM, MLC LLM, Xinference, Docker Model Runner, Lemonade and
+  Hugging Face TGI, plus any other OpenAI-compatible
+  server. Presets share discovery and chat transport, allow editable addresses
+  and optional authentication, and use a ten-minute initial wait setting.
+  GPT4All uses complete replies and its supported token-limit field; current
+  llama.cpp defaults to port 9931.
 
 - **Train your own small AI with your group.** The Training page is rebuilt
   around one path: choose what it should learn, a starting point and how

@@ -1595,12 +1595,10 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
         assert!(window.try_find("connection-clear-key").is_none());
         window.click("connection-more-options", cx);
         window.render_frame(cx);
-        window.scroll(
-            "model-connection-form",
-            ScrollDelta::Pixels(point(px(0.), px(-2000.))),
-            cx,
-        );
-        window.render_frame(cx);
+        reveal(window, "connection-timeout", cx);
+        reveal(window, "connection-streaming", cx);
+        reveal(window, "connection-legacy-max-tokens", cx);
+        reveal(window, "connection-timeout", cx);
         assert!(window.find("connection-timeout").visible());
     })
     .unwrap();
@@ -2288,4 +2286,88 @@ fn sign_in_starts_in_english_offers_arabic_and_hides_google_until_set_up(cx: &mu
         assert!(window.find("login-google-btn").visible());
     })
     .expect("window exists");
+}
+
+#[gpui_kit::test]
+fn every_local_preset_is_reachable_at_all_supported_sizes(cx: &mut TestAppContext) {
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (client, _commands, events) = Client::loopback();
+            let (window, shell) = open_shell(cx, client, width, height);
+            events
+                .send_blocking(Event::Models(ModelEvent::Loaded {
+                    connections: vec![],
+                    preferences: ModelPreferences {
+                        interface_scale: InterfaceScale::from_percent(scale),
+                        appearance: if mode.is_dark() {
+                            sovra_core::models::Appearance::Dark
+                        } else {
+                            sovra_core::models::Appearance::Light
+                        },
+                        ..ModelPreferences::default()
+                    },
+                }))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| {
+                    shell.select_tab(sovra_core::NavTab::Connections, cx);
+                });
+                window.render_frame(cx);
+                // The page's real add-connection control, also used by onboarding.
+                for _ in 0..40 {
+                    let bounds = window.find("connection-action-compatible").bounds();
+                    let pane = window.find("connections-scroll").bounds();
+                    if bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
+                        break;
+                    }
+                    window.scroll(
+                        "connections-scroll",
+                        ScrollDelta::Pixels(point(px(0.), px(-150.))),
+                        cx,
+                    );
+                    window.render_frame(cx);
+                }
+                window.click("connection-action-compatible", cx);
+                window.render_frame(cx);
+                for (index, preset) in sovra_core::models::CONNECTION_PRESETS.iter().enumerate() {
+                    let id = ("connection-preset", index);
+                    let mut reached = false;
+                    for _ in 0..60 {
+                        window.render_frame(cx);
+                        let bounds = window.find(id).bounds();
+                        let pane = window.find("connections-scroll").bounds();
+                        assert!(
+                            bounds.left() >= pane.left() && bounds.right() <= pane.right(),
+                            "{} overflows at {width}/{scale}: {bounds:?} {pane:?}",
+                            preset.name
+                        );
+                        if bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
+                            reached = true;
+                            break;
+                        }
+                        let delta = if bounds.top() < pane.top() {
+                            pane.top() - bounds.top()
+                        } else {
+                            pane.bottom() - bounds.bottom()
+                        };
+                        window.scroll(
+                            "connections-scroll",
+                            ScrollDelta::Pixels(point(px(0.), delta)),
+                            cx,
+                        );
+                    }
+                    assert!(
+                        reached,
+                        "{} must be reachable at {width}/{scale}",
+                        preset.name
+                    );
+                    window.click(id, cx);
+                }
+            })
+            .unwrap();
+        }
+    }
 }

@@ -41,6 +41,7 @@ const AI_SETUP_TABS: [NavTab; 6] = [
 
 pub(crate) fn render_sidebar(
     state: &WorkspaceState,
+    connections_summary: Option<&str>,
     history_search_input: &Entity<InputState>,
     rename_thread_input: &Entity<InputState>,
     collapsed: bool,
@@ -85,7 +86,7 @@ pub(crate) fn render_sidebar(
                         .min_h_0()
                         .flex_shrink(1.0)
                         .overflow_y_scroll()
-                        .child(render_nav_list(state, cx)),
+                        .child(render_nav_list(state, connections_summary, cx)),
                 )
                 .child(div().w_full().border_b_1().border_color(border))
                 .child(render_chat_history_section(
@@ -299,7 +300,11 @@ fn nav_tab_meta(tab: NavTab) -> (&'static str, IconName) {
     }
 }
 
-fn nav_context_badge(tab: NavTab, state: &WorkspaceState) -> Option<(String, bool)> {
+fn nav_context_badge(
+    tab: NavTab,
+    state: &WorkspaceState,
+    connections_summary: Option<&str>,
+) -> Option<(String, bool)> {
     match tab {
         NavTab::Models if state.models_loaded && !state.has_active_llm => Some((
             sovra_core::models::chrome(&state.language, ChromeKey::NavSetupBadge).to_owned(),
@@ -311,14 +316,18 @@ fn nav_context_badge(tab: NavTab, state: &WorkspaceState) -> Option<(String, boo
         NavTab::Schedules if !state.schedules.is_empty() => {
             Some((state.schedules.len().to_string(), false))
         }
-        NavTab::Connections if state.connections.whatsapp.is_connected() => {
-            Some(("WhatsApp".to_owned(), true))
-        }
+        // The page's catalogue already decided which kinds are linked. Naming
+        // only WhatsApp hid Google, GitHub, Telegram, AI setup, and MCP.
+        NavTab::Connections => connections_summary.map(|summary| (summary.to_owned(), true)),
         _ => None,
     }
 }
 
-fn render_nav_list(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+fn render_nav_list(
+    state: &WorkspaceState,
+    connections_summary: Option<&str>,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let active = state.active_tab;
     let tour = state.tour_step.map(|s| (s.target_tab(), s.step_number()));
@@ -331,7 +340,7 @@ fn render_nav_list(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl Into
             tab,
             tab == active,
             spot,
-            nav_context_badge(tab, state),
+            nav_context_badge(tab, state, connections_summary),
             cx,
         ));
     }
@@ -354,7 +363,7 @@ fn render_nav_list(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl Into
             tab,
             tab == active,
             spot,
-            nav_context_badge(tab, state),
+            nav_context_badge(tab, state, connections_summary),
             cx,
         ));
     }
@@ -372,12 +381,18 @@ fn badge_pill(
     div()
         .id(id)
         .test_support()
+        // The full list stays available when the pill is narrower than the names.
+        .aria_label(text.clone())
+        .max_w(t.layout.filter_width)
+        .min_w_0()
+        .flex_shrink(1.)
         .px(t.space.compact)
         .py(t.space.hair)
         .rounded(t.radius.pill)
         .bg(bg)
         .sovra_text(TextRole::Caption, cx)
         .text_color(fg)
+        .truncate()
         .child(text)
 }
 

@@ -1450,7 +1450,7 @@ impl ModelsView {
                 "No matching models"
             };
             let help = if self.filter.scope == CatalogScope::Ollama {
-                "Nothing here yet. Open the Ollama app on this computer, then press Refresh, or use Download a model."
+                "Nothing here yet. Install Ollama, then press Refresh or use Download a model. Sovra starts the local server for you."
             } else if self.filter.scope == CatalogScope::Custom {
                 "Nothing here yet. Use Connections to add another service, such as LM Studio."
             } else {

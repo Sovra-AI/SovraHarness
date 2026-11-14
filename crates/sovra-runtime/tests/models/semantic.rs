@@ -223,6 +223,7 @@ fn start(fixture: &Fixture, index: Arc<Index>) -> Client {
         AgentConfig::default(),
         None,
         Some(ModelsConfig {
+            readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(OllamaProvider), Arc::new(CompatibleProvider)],
         }),

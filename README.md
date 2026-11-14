@@ -122,7 +122,10 @@ After launching:
 1. Create or open a local account.
 2. Follow the guided tour or open **Models** to connect a service and choose a
    chat model. Cloud services may require a key and charge for usage. For Ollama,
-   install and start the local model server separately.
+   install Ollama once; Sovra starts its local server when you use it.
+   LM Studio, llama.cpp, LocalAI, Jan, GPT4All, vLLM, SGLang,
+   text-generation-webui, KoboldCpp, MLX LM, MLC LLM, Xinference and
+   llama-cpp-python, Docker Model Runner, Lemonade and Hugging Face TGI have named presets. See [local model setup](docs/local-models.md).
 3. Send a message in **Chat**, or open **Skills** to try an example.
 
 To try training, open **Training** and press **Start training**. It needs no

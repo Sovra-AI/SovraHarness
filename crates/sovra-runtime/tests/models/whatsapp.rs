@@ -161,6 +161,7 @@ async fn main_chat_delegates_to_messaging_but_only_native_review_can_send_once()
         AgentConfig::default(),
         None,
         Some(ModelsConfig {
+            readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(CompatibleProvider)],
         }),

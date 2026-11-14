@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, TestAppContext, px, size};
+use sovra_core::NavTab;
 use sovra_core::connection_catalogue::{first_screen_asks_for_secret, whatsapp_phase};
 use sovra_core::connections::{ConnectionEvent, LinkedDevice, TelegramStatus, WhatsAppStatus};
-use sovra_core::google::{GoogleEvent, GoogleState};
+use sovra_core::google::{GoogleAccount, GoogleEvent, GoogleState};
 use sovra_core::mcp::McpService;
 use sovra_core::models::{CatalogState, ModelConnection};
 use sovra_core::{CatalogueKind, CatalogueSources, Event, LinkPhase, Timestamp, catalogue_from};
@@ -197,6 +198,194 @@ fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppCo
                 "{id} is not edited from Settings"
             );
         }
+    })
+    .unwrap();
+}
+
+fn linked_whatsapp() -> WhatsAppStatus {
+    WhatsAppStatus::Connected {
+        device: LinkedDevice {
+            phone_display: "+1 555-0142".into(),
+            device_jid: "15550142:1@s.whatsapp.net".into(),
+            companion_name: "Sovra".into(),
+            linked_at: Timestamp(10_000),
+        },
+        online: true,
+    }
+}
+
+fn connections_mark(window: &gpui_kit::Window) -> Option<String> {
+    window
+        .try_find(("nav-context-badge", NavTab::Connections as usize))
+        .and_then(|item| item.label().map(str::to_owned))
+}
+
+#[gpui_kit::test]
+fn connections_nav_names_every_linked_kind(cx: &mut TestAppContext) {
+    let (client, _commands, events) = sovra_runtime::Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let window = cx.open_window(size(px(1100.), px(2400.)), |window, cx| {
+        let shell = cx.new(|cx| sovra_ui::Shell::new(0, window, cx));
+        Root::new(shell, window, cx)
+    });
+    events
+        .send_blocking(Event::Google(GoogleEvent::Changed(
+            GoogleState::NotConnected,
+        )))
+        .expect("loopback accepts the scripted sign-in state");
+    events
+        .send_blocking(Event::GitHub(sovra_core::github::GitHubEvent::Changed {
+            state: sovra_core::github::GitHubState::NotConnected,
+            device_sign_in: true,
+        }))
+        .expect("loopback accepts the scripted GitHub state");
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::StatusChanged(
+            linked_whatsapp(),
+        )))
+        .expect("loopback accepts the scripted WhatsApp status");
+    settle(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.click("nav-connections", cx);
+        window.render_frame(cx);
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            Theme::change(mode, Some(window), cx);
+            window.render_frame(cx);
+            let summary = connections_mark(window).expect("WhatsApp on its own still shows a mark");
+            assert!(summary.contains("WhatsApp"), "{summary}");
+            for other in [
+                "Google",
+                "Telegram",
+                "GitHub",
+                "MCP servers",
+                "An online AI",
+                "An AI on this computer",
+                "Another compatible service",
+            ] {
+                assert!(
+                    !summary.contains(other),
+                    "{summary} should leave {other} off while only WhatsApp is linked"
+                );
+            }
+            assert_eq!(
+                window.find("connection-status-whatsapp").label(),
+                Some("Linked")
+            );
+            for kind in CatalogueKind::ALL {
+                if kind == CatalogueKind::WhatsApp {
+                    continue;
+                }
+                let slug = kind.slug();
+                assert_eq!(
+                    window.find(format!("connection-status-{slug}")).label(),
+                    Some("Not linked"),
+                    "{slug}"
+                );
+            }
+        }
+        window.click("connection-action-whatsapp", cx);
+        window.render_frame(cx);
+        assert!(window.find("whatsapp-disconnect-top").visible());
+        window.click("connections-back", cx);
+        window.render_frame(cx);
+        assert!(window.find("connection-card-whatsapp").visible());
+    })
+    .unwrap();
+
+    events
+        .send_blocking(Event::Google(GoogleEvent::Changed(GoogleState::Connected(
+            GoogleAccount::default(),
+        ))))
+        .expect("loopback accepts the scripted Google account");
+    settle(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            Theme::change(mode, Some(window), cx);
+            window.render_frame(cx);
+            assert!(window.find("connections-page").visible());
+            assert!(
+                window.try_find("settings-connections").is_none(),
+                "the catalogue stays up while several kinds are linked"
+            );
+            let summary = connections_mark(window).expect("linked kinds show a mark");
+            assert_ne!(summary, "WhatsApp");
+            assert!(summary.contains("WhatsApp"), "{summary}");
+            assert!(summary.contains("Google"), "{summary}");
+            for kind in CatalogueKind::ALL {
+                let slug = kind.slug();
+                assert!(
+                    window.find(format!("connection-card-{slug}")).visible(),
+                    "{slug}"
+                );
+                let expected = match kind {
+                    CatalogueKind::WhatsApp | CatalogueKind::Google => "Linked",
+                    _ => "Not linked",
+                };
+                assert_eq!(
+                    window.find(format!("connection-status-{slug}")).label(),
+                    Some(expected),
+                    "{slug}"
+                );
+            }
+            for id in [
+                "connection-key",
+                "telegram-token-input",
+                "google-client-id",
+                "mcp-service-address",
+                "connection-url",
+            ] {
+                assert!(
+                    window.try_find(id).is_none(),
+                    "{id} is not on the first screen"
+                );
+            }
+        }
+    })
+    .unwrap();
+
+    events
+        .send_blocking(Event::Connections(ConnectionEvent::StatusChanged(
+            WhatsAppStatus::Disconnected,
+        )))
+        .expect("loopback accepts a cleared WhatsApp status");
+    events
+        .send_blocking(Event::Google(GoogleEvent::Changed(
+            GoogleState::NotConnected,
+        )))
+        .expect("loopback accepts a cleared Google status");
+    settle(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            Theme::change(mode, Some(window), cx);
+            window.render_frame(cx);
+            let summary = connections_mark(window);
+            assert!(
+                summary
+                    .as_ref()
+                    .is_none_or(|text| !text.contains("WhatsApp")),
+                "{summary:?}"
+            );
+            assert_eq!(
+                window.find("connection-status-whatsapp").label(),
+                Some("Not linked")
+            );
+            assert_eq!(
+                window.find("connection-status-google").label(),
+                Some("Not linked")
+            );
+        }
+        window.click("connection-action-whatsapp", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("whatsapp-connect-btn").label(),
+            Some("Connect WhatsApp")
+        );
+        window.click("connections-back", cx);
+        window.render_frame(cx);
+        assert!(window.find("connection-card-whatsapp").visible());
     })
     .unwrap();
 }

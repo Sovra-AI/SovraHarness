@@ -91,6 +91,7 @@ impl Fixture {
             AgentConfig::default(),
             None,
             Some(ModelsConfig {
+                readiness: None,
                 repository: self.repo.clone(),
                 providers: vec![
                     Arc::new(OpenRouterProvider),
@@ -229,6 +230,20 @@ async fn custom_chat_supports_api_key_headers_without_bearer() {
 }
 
 async fn custom_chat_with_authentication(authentication: Authentication) {
+    custom_chat_with_options(authentication, true).await;
+}
+
+#[tokio::test]
+async fn gpt4all_preset_uses_complete_replies_and_supported_request_fields() {
+    let preset = CONNECTION_PRESETS
+        .iter()
+        .find(|preset| preset.name == "GPT4All")
+        .unwrap();
+    assert!(!preset.streaming);
+    custom_chat_with_options(preset.authentication, preset.streaming).await;
+}
+
+async fn custom_chat_with_options(authentication: Authentication, streaming: bool) {
     let server = Server::new(move |request| {
         let headers = request.headers.to_ascii_lowercase();
         match authentication {
@@ -249,6 +264,34 @@ async fn custom_chat_with_authentication(authentication: Authentication) {
         }
         assert_eq!(request.path, "/v1/chat/completions");
         assert_eq!(request.body["model"], "local-chat");
+        if !streaming {
+            // GPT4All's server rejects streaming and unrecognized request fields.
+            assert_ne!(request.body["stream"], true);
+            for field in request.body.as_object().unwrap().keys() {
+                assert!(
+                    [
+                        "model",
+                        "messages",
+                        "stream",
+                        "temperature",
+                        "top_p",
+                        "max_tokens"
+                    ]
+                    .contains(&field.as_str()),
+                    "GPT4All does not accept {field}"
+                );
+            }
+            for message in request.body["messages"].as_array().unwrap() {
+                assert!(message["content"].is_string());
+                assert!(
+                    message
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .all(|field| ["role", "content"].contains(&field.as_str()))
+                );
+            }
+        }
         if request.body["stream"] == true {
             Reply {
                 status: 200,
@@ -269,6 +312,12 @@ async fn custom_chat_with_authentication(authentication: Authentication) {
     let mut connection = ModelConnection::new("custom", ProviderKind::OpenAiCompatible);
     connection.base_url = format!("{}/v1", server.url());
     connection.authentication = authentication;
+    connection.streaming = streaming;
+    connection.token_limit_field = if streaming {
+        TokenLimitField::MaxCompletionTokens
+    } else {
+        TokenLimitField::MaxTokens
+    };
     connection.api_key_header = "api-key".into();
     connection.has_credential = authentication != Authentication::None;
     let fixture = Fixture::new(
@@ -1042,6 +1091,7 @@ async fn purpose_assignment_keeps_chat_model_and_sends_real_images_and_document_
         AgentConfig::default(),
         None,
         Some(ModelsConfig {
+            readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(CompatibleProvider)],
         }),
@@ -1186,5 +1236,98 @@ async fn uploads_report_results_and_missing_storage_explains_how_to_recover() {
         failed,
         Event::FilePrepared(FilePrepared { result: Err(_), .. })
     ));
+    stop(client).await;
+}
+
+#[derive(Default)]
+struct ReadinessProbe(AtomicU64);
+#[async_trait::async_trait]
+impl ModelReadiness for ReadinessProbe {
+    async fn ensure_ready(&self, _: &ModelConnection) -> Result<(), ModelError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(ModelError(
+            "Test Ollama startup failed before inference".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn local_startup_is_explicit_and_inference_reports_readiness_failures() {
+    let server = Server::new(|request| {
+        assert_eq!(request.path, "/api/tags");
+        Reply::json(&json!({"models":[]}))
+    });
+    let mut connection = ModelConnection::new("local", ProviderKind::Ollama);
+    connection.base_url = server.url();
+    connection.manual_models.push(ModelInfo {
+        id: "manual-chat".into(),
+        name: "Manual chat".into(),
+        manual: true,
+        output_modalities: vec!["text".into()],
+        ..ModelInfo::default()
+    });
+    let fixture = Fixture::new(connection.clone(), None);
+    let readiness = Arc::new(ReadinessProbe::default());
+    let client = sovra_runtime::start_with_models(
+        "test",
+        AgentConfig::default(),
+        None,
+        Some(ModelsConfig {
+            readiness: Some(readiness.clone()),
+            repository: fixture.repo.clone(),
+            providers: vec![Arc::new(OllamaProvider)],
+        }),
+    )
+    .unwrap();
+    catalog(&client).await;
+    assert_eq!(
+        readiness.0.load(Ordering::SeqCst),
+        0,
+        "an unused saved connection must not start a server"
+    );
+    send(
+        &client,
+        ModelCommand::Refresh {
+            connection_id: connection.id.clone(),
+        },
+    );
+    event(&client, |event| matches!(event, Event::Models(ModelEvent::CatalogFailed { message, .. }) if message.contains("startup failed"))).await;
+    assert_eq!(readiness.0.load(Ordering::SeqCst), 1);
+    send(
+        &client,
+        ModelCommand::TestConnection {
+            connection: connection.clone(),
+            credential: CredentialChange::Keep,
+        },
+    );
+    event(&client, |event| matches!(event, Event::Models(ModelEvent::Error(message)) if message.contains("startup failed"))).await;
+    assert_eq!(readiness.0.load(Ordering::SeqCst), 2);
+    send(
+        &client,
+        ModelCommand::Activate {
+            key: ModelKey {
+                connection_id: connection.id.clone(),
+                model_id: "manual-chat".into(),
+            },
+        },
+    );
+    event(&client, |event| matches!(event, Event::Models(ModelEvent::PreferencesChanged(p)) if p.active.is_some())).await;
+    client
+        .send(Command::RunPrompt {
+            context: None,
+            session_id: "startup".into(),
+            prompt: "Hello".into(),
+        })
+        .unwrap();
+    event(&client, |event| matches!(event, Event::AgentError { message, .. } if message.contains("startup failed"))).await;
+    assert!(readiness.0.load(Ordering::SeqCst) >= 3);
+    assert!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|request| request.path == "/api/tags")
+    );
     stop(client).await;
 }

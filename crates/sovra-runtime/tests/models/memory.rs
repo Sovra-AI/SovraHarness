@@ -527,6 +527,7 @@ async fn start(server: &Server, store: Arc<Store>, enabled: bool) -> (Fixture, C
             Box::pin(async move { Ok(store as Arc<dyn MemoryStore>) })
         })),
         Some(ModelsConfig {
+            readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(CompatibleProvider)],
         }),
@@ -1219,7 +1220,8 @@ async fn selected_model_budget_trims_restored_context_and_rejects_oversized_curr
         assert!(!text.contains("OLDEST"));
         assert!(text.contains("shortened to fit"));
         assert!(!text.contains("sovra_optional_context"));
-        assert_eq!(request.body["max_completion_tokens"], 2048);
+        assert_eq!(request.body["max_tokens"], 2048);
+        assert!(request.body.get("max_completion_tokens").is_none());
         assert!(
             text.len() + 2048 < 8192,
             "assembled HTTP request plus reply reserve must fit this fixture"
@@ -1628,6 +1630,7 @@ async fn visible_conversation_context_survives_restart_and_model_change_with_rem
             Box::pin(async move { Ok(restored_store as Arc<dyn MemoryStore>) })
         })),
         Some(ModelsConfig {
+            readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(CompatibleProvider)],
         }),

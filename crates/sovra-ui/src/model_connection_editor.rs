@@ -18,7 +18,7 @@ use gpui_kit::{
 };
 use sovra_core::models::{
     Authentication, CredentialChange, ModelCommand, ModelConnection, ModelError, ModelInfo,
-    ModelSecret, ProviderKind,
+    ModelSecret, ProviderKind, TokenLimitField,
 };
 
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
@@ -308,6 +308,9 @@ impl ModelsView {
                     form.url
                         .update(cx, |s, cx| s.set_value(kind.default_url(), window, cx));
                     let auth = ModelConnection::new("draft", kind).authentication;
+                    form.timeout.update(cx, |s, cx| {
+                        s.set_value(kind.default_timeout_seconds().to_string(), window, cx);
+                    });
                     form.authentication.update(cx, |s, cx| {
                         s.set_selected_value(&auth_value(auth).to_owned(), window, cx);
                     });
@@ -340,6 +343,9 @@ impl ModelsView {
                 .update(cx, |s, cx| s.set_value(name.to_owned(), window, cx));
             form.url
                 .update(cx, |s, cx| s.set_value(url.to_owned(), window, cx));
+            form.timeout.update(cx, |s, cx| {
+                s.set_value(kind.default_timeout_seconds().to_string(), window, cx);
+            });
             form.authentication.update(cx, |s, cx| {
                 s.set_selected_value(&auth_value(auth).to_owned(), window, cx);
             });
@@ -408,10 +414,10 @@ impl ModelsView {
         let hint = match kind {
             ProviderKind::OpenRouter => "Usually https://openrouter.ai/api/v1.",
             ProviderKind::Ollama => {
-                "If Ollama runs on this computer, this is usually http://localhost:11434."
+                "Install Ollama once. Sovra starts its server when you test, refresh, download or use a local model. The address is usually http://localhost:11434."
             }
             ProviderKind::OpenAiCompatible => {
-                "Copy this from the program you're connecting to. It usually ends in /v1, for example http://localhost:1234/v1 for LM Studio."
+                "Start the server and load a model in that program, then copy its address here (usually ending in /v1). Add its key only if authentication is enabled."
             }
             ProviderKind::Anthropic => "Usually https://api.anthropic.com.",
         };
@@ -453,53 +459,29 @@ impl ModelsView {
             ))
             .child(
                 h_flex().flex_wrap().gap(t.space.compact).children(
-                    [
-                        (
-                            "OpenRouter",
-                            ProviderKind::OpenRouter,
-                            "https://openrouter.ai/api/v1",
-                            Authentication::Bearer,
-                        ),
-                        (
-                            "Ollama",
-                            ProviderKind::Ollama,
-                            "http://localhost:11434",
-                            Authentication::None,
-                        ),
-                        (
-                            "LM Studio",
-                            ProviderKind::OpenAiCompatible,
-                            "http://localhost:1234/v1",
-                            Authentication::None,
-                        ),
-                        (
-                            "vLLM",
-                            ProviderKind::OpenAiCompatible,
-                            "http://localhost:8000/v1",
-                            Authentication::None,
-                        ),
-                        (
-                            "llama.cpp",
-                            ProviderKind::OpenAiCompatible,
-                            "http://localhost:8080/v1",
-                            Authentication::None,
-                        ),
-                        (
-                            "Anthropic",
-                            ProviderKind::Anthropic,
-                            "https://api.anthropic.com",
-                            Authentication::ApiKey,
-                        ),
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (name, kind, url, auth))| {
-                        design::button(("connection-preset", index), name, cx)
-                            .small()
-                            .on_click(cx.listener(move |view, _, window, cx| {
-                                view.preset(name, kind, url, auth, window, cx);
-                            }))
-                    }),
+                    sovra_core::models::CONNECTION_PRESETS
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(index, preset)| {
+                            let sovra_core::models::ConnectionPreset {
+                                name,
+                                kind,
+                                url,
+                                authentication: auth,
+                                streaming,
+                                token_limit_field,
+                            } = preset;
+                            design::button(("connection-preset", index), name, cx)
+                                .small()
+                                .on_click(cx.listener(move |view, _, window, cx| {
+                                    view.preset(name, kind, url, auth, window, cx);
+                                    if let Some(form) = &mut view.connection_form {
+                                        form.original.streaming = streaming;
+                                        form.original.token_limit_field = token_limit_field;
+                                    }
+                                }))
+                        }),
                 ),
             )
             .child(field(
@@ -580,10 +562,40 @@ impl ModelsView {
                     "connection-timeout",
                     "Wait time (seconds)",
                     &form.timeout,
-                    "How long to wait for a reply before giving up. Between 5 and 600.",
+                    "Wait setting: 5–600 seconds. Chat on this computer allows at least 600 seconds for the model to load.",
                     cx,
                 ));
             if matches!(kind, ProviderKind::OpenAiCompatible | ProviderKind::Ollama) {
+                content = content.child(
+                    Checkbox::new("connection-streaming").cursor_pointer()
+                        .label("Show the reply as it arrives")
+                        .checked(form.original.streaming)
+                        .on_click(cx.listener(|view, checked, _, cx| {
+                            if let Some(form) = &mut view.connection_form { form.original.streaming = *checked; }
+                            cx.notify();
+                        }))
+                ).child(caption("Turn this off if the server only supports complete replies, such as GPT4All.", cx));
+                content = content
+                    .child(
+                        Checkbox::new("connection-legacy-max-tokens")
+                            .cursor_pointer()
+                            .label("Use max_tokens for the reply limit")
+                            .checked(form.original.token_limit_field == TokenLimitField::MaxTokens)
+                            .on_click(cx.listener(|view, checked, _, cx| {
+                                if let Some(form) = &mut view.connection_form {
+                                    form.original.token_limit_field = if *checked {
+                                        TokenLimitField::MaxTokens
+                                    } else {
+                                        TokenLimitField::MaxCompletionTokens
+                                    };
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(caption(
+                        "For servers that reject max_completion_tokens, such as GPT4All.",
+                        cx,
+                    ));
                 content = content.child(field(
                     "connection-key-header",
                     "Key header name",

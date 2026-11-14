@@ -18,7 +18,8 @@ use gpui_kit::{
 };
 use sovra_core::Command;
 use sovra_core::connection_catalogue::{
-    CatalogueKind, CatalogueSources, ConnectionCatalogue, LinkPhase, catalogue_from,
+    CatalogueKind, CatalogueSources, ConnectionCatalogue, KINDS, LinkPhase, catalogue_from,
+    whatsapp_phase,
 };
 use sovra_core::connections::{
     ConnectionCommand, ConnectionsState, TelegramSettings, TelegramStatus, WhatsAppQrTicket,
@@ -68,55 +69,73 @@ impl ModelsView {
         let t = design::tokens(cx);
         let state = &self.connections;
         let linked = state.whatsapp.is_linked();
+        let phase = whatsapp_phase(&state.whatsapp);
+        let phase_color = match phase {
+            LinkPhase::Linked => cx.theme().success,
+            LinkPhase::NeedsYou => cx.theme().danger,
+            LinkPhase::NotLinked | LinkPhase::Working => t.text_secondary,
+        };
+        let copy = KINDS
+            .iter()
+            .find(|row| row.kind == CatalogueKind::WhatsApp)
+            .expect("WhatsApp is one of the shipped connections");
 
-        let mut section = settings_section(
-            "settings-connections",
-            "WhatsApp",
-            "Link your own WhatsApp to this app. Click Connect, scan the code with your phone, then message yourself on WhatsApp to talk to Sovra. You can also ask in Chat to prepare a WhatsApp message and review it before sending.",
-            cx,
-        )
-        .child(
-            h_flex()
-                .w_full()
-                .flex_wrap()
-                .items_center()
-                .justify_between()
-                .gap(t.space.small)
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(t.space.compact)
-                        .child(
-                            Icon::new(IconName::MessageCircle)
-                                .small()
-                                .text_color(cx.theme().link),
-                        )
-                        .child(div().sovra_text(TextRole::Body, cx).child("WhatsApp"))
-                        .child(
-                            div()
-                                .id("whatsapp-status-badge")
-                                .test_support()
-                                .child(pill(state.whatsapp.badge_label().to_owned(), cx)),
-                        ),
-                )
-                .child(if linked {
-                    design::button("whatsapp-disconnect-top", "Unlink WhatsApp", cx)
-                        .small()
-                        .ghost()
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.send_connection(ConnectionCommand::DisconnectWhatsApp, cx);
-                        }))
-                } else {
-                    design::primary_button("whatsapp-connect-btn", "Connect WhatsApp", cx)
-                        .small()
-                        .icon(IconName::MessageCircle)
-                        .tooltip("Show a code to scan with WhatsApp on your phone")
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.send_connection(ConnectionCommand::StartWhatsAppPairing, cx);
-                        }))
-                }),
-        );
+        let mut section = v_flex()
+            .id("settings-connections")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .p(t.space.medium)
+            .gap(t.space.small)
+            .sovra_surface(Surface::Matte, cx)
+            .child(
+                div()
+                    .id("settings-connections-title")
+                    .test_support()
+                    .aria_label(copy.title)
+                    .sovra_text(TextRole::SectionTitle, cx)
+                    .child(copy.title),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .sovra_text(TextRole::Body, cx)
+                    .child(copy.sentence),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap(t.space.small)
+                    .child(
+                        div()
+                            .id("whatsapp-status-badge")
+                            .test_support()
+                            .aria_label(phase.label())
+                            .min_w_0()
+                            .text_color(phase_color)
+                            .sovra_text(TextRole::Caption, cx)
+                            .child(phase.label()),
+                    )
+                    .child(if linked {
+                        design::button("whatsapp-disconnect-top", "Unlink WhatsApp", cx)
+                            .small()
+                            .ghost()
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.send_connection(ConnectionCommand::DisconnectWhatsApp, cx);
+                            }))
+                    } else {
+                        design::primary_button("whatsapp-connect-btn", "Connect WhatsApp", cx)
+                            .small()
+                            .icon(IconName::MessageCircle)
+                            .tooltip("Show a code to scan with WhatsApp on your phone")
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.send_connection(ConnectionCommand::StartWhatsAppPairing, cx);
+                            }))
+                    }),
+            );
 
         if let Some(notice) = &state.notice {
             section = section.child(
@@ -840,6 +859,11 @@ impl ModelsView {
             services: &self.services.services,
             probed: &self.connections.probed,
         })
+    }
+
+    /// Sidebar text for the Connections tab, from the same catalogue the page shows.
+    pub(crate) fn connection_nav_summary(&self) -> Option<String> {
+        self.current_catalogue().nav_summary()
     }
 
     fn connections_frame(&self, cx: &mut Context<Self>, body: AnyElement) -> AnyElement {

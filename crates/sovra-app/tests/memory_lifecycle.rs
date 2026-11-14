@@ -159,6 +159,7 @@ impl Fixture {
                 })
             })),
             Some(ModelsConfig {
+                readiness: None,
                 repository: self.repository.clone(),
                 providers: vec![Arc::new(CompatibleProvider)],
             }),

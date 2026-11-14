@@ -21,7 +21,7 @@ pub use catalog::{
     AnthropicProvider, CompatibleProvider, OllamaProvider, OpenRouterProvider, pull_ollama,
     test_connection, verify_key,
 };
-pub use connection::{endpoint, validate_connection};
+pub use connection::{endpoint, model_turn_timeout, ollama_bind_address, validate_connection};
 pub use storage::{
     CredentialStore, FileCredentialStore, ModelRepository, OsCredentialStore, SavedModels,
 };

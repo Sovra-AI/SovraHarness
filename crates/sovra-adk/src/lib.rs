@@ -20,6 +20,7 @@ mod group_work;
 mod memory;
 mod native_ui;
 mod orchestrator;
+mod readiness;
 mod recall;
 mod remote_tools;
 mod reply_inputs;
@@ -362,6 +363,17 @@ impl AdkHarness {
         model: &ModelInfo,
         secret: &ModelSecret,
     ) -> Result<Self, Error> {
+        Self::from_selected_model_with_readiness(config, connection, model, secret, None)
+    }
+
+    /// As above, with runtime-owned local server preparation at every inference call.
+    pub fn from_selected_model_with_readiness(
+        config: &AgentConfig,
+        connection: &ModelConnection,
+        model: &ModelInfo,
+        secret: &ModelSecret,
+        readiness: Option<Arc<dyn sovra_core::models::ModelReadiness>>,
+    ) -> Result<Self, Error> {
         let llm: Arc<dyn Llm> = match connection.kind {
             ProviderKind::OpenRouter => Arc::new(
                 adk_model::OpenRouterClient::new(
@@ -434,6 +446,7 @@ impl AdkHarness {
                 Arc::new(adk_model::AnthropicClient::new(anthropic).map_err(Error::ModelInit)?)
             }
         };
+        let llm = readiness::wrap(llm, connection, readiness);
         let tools = web_search::chat_tools(model.supports("tools"), None);
         let llm = admission::wrap(
             llm,

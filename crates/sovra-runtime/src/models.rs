@@ -20,6 +20,7 @@ use tokio::task::{AbortHandle, JoinSet};
 /// The composition root supplies storage paths, credentials and concrete adapters.
 pub struct ModelsConfig {
     pub repository: ModelRepository,
+    pub readiness: Option<Arc<dyn sovra_core::models::ModelReadiness>>,
     pub providers: Vec<Arc<dyn ModelProvider>>,
 }
 
@@ -27,6 +28,7 @@ impl std::fmt::Debug for ModelsConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ModelsConfig")
             .field("repository", &self.repository)
+            .field("readiness", &self.readiness.is_some())
             .field("providers", &self.providers.len())
             .finish()
     }
@@ -78,6 +80,7 @@ impl ModelsRuntime {
         let actor = ModelActor {
             memory_control: memory_control.clone(),
             repository: config.repository,
+            readiness: config.readiness,
             providers: config
                 .providers
                 .into_iter()
@@ -166,6 +169,7 @@ type PullProgressChannel = (Sender<(u64, String)>, Receiver<(u64, String)>);
 struct ModelActor {
     memory_control: crate::remembering::MemoryControl,
     repository: ModelRepository,
+    readiness: Option<Arc<dyn sovra_core::models::ModelReadiness>>,
     providers: BTreeMap<ProviderKind, Arc<dyn ModelProvider>>,
     saved: SavedModels,
     catalogs: BTreeMap<String, CatalogState>,
@@ -192,7 +196,30 @@ async fn blocking<T: Send + 'static>(
         .map_err(|_| ModelError("The settings operation could not complete.".into()))?
 }
 
+async fn ensure_ready(
+    readiness: Option<&dyn sovra_core::models::ModelReadiness>,
+    connection: &ModelConnection,
+) -> Result<(), ModelError> {
+    if let Some(readiness) = readiness {
+        readiness.ensure_ready(connection).await?;
+    }
+    Ok(())
+}
+
 impl ModelActor {
+    fn is_selected(&self, id: &str) -> bool {
+        self.saved
+            .preferences
+            .active
+            .as_ref()
+            .is_some_and(|key| key.connection_id == id)
+            || self
+                .saved
+                .preferences
+                .purposes
+                .values()
+                .any(|key| key.connection_id == id)
+    }
     async fn publish_memory(&self) {
         let harness = match self.execution.read().await.clone() {
             ModelExecution::Legacy => crate::build_harness(&self.agent),
@@ -296,7 +323,9 @@ impl ModelActor {
                 .get(&connection.id)
                 .is_some_and(|c| now().saturating_sub(c.snapshot.fetched_at) < 900);
             if (!fresh || connection.kind != ProviderKind::OpenRouter)
-                && let Err(error) = self.refresh(&connection.id).await
+                && let Err(error) = self
+                    .refresh(&connection.id, self.is_selected(&connection.id))
+                    .await
             {
                 self.catalogs
                     .entry(connection.id.clone())
@@ -372,7 +401,7 @@ impl ModelActor {
         blocking(move || repository.save(&saved)).await
     }
 
-    async fn refresh(&mut self, id: &str) -> Result<(), ModelError> {
+    async fn refresh(&mut self, id: &str, start_server: bool) -> Result<(), ModelError> {
         let connection = self.connection(id)?;
         let provider = self.provider(connection.kind)?;
         let secret = self.secret(&connection).await?;
@@ -389,8 +418,13 @@ impl ModelActor {
             connection_id: id.to_owned(),
         })
         .await;
+        let readiness = self.readiness.clone().filter(|_| start_server);
         let job = self.jobs.spawn(async move {
-            let result = provider.list(&connection, &secret).await;
+            let result = async {
+                ensure_ready(readiness.as_deref(), &connection).await?;
+                provider.list(&connection, &secret).await
+            }
+            .await;
             Completed::Catalog {
                 connection,
                 generation,
@@ -442,7 +476,7 @@ impl ModelActor {
                     }
                 }
             }
-            ModelCommand::Refresh { connection_id } => self.refresh(&connection_id).await?,
+            ModelCommand::Refresh { connection_id } => self.refresh(&connection_id, true).await?,
             ModelCommand::SaveConnection {
                 connection,
                 credential,
@@ -455,7 +489,11 @@ impl ModelActor {
                 let secret = self.draft_secret(&connection, credential).await?;
                 let provider = self.provider(connection.kind)?;
                 self.emit(ModelEvent::OperationStarted).await;
+                let readiness = self.readiness.clone();
                 self.jobs.spawn(async move {
+                    if let Err(error) = ensure_ready(readiness.as_deref(), &connection).await {
+                        return Completed::Test(Err(error));
+                    }
                     Completed::Test(sovra_providers::test_connection(provider.as_ref(), &connection, &secret).await.map(|count| format!("It works! Sovra can reach this service · {count} AI models available.")))
                 });
             }
@@ -593,14 +631,20 @@ impl ModelActor {
                     let provider = self.provider(connection.kind)?;
                     let secret = self.secret(&connection).await?;
                     let generation = *self.generations.get(&connection.id).unwrap_or(&0);
+                    let readiness = self.readiness.clone();
                     self.jobs.spawn(async move {
+                        let result = async {
+                            ensure_ready(readiness.as_deref(), &connection).await?;
+                            provider
+                                .details(&connection, &secret, &model)
+                                .await
+                                .map(Box::new)
+                        }
+                        .await;
                         Completed::Details {
                             key,
                             generation,
-                            result: provider
-                                .details(&connection, &secret, &model)
-                                .await
-                                .map(Box::new),
+                            result,
                         }
                     });
                 }
@@ -626,19 +670,19 @@ impl ModelActor {
                 ))))
                 .await;
                 let id = connection_id.clone();
+                let readiness = self.readiness.clone();
                 let task = self.jobs.spawn(async move {
-                    let result = sovra_providers::pull_ollama(
-                        &connection,
-                        &secret,
-                        &model,
-                        move |message| {
+                    let result = async {
+                        ensure_ready(readiness.as_deref(), &connection).await?;
+                        sovra_providers::pull_ollama(&connection, &secret, &model, move |message| {
                             let progress = progress.clone();
                             let message = format!("{label} · {message}");
                             Box::pin(async move {
                                 let _ = progress.send((generation, message)).await;
                             })
-                        },
-                    )
+                        })
+                        .await
+                    }
                     .await;
                     Completed::Pull {
                         connection_id,
@@ -706,7 +750,7 @@ impl ModelActor {
                 .retain(|p| p != "tools");
         }
         let harness =
-            AdkHarness::from_selected_model(&effective_agent, &connection, &effective_model, &secret)
+            AdkHarness::from_selected_model_with_readiness(&effective_agent, &connection, &effective_model, &secret, self.readiness.clone())
                 .map_err(|_| {
                     ModelError(
                         "Could not configure this model. Check its connection URL and authentication settings."
@@ -726,7 +770,7 @@ impl ModelActor {
         }
         *self.execution.write().await = ModelExecution::Selected {
             harness: Box::new(harness),
-            timeout: Duration::from_secs(connection.timeout_seconds),
+            timeout: sovra_providers::model_turn_timeout(&connection),
         };
         self.publish_memory().await;
         self.rebuild_file_models().await;
@@ -778,7 +822,7 @@ impl ModelActor {
                         } else {
                             ModelExecution::Selected {
                                 harness: Box::new(harness),
-                                timeout: Duration::from_secs(connection.timeout_seconds),
+                                timeout: sovra_providers::model_turn_timeout(&connection),
                             }
                         },
                     },
@@ -975,7 +1019,7 @@ impl ModelActor {
             "Saved. Any key is kept safely in this computer's keychain.".into(),
         ))
         .await;
-        self.refresh(&connection.id).await
+        self.refresh(&connection.id, true).await
     }
 
     async fn delete_connection(&mut self, id: &str) -> Result<(), ModelError> {
@@ -1186,7 +1230,7 @@ impl ModelActor {
                             "Model downloaded. Refreshing Ollama…".into(),
                         ))
                         .await;
-                        if let Err(error) = self.refresh(&connection_id).await {
+                        if let Err(error) = self.refresh(&connection_id, true).await {
                             self.emit(ModelEvent::Error(error.0)).await;
                         }
                     }

@@ -215,6 +215,25 @@ impl ConnectionCatalogue {
         }
     }
 
+    /// Names of every linked kind, in catalogue order.
+    ///
+    /// One title when only that kind is linked. Several titles when more than
+    /// one is linked, so one kind cannot stand in for the rest. `None` when
+    /// nothing is linked.
+    pub fn nav_summary(&self) -> Option<String> {
+        let titles: Vec<&str> = self
+            .cards
+            .iter()
+            .filter(|card| card.phase == LinkPhase::Linked)
+            .map(|card| card.title)
+            .collect();
+        if titles.is_empty() {
+            None
+        } else {
+            Some(titles.join(", "))
+        }
+    }
+
     /// Titles, sentences, actions, and status words shown before a card is opened.
     pub fn first_screen_copy(&self) -> String {
         let mut text = String::new();
@@ -644,6 +663,75 @@ mod tests {
         assert_eq!(
             overridden.card(CatalogueKind::OnlineAi).phase,
             LinkPhase::Linked
+        );
+    }
+
+    #[test]
+    fn nav_summary_names_every_linked_kind() {
+        assert_eq!(ConnectionCatalogue::fresh().nav_summary(), None);
+
+        let connecting = WhatsAppStatus::Connecting { pairing: false };
+        let working = catalogue_from(&sources(
+            &[],
+            &BTreeMap::new(),
+            &connecting,
+            &TelegramStatus::Disconnected,
+            &GoogleState::NotConnected,
+            &[],
+            &BTreeMap::new(),
+        ));
+        assert_eq!(working.nav_summary(), None);
+
+        let whatsapp = WhatsAppStatus::Connected {
+            device: crate::connections::LinkedDevice {
+                phone_display: "+1 555-0142".into(),
+                device_jid: "15550142:1@s.whatsapp.net".into(),
+                companion_name: "Sovra".into(),
+                linked_at: crate::memory::Timestamp(10_000),
+            },
+            online: true,
+        };
+        let only_whatsapp = catalogue_from(&sources(
+            &[],
+            &BTreeMap::new(),
+            &whatsapp,
+            &TelegramStatus::Disconnected,
+            &GoogleState::NotConnected,
+            &[],
+            &BTreeMap::new(),
+        ));
+        assert_eq!(only_whatsapp.nav_summary().as_deref(), Some("WhatsApp"));
+
+        let google = GoogleState::Connected(crate::google::GoogleAccount::default());
+        let services = vec![McpService {
+            id: "files".into(),
+            name: "Files".into(),
+            address: "https://files.example".into(),
+            phase: McpPhase::Connected,
+            message: String::new(),
+            tools: Vec::new(),
+            ..McpService::default()
+        }];
+        let several = catalogue_from(&CatalogueSources {
+            connections: &[],
+            catalogs: &BTreeMap::new(),
+            whatsapp: &whatsapp,
+            telegram: &TelegramStatus::Disconnected,
+            google: &google,
+            github: &GitHubState::NotConnected,
+            services: &services,
+            probed: &BTreeMap::new(),
+        });
+        let summary = several.nav_summary().expect("linked kinds have names");
+        assert_ne!(summary, "WhatsApp");
+        assert!(summary.contains("WhatsApp"), "{summary}");
+        assert!(summary.contains("Google"), "{summary}");
+        assert!(summary.contains("MCP servers"), "{summary}");
+        assert!(summary.find("WhatsApp") < summary.find("Google"));
+        assert!(summary.find("Google") < summary.find("MCP servers"));
+        assert_eq!(
+            several.card(CatalogueKind::Telegram).phase,
+            LinkPhase::NotLinked
         );
     }
 }

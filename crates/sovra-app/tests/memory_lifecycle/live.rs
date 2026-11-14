@@ -364,6 +364,7 @@ fn synthetic_selected_model_evaluation() {
             })
         })),
         Some(ModelsConfig {
+            readiness: None,
             repository,
             providers: vec![
                 Arc::new(OpenRouterProvider),

@@ -123,7 +123,7 @@ impl Skill {
                 "/new ".to_owned(),
             ),
             "models" => (
-                "Opens Models so you can pick or connect an AI brain.".to_owned(),
+                "Choose an online AI or a model on your computer. Sovra can start Ollama for you, or connect to LM Studio, Jan and other local model programs.".to_owned(),
                 "/models ".to_owned(),
             ),
             "knowledge" => (
@@ -391,7 +391,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "models",
             "Models",
-            "Choose an AI and manage model connections.",
+            "Choose an online AI or connect Ollama, LM Studio, Jan and other local model programs.",
             SkillAction::Models,
             &[],
         ),

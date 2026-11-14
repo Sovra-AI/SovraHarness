@@ -2101,6 +2101,9 @@ impl Shell {
 
     fn render_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         self.ensure_turn_ticker(cx);
+        // Same phases the Connections page paints, including MCP and AI links
+        // that workspace state does not store.
+        let connections_summary = self.models.read(cx).connection_nav_summary();
         match self.state.route {
             ScreenRoute::Login => render_login_screen(
                 &self.login_name_input,
@@ -2202,6 +2205,7 @@ impl Shell {
                 body = body
                     .child(render_sidebar(
                         &self.state,
+                        connections_summary.as_deref(),
                         &self.history_search_input,
                         &self.rename_thread_input,
                         sidebar_collapsed,
@@ -2218,6 +2222,7 @@ impl Shell {
                             };
                             overlay.child(render_sidebar(
                                 &self.state,
+                                connections_summary.as_deref(),
                                 &self.history_search_input,
                                 &self.rename_thread_input,
                                 false,
