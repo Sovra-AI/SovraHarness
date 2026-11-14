@@ -126,7 +126,7 @@ gpui-bidi = "=0.1.1"
 serde = { version = "1.0.229", features = ["derive"] }
 # Persisted optimizer moments must decode to the exact original f64 values.
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
-serde-saphyr = { version = "=1.3.0", default-features = false, features = ["serialize", "deserialize"] }
+serde-saphyr = { version = "=2.1.1", default-features = false, features = ["serialize", "deserialize"] }
 # >=3.3.4: HNSW silently dropped near-duplicate vectors before 3.3.4. BUSL-1.1 licence —
 # permitted for embedding in this app (see docs/architecture.md), excepted in deny.toml.
 surrealdb = { version = "3.3.4", features = ["kv-mem", "kv-surrealkv"] }
