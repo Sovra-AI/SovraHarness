@@ -198,3 +198,87 @@ fn huge_finite_updates_are_clipped_before_squaring_into_moments() {
             .all(|x| x.is_finite() && *x <= 0.001)
     );
 }
+
+#[test]
+fn the_outer_step_size_can_follow_a_schedule_but_only_inside_its_range() {
+    let mut grid = syncer();
+    let before = grid.clone();
+    for bad in [0.0, -0.1, 1.5, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            grid.set_learning_rate(bad),
+            Err(GridError::InvalidSettings),
+            "{bad}"
+        );
+        assert_eq!(grid, before);
+    }
+    grid.set_learning_rate(0.5).unwrap();
+    assert!((grid.settings().learning_rate - 0.5).abs() < f64::EPSILON);
+    let big = update(&mut grid, 1, [1.0, 0.0]);
+    grid.merge(&[big], 1).unwrap();
+    let mut small = syncer();
+    small.set_learning_rate(0.001).unwrap();
+    let step = update(&mut small, 1, [1.0, 0.0]);
+    small.merge(&[step], 1).unwrap();
+    assert!(grid.params()[0].abs() > small.params()[0].abs() * 100.0);
+    // The saved state carries the changed rate.
+    let restored = GridSyncer::restore(grid.checkpoint()).unwrap();
+    assert!((restored.settings().learning_rate - 0.5).abs() < f64::EPSILON);
+}
+
+#[test]
+fn the_compact_saved_form_round_trips_and_rejects_every_wrong_length() {
+    let mut grid = syncer();
+    let step = update(&mut grid, 1, [0.25, -0.5]);
+    grid.merge(&[step], 1).unwrap();
+    let saved = grid.checkpoint();
+    let bytes = saved.to_bytes();
+    assert_eq!(bytes.len(), GridCheckpoint::byte_len(2));
+    assert_eq!(saved.parameters(), 2);
+    let decoded = GridCheckpoint::from_bytes(&bytes).unwrap();
+    assert_eq!(decoded, saved);
+    assert_eq!(
+        GridSyncer::restore(decoded).unwrap().params(),
+        grid.params()
+    );
+
+    for cut in 0..bytes.len() {
+        assert_eq!(
+            GridCheckpoint::from_bytes(&bytes[..cut]),
+            Err(GridError::InvalidCheckpoint),
+            "cut at {cut}"
+        );
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    assert_eq!(
+        GridCheckpoint::from_bytes(&longer),
+        Err(GridError::InvalidCheckpoint)
+    );
+    let mut magic = bytes.clone();
+    magic[0] ^= 1;
+    assert_eq!(
+        GridCheckpoint::from_bytes(&magic),
+        Err(GridError::InvalidCheckpoint)
+    );
+    // A huge declared size is refused from the header alone.
+    let count_at = bytes.len() - 2 * 20 - 8;
+    let mut huge = bytes.clone();
+    huge[count_at..count_at + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+    assert_eq!(
+        GridCheckpoint::from_bytes(&huge),
+        Err(GridError::InvalidCheckpoint)
+    );
+    // Values the grid would never produce decode, then fail the restore check.
+    let mut version = bytes.clone();
+    version[8] = 9;
+    let decoded = GridCheckpoint::from_bytes(&version).unwrap();
+    assert_eq!(
+        GridSyncer::restore(decoded),
+        Err(GridError::InvalidCheckpoint)
+    );
+    let mut value = bytes;
+    let at = value.len() - 2 * 20;
+    value[at..at + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+    let decoded = GridCheckpoint::from_bytes(&value).unwrap();
+    assert!(GridSyncer::restore(decoded).is_err());
+}

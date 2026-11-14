@@ -1,50 +1,218 @@
-//! Guided native training controls; progress arrives only through runtime events.
+//! The Training page: teach a small model from text the person chooses, watch it
+//! learn, and keep the result. The view only sends commands and shows the
+//! runtime's snapshots; it never reads files or does any training itself.
+
+mod advanced;
+mod choices;
+mod form;
+mod helping;
+mod knobs;
+mod library;
+mod live;
+mod parts;
+mod setup;
+mod words;
+
+use std::path::PathBuf;
+
 use crate::{
     RuntimeClient,
-    design::{self, SovraStyled as _, Surface, TextRole},
+    design::{self, WidthClass},
 };
+use form::{Facts, Form, SourceChoice};
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
-    button::ButtonVariants as _,
-    h_flex,
-    input::{Textarea, TextareaState},
+    input::{InputEvent, InputState, TextareaState},
     v_flex,
 };
 use gpui_kit::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, Role, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, div,
+    PathPromptOptions, Render, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
+    TestSupportExt as _, Window, div,
 };
+use knobs::Knob;
 use sovra_core::{
     Command,
     training::{
-        HelpingPhase, TrainingCommand, TrainingEvent, TrainingPhase, TrainingSource, TrainingState,
+        HardwareInfo, LocalOptimizer, LrSchedule, ModelId, TrainingBase, TrainingCommand,
+        TrainingEvent, TrainingPhase, TrainingPreset, TrainingSource, TrainingState,
     },
 };
 
 pub(crate) struct TrainingView {
     state: TrainingState,
-    text: Entity<TextareaState>,
-    sample: bool,
+    form: Form,
+    /// Stands in until the runtime has reported this computer's hardware.
+    unknown_hardware: HardwareInfo,
+    /// A command is on its way; cleared by the next snapshot. Stops double sends.
     pending: bool,
+    stale: Stale,
+    width_class: WidthClass,
+    advanced_open: bool,
+    all_models_listed: bool,
+    text: Entity<TextareaState>,
+    pasted: Pasted,
+    name: Entity<InputState>,
+    /// The name as the person typed it. Until they type one, the default name
+    /// follows the chosen model.
+    typed_name: Option<String>,
+    /// One input per [`Knob`], in [`Knob::ALL`] order.
+    knobs: Vec<Entity<InputState>>,
+    try_prompt: Entity<InputState>,
+    /// The library model whose Try it panel is open.
+    trying: Option<ModelId>,
+    file_notice: Option<String>,
+    picker: Option<Task<()>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+/// Input controls whose text the form's choices have moved on from.
+#[derive(Default)]
+struct Stale {
+    /// The expert number fields no longer show the form's settings.
+    knobs: bool,
+    /// The name field no longer shows the default name for the chosen model.
+    name: bool,
+}
+
+/// Length and blankness of the pasted text, kept so a frame never copies it.
+#[derive(Clone, Copy)]
+struct Pasted {
+    bytes: usize,
+    blank: bool,
+}
+
+/// Borrows only the fields the form's decisions need, so the form itself can be
+/// changed in the same statement.
+fn facts<'a>(state: &'a TrainingState, unknown: &'a HardwareInfo, pasted: Pasted) -> Facts<'a> {
+    Facts {
+        hardware: state.hardware.as_ref().unwrap_or(unknown),
+        models: &state.models,
+        pasted_bytes: pasted.bytes,
+        pasted_blank: pasted.blank,
+        in_group: state.group.is_some(),
+    }
 }
 
 impl TrainingView {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let unknown_hardware = HardwareInfo::default();
+        let form = Form::new(&unknown_hardware);
+        let name_value = form.default_name(&[]);
+        let mut subscriptions = Vec::new();
+        let text = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Paste the text you want it to learn from.")
+                .auto_grow(3, 8)
+        });
+        subscriptions.push(cx.subscribe_in(
+            &text,
+            window,
+            |view, text, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = text.read(cx).value();
+                    view.pasted = Pasted {
+                        bytes: value.len(),
+                        blank: value.trim().is_empty(),
+                    };
+                    view.settings_follow(cx);
+                }
+            },
+        ));
+        let name = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Name for your model")
+                .default_value(name_value)
+        });
+        subscriptions.push(cx.subscribe_in(
+            &name,
+            window,
+            |view, name, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    view.typed_name = Some(name.read(cx).value().to_string());
+                    cx.notify();
+                }
+            },
+        ));
+        let knobs: Vec<Entity<InputState>> = Knob::ALL
+            .into_iter()
+            .map(|knob| {
+                let shown = knob.shown(&form.settings);
+                let input = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .default_value(shown)
+                        .step(knob.step())
+                        .min(0.)
+                });
+                subscriptions.push(cx.subscribe_in(
+                    &input,
+                    window,
+                    |view, _, event: &InputEvent, _, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            let (schedule, optimizer) =
+                                (view.form.settings.schedule, view.form.settings.optimizer);
+                            view.settings_edited(schedule, optimizer, cx);
+                        }
+                    },
+                ));
+                input
+            })
+            .collect();
+        let try_prompt = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Type a beginning, such as: The garden")
+        });
+        subscriptions.push(cx.subscribe_in(
+            &try_prompt,
+            window,
+            |view, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    view.run_trial(cx);
+                }
+            },
+        ));
         Self {
             state: TrainingState::default(),
-            text: cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .placeholder("Paste text you want the model to learn from (up to 64 KB).")
-                    .auto_grow(3, 8)
-            }),
-            sample: true,
+            form,
+            unknown_hardware,
             pending: false,
+            stale: Stale::default(),
+            width_class: WidthClass::Compact,
+            advanced_open: false,
+            all_models_listed: false,
+            text,
+            pasted: Pasted {
+                bytes: 0,
+                blank: true,
+            },
+            name,
+            typed_name: None,
+            knobs,
+            try_prompt,
+            trying: None,
+            file_notice: None,
+            picker: None,
+            _subscriptions: subscriptions,
         }
     }
 
     pub(crate) fn apply(&mut self, event: &TrainingEvent, cx: &mut Context<Self>) {
+        let before = self.form.base;
         self.state.apply(event);
         self.pending = false;
+        if self
+            .form
+            .follow_hardware(facts(&self.state, &self.unknown_hardware, self.pasted))
+        {
+            self.stale.knobs = true;
+        }
+        if self.form.base != before {
+            self.stale.name = true;
+        }
+        if self
+            .trying
+            .is_some_and(|model| self.state.model(model).is_none())
+        {
+            self.trying = None;
+        }
         cx.notify();
     }
 
@@ -63,287 +231,280 @@ impl TrainingView {
         cx.notify();
     }
 
-    fn source(&self, cx: &Context<Self>) -> TrainingSource {
-        if self.sample {
-            TrainingSource::Sample
-        } else {
-            TrainingSource::Text(self.text.read(cx).value().to_string())
+    /// Whether the choices are locked: a run or a command is in progress, or the
+    /// person asked this computer to help someone by hand. Help that started by
+    /// itself does not lock anything: it gives way the moment a run is started.
+    fn locked(&self) -> bool {
+        let helping_by_hand = self
+            .state
+            .helping
+            .as_ref()
+            .is_some_and(|help| help.phase.active() && help.run.is_none());
+        self.pending
+            || self.state.phase.busy()
+            || self.state.phase == TrainingPhase::Unavailable
+            || helping_by_hand
+    }
+
+    fn compact(&self) -> bool {
+        self.width_class == WidthClass::Compact
+    }
+
+    fn problem(&self) -> Option<String> {
+        self.form.problem(
+            self.typed_name.as_deref().unwrap_or_default(),
+            facts(&self.state, &self.unknown_hardware, self.pasted),
+        )
+    }
+
+    /// Re-derives preset settings after the text changed.
+    fn settings_follow(&mut self, cx: &mut Context<Self>) {
+        if self
+            .form
+            .refresh(facts(&self.state, &self.unknown_hardware, self.pasted))
+        {
+            self.stale.knobs = true;
+        }
+        cx.notify();
+    }
+
+    fn choose_source(&mut self, source: SourceChoice, cx: &mut Context<Self>) {
+        self.file_notice = None;
+        if self.form.choose_source(
+            source,
+            facts(&self.state, &self.unknown_hardware, self.pasted),
+        ) {
+            self.stale.knobs = true;
+        }
+        cx.notify();
+    }
+
+    /// Opens the operating system's file dialog. The path is only passed on in
+    /// the plan; the runtime is what reads the file.
+    fn choose_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selection = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Use this text".into()),
+        });
+        self.picker = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = selection.await;
+            let _ = this.update_in(cx, |view, _, cx| {
+                match result {
+                    Ok(Ok(Some(paths))) => view.file_chosen(paths.into_iter().next(), cx),
+                    Ok(Ok(None)) => {}
+                    Ok(Err(_)) | Err(_) => {
+                        view.file_notice = Some(
+                            "The file picker couldn't open. Please try Use a text file again."
+                                .into(),
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn file_chosen(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+        let Some(path) = path else {
+            return;
+        };
+        if let Err(error) = TrainingSource::File(path.clone()).validate() {
+            self.file_notice = Some(error.to_string());
+            return;
+        }
+        self.form.file = Some(path);
+        self.choose_source(SourceChoice::File, cx);
+    }
+
+    fn choose_base(&mut self, base: TrainingBase, cx: &mut Context<Self>) {
+        if self.form.choose_base(
+            base,
+            facts(&self.state, &self.unknown_hardware, self.pasted),
+        ) {
+            self.stale.knobs = true;
+        }
+        self.stale.name = true;
+        cx.notify();
+    }
+
+    fn choose_preset(&mut self, preset: TrainingPreset, cx: &mut Context<Self>) {
+        self.form.choose_preset(
+            preset,
+            facts(&self.state, &self.unknown_hardware, self.pasted),
+        );
+        self.stale.knobs = true;
+        cx.notify();
+    }
+
+    fn reset_settings(&mut self, cx: &mut Context<Self>) {
+        self.form
+            .reset(facts(&self.state, &self.unknown_hardware, self.pasted));
+        self.stale.knobs = true;
+        cx.notify();
+    }
+
+    /// Reads every expert field as typed, with the given named choices.
+    fn settings_edited(
+        &mut self,
+        schedule: LrSchedule,
+        optimizer: LocalOptimizer,
+        cx: &mut Context<Self>,
+    ) {
+        let texts: Vec<String> = self
+            .knobs
+            .iter()
+            .map(|input| input.read(cx).value().to_string())
+            .collect();
+        self.form.edited(
+            &texts,
+            schedule,
+            optimizer,
+            facts(&self.state, &self.unknown_hardware, self.pasted),
+        );
+        cx.notify();
+    }
+
+    fn start(&mut self, cx: &mut Context<Self>) {
+        if self.locked() {
+            return;
+        }
+        let text = self.text.clone();
+        let plan = self.form.plan(
+            self.typed_name.as_deref().unwrap_or_default(),
+            || text.read(cx).value().to_string(),
+            facts(&self.state, &self.unknown_hardware, self.pasted),
+        );
+        match plan {
+            Ok(plan) => self.send(TrainingCommand::Start(Box::new(plan)), cx),
+            Err(problem) => {
+                self.state.error = Some(problem);
+                cx.notify();
+            }
         }
     }
 
-    fn grid_card(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let t = design::tokens(cx);
-        let busy = self.pending || self.state.busy();
-        let unavailable = self.state.phase == TrainingPhase::Unavailable;
-        let mut card = v_flex().w_full().min_w_0().gap(t.space.medium).p(t.space.large)
-            .sovra_surface(Surface::Matte, cx)
-            .child(div().sovra_text(TextRole::SectionTitle, cx).child("Help another computer"))
-            .child(div().min_w_0().whitespace_normal().sovra_text(TextRole::Body, cx)
-                .child("Choose a computer in your group. It must have started with Start with my group. This uses its chosen text and sends back model updates. Your chats, memories and local files are not added. Helping waits while chat is busy."))
-            .child(design::button("training-refresh-peers", "Refresh computers", cx).disabled(self.pending || unavailable)
-                .on_click(cx.listener(|view, _, _, cx| view.send(TrainingCommand::Load, cx))));
-        if let Some(help) = &self.state.helping {
-            let phase = match help.phase {
-                HelpingPhase::Working => "Helping",
-                HelpingPhase::Waiting => "Waiting to help",
-                HelpingPhase::Stopping => "Stopping after the current exchange",
-                HelpingPhase::Stopped => "Stopped helping",
-                HelpingPhase::Finished => "Training finished",
-            };
-            let status = format!("{phase} · {} saved updates", help.accepted_rounds);
-            card = card.child(
-                div()
-                    .id("training-helper-status")
-                    .test_support()
-                    .role(Role::Status)
-                    .aria_label(status.clone())
-                    .min_w_0()
-                    .whitespace_normal()
-                    .sovra_text(TextRole::Body, cx)
-                    .child(status),
-            );
-            card = card.child(
-                div()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .sovra_text(TextRole::Body, cx)
-                    .child(help.peer.name.clone()),
-            );
-            if let Some(notice) = &help.notice {
-                card = card.child(
-                    div()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .sovra_text(TextRole::Caption, cx)
-                        .child(notice.clone()),
-                );
-            }
-            card = card.child(
-                design::button("training-stop-help", "Stop helping", cx)
-                    .disabled(
-                        self.pending
-                            || !help.phase.active()
-                            || help.phase == HelpingPhase::Stopping,
-                    )
-                    .on_click(cx.listener(|view, _, _, cx| view.send(TrainingCommand::Pause, cx))),
-            );
+    fn run_trial(&mut self, cx: &mut Context<Self>) {
+        let Some(model) = self.trying else {
+            return;
+        };
+        if self.pending || self.state.trying() {
+            return;
         }
-        if let Some(group) = &self.state.group {
-            card = card.child(
-                div()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .sovra_text(TextRole::Body, cx)
-                    .child(format!("Your group: {}", group.name)),
-            );
-            if group.peers.is_empty() {
-                card = card.child(
-                    div()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .sovra_text(TextRole::Body, cx)
-                        .child("Add another computer in Groups, then refresh this list."),
-                );
+        let prompt = self.try_prompt.read(cx).value().to_string();
+        let command = TrainingCommand::Try { model, prompt };
+        match command.validate() {
+            Ok(()) => self.send(command, cx),
+            Err(error) => {
+                self.state.error = Some(error.to_string());
+                cx.notify();
             }
-            for peer in &group.peers {
-                let device = peer.device;
-                card = card.child(
-                    h_flex()
-                        .min_w_0()
-                        .flex_wrap()
-                        .gap(t.space.small)
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .whitespace_normal()
-                                .sovra_text(TextRole::Body, cx)
-                                .child(peer.name.clone()),
-                        )
-                        .child(
-                            design::button(
-                                format!("training-help-{}", device.to_hex()),
-                                "Help this computer",
-                                cx,
-                            )
-                            .accessibility_label(format!("Help {}", peer.name))
-                            .disabled(busy || unavailable)
-                            .on_click(cx.listener(
-                                move |view, _, _, cx| view.send(TrainingCommand::Help(device), cx),
-                            )),
-                        ),
-                );
-            }
-        } else {
-            card = card.child(div().min_w_0().whitespace_normal().sovra_text(TextRole::Body, cx).child("Open Groups in the left menu to create or join a group, then return here and refresh the list."));
         }
-        card
+    }
+
+    /// Rewrites the input controls the form's choices have moved on from. Typed
+    /// text is never replaced while the person is the one changing it.
+    fn write_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.stale.knobs {
+            self.stale.knobs = false;
+            for knob in Knob::ALL {
+                let shown = knob.shown(&self.form.settings);
+                if let Some(input) = self.knobs.get(knob.index()) {
+                    input.update(cx, |input, cx| input.set_value(shown, window, cx));
+                }
+            }
+        }
+        if self.stale.name {
+            self.stale.name = false;
+            if self.typed_name.is_none() {
+                let name = self.form.default_name(&self.state.models);
+                self.name
+                    .update(cx, |input, cx| input.set_value(name, window, cx));
+            }
+        }
     }
 }
 
 impl Render for TrainingView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.write_inputs(window, cx);
         let t = design::tokens(cx);
-        let busy = self.pending || self.state.busy();
-        let unavailable = self.state.phase == TrainingPhase::Unavailable;
-        let phase = match self.state.phase {
-            TrainingPhase::Loading => "Opening saved training…",
-            TrainingPhase::Ready => "Ready to start",
-            TrainingPhase::Preparing => "Preparing and saving…",
-            TrainingPhase::Running => "Training on this computer",
-            TrainingPhase::Pausing => "Finishing this short step…",
-            TrainingPhase::Paused => "Paused · your progress is saved",
-            TrainingPhase::Complete => "Finished · your model is saved",
-            TrainingPhase::Unavailable => "Training is unavailable in this session",
-        };
-        let progress = &self.state.progress;
-        let status = if progress.total_rounds > 0 {
-            format!(
-                "{phase} · {} of {} rounds saved · {} tokens learned from",
-                progress.rounds, progress.total_rounds, progress.tokens
-            )
-        } else {
-            phase.to_owned()
-        };
-        let mut card = v_flex()
+        let running = matches!(
+            self.state.phase,
+            TrainingPhase::Preparing
+                | TrainingPhase::Running
+                | TrainingPhase::Pausing
+                | TrainingPhase::Paused
+        );
+        let has_run = self.state.plan.is_some() || self.state.progress.total_rounds > 0;
+        let mut column = v_flex()
+            .relative()
             .w_full()
             .min_w_0()
-            .gap(t.space.medium)
-            .p(t.space.large)
-            .sovra_surface(Surface::Matte, cx)
-            .child(
-                div()
-                    .sovra_text(TextRole::SectionTitle, cx)
-                    .child("1. Choose text for a new run"),
-            )
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .gap(t.space.small)
-                    .child(
-                        design::button("training-sample", "Try the garden sample", cx)
-                            .selected(self.sample)
-                            .disabled(busy || unavailable)
-                            .on_click(cx.listener(|v, _, _, cx| {
-                                v.sample = true;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        design::button("training-own-text", "Use my text", cx)
-                            .selected(!self.sample)
-                            .disabled(busy || unavailable)
-                            .on_click(cx.listener(|v, _, _, cx| {
-                                v.sample = false;
-                                cx.notify();
-                            })),
-                    ),
-            );
-        if self.sample {
-            card = card.child(
-                div()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .sovra_text(TextRole::Body, cx)
-                    .child(sovra_core::training::SAMPLE_TEXT),
-            );
-        } else {
-            card = card.child(
-                Textarea::new(&self.text)
-                    .disabled(busy || unavailable)
-                    .aria_label("Text for training"),
-            );
-        }
-        card = card.child(div().min_w_0().whitespace_normal().sovra_text(TextRole::Caption, cx)
-            .child("New training uses only the text you choose here. It stays on this computer, including in the saved training file. Your chats, memories and shared group notes are not added. Helping the group train is a separate choice in Groups and starts off. Answering questions or lending an AI does not turn it on. Resume uses the text already saved with that run."))
-            .child(div().sovra_text(TextRole::SectionTitle, cx).child("2. Start when you're ready"))
-            .child(h_flex().flex_wrap().gap(t.space.small)
-                .child(design::button("training-start", if self.state.saved_at.is_some() { "Start new training" } else { "Start training" }, cx).primary().disabled(busy || unavailable)
-                    .on_click(cx.listener(|v, _, _, cx| {
-                        let source = v.source(cx);
-                        v.send(TrainingCommand::Start(source), cx);
-                    })))
-                .child(design::button("training-start-shared", "Start with my group", cx).disabled(busy || unavailable || self.state.group.is_none())
-                    .on_click(cx.listener(|v, _, _, cx| { let source = v.source(cx); v.send(TrainingCommand::StartShared(source), cx); })))
-                .child(design::button("training-pause", "Pause", cx).disabled(self.pending || self.state.phase != TrainingPhase::Running)
-                    .on_click(cx.listener(|v, _, _, cx| v.send(TrainingCommand::Pause, cx))))
-                .child(design::button("training-resume", "Resume saved training", cx).disabled(busy || self.state.phase != TrainingPhase::Paused)
-                    .on_click(cx.listener(|v, _, _, cx| v.send(TrainingCommand::Resume, cx)))))
-            .child(div().id("training-status").test_support().role(Role::Status).aria_label(status.clone())
-                .min_w_0().whitespace_normal().sovra_text(TextRole::Body, cx).child(status))
-            .child(div().min_w_0().whitespace_normal().sovra_text(TextRole::Caption, cx)
-                .child("Progress saves after each short round. Closing Sovra pauses training. It waits while chat is busy. Starting again keeps the earlier model file."));
-        if self.state.sharing.is_some() {
-            let shared = format!(
-                "Your group can help while this run is active · {} rounds saved from other computers in this session",
-                self.state.helped_rounds
-            );
-            card = card
-                .child(
-                    div()
-                        .id("training-sharing-status")
-                        .test_support()
-                        .role(Role::Status)
-                        .aria_label(shared.clone())
-                        .min_w_0()
-                        .whitespace_normal()
-                        .sovra_text(TextRole::Body, cx)
-                        .child(shared),
-                )
-                .child(
-                    design::button("training-stop-sharing", "Stop sharing", cx)
-                        .disabled(self.pending)
-                        .on_click(
-                            cx.listener(|v, _, _, cx| v.send(TrainingCommand::StopSharing, cx)),
-                        ),
-                );
-        }
-        if let Some(loss) = self.state.progress.loss_milli {
-            card = card.child(div().min_w_0().whitespace_normal().sovra_text(TextRole::Caption, cx)
-                .child(format!("Latest learning loss: {}.{:03}. Lower means fewer prediction errors on the current text batch; it is not a chat-quality score.", loss / 1000, loss % 1000)));
-        }
-        if let Some(path) = &self.state.saved_at {
-            let path = path.clone();
-            card = card
-                .child(
-                    div()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .sovra_text(TextRole::Caption, cx)
-                        .truncate()
-                        .child(format!("Saved model and training state: {path}")),
-                )
-                .child(
-                    design::button("training-copy-path", "Copy saved file location", cx).on_click(
-                        move |_, _, cx| {
-                            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
-                                path.clone(),
-                            ));
-                        },
-                    ),
-                );
+            .max_w(t.layout.reading_width)
+            .gap(t.space.large)
+            .child(design::width_probe(cx, |view: &mut Self| {
+                &mut view.width_class
+            }))
+            .child(design::page_header(
+                "Training",
+                "Teach your own small AI model from text you choose, on your own computers.",
+                cx,
+            ))
+            .child(parts::body(
+                "A model learns the style of the text you give it and then writes more in that style. These are small models you teach yourself. They do not replace your chat AI, and large ready-made models cannot be brought in yet. Nothing is downloaded and nothing leaves your computers.",
+                cx,
+            ));
+        if let Some(notice) = &self.state.notice {
+            column = column.child(parts::status("training-notice", notice.clone(), cx));
         }
         if let Some(error) = &self.state.error {
-            card = card.child(
-                div()
-                    .id("training-error")
-                    .test_support()
-                    .role(Role::Alert)
-                    .aria_label(error.clone())
-                    .min_w_0()
-                    .whitespace_normal()
-                    .sovra_text(TextRole::Body, cx)
-                    .text_color(cx.theme().danger)
-                    .child(error.clone()),
-            );
+            column = column.child(parts::alert("training-error", error.clone(), cx));
         }
-        div().id("training-page").test_support().size_full().min_w_0().min_h_0().overflow_y_scroll()
-            .child(v_flex().w_full().items_center().p(t.space.large)
-                .child(v_flex().w_full().min_w_0().max_w(t.layout.reading_width).gap(t.space.large)
-                    .child(design::page_header("Training", "Teach a tiny practice model with text you choose.", cx))
-                    .child(div().min_w_0().whitespace_normal().sovra_text(TextRole::Body, cx)
-                        .child("Early preview · Train a small next-byte model on this computer or with your group. It demonstrates training and recovery; it does not replace your chat AI. Larger language models are still being built."))
-                    .child(card)
-                    .child(self.grid_card(cx))))
+        if self.state.phase == TrainingPhase::Unavailable {
+            column = column.child(parts::status(
+                "training-unavailable",
+                "Training is not available in this session. Restart Sovra to try again.",
+                cx,
+            ));
+        }
+        // A run in progress comes first so pressing Start shows it learning
+        // without scrolling; a finished run sits below the choices for the next.
+        if has_run && running {
+            column = column.child(self.live_card(cx));
+        }
+        column = column
+            .child(self.hardware_card(cx))
+            .child(self.source_card(cx))
+            .child(self.base_card(cx))
+            .child(self.preset_card(cx))
+            .child(self.start_card(cx))
+            .child(self.advanced_card(cx));
+        if has_run && !running {
+            column = column.child(self.live_card(cx));
+        }
+        column = column
+            .child(self.library_card(cx))
+            .child(self.helping_card(cx));
+        div()
+            .id("training-page")
+            .test_support()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .p(if self.compact() {
+                        t.space.medium
+                    } else {
+                        t.space.large
+                    })
+                    .child(column),
+            )
     }
 }

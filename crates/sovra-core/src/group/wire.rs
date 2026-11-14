@@ -118,8 +118,10 @@ pub enum PeerRequest {
         group: GroupId,
         have: std::collections::BTreeMap<DeviceId, u64>,
     },
-    /// Fetch a short training interval or return its result. Sharing and helping
-    /// require separate explicit consent; group membership alone starts no work.
+    /// Training between group computers: work packets for a shared run, finding
+    /// such a run, and fetching finished models. Membership alone starts no work
+    /// and shares no text: a run is served only after its owner explicitly started
+    /// it with the group, and a computer helps only with its owner's permission.
     Training {
         group: GroupId,
         work: crate::training::TrainingPeerRequest,
@@ -187,7 +189,9 @@ pub enum Refusal {
     NotAnswering,
     /// This computer is not helping with work now (off, no AI, or busy).
     NotHelping,
-    /// This computer's owner has not turned on helping the group train.
+    /// Sent by computers on the first training release when their training switch
+    /// was off. Newer computers answer a training request they cannot serve with
+    /// `TrainingPeerResponse::Unavailable` instead, and still understand this.
     NotTraining,
 }
 
@@ -328,10 +332,20 @@ pub struct GroupRecord {
     /// Whether this computer helps with, and hands off, chat work (both off at first).
     #[serde(default)]
     pub work: super::work::WorkSettings,
-    /// Whether a group computer may take one short training step on a run started
-    /// here. Off until the owner turns it on. Answering and chat help do not imply it.
+    /// Left over from the first training release, where it meant "serve the run I
+    /// started" and was cleared on every launch. Nothing reads it now: serving a
+    /// run needs an explicit start with the group in this app session, which is
+    /// never saved. Kept so older records still load; see `help_train`.
     #[serde(default)]
     pub training_help: bool,
+    /// "Help the group train": whether this computer may, on its own, help a run
+    /// that someone in the group started with the group. Off until the owner turns
+    /// it on, and it stays as set across restarts. It only ever lends processor
+    /// time: this computer's own text and files are never sent. Answering and
+    /// chat help do not imply it. A separate field from `training_help` so a
+    /// value saved by the first release is never read as this permission.
+    #[serde(default)]
+    pub help_train: bool,
     /// This computer's signed audit history (`crate::swarm::audit`). Re-checked
     /// entry by entry on every start; never trusted as saved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

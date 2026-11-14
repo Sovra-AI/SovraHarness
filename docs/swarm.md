@@ -1,7 +1,8 @@
 # Audit and training internals
 
-This is a developer reference for code under `sovra_core::swarm`, the mesh
-adapter, and `sovra-train`. It also describes the early native Training preview.
+This is a developer reference for code under `sovra_core::swarm`,
+`sovra_core::training`, the mesh adapter, and `sovra-train`. To use training,
+read the [Training guide](training.md).
 
 ## Integrated group audit
 
@@ -27,147 +28,269 @@ Implementation: [audit rules](../crates/sovra-core/src/swarm/audit.rs),
 | `swarm::learn::privacy` | Discrete-Gaussian noise and zCDP accounting |
 | `swarm::learn::secagg` | Masked aggregation and dropout handling |
 | `swarm::learn::round` | Round planning, contributions, aggregation, and ledger events |
-| `swarm::learn::scavenger` | Bounded independent work leases, token-weighted age-gated Adam merges, validated optimizer checkpoints |
-| `sovra-train::ByteLanguageModel` | Burn next-byte cross-entropy/autodiff workload for CPU integration tests |
+| `swarm::learn::scavenger` | Bounded independent work leases, token-weighted age-gated Adam merges, a settable step size, validated optimizer checkpoints in a compact binary form |
+| `training` (core) | The Training product's pure domain: plans and presets, model shapes and the model file, metrics, hardware facts, the model library, group messages and the engine ports |
+| `sovra-train::BurnTrainingEngine` | The `TrainingEngine` port: the Starter table and byte-level transformers, work packets, text writing, the saved-run format and the hardware probe |
+| `sovra-train::ByteLanguageModel` | Burn next-byte cross-entropy/autodiff `Objective` used by library tests |
 | `sovra-train::LinearModel` | Burn autodiff for a linear model with squared-error loss |
 
 Source: [core modules](../crates/sovra-core/src/swarm/mod.rs),
 [learning modules](../crates/sovra-core/src/swarm/learn/mod.rs), and
 [training adapter](../crates/sovra-train/src/lib.rs).
-The training adapter uses the CPU backend by default; its `gpu` feature enables
-CubeCL/wgpu. The composition root links it into `sovra-app` through the core
-`TrainingEngine` port; the runtime and UI have no Burn dependency.
+The training adapter always uses Burn's pure-Rust processor backend (`flex`),
+selected explicitly; it never reads `BURN_DEVICE`. Its `gpu` feature compiles
+Burn's wgpu backend, which today only adds graphics card names to the hardware
+facts: there is no graphics training path, and no workspace manifest enables
+the feature. The composition root links the adapter into `sovra-app` through
+the core `TrainingEngine` port; the runtime and UI have no Burn dependency.
 
-## Scavenger-grid training: integrated preview
+## Training internals
 
-For first use, group setup, stopping controls and data handling, follow the
-[Training guide](training.md). This section explains the implementation and
-separates the working tiny-model preview from remaining pretrained SLM work.
+The product is layered on the scavenger merge engine. Core decides and
+validates, `sovra-train` does the arithmetic, the runtime owns tasks, files and
+group exchanges, and the UI renders one bounded state snapshot.
 
-Open **Training** (or **Skills → Teach a small model with your text**). Choose
-**Try the garden sample** or **Use my text**, then **Start training**. The preview
-accepts 32 bytes to 64 KB of pasted UTF-8 text. **Pause** finishes the current short
-round; **Resume saved training** continues the same model and optimizer. Closing
-Sovra stops work; reopening restores a paused run and never starts training by
-itself. **Copy saved file location** locates the model checkpoint. A new run keeps
-the earlier run's file.
+```mermaid
+flowchart LR
+  ui["sovra-ui: Training page"] -->|TrainingCommand| runtime["sovra-runtime: training actor"]
+  runtime -->|"TrainingEvent (whole bounded state)"| ui
+  runtime -->|"TrainingEngine port"| train["sovra-train: Burn engine"]
+  runtime -->|"PeerRequest::Training"| mesh["Group connection"]
+  train --> core["sovra-core: training rules and scavenger merge"]
+  runtime --> core
+```
 
-This is a tiny next-byte practice model, not a chat model or pretrained SLM
-fine-tuner. The page says so explicitly. **Start training** keeps work on this
-computer. **Help the group train**, in Groups, starts off each time Sovra opens.
-Answering questions or lending an AI does not
-turn it on, and membership alone does not start training or send work. **Start
-with my group** turns that choice on and shares small batches of the chosen text
-and the practice model with current group members who choose to help. A helper
-that disconnects before a valid update does not change the saved model, and that
-same step can be assigned again. Text is also included in the saved file. Chat
-history, memories and other group data are not ingested. New background rounds
-wait while Sovra's chat model is busy; this is not operating-system idle detection.
+### Models and the model file
 
-Create or join a group in **Groups**, then use **Refresh computers** in Training.
-On a second computer, choose **Help this computer** next to the job's owner.
-**Stop sharing** prevents further assignments and merges while local training
-continues. **Stop helping** stops after any bounded network/CPU operation already
-in flight; an update already sent can still be accepted. Leaving the group also
-stops helping. Your own saved model is preserved while you help someone else.
-Sharing and helping stay off after restarting. **Pause** stops both local and
-remote training work. A paused or offline host makes helpers wait and retry;
-they can stop at any time. Helping finishes when it receives an acknowledgement
-that completes the job; if another worker finishes it first, a waiting helper
-currently needs **Stop helping**. The **Groups → Borrow an AI → Help the group
-train** switch can revoke permission. Turning it on does not share a local-only
-run: select **Start with my group** to choose the text and grant access for that run.
+`BASE_MODELS` is a data table of four rows. `Architecture { context, width,
+layers, heads }` describes a shape, and `Architecture::blocks()` is the single
+definition of how the flat `f32` parameter vector is cut into matrices; the
+engine builds one tensor per block from it. `layers == 0` is the Starter table.
 
-### Scheduling primitive
-`GridSyncer` assigns short work leases to independent workers. A ready worker can
-advance training without waiting for offline workers. Each lease binds the job,
-worker, base model hash, round, step count, token budget and expiry. The caller
-supplies monotonic time; expired slots can be reused. Leases are consumed once,
-and altered assignments, duplicate submissions, invalid dimensions, non-finite
-values and out-of-budget counts are rejected before any merge state changes.
+| Row | Shape | Parameters | Group training |
+| --- | --- | --- | --- |
+| Starter | 256 by 256 table of next-byte scores | 65,536 | Yes |
+| Small | context 64, width 64, 2 layers, 4 heads | 137,216 | Yes |
+| Medium | context 128, width 128, 4 layers, 4 heads | 875,520 | Yes |
+| Large | context 256, width 192, 6 layers, 6 heads | 2,817,280 | No |
 
-The outer optimizer clips each pseudo-gradient, applies a cosine/exponential age
-gate, and token-weights the available updates before updating Adam's moments.
-Updates at or beyond the configured age cutoff are rejected without changing the
-moments. This is a whole-model prototype capped at 16,777,216 parameters and 64
-simultaneous workers, not yet a fragmented optimizer for billion-parameter SLMs.
-The defaults are development settings, not a validated training recipe.
+The transformers are pre-norm with causal self-attention, a GELU feed-forward
+four times the width, learned positions and a separate output layer with a
+bias. The count is `256W + CW + L(12W² + 13W) + 2W + 256W + 256`; a core test
+pins it for every row and an engine test checks that the engine's layout has
+the same length. The vocabulary is the 256 byte values, so there is no
+tokenizer. Fresh transformers are initialised from the plan's seed with a
+plain-Rust generator; the Starter table starts at zero.
 
-A serializable checkpoint contains parameters, moments, bias-correction powers,
-round, token count and the next work ID. Restore validates the checkpoint and
-invalidates in-flight leases, so restarted workers must fetch the current model.
-The runtime must persist that checkpoint atomically **before** acknowledging an
-accepted merge or assignment. The local runtime writes owner-private files through a temporary file, sync and atomic
-rename, and only then publishes progress. Each new run has its own file; a small
-index points to the most recent run. An OS-held lock excludes another training
-runtime from that directory. Optimizer floats use exact JSON round-trip parsing.
-Old checkpoint rollback is not protected by this primitive.
+A model file is a fixed 64-byte header (`SOVRAMDL`, version 1, starting point,
+shape, lifetime rounds and tokens, last loss and check loss, parameter count)
+followed by little-endian `f32` values. Its length is exactly
+`Architecture::file_len()`, at most 16 MiB. `decode_model` and `inspect_model`
+refuse a wrong length, an unknown version, an out-of-bounds shape or a
+non-finite value. `ModelId` is the content hash of the file.
 
-`ByteLanguageModel` uses Burn 0.22.1's cross-entropy and autodiff with a fixed
-256-byte vocabulary. Batches are limited to 4096 next-byte predictions. Tests
-exercise real local gradients, unequal participation, a disappearing worker and
-coordinator restore, and assert lower language loss. It is a 65,536-parameter
-bigram test workload, not a transformer, pretrained-model fine-tuner or chat model.
-The test inner loop uses SGD; AdamW learner state remains to be integrated.
+`group_capable` is `parameters <= 1,000,000`: the largest model whose work
+packet and returned update each fit one 8 MiB group message, where bytes travel
+as hex. A core test serialises the worst-case packet and update for every
+group-capable row and asserts the bound. Large does not fit and chunked work
+transfer is not built, so Large trains on one computer.
 
-### Independent learner packets
+### Plans, presets and settings
 
-The core `TrainingTask` and `TrainingResult` wire types split assignment, local
-work and merge. A task carries a versioned built-in recipe, a lease, little-endian
-model parameters and at most 512 bytes of explicitly selected text. Workers
-validate the authenticated worker identity, base-model hash, finite parameter
-values, exact model size, token budget and a maximum of 16 local steps before
-allocating Burn tensors. No task can request a command, file read or download.
+`TrainingPlan` holds the name, `TrainingBase` (`Fresh(BaseModel)` or
+`Continue(ModelId)`), `TrainingSource` (`Sample`, `Text`, `File(PathBuf)`), an
+optional preset, `TrainingSettings` and `with_group`. Settings are whole
+numbers (thousandths or millionths) so plans compare exactly.
+`TrainingSettings::validate(architecture)` bounds every field and names the
+first one out of range; `TrainingSettings::recommended(preset, architecture,
+text_len, hardware)` fills a preset. The ranges and recommended values are
+tabled once, in the [Training guide](training.md#advanced-reference).
 
-New runs use independent random identities, even when their text is identical.
-The coordinator remembers the exact batch/token count for each outstanding lease.
-Duplicate, altered, expired and stale updates cannot change a saved model. A
-restored coordinator invalidates outstanding work and advances the lease counter;
-workers must ask again. Earlier local checkpoints are still readable and upgrade
-on their next save.
+Core validates a file source by name only. The runtime reads it on a blocking
+task (regular file, bounded read, UTF-8, byte-order mark removed) and never
+puts text in the published state: `TrainingState.plan` is a
+`TrainingPlanSummary` with the source kind, byte count and file name.
 
-`PeerRequest::Training` uses the existing authenticated Groups protocol. The
-group wire already carried this request. Core and runtime membership checks
-cover these messages, and the desktop serves one only when **Help the group
-train** is on. Otherwise it refuses and does not assign work. Helping is a
-separately owned, cancellable runtime task. The coordinator's bounded inbox
-rejects excess requests. It saves the lease counter before sending an assignment
-and writes the model only after a matching finite result. A changed worker,
-model, size, token count or non-finite update is rejected and leaves the saved
-run unchanged. A helper that asks again after dropping out replaces its own
-unfinished lease, so the old update cannot be merged. It checks membership again
-before releasing a reply. Network exchanges use the Groups deadline; learner
-work has fixed size/step caps.
+### Rounds, the merge engine and the two optimizers
 
-Integration tests pass real Burn work over local iroh connections, including a
-lost worker, unauthorized sender and replay. Two full desktop runtimes driven
-through `Client` test consent, durable acknowledgements, stopping, group departure,
-preservation of a helper's own model and coordinator restart with sharing off.
-These run in one test process; cross-process interruption/rejoin testing and
-large-fleet performance remain to be established.
+`GridSyncer` assigns short work leases to independent workers. A ready worker
+can advance training without waiting for offline workers. Each lease binds the
+job, worker, base model hash, round, step count, token budget and expiry. The
+caller supplies monotonic time; expired slots can be reused. Leases are
+consumed once, and altered assignments, duplicate submissions, invalid
+dimensions, non-finite values and out-of-budget counts are rejected before any
+merge state changes.
 
-### Implementation path
+One round is one packet folded in. The session issues a lease for the next
+piece of the learning text, a computer learns from it, and the difference is
+merged:
 
-1. **Present:** pure scheduling/outer optimizer, Burn language workload, bounded
-   local rounds, durable model/optimizer/text checkpoints and runtime progress.
-2. **Present:** native Training page with sample/pasted-text choice, Start, Pause,
-   Resume, progress and saved-model location; registered on Skills.
-3. **Next:** larger dataset ingestion, idle/resource budgets, better model
-   evaluation and saved-run selection. Pause currently occurs between short rounds.
-   The learner uses SGD; persistent AdamW inner state is still pending.
-4. **Grid integration:** bounded learner packets, the Groups switch **Help the
-   group train** (off until the owner turns it on), durable assignment and merge
-   acknowledgements, and a dropped helper that does not change the saved model.
-   Next are resource budgets and reconnect tests across separate machines.
-5. **SLMs:** transformer/pretrained model support, tokenizer/model artifacts,
-   AdamW local checkpoints, fragments and measured memory/quality benchmarks.
+- **Local optimizer** (`sovra-train`, plain Rust over the flat vector): SGD or
+  Adam with weight decay and optional clipping, for `local_steps` steps of
+  `windows` seeded windows each. Its state lasts one packet, because a packet
+  does not carry optimizer moments.
+- **Outer optimizer** (`GridSyncer`): clips each pseudo-gradient to a fixed
+  norm, applies a cosine/exponential age gate, token-weights the update and
+  steps Adam. Because Adam normalises magnitude, `outer_learning_rate_micro`
+  is the real step size and the local rate mostly sets direction. The schedule
+  (constant, cosine, warm-up then cosine) therefore drives the outer rate: the
+  session calls `GridSyncer::set_learning_rate` before every merge.
 
-The intended delivery stays within the Rust executable: Burn owns tensor code,
-core owns decisions, runtime owns tasks and IO, and GPUI owns the native controls.
-Python, Ray, Slurm, a separate trainer service and a browser UI are not dependencies.
-Model weights, selected text and checkpoints are data files in the app data
-directory’s `training/` folder. The training adapter is linked into `sovra-app`; no
-separate training process is started.
+An update older than `cutoff_rounds` is refused without touching the moments;
+recommended plans use 128 rounds with a small age decay so that a helper is
+not left behind by an owner training continuously. The owner's own rounds use
+the same path on a reserved all-zero worker id and skip the hex encoding. The
+merge engine is capped at 16,777,216 parameters and 64 simultaneous workers.
+
+Token accounting is exact. A transformer packet teaches
+`windows × min(context, text_len − 1) × steps` next-byte guesses and the
+Starter `(text_len − 1) × steps`; both ends compute the number, it must fit the
+lease's token budget, and a result reporting any other count is refused.
+
+Every `check_every` rounds, on round 1 and on the last round, the session
+measures the loss on the held-back tail (`check_split`, never issued in a
+packet) and writes sample text. `stop_when_stalled` ends the run when the best
+check loss is that many rounds old. Evaluation and writing use no autodiff
+graph, and text writing does not use Burn at all.
+
+### Saved runs
+
+`TrainingSession::checkpoint` returns a binary file: `SOVRARUN`, version 3,
+section lengths, a small JSON header (`TrainingPlanSummary`, text hash, cursor,
+losses, sample, last metric point), the text, and `GridCheckpoint::to_bytes()`
+(`SOVRAGRD`, 20 bytes per parameter: the value and two `f64` moments). Restore
+checks every length before allocating, then the plan, text hash, shape, round
+and cursor, and passes the merge state through `GridSyncer::restore`. Any
+failure is `InvalidCheckpoint`; the runtime then shows the error once, keeps
+the file and lets a new run start. In-flight leases are never restored, and
+the lease counter moves forward, so helpers must ask again. The 0.5.0 JSON
+checkpoints still restore, as a Starter run, and are saved in the new form
+afterwards. The size cap is 96 MiB.
+
+The runtime writes owner-private files through a temporary file, sync and
+atomic rename under `training/`: the run file, a `notes.json` sidecar with the
+chart history, a pointer to the latest run, and `models/<id>.model` with a card
+JSON. An OS-held lock excludes a second training runtime from the directory.
+The library scan skips and logs anything that does not validate and never
+removes a file. Rollback to an older checkpoint is not detected.
+
+### The training actor
+
+One actor task owns the session. While a run is `Running` the session is moved
+into a blocking task for a slice of about 200 ms of rounds, and the actor keeps
+answering commands and group requests; anything that needs the session sets a
+halt flag and waits for the slice. Slices stop for a chat turn
+(`model_priority::busy()`). State is published at most every 250 ms, except
+phase changes. A slice saves when a save is due: every 25 times the measured
+cost of a save, between 3 and 60 seconds. The run is always saved on pause,
+stop, completion and shutdown.
+
+On completion, a `Stop` command or a stall, the actor exports the model, has the engine
+inspect it, writes the file and card, and adds it to the library. A failed
+export leaves the run saved and is retried on the next `Load`. Starting a new
+run first exports an unfinished earlier run that has rounds.
+
+### Group exchanges
+
+Every message is a variant of `TrainingPeerRequest` / `TrainingPeerResponse`
+inside the existing `PeerRequest::Training { group, work }`, so the ALPN and
+the membership gate are unchanged. Each exchange is one bounded JSON request
+and one bounded JSON reply over the authenticated group connection.
+
+| Request | Reply | Served when |
+| --- | --- | --- |
+| `Status` | `Running(RunSummary)` or `Unavailable` | Owner grant holds |
+| `Work` | `Assigned(TrainingTask)` or `Unavailable` | Owner grant holds |
+| `Submit(TrainingResult)` | `Accepted(TrainingProgress)` or `Rejected` | Owner grant holds |
+| `Offers { have }` (at most 64 ids) | `Offered` (at most 8 cards) | Sender is a current member |
+| `FetchModel { model, offset }` | `ModelPart { total, bytes }` (at most 2 MiB) | Member, and the model is shared with that group |
+| `Received { model }` | `Thanks` | Member, and the model is shared with that group |
+| `Announce { models }` | `Thanks` | Sender is a current member; treated as a hint only |
+
+Authorisation has three layers:
+
+1. **Membership.** `admits_request` refuses a non-member (`NotAMember`) or a
+   wrong group id (`WrongGroup`) before any training code runs. The sender is
+   the connection's authenticated device key. The sending side checks that
+   both computers are in the group before the request and again after the
+   reply.
+2. **Owner grant.** `TrainingState.sharing = Some(group)` is set only by
+   `Start(plan)` with `plan.with_group`, in memory. It is cleared by
+   `StopSharing`, finishing, a failed run, or a change of group, and it is
+   never saved or restored. `Status`, `Work` and `Submit` are served only while
+   `sharing == Some(group)`, the phase is `Running` and both computers are
+   still members; the check is repeated after the save and before an
+   assignment leaves. The owner never runs work a peer supplies.
+3. **Helper permission.** `GroupRecord.help_train` (**Help the group train**)
+   is persisted and changed only by `GroupCommand::SetTrainingHelp`. It is read
+   only by the helper's own scout, never on the serving side. The 0.5.0 field
+   `training_help` is kept in the record and read by nothing.
+
+A `TrainingTask` carries a recipe (`ByteBigramV1`, or `ByteModelV2` with the
+shape, windows, scheduled local rate, optimizer, weight decay, clip and seed),
+the lease, the model values and at most 4,096 bytes of text.
+`TrainingTask::parameters(worker)` checks the recipe's bounds, that the lease
+names this worker, the exact model size, 1 to 16 steps, the text length, the
+token budget, that the model hashes to the lease's base model, and finite
+values, all before a tensor is built. No field can name a command, path or
+download. A Starter run on recommended settings still sends `ByteBigramV1`
+packets, which 0.5.0 helpers decode; everything else sends `ByteModelV2`.
+
+On the owner, the lease counter is saved before a packet leaves and a result is
+saved before `Accepted` is returned, so each exchange with a helper costs one
+full save. A bad or late result is `Rejected` and leaves the saved run
+byte-identical; it never pauses the run. Outstanding leases are abandoned when
+they pass `lease_seconds`, when the helper leaves the group, when sharing ends
+and on finish, and that text interval is issued again. A helper that takes
+three packets without one accepted result is answered `Unavailable` for 30
+seconds. Requests wait at most 5 seconds for small messages and 60 seconds for
+work, results and model parts.
+
+**Automatic helping.** Each 250 ms tick the helper's actor may start a scout
+when the permission is on, **Stop helping** has not latched it off, this
+computer is not training, sharing, trying a model or answering chat, and it is
+in a group. The scout sends `Status` to group computers, four at a time, every
+3 seconds for computers seen online and every tenth look to all of them, and
+stops at the first `Running`. Conditions are checked again before the first
+packet. A peer that cannot decode the request (0.5.0 answers `Malformed`) is
+skipped for 10 minutes. `Help(device)` remains an explicit manual choice that
+needs no permission.
+
+**Delivery.** A model is offered to a group when it was trained here and its
+card names that group. After export or `Share(id)` the owner sends `Announce`
+to each computer that has not got it, four at a time. Every member polls
+`Offers` at start, on `Load`, and every 30 seconds for computers seen online.
+A receiver builds a `ModelAssembly` from the card (valid card, its own group,
+size within the received-model quota of 64 models and 512 MiB), fetches parts
+one request at a time, and keeps the file only if the total matches the card,
+the content hash equals the id, `inspect_model` and the engine's `inspect`
+accept it and agree with the card, and both computers are still members. It
+stores the model as `Received { from }` with the trainer's name taken from its
+own roster, then sends `Received`. The owner records delivery per device in the
+card JSON; an id in a later `Offers.have` also counts, so a lost `Received`
+heals. Received models are not offered onward.
+
+### Tests
+
+Core unit tests cover the settings bounds, presets, parameter counts, model
+file and checkpoint round-trips, message size bounds and delivery assembly.
+`sovra-train` tests train a micro transformer, check gradients, repeatability
+across thread counts, restore, and refusal of altered packets; they never run
+the Medium or Large shapes. Runtime tests drive full runtimes through `Client`
+over an in-process group transport that also asserts every message fits the
+wire limit: consent and refusals, forged, replayed and stale results, a dropped
+helper, restart without sharing, automatic helping and its latch, delivery to
+present and absent members, and refusal of a changed, oversized or wrong-group
+model. Separate-machine networks, large groups and group speed-up are not
+measured.
+
+### Single executable
+
+Burn owns tensor code, core owns decisions, the runtime owns tasks and IO, and
+GPUI owns the native controls. The adapter is linked into `sovra-app`; no
+separate training process is started. Python, Ray, Slurm, a trainer service
+and a browser UI are not dependencies, and nothing is downloaded. `sysinfo`
+supplies hardware facts without running an external tool.
 
 ### Research used
 
@@ -186,13 +309,14 @@ separate training process is started.
 
 ## Integration and security limits
 
-The desktop's connected training preview uses only the fixed small-model recipe;
-it has no general outbound-message gate using `EgressGate`. Ordinary messaging uses the separate
+Desktop training uses only the built-in recipes described above; it has no
+general outbound-message gate using `EgressGate`. Ordinary messaging uses the separate
 review and trusted-recipient rules in [Messaging](communications.md). Department
 spaces in Groups do not establish a company-wide policy system.
 
-The scavenger primitive does not authenticate peers, authorize training, or apply
-the separate secure-aggregation/privacy protocol. Model changes can leak training
+The scavenger primitive itself does not authenticate peers or authorize training;
+the group layers above do. Desktop training does not apply the separate
+secure-aggregation or privacy-noise protocols. Model changes can leak training
 data; keeping raw examples local alone is not a privacy guarantee. Transport must
 bound messages before decoding or allocating tensors.
 

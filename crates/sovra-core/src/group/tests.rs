@@ -31,6 +31,69 @@ fn person(n: u8) -> PersonId {
 }
 
 #[test]
+fn the_first_releases_training_switch_is_never_read_as_the_helper_permission() {
+    let record = GroupRecord::default();
+    assert!(!record.help_train && !record.training_help);
+    // A record saved while an owner was sharing a run on the first release.
+    let mut old = serde_json::to_value(&record).unwrap();
+    old["training_help"] = true.into();
+    old.as_object_mut().unwrap().remove("help_train");
+    let loaded: GroupRecord = serde_json::from_value(old).unwrap();
+    assert!(loaded.training_help);
+    assert!(!loaded.help_train);
+    // The permission itself survives a save and load.
+    let on = GroupRecord {
+        help_train: true,
+        ..GroupRecord::default()
+    };
+    let saved = serde_json::to_string(&on).unwrap();
+    assert!(
+        serde_json::from_str::<GroupRecord>(&saved)
+            .unwrap()
+            .help_train
+    );
+}
+
+#[test]
+fn every_training_message_requires_current_membership_in_the_named_group() {
+    let mut log = Log::family();
+    log.add(2, Role::Member, 2000);
+    let model = ContentHash::of(b"model");
+    for work in [
+        crate::training::TrainingPeerRequest::Status,
+        crate::training::TrainingPeerRequest::Offers { have: Vec::new() },
+        crate::training::TrainingPeerRequest::FetchModel { model, offset: 0 },
+        crate::training::TrainingPeerRequest::Received { model },
+        crate::training::TrainingPeerRequest::Announce { models: Vec::new() },
+    ] {
+        let request = PeerRequest::Training {
+            group: log.group,
+            work: work.clone(),
+        };
+        assert_eq!(
+            admits_request(Some(&log.state()), &device(2), &request),
+            Ok(())
+        );
+        assert_eq!(
+            admits_request(Some(&log.state()), &device(3), &request),
+            Err(Refusal::NotAMember)
+        );
+        assert_eq!(
+            admits_request(None, &device(2), &request),
+            Err(Refusal::WrongGroup)
+        );
+        let wrong = PeerRequest::Training {
+            group: GroupId([99; 32]),
+            work,
+        };
+        assert_eq!(
+            admits_request(Some(&log.state()), &device(2), &wrong),
+            Err(Refusal::WrongGroup)
+        );
+    }
+}
+
+#[test]
 fn training_messages_require_current_membership_in_the_named_group() {
     let mut log = Log::family();
     log.add(2, Role::Member, 2000);

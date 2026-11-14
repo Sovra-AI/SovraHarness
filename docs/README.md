@@ -1,7 +1,7 @@
 # Documentation
 
 SovraHarness is a native desktop workspace for AI chat, files, memory, shared
-work and training together on computers you own. These guides describe the
+work, and training your own small AI across your group's computers. These guides describe the
 current checkout. For a released version, read
 the documentation at that release's tag. Start with the [project README](../README.md)
 for installation and the [changelog](../CHANGELOG.md) for release history.
@@ -9,7 +9,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 ## Start here
 
 - [Getting started](getting-started.md): launch Sovra, connect a model, and send a first message.
-- [Training together](training.md): try the tiny-model preview and let group computers help, with explicit control over sharing.
+- [Train your own small AI](training.md): teach a model from your own text in one app, let your group's computers help, watch it learn, and have the finished model delivered to everyone in the group.
 - [Models](models.md): choose a provider, check credentials, and change your chat model.
 - [Configuration and local data](configuration.md): settings, environment variables, data paths, and troubleshooting.
 
@@ -23,7 +23,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 | Work with helpers and save their output | [Teams and artifacts](teams-and-artifacts.md) |
 | Run prompts or send messages later | [Schedules](schedules.md) |
 | Share selected work across computers | [Groups](groups.md) |
-| Train a practice model locally or with a group | [Training](training.md) |
+| Train your own small AI, alone or with your group | [Training](training.md) |
 | Connect WhatsApp or Telegram | [Messaging](communications.md) |
 | Use Gmail drafts, Calendar, Drive, Contacts, or Tasks | [Google](google.md) |
 | Work with repositories and issues | [GitHub](github.md) |
@@ -47,7 +47,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 - [Memory capture and recall](memory-capture-and-recall.md): evidence, extraction, retrieval, and withdrawal.
 - [File understanding](file-ontology.md): classification and bounded folder scanning.
 - [Phone control protocol](remote-control.md): desktop transport and reference client; phone apps live in separate repositories linked from the project README.
-- [Swarm internals](swarm.md): the scavenger grid, independent work packets, durable checkpoints, group permissions and remaining SLM work.
+- [Swarm internals](swarm.md): how training works inside: the model shapes, work packets and merge rules, saved-file formats, group messages, model delivery and tests.
 - [Network access](network.md): configured destinations and local-operation limits.
 - [Dependency license evidence](dependency-licenses.md): version-specific clarification.
 

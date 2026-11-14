@@ -22,7 +22,7 @@ impl Skill {
     /// Returns grandma-friendly title, summary, example display, and 1-click starter draft.
     pub fn friendly_card_copy(&self) -> SkillCardCopy {
         let friendly_title = match self.name.as_str() {
-            "training" => "Teach a small model with your text",
+            "training" => "Teach your own AI model with your group",
             "files" => "Attach files or photos",
             "index-folder" => "Connect folders on your computer",
             "help" => "Browse all skills & shortcuts",
@@ -103,7 +103,7 @@ impl Skill {
             );
 
         let (example_display, sample_draft) = match self.name.as_str() {
-            "training" => ("Open Training, choose the garden sample or paste a short story, and press Start training. Pause and resume whenever you like. Choose Start with my group to let your group's computers help with that text.".to_owned(), "/training".to_owned()),
+            "training" => ("Open Training and press Start training to try the garden sample, or paste your family's recipes or choose a text file first. Watch the chart as it learns, then press Try it to see what it writes. Leave Train with my group on and everyone in your group gets the finished model.".to_owned(), "/training".to_owned()),
             "files" => (
                 "Opens your computer's file picker so you can attach documents or pictures."
                     .to_owned(),
@@ -397,8 +397,8 @@ pub fn builtin_skills() -> Vec<Skill> {
         ),
         action(
             "training",
-            "Teach a small model with your text",
-            "Try a tiny practice model with automatic saving and a pause button. Letting a computer in your group help is a separate choice that starts off. Larger models are still being built.",
+            "Teach your own AI model with your group",
+            "Teach a small AI model from your own writing, on your own computers. Watch it learn live, let your group's computers help, and everyone in the group gets the finished model. It writes in the style you taught it and does not replace your chat AI.",
             SkillAction::Training,
             &[],
         ),

@@ -1,7 +1,11 @@
-//! Bounded, versioned learner work carried over an authenticated group connection.
+//! Bounded, versioned training messages carried over an authenticated group
+//! connection: work packets, finding a shared run, and delivering finished models.
 //!
-//! Only the selected batch and model weights travel. A task never names a file,
-//! executable, model download or operation to perform outside the learner.
+//! Only the selected batch, model values and model cards travel. A message never
+//! names a file, executable, download or operation to perform outside the learner,
+//! and every value is checked against fixed bounds before anything is allocated
+//! for it. The transport has already checked that the sender is a current member
+//! of the named group; who may be served what is the runtime's decision.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +14,25 @@ use crate::{
     swarm::learn::scavenger::{Contribution, WorkLease},
 };
 
-use super::TrainingError;
+use super::{
+    Architecture, BaseModel, LEGACY_WORK_BATCH_BYTES, LocalOptimizer, MAX_LOCAL_STEPS,
+    MAX_MODEL_BYTES, MAX_WINDOWS, MAX_WORK_BATCH_BYTES, ModelCard, ModelId, TrainingError,
+    TrainingSettings, check_name,
+};
+
+// The cap on group-trained shapes leaves room for the rest of the message: each
+// value is eight hex characters, beside the assignment and up to 4096 bytes of text.
+const _: () =
+    assert!(super::MAX_GROUP_PARAMETERS * 8 + 64 * 1024 <= crate::group::MAX_PEER_MESSAGE_BYTES);
+
+/// Values in the Starter table.
+pub const BYTE_MODEL_PARAMETERS: usize = 65_536;
+/// Most model ids a computer lists as already held when asking for offers.
+pub const MAX_OFFER_HAVE: usize = 64;
+/// Most model cards in one reply or announcement.
+pub const MAX_OFFERED_MODELS: usize = 8;
+/// Most model bytes in one part: 2 MiB, which is 4 MiB as hex on the wire.
+pub const MAX_MODEL_PART_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -20,8 +42,29 @@ use super::TrainingError;
     deny_unknown_fields
 )]
 pub enum TrainingPeerRequest {
+    /// "Give me a packet of your shared run to work on."
     Work,
     Submit(Box<TrainingResult>),
+    /// "Are you running training that your group may help with?"
+    Status,
+    /// "Which finished models are you sharing with this group that I lack?"
+    Offers {
+        have: Vec<ModelId>,
+    },
+    /// "Send me that model's bytes from `offset` on."
+    FetchModel {
+        model: ModelId,
+        offset: u64,
+    },
+    /// "I have that model now."
+    Received {
+        model: ModelId,
+    },
+    /// "I have just finished these." Only a hint: the receiver answers `Thanks`
+    /// and then fetches what it wants itself. Model bytes never travel in a request.
+    Announce {
+        models: Vec<ModelCard>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,19 +77,212 @@ pub enum TrainingPeerRequest {
 pub enum TrainingPeerResponse {
     Assigned(Box<TrainingTask>),
     Accepted(super::TrainingProgress),
+    /// Nothing to give right now: no shared run, not this group's, busy, or the
+    /// model asked for is not on offer. Ask again later.
     Unavailable,
     Rejected,
+    /// A run this group may help with is going.
+    Running(RunSummary),
+    Offered(Vec<ModelCard>),
+    ModelPart {
+        total: u64,
+        bytes: Bytes,
+    },
+    Thanks,
 }
 
-pub const BYTE_MODEL_PARAMETERS: usize = 65_536;
-pub const MAX_WORK_BATCH_BYTES: usize = 512;
-pub const MAX_LOCAL_STEPS: u32 = 16;
+impl TrainingPeerRequest {
+    /// Checks the bounded parts of a request before it is acted on.
+    pub fn validate(&self) -> Result<(), TrainingError> {
+        match self {
+            Self::Work | Self::Status | Self::Received { .. } | Self::Submit(_) => Ok(()),
+            Self::Offers { have } if have.len() <= MAX_OFFER_HAVE => Ok(()),
+            Self::FetchModel { offset, .. } if *offset < MAX_MODEL_BYTES as u64 => Ok(()),
+            Self::Announce { models } if models.len() <= MAX_OFFERED_MODELS => valid_cards(models),
+            Self::Offers { .. } | Self::FetchModel { .. } | Self::Announce { .. } => {
+                Err(TrainingError::InvalidWork)
+            }
+        }
+    }
+}
+
+impl TrainingPeerResponse {
+    /// Checks the bounded parts of a reply before it is used. A work packet is
+    /// checked separately by [`TrainingTask::parameters`], which also needs to
+    /// know who it was meant for.
+    pub fn validate(&self) -> Result<(), TrainingError> {
+        match self {
+            Self::Assigned(_)
+            | Self::Accepted(_)
+            | Self::Unavailable
+            | Self::Rejected
+            | Self::Thanks => Ok(()),
+            Self::Running(run) => run.validate(),
+            Self::Offered(models) if models.len() <= MAX_OFFERED_MODELS => valid_cards(models),
+            Self::ModelPart { total, bytes }
+                if *total <= MAX_MODEL_BYTES as u64
+                    && !bytes.0.is_empty()
+                    && bytes.0.len() <= MAX_MODEL_PART_BYTES
+                    && bytes.0.len() as u64 <= *total =>
+            {
+                Ok(())
+            }
+            Self::Offered(_) | Self::ModelPart { .. } => Err(TrainingError::InvalidWork),
+        }
+    }
+}
+
+fn valid_cards(models: &[ModelCard]) -> Result<(), TrainingError> {
+    if models.iter().all(|card| card.validate().is_ok()) {
+        Ok(())
+    } else {
+        Err(TrainingError::InvalidWork)
+    }
+}
+
+/// What a computer says about the run it is sharing, so a helper can show whose
+/// run it joined. It carries no text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunSummary {
+    pub name: String,
+    pub base: BaseModel,
+    pub architecture: Architecture,
+    pub rounds: u32,
+    pub total_rounds: u32,
+}
+
+impl RunSummary {
+    pub fn validate(&self) -> Result<(), TrainingError> {
+        check_name(&self.name).map_err(|_| TrainingError::InvalidWork)?;
+        if self.architecture.validate().is_err()
+            || !self.architecture.group_capable()
+            || (self.base == BaseModel::Starter) != self.architecture.is_table()
+            || self.rounds > self.total_rounds
+            || self.total_rounds > TrainingSettings::ROUNDS.1
+        {
+            return Err(TrainingError::InvalidWork);
+        }
+        Ok(())
+    }
+}
+
+/// How a helper must do one packet's learning steps. Plain bounded numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkRecipe {
+    pub architecture: Architecture,
+    /// Windows read from the packet in each step; always 1 for the Starter table.
+    pub windows: u16,
+    /// This round's step size, in millionths, with the schedule already applied.
+    pub learning_rate_micro: u32,
+    pub optimizer: LocalOptimizer,
+    pub weight_decay_micro: u32,
+    /// Largest size of one step's correction, in thousandths; 0 = no limit.
+    pub clip_milli: u32,
+    /// Chooses which windows are read, so both ends can repeat the work exactly.
+    pub seed: u64,
+}
+
+impl WorkRecipe {
+    pub fn validate(&self) -> Result<(), TrainingError> {
+        self.architecture
+            .validate()
+            .map_err(|_| TrainingError::InvalidWork)?;
+        let windows = if self.architecture.is_table() {
+            1..=1
+        } else {
+            1..=MAX_WINDOWS
+        };
+        let rate = TrainingSettings::LEARNING_RATE_MICRO;
+        if !self.architecture.group_capable()
+            || !windows.contains(&self.windows)
+            || !(rate.0..=rate.1).contains(&self.learning_rate_micro)
+            || self.weight_decay_micro > TrainingSettings::MAX_WEIGHT_DECAY_MICRO
+            || self.clip_milli > TrainingSettings::MAX_CLIP_MILLI
+        {
+            return Err(TrainingError::InvalidWork);
+        }
+        Ok(())
+    }
+}
 
 /// An exact recipe version, rather than peer-supplied executable instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrainingRecipe {
+    /// The first wire form, which computers on the first training release
+    /// understand: the Starter table, plain steps of size 0.1 over the whole
+    /// packet, at most 512 bytes of text.
     ByteBigramV1,
+    /// Any supported model shape with the local rule spelled out.
+    ByteModelV2(WorkRecipe),
+}
+
+impl TrainingRecipe {
+    /// The recipe for the round about to run (counted from zero). Starter runs on
+    /// the settings an old helper already uses keep the first wire form.
+    pub fn for_round(architecture: Architecture, settings: &TrainingSettings, round: u32) -> Self {
+        if settings.is_legacy_starter(architecture) {
+            return Self::ByteBigramV1;
+        }
+        Self::ByteModelV2(WorkRecipe {
+            architecture,
+            windows: settings.windows,
+            learning_rate_micro: settings.learning_rate_micro_at(round),
+            optimizer: settings.optimizer,
+            weight_decay_micro: settings.weight_decay_micro,
+            clip_milli: settings.clip_milli,
+            seed: settings
+                .seed
+                .wrapping_add(u64::from(round).wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+        })
+    }
+
+    /// The local rule in full, whichever wire form names it.
+    pub fn work(&self) -> WorkRecipe {
+        match self {
+            Self::ByteBigramV1 => WorkRecipe {
+                architecture: Architecture::STARTER,
+                windows: 1,
+                learning_rate_micro: 100_000,
+                optimizer: LocalOptimizer::Sgd,
+                weight_decay_micro: 0,
+                clip_milli: 0,
+                seed: 0,
+            },
+            Self::ByteModelV2(recipe) => *recipe,
+        }
+    }
+
+    pub fn architecture(&self) -> Architecture {
+        self.work().architecture
+    }
+
+    pub fn validate(&self) -> Result<(), TrainingError> {
+        self.work().validate()
+    }
+
+    /// Most text a packet with this recipe may carry.
+    pub fn max_text_bytes(&self) -> usize {
+        match self {
+            Self::ByteBigramV1 => LEGACY_WORK_BATCH_BYTES,
+            Self::ByteModelV2(_) => MAX_WORK_BATCH_BYTES,
+        }
+    }
+
+    /// Next-byte guesses a packet of `text_len` bytes teaches over `steps` steps:
+    /// windows × bytes per window × steps. The owner and the helper both compute
+    /// this, and a result with any other count is refused.
+    pub fn expected_tokens(&self, text_len: usize, steps: u32) -> Result<u32, TrainingError> {
+        let recipe = self.work();
+        u32::try_from(recipe.architecture.window_tokens(text_len))
+            .ok()
+            .and_then(|tokens| tokens.checked_mul(u32::from(recipe.windows)))
+            .and_then(|tokens| tokens.checked_mul(steps))
+            .filter(|tokens| *tokens > 0)
+            .ok_or(TrainingError::InvalidWork)
+    }
 }
 
 /// One independently runnable assignment. The runtime persists the lease counter
@@ -62,28 +298,28 @@ pub struct TrainingTask {
 }
 
 impl TrainingTask {
-    /// Validate before allocating tensors or starting any learner work.
+    /// Validate before allocating tensors or starting any learner work: the recipe
+    /// and its bounds, who the packet is for, the exact model size its shape
+    /// implies, the step and text limits, the cost, and that the model is the one
+    /// the lease names.
     pub fn parameters(&self, worker: DeviceId) -> Result<Vec<f32>, TrainingError> {
+        self.recipe.validate()?;
+        let architecture = self.recipe.architecture();
         if self.lease.worker != worker
-            || self.model.0.len() != BYTE_MODEL_PARAMETERS * 4
+            || self.model.0.len() != architecture.parameters() * 4
             || !(1..=MAX_LOCAL_STEPS).contains(&self.lease.steps)
-            || !(2..=MAX_WORK_BATCH_BYTES).contains(&self.text.len())
-            || ContentHash::of(&self.model.0) != self.lease.base_model
+            || !(2..=self.recipe.max_text_bytes()).contains(&self.text.len())
             || self.expected_tokens()? > self.lease.token_budget
+            || ContentHash::of(&self.model.0) != self.lease.base_model
         {
             return Err(TrainingError::InvalidWork);
         }
-        match self.recipe {
-            TrainingRecipe::ByteBigramV1 => decode_parameters(&self.model),
-        }
+        decode_parameters(&self.model, architecture)
     }
 
     pub fn expected_tokens(&self) -> Result<u32, TrainingError> {
-        u32::try_from(self.text.len().saturating_sub(1))
-            .ok()
-            .and_then(|tokens| tokens.checked_mul(self.lease.steps))
-            .filter(|tokens| *tokens > 0)
-            .ok_or(TrainingError::InvalidWork)
+        self.recipe
+            .expected_tokens(self.text.len(), self.lease.steps)
     }
 }
 
@@ -98,7 +334,12 @@ pub struct TrainingResult {
 }
 
 impl TrainingResult {
-    pub fn contribution(&self, worker: DeviceId) -> Result<Contribution, TrainingError> {
+    /// Checks a returned update against the run's own model shape.
+    pub fn contribution(
+        &self,
+        worker: DeviceId,
+        architecture: Architecture,
+    ) -> Result<Contribution, TrainingError> {
         if self.lease.worker != worker || self.tokens == 0 || self.tokens > self.lease.token_budget
         {
             return Err(TrainingError::InvalidWork);
@@ -106,13 +347,17 @@ impl TrainingResult {
         Ok(Contribution {
             lease: self.lease.clone(),
             tokens: self.tokens,
-            pseudo_gradient: decode_parameters(&self.pseudo_gradient)?,
+            pseudo_gradient: decode_parameters(&self.pseudo_gradient, architecture)?,
         })
     }
 }
 
-pub fn encode_parameters(parameters: &[f32]) -> Result<Bytes, TrainingError> {
-    if parameters.len() != BYTE_MODEL_PARAMETERS || parameters.iter().any(|x| !x.is_finite()) {
+/// Model values as wire bytes: exactly the count the shape implies, all finite.
+pub fn encode_parameters(
+    parameters: &[f32],
+    architecture: Architecture,
+) -> Result<Bytes, TrainingError> {
+    if parameters.len() != architecture.parameters() || parameters.iter().any(|x| !x.is_finite()) {
         return Err(TrainingError::InvalidWork);
     }
     Ok(Bytes(
@@ -120,8 +365,13 @@ pub fn encode_parameters(parameters: &[f32]) -> Result<Bytes, TrainingError> {
     ))
 }
 
-fn decode_parameters(bytes: &Bytes) -> Result<Vec<f32>, TrainingError> {
-    if bytes.0.len() != BYTE_MODEL_PARAMETERS * 4 {
+/// Wire bytes back to model values, refusing any other length or a value that is
+/// not a finite number. The length is checked before anything is allocated.
+pub fn decode_parameters(
+    bytes: &Bytes,
+    architecture: Architecture,
+) -> Result<Vec<f32>, TrainingError> {
+    if bytes.0.len() != architecture.parameters() * 4 {
         return Err(TrainingError::InvalidWork);
     }
     let parameters: Vec<f32> = bytes
@@ -138,77 +388,4 @@ fn decode_parameters(bytes: &Bytes) -> Result<Vec<f32>, TrainingError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::swarm::learn::scavenger::{GridSettings, GridSyncer};
-
-    fn task() -> TrainingTask {
-        let parameters = vec![0.0; BYTE_MODEL_PARAMETERS];
-        let mut grid = GridSyncer::new(
-            ContentHash::of(b"run"),
-            parameters.clone(),
-            GridSettings {
-                local_steps: 4,
-                ..GridSettings::default()
-            },
-        )
-        .unwrap();
-        TrainingTask {
-            recipe: TrainingRecipe::ByteBigramV1,
-            lease: grid.issue(DeviceId([1; 32]), 0).unwrap(),
-            model: encode_parameters(&parameters).unwrap(),
-            text: "a garden".into(),
-        }
-    }
-
-    #[test]
-    fn tasks_reject_changed_identity_model_recipe_cost_or_batch_before_training() {
-        let original = task();
-        assert_eq!(original.expected_tokens().unwrap(), 28);
-        assert_eq!(
-            original.parameters(DeviceId([1; 32])).unwrap().len(),
-            BYTE_MODEL_PARAMETERS
-        );
-        assert!(original.parameters(DeviceId([2; 32])).is_err());
-        for change in 0..6 {
-            let mut altered = original.clone();
-            match change {
-                0 => altered.model.0[0] = 1,
-                1 => altered.lease.steps = MAX_LOCAL_STEPS + 1,
-                2 => altered.text = "x".repeat(MAX_WORK_BATCH_BYTES + 1),
-                3 => altered.text.clear(),
-                4 => altered.lease.token_budget = 1,
-                _ => {
-                    altered.model.0[..4].copy_from_slice(&f32::NAN.to_le_bytes());
-                    altered.lease.base_model = ContentHash::of(&altered.model.0);
-                }
-            }
-            assert!(
-                altered.parameters(DeviceId([1; 32])).is_err(),
-                "change {change}"
-            );
-        }
-        let mut wire = serde_json::to_value(original).unwrap();
-        wire["recipe"] = "run-a-command".into();
-        assert!(serde_json::from_value::<TrainingTask>(wire).is_err());
-    }
-
-    #[test]
-    fn returned_updates_have_exact_bounded_finite_parameters_and_owned_identity() {
-        let assignment = task();
-        let mut result = TrainingResult {
-            lease: assignment.lease,
-            tokens: 28,
-            pseudo_gradient: assignment.model,
-        };
-        assert!(result.contribution(DeviceId([1; 32])).is_ok());
-        assert!(result.contribution(DeviceId([2; 32])).is_err());
-        result.tokens = 0;
-        assert!(result.contribution(DeviceId([1; 32])).is_err());
-        result.tokens = 28;
-        result.pseudo_gradient.0.pop();
-        assert!(result.contribution(DeviceId([1; 32])).is_err());
-        assert!(encode_parameters(&[0.0]).is_err());
-        assert!(encode_parameters(&vec![f32::INFINITY; BYTE_MODEL_PARAMETERS]).is_err());
-    }
-}
+mod tests;

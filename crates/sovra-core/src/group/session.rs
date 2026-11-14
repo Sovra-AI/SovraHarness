@@ -104,8 +104,9 @@ pub enum GroupCommand {
     SetFederated(FederatedSettings),
     /// Turn work handoff on or off for this computer.
     SetWork(super::work::WorkSettings),
-    /// Let a computer in the group take one short training step on a run started
-    /// here. Starts off. Answering questions or lending an AI does not turn it on.
+    /// "Help the group train": let this computer help, on its own, with training
+    /// that someone in the group started with the group. Starts off and stays as
+    /// set. Answering questions or lending an AI does not turn it on.
     SetTrainingHelp(bool),
     /// "Ask my group": search the memories of computers that answer, once, now.
     AskGroup {
@@ -208,7 +209,7 @@ pub enum GroupEvent {
         settings: super::work::WorkSettings,
         recent: Vec<super::work::WorkRecord>,
     },
-    /// Whether this computer lets the group help with training. Starts off.
+    /// Whether this computer helps the group's training runs. Starts off.
     TrainingHelp(bool),
     /// What the group's computers answered to an "Ask my group" question.
     Answers {
@@ -311,7 +312,8 @@ pub struct GroupsView {
     pub work: super::work::WorkSettings,
     /// Chat jobs this computer answered for others, newest first.
     pub recent_work: Vec<super::work::WorkRecord>,
-    /// Let the group help with training on this computer. Starts off.
+    /// "Help the group train": this computer helps the group's training runs on
+    /// its own while it is idle. Starts off.
     pub training_help: bool,
     /// This computer's audit history. Kept when leaving a group: history is never lost.
     pub audit: crate::swarm::audit::AuditSummary,

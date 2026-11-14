@@ -42,7 +42,7 @@ use sovra_core::{Event, Timestamp};
 use tokio::sync::{Mutex, RwLock};
 
 mod training;
-pub(crate) use training::GroupTraining;
+pub(crate) use training::{BULKY, GroupTraining, PeerReply, QUICK};
 
 /// Builds the transport once the runtime's reactor is running (iroh needs it).
 pub type TransportFuture =
@@ -669,6 +669,9 @@ struct Inner {
     limiter: AskLimiter,
     /// When each other computer was last heard from (any successful exchange).
     last_seen: std::collections::BTreeMap<DeviceId, Timestamp>,
+    /// Times "Help the group train" was turned on since the app started, so
+    /// training notices an off-and-on however quick it was.
+    help_turned_on: u64,
     /// Computers that recently did not answer, and until when they are skipped.
     quiet_until: std::collections::BTreeMap<DeviceId, Timestamp>,
     /// Chat jobs this computer answered for others, newest first (not saved).
@@ -772,9 +775,6 @@ impl Groups {
             verifier.as_ref(),
         );
         let mut record = record;
-        // Training consent is for this app session. Restoring a paused model
-        // must never let another computer restart work or retrieve its text.
-        record.training_help = false;
         record.audit_witnesses = audit::verified_marks(
             &audit,
             std::mem::take(&mut record.audit_witnesses),
@@ -799,6 +799,7 @@ impl Groups {
                 limiter: AskLimiter::default(),
                 quiet_until: std::collections::BTreeMap::new(),
                 last_seen: std::collections::BTreeMap::new(),
+                help_turned_on: 0,
                 work_log: Vec::new(),
                 work_limiter: AskLimiter::default(),
                 jobs: std::collections::BTreeMap::new(),
@@ -1204,7 +1205,7 @@ impl Groups {
                 Self::shared(&inner),
                 inner.record.federated,
                 inner.asks.clone(),
-                inner.record.training_help,
+                inner.record.help_train,
             )
         };
         self.emit(GroupEvent::Loaded {
@@ -1219,18 +1220,20 @@ impl Groups {
         self.publish_audit().await;
     }
 
-    /// Owner's choice to let a group computer take one training step. Starts off.
+    /// "Help the group train": whether this computer may lend its processor to
+    /// a run another computer of the group started. It is kept across restarts
+    /// and says nothing about this computer's own runs: only an explicit start
+    /// with the group lets others see a run's text.
     pub(super) async fn set_training_help(&self, on: bool) {
         {
             let mut inner = self.inner.lock().await;
-            inner.record.training_help = on;
+            if on && !inner.record.help_train {
+                inner.help_turned_on = inner.help_turned_on.wrapping_add(1);
+            }
+            inner.record.help_train = on;
             self.persist(&inner).await;
         }
         self.emit(GroupEvent::TrainingHelp(on)).await;
-    }
-
-    pub(super) async fn training_help(&self) -> bool {
-        self.inner.lock().await.record.training_help
     }
 
     async fn publish_work(&self) {
@@ -1433,7 +1436,18 @@ impl Groups {
     }
 
     async fn ask(&self, to: &PeerAddress, request: PeerRequest) -> Result<PeerResponse, String> {
-        match tokio::time::timeout(REQUEST_TIMEOUT, self.transport.request(to, request)).await {
+        self.ask_within(to, request, REQUEST_TIMEOUT).await
+    }
+
+    /// Like [`Self::ask`] with its own time limit: short for a small question,
+    /// longer for a message that carries a model.
+    async fn ask_within(
+        &self,
+        to: &PeerAddress,
+        request: PeerRequest,
+        limit: Duration,
+    ) -> Result<PeerResponse, String> {
+        match tokio::time::timeout(limit, self.transport.request(to, request)).await {
             Ok(Ok(response)) => {
                 self.saw(to.device).await;
                 Ok(response)
@@ -2408,7 +2422,9 @@ impl Groups {
             addresses: Vec::new(),
             federated: inner.record.federated,
             work: inner.record.work,
+            // Read by nothing; kept so an older record's value is not lost.
             training_help: inner.record.training_help,
+            help_train: inner.record.help_train,
             // History outlives any one group.
             audit: std::mem::take(&mut inner.record.audit),
             peer_audit: std::mem::take(&mut inner.record.peer_audit),
@@ -3046,13 +3062,10 @@ impl PeerHandler for GroupHandler {
             } => groups.work_next(from, id, offset).await,
             PeerRequest::WorkCancel { id, .. } => groups.work_cancel(from, id).await,
             PeerRequest::Training { group, work } => {
-                // Membership is already checked. Answering and chat help do not
-                // count: the owner must turn training help on, and it starts off.
-                if !groups.training_help().await {
-                    return PeerResponse::Refused {
-                        reason: Refusal::NotTraining,
-                    };
-                }
+                // Membership is already checked. No saved switch opens a run:
+                // the training actor serves work only for a run its person
+                // started with the group in this app session, and answers
+                // "unavailable" otherwise.
                 groups.knowledge.training_request(group, from, work).await
             }
             other => groups.serve_peer(from, other).await,

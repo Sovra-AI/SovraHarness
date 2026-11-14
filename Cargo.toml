@@ -62,9 +62,10 @@ iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "p
 # Fleet-wide broadcast of signed audit checkpoints over the same iroh endpoint
 # (MIT OR Apache-2.0). Metrics off, like iroh: nothing reports out.
 iroh-gossip = { version = "=0.102.0", default-features = false, features = ["net"] }
-# Local fine-tuning for the sovereign swarm (MIT OR Apache-2.0). Pure-Rust CPU (flex) with
-# autodiff by default; `sovra-train/gpu` adds Burn's CubeCL wgpu backend.
-burn = { version = "=0.22.1", default-features = false, features = ["std", "autodiff", "flex"] }
+# Local training for the sovereign swarm (MIT OR Apache-2.0). Pure-Rust CPU (flex) with
+# autodiff by default; `sovra-train/gpu` adds Burn's CubeCL wgpu backend. `simd` and
+# `rayon` are flex's own defaults: without them every matrix product runs on one thread.
+burn = { version = "=0.22.1", default-features = false, features = ["std", "autodiff", "flex", "simd", "rayon"] }
 directories = "6.0.0"
 futures = "0.3.32"
 # Official MCP server SDK; stdio only, owned by sovra-runtime.
@@ -128,6 +129,9 @@ serde-saphyr = { version = "=1.3.0", default-features = false, features = ["seri
 # >=3.3.4: HNSW silently dropped near-duplicate vectors before 3.3.4. BUSL-1.1 licence —
 # permitted for embedding in this app (see docs/architecture.md), excepted in deny.toml.
 surrealdb = { version = "3.3.4", features = ["kv-mem", "kv-surrealkv"] }
+# Processor name and memory for the Training page's "This computer" card (MIT). The same
+# version the database already compiles; `system` alone, so nothing else is pulled in.
+sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 time = { version = "0.3.55", features = ["formatting"] }

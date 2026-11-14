@@ -15,10 +15,11 @@ use sovra_core::group::{
     SharedArtifact, SharedDetail, Signature, SignatureVerifier, Spawn, TransportError,
 };
 use sovra_core::training::{
-    BYTE_MODEL_PARAMETERS, TrainingCommand, TrainingEngine, TrainingError, TrainingEvent,
-    TrainingPeerRequest, TrainingPeerResponse, TrainingPhase, TrainingProgress, TrainingRecipe,
-    TrainingResult, TrainingSession, TrainingSource, TrainingState, TrainingTask,
-    encode_parameters,
+    Architecture, BYTE_MODEL_PARAMETERS, BaseModel, HardwareInfo, MetricPoint, ModelFacts,
+    ModelHeader, TrainingCommand, TrainingEngine, TrainingError, TrainingEvent,
+    TrainingPeerRequest, TrainingPeerResponse, TrainingPhase, TrainingPlan, TrainingPlanSummary,
+    TrainingProgress, TrainingRecipe, TrainingResult, TrainingSession, TrainingState, TrainingTask,
+    encode_model, encode_parameters, inspect_model,
 };
 use sovra_core::{AgentConfig, Command, Event};
 use sovra_runtime::{Client, GroupServices, RuntimeServices, TrainingConfig};
@@ -266,20 +267,25 @@ impl GroupTransport for LoopTransport {
             .get(&to.device)
             .cloned()
             .ok_or_else(|| TransportError::Unreachable("not listening".into()))?;
-        // Round-trip through JSON, as the real wire does.
-        let request: PeerRequest =
-            serde_json::from_slice(&serde_json::to_vec(&request).expect("encodes"))
-                .expect("decodes");
+        // Round-trip through JSON, as the real wire does, with its size cap.
+        let encoded = serde_json::to_vec(&request).expect("encodes");
+        assert!(
+            encoded.len() <= sovra_core::group::MAX_PEER_MESSAGE_BYTES,
+            "a request must fit one peer message"
+        );
+        let request: PeerRequest = serde_json::from_slice(&encoded).expect("decodes");
         let mut response = handler.handle(self.me, request).await;
         if let PeerResponse::AuditEntries { entries } = &mut response
             && let Some(prefix) = *self.net.audit_visible_prefix.lock().expect("not poisoned")
         {
             entries.retain(|entry| entry.body.seq <= prefix);
         }
-        Ok(
-            serde_json::from_slice(&serde_json::to_vec(&response).expect("encodes"))
-                .expect("decodes"),
-        )
+        let encoded = serde_json::to_vec(&response).expect("encodes");
+        assert!(
+            encoded.len() <= sovra_core::group::MAX_PEER_MESSAGE_BYTES,
+            "a reply must fit one peer message"
+        );
+        Ok(serde_json::from_slice(&encoded).expect("decodes"))
     }
 
     async fn close(&self) {
@@ -1753,38 +1759,80 @@ use sovra_core::swarm::learn::scavenger::{GridSettings, GridSyncer};
 struct CountingEngine {
     assignments: Arc<std::sync::atomic::AtomicU64>,
     learner_calls: Arc<std::sync::atomic::AtomicU64>,
+    /// Whether `work` returns a well-formed result that changes nothing,
+    /// standing in for a real learner on a helping computer.
+    helpful: bool,
 }
 
 impl CountingEngine {
     fn new() -> Arc<Self> {
+        Self::build(false)
+    }
+
+    fn helpful() -> Arc<Self> {
+        Self::build(true)
+    }
+
+    fn build(helpful: bool) -> Arc<Self> {
         Arc::new(Self {
             assignments: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             learner_calls: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            helpful,
         })
+    }
+
+    fn assigned(&self) -> u64 {
+        self.assignments.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn learned(&self) -> u64 {
+        self.learner_calls.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
 impl TrainingEngine for CountingEngine {
+    fn hardware(&self) -> HardwareInfo {
+        HardwareInfo::default()
+    }
+
     fn create(
         &self,
+        plan: &TrainingPlan,
         text: &str,
+        base: Option<&[u8]>,
         run: ContentHash,
     ) -> Result<Box<dyn TrainingSession>, TrainingError> {
+        if base.is_some() {
+            return Err(TrainingError::InvalidModel);
+        }
         Ok(Box::new(LeaseSession::start(
+            plan.summary(Architecture::STARTER, text.len()),
             text,
             run,
             self.assignments.clone(),
         )?))
     }
 
+    fn inspect(&self, model: &[u8]) -> Result<ModelFacts, TrainingError> {
+        inspect_model(model)
+    }
+
+    fn generate(&self, _: &[u8], _: &str, _: u16, _: u32, _: u64) -> Result<String, TrainingError> {
+        Err(TrainingError::InvalidModel)
+    }
+
     fn restore(&self, _: &[u8]) -> Result<Box<dyn TrainingSession>, TrainingError> {
         Err(TrainingError::InvalidCheckpoint)
     }
 
-    fn work(&self, _: TrainingTask, _: DeviceId) -> Result<TrainingResult, TrainingError> {
+    fn work(&self, task: TrainingTask, worker: DeviceId) -> Result<TrainingResult, TrainingError> {
         self.learner_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Err(TrainingError::InvalidWork)
+        if !self.helpful {
+            return Err(TrainingError::InvalidWork);
+        }
+        task.parameters(worker)?;
+        Ok(zero_result(&task))
     }
 }
 
@@ -1796,6 +1844,7 @@ struct LeaseBatch {
 }
 
 struct LeaseSession {
+    plan: TrainingPlanSummary,
     text: String,
     cursor: usize,
     grid: GridSyncer,
@@ -1805,6 +1854,7 @@ struct LeaseSession {
 
 impl LeaseSession {
     fn start(
+        plan: TrainingPlanSummary,
         text: &str,
         run: ContentHash,
         assignments: Arc<std::sync::atomic::AtomicU64>,
@@ -1819,6 +1869,7 @@ impl LeaseSession {
         )
         .map_err(|_| TrainingError::Step)?;
         Ok(Self {
+            plan,
             text: text.to_owned(),
             cursor: 0,
             grid,
@@ -1830,8 +1881,40 @@ impl LeaseSession {
 
 impl TrainingSession for LeaseSession {
     fn advance(&mut self, _: u64) -> Result<(), TrainingError> {
-        // These tests isolate received work from local background progress.
+        // These tests isolate received work from local background progress: a
+        // local round takes a moment and changes nothing.
+        let started = std::time::Instant::now();
+        let round = Duration::from_millis(5);
+        while started.elapsed() < round {
+            std::thread::park_timeout(round.saturating_sub(started.elapsed()));
+        }
         Ok(())
+    }
+
+    fn plan(&self) -> TrainingPlanSummary {
+        self.plan.clone()
+    }
+
+    fn metrics(&self) -> Option<MetricPoint> {
+        None
+    }
+
+    fn sample(&self) -> Option<(u32, String)> {
+        None
+    }
+
+    fn export(&self) -> Result<Vec<u8>, TrainingError> {
+        encode_model(
+            &ModelHeader {
+                base: BaseModel::Starter,
+                architecture: Architecture::STARTER,
+                rounds: self.progress().rounds,
+                tokens: self.grid.tokens(),
+                loss_milli: None,
+                check_loss_milli: None,
+            },
+            self.grid.params(),
+        )
     }
 
     fn progress(&self) -> TrainingProgress {
@@ -1895,7 +1978,7 @@ impl TrainingSession for LeaseSession {
         let task = TrainingTask {
             recipe: TrainingRecipe::ByteBigramV1,
             lease,
-            model: encode_parameters(self.grid.params())?,
+            model: encode_parameters(self.grid.params(), Architecture::STARTER)?,
             text: self.text[start..end].to_owned(),
         };
         let cursor_after = if end == self.text.len() {
@@ -1931,7 +2014,7 @@ impl TrainingSession for LeaseSession {
         if batch.lease != result.lease || batch.tokens != result.tokens {
             return Err(TrainingError::InvalidWork);
         }
-        let contribution = result.contribution(worker)?;
+        let contribution = result.contribution(worker, Architecture::STARTER)?;
         self.grid
             .merge(std::slice::from_ref(&contribution), now_ms)
             .map_err(|_| TrainingError::InvalidWork)?;
@@ -1948,7 +2031,7 @@ impl Computer {
                     self.events.recv().await.expect("runtime running")
                     && pred(&state)
                 {
-                    return state;
+                    return *state;
                 }
             }
         })
@@ -2049,9 +2132,9 @@ impl TrainedFamily {
         let roster = mum.roster(|state| state.people.len() == 2).await;
         let outsider = Computer::start(&net, n + 2);
         mum.client
-            .send(Command::Training(TrainingCommand::Start(
-                TrainingSource::Sample,
-            )))
+            .send(Command::Training(TrainingCommand::Start(Box::new(
+                training_plan(false),
+            ))))
             .expect("start");
         mum.training(|state| state.phase == TrainingPhase::Running)
             .await;
@@ -2086,9 +2169,9 @@ impl TrainedFamily {
     async fn share(&mut self) {
         self.mum
             .client
-            .send(Command::Training(TrainingCommand::StartShared(
-                TrainingSource::Sample,
-            )))
+            .send(Command::Training(TrainingCommand::Start(Box::new(
+                training_plan(true),
+            ))))
             .expect("share selected text");
         self.paused = self
             .mum
@@ -2110,11 +2193,39 @@ impl TrainedFamily {
     }
 }
 
+/// The Starter model on the built-in sample; `with_group` is the one explicit
+/// choice that lets the group's computers be given pieces of the text.
+fn training_plan(with_group: bool) -> TrainingPlan {
+    let mut plan = TrainingPlan::recommended(&HardwareInfo::default(), with_group);
+    plan.base = sovra_core::training::TrainingBase::Fresh(BaseModel::Starter);
+    plan.settings = sovra_core::training::TrainingSettings::recommended(
+        sovra_core::training::TrainingPreset::Balanced,
+        Architecture::STARTER,
+        sovra_core::training::SAMPLE_TEXT.len(),
+        &HardwareInfo::default(),
+    );
+    plan.with_group = with_group;
+    plan
+}
+
+fn unavailable(response: &PeerResponse) -> bool {
+    matches!(
+        response,
+        PeerResponse::Training {
+            work: TrainingPeerResponse::Unavailable
+        }
+    )
+}
+
 fn zero_result(task: &TrainingTask) -> TrainingResult {
     TrainingResult {
         lease: task.lease.clone(),
         tokens: task.expected_tokens().expect("token count"),
-        pseudo_gradient: encode_parameters(&vec![0.0; BYTE_MODEL_PARAMETERS]).expect("gradient"),
+        pseudo_gradient: encode_parameters(
+            &vec![0.0; BYTE_MODEL_PARAMETERS],
+            Architecture::STARTER,
+        )
+        .expect("gradient"),
     }
 }
 
@@ -2130,7 +2241,7 @@ fn rejected(response: &PeerResponse) -> bool {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn group_training_help_starts_off_and_only_a_matching_update_is_saved() {
     let mut family = TrainedFamily::start(81).await;
-    assert!(!family.mum.store.0.lock().expect("store").training_help);
+    assert!(!family.mum.store.0.lock().expect("store").help_train);
 
     assert_eq!(
         refusal(
@@ -2154,14 +2265,12 @@ async fn group_training_help_starts_off_and_only_a_matching_update_is_saved() {
         ),
         sovra_core::group::Refusal::WrongGroup
     );
-    assert_eq!(
-        refusal(
-            family
-                .ask(family.dad.device, TrainingPeerRequest::Work)
-                .await
-        ),
-        sovra_core::group::Refusal::NotTraining
-    );
+    // Nothing but an explicit start with the group opens a run: a member is
+    // told there is nothing to help with, and learns nothing about the run.
+    for request in [TrainingPeerRequest::Work, TrainingPeerRequest::Status] {
+        let response = family.ask(family.dad.device, request).await;
+        assert!(unavailable(&response), "{response:?}");
+    }
 
     family.mum.send(GroupCommand::SetFederated(
         sovra_core::group::FederatedSettings {
@@ -2189,14 +2298,12 @@ async fn group_training_help_starts_off_and_only_a_matching_update_is_saved() {
             _ => None,
         })
         .await;
-    assert_eq!(
-        refusal(
-            family
-                .ask(family.dad.device, TrainingPeerRequest::Work)
-                .await
-        ),
-        sovra_core::group::Refusal::NotTraining
-    );
+    // Nothing but an explicit start with the group opens a run: a member is
+    // told there is nothing to help with, and learns nothing about the run.
+    for request in [TrainingPeerRequest::Work, TrainingPeerRequest::Status] {
+        let response = family.ask(family.dad.device, request).await;
+        assert!(unavailable(&response), "{response:?}");
+    }
     assert_eq!(
         family
             .engine
@@ -2212,26 +2319,79 @@ async fn group_training_help_starts_off_and_only_a_matching_update_is_saved() {
         0
     );
     assert_eq!(family.saved(), (family.rounds, family.next_lease));
-    assert!(!family.mum.store.0.lock().expect("store").training_help);
+    assert!(!family.mum.store.0.lock().expect("store").help_train);
 
+    // "Help the group train" lends this computer's processor to others. It
+    // never opens this computer's own run, paused or running.
     family.mum.send(GroupCommand::SetTrainingHelp(true));
     family
         .mum
         .wait(|event| matches!(event, GroupEvent::TrainingHelp(true)).then_some(()))
         .await;
-    assert!(family.mum.store.0.lock().expect("store").training_help);
+    assert!(family.mum.store.0.lock().expect("store").help_train);
+    let response = family
+        .ask(family.dad.device, TrainingPeerRequest::Work)
+        .await;
     assert!(
-        matches!(
-            family
-                .ask(family.dad.device, TrainingPeerRequest::Work)
-                .await,
-            PeerResponse::Training {
-                work: TrainingPeerResponse::Unavailable
-            }
-        ),
-        "a general permission does not expose a paused local-only run"
+        unavailable(&response),
+        "a general permission does not expose a paused local-only run: {response:?}"
     );
+    family
+        .mum
+        .client
+        .send(Command::Training(TrainingCommand::Resume))
+        .expect("resume");
+    let local = family
+        .mum
+        .training(|state| state.phase == TrainingPhase::Running)
+        .await;
+    assert_eq!(local.sharing, None);
+    for request in [TrainingPeerRequest::Work, TrainingPeerRequest::Status] {
+        let response = family.ask(family.dad.device, request).await;
+        assert!(
+            unavailable(&response),
+            "a general permission does not expose a running local-only run: {response:?}"
+        );
+    }
+    assert_eq!(
+        family
+            .engine
+            .assignments
+            .load(std::sync::atomic::Ordering::SeqCst),
+        family.assignments
+    );
+    family
+        .mum
+        .client
+        .send(Command::Training(TrainingCommand::Pause))
+        .expect("pause");
+    family
+        .mum
+        .training(|state| state.phase == TrainingPhase::Paused)
+        .await;
+    assert_eq!(family.saved(), (family.rounds, family.next_lease));
     family.share().await;
+
+    // Only now can a member see what is being trained, and only a member.
+    let status = family
+        .ask(family.dad.device, TrainingPeerRequest::Status)
+        .await;
+    let PeerResponse::Training {
+        work: TrainingPeerResponse::Running(summary),
+    } = status
+    else {
+        panic!("expected the shared run's summary, got {status:?}");
+    };
+    assert_eq!(summary.base, BaseModel::Starter);
+    assert_eq!(summary.name, training_plan(true).name);
+    assert_eq!(
+        refusal(
+            family
+                .ask(family.outsider.device, TrainingPeerRequest::Status)
+                .await
+        ),
+        sovra_core::group::Refusal::NotAMember
+    );
 
     let assigned = family
         .ask(family.dad.device, TrainingPeerRequest::Work)
@@ -2305,6 +2465,18 @@ async fn group_training_help_starts_off_and_only_a_matching_update_is_saved() {
     };
     assert_eq!(u64::from(progress.rounds), rounds + 1);
     assert_eq!(family.saved().0, rounds + 1);
+    // The owner's page shows who helped and how much.
+    let helped = family.mum.training(|state| state.helped_rounds == 1).await;
+    let dad = helped
+        .group
+        .as_ref()
+        .expect("group")
+        .peers
+        .iter()
+        .find(|peer| peer.device == family.dad.device)
+        .expect("dad is listed");
+    assert_eq!((dad.rounds, dad.helping), (1, false));
+    assert_eq!(helped.phase, TrainingPhase::Running);
     let replay = family
         .ask(
             family.dad.device,
@@ -2319,6 +2491,37 @@ async fn group_training_help_starts_off_and_only_a_matching_update_is_saved() {
             .learner_calls
             .load(std::sync::atomic::Ordering::SeqCst),
         0
+    );
+    // A helper's bad updates never paused the owner's run.
+    let running = family
+        .mum
+        .training(|state| state.phase == TrainingPhase::Running)
+        .await;
+    assert_eq!(running.error, None);
+
+    // The owner takes the grant back: the run carries on, and nothing more
+    // leaves this computer.
+    let before = family
+        .engine
+        .assignments
+        .load(std::sync::atomic::Ordering::SeqCst);
+    family
+        .mum
+        .client
+        .send(Command::Training(TrainingCommand::StopSharing))
+        .expect("stop sharing");
+    let private = family.mum.training(|state| state.sharing.is_none()).await;
+    assert_eq!(private.phase, TrainingPhase::Running);
+    for request in [TrainingPeerRequest::Work, TrainingPeerRequest::Status] {
+        let response = family.ask(family.dad.device, request).await;
+        assert!(unavailable(&response), "{response:?}");
+    }
+    assert_eq!(
+        family
+            .engine
+            .assignments
+            .load(std::sync::atomic::Ordering::SeqCst),
+        before
     );
 }
 
@@ -2399,6 +2602,38 @@ async fn a_dropped_training_helper_does_not_change_the_saved_run() {
         .await;
     assert!(rejected(&stale), "{stale:?}");
     assert_eq!(family.saved().0, rounds + 1);
+
+    // A computer that keeps taking work and never returns any is made to wait:
+    // each packet costs the owner a save.
+    let before = family
+        .engine
+        .assignments
+        .load(std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..3 {
+        let taken = family
+            .ask(family.dad.device, TrainingPeerRequest::Work)
+            .await;
+        assert!(
+            matches!(
+                taken,
+                PeerResponse::Training {
+                    work: TrainingPeerResponse::Assigned(_)
+                }
+            ),
+            "{taken:?}"
+        );
+    }
+    let refused = family
+        .ask(family.dad.device, TrainingPeerRequest::Work)
+        .await;
+    assert!(unavailable(&refused), "{refused:?}");
+    assert_eq!(
+        family
+            .engine
+            .assignments
+            .load(std::sync::atomic::Ordering::SeqCst),
+        before + 3
+    );
     assert_eq!(
         family
             .engine
@@ -2407,3 +2642,6 @@ async fn a_dropped_training_helper_does_not_change_the_saved_run() {
         0
     );
 }
+
+#[path = "groups/training_together.rs"]
+mod training_together;

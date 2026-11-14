@@ -43,7 +43,8 @@ const LAYERS: &[(&str, &[&str])] = &[
     ("sovra-mesh", &["sovra-core"]),
     // Local training: the Burn deep-learning framework (CPU by default, CubeCL GPU
     // backends behind a feature) is a heavy, distinct dependency set. It implements
-    // the core swarm `Objective` port so only parameter changes ever leave it.
+    // the core `TrainingEngine` and swarm `Objective` ports, so only plain data
+    // (parameter values, model files, hardware facts) ever leaves it.
     ("sovra-train", &["sovra-core"]),
     ("sovra-ui", &["sovra-core", "sovra-runtime"]),
     (
@@ -100,6 +101,16 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
         "surrealdb",
         "sovra-store-surreal",
         "the database is an implementation detail behind the MemoryStore port",
+    ),
+    (
+        "burn",
+        "sovra-train",
+        "tensors and autodiff stay behind the core training ports; no other crate names Burn",
+    ),
+    (
+        "sysinfo",
+        "sovra-train",
+        "hardware probing is the training adapter's job; core carries the facts as plain data",
     ),
     (
         "velopack",

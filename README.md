@@ -5,14 +5,15 @@
 <h1 align="center">SovraHarness</h1>
 
 <p align="center">
-  Your AI workspace. Your knowledge. Computers that can train together.<br>
+  Your AI workspace, and a place to train your own small AI.<br>
+  Privately, across your group's computers, in one app. No cloud. No Python.<br>
   Built in Rust with GPUI for macOS, Windows, and Linux.
 </p>
 
 <p align="center">
   <a href="docs/getting-started.md">Getting started</a>
   ·
-  <a href="docs/training.md">Train together</a>
+  <a href="docs/training.md">Train your own AI</a>
   ·
   <a href="docs/README.md">Documentation</a>
   ·
@@ -25,41 +26,67 @@
 
 Connect a cloud AI service or a local model server such as Ollama, then use
 helpers to work with your knowledge, create documents and websites, and
-schedule tasks. Sovra also brings model training into the same native app:
-start on one computer, then invite computers in your group to contribute.
+schedule tasks. Sovra also trains small AI models from your own text: on your
+computer, with the computers in your group helping, and with the finished
+model delivered to everyone in the group.
 
 > **License:** Source on `main` is available under Sovra's Sustainable Use License.
 > This is fair-code: source-available, and not an OSI open-source license.
 > Enterprise files have separate terms. See [License](#license).
 
-## Train together on computers you already own
+## Train your own small AI, privately, with your group
 
-**Sovra's scavenger grid lets a group contribute short training steps to a shared
-model.** One computer starts a run; other members choose to help over the group's
-encrypted connection. Each helper works independently, so an absent computer
-does not hold up the group. Training runs inside the Rust desktop executable,
-with no Python environment or separate training service to install.
+Pick some text, press **Start training**, and watch a model learn to write
+like it. The training engine is inside the Sovra executable, so there is
+nothing else to install: no cloud account, no Python, no separate trainer and
+no model download.
 
-- **Choose what it learns:** use the garden sample or paste your own text.
-  Chat history, memories and files are not automatically added.
-- **Choose who helps:** **Start training** keeps the run local;
-  **Start with my group** permits group members to receive the selected text and
-  model. They join with **Help this computer**. Membership alone is not consent.
-- **Keep control:** progress saves after each short step. Pause and resume,
-  stop sharing, or stop helping. Training gives chat priority between steps;
-  sharing and helping stay off after restarting.
+```mermaid
+sequenceDiagram
+  participant Owner as Your computer
+  participant Group as Your group's computers
+  Owner->>Owner: Start training with Train with my group on
+  Group->>Owner: Computers that chose to help ask for work
+  Owner-->>Group: Short pieces of the chosen text and the current model
+  Group->>Owner: Updates made of numbers, checked before they are kept
+  Owner->>Owner: Finish and save the model
+  Group->>Owner: Every group computer fetches the finished model
+```
 
-**Available in 0.5.0 as a preview:** a tiny next-byte practice model on CPU.
-Pretrained small language model (SLM) fine-tuning is still being built; this
-practice model does not replace your chat AI. Group training shares the chosen
-text and model with participating computers, so use text you intend to share.
-There is no automatic idle-computer detection or demonstrated fleet speedup yet.
+- **Simple to start.** Open **Training** and press
+  **Start training**. A sample text, a model size suited to this computer and
+  a balanced preset are already chosen.
+- **Your group's computers help.** Leave **Train with my group** on. Computers
+  in your group that turned on **Help the group train** join in by themselves,
+  and a slow or missing one never holds the run up.
+- **Everyone gets the model.** When the run finishes, every computer in the
+  group receives the same model file, checked on arrival, including computers
+  that were switched off at the time.
+- **Watch it learn.** A live chart, plain-word numbers, time left, and a sample
+  of what the model writes right now.
+- **Choose a starting point.** Four built-in sizes, from a table that learns
+  in seconds to a small transformer with 2.8 million values. Train any model
+  in **Your models** further.
+- **Simple presets, full control.** **Quick try**, **Balanced** and
+  **Thorough**, with every setting available under **Advanced**.
+- **See what this computer has.** Processor, cores, memory, the engine in use
+  and which model sizes it is comfortable with.
+- **Private by default.** Only the text you choose is used, and it leaves this
+  computer only when you start a run with your group. Chats, memories and
+  files are never added.
 
-Start with the [Training guide](docs/training.md), or read the
-[training architecture and implementation status](docs/swarm.md).
+What to expect: these are small models that continue text in the style
+you taught them. They do not replace the AI that answers chat, pretrained
+models cannot be imported yet, and released builds train on the processor.
+Computers that help can read the pieces of text they work on, so share text
+you are willing for your group to read. The [Training guide](docs/training.md)
+has the first run, group steps, every setting, privacy details and limits.
 
 ## What you can do
 
+- **Train your own small AI:** teach a model from your own text, with your
+  group's computers helping, live progress, and the finished model delivered
+  to everyone in the group. One app, no cloud, no Python.
 - **Chat with helpers:** choose a model, discover capabilities on the Skills
   page, and follow the live work log as helpers work together.
 - **Work with your knowledge:** attach files, index local folders, recall saved
@@ -94,9 +121,9 @@ After launching:
    install and start the local model server separately.
 3. Send a message in **Chat**, or open **Skills** to try an example.
 
-To try training, open **Training → Try the garden sample → Start training**.
-This preview needs no chat provider or API key. Follow the
-[group training steps](docs/training.md#train-with-your-group) to connect helpers.
+To try training, open **Training** and press **Start training**. It needs no
+chat provider or API key. To train with other computers, follow the
+[group training steps](docs/training.md#train-with-your-group).
 
 For connection problems, see [Models](docs/models.md) and
 [Configuration and local data](docs/configuration.md).
@@ -148,6 +175,10 @@ and the [documentation](docs/README.md) for current behavior.
 - Phone control pairs with the [SovraiOS](https://github.com/Sovra-AI/SovraiOS) and
   [SovraAndroid](https://github.com/Sovra-AI/SovraAndroid) apps, built from source;
   no store release is published yet. Groups support borrowing another computer's AI for chat; embedding and indexing work are not handed off.
+- Training teaches small built-in models from text you choose; it does not
+  import or fine-tune pretrained models. A run started with your group sends
+  pieces of that text to group computers that help. See
+  [Training: privacy and consent](docs/training.md#privacy-and-consent).
 
 See [Security](SECURITY.md) for credential storage and execution boundaries.
 
@@ -192,6 +223,7 @@ Read [Architecture](docs/architecture.md) and
 
 | Guide | Covers |
 | --- | --- |
+| [Training](docs/training.md) | Train your own small AI: first run, group training and delivery, live numbers, settings, privacy, and limits |
 | [Getting started](docs/getting-started.md) | First launch, first chat, and finding features |
 | [Configuration](docs/configuration.md) | Startup variables, data paths, and troubleshooting |
 | [Models](docs/models.md) | Providers, keys, model selection, and routing previews |

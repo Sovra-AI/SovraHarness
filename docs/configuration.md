@@ -53,7 +53,7 @@ accounts, memory or connections.
 | `connected-services/services.json` | Saved MCP service catalog |
 | `schedules.json` | Scheduled prompts, timed sends and run history |
 | `groups/` | Group records and shared state |
-| `training/` | Selected training text, model and optimizer checkpoints; separate run files and a pointer to the latest run. See [Training](training.md#saved-progress). |
+| `training/` | Training runs (`run-<id>.train`, which include the chosen text, with chart notes beside them), a pointer to the latest run, and `models/` holding every model trained here or received from the group. Sovra never deletes these. See [Training: where files live](training.md#where-files-live). |
 | `remote-control/phones.json` | Remembered phone public keys and names; access still starts off. An owner lock prevents concurrent writers. |
 | `remote-control-reference/desktop.json` | Public desktop routing hints for the optional `--remote-control-client` developer client. Its separate phone identity is in the credential store. |
 | `terminal/settings.json` | Terminal preferences |
@@ -72,7 +72,7 @@ copy of your workspace.
 ## Backup and troubleshooting
 
 Close the app before taking a filesystem copy of its data. Keep backups private:
-the database, attachments, training text, schedules, WhatsApp session and development credentials
+the database, attachments, training runs (which contain the chosen text), schedules, WhatsApp session and development credentials
 can contain sensitive information. Keychain entries are separate and do not come
 with a directory copy. There is no supported one-click backup/restore or database
 migration command; verify recovery separately before relying on a backup across

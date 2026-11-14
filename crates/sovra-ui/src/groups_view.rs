@@ -2402,7 +2402,7 @@ impl ModelsView {
             .child(heading("Your choices for this computer", cx))
             .child(switch_row(
                 "Help the group train",
-                "Turn this on to let a computer in your group take one short training step on a run you started with your group. It starts off each time Sovra opens. Answering questions or lending this computer's AI does not turn it on. Your chats, memories and shared notes are not used as the training text.",
+                "Turn this on to let this computer help when someone in your group trains a model with the group. It joins in by itself while this computer is idle, and it stays on until you turn it off. It works on pieces of the text they chose and sends back only what it learned. Your own chats, memories, files and shared notes are never used. Answering questions or lending this computer's AI does not turn it on. Finished models from your group arrive either way.",
                 self.groups.training_help,
                 design::button(
                     "groups-training-help",

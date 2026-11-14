@@ -143,19 +143,41 @@ below; the public UI exposes only the controls described in this guide.
 
 ## Train together
 
-The group can also contribute short training steps to one member's practice
-model. On **Training**, the owner chooses **Start with my group**; each helper
-chooses **Help this computer**. Both choices are explicit. Joining a group,
-answering questions or lending an AI does not enable training.
+A group's computers can train a small AI model together, and every member
+receives the finished model. The full steps are in the
+[Training guide](training.md#train-with-your-group); this section covers the
+group's side.
 
-The owner shares the selected training text and model with participating
-computers. **Groups → Borrow an AI → Help the group train** is a separate
-permission: switching it off revokes sharing, and switching it on alone does
-not expose a local run. Sharing and helping stay off after restarting.
+- **Starting a shared run.** On **Training**, the person who owns the run
+  leaves **Train with my group** on and presses **Start training**. That choice
+  is made for each run and is never saved: after a restart, nothing is shared
+  until a run is started with the group again.
+- **Helping.** Under **Your choices for this computer**, **Help the group
+  train** lets this computer help a run a group member started with the group.
+  It is off until you turn it on and it is remembered across restarts. With it
+  on, this computer helps by itself when it is not training its own model and
+  chat is not busy. **Stop helping** on the Training page stops until Sovra
+  restarts or the switch is turned off and on again.
+- **Receiving the model.** Every current member's computer receives a finished
+  shared model, whether or not **Help the group train** is on. Computers that
+  were away fetch it when they are next online. A received file is checked
+  against its fingerprint before it is kept, and it is never run as a program.
+- **What it does not unlock.** Joining a group, **Answer questions from my
+  group** and lending this computer's AI do not start training, send training
+  text or make this computer help. The helper switch does not expose a run
+  that was started without the group.
+- **Membership is checked both ways.** Each training request is checked
+  against the current member list before it is sent and before it is answered.
+  A removed computer is refused and stops helping without being told to.
 
-See [Training](training.md) for steps, saved progress and stopping controls.
-This is a tiny next-byte model preview; pretrained SLM fine-tuning is still
-being built.
+The owner sends helpers short pieces of the chosen text with the current
+model, over the group's encrypted connection. Helpers can read those pieces.
+Training messages are not sealed with the group's space keys, and they are not
+written to the group's signed history. See
+[Training: privacy and consent](training.md#privacy-and-consent).
+
+Computers on Sovra 0.5.0 cannot receive models and can help only a Starter run
+on its recommended settings. Use the same Sovra version across the group.
 
 ## Network
 

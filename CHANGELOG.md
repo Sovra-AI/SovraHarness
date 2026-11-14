@@ -14,6 +14,85 @@ package version.
 
 ## [Unreleased]
 
+- **Train your own small AI with your group.** The Training page is rebuilt
+  around one path: choose what it should learn, a starting point and how
+  thorough to be, then press **Start training**. A sample, a model size suited
+  to this computer and the **Balanced** preset are already chosen. With
+  **Train with my group** on, computers in your group that turned on **Help the
+  group train** join in by themselves, and a slow or missing computer never
+  holds the run up. This replaces **Start with my group** and **Help this
+  computer**.
+
+- **Everyone in the group gets the finished model.** When a run started with
+  the group finishes or is stopped, every member's computer fetches the model
+  file, checks its size and fingerprint, and adds it to **Your models**.
+  Computers that were off get it when they are back. The owner sees **On N of
+  M computers in your group**, and **Share with my group** offers a model
+  trained without the group. Received models are never run as programs and
+  nothing is removed to make room.
+
+- **Choose a starting point.** Four built-in models: **Starter** (a table of
+  letter pairs, 65,536 values) and **Small**, **Medium** and **Large**
+  byte-level transformers (137,216, 875,520 and 2,817,280 values). Any model
+  in **Your models** can be trained further. Large trains on one computer
+  only and is given to the group with **Share with my group**; the group
+  helps train the other three. Pretrained models cannot be
+  imported, and these models do not replace your chat AI.
+
+- **Watch it learn.** A live chart of the loss and a check loss measured on
+  text kept back from training, plain-word readings of each number, speed,
+  time left, helpers joined, and a sample of what the model writes right now.
+
+- **This computer card.** Training shows the operating system, processor,
+  cores, total and free memory, the training engine in use, and which model
+  sizes this computer is comfortable with. The facts are read locally and are
+  not sent anywhere.
+
+- **Presets and Advanced settings.** **Quick try**, **Balanced** and
+  **Thorough** set everything. **Advanced** exposes rounds, text per packet,
+  windows, steps, both step sizes, optimizer, weight decay, step limit,
+  schedule, warm-up, check share and frequency, sample variety and length,
+  seed, stopping when stalled, processor threads and the helper lag and
+  time limits, each with a bounded range and **Reset to recommended**. It
+  also has **Help now** for helping one named computer by hand.
+
+- **Your models and Try it.** Finished and stopped runs are saved as models.
+  **Try it** continues a beginning you type. **Finish now and keep the model**
+  ends a run early and keeps the model so far, and starting a new run saves
+  an unfinished one first.
+
+- **Train from a text file.** **Use a text file** takes a plain UTF-8 `.txt`
+  or `.md` file. Text can now be up to 4 MiB, up from 64 KB.
+
+- **Help the group train is now a lasting choice.** The Groups switch means
+  "this computer may help a run a group member started with the group". It is
+  off until you turn it on and is remembered across restarts. It no longer
+  controls whether your own run is shared: only starting a run with
+  **Train with my group** does that, for that run, and that grant is never
+  saved. **Stop helping** holds until Sovra restarts or the switch is turned
+  off and on again. Membership is checked on both computers for every
+  training message; forged, replayed, late and mismatched updates are refused
+  and leave the saved run unchanged.
+
+- **Faster training and compact saved runs.** Training runs continuously in
+  short slices that give way to chat, instead of one round per tick. Saved
+  runs use a compact binary form, are written every few seconds to a minute
+  and always on pause, stop, finish and quit. The engine uses Burn's pure-Rust
+  processor backend with its vector and thread support, chosen explicitly.
+  Runs saved by 0.5.0 still open. Released builds train on the processor
+  only; the optional `gpu` build feature only lists graphics cards.
+
+- **Works alongside 0.5.0, with limits.** A computer on 0.5.0 can still help a
+  Starter run on its recommended settings. It cannot help other runs or
+  receive finished models, and it is asked again only every ten minutes.
+
+- **Training guide rewritten.** The README leads with training, and the
+  Training guide covers the first run, group training and delivery, each
+  number on the page, starting points, presets, every Advanced setting,
+  exactly what text and model data travels to whom, where files live, and the
+  limits. The swarm reference documents the model shapes, file formats, group
+  messages and tests.
+
 ## [0.5.0] — 2026-11-13
 
 - **Training as a core capability.** The README and a new Training guide explain

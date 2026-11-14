@@ -225,6 +225,26 @@ pub struct GraphTokens {
     pub saved_from: Hsla,
 }
 
+/// The Training page: a live chart of learning, the numbers beside it and the
+/// expert settings. Sizes follow the interface scale like every other token.
+#[derive(Debug, Clone, Copy)]
+pub struct TrainingTokens {
+    /// The loss chart keeps this height so the lines stay readable while the
+    /// pane's width changes.
+    pub chart_height: Rems,
+    /// A shorter chart for compact panes, so the numbers below stay in reach.
+    pub chart_compact_height: Rems,
+    /// Preferred width of one number tile; a row wraps when tiles no longer fit.
+    pub tile_width: Rems,
+    /// Width of one expert number field with its plus and minus buttons.
+    pub field_width: Rems,
+    /// Tallest the written sample and a tried model's answer get before they scroll.
+    pub sample_max_height: Rems,
+    /// Line marking a chart series in its legend.
+    pub legend_mark: Rems,
+    pub legend_mark_height: Rems,
+}
+
 #[derive(Debug, Clone)]
 pub struct SovraTokens {
     pub accent: AccentTokens,
@@ -235,6 +255,7 @@ pub struct SovraTokens {
     pub motion: MotionTokens,
     pub chat: ChatTokens,
     pub graph: GraphTokens,
+    pub training: TrainingTokens,
     pub text_secondary: Hsla,
     pub canvas: Hsla,
     pub chrome: Hsla,
@@ -487,6 +508,15 @@ pub fn tokens(cx: &App) -> SovraTokens {
             message: colour(if dark { 0xfb_bf_24 } else { 0xd9_77_06 }),
             version: colour(if dark { 0xf4_72_b6 } else { 0xdb_27_77 }),
             saved_from: colour(if dark { 0x38_bd_f8 } else { 0x02_84_c7 }),
+        },
+        training: TrainingTokens {
+            chart_height: rem(240.),
+            chart_compact_height: rem(168.),
+            tile_width: rem(152.),
+            field_width: rem(168.),
+            sample_max_height: rem(192.),
+            legend_mark: rem(16.),
+            legend_mark_height: rem(3.),
         },
         text_secondary: colour(p.secondary_text),
         canvas,

@@ -234,7 +234,7 @@ impl TourStep {
             Self::Schedules => "Put jobs on autopilot",
             Self::SavedWork => "Find your saved work",
             Self::Groups => "Share with family or a team",
-            Self::Training => "Try training with your text",
+            Self::Training => "Teach your own small AI",
             Self::MakeItYours => "Make Sovra yours",
         }
     }
@@ -273,7 +273,7 @@ impl TourStep {
                 "Link up with people you trust, like your family or a small team, to pass notes, lists and questions to each other privately. Nothing is shared until you press Share."
             }
             Self::Training => {
-                "Choose a sample or paste your own text, then press Start training. Sovra saves after each short round. Start with my group lets your group's computers help with that text; Help this computer contributes to someone else's job. You can stop either at any time. Help the group train, in Groups, is the same choice and starts off. Answering questions or lending an AI does not turn it on. This early preview does not replace your chat AI. Larger models are still being built."
+                "Teach a small AI from your own writing, right on this computer. Pick the sample, paste some text or choose a text file, then press Start training and watch it learn: a live chart, its speed, and what it writes right now. If you are in a group, the group's computers that have turned on Help the group train join in, and everyone in the group gets the finished AI. Pause or stop whenever you like; what it has learned is always kept. It continues text in the style you taught it. It does not replace your chat AI."
             }
             Self::MakeItYours => {
                 "Write personal instructions, like \"keep answers short\" or \"I live in Dubai\", and Sovra follows them every time. Here you can also change the language, light or dark look, and text size."
@@ -303,7 +303,7 @@ impl TourStep {
                 Some("Press Create schedule, then type what Sovra should do and when.")
             }
             Self::Training => Some(
-                "Choose Try the garden sample, then Start training. Nothing starts until you press the button.",
+                "Press Start training to try the garden sample. Nothing starts, and no text leaves this computer, until you press the button.",
             ),
             Self::SavedWork | Self::Groups => None,
             Self::MakeItYours => {

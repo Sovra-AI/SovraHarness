@@ -54,16 +54,19 @@ For local models, start the model server separately; Sovra does not install or
 launch it for you. A local chat model alone does not disable web search, remote
 tools or group networking; see [network destinations](network.md#network-destinations).
 
-## Try training on your computer
+## Train your own small AI
 
-Open **Training**, keep **Try the garden sample** selected, and choose
-**Start training**. This runs a tiny practice model inside Sovra without a chat
-provider or API key. Wait for saved progress to appear; **Pause** and
-**Resume saved training** let you continue later.
+Open **Training** and press **Start training**. The sample text, a model size
+suited to this computer and the **Balanced** preset are already chosen, and no
+chat provider or API key is needed. A chart and a sample of the model's own
+writing show it learning. When it finishes, find it under **Your models** and
+press **Try it**.
 
-To let computers in your group contribute, follow [Training together](training.md).
-The preview trains a tiny next-byte model; pretrained SLM fine-tuning is still
-being built, and training does not change the AI answering your chats.
+If you are in a group, **Train with my group** lets group computers that turned
+on **Help the group train** join in, and gives everyone in the group the
+finished model. The [Training guide](training.md) covers your own text, the
+group steps, what is shared, and the limits. These are small models that write
+in the style you taught them; they do not change the AI answering your chats.
 
 ## Find the right feature
 
@@ -76,7 +79,7 @@ being built, and training does not change the AI answering your chats.
 | Ask several helpers together or keep a reply | [Teams and artifacts](teams-and-artifacts.md) |
 | Run something later | [Schedules](schedules.md) |
 | Share a detail with family or colleagues | [Groups](groups.md) |
-| Train a small practice model together | [Training](training.md) |
+| Train your own small AI, alone or with my group | [Training](training.md) |
 | Connect WhatsApp or Telegram | [Messaging](communications.md) |
 | Use Google services | [Google](google.md) |
 | Add tools from another service | [MCP servers](connected-services.md) |

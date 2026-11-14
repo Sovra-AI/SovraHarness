@@ -171,6 +171,33 @@ claims that a design system prescribes this exact palette or layout.
 - **Agent cards and forms:** shared matte surfaces, section typography and native
   actions inherit the same system. Reserve shadows for floating material, not
   every repeated row.
+- **Training:** one bounded column that reads top to bottom as a single task:
+  what this computer has, what to learn, the starting point, how thorough, and
+  one primary **Start training** action. Recommended choices are preselected
+  so the page works without a decision; expert settings stay collapsed under
+  **Advanced** (progressive disclosure). Words stay plain ("round", "helper",
+  "computer"); technical terms appear only inside Advanced.
+- **Training chart:** the kit's `AreaChart` with transparent fills draws the
+  loss and the check loss as two lines on one scale, coloured from
+  `cx.theme().chart_1` and `chart_2`. The kit's `LineChart` holds one series,
+  so it is not used here. The chart has no gaps for missing values, so
+  `TrainingMetrics::chart` in core carries the check value forward, and the
+  view draws a single series when no check was ever measured. The view
+  converts core's whole-number thousandths to floats; core stays integer. The
+  chart takes its height from `tokens.training.chart_height` (a shorter
+  `chart_compact_height` in compact panes) and the pane's full width, with
+  `appear(false)` because it repaints on every progress event. Colour is
+  never the only signal: a legend names each line, the same values are in
+  the number tiles, and the wrapper carries a role and a spoken summary
+  because the chart itself exposes none. Axis text is the kit's fixed-pixel
+  text and does not follow the interface scale; the tiles carry the readable
+  numbers.
+- **Training numbers:** hardware facts and progress tiles are wrapping rows of
+  `tokens.training.tile_width` tiles, measured from the pane with
+  `design::width_probe`, so they reflow at the minimum window and at 200%
+  text size instead of shrinking. Written sample text and a tried model's
+  answer scroll inside `sample_max_height`. Loss is shown with a plain-word
+  reading from core beside the figure.
 
 ### Rust and GPUI implementation rules
 

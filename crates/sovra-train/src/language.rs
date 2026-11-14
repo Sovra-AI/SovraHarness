@@ -1,9 +1,10 @@
-//! Small next-byte language objective for exercising the scavenger training path.
+//! The Starter table as a core `Objective`: a next-byte model the swarm's own
+//! learning rules can drive directly.
 //!
-//! A bigram model is deliberately cheap enough for CPU integration tests. It is
-//! not a transformer, an imported pretrained SLM, or a useful chat model. Every
+//! It predicts each byte from the one before it, with a 256 × 256 table. Every
 //! UTF-8 byte uses the same fixed vocabulary on every worker; no tokenizer file,
 //! Python runtime, network download, or external training process is required.
+//! Training runs use the same table through `net`, beside the transformers.
 
 use burn::nn::loss::CrossEntropyLossConfig;
 use burn::tensor::{Device, Int, Tensor, TensorData};
@@ -35,7 +36,7 @@ impl ByteLanguageModel {
                 .map(|b| i32::from(*b))
                 .collect(),
             targets: bytes[1..].iter().map(|b| i32::from(*b)).collect(),
-            device: Device::default().autodiff(),
+            device: Device::flex().autodiff(),
         })
     }
 

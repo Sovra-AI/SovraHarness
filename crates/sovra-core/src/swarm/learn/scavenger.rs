@@ -75,7 +75,8 @@ impl Default for GridSettings {
 }
 
 impl GridSettings {
-    fn validate(self) -> Result<(), GridError> {
+    /// Whether every value is inside the range the grid accepts.
+    pub fn validate(self) -> Result<(), GridError> {
         if !(0.0..=1.0).contains(&self.learning_rate)
             || self.learning_rate == 0.0
             || !(0.0..1.0).contains(&self.beta1)
@@ -148,6 +149,150 @@ pub struct GridCheckpoint {
     next_lease: u64,
 }
 
+/// Marks the compact binary form of a [`GridCheckpoint`].
+const CHECKPOINT_MAGIC: &[u8; 8] = b"SOVRAGRD";
+/// Fixed bytes before the three value arrays in the binary form.
+const CHECKPOINT_HEADER_BYTES: usize = 8 + 4 + 32 + 5 * 8 + 4 + 8 + 3 * 4 + 2 * 8 + 4 * 8;
+/// Bytes per parameter in the binary form: one f32 value and two f64 moments.
+const CHECKPOINT_BYTES_PER_PARAMETER: usize = 4 + 8 + 8;
+
+impl GridCheckpoint {
+    /// The exact length of [`Self::to_bytes`] for a model of `parameters` values.
+    pub const fn byte_len(parameters: usize) -> usize {
+        CHECKPOINT_HEADER_BYTES + parameters * CHECKPOINT_BYTES_PER_PARAMETER
+    }
+
+    /// How many model values this state holds.
+    pub fn parameters(&self) -> usize {
+        self.params.len()
+    }
+
+    /// A compact little-endian form: 20 bytes per parameter where JSON needs about
+    /// 45. The layout is a fixed header (magic, version, job, settings, counters,
+    /// parameter count) followed by the values, then both moment arrays.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(Self::byte_len(self.params.len()));
+        out.extend_from_slice(CHECKPOINT_MAGIC);
+        out.extend_from_slice(&self.version.to_le_bytes());
+        out.extend_from_slice(self.job.as_bytes());
+        let settings = self.settings;
+        for value in [
+            settings.learning_rate,
+            settings.beta1,
+            settings.beta2,
+            settings.epsilon,
+            settings.age_decay,
+        ] {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out.extend_from_slice(&settings.cutoff_rounds.to_le_bytes());
+        out.extend_from_slice(&settings.clip_norm.to_le_bytes());
+        out.extend_from_slice(&settings.local_steps.to_le_bytes());
+        out.extend_from_slice(&settings.token_budget.to_le_bytes());
+        out.extend_from_slice(&settings.lease_ms.to_le_bytes());
+        out.extend_from_slice(&self.beta1_power.to_le_bytes());
+        out.extend_from_slice(&self.beta2_power.to_le_bytes());
+        out.extend_from_slice(&self.round.to_le_bytes());
+        out.extend_from_slice(&self.tokens.to_le_bytes());
+        out.extend_from_slice(&self.next_lease.to_le_bytes());
+        out.extend_from_slice(&(self.params.len() as u64).to_le_bytes());
+        out.extend(self.params.iter().flat_map(|x| x.to_le_bytes()));
+        out.extend(self.first.iter().flat_map(|x| x.to_le_bytes()));
+        out.extend(self.second.iter().flat_map(|x| x.to_le_bytes()));
+        out
+    }
+
+    /// Decodes [`Self::to_bytes`]. The declared size is checked against the real
+    /// length before anything is allocated. The result still has to pass
+    /// [`GridSyncer::restore`], which checks every value.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, GridError> {
+        let mut reader = Reader(bytes);
+        if reader.take::<8>()? != *CHECKPOINT_MAGIC {
+            return Err(GridError::InvalidCheckpoint);
+        }
+        let version = reader.u32()?;
+        let job = ContentHash(reader.take::<32>()?);
+        let settings = GridSettings {
+            learning_rate: reader.f64()?,
+            beta1: reader.f64()?,
+            beta2: reader.f64()?,
+            epsilon: reader.f64()?,
+            age_decay: reader.f64()?,
+            cutoff_rounds: reader.u32()?,
+            clip_norm: reader.f64()?,
+            local_steps: reader.u32()?,
+            token_budget: reader.u32()?,
+            lease_ms: reader.u32()?,
+        };
+        let beta1_power = reader.f64()?;
+        let beta2_power = reader.f64()?;
+        let round = reader.u64()?;
+        let tokens = reader.u64()?;
+        let next_lease = reader.u64()?;
+        let dimension = usize::try_from(reader.u64()?)
+            .ok()
+            .filter(|n| (1..=MAX_PARAMETERS).contains(n))
+            .ok_or(GridError::InvalidCheckpoint)?;
+        if reader.0.len() != dimension * CHECKPOINT_BYTES_PER_PARAMETER {
+            return Err(GridError::InvalidCheckpoint);
+        }
+        let (params, moments) = reader.0.split_at(dimension * 4);
+        let (first, second) = moments.split_at(dimension * 8);
+        let floats = |bytes: &[u8]| -> Vec<f64> {
+            bytes
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|x| f64::from_le_bytes(*x))
+                .collect()
+        };
+        Ok(Self {
+            version,
+            job,
+            settings,
+            params: params
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|x| f32::from_le_bytes(*x))
+                .collect(),
+            first: floats(first),
+            second: floats(second),
+            beta1_power,
+            beta2_power,
+            round,
+            tokens,
+            next_lease,
+        })
+    }
+}
+
+/// Reads fixed-size little-endian fields, failing instead of panicking when short.
+struct Reader<'a>(&'a [u8]);
+
+impl Reader<'_> {
+    fn take<const N: usize>(&mut self) -> Result<[u8; N], GridError> {
+        let (head, rest) = self
+            .0
+            .split_first_chunk::<N>()
+            .ok_or(GridError::InvalidCheckpoint)?;
+        self.0 = rest;
+        Ok(*head)
+    }
+
+    fn u32(&mut self) -> Result<u32, GridError> {
+        self.take().map(u32::from_le_bytes)
+    }
+
+    fn u64(&mut self) -> Result<u64, GridError> {
+        self.take().map(u64::from_le_bytes)
+    }
+
+    fn f64(&mut self) -> Result<f64, GridError> {
+        self.take().map(f64::from_le_bytes)
+    }
+}
+
 /// Pure state machine. The runtime owns synchronization, persistence and IO.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GridSyncer {
@@ -204,6 +349,22 @@ impl GridSyncer {
 
     pub fn checkpoint(&self) -> GridCheckpoint {
         self.saved.clone()
+    }
+
+    pub fn settings(&self) -> GridSettings {
+        self.saved.settings
+    }
+
+    /// Changes the outer step size for the merges that follow, so a schedule can
+    /// warm it up and wind it down. Leases, moments and counters are untouched.
+    pub fn set_learning_rate(&mut self, learning_rate: f64) -> Result<(), GridError> {
+        let settings = GridSettings {
+            learning_rate,
+            ..self.saved.settings
+        };
+        settings.validate()?;
+        self.saved.settings = settings;
+        Ok(())
     }
 
     pub fn restore(saved: GridCheckpoint) -> Result<Self, GridError> {

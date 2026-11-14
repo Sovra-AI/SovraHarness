@@ -1,169 +1,265 @@
-//! Resumable CPU language-training sessions behind the core learner port.
-use std::collections::BTreeMap;
+//! Resumable training runs behind the core training ports.
+//!
+//! A run is the merge engine (`GridSyncer`) plus the text, a reading position and
+//! what the page shows. Each round is one packet of text: this computer learns it
+//! itself in [`TrainingSession::advance`], or a helper learns it and the result
+//! comes back through [`TrainingSession::merge`]. Either way the same packet code
+//! runs, and the same counts are checked.
 
-use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::time::Instant;
+
 use sovra_core::group::{ContentHash, DeviceId};
-use sovra_core::swarm::learn::scaffold::{Algorithm, LocalWork, Objective, ScaffoldClient};
-use sovra_core::swarm::learn::scavenger::{GridCheckpoint, GridSettings, GridSyncer, WorkLease};
+use sovra_core::swarm::learn::scavenger::{Contribution, GridSyncer, WorkLease};
 use sovra_core::training::{
-    BYTE_MODEL_PARAMETERS, MAX_CHECKPOINT_BYTES, MAX_WORK_BATCH_BYTES, TrainingEngine,
-    TrainingError, TrainingProgress, TrainingRecipe, TrainingResult, TrainingSession,
-    TrainingSource, TrainingTask, encode_parameters,
+    BaseModel, HardwareInfo, MAX_SAMPLE_BYTES, MetricPoint, ModelFacts, ModelHeader, TrainingBase,
+    TrainingEngine, TrainingError, TrainingPlan, TrainingPlanSummary, TrainingProgress,
+    TrainingRecipe, TrainingResult, TrainingSession, TrainingTask, check_text, check_trial_prompt,
+    decode_model, encode_model, encode_parameters, inspect_model, model_id, sample_text,
 };
 
-use crate::ByteLanguageModel;
+use crate::net::{Batch, Net};
+use crate::packet::{self, Compute};
+use crate::saved::{self, Header};
+use crate::{hardware, init, writer};
 
-const MIN_ROUNDS: u32 = 80;
+/// Stands for this computer in the merge engine's list of workers. No real
+/// device has this key: a device key is a public key, and this is not one.
+const LOCAL: DeviceId = DeviceId([0; 32]);
+/// Most windows of held-back text read for one check, so a check stays quick on
+/// long texts and large models.
+const MAX_CHECK_WINDOWS: usize = 16;
+/// Most held-back text the Starter table reads for one check.
+const MAX_TABLE_CHECK_BYTES: usize = 4097;
+/// How much of the newest round's speed enters the shown speed.
+const SPEED_BLEND: f64 = 0.3;
 
-fn round_limit(text: &str) -> u32 {
-    // Each UTF-8 batch advances by at least 508 bytes, including overlap.
-    MIN_ROUNDS.max(u32::try_from(text.len().div_ceil(BATCH_BYTES - 4)).expect("bounded text size"))
-}
-const BATCH_BYTES: usize = MAX_WORK_BATCH_BYTES;
-
-#[derive(Debug, Default)]
+/// The training engine: Burn's built-in processor backend, with gradients from
+/// Burn's autodiff. Holds nothing; build it with `BurnTrainingEngine` or
+/// `BurnTrainingEngine::default()`.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct BurnTrainingEngine;
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SavedSession {
-    version: u32,
-    #[serde(default)]
-    recipe: Option<ContentHash>,
-    text: String,
-    cursor: usize,
-    grid: GridCheckpoint,
-    loss_milli: Option<u32>,
-}
-
-struct Session {
-    pending: BTreeMap<u64, PendingBatch>,
-    text: String,
-    cursor: usize,
-    grid: GridSyncer,
-    loss_milli: Option<u32>,
-}
-
-struct PendingBatch {
+struct Pending {
     lease: WorkLease,
-    text: String,
+    recipe: TrainingRecipe,
+    /// The packet's place in the text.
+    start: usize,
+    end: usize,
     tokens: u32,
     cursor_before: usize,
     cursor_after: usize,
 }
 
+struct Session {
+    compute: Compute,
+    net: Net,
+    plan: TrainingPlanSummary,
+    family: BaseModel,
+    base_rounds: u32,
+    base_tokens: u64,
+    text: String,
+    text_hash: ContentHash,
+    /// `text[..split]` is learned from; the rest is held back for checks.
+    split: usize,
+    cursor: usize,
+    grid: GridSyncer,
+    pending: BTreeMap<u64, Pending>,
+    loss_milli: Option<u32>,
+    check_loss_milli: Option<u32>,
+    best_check: Option<(u32, u32)>,
+    stalled: bool,
+    sample: Option<(u32, String)>,
+    point: Option<MetricPoint>,
+    /// Next-byte guesses per second on this computer; zero until measured.
+    speed: f64,
+}
+
+fn milli(loss: f32) -> Option<u32> {
+    if !loss.is_finite() || loss < 0.0 {
+        return None;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "finite, nonnegative and clamped below the u32 limit"
+    )]
+    let value = (f64::from(loss) * 1000.0).round().min(4_000_000_000.0) as u32;
+    Some(value)
+}
+
 impl TrainingEngine for BurnTrainingEngine {
+    fn hardware(&self) -> HardwareInfo {
+        hardware::probe()
+    }
+
     fn create(
         &self,
+        plan: &TrainingPlan,
         text: &str,
+        base: Option<&[u8]>,
         run: ContentHash,
     ) -> Result<Box<dyn TrainingSession>, TrainingError> {
-        TrainingSource::Text(text.to_owned()).text()?;
-        let settings = GridSettings {
-            local_steps: 4,
-            learning_rate: 0.25,
-            ..GridSettings::default()
+        check_text(text)?;
+        let (family, architecture, values, base_rounds, base_tokens) = match (plan.base, base) {
+            (TrainingBase::Fresh(model), None) => {
+                let architecture = model.architecture();
+                architecture.validate()?;
+                let values = init::fresh(architecture, plan.settings.seed);
+                (model, architecture, values, 0, 0)
+            }
+            (TrainingBase::Continue(id), Some(file)) => {
+                if model_id(file) != id {
+                    return Err(TrainingError::InvalidModel);
+                }
+                let model = decode_model(file)?;
+                let header = model.header;
+                (
+                    header.base,
+                    header.architecture,
+                    model.parameters,
+                    header.rounds,
+                    header.tokens,
+                )
+            }
+            (TrainingBase::Fresh(_), Some(_)) | (TrainingBase::Continue(_), None) => {
+                return Err(TrainingError::InvalidModel);
+            }
         };
-        let grid = GridSyncer::new(run, vec![0.0; BYTE_MODEL_PARAMETERS], settings)
+        plan.validate(architecture)?;
+        let grid = GridSyncer::new(run, values, plan.settings.grid_settings(architecture))
             .map_err(|_| TrainingError::Step)?;
+        let summary = plan.summary(architecture, text.len());
         Ok(Box::new(Session {
-            pending: BTreeMap::new(),
+            compute: Compute::new(summary.settings.threads)?,
+            net: Net::new(architecture)?,
+            split: summary.settings.check_split(text),
+            plan: summary,
+            family,
+            base_rounds,
+            base_tokens,
+            text_hash: ContentHash::of(text.as_bytes()),
             text: text.into(),
             cursor: 0,
             grid,
+            pending: BTreeMap::new(),
             loss_milli: None,
+            check_loss_milli: None,
+            best_check: None,
+            stalled: false,
+            sample: None,
+            point: None,
+            speed: 0.0,
         }))
     }
 
     fn restore(&self, checkpoint: &[u8]) -> Result<Box<dyn TrainingSession>, TrainingError> {
-        if checkpoint.len() > MAX_CHECKPOINT_BYTES {
-            return Err(TrainingError::InvalidCheckpoint);
-        }
-        let saved: SavedSession =
-            serde_json::from_slice(checkpoint).map_err(|_| TrainingError::InvalidCheckpoint)?;
-        TrainingSource::Text(saved.text.clone())
-            .text()
-            .map_err(|_| TrainingError::InvalidCheckpoint)?;
-        let grid = GridSyncer::restore(saved.grid).map_err(|_| TrainingError::InvalidCheckpoint)?;
-        let recipe_valid = match saved.version {
-            1 => saved.recipe.is_none() && grid.job() == recipe_hash(&saved.text),
-            2 => saved.recipe == Some(recipe_hash(&saved.text)),
-            _ => false,
-        };
-        if !recipe_valid
-            || saved.cursor >= saved.text.len()
-            || !saved.text.is_char_boundary(saved.cursor)
-            || grid.params().len() != BYTE_MODEL_PARAMETERS
-            || grid.round() > u64::from(round_limit(&saved.text))
+        let invalid = TrainingError::InvalidCheckpoint;
+        let saved = saved::decode(checkpoint)?;
+        let header = saved.header;
+        let plan = header.plan;
+        let architecture = plan.architecture;
+        plan.validate().map_err(|_| invalid.clone())?;
+        check_text(&saved.text).map_err(|_| invalid.clone())?;
+        let grid = GridSyncer::restore(saved.grid).map_err(|_| invalid.clone())?;
+        let split = plan.settings.check_split(&saved.text);
+        let cursor = usize::try_from(header.cursor).map_err(|_| invalid.clone())?;
+        let round = u32::try_from(grid.round()).map_err(|_| invalid.clone())?;
+        let needed = plan
+            .settings
+            .work_tokens(architecture, plan.settings.batch_bytes as usize);
+        if plan.source.bytes != saved.text.len() as u64
+            || (header.family == BaseModel::Starter) != architecture.is_table()
+            || saved.job.is_some_and(|job| grid.job() != job)
+            || grid.params().len() != architecture.parameters()
+            || round > plan.settings.rounds
+            || grid.settings().local_steps != plan.settings.local_steps
+            || u64::from(grid.settings().token_budget) < needed
+            || cursor >= split
+            || !saved.text.is_char_boundary(cursor)
+            || header.point.is_some_and(|point| point.round > round)
+            || header.sample.as_ref().is_some_and(|(at, _)| *at > round)
+            || header.best_check.is_some_and(|(_, at)| at > round)
         {
-            return Err(TrainingError::InvalidCheckpoint);
+            return Err(invalid);
         }
         Ok(Box::new(Session {
-            pending: BTreeMap::new(),
+            compute: Compute::new(plan.settings.threads).map_err(|_| TrainingError::Step)?,
+            net: Net::new(architecture).map_err(|_| invalid)?,
+            plan,
+            family: header.family,
+            base_rounds: header.base_rounds,
+            base_tokens: header.base_tokens,
+            text_hash: header.text,
             text: saved.text,
-            cursor: saved.cursor,
+            split,
+            cursor,
             grid,
-            loss_milli: saved.loss_milli,
+            pending: BTreeMap::new(),
+            loss_milli: header.loss_milli,
+            check_loss_milli: header.check_loss_milli,
+            best_check: header.best_check,
+            stalled: header.stalled,
+            sample: header.sample,
+            point: header.point,
+            speed: 0.0,
         }))
     }
 
     fn work(&self, task: TrainingTask, worker: DeviceId) -> Result<TrainingResult, TrainingError> {
+        // Everything about the packet is checked before any tensor exists.
         let parameters = task.parameters(worker)?;
-        let model = ByteLanguageModel::new(&task.text).map_err(|_| TrainingError::InvalidWork)?;
-        let delta = ScaffoldClient::new(model.dimension()).train(
-            &model,
-            &parameters,
-            &vec![0.0; model.dimension()],
-            LocalWork {
-                steps: usize::try_from(task.lease.steps).map_err(|_| TrainingError::InvalidWork)?,
-                learning_rate: 0.1,
-                algorithm: Algorithm::FedAvg,
-            },
-        );
         let tokens = task.expected_tokens()?;
-        let pseudo_gradient =
-            encode_parameters(&delta.into_iter().map(|x| -x).collect::<Vec<_>>())?;
+        let recipe = task.recipe.work();
+        let net = Net::new(recipe.architecture).map_err(|_| TrainingError::InvalidWork)?;
+        let learned = packet::learn(
+            &Compute::new(0)?,
+            &net,
+            &recipe,
+            &parameters,
+            task.text.as_bytes(),
+            task.lease.steps,
+        )?;
         Ok(TrainingResult {
+            pseudo_gradient: encode_parameters(&learned.pseudo_gradient, recipe.architecture)?,
             lease: task.lease,
             tokens,
-            pseudo_gradient,
         })
     }
-}
 
-fn recipe_hash(text: &str) -> ContentHash {
-    let mut bytes = b"sovra-byte-grid-session-v1\0".to_vec();
-    bytes.extend_from_slice(text.as_bytes());
-    ContentHash::of(&bytes)
-}
-
-impl TrainingSession for Session {
-    fn advance(&mut self, now_ms: u64) -> Result<(), TrainingError> {
-        if self.progress().is_complete() {
-            return Ok(());
-        }
-        let worker = DeviceId([0; 32]);
-        let task = self.assign(worker, now_ms)?;
-        let result = BurnTrainingEngine.work(task, worker)?;
-        self.merge(result, worker, now_ms)
+    fn inspect(&self, model: &[u8]) -> Result<ModelFacts, TrainingError> {
+        inspect_model(model)
     }
 
-    fn abandon(&mut self, worker: DeviceId) {
-        let id = self
-            .pending
-            .iter()
-            .find(|(_, batch)| batch.lease.worker == worker)
-            .map(|(id, _)| *id);
-        if let Some(id) = id
-            && let Some(batch) = self.pending.remove(&id)
-            && self.cursor == batch.cursor_after
-        {
-            self.cursor = batch.cursor_before;
-        }
-        self.grid.release(worker);
+    fn generate(
+        &self,
+        model: &[u8],
+        prompt: &str,
+        bytes: u16,
+        temperature_milli: u32,
+        seed: u64,
+    ) -> Result<String, TrainingError> {
+        check_trial_prompt(prompt)?;
+        let model = decode_model(model)?;
+        let written = writer::write(
+            model.header.architecture,
+            &model.parameters,
+            prompt.as_bytes(),
+            usize::from(bytes.min(MAX_SAMPLE_BYTES)),
+            temperature_milli,
+            seed,
+        )?;
+        Ok(sample_text(&written))
+    }
+}
+
+impl Session {
+    fn round(&self) -> u32 {
+        u32::try_from(self.grid.round()).unwrap_or(u32::MAX)
     }
 
-    fn assign(&mut self, worker: DeviceId, now_ms: u64) -> Result<TrainingTask, TrainingError> {
+    /// Reserves the next packet of text for `worker` and returns its lease id.
+    fn take(&mut self, worker: DeviceId, now_ms: u64) -> Result<u64, TrainingError> {
         if self.progress().is_complete() {
             return Err(TrainingError::InvalidWork);
         }
@@ -171,54 +267,294 @@ impl TrainingSession for Session {
         // is unchanged, and the same text interval is issued when the cursor has
         // not moved on for someone else.
         self.abandon(worker);
+        let settings = &self.plan.settings;
+        let learn = &self.text[..self.split];
+        let batch = settings.batch_bytes as usize;
         let cursor_before = self.cursor;
-        // Overlap the last character so a one-byte tail has a predecessor.
-        let start = if self.text.len() - self.cursor < 2 {
-            self.text[..self.cursor]
-                .char_indices()
-                .next_back()
-                .map_or(0, |(i, _)| i)
+        let mut end = (self.cursor + batch).min(learn.len());
+        while !learn.is_char_boundary(end) {
+            end -= 1;
+        }
+        // The last packet reaches back so it is as full as any other: a short
+        // tail on its own would teach little.
+        let start = if end == learn.len() {
+            let mut start = learn.len().saturating_sub(batch);
+            while !learn.is_char_boundary(start) {
+                start += 1;
+            }
+            start.min(self.cursor)
         } else {
             self.cursor
         };
-        let mut end = (start + BATCH_BYTES).min(self.text.len());
-        while !self.text.is_char_boundary(end) {
-            end -= 1;
-        }
+        let recipe = TrainingRecipe::for_round(self.net.architecture(), settings, self.round());
+        let tokens = recipe.expected_tokens(end - start, settings.local_steps)?;
         let lease = self
             .grid
             .issue(worker, now_ms)
             .map_err(|_| TrainingError::InvalidWork)?;
         self.pending
-            .retain(|_, task| self.grid.has_lease(&task.lease));
-        let task = TrainingTask {
-            recipe: TrainingRecipe::ByteBigramV1,
-            lease,
-            model: encode_parameters(self.grid.params())?,
-            text: self.text[start..end].into(),
-        };
-        // Assignment progress is saved before sending work. A missing worker's
-        // batch can be visited again when the cursor cycles through the corpus.
-        let cursor_after = if end == self.text.len() {
+            .retain(|_, packet| self.grid.has_lease(&packet.lease));
+        // The next packet overlaps the last character, so the byte after it is
+        // still taught. The position is saved before work is sent: a missing
+        // worker's packet is read again when the cursor comes round.
+        let cursor_after = if end == learn.len() {
             0
         } else {
-            self.text[..end]
+            learn[..end]
                 .char_indices()
                 .next_back()
                 .map_or(end, |(i, _)| i)
         };
         self.cursor = cursor_after;
+        let id = lease.id;
         self.pending.insert(
-            task.lease.id,
-            PendingBatch {
-                lease: task.lease.clone(),
-                text: task.text.clone(),
-                tokens: task.expected_tokens()?,
+            id,
+            Pending {
+                lease,
+                recipe,
+                start,
+                end,
+                tokens,
                 cursor_before,
                 cursor_after,
             },
         );
-        Ok(task)
+        Ok(id)
+    }
+
+    /// Folds one finished packet into the model and refreshes what the page shows.
+    /// `measured` is the loss the local steps saw; a helper's packet is measured
+    /// here instead.
+    fn fold(
+        &mut self,
+        contribution: Contribution,
+        now_ms: u64,
+        measured: Option<f32>,
+    ) -> Result<(), TrainingError> {
+        let id = contribution.lease.id;
+        // The schedule moves the merge engine's step size, which is what sets how
+        // far the model travels each round. A refused merge changes nothing.
+        let previous = self.grid.settings().learning_rate;
+        self.grid
+            .set_learning_rate(self.plan.settings.outer_learning_rate_at(self.round()))
+            .map_err(|_| TrainingError::Step)?;
+        if self.grid.merge(&[contribution], now_ms).is_err() {
+            self.grid
+                .set_learning_rate(previous)
+                .map_err(|_| TrainingError::Step)?;
+            return Err(TrainingError::InvalidWork);
+        }
+        let packet = self.pending.remove(&id);
+        let loss = measured.or_else(|| {
+            let packet = packet.as_ref()?;
+            packet::packet_loss(
+                &self.compute,
+                &self.net,
+                &packet.recipe.work(),
+                self.grid.params(),
+                &self.text.as_bytes()[packet.start..packet.end],
+            )
+            .ok()
+        });
+        if let Some(loss) = loss.and_then(milli) {
+            self.loss_milli = Some(loss);
+        }
+        self.after_round();
+        Ok(())
+    }
+
+    fn after_round(&mut self) {
+        let round = self.round();
+        let settings = &self.plan.settings;
+        let due =
+            round == 1 || round.is_multiple_of(settings.check_every) || round >= settings.rounds;
+        let mut checked = None;
+        if due {
+            checked = self.check();
+            if let Some(loss) = checked {
+                self.check_loss_milli = Some(loss);
+                if self.best_check.is_none_or(|(best, _)| loss < best) {
+                    self.best_check = Some((loss, round));
+                }
+                let limit = self.plan.settings.stop_when_stalled;
+                if limit > 0
+                    && self
+                        .best_check
+                        .is_some_and(|(_, at)| round.saturating_sub(at) >= limit)
+                {
+                    self.stalled = true;
+                }
+            }
+            self.sample = self.write_sample(round);
+        }
+        if let Some(loss_milli) = self.loss_milli {
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a nonnegative speed clamped to the u32 range"
+            )]
+            let tokens_per_second = self.speed.round().clamp(0.0, f64::from(u32::MAX)) as u32;
+            self.point = Some(MetricPoint {
+                round,
+                loss_milli,
+                check_loss_milli: checked,
+                lr_micro: self
+                    .plan
+                    .settings
+                    .outer_learning_rate_micro_at(round.saturating_sub(1)),
+                tokens_per_second,
+            });
+        }
+    }
+
+    /// The loss on text the model has not learned from, or `None` when no text
+    /// was held back.
+    fn check(&self) -> Option<u32> {
+        let tail = &self.text.as_bytes()[self.split..];
+        let architecture = self.net.architecture();
+        let length = if architecture.is_table() {
+            tail.len().min(MAX_TABLE_CHECK_BYTES).checked_sub(1)?
+        } else {
+            architecture.window_tokens(tail.len())
+        };
+        if length == 0 {
+            return None;
+        }
+        // Windows side by side across the tail; when there are more than a check
+        // may read, evenly spaced ones are taken.
+        let available = if architecture.is_table() {
+            1
+        } else {
+            (tail.len() - 1) / length
+        };
+        let count = available.clamp(1, MAX_CHECK_WINDOWS);
+        let starts: Vec<usize> = (0..count)
+            .map(|index| index * available / count * length)
+            .collect();
+        let batch = Batch::windows(tail, &starts, length).ok()?;
+        self.compute
+            .loss(&self.net, self.grid.params(), &batch)
+            .ok()
+            .and_then(milli)
+    }
+
+    /// Lets the model write from the text's first character.
+    fn write_sample(&self, round: u32) -> Option<(u32, String)> {
+        let settings = &self.plan.settings;
+        let first = self.text.chars().next()?;
+        let mut bytes = self.text.as_bytes()[..first.len_utf8()].to_vec();
+        let written = writer::write(
+            self.net.architecture(),
+            self.grid.params(),
+            &bytes,
+            usize::from(settings.sample_bytes.min(MAX_SAMPLE_BYTES)),
+            settings.sample_temperature_milli,
+            settings.seed ^ u64::from(round).wrapping_mul(0xA24B_AED4_963E_E407),
+        )
+        .ok()?;
+        bytes.extend_from_slice(&written);
+        Some((round, sample_text(&bytes)))
+    }
+
+    fn header(&self) -> Header {
+        Header {
+            plan: self.plan.clone(),
+            family: self.family,
+            base_rounds: self.base_rounds,
+            base_tokens: self.base_tokens,
+            text: self.text_hash,
+            cursor: self.cursor as u64,
+            loss_milli: self.loss_milli,
+            check_loss_milli: self.check_loss_milli,
+            best_check: self.best_check,
+            stalled: self.stalled,
+            sample: self.sample.clone(),
+            point: self.point,
+        }
+    }
+}
+
+impl TrainingSession for Session {
+    fn advance(&mut self, now_ms: u64) -> Result<(), TrainingError> {
+        if self.progress().is_complete() {
+            return Ok(());
+        }
+        let id = self.take(LOCAL, now_ms)?;
+        let packet = self.pending.get(&id).ok_or(TrainingError::Step)?;
+        let lease = packet.lease.clone();
+        let tokens = packet.tokens;
+        let started = Instant::now();
+        // The same packet code a helper runs, straight on the model's values:
+        // nothing is encoded for the wire when the work stays here.
+        let learned = packet::learn(
+            &self.compute,
+            &self.net,
+            &packet.recipe.work(),
+            self.grid.params(),
+            &self.text.as_bytes()[packet.start..packet.end],
+            lease.steps,
+        );
+        let Ok(learned) = learned else {
+            self.abandon(LOCAL);
+            return Err(TrainingError::Step);
+        };
+        let seconds = started.elapsed().as_secs_f64();
+        if seconds > 0.0 {
+            let speed = f64::from(tokens) / seconds;
+            self.speed = if self.speed > 0.0 {
+                self.speed * (1.0 - SPEED_BLEND) + speed * SPEED_BLEND
+            } else {
+                speed
+            };
+        }
+        let contribution = Contribution {
+            lease,
+            tokens,
+            pseudo_gradient: learned.pseudo_gradient,
+        };
+        if self.fold(contribution, now_ms, Some(learned.loss)).is_err() {
+            self.abandon(LOCAL);
+            return Err(TrainingError::Step);
+        }
+        Ok(())
+    }
+
+    fn abandon(&mut self, worker: DeviceId) {
+        let id = self
+            .pending
+            .iter()
+            .find(|(_, packet)| packet.lease.worker == worker)
+            .map(|(id, _)| *id);
+        if let Some(id) = id
+            && let Some(packet) = self.pending.remove(&id)
+            && self.cursor == packet.cursor_after
+        {
+            self.cursor = packet.cursor_before;
+        }
+        self.grid.release(worker);
+    }
+
+    fn assign(&mut self, worker: DeviceId, now_ms: u64) -> Result<TrainingTask, TrainingError> {
+        // A shape too large for one group message is trained here only, and no
+        // helper may claim this computer's own slot.
+        if !self.net.architecture().group_capable() || worker == LOCAL {
+            return Err(TrainingError::InvalidWork);
+        }
+        let id = self.take(worker, now_ms)?;
+        let packet = self.pending.get(&id).ok_or(TrainingError::InvalidWork)?;
+        let model = encode_parameters(self.grid.params(), self.net.architecture());
+        match model {
+            Ok(model) => Ok(TrainingTask {
+                recipe: packet.recipe,
+                lease: packet.lease.clone(),
+                model,
+                text: self.text[packet.start..packet.end].into(),
+            }),
+            Err(error) => {
+                self.abandon(worker);
+                Err(error)
+            }
+        }
     }
 
     fn merge(
@@ -227,228 +563,63 @@ impl TrainingSession for Session {
         worker: DeviceId,
         now_ms: u64,
     ) -> Result<(), TrainingError> {
-        if self.progress().is_complete() {
+        if self.progress().is_complete() || worker == LOCAL {
             return Err(TrainingError::InvalidWork);
         }
-        let task = self
+        let packet = self
             .pending
             .get(&result.lease.id)
             .ok_or(TrainingError::InvalidWork)?;
-        if task.lease != result.lease || task.tokens != result.tokens {
+        if packet.lease != result.lease || packet.tokens != result.tokens {
             return Err(TrainingError::InvalidWork);
         }
-        let contribution = result.contribution(worker)?;
-        self.grid
-            .merge(&[contribution], now_ms)
-            .map_err(|_| TrainingError::InvalidWork)?;
-        let model = ByteLanguageModel::new(&task.text).map_err(|_| TrainingError::Step)?;
-        let loss = model.loss(self.grid.params());
-        if !loss.is_finite() || !(0.0..=1000.0).contains(&loss) {
-            return Err(TrainingError::Step);
-        }
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "finite nonnegative loss is bounded to 1000 above"
-        )]
-        {
-            self.loss_milli = Some((loss * 1000.0).round() as u32);
-        }
-        self.pending.remove(&result.lease.id);
-        Ok(())
+        let contribution = result.contribution(worker, self.net.architecture())?;
+        self.fold(contribution, now_ms, None)
     }
 
     fn progress(&self) -> TrainingProgress {
+        let rounds = self.round();
         TrainingProgress {
-            rounds: u32::try_from(self.grid.round()).expect("bounded session rounds"),
-            total_rounds: round_limit(&self.text),
+            rounds,
+            // A run that stopped improving is finished where it stands.
+            total_rounds: if self.stalled {
+                rounds
+            } else {
+                self.plan.settings.rounds
+            },
             tokens: self.grid.tokens(),
             loss_milli: self.loss_milli,
         }
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, TrainingError> {
-        let saved = SavedSession {
-            version: 2,
-            recipe: Some(recipe_hash(&self.text)),
-            text: self.text.clone(),
-            cursor: self.cursor,
-            grid: self.grid.checkpoint(),
+        saved::encode(&self.header(), &self.text, &self.grid.checkpoint())
+    }
+
+    fn plan(&self) -> TrainingPlanSummary {
+        self.plan.clone()
+    }
+
+    fn metrics(&self) -> Option<MetricPoint> {
+        self.point
+    }
+
+    fn sample(&self) -> Option<(u32, String)> {
+        self.sample.clone()
+    }
+
+    fn export(&self) -> Result<Vec<u8>, TrainingError> {
+        let header = ModelHeader {
+            base: self.family,
+            architecture: self.net.architecture(),
+            rounds: self.base_rounds.saturating_add(self.round()),
+            tokens: self.base_tokens.saturating_add(self.grid.tokens()),
             loss_milli: self.loss_milli,
+            check_loss_milli: self.check_loss_milli,
         };
-        let bytes = serde_json::to_vec(&saved).map_err(|_| TrainingError::Step)?;
-        if bytes.len() > MAX_CHECKPOINT_BYTES {
-            return Err(TrainingError::Step);
-        }
-        Ok(bytes)
+        encode_model(&header, self.grid.params())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use sovra_core::training::SAMPLE_TEXT;
-
-    #[test]
-    fn saved_session_restores_text_cursor_model_and_optimizer() {
-        let engine = BurnTrainingEngine;
-        let mut original = engine
-            .create(SAMPLE_TEXT, ContentHash::of(b"test run"))
-            .unwrap();
-        for _ in 0..3 {
-            original.advance(0).unwrap();
-        }
-        let bytes = original.checkpoint().unwrap();
-        let mut restored = engine.restore(&bytes).unwrap();
-        original.advance(0).unwrap();
-        restored.advance(0).unwrap();
-        assert_eq!(restored.progress(), original.progress());
-        assert_eq!(
-            restored.checkpoint().unwrap(),
-            original.checkpoint().unwrap()
-        );
-        assert!(engine.restore(&bytes[..bytes.len() / 2]).is_err());
-        let mut changed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        changed["text"] = SAMPLE_TEXT.replace("garden", "castle").into();
-        assert!(
-            engine
-                .restore(&serde_json::to_vec(&changed).unwrap())
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn unicode_batches_and_last_short_batch_do_not_panic() {
-        let mut session = BurnTrainingEngine
-            .create(
-                &format!("{}x", "🌱".repeat(128)),
-                ContentHash::of(b"unicode run"),
-            )
-            .unwrap();
-        session.advance(0).unwrap();
-        session.advance(0).unwrap();
-        assert_eq!(session.progress().rounds, 2);
-    }
-
-    #[test]
-    fn independent_learners_handle_dropout_replay_restore_and_distinct_runs() {
-        let engine = BurnTrainingEngine;
-        let fast = DeviceId([1; 32]);
-        let slow = DeviceId([2; 32]);
-        let gone = DeviceId([3; 32]);
-        let mut session = engine
-            .create(SAMPLE_TEXT, ContentHash::of(b"first"))
-            .unwrap();
-        let slow_task = session.assign(slow, 0).unwrap();
-        let abandoned = session.assign(gone, 0).unwrap();
-        let initial_loss = ByteLanguageModel::new(SAMPLE_TEXT)
-            .unwrap()
-            .loss(&slow_task.parameters(slow).unwrap());
-        let first = session.assign(fast, 0).unwrap();
-        let first = engine.work(first, fast).unwrap();
-        let mut forged = first.clone();
-        forged.tokens -= 1;
-        let before = session.checkpoint().unwrap();
-        assert!(session.merge(forged, fast, 1).is_err());
-        assert_eq!(before, session.checkpoint().unwrap());
-        session.merge(first.clone(), fast, 1).unwrap();
-        let saved = session.checkpoint().unwrap();
-        assert!(session.merge(first, fast, 1).is_err());
-        assert_eq!(saved, session.checkpoint().unwrap());
-        session
-            .merge(engine.work(slow_task, slow).unwrap(), slow, 2)
-            .unwrap();
-        for now in 3..12 {
-            let task = session.assign(fast, now).unwrap();
-            session
-                .merge(engine.work(task, fast).unwrap(), fast, now)
-                .unwrap();
-        }
-        assert!(
-            f64::from(session.progress().loss_milli.unwrap()) < f64::from(initial_loss) * 1000.0
-        );
-        assert!(
-            session
-                .merge(engine.work(abandoned, gone).unwrap(), gone, 12)
-                .is_err()
-        );
-        let outstanding = session.assign(fast, 13).unwrap();
-        let checkpoint = session.checkpoint().unwrap();
-        let mut restored = engine.restore(&checkpoint).unwrap();
-        let result = engine.work(outstanding.clone(), fast).unwrap();
-        assert!(restored.merge(result.clone(), fast, 14).is_err());
-        let replacement = restored.assign(fast, 14).unwrap();
-        assert!(replacement.lease.id > outstanding.lease.id);
-        restored
-            .merge(engine.work(replacement, fast).unwrap(), fast, 15)
-            .unwrap();
-        let mut another = engine
-            .create(SAMPLE_TEXT, ContentHash::of(b"second"))
-            .unwrap();
-        let fresh = another.assign(fast, 14).unwrap();
-        assert_ne!(fresh.lease.job, outstanding.lease.job);
-        assert!(another.merge(result, fast, 15).is_err());
-    }
-
-    #[test]
-    fn a_dropped_worker_keeps_the_saved_model_and_can_take_the_same_interval_again() {
-        let engine = BurnTrainingEngine;
-        let worker = DeviceId([9; 32]);
-        let mut session = engine
-            .create(SAMPLE_TEXT, ContentHash::of(b"dropout"))
-            .unwrap();
-        let first = session.assign(worker, 0).unwrap();
-        let rounds = session.progress().rounds;
-        let saved = session.checkpoint().unwrap();
-        let again = session.assign(worker, 1).unwrap();
-        assert_eq!(again.text, first.text);
-        assert!(again.lease.id > first.lease.id);
-        assert_eq!(session.progress().rounds, rounds);
-        let reassigned = session.checkpoint().unwrap();
-        let mut before: serde_json::Value = serde_json::from_slice(&saved).unwrap();
-        let after: serde_json::Value = serde_json::from_slice(&reassigned).unwrap();
-        assert!(
-            after["grid"]["next_lease"].as_u64().unwrap()
-                > before["grid"]["next_lease"].as_u64().unwrap()
-        );
-        before["grid"]["next_lease"] = after["grid"]["next_lease"].clone();
-        assert!(
-            before == after,
-            "reassignment preserves model, optimizer and progress"
-        );
-        assert!(
-            session
-                .merge(engine.work(first, worker).unwrap(), worker, 2)
-                .is_err()
-        );
-        assert!(
-            session.checkpoint().unwrap() == reassigned,
-            "rejected work cannot change the checkpoint"
-        );
-        session
-            .merge(engine.work(again, worker).unwrap(), worker, 2)
-            .unwrap();
-        assert_eq!(session.progress().rounds, rounds + 1);
-    }
-
-    #[test]
-    fn legacy_local_checkpoints_upgrade_without_losing_model_state() {
-        let mut session = BurnTrainingEngine
-            .create(SAMPLE_TEXT, recipe_hash(SAMPLE_TEXT))
-            .unwrap();
-        session.advance(0).unwrap();
-        let mut saved: serde_json::Value =
-            serde_json::from_slice(&session.checkpoint().unwrap()).unwrap();
-        saved["version"] = 1.into();
-        saved.as_object_mut().unwrap().remove("recipe");
-        let mut restored = BurnTrainingEngine
-            .restore(&serde_json::to_vec(&saved).unwrap())
-            .unwrap();
-        restored.advance(0).unwrap();
-        session.advance(0).unwrap();
-        assert_eq!(
-            restored.checkpoint().unwrap(),
-            session.checkpoint().unwrap()
-        );
-    }
-}
+mod tests;

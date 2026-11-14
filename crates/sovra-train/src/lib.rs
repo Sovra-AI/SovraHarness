@@ -1,16 +1,31 @@
 //! Local training for the sovereign swarm, on the Burn deep-learning framework.
 //!
-//! Owns the tensor code; decides nothing. Each model here implements the core
-//! [`Objective`] port (`sovra_core::swarm::learn::scaffold`), so the swarm's rules
-//! (SCAFFOLD, privacy noise, secure sums, sign-off) only ever see a flat parameter
-//! vector and its gradient, and the training examples never leave this crate.
+//! Owns the tensor code; decides nothing. It implements two core ports:
 //!
-//! Burn picks the best enabled backend: with the `gpu` feature, `CubeCL` compiles the
-//! kernels for the computer's GPU (Vulkan, Metal or DX12 through wgpu); without it,
-//! Burn's pure-Rust CPU backend runs everywhere. Gradients come from Burn's autodiff.
+//! - [`BurnTrainingEngine`] is the core `TrainingEngine`: byte-level models (the
+//!   Starter table and a family of small transformers) that learn from a person's
+//!   own text, write text, and report what this computer is. The runtime drives
+//!   it; group computers help through bounded work packets.
+//! - [`LinearModel`] and [`ByteLanguageModel`] are core `Objective`s, so the
+//!   swarm's rules (SCAFFOLD, privacy noise, secure sums, sign-off) only ever see
+//!   a flat parameter vector and its gradient.
+//!
+//! Everything runs on Burn's pure-Rust processor backend, picked explicitly: no
+//! environment variable chooses the device, nothing is downloaded, and no
+//! external program is involved. Gradients come from Burn's autodiff. The `gpu`
+//! feature compiles Burn's graphics backend too, which today only adds graphics
+//! card names to the hardware facts.
 
+mod hardware;
+mod init;
 mod language;
+mod net;
+mod optim;
+mod packet;
+mod rng;
+mod saved;
 mod session;
+mod writer;
 pub use session::BurnTrainingEngine;
 
 pub use language::ByteLanguageModel;
@@ -78,11 +93,11 @@ fn read(tensor: Tensor<2>) -> Vec<f32> {
 }
 
 impl LinearModel {
-    /// Trains on the best device Burn has enabled, with autodiff.
+    /// Trains on Burn's built-in processor backend, with autodiff.
     pub fn new(examples: Examples) -> Self {
         Self {
             examples,
-            device: Device::default().autodiff(),
+            device: Device::flex().autodiff(),
         }
     }
 
