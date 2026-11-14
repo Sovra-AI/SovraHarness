@@ -11,6 +11,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 - [Getting started](getting-started.md): launch Sovra, connect a model, and send a first message.
 - [Train your own small AI](training.md): teach a model from your own text in one app, let your group's computers help, watch it learn, and have the finished model delivered to everyone in the group.
 - [Models](models.md): choose a provider, check credentials, and change your chat model.
+- [Local model servers](local-models.md): automatic Ollama startup, alternative-server presets, official API references and troubleshooting.
 - [Configuration and local data](configuration.md): settings, environment variables, data paths, and troubleshooting.
 
 ## Use Sovra

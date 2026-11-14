@@ -50,8 +50,10 @@ in Settings, replays it.
 4. Open **Skills** to find capabilities in plain words and try an example.
 
 The [Models guide](models.md) explains keys, discovery, costs and capabilities.
-For local models, start the model server separately; Sovra does not install or
-launch it for you. A local chat model alone does not disable web search, remote
+Install Ollama once; Sovra starts its local server when you test, refresh,
+download or use a model. Other local programs need their server started
+separately. See [local model setup](local-models.md) for presets and troubleshooting.
+A local chat model alone does not disable web search, remote
 tools or group networking; see [network destinations](network.md#network-destinations).
 
 ## Train your own small AI

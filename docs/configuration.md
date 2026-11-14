@@ -28,6 +28,12 @@ and Models. Environment changes require restarting the app.
 Do not put real keys into tracked configuration or examples. Clearing a saved
 model key can reveal an environment fallback; remove both to remove access.
 
+Ollama startup uses the executable on `PATH` or common desktop installation
+locations. Sovra sets the child server's `OLLAMA_HOST` to the selected loopback
+address and port. It does not change an existing service or start servers for
+remote URLs. See [local model setup](local-models.md) for startup limits,
+connection wait settings and the other supported server presets.
+
 ## Data location
 
 The app uses `directories::ProjectDirs::from("com", "Sovra", "SovraHarness")`

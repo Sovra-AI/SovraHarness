@@ -7,7 +7,8 @@ that a service can answer with your account and available credit.
 ## Connect and choose a model
 
 1. Open **Models**. Use the guided OpenRouter setup or configure a local/compatible
-   service from Connections. Start local model servers separately.
+   service from Connections. Sovra starts installed local Ollama servers when
+   needed; start other local servers in their own programs.
 2. Save a connection key if required. **Check key** checks whether OpenRouter
    accepts it; saving a key and checking a key are distinct actions. A saved key
    is not proof of successful inference.
@@ -110,7 +111,7 @@ prefixes are preserved. Common full endpoint suffixes are normalized.
 | Ollama hosted | `https://ollama.com` | Ollama | Bearer API key |
 | LM Studio | `http://localhost:1234/v1` | OpenAI-compatible | None, or the server's configured auth |
 | vLLM | `http://localhost:8000/v1` | OpenAI-compatible | None, or Bearer when configured |
-| llama.cpp server | `http://localhost:8080/v1` | OpenAI-compatible | None, or Bearer when configured |
+| llama.cpp server | `http://localhost:9931/v1` | OpenAI-compatible | None, or Bearer when configured |
 | Compatible remote API | `https://your-server.example/prefix/v1` | OpenAI-compatible | None, Bearer, or a named API-key header |
 | Anthropic Messages | `https://api.anthropic.com` | Anthropic | `x-api-key` |
 
@@ -119,7 +120,13 @@ The preset cannot guarantee compatibility with every gateway: an endpoint that
 only implements Responses, Gemini, Azure deployment-specific routes or OAuth
 needs its matching adapter. Optional OpenAI organization/project headers and a
 custom API-key header name are supported. Request/chat timeout is configurable
-between 5 and 600 seconds.
+between 5 and 600 seconds for individual catalog and connection requests. Local
+presets default to 600 seconds, and chat turns on loopback Ollama/compatible
+connections allow at least ten minutes even with an older saved wait setting.
+**Show technical options** also controls streaming and the token-limit field;
+the GPT4All preset uses complete replies and `max_tokens`.
+See [local model servers](local-models.md) for all 16 alternatives, their official
+API references, and version-specific ports and setup requirements.
 
 **Check connection** verifies discovery and, for OpenRouter, the key endpoint; it
 does not send a paid inference request. Saving is also possible when discovery
@@ -141,7 +148,14 @@ precedence; clearing it can reveal the environment fallback.
 
 ## Ollama
 
-Run your Ollama server separately. Discovery uses `/api/tags` and bounded
+Install Ollama once. For a selected local HTTP loopback connection, Sovra checks
+the server and starts `ollama serve` if needed. Connection checks, refreshes and
+explicit downloads also prepare the server. Startup waits up to 30 seconds and
+reports missing installations or startup failures. Remote servers, HTTPS and
+reverse-proxy paths remain externally managed. Existing services stay running
+when Sovra closes; servers started by Sovra belong to its runtime.
+
+Discovery uses `/api/tags` and bounded
 `/api/show` requests for context, model family, parameter size, quantization and
 capabilities. Advertised maximum context can exceed the server's configured
 runtime context. A detail lookup failure does not hide an installed model.

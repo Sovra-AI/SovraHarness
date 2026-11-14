@@ -1,17 +1,17 @@
 # Local model servers
 
-In **Models → Connections**, add a connection and choose the program's preset.
+In **Connections → Another compatible service**, choose the program's preset.
 The address remains editable: use the port and API prefix shown by your server.
-Press **Test**, save, then choose an installed model in Models. If discovery is
-unavailable, add the server's exact model ID manually. Set Bearer authentication
+Press **Check connection**, save, then choose an installed model in Models.
+If discovery is unavailable, add the server's exact model ID manually. Set Bearer authentication
 and enter its key if you enabled authentication in the server.
 
 ## Ollama
 
 Install [Ollama](https://docs.ollama.com/quickstart) once. Sovra checks its server
 before model requests and starts `ollama serve` if the selected local server is
-not running. **Test**, **Refresh** and **Download a model** also start it. Merely
-opening Sovra with an unused Ollama connection does not launch a server.
+not running. **Check connection**, **Refresh** and **Download a model** also
+start it. Merely opening Sovra with an unused Ollama connection does not launch a server.
 
 Startup waits up to 30 seconds. A missing executable, a process that exits, a
 wrong service on the port, or an unresponsive server produces a specific error.
@@ -29,9 +29,9 @@ are owned by its runtime and stop with the app.
 ## Other programs
 
 Start the server and install/load a model in the chosen program first. These
-presets all use the shared OpenAI-compatible adapter (`GET /models`, streaming
-`POST /chat/completions` relative to the API base). Automatic process startup is
-currently provided for Ollama. Other programs need their own model paths, GPU
+presets all use the shared OpenAI-compatible adapter (`GET /models` and
+`POST /chat/completions` relative to the API base). Replies stream by default,
+except for GPT4All. Automatic process startup is currently provided for Ollama. Other programs need their own model paths, GPU
 settings or desktop server switches.
 
 | Preset | Suggested API base | Official setup/API reference |
@@ -80,4 +80,10 @@ other single HTTP requests. This gives
 cold model loading and helper calls time to finish. Stop still cancels a turn.
 If a model repeatedly fails, check available RAM/VRAM, use a smaller model, and
 check the server's own logs. Raising a timeout cannot fix a model that does not
-fit in memory.
+fit in memory. Close other demanding workloads or choose a smaller installed
+model when RAM, graphics memory or swap is exhausted.
+
+An **input budget** error is different from a startup or connection timeout.
+The question, saved context and enabled helpers must fit the model together.
+Try a fresh conversation, reduce unneeded helpers in Settings, or choose a model
+with a larger context. Changing the wait time does not increase context size.

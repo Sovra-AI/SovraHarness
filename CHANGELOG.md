@@ -14,6 +14,12 @@ package version.
 
 ## [Unreleased]
 
+- **Local model setup is clearer.** The getting-started, model, configuration
+  and network guides now explain automatic Ollama startup, manual startup for
+  other programs, connection wait settings, and memory and input-budget limits.
+  The local-server guide links the official APIs for all sixteen alternatives
+  and uses the current Connections controls.
+
 ## [0.6.0] — 2026-11-14
 
 - **Training uses your graphics card when it helps.** Sovra now opens the

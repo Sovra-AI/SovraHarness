@@ -39,7 +39,9 @@ Implementation: [composition root](../crates/sovra-app/src/main.rs),
 
 ## Configure local operation
 
-1. Install and start a local model server with the models you need already available.
+1. Install a local model server with the models you need already available.
+   Sovra starts installed Ollama on the selected loopback address when needed;
+   start other programs separately. See [local model setup](local-models.md).
 2. Choose its local connection in Models and remove unused remote connections,
    including the default OpenRouter connection if you do not want catalog requests.
 3. Disable helper web search and remove scheduled research tasks.
