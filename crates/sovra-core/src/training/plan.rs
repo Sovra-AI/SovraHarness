@@ -334,7 +334,7 @@ impl TrainingSettings {
         // Quick try only shows the run working. On an eight-core desktop
         // processor (about 45, 11 and 4 rounds a second for Small, Medium and
         // Large) a Quick try lands in roughly 10 to 30 seconds and Balanced in
-        // about one, five and twenty-five minutes.
+        // about one, seven and thirty minutes.
         let numbers = match (preset, parameters) {
             (TrainingPreset::Quick, _) if table => (80, 10, 0),
             (TrainingPreset::Balanced, _) if table => (400, 20, 0),

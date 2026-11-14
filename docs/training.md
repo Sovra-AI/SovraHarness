@@ -293,7 +293,7 @@ loss at the end (check loss).
 | Starter | not measured | 3 s, 2.60 (2.78), on the processor | does not apply |
 | Small | 50 s, 1.73 (1.70) | 10 s, 1.60 (1.61) | 1.67 (1.54) |
 | Medium | 6.8 minutes, 1.72 (1.72) | 70 s, 1.28 (1.41) | 1.35 (1.43) |
-| Large | not measured; about 25 minutes expected | 6.7 minutes, 1.09 (1.43) | 1.01 (1.43) |
+| Large | 30 minutes, 1.58 (1.60) | 6.7 minutes, 1.09 (1.43) | 1.01 (1.43) |
 
 Before these settings, the same Balanced runs on the same text ended at check
 losses of 2.15 (Small), 2.41 (Medium) and 2.60 (Large), on either engine.

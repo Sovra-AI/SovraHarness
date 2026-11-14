@@ -35,9 +35,9 @@ package version.
   read at most 120 times so it is not simply memorised. **Balanced**
   and **Thorough** now give Medium and Large enough reading to get past the
   point where they are no better than the Starter table, so they take longer
-  on a processor: Balanced is about one, five and twenty-five minutes for
-  Small, Medium and Large on an eight-core desktop (Large estimated, not
-  measured), and about 10 seconds, 70 seconds and seven minutes on that
+  on a processor: Balanced measured about 1, 7 and 30 minutes for
+  Small, Medium and Large on an eight-core desktop that was also doing other work,
+  and about 10 seconds, 70 seconds and seven minutes on that
   desktop's graphics card.
 
 - **Measure training yourself.** `cargo run --release -p sovra-train
