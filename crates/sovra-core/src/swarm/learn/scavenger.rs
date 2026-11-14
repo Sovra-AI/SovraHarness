@@ -487,31 +487,57 @@ impl GridSyncer {
                 *sum += f64::from(*value) * scale;
             }
         }
-        let mut next = self.saved.clone();
-        next.beta1_power *= settings.beta1;
-        next.beta2_power *= settings.beta2;
-        for (i, value) in gradient.into_iter().enumerate() {
-            next.first[i] = settings.beta1 * next.first[i] + (1.0 - settings.beta1) * value;
-            next.second[i] =
-                settings.beta2 * next.second[i] + (1.0 - settings.beta2) * value * value;
-            let first = next.first[i] / (1.0 - next.beta1_power);
-            let second = next.second[i] / (1.0 - next.beta2_power);
-            let param = f64::from(next.params[i])
-                - settings.learning_rate * first / (second.sqrt() + settings.epsilon);
-            if !param.is_finite() || param.abs() > f64::from(f32::MAX) {
-                return Err(GridError::InvalidUpdate);
-            }
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "finite f32 range checked above"
-            )]
-            {
-                next.params[i] = param as f32;
-            }
+        let beta1_power = self.saved.beta1_power * settings.beta1;
+        let beta2_power = self.saved.beta2_power * settings.beta2;
+        // Every new value is worked out before anything saved changes, so a
+        // refused merge leaves the model exactly as it was. Only the new values
+        // are held aside: copying the whole saved state each round (the values
+        // and both moment arrays) cost more than the arithmetic.
+        // The check is gathered instead of stopping at the first bad value, which
+        // lets the loop run several values at a time.
+        let mut valid = true;
+        let params: Vec<f32> = gradient
+            .iter()
+            .zip(&self.saved.first)
+            .zip(&self.saved.second)
+            .zip(&self.saved.params)
+            .map(|(((value, first), second), param)| {
+                let first =
+                    (settings.beta1 * first + (1.0 - settings.beta1) * value) / (1.0 - beta1_power);
+                let second = (settings.beta2 * second + (1.0 - settings.beta2) * value * value)
+                    / (1.0 - beta2_power);
+                let param = f64::from(*param)
+                    - settings.learning_rate * first / (second.sqrt() + settings.epsilon);
+                // A value that is not a number fails this comparison too.
+                valid &= param.abs() <= f64::from(f32::MAX);
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "values outside the f32 range refuse the whole merge below"
+                )]
+                {
+                    param as f32
+                }
+            })
+            .collect();
+        if !valid {
+            return Err(GridError::InvalidUpdate);
         }
-        next.round = next_round;
-        next.tokens = next_tokens;
-        self.saved = next;
+        // Accepted: the moments move in place, with the same arithmetic as above.
+        for ((first, second), value) in self
+            .saved
+            .first
+            .iter_mut()
+            .zip(&mut self.saved.second)
+            .zip(&gradient)
+        {
+            *first = settings.beta1 * *first + (1.0 - settings.beta1) * value;
+            *second = settings.beta2 * *second + (1.0 - settings.beta2) * value * value;
+        }
+        self.saved.params = params;
+        self.saved.beta1_power = beta1_power;
+        self.saved.beta2_power = beta2_power;
+        self.saved.round = next_round;
+        self.saved.tokens = next_tokens;
         for update in updates {
             self.leases.remove(&update.lease.id);
         }

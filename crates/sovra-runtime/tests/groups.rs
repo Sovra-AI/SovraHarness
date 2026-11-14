@@ -1980,6 +1980,7 @@ impl TrainingSession for LeaseSession {
             lease,
             model: encode_parameters(self.grid.params(), Architecture::STARTER)?,
             text: self.text[start..end].to_owned(),
+            starts: Vec::new(),
         };
         let cursor_after = if end == self.text.len() {
             0

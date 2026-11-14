@@ -14,6 +14,35 @@ package version.
 
 ## [Unreleased]
 
+- **Training uses your graphics card when it helps.** Sovra now opens the
+  computer's graphics card itself, checks that it gives the same answers as
+  the processor, and trains Small, Medium and Large models on it when it is
+  at least one and a half times faster. Nothing is installed or switched on.
+  **This computer** shows **Graphics card** as the training engine and names
+  the card. If the card fails during a run, for example because another
+  program filled its memory, the run carries on with the processor. Measured
+  on one desktop (Ryzen 7 3700X, RTX 2080 Ti): 5 to 9 times the processor's
+  speed.
+
+- **Trained models are much better for the same work.** Each round now reads
+  short stretches from all over your text instead of one piece of it, and
+  takes one learning step instead of two. On a 280 kB text, the same amount
+  of work took a Medium model's check loss from 2.41 to 1.41, the same as a
+  textbook trainer reaches. Plain local steps are now recommended, the
+  step-size schedule is applied once instead of twice, and a short text is
+  read at most 120 times so it is not simply memorised. **Balanced**
+  and **Thorough** now give Medium and Large enough reading to get past the
+  point where they are no better than the Starter table, so they take longer
+  on a processor: Balanced is about one, five and twenty-five minutes for
+  Small, Medium and Large on an eight-core desktop (Large estimated, not
+  measured), and about 10 seconds, 70 seconds and seven minutes on that
+  desktop's graphics card.
+
+- **Measure training yourself.** `cargo run --release -p sovra-train
+  --features gpu --example training_benchmark` runs real training runs and
+  reports speed and loss for each starting point, on the graphics card or the
+  processor. See [Training: Measuring it](docs/training.md#measuring-it).
+
 - **Train your own small AI with your group.** The Training page is rebuilt
   around one path: choose what it should learn, a starting point and how
   thorough to be, then press **Start training**. A sample, a model size suited

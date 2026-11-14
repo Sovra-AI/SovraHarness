@@ -14669,6 +14669,7 @@ dependencies = [
  "sovra-core",
  "sysinfo 0.37.2",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

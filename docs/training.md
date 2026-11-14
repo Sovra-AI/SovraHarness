@@ -16,7 +16,8 @@ AI. See [Limits](#limits) for exactly what is and is not supported.
 1. Open **Training** in the sidebar. It is also on **Skills** as
    **Teach your own AI model with your group**, and in the guided tour.
 2. Look at the **This computer** card. It shows what this computer has to train
-   with and which model sizes it is comfortable with.
+   with, whether training will use its graphics card, and which model sizes it
+   is comfortable with.
 3. Under **What should it learn?**, leave **Try the sample** selected. The
    built-in garden sample is about 2,000 characters.
 4. Leave the suggested **Starting point** and the **How thorough?** choice as
@@ -129,8 +130,8 @@ to **Your models** marked as coming from that person and computer.
   **Share with my group** on that model. Only the computer that trained a model
   can share it; received models are not passed on automatically.
 
-A slow or missing helper does not hold the run up. If a helper disappears, its
-piece is given out again and its late answer is refused. An update that does
+A slow or missing helper does not hold the run up. If a helper disappears, a
+fresh piece is given out and its late answer is refused. An update that does
 not match its piece (wrong computer, wrong size, wrong count, or numbers that
 are not finite) is refused and the saved model stays as it was.
 
@@ -141,7 +142,7 @@ stat tiles and a sample.
 
 | What you see | What it means in plain words |
 | --- | --- |
-| **Round** x of y | One round reads one piece of the text and folds what was learned into the model. The preset decides how many rounds there are. |
+| **Round** x of y | One round reads a handful of short stretches from different places in the text and folds what was learned into the model. The preset decides how many rounds there are. |
 | **Speed** | Letters a second: how many next-letter guesses this computer learns from each second. |
 | **Time left** | Worked out from the measured speed, and rounded. It says **Measuring…** until a speed is known. Before you start, each preset shows a rough guess for this computer. |
 | **Loss** | How surprised the model is by the text it is learning from. Lower is better. An untrained model starts near 5.5, which is a blind guess among all 256 possible bytes. The page also says it in words, for example "Narrowed each next letter down to about 10 choices." |
@@ -167,7 +168,8 @@ restored with the saved run.
 | **Processor** | The processor's name |
 | **Cores** | Cores and threads, for example "8 cores, 16 threads" |
 | **Memory** | Total memory and memory free right now. Free memory is refreshed each time the page opens and when you press **Check again**. |
-| **Training engine** | **Built-in processor engine** in every released build |
+| **Training engine** | **Graphics card** when Sovra trains on this computer's graphics card, otherwise **Built-in processor engine**. See [Graphics cards](#graphics-cards). |
+| **Graphics** | The name of the graphics card in use. The row is absent when the processor does the work. |
 | Recommendation | One sentence, for example "This computer is comfortable with Small and Medium models." |
 
 The facts are read on this computer through the operating system. Nothing is
@@ -177,8 +179,42 @@ comfortable. Each starting point is marked as recommended, comfortable or
 likely to be slow on this computer.
 
 The suggested starting point favours seeing a result soon: **Small** on most
-computers, **Medium** when there are at least 8 processor threads and 8 GiB of
-memory, and **Starter** on a very small computer.
+computers, **Medium** when training uses a graphics card or there are at least
+8 processor threads and 8 GiB of memory, and **Starter** on a very small
+computer. **Large** is never suggested for a first run: it needs a long run to
+beat Medium.
+
+### Graphics cards
+
+Sovra trains on a graphics card when the computer has one that passes three
+checks, made once each time Sovra starts, the first time the Training page
+needs them:
+
+1. It is a real card. A software renderer that only imitates one is ignored.
+2. It gives the same answers as the processor on a small test model.
+3. It is clearly faster: at least one and a half times the processor's speed
+   on the Small model. A weak card built into a processor can be the slower
+   of the two, and then the processor is used.
+
+A separate card is tried first, then one built into the processor. Nothing is
+installed or downloaded for this, and there is no setting to turn on: the
+graphics engine is part of the same Sovra executable on macOS (Metal), Windows
+(DirectX 12 or Vulkan) and Linux (Vulkan), and uses the driver the computer
+already has.
+
+On a card, each round reads four times as much text and a preset takes half
+as many rounds: twice the reading of a processor run in a fraction of the
+time. The **Starter** table always trains on the processor, where it already
+takes seconds.
+
+If the card fails during a run (it runs out of memory because another program
+is using it, the driver stops, or the card is unplugged), the step that failed
+is done again on the processor and the run carries on there. The card is then
+left alone until Sovra is restarted. Nothing is lost, but the rest of that run
+is slower, because it keeps its graphics-sized rounds.
+
+Results on a card and on a processor agree to several decimal places, not bit
+for bit. A run that must repeat exactly should be compared on one engine.
 
 ## Starting points
 
@@ -191,7 +227,7 @@ works. A model can look back only as far as its **reach**.
 | **Starter** | Which letters follow which. Learns in seconds. | 65,536 values | 1 byte | 0.25 MiB | Any computer | Yes |
 | **Small** | Words and short phrases. A good first real try. | 137,216 values | 64 bytes | 0.5 MiB | 2 threads, 1 GiB | Yes |
 | **Medium** | Sentences and style. A group makes it quicker. | 875,520 values | 128 bytes | 3.3 MiB | 4 threads, 2 GiB | Yes |
-| **Large** | Longer passages. Slow on a processor. | 2,817,280 values | 256 bytes | 10.7 MiB | 8 threads, 4 GiB | No, this computer only |
+| **Large** | Longer passages. Slow without a graphics card. | 2,817,280 values | 256 bytes | 10.7 MiB | 8 threads, 4 GiB | No, this computer only |
 
 **Starter** is a table of letter pairs. **Small**, **Medium** and **Large** are
 small transformers (the same kind of design as large language models, at a
@@ -209,28 +245,64 @@ to be opened.
 
 | Preset | In one sentence | Starter rounds | Small rounds | Medium rounds | Large rounds |
 | --- | --- | --- | --- | --- | --- |
-| **Quick try** | A short run to see it learn. | 80 | 300 | 120 | 60 |
-| **Balanced** | A good model in a reasonable time. | 400 | 1,000 | 800 | 500 |
-| **Thorough** | The best result. Leave it running, and pause whenever you like. | 2,000 | 5,000 | 4,000 | 3,000 |
+| **Quick try** | A short run to see it learn. | 80 | 600 | 240 | 120 |
+| **Balanced** | A good model in a reasonable time. | 400 | 2,000 | 3,200 | 6,000 |
+| **Thorough** | The best result. Leave it running, and pause whenever you like. | 2,000 | 10,000 | 12,000 | 20,000 |
+
+These are the rounds on a processor, where a round of a Small, Medium or Large
+model reads about 512 bytes. On a [graphics card](#graphics-cards) a round
+reads about 2,048 bytes and each preset takes half the rounds shown.
 
 **Starter** uses more rounds when the text is long, so that all of it is read.
 **Thorough** finishes early when the check loss has not improved for 400
-(Starter), 1,000 (Small), 800 (Medium) or 600 (Large) rounds.
+(Starter), 2,000 (Small), 2,400 (Medium) or 4,000 (Large) rounds, or half
+those on a graphics card.
 
-Measured **Quick try** times on the built-in sample, release build, on one
-8-core desktop processor (AMD Ryzen 7 3700X) that was also running other work:
+The bigger a model, the more it must read before it is any good. Measured on
+a 280 kB text, Small, Medium and Large all sit near a check loss of 2.3 (about
+what the Starter table manages) until they have read roughly 1, 1.6 and 3 to 4
+million bytes, and then improve quickly. **Balanced** is sized to get each
+model past that point, which is why the larger models get more rounds, not
+fewer. **Quick try** stops well short of it for Medium and Large: it shows the
+run working, not a finished model.
 
-| Starting point | Time | Speed | Loss at the end (check loss) |
+A short text gets fewer rounds than the table says. Reading the same text
+over and over only memorises it (on the built-in sample the check loss is
+best after 60 to 150 readings and climbs after about 200), so no preset lets
+Small, Medium or Large read the text more than 120 times. On the sample that
+is 452 rounds on a processor and 113 on a graphics card, whichever preset is
+chosen; texts of about 100 kB and more always get the full number.
+
+Measured on one desktop (AMD Ryzen 7 3700X, 8 cores; NVIDIA RTX 2080 Ti),
+release build, while the computer was also doing other work. Loss is shown as
+loss at the end (check loss).
+
+**Quick try** on the built-in sample:
+
+| Starting point | Processor | Graphics card |
+| --- | --- | --- |
+| Starter | 0.5 s, 300,000 guesses a second, 1.99 (2.32) | trains on the processor |
+| Small | 10 s, 22,000, 1.02 (2.42) | 1.6 s, 163,000, 1.76 (2.23) |
+| Medium | 24 s, 5,100, 1.74 (2.29) | 7 s, 50,000, 1.74 (2.15) |
+| Large | 34 s, 1,800, 1.96 (2.20) | 10 s, 16,000, 2.00 (2.18) |
+
+**Balanced** on a 280 kB text (this repository's documentation):
+
+| Starting point | Processor | Graphics card | Textbook trainer on the card, same steps |
 | --- | --- | --- | --- |
-| Starter | under 1 second | about 350,000 guesses a second | 1.99 (2.32) |
-| Small | 11 to 13 seconds | 25,000 to 31,000 | 1.71 (2.25) |
-| Medium | about 19 seconds | 7,200 to 7,800 | 2.03 (2.22) |
-| Large | about 26 seconds | 2,500 to 2,700 | 2.04 (2.21) |
+| Starter | not measured | 3 s, 2.60 (2.78), on the processor | does not apply |
+| Small | 50 s, 1.73 (1.70) | 10 s, 1.60 (1.61) | 1.67 (1.54) |
+| Medium | 6.8 minutes, 1.72 (1.72) | 70 s, 1.28 (1.41) | 1.35 (1.43) |
+| Large | not measured; about 25 minutes expected | 6.7 minutes, 1.09 (1.43) | 1.01 (1.43) |
+
+Before these settings, the same Balanced runs on the same text ended at check
+losses of 2.15 (Small), 2.41 (Medium) and 2.60 (Large), on either engine.
 
 These are one machine's numbers, not a promise for yours; the page measures
 your computer's own speed once a run is going. A development build
 (`cargo xtask dev`) trains several times slower than a released build. No
-speed-up from adding group computers has been measured yet.
+speed-up from adding group computers has been measured yet. To measure your
+own computer, see [Measuring it](#measuring-it).
 
 ## Advanced reference
 
@@ -247,9 +319,9 @@ The settings are grouped as they are on the page.
 | Setting | What it does | Range | Recommended |
 | --- | --- | --- | --- |
 | Rounds | How many times the model is improved | 20 to 100,000 | From the preset |
-| Text per packet | Bytes of your text handed out in each round | 64 to 4,096, and at least the model's reach plus one | Small 1,024, Medium 2,048, Large 4,096, Starter 512 |
-| Windows per step | Stretches of text read from the packet in each step | 1 to 64; always 1 for Starter | Small 8, Medium 4, Large 2 |
-| Steps per round | Learning steps taken on a packet before its result is folded in | 1 to 16 | 2; Starter 4 |
+| Text per packet | Most bytes of your text handed out in each round. For Small, Medium and Large a packet is short stretches from different places in the text, one for each window when they fit; when they do not, the windows share the stretches that do. | 64 to 4,096, and at least the model's reach plus one | Room for every window: Small 544, Medium 528, Large 520 (four times that on a graphics card); Starter 512 |
+| Windows per step | Stretches of text read from the packet in each step | 1 to 64; always 1 for Starter | Small 8, Medium 4, Large 2; on a graphics card 32, 16 and 8 |
+| Steps per round | Learning steps taken on a packet before its result is folded in. More than one makes each round cost more without teaching more. | 1 to 16 | 1; Starter 4 |
 
 **Step sizes**
 
@@ -258,9 +330,9 @@ The settings are grouped as they are on the page.
 | Round step size | How far the model moves each round. This is the step size that matters: lower is steadier, higher is quicker and riskier. | 0.000001 to 1 | Small 0.005, Medium 0.003, Large 0.0015, Starter 0.25 |
 | Step size over the run | Whether the round step size stays the same (**Steady**), eases down to a tenth (**Ease down**), or warms up first (**Warm up, then ease down**) | One of the three | Warm up, then ease down; Starter Steady |
 | Warm-up rounds | Rounds spent easing the step size up at the start | 0 to the number of rounds | A twentieth of the rounds, at least 5; Starter 0 |
-| Learning rate | Step size inside one packet. It mostly sets the direction, so changing it does little. | 0.000001 to 10 | 0.003; Starter 0.1 |
-| Steps inside a packet | The rule a computer uses for its learning steps on one packet: **Plain steps (SGD)** or **Adaptive steps (Adam)**. Its memory starts fresh with every packet. | One of the two | Adaptive steps (Adam); Starter Plain steps (SGD) |
-| Weight decay | Gently pulls values towards zero so the model does not just memorise; 0 turns it off | 0 to 1 | 0.01; Starter 0 |
+| Learning rate | Step size inside one packet, the same in every round. It mostly sets the direction, so changing it does little. | 0.000001 to 10 | 0.003; Starter 0.1 |
+| Steps inside a packet | The rule a computer uses for its learning steps on one packet: **Plain steps (SGD)** or **Adaptive steps (Adam)**. Its memory starts fresh with every packet. With plain steps the round's own Adam sees the whole correction; adaptive steps pass on only its direction, which measured slightly worse. | One of the two | Plain steps (SGD) |
+| Weight decay | Gently pulls values towards zero so the model does not just memorise; 0 turns it off | 0 to 1 | 0 |
 | Step limit | Largest correction one step may make; 0 means no limit. Each round's folded-in update is always limited as well. | 0 to 1,000 | 1; Starter 0 |
 
 **Checking and sample text**
@@ -268,17 +340,17 @@ The settings are grouped as they are on the page.
 | Setting | What it does | Range | Recommended |
 | --- | --- | --- | --- |
 | Check share | Percent of the end of your text kept back to check the model on text it has not learned from; 0 means no check | 0 to 30 | 10; 0 for text under 160 bytes |
-| Rounds between checks | Rounds between checks and fresh sample text | 1 to 10,000 | Quick 10, Balanced 25, Thorough 50; Starter 10, 20, 50 |
+| Rounds between checks | Rounds between checks and fresh sample text | 1 to 10,000 | Quick 20, Balanced 50, Thorough 100, or half those on a graphics card; Starter 10, 20, 50 |
 | Stop when stalled | Finish early after this many rounds without a better check result; 0 means never | 0 to 100,000 | 0 for Quick and Balanced; see the presets for Thorough |
 | Sample variety | How adventurous the sample text is; 0 always picks the likeliest letter | 0 to 5 | 0.8 |
 | Sample length | Bytes of sample text written each time | 16 to 512 | 200 |
-| Seed | Starting number for the random choices. Keeping it the same makes a run on one computer, without helpers, repeatable. | Any whole number from 0 | 42 |
+| Seed | Starting number for the random choices, including which stretches of text each round reads. Keeping it the same makes a run on one computer, without helpers, repeatable on the processor engine; on a graphics card it repeats to several decimal places. | Any whole number from 0 | 42 |
 
 **This computer**
 
 | Setting | What it does | Range | Recommended |
 | --- | --- | --- | --- |
-| Processor threads | Threads the engine uses; 0 lets Sovra decide (up to 4). More rarely helps models this small. | 0 to 64 | 0 |
+| Processor threads | Threads the processor engine uses; 0 lets Sovra decide (up to 4). More rarely helps models this small. It has no effect on work done by a graphics card. | 0 to 64 | 0 |
 
 **Group helpers**
 
@@ -329,8 +401,10 @@ Training stays on this computer unless you start a run with
 | The finished model file and its description: name, your name and computer name as the group knows them, size, rounds, loss values, when it was made, and the group it is shared with | Every computer currently in the group | After a run started with the group finishes or is stopped, or after **Share with my group**, for as long as you stay in that group |
 | Hardware facts, the chart, the sample text, your other models, and the text itself as a whole | Nobody | Never sent |
 
-Over a long run, helpers are sent effectively all of the text the model learns
-from, one piece at a time. The part kept back for the check loss is not sent.
+A piece is one unbroken stretch for a Starter run, and several short stretches
+from different places in the text for Small and Medium. Over a long run,
+helpers are sent effectively all of the text the model learns from, one piece
+at a time. The part kept back for the check loss is not sent.
 **Use text you are willing for the people in your group to read.**
 
 - **The connection is encrypted, the receiver can read it.** Training traffic
@@ -393,19 +467,53 @@ it; remove files yourself, with Sovra closed, if you need the space.
 ## One executable, every operating system
 
 The training engine is the Rust library [Burn](https://burn.dev), compiled
-into the Sovra executable with its pure-Rust processor backend. The same
-released executable for macOS, Windows and Linux contains everything on this
-page.
+into the Sovra executable with its pure-Rust processor backend and its
+graphics backend (wgpu). The same released executable for macOS, Windows and
+Linux contains everything on this page, and decides for itself whether this
+computer's [graphics card](#graphics-cards) is worth using.
 
 - No Python, no separate trainer process, no container, no cluster software.
 - No model, vocabulary or other download. The starting points are built in and
   start untrained.
-- No system library beyond what Sovra already needs to draw its window.
+- No system library beyond what Sovra already needs to draw its window. The
+  graphics engine talks to the card through the graphics driver the computer
+  already has; no CUDA or other toolkit is installed.
 - Hardware facts come from the operating system through a Rust library; no
   external tool is run.
 
 Released builds are made for macOS on Apple Silicon, Windows x64 and Linux x64;
 see [Releasing](releasing.md).
+
+## Measuring it
+
+Training is measured with one tool, kept beside the engine. It runs real
+training runs through the same engine and the same recommended settings as the
+app, so its numbers include the checks and sample text a real run writes:
+
+```sh
+cargo run --release -p sovra-train --features gpu --example training_benchmark -- --help
+```
+
+| To measure | Add |
+| --- | --- |
+| The Quick try of every starting point on the built-in sample | nothing |
+| Another preset, or only some starting points | `--preset balanced`, `--models small,medium` |
+| Your own text | `--text notes.txt` |
+| The processor only, even with a graphics card | `--engine processor` |
+| One changed setting | `--set rounds=500`, `--set windows=16` (may be repeated) |
+| The same model trained the textbook way, for comparison | `--textbook yes` |
+
+Leave out `--features gpu` to build the processor engine alone. Always pass
+`--release`: a development build trains several times slower. For each
+starting point the table shows the rounds, the first round (which includes
+opening the graphics card), the fastest and the median round, the whole run,
+next-letter guesses a second, and the loss and check loss at the end.
+
+`--textbook yes` follows each Small, Medium or Large run with a reference
+trainer: one model, one AdamW optimiser kept for the whole run, windows drawn
+from anywhere in the text, for the same number of steps and windows. It shares
+the model code and the check with real runs, so a gap between the two rows
+comes only from how a run is organised.
 
 ## Troubleshooting
 
@@ -426,7 +534,9 @@ see [Releasing](releasing.md).
 | "The saved training file is damaged or from an unsupported version. Your file has been kept." | The last run could not be opened. Start a new run; the old file stays in the folder. |
 | "Training finished early because the check stopped improving." | **Stop when stalled** ended the run. The model is in **Your models**. |
 | "Training stopped before its first round, so there is no model to keep yet." | The run was stopped before it learned anything. Start again. |
-| It is slow | Choose a smaller starting point or **Quick try**. Large is slow on a processor. Development builds are several times slower than released ones. |
+| It is slow | Choose a smaller starting point or **Quick try**. Large is slow without a graphics card. Development builds are several times slower than released ones. |
+| **Training engine** says **Built-in processor engine** on a computer with a graphics card | The card did not pass its checks: it was not found, gave different answers from the processor, or was not clearly faster. See [Graphics cards](#graphics-cards). Updating the graphics driver and restarting Sovra makes it check again. |
+| Training became slower part-way through a run | The graphics card failed, most often because another program filled its memory, and the run carried on with the processor. Restart Sovra to use the card again; **Pause**, restart and **Resume** continue the same run. |
 
 ## Limits
 
@@ -437,11 +547,13 @@ see [Releasing](releasing.md).
 - **No pretrained models.** Importing or fine-tuning an existing language
   model, and tokenizer files, are not supported. Models cannot be exported to
   other tools' formats.
-- **Processor only.** Every released build trains on the built-in processor
-  engine. Building `sovra-train` with its optional `gpu` feature compiles
-  Burn's graphics backend and adds graphics card names to the hardware facts,
-  but training still runs on the processor; no released build turns the
-  feature on.
+- **One graphics card, chosen for you.** Sovra uses the first separate card,
+  or else the one built into the processor, and only when it passes its
+  checks. There is no setting to pick a card or to keep training off the
+  card, several cards are not used together, and the card's free memory is not
+  measured beforehand: a run that does not fit carries on with the processor.
+  Measured on one card only (an NVIDIA RTX 2080 Ti on Linux); Metal and
+  DirectX have not been measured.
 - **Large is not trained with the group.** The group helps with Starter, Small
   and Medium, whose work fits in one group message. A Large model reaches the
   group only through **Share with my group**.
@@ -469,6 +581,8 @@ see [Releasing](releasing.md).
 | Starting points, model shape and the model file | [models.rs](../crates/sovra-core/src/training/models.rs) |
 | Chart history, loss wording and time left | [metrics.rs](../crates/sovra-core/src/training/metrics.rs) |
 | Hardware facts and recommendations | [core hardware.rs](../crates/sovra-core/src/training/hardware.rs), [engine probe](../crates/sovra-train/src/hardware.rs) |
+| Choosing and checking the graphics card | [device.rs](../crates/sovra-train/src/device.rs) |
+| Measuring training | [training_benchmark.rs](../crates/sovra-train/examples/training_benchmark.rs), [reference.rs](../crates/sovra-train/src/reference.rs) |
 | Model library and delivery rules | [library.rs](../crates/sovra-core/src/training/library.rs), [delivery.rs](../crates/sovra-core/src/training/delivery.rs) |
 | Group messages and work pieces | [work.rs](../crates/sovra-core/src/training/work.rs) |
 | Commands, page state and engine ports | [training.rs](../crates/sovra-core/src/training.rs) |

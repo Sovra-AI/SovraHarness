@@ -184,7 +184,7 @@ fn long_run(with_group: bool) -> TrainingPlan {
 /// The round the saved run on disk has reached, read the way the app reads it.
 fn saved_round(path: &str) -> u32 {
     let saved = std::fs::read(path).expect("saved run");
-    BurnTrainingEngine
+    BurnTrainingEngine::processor()
         .restore(&saved)
         .expect("saved run opens")
         .progress()
@@ -320,14 +320,14 @@ async fn a_group_trains_a_small_model_together_and_both_computers_get_it() {
         assert!(!written.trim().is_empty(), "Try it wrote: {written:?}");
     }
     let write = |file: &[u8]| {
-        BurnTrainingEngine
+        BurnTrainingEngine::processor()
             .generate(file, "The garden", 80, 800, 7)
             .expect("the model writes")
     };
     assert_eq!(write(&here), write(&there));
     assert_ne!(write(&here).trim(), "");
     assert_eq!(
-        BurnTrainingEngine
+        BurnTrainingEngine::processor()
             .inspect(&there)
             .expect("a sound model")
             .id,

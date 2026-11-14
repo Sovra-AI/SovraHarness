@@ -1,34 +1,22 @@
 //! What this computer is, for the Training page's "This computer" card.
 //!
 //! Read with `sysinfo` and the standard library only: nothing is run, nothing is
-//! sent anywhere. The engine is always Burn's built-in processor backend, chosen
-//! explicitly. A build with the `gpu` feature also lists the graphics cards Burn
-//! can see, by name.
+//! sent anywhere. The engine is the graphics card the training engine opened and
+//! checked, when there is one, and Burn's built-in processor backend otherwise.
 
 use sovra_core::training::{HardwareInfo, TrainingEngineKind};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 /// Shown as the engine in use.
-const ENGINE_NAME: &str = "Built-in processor engine";
+const PROCESSOR_ENGINE: &str = "Built-in processor engine";
+const GRAPHICS_ENGINE: &str = "Graphics card";
 
 fn count(value: usize) -> u16 {
     u16::try_from(value).unwrap_or(u16::MAX)
 }
 
-#[cfg(feature = "gpu")]
-fn graphics_cards() -> Vec<String> {
-    burn::tensor::Device::enumerate_physical()
-        .into_iter()
-        .map(|card| card.name)
-        .collect()
-}
-
-#[cfg(not(feature = "gpu"))]
-fn graphics_cards() -> Vec<String> {
-    Vec::new()
-}
-
-pub(crate) fn probe() -> HardwareInfo {
+/// `card` is the graphics card training runs on, when it runs on one.
+pub(crate) fn probe(card: Option<String>) -> HardwareInfo {
     let system = System::new_with_specifics(
         RefreshKind::nothing()
             .with_cpu(CpuRefreshKind::nothing())
@@ -56,9 +44,18 @@ pub(crate) fn probe() -> HardwareInfo {
         logical_cores: count(logical),
         memory_total_bytes: system.total_memory(),
         memory_available_bytes: system.available_memory(),
-        engine: TrainingEngineKind::Cpu,
-        engine_name: ENGINE_NAME.into(),
-        gpus: graphics_cards(),
+        engine: if card.is_some() {
+            TrainingEngineKind::Gpu
+        } else {
+            TrainingEngineKind::Cpu
+        },
+        engine_name: if card.is_some() {
+            GRAPHICS_ENGINE
+        } else {
+            PROCESSOR_ENGINE
+        }
+        .into(),
+        gpus: card.into_iter().collect(),
     }
     .bounded()
 }
@@ -69,7 +66,7 @@ mod tests {
 
     #[test]
     fn this_computer_is_described_without_a_graphics_engine() {
-        let info = probe();
+        let info = probe(None);
         assert!(info.logical_cores >= 1);
         assert!(info.physical_cores >= 1);
         assert!(info.physical_cores <= info.logical_cores);
@@ -78,10 +75,17 @@ mod tests {
         assert!(!info.cpu.is_empty() && !info.os.is_empty());
         assert_eq!(info.arch, std::env::consts::ARCH);
         assert_eq!(info.engine, TrainingEngineKind::Cpu);
-        assert_eq!(info.engine_name, ENGINE_NAME);
-        #[cfg(not(feature = "gpu"))]
+        assert_eq!(info.engine_name, PROCESSOR_ENGINE);
         assert_eq!(info.gpus, Vec::<String>::new());
         // Asking again is safe and steady.
-        assert_eq!(probe().cpu, info.cpu);
+        assert_eq!(probe(None).cpu, info.cpu);
+    }
+
+    #[test]
+    fn a_graphics_card_in_use_is_named_as_the_engine() {
+        let info = probe(Some("Example Card 9000".into()));
+        assert_eq!(info.engine, TrainingEngineKind::Gpu);
+        assert_eq!(info.engine_name, GRAPHICS_ENGINE);
+        assert_eq!(info.gpus, vec!["Example Card 9000".to_owned()]);
     }
 }

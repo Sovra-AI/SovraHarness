@@ -18,8 +18,10 @@ use sovra_core::training::{
     decode_model, encode_model, encode_parameters, inspect_model, model_id, sample_text,
 };
 
+use crate::device::{self, EngineChoice, GraphicsCard};
 use crate::net::{Batch, Net};
 use crate::packet::{self, Compute};
+use crate::rng::Rng;
 use crate::saved::{self, Header};
 use crate::{hardware, init, writer};
 
@@ -34,18 +36,43 @@ const MAX_TABLE_CHECK_BYTES: usize = 4097;
 /// How much of the newest round's speed enters the shown speed.
 const SPEED_BLEND: f64 = 0.3;
 
-/// The training engine: Burn's built-in processor backend, with gradients from
-/// Burn's autodiff. Holds nothing; build it with `BurnTrainingEngine` or
-/// `BurnTrainingEngine::default()`.
+/// The training engine: Burn tensors with gradients from Burn's autodiff.
+/// `BurnTrainingEngine::default()` uses a working graphics card when this build
+/// includes the graphics engine and the computer has one, and Burn's built-in
+/// processor backend otherwise. [`BurnTrainingEngine::processor`] never uses a
+/// card.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct BurnTrainingEngine;
+pub struct BurnTrainingEngine {
+    choice: EngineChoice,
+}
+
+impl BurnTrainingEngine {
+    pub fn new(choice: EngineChoice) -> Self {
+        Self { choice }
+    }
+
+    /// The processor engine only: the same seed gives the same run everywhere.
+    pub fn processor() -> Self {
+        Self::new(EngineChoice::Processor)
+    }
+
+    /// The graphics card this engine trains transformers on, if any. The first
+    /// call opens and checks the card, which can take a second or two.
+    pub fn graphics_card(&self) -> Option<GraphicsCard> {
+        match self.choice {
+            EngineChoice::Automatic => device::graphics().map(|graphics| graphics.card.clone()),
+            EngineChoice::Processor => None,
+        }
+    }
+}
 
 struct Pending {
     lease: WorkLease,
     recipe: TrainingRecipe,
-    /// The packet's place in the text.
-    start: usize,
-    end: usize,
+    /// The packet's text, and where each of its windows begins (empty for the
+    /// Starter table, which reads the whole packet).
+    text: String,
+    starts: Vec<u32>,
     tokens: u32,
     cursor_before: usize,
     cursor_after: usize,
@@ -88,9 +115,111 @@ fn milli(loss: f32) -> Option<u32> {
     Some(value)
 }
 
+fn positions(starts: &[u32]) -> Vec<usize> {
+    starts.iter().map(|start| *start as usize).collect()
+}
+
+/// The Starter table's next packet: `batch` bytes of `learn` from `cursor`, as
+/// `(start, end, cursor afterwards)`. The table learns letter pairs, so it reads
+/// the text straight through.
+fn next_stretch(learn: &str, cursor: usize, batch: usize) -> (usize, usize, usize) {
+    let mut end = (cursor + batch).min(learn.len());
+    while !learn.is_char_boundary(end) {
+        end -= 1;
+    }
+    // The last packet reaches back so it is as full as any other: a short
+    // tail on its own would teach little.
+    let start = if end == learn.len() {
+        let mut start = learn.len().saturating_sub(batch);
+        while !learn.is_char_boundary(start) {
+            start += 1;
+        }
+        start.min(cursor)
+    } else {
+        cursor
+    };
+    // The next packet overlaps the last character, so the byte after it is
+    // still taught.
+    let cursor_after = if end == learn.len() {
+        0
+    } else {
+        learn[..end]
+            .char_indices()
+            .next_back()
+            .map_or(end, |(i, _)| i)
+    };
+    (start, end, cursor_after)
+}
+
+/// A transformer's packet: short stretches of `learn` from different places,
+/// joined, with where each one begins. Every window of every step gets its own
+/// stretch (a window and the byte after it), so one round learns from all over
+/// the text instead of from one neighbourhood of it. Measured on a 280 kB text,
+/// that alone took a Medium model's check loss from 2.2 to 1.7 for the same
+/// work. When `wanted` stretches do not fit in `batch` bytes, as many as fit are
+/// taken and the windows share them in turn.
+fn scattered(
+    learn: &str,
+    context: usize,
+    wanted: usize,
+    batch: usize,
+    rng: &mut Rng,
+) -> (String, Vec<u32>) {
+    let reach = context + 1;
+    if learn.len() <= reach {
+        // Too short to choose from: every window is the whole text.
+        return (learn.to_owned(), vec![0; wanted]);
+    }
+    // A stretch may run up to three bytes longer to finish a character.
+    let distinct = wanted.min(batch / (reach + 3)).max(1);
+    let mut text = String::with_capacity(distinct * (reach + 3));
+    let mut offsets = Vec::with_capacity(distinct);
+    for _ in 0..distinct {
+        let mut from = rng.below(learn.len() - reach + 1);
+        while !learn.is_char_boundary(from) {
+            from -= 1;
+        }
+        let mut to = from + reach;
+        while !learn.is_char_boundary(to) {
+            to += 1;
+        }
+        offsets.push(u32::try_from(text.len()).unwrap_or(u32::MAX));
+        text.push_str(&learn[from..to]);
+    }
+    let starts = (0..wanted).map(|index| offsets[index % distinct]).collect();
+    (text, starts)
+}
+
+/// The loss of `params` on `tail`, the text held back from learning, or `None`
+/// when there is too little of it to read.
+pub(crate) fn check_loss(compute: &Compute, net: &Net, params: &[f32], tail: &[u8]) -> Option<f32> {
+    let architecture = net.architecture();
+    let length = if architecture.is_table() {
+        tail.len().min(MAX_TABLE_CHECK_BYTES).checked_sub(1)?
+    } else {
+        architecture.window_tokens(tail.len())
+    };
+    if length == 0 {
+        return None;
+    }
+    // Windows side by side across the tail; when there are more than a check
+    // may read, evenly spaced ones are taken.
+    let available = if architecture.is_table() {
+        1
+    } else {
+        (tail.len() - 1) / length
+    };
+    let count = available.clamp(1, MAX_CHECK_WINDOWS);
+    let starts: Vec<usize> = (0..count)
+        .map(|index| index * available / count * length)
+        .collect();
+    let batch = Batch::windows(tail, &starts, length).ok()?;
+    compute.loss(net, params, &batch).ok()
+}
+
 impl TrainingEngine for BurnTrainingEngine {
     fn hardware(&self) -> HardwareInfo {
-        hardware::probe()
+        hardware::probe(self.graphics_card().map(|card| card.name))
     }
 
     fn create(
@@ -131,7 +260,7 @@ impl TrainingEngine for BurnTrainingEngine {
             .map_err(|_| TrainingError::Step)?;
         let summary = plan.summary(architecture, text.len());
         Ok(Box::new(Session {
-            compute: Compute::new(summary.settings.threads)?,
+            compute: Compute::new(summary.settings.threads, self.choice)?,
             net: Net::new(architecture)?,
             split: summary.settings.check_split(text),
             plan: summary,
@@ -184,7 +313,8 @@ impl TrainingEngine for BurnTrainingEngine {
             return Err(invalid);
         }
         Ok(Box::new(Session {
-            compute: Compute::new(plan.settings.threads).map_err(|_| TrainingError::Step)?,
+            compute: Compute::new(plan.settings.threads, self.choice)
+                .map_err(|_| TrainingError::Step)?,
             net: Net::new(architecture).map_err(|_| invalid)?,
             plan,
             family: header.family,
@@ -212,12 +342,14 @@ impl TrainingEngine for BurnTrainingEngine {
         let tokens = task.expected_tokens()?;
         let recipe = task.recipe.work();
         let net = Net::new(recipe.architecture).map_err(|_| TrainingError::InvalidWork)?;
+        let starts = task.window_starts()?;
         let learned = packet::learn(
-            &Compute::new(0)?,
+            &Compute::new(0, self.choice)?,
             &net,
             &recipe,
             &parameters,
             task.text.as_bytes(),
+            &starts,
             task.lease.steps,
         )?;
         Ok(TrainingResult {
@@ -269,42 +401,34 @@ impl Session {
         self.abandon(worker);
         let settings = &self.plan.settings;
         let learn = &self.text[..self.split];
-        let batch = settings.batch_bytes as usize;
         let cursor_before = self.cursor;
-        let mut end = (self.cursor + batch).min(learn.len());
-        while !learn.is_char_boundary(end) {
-            end -= 1;
-        }
-        // The last packet reaches back so it is as full as any other: a short
-        // tail on its own would teach little.
-        let start = if end == learn.len() {
-            let mut start = learn.len().saturating_sub(batch);
-            while !learn.is_char_boundary(start) {
-                start += 1;
-            }
-            start.min(self.cursor)
+        let (text, starts, cursor_after) = if self.net.architecture().is_table() {
+            let (start, end, cursor_after) =
+                next_stretch(learn, self.cursor, settings.batch_bytes as usize);
+            (learn[start..end].to_owned(), Vec::new(), cursor_after)
         } else {
-            self.cursor
+            // Decided by the seed and the packet's number alone, so a run on one
+            // computer repeats exactly and two helpers never get the same packet.
+            let mut rng = Rng::stream(settings.seed, self.grid.next_lease());
+            let (text, starts) = scattered(
+                learn,
+                usize::from(self.net.architecture().context),
+                usize::from(settings.windows) * settings.local_steps as usize,
+                settings.batch_bytes as usize,
+                &mut rng,
+            );
+            (text, starts, self.cursor)
         };
         let recipe = TrainingRecipe::for_round(self.net.architecture(), settings, self.round());
-        let tokens = recipe.expected_tokens(end - start, settings.local_steps)?;
+        let tokens = recipe.expected_tokens(text.len(), settings.local_steps)?;
         let lease = self
             .grid
             .issue(worker, now_ms)
             .map_err(|_| TrainingError::InvalidWork)?;
         self.pending
             .retain(|_, packet| self.grid.has_lease(&packet.lease));
-        // The next packet overlaps the last character, so the byte after it is
-        // still taught. The position is saved before work is sent: a missing
-        // worker's packet is read again when the cursor comes round.
-        let cursor_after = if end == learn.len() {
-            0
-        } else {
-            learn[..end]
-                .char_indices()
-                .next_back()
-                .map_or(end, |(i, _)| i)
-        };
+        // The position is saved before work is sent: a missing worker's packet
+        // is read again when the cursor comes round.
         self.cursor = cursor_after;
         let id = lease.id;
         self.pending.insert(
@@ -312,8 +436,8 @@ impl Session {
             Pending {
                 lease,
                 recipe,
-                start,
-                end,
+                text,
+                starts,
                 tokens,
                 cursor_before,
                 cursor_after,
@@ -352,7 +476,8 @@ impl Session {
                 &self.net,
                 &packet.recipe.work(),
                 self.grid.params(),
-                &self.text.as_bytes()[packet.start..packet.end],
+                packet.text.as_bytes(),
+                &positions(&packet.starts),
             )
             .ok()
         });
@@ -411,31 +536,7 @@ impl Session {
     /// was held back.
     fn check(&self) -> Option<u32> {
         let tail = &self.text.as_bytes()[self.split..];
-        let architecture = self.net.architecture();
-        let length = if architecture.is_table() {
-            tail.len().min(MAX_TABLE_CHECK_BYTES).checked_sub(1)?
-        } else {
-            architecture.window_tokens(tail.len())
-        };
-        if length == 0 {
-            return None;
-        }
-        // Windows side by side across the tail; when there are more than a check
-        // may read, evenly spaced ones are taken.
-        let available = if architecture.is_table() {
-            1
-        } else {
-            (tail.len() - 1) / length
-        };
-        let count = available.clamp(1, MAX_CHECK_WINDOWS);
-        let starts: Vec<usize> = (0..count)
-            .map(|index| index * available / count * length)
-            .collect();
-        let batch = Batch::windows(tail, &starts, length).ok()?;
-        self.compute
-            .loss(&self.net, self.grid.params(), &batch)
-            .ok()
-            .and_then(milli)
+        check_loss(&self.compute, &self.net, self.grid.params(), tail).and_then(milli)
     }
 
     /// Lets the model write from the text's first character.
@@ -474,6 +575,13 @@ impl Session {
     }
 }
 
+impl Drop for Session {
+    /// A run that ends, is replaced or is put away gives the card's memory back.
+    fn drop(&mut self) {
+        device::release();
+    }
+}
+
 impl TrainingSession for Session {
     fn advance(&mut self, now_ms: u64) -> Result<(), TrainingError> {
         if self.progress().is_complete() {
@@ -491,7 +599,8 @@ impl TrainingSession for Session {
             &self.net,
             &packet.recipe.work(),
             self.grid.params(),
-            &self.text.as_bytes()[packet.start..packet.end],
+            packet.text.as_bytes(),
+            &positions(&packet.starts),
             lease.steps,
         );
         let Ok(learned) = learned else {
@@ -548,7 +657,8 @@ impl TrainingSession for Session {
                 recipe: packet.recipe,
                 lease: packet.lease.clone(),
                 model,
-                text: self.text[packet.start..packet.end].into(),
+                text: packet.text.clone(),
+                starts: packet.starts.clone(),
             }),
             Err(error) => {
                 self.abandon(worker);

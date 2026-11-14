@@ -21,7 +21,7 @@ The engineering rules are in [AGENTS.md](../AGENTS.md).
 | `sovra-google`, `sovra-github` | OAuth/token setup and service APIs behind core ports |
 | `sovra-whatsapp`, `sovra-telegram` | Messaging adapters behind `MessagingChannel` |
 | `sovra-mesh` | Group storage, signatures, peer transport, and audit replication |
-| `sovra-train` | Burn training engine behind the core `TrainingEngine` port: built-in byte-level models, work packets, text writing, saved-run format, and the hardware probe. The only crate naming `burn` and `sysinfo`. |
+| `sovra-train` | Burn training engine behind the core `TrainingEngine` port: built-in byte-level models on the processor or a checked graphics card, work packets, text writing, saved-run format, and the hardware probe. The only crate naming `burn` and `sysinfo`. |
 | `xtask` | Checks, development launch, hooks, and packaging |
 
 ```mermaid

@@ -7,6 +7,8 @@ use sovra_core::training::{
     TrainingSettings, TrainingSource, WorkRecipe,
 };
 
+use std::fmt::Write as _;
+
 use super::*;
 
 /// A transformer small enough to train in milliseconds. Not a base model: runs
@@ -20,7 +22,7 @@ const MICRO: Architecture = Architecture {
 const REPEATED: &str = "the cat sat on the mat. ";
 
 fn engine() -> BurnTrainingEngine {
-    BurnTrainingEngine
+    BurnTrainingEngine::processor()
 }
 
 fn repeated() -> String {
@@ -138,7 +140,7 @@ fn the_small_transformer_learns_a_repetitive_text() {
     let progress = session.progress();
     assert!(progress.is_complete());
     assert_eq!((progress.rounds, progress.total_rounds), (20, 20));
-    assert_eq!(progress.tokens, 20 * 4 * 64 * 2);
+    assert_eq!(progress.tokens, 20 * 4 * 64);
     let last = session.metrics().unwrap();
     assert_eq!(last.round, 20);
     assert!(
@@ -543,6 +545,101 @@ fn unicode_text_is_cut_into_packets_on_character_boundaries() {
 }
 
 #[test]
+fn a_transformer_packet_is_short_stretches_from_all_over_the_text() {
+    // Numbered lines, so where a stretch came from can be read off it.
+    let mut text = String::new();
+    for line in 0..400 {
+        writeln!(text, "line {line:03} of the garden book.").unwrap();
+    }
+    let small = BaseModel::Small.architecture();
+    let helper = DeviceId([4; 32]);
+    let create = || {
+        engine()
+            .create(
+                &plan(
+                    TrainingBase::Fresh(BaseModel::Small),
+                    settings(small, &text),
+                ),
+                &text,
+                None,
+                ContentHash::of(b"scattered"),
+            )
+            .unwrap()
+    };
+    let mut session = create();
+    let task = session.assign(helper, 0).unwrap();
+    let limits = session.plan().settings;
+    let wanted = usize::from(limits.windows) * limits.local_steps as usize;
+    assert_eq!(task.starts.len(), wanted);
+    assert!(task.text.len() <= limits.batch_bytes as usize);
+    assert!(task.parameters(helper).is_ok());
+    // Every window is a whole stretch of the text exactly as it stands, with the
+    // byte after it, and the stretches come from different places.
+    let reach = usize::from(small.context) + 1;
+    let learned = &text[..limits.check_split(&text)];
+    let places: std::collections::BTreeSet<usize> = task
+        .window_starts()
+        .unwrap()
+        .into_iter()
+        .map(|start| {
+            let stretch = &task.text[start..start + reach];
+            let mut found = learned.match_indices(stretch);
+            let place = found.next().expect("the stretch is in the learned text").0;
+            assert!(found.next().is_none(), "numbered lines make it unique");
+            place
+        })
+        .collect();
+    assert_eq!(places.len(), wanted, "no two windows read the same place");
+    let spread = places.last().unwrap() - places.first().unwrap();
+    assert!(spread > learned.len() / 3, "spread over {spread} bytes");
+    // The seed and the packet's number decide it: the same run gives the same
+    // packet again, and the next packet is a different one.
+    let mut twin = create();
+    assert_eq!(twin.assign(helper, 0).unwrap().text, task.text);
+    session
+        .merge(engine().work(task.clone(), helper).unwrap(), helper, 1)
+        .unwrap();
+    let next = session.assign(helper, 2).unwrap();
+    assert_ne!(next.text, task.text);
+    // The owner's own rounds read scattered packets too, and still learn.
+    let before = session.progress().tokens;
+    session.advance(3).unwrap();
+    assert_eq!(
+        session.progress().tokens - before,
+        (wanted * usize::from(small.context)) as u64
+    );
+}
+
+#[test]
+fn stretches_keep_whole_characters_and_share_a_packet_that_is_too_small() {
+    let text = "🌱é".repeat(200);
+    let mut rng = Rng::new(3);
+    let (packet, starts) = scattered(&text, 8, 12, 4096, &mut rng);
+    assert_eq!(starts.len(), 12);
+    let distinct: std::collections::BTreeSet<u32> = starts.iter().copied().collect();
+    assert_eq!(distinct.len(), 12);
+    for start in &starts {
+        let start = *start as usize;
+        assert!(packet.is_char_boundary(start));
+        // A window of eight bytes and the byte after it lie inside the packet.
+        assert!(start + 8 < packet.len());
+    }
+    // Room for only two stretches: the windows take turns on them.
+    let (packet, starts) = scattered(&text, 8, 12, 24, &mut rng);
+    assert!(packet.len() <= 24);
+    assert_eq!(starts.len(), 12);
+    assert_eq!(starts[0], starts[2]);
+    assert_ne!(starts[0], starts[1]);
+    // A text no longer than one window and its next byte is the whole packet.
+    let (packet, starts) = scattered("short one", 8, 3, 4096, &mut rng);
+    assert_eq!(packet, "short one");
+    assert_eq!(starts, vec![0, 0, 0]);
+    // The Starter table still reads straight through, overlapping one character.
+    assert_eq!(next_stretch("abcdefghij", 0, 4), (0, 4, 3));
+    assert_eq!(next_stretch("abcdefghij", 6, 4), (6, 10, 0));
+}
+
+#[test]
 fn starter_runs_on_recommended_settings_keep_the_first_wire_form() {
     let mut session = starter_session(SAMPLE_TEXT, b"starter");
     let helper = DeviceId([5; 32]);
@@ -596,7 +693,7 @@ fn independent_helpers_handle_dropout_replay_restore_and_distinct_runs() {
     assert!(matches!(first.recipe, TrainingRecipe::ByteModelV2(_)));
     assert_eq!(first.lease.worker, fast);
     let first = engine().work(first, fast).unwrap();
-    assert_eq!(first.tokens, 8 * 8 * 2);
+    assert_eq!(first.tokens, 8 * 8);
 
     // A changed count, a result from someone else, and a replay are all refused
     // and leave the saved run exactly as it was.
@@ -670,7 +767,7 @@ fn independent_helpers_handle_dropout_replay_restore_and_distinct_runs() {
 }
 
 #[test]
-fn a_dropped_helper_keeps_the_saved_model_and_can_take_the_same_packet_again() {
+fn a_dropped_helper_keeps_the_saved_model_and_can_take_a_packet_again() {
     let text = repeated();
     let helper = DeviceId([9; 32]);
     let mut session = micro_session(&text, b"dropout");
@@ -680,7 +777,11 @@ fn a_dropped_helper_keeps_the_saved_model_and_can_take_the_same_packet_again() {
     let saved = session.checkpoint().unwrap();
     let model_before = session.export().unwrap();
     let again = session.assign(helper, 2).unwrap();
-    assert_eq!(again.text, first.text);
+    // A transformer's packets are drawn afresh from all over the text, so the
+    // helper gets as much to do as before, of the same model.
+    assert_eq!(again.starts.len(), first.starts.len());
+    assert_eq!(again.expected_tokens(), first.expected_tokens());
+    assert!(again.parameters(helper).is_ok());
     assert_eq!(same(&again.model.0), same(&first.model.0));
     assert!(again.lease.id > first.lease.id);
     assert_eq!(session.progress().rounds, rounds);
@@ -713,7 +814,7 @@ fn a_dropped_helper_keeps_the_saved_model_and_can_take_the_same_packet_again() {
     assert_eq!(same(&session.export().unwrap()), same(&model_before));
     assert_eq!(session.progress().rounds, rounds);
     let third = session.assign(helper, 4).unwrap();
-    assert_eq!(third.text, again.text);
+    assert_eq!(third.expected_tokens(), again.expected_tokens());
     session
         .merge(engine().work(third, helper).unwrap(), helper, 5)
         .unwrap();
@@ -905,5 +1006,5 @@ fn the_merge_state_is_saved_compactly() {
     assert!(bytes.len() < fixed + 4096, "{} bytes", bytes.len());
     let settings = saved::decode(&bytes).unwrap().header.plan.settings;
     let grid: GridSettings = settings.grid_settings(MICRO);
-    assert_eq!(grid.local_steps, 2);
+    assert_eq!(grid.local_steps, 1);
 }

@@ -10,22 +10,30 @@
 //!   swarm's rules (SCAFFOLD, privacy noise, secure sums, sign-off) only ever see
 //!   a flat parameter vector and its gradient.
 //!
-//! Everything runs on Burn's pure-Rust processor backend, picked explicitly: no
-//! environment variable chooses the device, nothing is downloaded, and no
-//! external program is involved. Gradients come from Burn's autodiff. The `gpu`
-//! feature compiles Burn's graphics backend too, which today only adds graphics
-//! card names to the hardware facts.
+//! Devices are picked explicitly: no environment variable chooses one, nothing
+//! is downloaded, and no external program is involved. Burn's pure-Rust
+//! processor backend is always there. With the `gpu` feature, transformers train
+//! on a graphics card instead when one passes the checks in `device`: a real
+//! card, the same answers as the processor, and clearly faster. A card that
+//! fails mid-run hands its work back to the processor. Gradients come from
+//! Burn's autodiff on either.
+//!
+//! [`reference`] is a textbook trainer for the `training_benchmark` example to
+//! compare real runs against.
 
+mod device;
 mod hardware;
 mod init;
 mod language;
 mod net;
 mod optim;
 mod packet;
+pub mod reference;
 mod rng;
 mod saved;
 mod session;
 mod writer;
+pub use device::{EngineChoice, GraphicsCard};
 pub use session::BurnTrainingEngine;
 
 pub use language::ByteLanguageModel;

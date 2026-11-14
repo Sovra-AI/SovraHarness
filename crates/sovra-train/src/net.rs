@@ -126,14 +126,17 @@ impl Net {
         Ok(())
     }
 
+    /// One tensor per block, cut from a single copy of `params`: the values
+    /// cross to the device once, however many blocks there are.
     fn leaves(&self, params: &[f32], device: &Device, learn: bool) -> Vec<Tensor<2>> {
+        let flat = Tensor::<1>::from_data(TensorData::new(params.to_vec(), [params.len()]), device);
         self.blocks
             .iter()
             .map(|block| {
-                let leaf = Tensor::<2>::from_data(
-                    TensorData::new(params[block.range()].to_vec(), [block.rows, block.cols]),
-                    device,
-                );
+                let leaf = flat
+                    .clone()
+                    .narrow(0, block.offset, block.len())
+                    .reshape([block.rows, block.cols]);
                 if learn { leaf.require_grad() } else { leaf }
             })
             .collect()
@@ -231,18 +234,24 @@ impl Net {
         let leaves = self.leaves(params, device, true);
         let loss = self.cross_entropy(&leaves, batch, device);
         let mut grads = loss.backward();
-        let mut out = vec![0.0; params.len()];
-        for (leaf, block) in leaves.iter().zip(&self.blocks) {
-            // A leaf the loss never touched (positions past a short window) has no
-            // gradient: its part of the vector stays zero.
-            if let Some(grad) = leaf.grad_remove(&mut grads) {
-                let data = grad.into_data();
-                let values = data.as_slice::<f32>().map_err(|_| TrainingError::Step)?;
-                if values.len() != block.len() {
-                    return Err(TrainingError::Step);
-                }
-                out[block.range()].copy_from_slice(values);
-            }
+        // Joined on the device and read back in one piece, in layout order.
+        let parts: Vec<Tensor<1>> = leaves
+            .iter()
+            .zip(&self.blocks)
+            .map(|(leaf, block)| match leaf.grad_remove(&mut grads) {
+                Some(grad) => grad.reshape([block.len()]),
+                // A leaf the loss never touched (positions past a short window)
+                // has no gradient: its part of the vector is zero.
+                None => Tensor::<1>::zeros([block.len()], device).without_autodiff(),
+            })
+            .collect();
+        let data = Tensor::cat(parts, 0).into_data();
+        let out = data
+            .as_slice::<f32>()
+            .map_err(|_| TrainingError::Step)?
+            .to_vec();
+        if out.len() != params.len() {
+            return Err(TrainingError::Step);
         }
         Ok((scalar(loss)?, out))
     }

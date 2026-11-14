@@ -50,6 +50,12 @@ impl Optimizer {
         }
     }
 
+    /// Changes the step size and keeps the running averages: only the reference
+    /// trainer, whose optimiser lives for a whole run, needs it.
+    pub(crate) fn set_learning_rate(&mut self, learning_rate: f32) {
+        self.learning_rate = learning_rate;
+    }
+
     /// Moves `params` one step against `gradient`. `matrices` are the ranges
     /// weight decay applies to.
     pub(crate) fn step(

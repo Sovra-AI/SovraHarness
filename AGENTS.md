@@ -101,8 +101,9 @@ crates/
   sovra-mesh      Peer-to-peer groups adapter. The only crate naming iroh.
   sovra-train     Training engine on Burn behind the core TrainingEngine port (and the
                   swarm Objective port): built-in byte-level models on Burn's pure-Rust
-                  CPU backend. The `gpu` feature only lists graphics cards today. The
-                  only crate naming burn and sysinfo.
+                  CPU backend, and on a graphics card that passes the engine's own
+                  checks when built with the `gpu` feature (`sovra-app` enables it).
+                  The only crate naming burn and sysinfo.
   sovra-ui        GPUI views. The only crate allowed to use gpui-kit.
   sovra-app       binary + composition root: velopack hook, paths, logging, wiring. No logic.
 xtask/            automation: ci, hooks, layering rules (xtask/src/deps.rs)

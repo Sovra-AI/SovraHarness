@@ -26,6 +26,13 @@ fn settings(architecture: Architecture) -> TrainingSettings {
     TrainingSettings::recommended(TrainingPreset::Balanced, architecture, 4000, &laptop())
 }
 
+/// A text long enough that no preset is cut short to keep from memorising it.
+const LONG_TEXT: usize = 1 << 20;
+
+fn long_settings(architecture: Architecture) -> TrainingSettings {
+    TrainingSettings::recommended(TrainingPreset::Balanced, architecture, LONG_TEXT, &laptop())
+}
+
 fn shapes() -> Vec<Architecture> {
     let mut shapes: Vec<Architecture> = BASE_MODELS.iter().map(|row| row.architecture).collect();
     shapes.push(MICRO);
@@ -219,30 +226,69 @@ fn recommended_settings_are_valid_for_every_preset_shape_text_and_computer() {
     }
     // Presets get longer in order, and bigger shapes read about as much per step.
     for architecture in shapes() {
+        // The Starter table's rounds grow with the text instead, so it is asked
+        // about a short one.
+        let text_len = if architecture.is_table() {
+            4000
+        } else {
+            LONG_TEXT
+        };
         let rounds: Vec<u32> = TrainingPreset::ALL
             .iter()
             .map(|preset| {
-                TrainingSettings::recommended(*preset, architecture, 4000, &laptop()).rounds
+                TrainingSettings::recommended(*preset, architecture, text_len, &laptop()).rounds
             })
             .collect();
         assert!(rounds[0] < rounds[1] && rounds[1] < rounds[2], "{rounds:?}");
     }
-    let small = settings(BaseModel::Small.architecture());
-    assert_eq!((small.windows, small.batch_bytes), (8, 1024));
-    let medium = settings(BaseModel::Medium.architecture());
-    assert_eq!((medium.windows, medium.batch_bytes), (4, 2048));
-    let large = settings(BaseModel::Large.architecture());
-    assert_eq!((large.windows, large.batch_bytes), (2, 4096));
-    let gpu = TrainingSettings::recommended(
-        TrainingPreset::Balanced,
-        BaseModel::Small.architecture(),
-        4000,
-        &HardwareInfo {
-            engine: TrainingEngineKind::Gpu,
-            ..laptop()
-        },
+    // A packet has room for every window to be its own stretch of text: a
+    // window, the byte after it, and up to three bytes to finish a character.
+    let small = long_settings(BaseModel::Small.architecture());
+    assert_eq!((small.windows, small.batch_bytes), (8, 8 * 68));
+    let medium = long_settings(BaseModel::Medium.architecture());
+    assert_eq!((medium.windows, medium.batch_bytes), (4, 4 * 132));
+    let large = long_settings(BaseModel::Large.architecture());
+    assert_eq!((large.windows, large.batch_bytes), (2, 2 * 260));
+    // Balanced reads enough to get a transformer past letter pairs: more rounds
+    // the bigger the model, one step each.
+    assert_eq!(
+        (small.rounds, medium.rounds, large.rounds),
+        (2_000, 3_200, 6_000)
     );
-    assert_eq!(gpu.windows, 16);
+    assert_eq!(
+        (small.local_steps, medium.local_steps, large.local_steps),
+        (1, 1, 1)
+    );
+    // A graphics card reads four times as much each round in half the rounds.
+    let card = HardwareInfo {
+        engine: TrainingEngineKind::Gpu,
+        ..laptop()
+    };
+    for row in BASE_MODELS
+        .iter()
+        .filter(|row| !row.architecture.is_table())
+    {
+        for preset in TrainingPreset::ALL {
+            let on_processor =
+                TrainingSettings::recommended(preset, row.architecture, LONG_TEXT, &laptop());
+            let on_card = TrainingSettings::recommended(preset, row.architecture, LONG_TEXT, &card);
+            assert_eq!(on_card.windows, on_processor.windows * 4, "{}", row.title);
+            assert_eq!(on_card.rounds, on_processor.rounds / 2, "{}", row.title);
+            assert_eq!(on_card.check_every, on_processor.check_every / 2);
+            assert_eq!(
+                on_card.total_tokens(row.architecture),
+                on_processor.total_tokens(row.architecture) * 2
+            );
+            let reach = u32::from(row.architecture.context) + 4;
+            assert_eq!(on_card.batch_bytes, u32::from(on_card.windows) * reach);
+            assert!(on_card.batch_bytes as usize <= MAX_WORK_BATCH_BYTES);
+        }
+    }
+    // The Starter table is the same on any engine.
+    assert_eq!(
+        TrainingSettings::recommended(TrainingPreset::Balanced, Architecture::STARTER, 4000, &card),
+        settings(Architecture::STARTER)
+    );
     // Long text gives the Starter table enough rounds to read it all once.
     let long = TrainingSettings::recommended(
         TrainingPreset::Quick,
@@ -382,7 +428,7 @@ fn every_setting_outside_its_range_is_refused_by_name() {
 }
 
 #[test]
-fn the_schedule_scales_both_step_sizes_and_never_reaches_zero() {
+fn the_schedule_scales_the_round_step_size_and_never_reaches_zero() {
     let mut s = settings(BaseModel::Small.architecture());
     s.rounds = 1000;
     s.learning_rate_micro = 3000;
@@ -392,7 +438,7 @@ fn the_schedule_scales_both_step_sizes_and_never_reaches_zero() {
     for round in [0, 1, 500, 999, 5000] {
         assert_eq!(s.schedule_milli(round), 1000);
     }
-    assert_eq!(s.learning_rate_micro_at(999), 3000);
+    assert_eq!(s.outer_learning_rate_micro_at(999), 2000);
 
     s.schedule = LrSchedule::Cosine;
     assert_eq!(s.schedule_milli(0), 1000);
@@ -411,7 +457,6 @@ fn the_schedule_scales_both_step_sizes_and_never_reaches_zero() {
     assert_eq!(s.schedule_milli(1000), 100);
     assert!((0..99).all(|r| s.schedule_milli(r) < s.schedule_milli(r + 1)));
     assert!((100..1000).all(|r| s.schedule_milli(r) >= s.schedule_milli(r + 1)));
-    assert_eq!(s.learning_rate_micro_at(0), 30);
     assert_eq!(s.outer_learning_rate_micro_at(0), 20);
     assert!((s.outer_learning_rate_at(0) - 0.00002).abs() < 1e-12);
     assert!((s.outer_learning_rate_at(100) - 0.002).abs() < 1e-12);
@@ -427,21 +472,56 @@ fn the_schedule_scales_both_step_sizes_and_never_reaches_zero() {
     s.outer_learning_rate_micro = 1;
     s.warmup_rounds = 100;
     for round in 0..1100 {
-        assert_eq!(s.learning_rate_micro_at(round), 1);
+        assert_eq!(s.outer_learning_rate_micro_at(round), 1);
         assert!(s.outer_learning_rate_at(round) > 0.0);
     }
 }
 
 #[test]
+fn a_short_text_is_not_read_so_often_that_it_is_only_memorised() {
+    let small = BaseModel::Small.architecture();
+    let card = HardwareInfo {
+        engine: TrainingEngineKind::Gpu,
+        ..laptop()
+    };
+    // The built-in sample keeps back a tenth and learns from 1,929 bytes. No
+    // preset reads that more than 120 times, on either engine.
+    let learned = 1929;
+    for preset in TrainingPreset::ALL {
+        for (computer, rounds) in [(laptop(), 452), (card.clone(), 113)] {
+            let s = TrainingSettings::recommended(preset, small, SAMPLE_TEXT.len(), &computer);
+            assert_eq!(s.check_split(SAMPLE_TEXT), learned);
+            assert_eq!(s.rounds, rounds, "{preset:?}");
+            assert!(s.total_tokens(small) <= 120 * learned as u64);
+            assert!(s.warmup_rounds <= s.rounds);
+            assert_eq!(s.validate(small), Ok(()));
+        }
+    }
+    // A Quick try of a bigger model is shorter than that anyway.
+    let medium = BaseModel::Medium.architecture();
+    let quick =
+        TrainingSettings::recommended(TrainingPreset::Quick, medium, SAMPLE_TEXT.len(), &laptop());
+    assert_eq!(quick.rounds, 240);
+    // The shortest text still gets the fewest rounds a run may have.
+    let least =
+        TrainingSettings::recommended(TrainingPreset::Thorough, small, MIN_TEXT_BYTES, &laptop());
+    assert_eq!(least.rounds, TrainingSettings::ROUNDS.0);
+    // A long text gets the preset's own rounds, and the Starter table, which
+    // reads its text straight through, is never cut short.
+    assert_eq!(long_settings(small).rounds, 2000);
+    assert_eq!(settings(Architecture::STARTER).rounds, 400);
+}
+
+#[test]
 fn token_counts_and_merge_settings_follow_from_the_plan() {
     let small = BaseModel::Small.architecture();
-    let s = settings(small);
-    assert_eq!((s.windows, s.local_steps, s.rounds), (8, 2, 1000));
-    assert_eq!(s.work_tokens(small, 1024), 8 * 64 * 2);
-    // A short last packet teaches less.
-    assert_eq!(s.work_tokens(small, 33), 8 * 32 * 2);
+    let s = long_settings(small);
+    assert_eq!((s.windows, s.local_steps, s.rounds), (8, 1, 2000));
+    assert_eq!(s.work_tokens(small, 1024), 8 * 64);
+    // A packet shorter than the model's reach teaches less.
+    assert_eq!(s.work_tokens(small, 33), 8 * 32);
     assert_eq!(s.work_tokens(small, 1), 0);
-    assert_eq!(s.total_tokens(small), 1024 * 1000);
+    assert_eq!(s.total_tokens(small), 512 * 2000);
     let table = settings(Architecture::STARTER);
     assert_eq!(table.work_tokens(Architecture::STARTER, 512), 511 * 4);
 
@@ -630,7 +710,8 @@ fn the_page_opens_on_a_plan_that_only_needs_start_pressed() {
                 engine: TrainingEngineKind::Gpu,
                 ..laptop()
             },
-            BaseModel::Large,
+            // Also the largest model the group can help with.
+            BaseModel::Medium,
         ),
     ] {
         for with_group in [false, true] {

@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
         agent_config,
         sovra_runtime::RuntimeServices {
             training: Some(sovra_runtime::TrainingConfig {
-                engine: Arc::new(sovra_train::BurnTrainingEngine),
+                engine: Arc::new(sovra_train::BurnTrainingEngine::default()),
                 directory: data_dir.as_path().join("training"),
             }),
             memory: Some(memory),

@@ -147,7 +147,7 @@ fn session(base: BaseModel, run: &[u8]) -> Box<dyn TrainingSession> {
         ),
         with_group: true,
     };
-    BurnTrainingEngine
+    BurnTrainingEngine::processor()
         .create(&plan, SAMPLE_TEXT, None, ContentHash::of(run))
         .expect("the run starts")
 }
@@ -227,10 +227,11 @@ async fn real_peer_work_survives_worker_loss_and_binds_updates_to_authenticated_
             "a Starter run on its usual settings keeps the first release's packets"
         );
         let worker = fast.this_device();
-        let result = tokio::task::spawn_blocking(move || BurnTrainingEngine.work(task, worker))
-            .await
-            .unwrap()
-            .unwrap();
+        let result =
+            tokio::task::spawn_blocking(move || BurnTrainingEngine::processor().work(task, worker))
+                .await
+                .unwrap()
+                .unwrap();
         old_result = Some(result.clone());
         assert!(matches!(
             ask(
@@ -301,10 +302,11 @@ async fn the_largest_group_model_trains_and_is_delivered_over_the_real_wire() {
     assert_eq!(recipe.architecture, BaseModel::Medium.architecture());
     assert_eq!(task.model.0.len(), recipe.architecture.parameters() * 4);
     let worker = member.this_device();
-    let result = tokio::task::spawn_blocking(move || BurnTrainingEngine.work(task, worker))
-        .await
-        .unwrap()
-        .unwrap();
+    let result =
+        tokio::task::spawn_blocking(move || BurnTrainingEngine::processor().work(task, worker))
+            .await
+            .unwrap()
+            .unwrap();
     assert!(matches!(
         ask(
             &outsider,
@@ -330,7 +332,7 @@ async fn the_largest_group_model_trains_and_is_delivered_over_the_real_wire() {
 
     // The model as it stands becomes a file shared with the group.
     let file = coordinator.session.lock().unwrap().export().unwrap();
-    let facts = BurnTrainingEngine.inspect(&file).unwrap();
+    let facts = BurnTrainingEngine::processor().inspect(&file).unwrap();
     let card = ModelCard::from_facts(
         &facts,
         "Medium over the wire".into(),
@@ -375,13 +377,19 @@ async fn the_largest_group_model_trains_and_is_delivered_over_the_real_wire() {
     };
     assert_eq!(parts, 2, "3.5 MB arrives as two bounded parts");
     assert_eq!(fetched, file);
-    assert_eq!(BurnTrainingEngine.inspect(&fetched).unwrap().id, card.id);
-    let written = BurnTrainingEngine
+    assert_eq!(
+        BurnTrainingEngine::processor()
+            .inspect(&fetched)
+            .unwrap()
+            .id,
+        card.id
+    );
+    let written = BurnTrainingEngine::processor()
         .generate(&fetched, "The garden", 40, 800, 3)
         .unwrap();
     assert_eq!(
         written,
-        BurnTrainingEngine
+        BurnTrainingEngine::processor()
             .generate(&file, "The garden", 40, 800, 3)
             .unwrap()
     );

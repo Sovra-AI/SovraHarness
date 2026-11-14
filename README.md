@@ -69,6 +69,10 @@ sequenceDiagram
   in **Your models** further.
 - **Simple presets, full control.** **Quick try**, **Balanced** and
   **Thorough**, with every setting available under **Advanced**.
+- **Uses your graphics card when it helps.** Sovra checks the card itself and
+  trains on it when it is clearly faster than the processor, with nothing to
+  install or switch on. If the card fails mid-run, the run carries on with
+  the processor.
 - **See what this computer has.** Processor, cores, memory, the engine in use
   and which model sizes it is comfortable with.
 - **Private by default.** Only the text you choose is used, and it leaves this
@@ -77,7 +81,7 @@ sequenceDiagram
 
 What to expect: these are small models that continue text in the style
 you taught them. They do not replace the AI that answers chat, pretrained
-models cannot be imported yet, and released builds train on the processor.
+models cannot be imported yet, and one graphics card at most is used.
 Computers that help can read the pieces of text they work on, so share text
 you are willing for your group to read. The [Training guide](docs/training.md)
 has the first run, group steps, every setting, privacy details and limits.

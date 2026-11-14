@@ -19,7 +19,7 @@ pub enum TrainingEngineKind {
     /// The built-in processor engine. Always available.
     #[default]
     Cpu,
-    /// A graphics card, in builds that include the graphics engine.
+    /// A graphics card that the engine opened, checked and found faster.
     Gpu,
 }
 
@@ -38,7 +38,8 @@ pub struct HardwareInfo {
     pub memory_available_bytes: u64,
     pub engine: TrainingEngineKind,
     pub engine_name: String,
-    /// Graphics cards the engine can use. Empty in the standard build.
+    /// The graphics card training runs on, by name. Empty when the processor
+    /// does the work.
     pub gpus: Vec<String>,
 }
 
@@ -80,12 +81,15 @@ impl HardwareInfo {
     }
 
     /// The starting point preselected for a first run. It favours seeing results
-    /// soon: Medium only on a well-equipped computer, Large only with a graphics
-    /// engine, and never a model this computer is not comfortable with.
+    /// soon: Medium only on a well-equipped computer or with a graphics engine,
+    /// and never a model this computer is not comfortable with. Large is never
+    /// preselected: measured on a graphics card, a Balanced run of it takes six
+    /// times as long as Medium's for the same check loss, and only pulls ahead
+    /// on a Thorough run.
     pub fn recommended_model(&self) -> BaseModel {
         let roomy = self.logical_cores >= 8 && self.memory_total_bytes >= 8 * GIB;
         let wanted = match self.engine {
-            TrainingEngineKind::Gpu => BaseModel::Large,
+            TrainingEngineKind::Gpu => BaseModel::Medium,
             TrainingEngineKind::Cpu if roomy => BaseModel::Medium,
             TrainingEngineKind::Cpu => BaseModel::Small,
         };
@@ -217,12 +221,19 @@ mod tests {
             gpus: vec!["Example Graphics".into()],
             ..computer(16, 32)
         };
-        assert_eq!(gpu.recommended_model(), BaseModel::Large);
+        assert_eq!(gpu.recommended_model(), BaseModel::Medium);
+        // A graphics card makes Medium the first choice even beside a modest
+        // processor, as long as the computer is comfortable with it.
         let small_gpu = HardwareInfo {
             engine: TrainingEngineKind::Gpu,
             ..computer(4, 2)
         };
         assert_eq!(small_gpu.recommended_model(), BaseModel::Medium);
+        let tiny_gpu = HardwareInfo {
+            engine: TrainingEngineKind::Gpu,
+            ..computer(2, 1)
+        };
+        assert_eq!(tiny_gpu.recommended_model(), BaseModel::Small);
         for cores in [0, 1, 2, 4, 8, 64] {
             for memory in [0, 1, 2, 4, 8, 64] {
                 let info = computer(cores, memory);

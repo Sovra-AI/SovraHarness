@@ -8,8 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# Burn's CubeCL GPU backend (Vulkan, Metal, DX12 through wgpu). Off by default so every
-# laptop and CI builds the CPU trainer only.
+# Burn's CubeCL GPU backend (Vulkan, Metal, DX12 through wgpu). `sovra-app` turns it
+# on; the engine then trains on a card only when one passes its own checks. Off by
+# default so this crate alone builds and tests the processor engine quickly.
 gpu = ["burn/wgpu"]
 
 [dependencies]
@@ -20,6 +21,7 @@ serde_json = { workspace = true }
 sovra-core = { workspace = true }
 sysinfo = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

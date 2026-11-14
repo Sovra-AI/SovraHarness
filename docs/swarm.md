@@ -37,12 +37,20 @@ Implementation: [audit rules](../crates/sovra-core/src/swarm/audit.rs),
 Source: [core modules](../crates/sovra-core/src/swarm/mod.rs),
 [learning modules](../crates/sovra-core/src/swarm/learn/mod.rs), and
 [training adapter](../crates/sovra-train/src/lib.rs).
-The training adapter always uses Burn's pure-Rust processor backend (`flex`),
-selected explicitly; it never reads `BURN_DEVICE`. Its `gpu` feature compiles
-Burn's wgpu backend, which today only adds graphics card names to the hardware
-facts: there is no graphics training path, and no workspace manifest enables
-the feature. The composition root links the adapter into `sovra-app` through
-the core `TrainingEngine` port; the runtime and UI have no Burn dependency.
+The training adapter selects its devices explicitly and never reads
+`BURN_DEVICE`. Burn's pure-Rust processor backend (`flex`) is always there.
+The `gpu` feature, which `sovra-app` enables, adds Burn's wgpu backend:
+`device.rs` opens one card without panicking (`Device::wgpu_options().init()`,
+a separate card before an integrated one), refuses software renderers, checks
+the card's gradient against the processor's on a small model, and times both
+on the Small shape. The card is used for transformers only when it is at
+least 1.5 times faster; the Starter table stays on the processor. A panic
+inside a step on the card (out of memory, a lost device) is caught, the card
+is retired for the rest of the process, and the same step runs on the
+processor. `BurnTrainingEngine::processor()` never opens a card and is what
+every test uses. The composition root links the adapter into `sovra-app`
+through the core `TrainingEngine` port; the runtime and UI have no Burn
+dependency.
 
 ## Training internals
 
@@ -121,14 +129,29 @@ consumed once, and altered assignments, duplicate submissions, invalid
 dimensions, non-finite values and out-of-budget counts are rejected before any
 merge state changes.
 
-One round is one packet folded in. The session issues a lease for the next
-piece of the learning text, a computer learns from it, and the difference is
-merged:
+One round is one packet folded in. The session issues a lease for a packet of
+the learning text, a computer learns from it, and the difference is merged.
+
+A Starter packet is the next `batch_bytes` of the text, read straight through.
+A transformer packet is `windows × local_steps` short stretches (a window and
+the byte after it, cut on character boundaries) drawn from anywhere in the
+learning text by `Rng::stream(seed, lease id)` and joined; `TrainingTask::starts`
+names where each window begins, so both ends read the same windows and a
+window never runs from one stretch into the next. When that many stretches do
+not fit in `batch_bytes`, the windows share the ones that do. An empty `starts`
+(the Starter table, and the only form 0.5.0 understands) leaves the placing to
+the recipe's seed. Measured with the reference trainer on a 280 kB text,
+windows drawn from one 2 kB stretch per step reach a Medium check loss of 2.2
+where windows drawn from the whole text reach 1.7, for the same work.
 
 - **Local optimizer** (`sovra-train`, plain Rust over the flat vector): SGD or
   Adam with weight decay and optional clipping, for `local_steps` steps of
-  `windows` seeded windows each. Its state lasts one packet, because a packet
-  does not carry optimizer moments.
+  `windows` windows each. Its state lasts one packet, because a packet does
+  not carry optimizer moments. Presets use plain SGD steps with a fixed local
+  rate, so the outer Adam receives the gradient itself and one step a round is
+  exactly Adam; the schedule scales the outer rate only. Transformer presets
+  take one step: two steps folded into one outer update taught no more than
+  one did (Medium, same gradient work: check loss 2.04 against 1.74).
 - **Outer optimizer** (`GridSyncer`): clips each pseudo-gradient to a fixed
   norm, applies a cosine/exponential age gate, token-weights the update and
   steps Adam. Because Adam normalises magnitude, `outer_learning_rate_micro`
@@ -275,8 +298,12 @@ heals. Received models are not offered onward.
 Core unit tests cover the settings bounds, presets, parameter counts, model
 file and checkpoint round-trips, message size bounds and delivery assembly.
 `sovra-train` tests train a micro transformer, check gradients, repeatability
-across thread counts, restore, and refusal of altered packets; they never run
-the Medium or Large shapes. Runtime tests drive full runtimes through `Client`
+across thread counts, restore, scattered packets, the fall back from a failing
+card, and refusal of altered packets; they never run the Medium or Large
+shapes. On a computer with a working card, a `gpu` build also checks that the
+card learns what the processor learns. The `training_benchmark` example and
+the ignored `reference_trainer` test measure real runs; see
+[Training: Measuring it](training.md#measuring-it). Runtime tests drive full runtimes through `Client`
 over an in-process group transport that also asserts every message fits the
 wire limit: consent and refusals, forged, replayed and stale results, a dropped
 helper, restart without sharing, automatic helping and its latch, delivery to

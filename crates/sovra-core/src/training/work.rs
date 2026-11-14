@@ -174,7 +174,10 @@ pub struct WorkRecipe {
     pub architecture: Architecture,
     /// Windows read from the packet in each step; always 1 for the Starter table.
     pub windows: u16,
-    /// This round's step size, in millionths, with the schedule already applied.
+    /// The step size for the local steps, in millionths. It is the same in
+    /// every round: the schedule scales the round step size, which the owner
+    /// applies when it folds the result in. Scaling both made the merge engine,
+    /// which remembers the size of recent updates, shrink late steps twice.
     pub learning_rate_micro: u32,
     pub optimizer: LocalOptimizer,
     pub weight_decay_micro: u32,
@@ -229,7 +232,7 @@ impl TrainingRecipe {
         Self::ByteModelV2(WorkRecipe {
             architecture,
             windows: settings.windows,
-            learning_rate_micro: settings.learning_rate_micro_at(round),
+            learning_rate_micro: settings.learning_rate_micro,
             optimizer: settings.optimizer,
             weight_decay_micro: settings.weight_decay_micro,
             clip_milli: settings.clip_milli,
@@ -295,6 +298,14 @@ pub struct TrainingTask {
     /// Little-endian f32 bytes, hex on the existing group JSON wire.
     pub model: Bytes,
     pub text: String,
+    /// Where each window begins in `text`, in the order the steps read them:
+    /// the recipe's `windows` for every step. A transformer's packet is made of
+    /// short stretches from different places in the text, and this says where
+    /// each one starts. Empty means the recipe's seed places the windows (and
+    /// the Starter table always reads its whole packet as one window), which is
+    /// also the only form the first training release understands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub starts: Vec<u32>,
 }
 
 impl TrainingTask {
@@ -314,7 +325,33 @@ impl TrainingTask {
         {
             return Err(TrainingError::InvalidWork);
         }
+        self.window_starts()?;
         decode_parameters(&self.model, architecture)
+    }
+
+    /// Where each window begins, checked against the packet: none for the
+    /// Starter table, otherwise either none (the seed places them) or exactly
+    /// one for every window of every step, each with a whole window and the byte
+    /// after it inside the text.
+    pub fn window_starts(&self) -> Result<Vec<usize>, TrainingError> {
+        if self.starts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let recipe = self.recipe.work();
+        let window = recipe.architecture.window_tokens(self.text.len());
+        let wanted = usize::from(recipe.windows) * self.lease.steps as usize;
+        let starts: Vec<usize> = self.starts.iter().map(|start| *start as usize).collect();
+        if recipe.architecture.is_table()
+            || starts.len() != wanted
+            || starts.iter().any(|start| {
+                start
+                    .checked_add(window)
+                    .is_none_or(|end| end >= self.text.len())
+            })
+        {
+            return Err(TrainingError::InvalidWork);
+        }
+        Ok(starts)
     }
 
     pub fn expected_tokens(&self) -> Result<u32, TrainingError> {

@@ -104,8 +104,9 @@ pub struct TrainingSettings {
     pub windows: u16,
     /// Learning steps taken on one packet before its result is folded in.
     pub local_steps: u32,
-    /// Step size for those steps, in millionths. It mostly sets the direction:
-    /// `outer_learning_rate_micro` sets how far the model moves each round.
+    /// Step size for those steps, in millionths, the same in every round. It
+    /// mostly sets the direction: `outer_learning_rate_micro` sets how far the
+    /// model moves each round, and the schedule scales that one only.
     pub learning_rate_micro: u32,
     pub schedule: LrSchedule,
     pub warmup_rounds: u32,
@@ -160,6 +161,9 @@ fn within(name: &str, value: u64, low: u64, high: u64) -> Result<(), TrainingErr
         number(high)
     )))
 }
+
+/// Most times a preset lets a transformer read the text it learns from.
+const MAX_READINGS: usize = 120;
 
 struct PresetNumbers {
     rounds: u32,
@@ -321,25 +325,31 @@ impl TrainingSettings {
     ) -> Self {
         let table = architecture.is_table();
         let parameters = architecture.parameters();
-        // Bigger models take longer per round, so they get fewer of them. Sized
-        // from measured speed on an eight-core desktop processor (about 28, 6.5 and
-        // 2.5 rounds a second for Small, Medium and Large): a Quick try lands in
-        // roughly 10 to 30 seconds, Balanced in about one to three minutes.
+        // How much a model must read before it is any good was measured, on a
+        // 280 kB text with a round of about 512 bytes. A transformer first learns
+        // which letters follow which and stays there (a check loss near 2.3) until
+        // it has read enough: about a million bytes for Small, 1.6 million for
+        // Medium and 3 to 4 million for Large. Then it improves quickly. Balanced
+        // is sized to get past that point and Thorough to go well beyond it; a
+        // Quick try only shows the run working. On an eight-core desktop
+        // processor (about 45, 11 and 4 rounds a second for Small, Medium and
+        // Large) a Quick try lands in roughly 10 to 30 seconds and Balanced in
+        // about one, five and twenty-five minutes.
         let numbers = match (preset, parameters) {
             (TrainingPreset::Quick, _) if table => (80, 10, 0),
             (TrainingPreset::Balanced, _) if table => (400, 20, 0),
             (TrainingPreset::Thorough, _) if table => (2_000, 50, 400),
-            (TrainingPreset::Quick, ..=300_000) => (300, 10, 0),
-            (TrainingPreset::Balanced, ..=300_000) => (1_000, 25, 0),
-            (TrainingPreset::Thorough, ..=300_000) => (5_000, 50, 1_000),
-            (TrainingPreset::Quick, ..=1_500_000) => (120, 10, 0),
-            (TrainingPreset::Balanced, ..=1_500_000) => (800, 25, 0),
-            (TrainingPreset::Thorough, ..=1_500_000) => (4_000, 50, 800),
-            (TrainingPreset::Quick, _) => (60, 10, 0),
-            (TrainingPreset::Balanced, _) => (500, 25, 0),
-            (TrainingPreset::Thorough, _) => (3_000, 50, 600),
+            (TrainingPreset::Quick, ..=300_000) => (600, 20, 0),
+            (TrainingPreset::Balanced, ..=300_000) => (2_000, 50, 0),
+            (TrainingPreset::Thorough, ..=300_000) => (10_000, 100, 2_000),
+            (TrainingPreset::Quick, ..=1_500_000) => (240, 20, 0),
+            (TrainingPreset::Balanced, ..=1_500_000) => (3_200, 50, 0),
+            (TrainingPreset::Thorough, ..=1_500_000) => (12_000, 100, 2_400),
+            (TrainingPreset::Quick, _) => (120, 20, 0),
+            (TrainingPreset::Balanced, _) => (6_000, 50, 0),
+            (TrainingPreset::Thorough, _) => (20_000, 100, 4_000),
         };
-        let numbers = PresetNumbers {
+        let mut numbers = PresetNumbers {
             rounds: numbers.0,
             check_every: numbers.1,
             stop_when_stalled: numbers.2,
@@ -353,31 +363,53 @@ impl TrainingSettings {
             (512 / context).clamp(1, 8)
         };
         if !table && hardware.engine == TrainingEngineKind::Gpu {
-            // A graphics card reads many windows at once for little extra time.
-            windows *= 2;
+            // A graphics card reads many windows at once for little extra time
+            // (measured: four times the reading for about a third more time). So
+            // it reads four times as much each round and takes half the rounds:
+            // twice the reading of a processor run, in a fraction of the time.
+            windows *= 4;
+            numbers.rounds /= 2;
+            numbers.check_every /= 2;
+            numbers.stop_when_stalled /= 2;
         }
+        let local_steps: u32 = if table { 4 } else { 1 };
+        // Room for every window of every step to be its own stretch of text (a
+        // window, the byte after it, and up to three bytes to finish a character).
         let batch_bytes = if table {
             LEGACY_WORK_BATCH_BYTES
         } else {
-            (context * 16).clamp(context + 1, MAX_WORK_BATCH_BYTES)
+            (windows * local_steps as usize * (context + 4))
+                .clamp(context + 1, MAX_WORK_BATCH_BYTES)
         };
-        // The Starter table sees each packet once, so long text needs enough rounds
-        // to be read through.
+        // A check needs a held-back tail worth reading.
+        let check_share_percent: u8 = if text_len / 10 >= 16 { 10 } else { 0 };
         let rounds = if table {
+            // The Starter table sees each packet once, so long text needs enough
+            // rounds to be read through.
             let passes = u32::try_from(text_len.div_ceil(LEGACY_WORK_BATCH_BYTES - 4))
                 .unwrap_or(u32::MAX)
                 .min(Self::ROUNDS.1);
             numbers.rounds.max(passes)
         } else {
-            numbers.rounds
+            // A transformer that reads a short text over and over only memorises
+            // it. Measured on the 2 kB sample, the check loss is at its best
+            // after 60 to 150 readings and climbs after about 200, so no preset
+            // reads the text more often than this.
+            let learned = text_len - text_len * usize::from(check_share_percent) / 100;
+            let per_round = windows * local_steps as usize * context.min(learned.max(1));
+            let most = u32::try_from(MAX_READINGS * learned / per_round.max(1))
+                .unwrap_or(u32::MAX)
+                .clamp(Self::ROUNDS.0, Self::ROUNDS.1);
+            numbers.rounds.min(most)
         };
-        // A check needs a held-back tail worth reading.
-        let check_share_percent = if text_len / 10 >= 16 { 10 } else { 0 };
         Self {
             rounds,
             batch_bytes: u32::try_from(batch_bytes).unwrap_or(MAX_BATCH),
             windows: u16::try_from(windows).unwrap_or(1),
-            local_steps: if table { 4 } else { 2 },
+            // One step a round for a transformer: measured, two steps folded
+            // into one update taught no more than one step did, so the second
+            // was wasted work.
+            local_steps,
             learning_rate_micro: if table { 100_000 } else { 3_000 },
             schedule: if table {
                 LrSchedule::Constant
@@ -385,12 +417,16 @@ impl TrainingSettings {
                 LrSchedule::WarmupCosine
             },
             warmup_rounds: if table { 0 } else { (rounds / 20).max(5) },
-            optimizer: if table {
-                LocalOptimizer::Sgd
-            } else {
-                LocalOptimizer::Adam
-            },
-            weight_decay_micro: if table { 0 } else { 10_000 },
+            // Plain steps everywhere: the merge engine is the one Adam. A plain
+            // step hands it the gradient itself, so one step a round is exactly
+            // textbook Adam, and measured against the textbook trainer it lands
+            // on the same check loss (Medium, 280 kB text: 1.41 both). Adaptive
+            // local steps pass on only each value's direction, and measured
+            // 0.06 to 0.07 worse on Small and Medium. Weight decay is off because
+            // inside a plain step it is not the decoupled kind, and at these
+            // sizes it measured no gain.
+            optimizer: LocalOptimizer::Sgd,
+            weight_decay_micro: 0,
             clip_milli: if table { 0 } else { 1_000 },
             // Measured: a larger model wants a smaller step each round.
             outer_learning_rate_micro: if table {
@@ -454,11 +490,6 @@ impl TrainingSettings {
         u32::try_from(u64::from(value) * u64::from(milli) / 1000)
             .unwrap_or(u32::MAX)
             .max(1)
-    }
-
-    /// The local step size for the round about to run, in millionths.
-    pub fn learning_rate_micro_at(&self, round: u32) -> u32 {
-        Self::scaled(self.learning_rate_micro, self.schedule_milli(round))
     }
 
     /// The round step size for the round about to run, in millionths.

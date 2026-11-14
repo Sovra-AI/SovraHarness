@@ -151,11 +151,15 @@ impl Knob {
             Self::Rounds => {
                 "How many times the model is improved. More rounds learn more and take longer."
             }
-            Self::BatchBytes => "Bytes of your text handed out in each round.",
+            Self::BatchBytes => {
+                "Most bytes of your text handed out in each round, as short stretches from different places. With too little room, windows share the same stretches."
+            }
             Self::Windows => {
                 "Stretches of text read from the packet in each step. The Starter model always uses 1."
             }
-            Self::LocalSteps => "Learning steps taken on a packet before its result is folded in.",
+            Self::LocalSteps => {
+                "Learning steps taken on a packet before its result is folded in. More than 1 costs more without teaching more."
+            }
             Self::OuterLearningRate => {
                 "How far the model moves each round. This is the step size that matters: lower is steadier, higher is quicker and riskier."
             }

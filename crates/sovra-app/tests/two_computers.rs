@@ -76,7 +76,7 @@ impl Computer {
             AgentConfig::default(),
             RuntimeServices {
                 training: training.then(|| sovra_runtime::TrainingConfig {
-                    engine: Arc::new(sovra_train::BurnTrainingEngine),
+                    engine: Arc::new(sovra_train::BurnTrainingEngine::processor()),
                     directory: dir.join("training"),
                 }),
                 memory,

@@ -63,7 +63,8 @@ iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "p
 # (MIT OR Apache-2.0). Metrics off, like iroh: nothing reports out.
 iroh-gossip = { version = "=0.102.0", default-features = false, features = ["net"] }
 # Local training for the sovereign swarm (MIT OR Apache-2.0). Pure-Rust CPU (flex) with
-# autodiff by default; `sovra-train/gpu` adds Burn's CubeCL wgpu backend. `simd` and
+# autodiff by default; `sovra-train/gpu`, which the app enables, adds Burn's CubeCL
+# wgpu backend for training on a graphics card. `simd` and
 # `rayon` are flex's own defaults: without them every matrix product runs on one thread.
 burn = { version = "=0.22.1", default-features = false, features = ["std", "autodiff", "flex", "simd", "rayon"] }
 directories = "6.0.0"

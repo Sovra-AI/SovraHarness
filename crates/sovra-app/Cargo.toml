@@ -25,7 +25,9 @@ sovra-runtime = { workspace = true }
 sovra-skills = { workspace = true }
 sovra-store-surreal = { workspace = true }
 sovra-ui = { workspace = true }
-sovra-train = { workspace = true }
+# `gpu`: the shipped app trains on a working graphics card when the computer has
+# one, and on the processor otherwise. The engine opens and checks the card itself.
+sovra-train = { workspace = true, features = ["gpu"] }
 sovra-telegram = { workspace = true }
 sovra-whatsapp = { workspace = true }
 tracing = { workspace = true }

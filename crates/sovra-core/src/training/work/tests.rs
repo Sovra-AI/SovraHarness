@@ -32,6 +32,7 @@ fn task_for(architecture: Architecture, settings: &TrainingSettings, text: &str)
         lease: grid.issue(WORKER, 0).unwrap(),
         model: encode_parameters(&parameters, architecture).unwrap(),
         text: text.into(),
+        starts: Vec::new(),
     }
 }
 
@@ -116,8 +117,9 @@ fn a_recipe_names_the_shape_and_this_rounds_local_rule() {
     };
     assert_eq!(recipe.architecture, MICRO);
     assert_eq!(recipe.windows, s.windows);
-    assert_eq!(recipe.learning_rate_micro, 300);
-    assert_eq!(recipe.optimizer, LocalOptimizer::Adam);
+    // The schedule belongs to the round step size: the local one never moves.
+    assert_eq!(recipe.learning_rate_micro, 3000);
+    assert_eq!(recipe.optimizer, LocalOptimizer::Sgd);
     assert_eq!(recipe.weight_decay_micro, s.weight_decay_micro);
     assert_eq!(recipe.clip_milli, s.clip_milli);
     assert_eq!(recipe.seed, 5);
@@ -149,7 +151,7 @@ fn a_recipe_names_the_shape_and_this_rounds_local_rule() {
     assert!(first.expected_tokens(20, u32::MAX).is_err());
     let wire = serde_json::to_value(first).unwrap();
     assert_eq!(wire["byte_model_v2"]["architecture"]["context"], 8);
-    assert_eq!(wire["byte_model_v2"]["optimizer"], "adam");
+    assert_eq!(wire["byte_model_v2"]["optimizer"], "sgd");
     assert_eq!(
         serde_json::from_value::<TrainingRecipe>(wire).unwrap(),
         first
@@ -494,4 +496,72 @@ fn finding_a_run_and_delivering_models_use_bounded_checked_messages() {
     ] {
         assert!(serde_json::from_value::<TrainingPeerRequest>(unknown).is_err());
     }
+}
+
+#[test]
+fn a_packet_may_name_where_each_window_begins() {
+    // Without positions the recipe's seed places the windows, as before.
+    let seeded = micro_task();
+    assert_eq!(seeded.starts, Vec::<u32>::new());
+    assert_eq!(seeded.window_starts().unwrap(), Vec::<usize>::new());
+    assert!(
+        !serde_json::to_value(&seeded)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("starts")
+    );
+    // A packet written before positions existed still reads.
+    let old: TrainingTask = serde_json::from_value(serde_json::to_value(&seeded).unwrap()).unwrap();
+    assert_eq!(old, seeded);
+
+    // "a garden grows here" is 19 bytes and a window reads 8 and the byte after
+    // it, so the last place a window can begin is byte 10.
+    let wanted = usize::from(seeded.recipe.work().windows) * seeded.lease.steps as usize;
+    let mut named = micro_task();
+    named.starts = (0..wanted)
+        .map(|index| u32::try_from(index % 11).unwrap())
+        .collect();
+    assert_eq!(named.window_starts().unwrap().len(), wanted);
+    assert!(named.parameters(WORKER).is_ok());
+    assert_eq!(
+        named.expected_tokens().unwrap(),
+        seeded.expected_tokens().unwrap()
+    );
+    let wire = serde_json::to_string(&named).unwrap();
+    assert_eq!(serde_json::from_str::<TrainingTask>(&wire).unwrap(), named);
+
+    let refused: Vec<(&str, Change<TrainingTask>)> = vec![
+        (
+            "one too few",
+            Box::new(|task| task.starts.truncate(task.starts.len() - 1)),
+        ),
+        ("one too many", Box::new(|task| task.starts.push(0))),
+        (
+            "a window that runs off the end",
+            Box::new(|task| task.starts[0] = 11),
+        ),
+        (
+            "a position far outside the text",
+            Box::new(|task| task.starts[0] = u32::MAX),
+        ),
+    ];
+    for (what, change) in refused {
+        let mut task = named.clone();
+        change(&mut task);
+        assert_eq!(
+            task.window_starts(),
+            Err(TrainingError::InvalidWork),
+            "{what}"
+        );
+        assert_eq!(
+            task.parameters(WORKER),
+            Err(TrainingError::InvalidWork),
+            "{what}"
+        );
+    }
+    // The Starter table reads its whole packet: it takes no positions.
+    let mut table = legacy_task();
+    table.starts = vec![0];
+    assert_eq!(table.parameters(WORKER), Err(TrainingError::InvalidWork));
 }
