@@ -767,9 +767,9 @@ fn live_metrics_and_run_controls_follow_the_runtime(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         assert_eq!(
             label(window, "training-status"),
-            "Learning with your group · round 30 of 1,000."
+            "Learning with your group · round 30 of 452."
         );
-        assert_eq!(label(window, "training-tile-round"), "Round: 30 of 1,000");
+        assert_eq!(label(window, "training-tile-round"), "Round: 30 of 452");
         assert_eq!(
             label(window, "training-tile-speed"),
             "Speed: 27,500 letters a second"

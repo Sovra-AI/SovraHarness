@@ -137,7 +137,7 @@ fn a_wrong_field_is_named_in_plain_words() {
     assert_eq!(with(Knob::Rounds, ""), "Rounds needs a number.");
     assert_eq!(
         with(Knob::Rounds, "lots"),
-        "Rounds needs a number such as 300."
+        "Rounds needs a number such as 452."
     );
     assert_eq!(
         with(Knob::LearningRate, "11"),
@@ -152,8 +152,8 @@ fn a_wrong_field_is_named_in_plain_words() {
         "Text per packet must be between 65 and 4,096."
     );
     assert_eq!(
-        with(Knob::WarmupRounds, "301"),
-        "Warm-up rounds must be between 0 and 300."
+        with(Knob::WarmupRounds, "453"),
+        "Warm-up rounds must be between 0 and 452."
     );
 }
 
