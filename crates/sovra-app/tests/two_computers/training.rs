@@ -445,13 +445,19 @@ async fn leaving_the_group_stops_helping_without_a_separate_stop_command() {
         })
         .await;
     tokio::time::sleep(Duration::from_secs(3)).await;
+    // The host has been publishing states all along. Without emptying the
+    // queue, an old one from before the helper's last round was counted would
+    // answer for the present.
+    while host.events.try_recv().is_ok() {}
     let later = host
         .training_page("more rounds", |state| {
             state.progress.rounds > before.progress.rounds
         })
         .await;
     let settled = later.helped_rounds;
+    assert!(settled >= 1, "the round given before leaving still counts");
     tokio::time::sleep(Duration::from_secs(3)).await;
+    while host.events.try_recv().is_ok() {}
     let last = host
         .training_page("the host's run", |state| {
             state.progress.rounds > later.progress.rounds
