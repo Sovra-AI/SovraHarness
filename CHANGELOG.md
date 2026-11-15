@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-15
+
 - **Microsoft 365 connection.** A four-step Connections guide helps each person
   register their own Microsoft connection, copy the desktop return address and
   validate their public IDs before browser sign-in with PKCE. Work/school and
