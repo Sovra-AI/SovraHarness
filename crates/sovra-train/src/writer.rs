@@ -232,6 +232,14 @@ fn gelu(x: f32) -> f32 {
     }
 }
 
+/// A byte is never written when it is less than this share as likely as the
+/// likeliest one ("min-p" sampling, Nguyen et al., ICLR 2025). A small model
+/// spreads a little chance over every one of the 256 bytes; drawing from that
+/// tail is what fills its writing with stray characters. The cut follows the
+/// model's own confidence, so a sure model writes the word it knows and an
+/// unsure one still chooses among its real candidates.
+pub(crate) const MIN_P: f64 = 0.05;
+
 /// Picks the next byte from its scores. A temperature of zero always takes the
 /// likeliest byte; higher values are more adventurous.
 fn pick(scores: &[f32], temperature_milli: u32, rng: &mut Rng) -> u8 {
@@ -249,9 +257,18 @@ fn pick(scores: &[f32], temperature_milli: u32, rng: &mut Rng) -> u8 {
     } else {
         let temperature = f64::from(temperature_milli) / 1000.0;
         let top = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        // Relative to the likeliest byte, whose weight is exactly one, before
+        // the temperature spreads them: so the cut is the same at any setting.
         let weights: Vec<f64> = scores
             .iter()
-            .map(|score| (f64::from(score - top) / temperature).exp())
+            .map(|score| {
+                let share = f64::from(score - top).exp();
+                if share < MIN_P {
+                    0.0
+                } else {
+                    (f64::from(score - top) / temperature).exp()
+                }
+            })
             .collect();
         let total: f64 = weights.iter().sum();
         let mut left = rng.unit() * total;
@@ -394,6 +411,29 @@ mod tests {
             5
         );
         assert!(write(MICRO, &params[1..], b"", 5, 500, 1).is_err());
+    }
+
+    #[test]
+    fn a_byte_far_less_likely_than_the_best_is_never_written() {
+        // Byte 1 is the likeliest; byte 2 is a fifth as likely, byte 3 a
+        // hundredth. Even a very adventurous temperature never writes byte 3.
+        let mut scores = vec![-50.0_f32; VOCABULARY];
+        scores[1] = 0.0;
+        #[expect(clippy::cast_possible_truncation, reason = "small constants")]
+        {
+            scores[2] = (0.2_f64).ln() as f32;
+            scores[3] = (0.01_f64).ln() as f32;
+        }
+        let mut rng = Rng::new(9);
+        let mut seen = [0_u32; 4];
+        for _ in 0..2_000 {
+            let byte = usize::from(pick(&scores, 3_000, &mut rng));
+            assert!(byte == 1 || byte == 2, "wrote byte {byte}");
+            seen[byte] += 1;
+        }
+        // Both real candidates are still written, the likelier more often.
+        assert!(seen[2] > 0 && seen[1] > seen[2]);
+        assert_eq!(pick(&scores, 0, &mut rng), 1);
     }
 
     #[test]

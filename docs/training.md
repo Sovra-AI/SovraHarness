@@ -378,7 +378,104 @@ starting point and size, how far it was trained, and where it came from
 - **Share with my group:** offer a model trained on this computer to your
   current group. See [How everyone receives the model](#how-everyone-receives-the-model).
 - **Copy file location:** copy where the model file is on this computer.
+- **Add to Ollama:** add a Small, Medium or Large model to the Ollama on this
+  computer. See [Run your model in Ollama](#run-your-model-in-ollama).
+- **Back up now:** copy the model to your storage bucket. See
+  [Back up to your own storage bucket](#back-up-to-your-own-storage-bucket).
 - **Continue this** under **Starting point** trains a model further.
+
+Each model shows how its copies went: **Backed up to …**, **In Ollama as …**,
+or, in the alert colour, why a copy did not work.
+
+### The best version is the one you keep
+
+During a run Sovra checks the model on the part of your text it never learns
+from. Each time that check is the best so far, Sovra keeps a copy of the model
+as it was then. When the run ends, that best version goes into **Your models**,
+with the rounds and loss it had at that moment, unless the model as it stands
+was checked last and did at least as well. A small model on a small text gets
+worse on new text once it starts to memorise; this keeps the version from
+before that. The copy is saved with the run, so it survives a restart.
+
+### Writing that stays on track
+
+When a model writes (**Try it** and the sample during a run), Sovra never picks
+a letter that is less than one twentieth as likely as the model's first choice.
+A small model gives every one of the 256 possible bytes a little chance, and
+drawing from that tail is what fills its writing with stray characters. The cut
+follows the model's own confidence, so **Sample variety** still decides how
+adventurous it is among its real candidates. Ollama is set up to write the same
+way.
+
+## Send finished models
+
+The **Send finished models** card, below **Your models**, has two switches.
+Both are off until you turn them on, both apply only to models trained on this
+computer, and both send only the finished model: never the text it learned from.
+
+### Run your model in Ollama
+
+Turn on **Add finished models to Ollama**, or press **Add to Ollama** on one
+model. Sovra writes the model as a GGUF file (the format Ollama, llama.cpp and
+LM Studio read) and hands it to the Ollama on this computer, starting Ollama
+first if it is installed and not running. The model is listed as
+`sovra-<its name>-<8 characters of its fingerprint>`, and the page shows the
+command, for example:
+
+```sh
+ollama run sovra-garden-notes-1a2b3c4d "The garden"
+```
+
+- The model continues text; it does not chat. Ollama is set to pass your words
+  through as they are, with the model's own reach (64, 128 or 256 bytes) as its
+  context.
+- It needs Ollama 0.40.15 or newer. With an older Ollama the model says which
+  version to install, and nothing is added.
+- Before saying it is done, Sovra asks Ollama to write one byte with the model.
+  If Ollama cannot run it, the model is removed from Ollama again and the page
+  says why.
+- **Starter** is a table of letter pairs and cannot run in Ollama.
+- Measured on this guide's development computer: given the same beginning,
+  Ollama writes byte for byte what Sovra's own **Try it** writes when both take
+  the likeliest letter each time. llama.cpp works out one step (GELU) with a
+  close approximation, so with longer texts the two can differ slightly.
+- Ollama keeps its own copy. Remove it with `ollama rm <name>`; the model in
+  **Your models** is not affected.
+
+### Back up to your own storage bucket
+
+Any service that speaks Amazon S3's language works: Amazon S3, Cloudflare R2,
+Backblaze B2, Wasabi, DigitalOcean Spaces, MinIO and others.
+
+1. In your storage service, make a bucket and a key that may only write to it.
+   On Amazon S3, a policy allowing only `s3:PutObject` on
+   `arn:aws:s3:::<bucket>/<folder>/*` is enough.
+2. Fill in the card: **Storage address** (for example
+   `https://s3.eu-west-2.amazonaws.com`, or
+   `https://<account>.r2.cloudflarestorage.com` for R2), **Region**
+   (`auto` for R2), **Bucket**, an optional **Folder**, **Access key ID** and
+   **Secret access key**. Press **Save bucket**.
+3. Turn on **Back up finished models**, or press **Back up now** on one model.
+
+Each backup is three files in the folder, named after the model:
+
+| File | What it is |
+| --- | --- |
+| `<name>.model` | The model exactly as it is in **Your models**, ready to bring back into Sovra |
+| `<name>.gguf` | The same model for Ollama, llama.cpp and LM Studio (not for Starter) |
+| `<name>.md` | A short description: starting point, size, rounds, loss, who trained it, its fingerprint |
+
+- The secret key is kept in this computer's keychain, never in a file, and is
+  never shown again. To change the bucket press **Change bucket**; leave the
+  secret key empty to keep the saved one. **Forget bucket** removes the key and
+  turns the backup off; files already in the bucket stay there.
+- The storage address must start with `https://`. Only a service on this
+  computer itself (such as MinIO on `localhost`) may use `http://`.
+- Sovra signs each upload itself and talks only to the address you gave. It
+  sends no other request, follows no redirect, and never lists or reads the
+  bucket.
+- A backup with the same name replaces the earlier one. Uploading again is
+  safe.
 
 There is no delete button. Models are small, and Sovra does not remove work.
 The list shows up to 128 models. Models received from the group stop being
@@ -389,7 +486,9 @@ unfinished first saves the earlier model to **Your models**.
 ## Privacy and consent
 
 Training stays on this computer unless you start a run with
-**Train with my group** on, or press **Share with my group** on a model.
+**Train with my group** on, press **Share with my group** on a model, or send
+finished models to your own bucket. Adding a model to Ollama keeps it on this
+computer.
 
 ### What travels, to whom, and when
 
@@ -399,6 +498,8 @@ Training stays on this computer unless you start a run with
 | The run's name, starting point and progress | Any current group member's computer that asks whether a run is going | Under the same conditions |
 | An update made of numbers, the same size as the model | From a helper back to the owner | After each piece the helper works on |
 | The finished model file and its description: name, your name and computer name as the group knows them, size, rounds, loss values, when it was made, and the group it is shared with | Every computer currently in the group | After a run started with the group finishes or is stopped, or after **Share with my group**, for as long as you stay in that group |
+| A finished model trained here, its GGUF form and a short description (name, size, rounds, loss, who trained it, fingerprint) | Your storage bucket, at the address you gave | After **Back up now**, or when a run finishes with **Back up finished models** on |
+| A finished model trained here, as GGUF | The Ollama on this computer | After **Add to Ollama**, or when a run finishes with **Add finished models to Ollama** on |
 | Hardware facts, the chart, the sample text, your other models, and the text itself as a whole | Nobody | Never sent |
 
 A piece is one unbroken stretch for a Starter run, and several short stretches
@@ -445,11 +546,12 @@ temporary file and a rename, so a crash leaves the previous file intact.
 
 | File | Contents |
 | --- | --- |
-| `run-<id>.train` | One run: **the full chosen text**, the model, the optimizer's state and the settings. Small is about 2.7 MB, Medium 17.5 MB, Large 56 MB, plus the text. |
+| `run-<id>.train` | One run: **the full chosen text**, the model, the optimizer's state, the best version so far and the settings. Small is about 3.3 MB, Medium 21 MB, Large 67 MB, plus the text. Runs saved by 0.6.0 still open. |
 | `run-<id>.notes.json` | That run's chart history, sample, and whether it was stopped and saved to Your models |
 | `latest.json` | The name of the most recent run |
 | `models/<id>.model` | One model: a 64-byte description followed by the values. It does not contain the training text. The file name is the fingerprint of its content, so every copy in the group is provably the same file. |
 | `models/<id>.json` | That model's name, origin, group, and which computers have received it |
+| `outlets.json` | Your bucket's address, region, bucket, folder and access key ID, the two switches, and where each model was copied. The secret key is not here: it is in the keychain. |
 | `owner.lock` | Stops a second Sovra window from using the same folder |
 
 A run is saved when it is paused, stopped, finished and when Sovra closes, and
@@ -534,6 +636,13 @@ comes only from how a run is organised.
 | "The saved training file is damaged or from an unsupported version. Your file has been kept." | The last run could not be opened. Start a new run; the old file stays in the folder. |
 | "Training finished early because the check stopped improving." | **Stop when stalled** ended the run. The model is in **Your models**. |
 | "Training stopped before its first round, so there is no model to keep yet." | The run was stopped before it learned anything. Start again. |
+| "Ollama is not running on this computer…" | Install Ollama from ollama.com, or start it. Sovra starts an installed Ollama by itself on the usual address. |
+| "Ollama on this computer is version … Update Ollama to 0.40.15 or newer…" | Update Ollama, then press **Add to Ollama** again. |
+| "Ollama on this computer is set to a compressed memory cache (OLLAMA_KV_CACHE_TYPE)…" | Your Ollama is set to `OLLAMA_KV_CACHE_TYPE=q8_0` or `q4_0`, which needs attention heads at least 32 values wide. Medium and Large work with it. For a Small model, remove that setting from Ollama's environment (on Linux, the `ollama.service` file) and restart Ollama. |
+| "The storage service did not accept the keys…" | The access key ID or secret key is wrong. Press **Change bucket** and type them again. |
+| "The storage service refused the upload…" | The key may not write to that bucket or folder. Check its permissions in your storage service. |
+| "The bucket was not found…" or "…Check the storage address and the region." | The bucket name, storage address or region does not match the bucket. R2 uses the region `auto`. |
+| "…because this computer's clock is wrong." | Signed uploads are refused when the clock is more than a few minutes out. Set the date and time automatically. |
 | It is slow | Choose a smaller starting point or **Quick try**. Large is slow without a graphics card. Development builds are several times slower than released ones. |
 | **Training engine** says **Built-in processor engine** on a computer with a graphics card | The card did not pass its checks: it was not found, gave different answers from the processor, or was not clearly faster. See [Graphics cards](#graphics-cards). Updating the graphics driver and restarting Sovra makes it check again. |
 | Training became slower part-way through a run | The graphics card failed, most often because another program filled its memory, and the run carried on with the processor. Restart Sovra to use the card again; **Pause**, restart and **Resume** continue the same run. |
@@ -545,8 +654,18 @@ comes only from how a run is organised.
   continue text in the style they were taught. They do not chat, follow
   instructions or answer questions, and they cannot be selected as a chat AI.
 - **No pretrained models.** Importing or fine-tuning an existing language
-  model, and tokenizer files, are not supported. Models cannot be exported to
-  other tools' formats.
+  model, and tokenizer files, are not supported. Models go out to other tools
+  as GGUF only, through **Add to Ollama** or a bucket backup; there is no
+  download button for the GGUF file itself, and nothing in GGUF or any other
+  format can be brought in.
+- **One bucket, uploads only.** Sovra keeps one bucket and only ever puts
+  files in it. It does not list, download, restore from or tidy the bucket,
+  does not upload in parts (a model file is at most 16 MiB), and asks for no
+  server-side encryption: services that encrypt by default (Amazon S3 since
+  2023) still do. Received models and Starter's GGUF form are not sent.
+- **Ollama on this computer only.** **Add to Ollama** talks to the Ollama
+  Sovra starts and uses for chat, at its usual local address. Ollama on another
+  computer is not supported.
 - **One graphics card, chosen for you.** Sovra uses the first separate card,
   or else the one built into the processor, and only when it passes its
   checks. There is no setting to pick a card or to keep training off the
@@ -582,6 +701,9 @@ comes only from how a run is organised.
 | Chart history, loss wording and time left | [metrics.rs](../crates/sovra-core/src/training/metrics.rs) |
 | Hardware facts and recommendations | [core hardware.rs](../crates/sovra-core/src/training/hardware.rs), [engine probe](../crates/sovra-train/src/hardware.rs) |
 | Choosing and checking the graphics card | [device.rs](../crates/sovra-train/src/device.rs) |
+| The GGUF file | [export.rs](../crates/sovra-core/src/training/export.rs) |
+| Bucket and Ollama choices, names and checks | [outlets.rs](../crates/sovra-core/src/training/outlets.rs) |
+| Sending to the bucket and to Ollama | [providers outlets.rs](../crates/sovra-providers/src/outlets.rs), [runtime outlets.rs](../crates/sovra-runtime/src/training/outlets.rs) |
 | Measuring training | [training_benchmark.rs](../crates/sovra-train/examples/training_benchmark.rs), [reference.rs](../crates/sovra-train/src/reference.rs) |
 | Model library and delivery rules | [library.rs](../crates/sovra-core/src/training/library.rs), [delivery.rs](../crates/sovra-core/src/training/delivery.rs) |
 | Group messages and work pieces | [work.rs](../crates/sovra-core/src/training/work.rs) |

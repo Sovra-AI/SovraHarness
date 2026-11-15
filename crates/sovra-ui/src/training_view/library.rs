@@ -190,7 +190,9 @@ impl TrainingView {
                     cx.write_to_clipboard(ClipboardItem::new_string(location.clone()));
                 }),
         );
-        row = row.child(actions);
+        let (copy_lines, copy_buttons) = self.model_outlets(index, model, cx);
+        actions = actions.children(copy_buttons);
+        row = row.children(copy_lines).child(actions);
         if open {
             row = row.child(self.trial_panel(model, cx));
         }

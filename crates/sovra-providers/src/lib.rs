@@ -6,11 +6,13 @@ mod catalog;
 mod connection;
 mod destination;
 mod embeddings;
+mod outlets;
 mod summaries;
 mod transport;
 pub use destination::ResolvedModel;
 mod storage;
 pub use embeddings::HttpEmbedder;
+pub use outlets::HttpModelOutlets;
 pub use summaries::HttpSummarizer;
 
 pub use auth::{

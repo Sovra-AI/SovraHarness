@@ -11,11 +11,12 @@ use sovra_core::{
     group::{ContentHash, DeviceId, GroupId},
     models::InterfaceScale,
     training::{
-        BaseModel, Delivery, HardwareInfo, HelpingPhase, LibraryModel, LrSchedule, MetricPoint,
-        ModelCard, ModelFacts, ModelHeader, ModelOrigin, RunSummary, SAMPLE_TEXT, TrainingBase,
-        TrainingCommand, TrainingEngineKind, TrainingEvent, TrainingGroup, TrainingHelp,
-        TrainingMetrics, TrainingPeer, TrainingPhase, TrainingPlan, TrainingPreset,
-        TrainingProgress, TrainingSettings, TrainingSource, TrainingState, Trial,
+        BaseModel, BucketSettings, CopyState, Delivery, HardwareInfo, HelpingPhase, LibraryModel,
+        LrSchedule, MetricPoint, ModelCard, ModelFacts, ModelHeader, ModelOrigin, ModelOutletState,
+        Outlet, RunSummary, SAMPLE_TEXT, TrainingBase, TrainingCommand, TrainingEngineKind,
+        TrainingEvent, TrainingGroup, TrainingHelp, TrainingMetrics, TrainingPeer, TrainingPhase,
+        TrainingPlan, TrainingPreset, TrainingProgress, TrainingSettings, TrainingSource,
+        TrainingState, Trial,
     },
 };
 use sovra_runtime::Client;
@@ -242,6 +243,55 @@ fn library() -> Vec<LibraryModel> {
     ]
 }
 
+fn bucket() -> BucketSettings {
+    BucketSettings {
+        endpoint: "https://s3.eu-west-2.amazonaws.com".into(),
+        region: "eu-west-2".into(),
+        bucket: "family-models".into(),
+        folder: "sovra/finished-models-from-the-kitchen-laptop".into(),
+        access_key_id: "AKIAEXAMPLEKEY".into(),
+    }
+}
+
+/// A saved bucket, with the first model in it and in Ollama, and the second
+/// one's backup refused.
+fn copies() -> ModelOutletState {
+    let mut outlets = ModelOutletState {
+        bucket: Some(bucket()),
+        bucket_key_saved: true,
+        backup_automatically: true,
+        ollama_automatically: true,
+        ..ModelOutletState::default()
+    };
+    outlets.record(
+        ContentHash([9; 32]),
+        Outlet::Bucket,
+        CopyState::Done {
+            place: format!(
+                "family-models/sovra/{}.model",
+                "a-long-model-name-".repeat(4)
+            ),
+            at_unix_ms: 1,
+        },
+    );
+    outlets.record(
+        ContentHash([9; 32]),
+        Outlet::Ollama,
+        CopyState::Done {
+            place: "sovra-a-model-with-a-name-as-long-as-a-name-may-be-0909".into(),
+            at_unix_ms: 1,
+        },
+    );
+    outlets.record(
+        ContentHash([8; 32]),
+        Outlet::Bucket,
+        CopyState::Failed(
+            "The storage service refused the upload. Check that the keys may write to this bucket and folder. (It answered 403 AccessDenied.)".into(),
+        ),
+    );
+    outlets
+}
+
 fn metrics() -> TrainingMetrics {
     let mut metrics = TrainingMetrics::default();
     for round in 1..=30u32 {
@@ -347,6 +397,12 @@ fn every_part_of_the_training_page_fits_each_layout(cx: &mut TestAppContext) {
                     "training-preset-thorough",
                     "training-name",
                     "training-models-empty",
+                    "training-outlets",
+                    "training-outlet-ollama",
+                    "training-outlet-backup",
+                    "training-bucket-endpoint",
+                    "training-bucket-secret",
+                    "training-bucket-save",
                     "training-helper-status",
                 ] {
                     reveal(window, id, cx);
@@ -383,6 +439,7 @@ fn every_part_of_the_training_page_fits_each_layout(cx: &mut TestAppContext) {
                 sharing: Some(GROUP),
                 helped_rounds: 3,
                 models: library(),
+                outlets: copies(),
                 trial: Some(Trial {
                     model: ContentHash([9; 32]),
                     prompt: "The garden".into(),
@@ -427,6 +484,12 @@ fn every_part_of_the_training_page_fits_each_layout(cx: &mut TestAppContext) {
                 }
                 reveal(window, ("training-model-delivery", 0usize), cx);
                 reveal(window, ("training-model-share", 1usize), cx);
+                reveal(window, ("training-model-backup", 0usize), cx);
+                reveal(window, ("training-model-ollama", 0usize), cx);
+                reveal(window, ("training-model-backup-state", 0usize), cx);
+                reveal(window, ("training-model-ollama-state", 0usize), cx);
+                reveal(window, "training-bucket-saved", cx);
+                reveal(window, "training-bucket-change", cx);
                 click(window, ("training-model-try", 0usize), cx);
                 reveal(window, "training-try-prompt", cx);
                 reveal(window, "training-try-run", cx);
@@ -962,6 +1025,98 @@ fn your_models_can_be_tried_shared_and_found(cx: &mut TestAppContext) {
         assert!(window.try_find("training-try-output").is_none());
     })
     .expect("window open");
+}
+
+#[gpui_kit::test]
+fn finished_models_go_to_your_bucket_and_to_ollama_when_you_choose(cx: &mut TestAppContext) {
+    let (window, commands, events) = open(cx, DESK, ThemeMode::Light);
+    let mut state = TrainingState {
+        models: library(),
+        ..ready()
+    };
+    publish(&events, &state, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        // Nothing is on at first, and nothing can be backed up without a bucket.
+        assert_eq!(
+            label(window, "training-outlet-backup"),
+            "Back up finished models: off. Turn on"
+        );
+        assert!(window.try_find(("training-model-backup", 0usize)).is_none());
+        // Ollama is offered for a transformer, not for the Starter table.
+        assert!(window.try_find(("training-model-ollama", 0usize)).is_some());
+        assert!(window.try_find(("training-model-ollama", 1usize)).is_none());
+        click(window, "training-outlet-ollama", cx);
+    })
+    .expect("window open");
+    assert_eq!(take(&commands), TrainingCommand::SetAutomaticOllama(true));
+
+    publish(&events, &state, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        let typed = [
+            (
+                "training-bucket-endpoint",
+                " https://s3.eu-west-2.amazonaws.com/ ",
+            ),
+            ("training-bucket-region", "eu-west-2"),
+            ("training-bucket-name", "family-models"),
+            ("training-bucket-folder", "/sovra/"),
+            ("training-bucket-key-id", "AKIAEXAMPLEKEY"),
+            ("training-bucket-secret", "a-secret-key"),
+        ];
+        for (id, text) in typed {
+            click(window, id, cx);
+            window.input(text, cx);
+        }
+        click(window, "training-bucket-save", cx);
+    })
+    .expect("window open");
+    assert_eq!(
+        take(&commands),
+        TrainingCommand::SaveBucket {
+            settings: BucketSettings {
+                folder: "sovra".into(),
+                ..bucket()
+            },
+            secret: Some("a-secret-key".into()),
+        }
+    );
+
+    state.outlets = copies();
+    publish(&events, &state, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(label(window, "training-bucket-saved").contains("family-models/sovra"));
+        assert_eq!(
+            label(window, ("training-model-ollama-state", 0usize)),
+            "In Ollama as sovra-a-model-with-a-name-as-long-as-a-name-may-be-0909. Run it with: ollama run sovra-a-model-with-a-name-as-long-as-a-name-may-be-0909"
+        );
+        assert!(
+            label(window, ("training-model-backup-state", 1usize))
+                .starts_with("Backup did not work: The storage service refused")
+        );
+        click(window, ("training-model-backup", 1usize), cx);
+    })
+    .expect("window open");
+    assert_eq!(
+        take(&commands),
+        TrainingCommand::BackUp(ContentHash([8; 32]))
+    );
+
+    // A copy on its way cannot be started twice.
+    state
+        .outlets
+        .record(ContentHash([7; 32]), Outlet::Ollama, CopyState::Working);
+    publish(&events, &state, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        assert_eq!(
+            label(window, ("training-model-ollama-state", 2usize)),
+            "Adding to Ollama…"
+        );
+        click(window, ("training-model-ollama", 2usize), cx);
+        click(window, "training-bucket-forget", cx);
+    })
+    .expect("window open");
+    assert_eq!(take(&commands), TrainingCommand::ForgetBucket);
 }
 
 #[gpui_kit::test]

@@ -78,6 +78,7 @@ impl Computer {
                 training: training.then(|| sovra_runtime::TrainingConfig {
                     engine: Arc::new(sovra_train::BurnTrainingEngine::processor()),
                     directory: dir.join("training"),
+                    outlets: None,
                 }),
                 memory,
                 groups: Some(GroupServices {

@@ -10,6 +10,7 @@
 //! - `grid`: the group's side: serving work for a shared run, helping another.
 //! - `auto`: finding a shared run to help when the person allows it.
 //! - `delivery`: giving finished models to the group, and receiving them.
+//! - `outlets`: copies of finished models in a storage bucket and in Ollama.
 //! - `storage`: file names and bounded readers.
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -23,8 +24,8 @@ use sovra_core::{
     Event,
     group::DeviceId,
     training::{
-        HardwareInfo, ModelId, TrainingCommand, TrainingEngine, TrainingEvent, TrainingPhase,
-        TrainingSession, TrainingState,
+        HardwareInfo, ModelId, ModelOutlets, TrainingCommand, TrainingEngine, TrainingEvent,
+        TrainingPhase, TrainingSession, TrainingState,
     },
 };
 use tokio::task::{JoinError, JoinHandle, JoinSet};
@@ -33,6 +34,7 @@ mod auto;
 mod delivery;
 mod grid;
 mod library;
+mod outlets;
 mod run;
 mod storage;
 pub(crate) use grid::PeerInbox;
@@ -46,6 +48,9 @@ const TICK: Duration = Duration::from_millis(250);
 pub struct TrainingConfig {
     pub engine: Arc<dyn TrainingEngine>,
     pub directory: PathBuf,
+    /// Sends finished models to a storage bucket and to Ollama when the person
+    /// asks. `None` leaves both switched off and unavailable.
+    pub outlets: Option<Arc<dyn ModelOutlets>>,
 }
 
 impl std::fmt::Debug for TrainingConfig {
@@ -178,6 +183,8 @@ struct Actor {
     hardware_task: Option<JoinHandle<HardwareInfo>>,
     trial_task: Option<JoinHandle<Result<String, String>>>,
     trial_seed: u64,
+    /// Copies of finished models on their way to the bucket or to Ollama.
+    outlet_tasks: JoinSet<outlets::Sent>,
 }
 
 /// Waits for an owned task if there is one, and forgets it once it is done.
@@ -242,6 +249,7 @@ impl Actor {
             hardware_task: None,
             trial_task: None,
             trial_seed: 0,
+            outlet_tasks: JoinSet::new(),
         }
     }
 
@@ -314,6 +322,12 @@ impl Actor {
                     self.publish().await;
                 }
                 Some(_) = self.chores.join_next() => {}
+                Some(sent) = self.outlet_tasks.join_next() => {
+                    if let Ok(sent) = sent {
+                        self.finish_sent(sent).await;
+                        self.publish().await;
+                    }
+                }
                 result = joined(&mut self.trial_task) => {
                     self.finish_trial(result);
                     self.publish().await;
@@ -510,6 +524,14 @@ impl Actor {
                 self.drop_sharing();
                 Ok(())
             }
+            TrainingCommand::SaveBucket { settings, secret } => {
+                self.save_bucket(settings, secret).await
+            }
+            TrainingCommand::ForgetBucket => self.forget_bucket().await,
+            TrainingCommand::SetAutomaticBackup(on) => self.set_automatic_backup(on).await,
+            TrainingCommand::SetAutomaticOllama(on) => self.set_automatic_ollama(on).await,
+            TrainingCommand::BackUp(model) => self.back_up(model),
+            TrainingCommand::AddToOllama(model) => self.add_to_ollama(model),
         }
     }
 
@@ -526,6 +548,7 @@ impl Actor {
             self.fail(error);
         }
         self.load_library().await?;
+        self.load_outlets().await;
         self.export_if_owed().await;
         // Look for models the group is offering now, on every computer of it.
         self.poll_soon();

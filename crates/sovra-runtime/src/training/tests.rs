@@ -228,6 +228,7 @@ fn client_with(root: &std::path::Path, engine: Engine) -> crate::Client {
             training: Some(TrainingConfig {
                 engine: Arc::new(engine),
                 directory: root.into(),
+                outlets: None,
             }),
             ..crate::RuntimeServices::default()
         },

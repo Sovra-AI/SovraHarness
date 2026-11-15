@@ -69,6 +69,13 @@ sequenceDiagram
   in **Your models** further.
 - **Simple presets, full control.** **Quick try**, **Balanced** and
   **Thorough**, with every setting available under **Advanced**.
+- **Run it in Ollama, back it up to your bucket.** Turn on **Add finished
+  models to Ollama** and each model you finish is ready for `ollama run`.
+  Save a storage bucket (S3, R2, B2, Wasabi, MinIO…) and each one is copied
+  there with a GGUF version and a short description. Only the finished model
+  leaves; never your text.
+- **Keeps the best version.** A run hands back the model as it was at its best
+  check, not the one that came after it started to memorise.
 - **Uses your graphics card when it helps.** Sovra checks the card itself and
   trains on it when it is clearly faster than the processor, with nothing to
   install or switch on. If the card fails mid-run, the run carries on with

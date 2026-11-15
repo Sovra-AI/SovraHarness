@@ -9,6 +9,7 @@ mod helping;
 mod knobs;
 mod library;
 mod live;
+mod outlets;
 mod parts;
 mod setup;
 mod words;
@@ -58,6 +59,7 @@ pub(crate) struct TrainingView {
     /// One input per [`Knob`], in [`Knob::ALL`] order.
     knobs: Vec<Entity<InputState>>,
     try_prompt: Entity<InputState>,
+    bucket: outlets::BucketForm,
     /// The library model whose Try it panel is open.
     trying: Option<ModelId>,
     file_notice: Option<String>,
@@ -169,6 +171,17 @@ impl TrainingView {
                 }
             },
         ));
+        let bucket_fields = outlets::BUCKET_FIELDS
+            .iter()
+            .map(|(id, _, hint)| {
+                let secret = *id == "training-bucket-secret";
+                cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .placeholder(*hint)
+                        .masked(secret)
+                })
+            })
+            .collect();
         Self {
             state: TrainingState::default(),
             form,
@@ -187,6 +200,7 @@ impl TrainingView {
             typed_name: None,
             knobs,
             try_prompt,
+            bucket: outlets::BucketForm::new(bucket_fields),
             trying: None,
             file_notice: None,
             picker: None,
@@ -406,6 +420,27 @@ impl TrainingView {
     /// Rewrites the input controls the form's choices have moved on from. Typed
     /// text is never replaced while the person is the one changing it.
     fn write_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.bucket.fill)
+            && let Some(bucket) = self.state.outlets.bucket.clone()
+        {
+            let values = [
+                bucket.endpoint,
+                bucket.region,
+                bucket.bucket,
+                bucket.folder,
+                bucket.access_key_id,
+                String::new(),
+            ];
+            for (input, value) in self.bucket.fields.iter().zip(values) {
+                input.update(cx, |input, cx| input.set_value(value, window, cx));
+            }
+        }
+        // A typed secret key is never kept in the page once it has been sent.
+        if std::mem::take(&mut self.bucket.clear_secret)
+            && let Some(secret) = self.bucket.fields.last()
+        {
+            secret.update(cx, |input, cx| input.set_value("", window, cx));
+        }
         if self.stale.knobs {
             self.stale.knobs = false;
             for knob in Knob::ALL {
@@ -453,7 +488,7 @@ impl Render for TrainingView {
                 cx,
             ))
             .child(parts::body(
-                "A model learns the style of the text you give it and then writes more in that style. These are small models you teach yourself. They do not replace your chat AI, and large ready-made models cannot be brought in yet. Nothing is downloaded and nothing leaves your computers.",
+                "A model learns the style of the text you give it and then writes more in that style. These are small models you teach yourself. They do not replace your chat AI, and large ready-made models cannot be brought in yet. Nothing is downloaded, and a finished model leaves your computers only if you send it to your own bucket.",
                 cx,
             ));
         if let Some(notice) = &self.state.notice {
@@ -486,6 +521,7 @@ impl Render for TrainingView {
         }
         column = column
             .child(self.library_card(cx))
+            .child(self.outlets_card(cx))
             .child(self.helping_card(cx));
         div()
             .id("training-page")

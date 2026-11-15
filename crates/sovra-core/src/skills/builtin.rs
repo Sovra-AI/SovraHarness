@@ -103,7 +103,7 @@ impl Skill {
             );
 
         let (example_display, sample_draft) = match self.name.as_str() {
-            "training" => ("Open Training and press Start training to try the garden sample, or paste your family's recipes or choose a text file first. Watch the chart as it learns, then press Try it to see what it writes. Leave Train with my group on and everyone in your group gets the finished model.".to_owned(), "/training".to_owned()),
+            "training" => ("Open Training and press Start training to try the garden sample, or paste your family's recipes or choose a text file first. Watch the chart as it learns, then press Try it to see what it writes. Leave Train with my group on and everyone in your group gets the finished model. Turn on Add finished models to Ollama to run it with ollama run.".to_owned(), "/training".to_owned()),
             "files" => (
                 "Opens your computer's file picker so you can attach documents or pictures."
                     .to_owned(),
@@ -398,7 +398,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "training",
             "Teach your own AI model with your group",
-            "Teach a small AI model from your own writing, on your own computers. Watch it learn live, let your group's computers help, and everyone in the group gets the finished model. It writes in the style you taught it and does not replace your chat AI.",
+            "Teach a small AI model from your own writing, on your own computers. Watch it learn live, let your group's computers help, and everyone in the group gets the finished model. Finished models can be added to Ollama on this computer and backed up to your own storage bucket by themselves. It writes in the style you taught it and does not replace your chat AI.",
             SkillAction::Training,
             &[],
         ),

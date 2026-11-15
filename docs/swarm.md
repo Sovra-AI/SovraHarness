@@ -178,10 +178,15 @@ graph, and text writing does not use Burn at all.
 
 ### Saved runs
 
-`TrainingSession::checkpoint` returns a binary file: `SOVRARUN`, version 3,
+`TrainingSession::checkpoint` returns a binary file: `SOVRARUN`, version 4,
 section lengths, a small JSON header (`TrainingPlanSummary`, text hash, cursor,
-losses, sample, last metric point), the text, and `GridCheckpoint::to_bytes()`
-(`SOVRAGRD`, 20 bytes per parameter: the value and two `f64` moments). Restore
+losses, sample, last metric point, the best check's progress), the text,
+`GridCheckpoint::to_bytes()` (`SOVRAGRD`, 20 bytes per parameter: the value and
+two `f64` moments), and the model as it was at the best check (4 bytes per
+parameter, or nothing before the first check). `export` gives back that best
+model unless the latest model was checked last and did at least as well.
+Version 3 files, written by 0.6.0, are the same without the best model and
+still restore. Restore
 checks every length before allocating, then the plan, text hash, shape, round
 and cursor, and passes the merge state through `GridSyncer::restore`. Any
 failure is `InvalidCheckpoint`; the runtime then shows the error once, keeps

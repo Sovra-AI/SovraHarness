@@ -257,7 +257,7 @@ fn damaged_saved_runs_are_refused() {
     let refit = |edit: &dyn Fn(&mut Header)| {
         let mut header = saved.header.clone();
         edit(&mut header);
-        saved::encode(&header, &saved.text, &saved.grid).unwrap()
+        saved::encode(&header, &saved.text, &saved.grid, saved.best.as_deref()).unwrap()
     };
     assert!(engine().restore(&refit(&|_| {})).is_ok());
     assert!(engine().restore(&refit(&|h| h.cursor = 1 << 40)).is_err());
@@ -1007,4 +1007,105 @@ fn the_merge_state_is_saved_compactly() {
     let settings = saved::decode(&bytes).unwrap().header.plan.settings;
     let grid: GridSettings = settings.grid_settings(MICRO);
     assert_eq!(grid.local_steps, 1);
+}
+
+#[test]
+fn a_finished_run_gives_back_its_best_checked_model_even_after_a_restart() {
+    let text = repeated();
+    let mut session = micro_session(&text, b"best");
+    run_rounds(session.as_mut(), 12);
+    let saved = saved::decode(&session.checkpoint().unwrap()).unwrap();
+    let latest = saved.grid_params();
+    let checked = saved.header.check_loss_milli.unwrap();
+
+    // Say round 5 checked better than anything since, with values of its own.
+    let earlier: Vec<f32> = latest.iter().map(|value| value * 0.5).collect();
+    let mut header = saved.header.clone();
+    header.best_check = Some((checked - 100, 5));
+    header.best = Some(BestPoint {
+        round: 5,
+        tokens: 640,
+        loss_milli: Some(3_333),
+        check_loss_milli: checked - 100,
+    });
+    let file = saved::encode(&header, &saved.text, &saved.grid, Some(&earlier)).unwrap();
+    let restored = engine().restore(&file).unwrap();
+    let given = decode_model(&restored.export().unwrap()).unwrap();
+    assert_eq!(given.parameters, earlier, "the best model is the one kept");
+    // The micro starting model had trained no rounds of its own.
+    assert_eq!(given.header.rounds, 5);
+    assert_eq!(given.header.check_loss_milli, Some(checked - 100));
+    assert_eq!(given.header.loss_milli, Some(3_333));
+    // Saving again keeps it.
+    let again = engine().restore(&restored.checkpoint().unwrap()).unwrap();
+    assert_eq!(
+        decode_model(&again.export().unwrap()).unwrap().parameters,
+        earlier
+    );
+
+    // A best model that does not fit its run, or has no progress beside it,
+    // means the file is damaged.
+    let short = saved::encode(&header, &saved.text, &saved.grid, Some(&earlier[1..])).unwrap();
+    assert!(engine().restore(&short).is_err());
+    let mut bare = saved.header.clone();
+    bare.best = None;
+    let alone = saved::encode(&bare, &saved.text, &saved.grid, Some(&earlier)).unwrap();
+    // And progress without the model it belongs to.
+    let missing = saved::encode(&header, &saved.text, &saved.grid, None).unwrap();
+    assert!(engine().restore(&missing).is_err());
+    assert!(engine().restore(&alone).is_err());
+    let mut broken = earlier;
+    broken[0] = f32::NAN;
+    let broken = saved::encode(&header, &saved.text, &saved.grid, Some(&broken)).unwrap();
+    assert!(engine().restore(&broken).is_err());
+}
+
+#[test]
+fn a_run_whose_latest_check_is_its_best_gives_back_the_latest_model() {
+    let text = repeated();
+    let mut session = micro_session(&text, b"latest");
+    // The last round is always checked, so a run that only improved ends on
+    // its best, and the model given back is the model as it stands.
+    run_rounds(session.as_mut(), 40);
+    assert!(session.progress().is_complete());
+    let saved = saved::decode(&session.checkpoint().unwrap()).unwrap();
+    let (best, at) = saved.header.best_check.unwrap();
+    let given = decode_model(&session.export().unwrap()).unwrap();
+    assert!(given.header.check_loss_milli.unwrap() >= best);
+    if at == 40 {
+        assert_eq!(given.parameters, saved.grid_params());
+    } else {
+        assert_eq!(given.header.rounds, at);
+        assert_eq!(given.header.check_loss_milli, Some(best));
+    }
+}
+
+#[test]
+fn runs_saved_before_best_models_were_kept_still_open() {
+    let text = repeated();
+    let mut session = micro_session(&text, b"older");
+    run_rounds(session.as_mut(), 6);
+    let saved = saved::decode(&session.checkpoint().unwrap()).unwrap();
+    // The same run as Sovra 0.6.0 wrote it: version 3, no best-model length,
+    // no best model, and no best progress in the header.
+    let mut header = saved.header.clone();
+    header.best = None;
+    let mut json = serde_json::to_value(&header).unwrap();
+    json.as_object_mut().unwrap().remove("best");
+    let header_json = serde_json::to_vec(&json).unwrap();
+    let grid = saved.grid.to_bytes();
+    let mut old = b"SOVRARUN".to_vec();
+    old.extend_from_slice(&3_u32.to_le_bytes());
+    old.extend_from_slice(&u32::try_from(header_json.len()).unwrap().to_le_bytes());
+    old.extend_from_slice(&(saved.text.len() as u64).to_le_bytes());
+    old.extend_from_slice(&(grid.len() as u64).to_le_bytes());
+    old.extend_from_slice(&header_json);
+    old.extend_from_slice(saved.text.as_bytes());
+    old.extend_from_slice(&grid);
+    let reopened = engine().restore(&old).unwrap();
+    assert_eq!(reopened.progress(), session.progress());
+    // It carries on and starts keeping its best from here.
+    let mut reopened = reopened;
+    reopened.advance(100).unwrap();
+    assert!(engine().restore(&reopened.checkpoint().unwrap()).is_ok());
 }

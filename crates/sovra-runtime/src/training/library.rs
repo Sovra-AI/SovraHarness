@@ -104,6 +104,7 @@ impl Actor {
         self.store_model(card, file).await?;
         self.ending.exported = Some(facts.id);
         self.write_notes().await?;
+        self.send_finished(facts.id);
         if group.is_some() {
             // Trained with the group: every computer of it gets the model.
             self.announce(facts.id).await;

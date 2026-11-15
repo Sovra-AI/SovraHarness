@@ -59,7 +59,7 @@ accounts, memory or connections.
 | `connected-services/services.json` | Saved MCP service catalog |
 | `schedules.json` | Scheduled prompts, timed sends and run history |
 | `groups/` | Group records and shared state |
-| `training/` | Training runs (`run-<id>.train`, which include the chosen text, with chart notes beside them), a pointer to the latest run, and `models/` holding every model trained here or received from the group. Sovra never deletes these. See [Training: where files live](training.md#where-files-live). |
+| `training/` | Training runs (`run-<id>.train`, which include the chosen text, with chart notes beside them), a pointer to the latest run, `models/` holding every model trained here or received from the group, and `outlets.json` with the storage bucket and Ollama choices (never the bucket's secret key, which is in the credential store as `training-bucket-secret`). Sovra never deletes these. See [Training: where files live](training.md#where-files-live). |
 | `remote-control/phones.json` | Remembered phone public keys and names; access still starts off. An owner lock prevents concurrent writers. |
 | `remote-control-reference/desktop.json` | Public desktop routing hints for the optional `--remote-control-client` developer client. Its separate phone identity is in the credential store. |
 | `terminal/settings.json` | Terminal preferences |

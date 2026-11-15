@@ -85,10 +85,16 @@ fn main() -> anyhow::Result<()> {
         credential_store(&data_dir),
         read_model_keys(),
     );
+    // One owner for the local model server, shared by chat and by Training's
+    // "Add to Ollama", so Ollama is never started twice.
+    let local_servers: Arc<dyn sovra_core::models::ModelReadiness> =
+        Arc::new(sovra_runtime::LocalModelServers::new(ollama_programs()));
+    let model_outlets = Arc::new(sovra_providers::HttpModelOutlets::new(
+        credential_store(&data_dir),
+        Some(local_servers.clone()),
+    ));
     let models = sovra_runtime::ModelsConfig {
-        readiness: Some(Arc::new(sovra_runtime::LocalModelServers::new(
-            ollama_programs(),
-        ))),
+        readiness: Some(local_servers),
         repository: model_repository,
         providers: vec![
             Arc::new(sovra_providers::OpenRouterProvider),
@@ -124,6 +130,7 @@ fn main() -> anyhow::Result<()> {
             training: Some(sovra_runtime::TrainingConfig {
                 engine: Arc::new(sovra_train::BurnTrainingEngine::default()),
                 directory: data_dir.as_path().join("training"),
+                outlets: Some(model_outlets),
             }),
             memory: Some(memory),
             memory_extraction_slots: read_memory_extraction_slots(),

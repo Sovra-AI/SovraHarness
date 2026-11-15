@@ -138,6 +138,7 @@ fn a_snapshot_carries_the_whole_page_and_replaces_what_was_there() {
             output: None,
             running: true,
         }),
+        outlets: ModelOutletState::default(),
     };
     let mut state = TrainingState::default();
     state.apply(&TrainingEvent::new(full.clone()));

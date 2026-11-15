@@ -2112,6 +2112,7 @@ impl TrainedFamily {
             Some(TrainingConfig {
                 engine: engine.clone(),
                 directory: dir.path().join("training"),
+                outlets: None,
             }),
         );
         mum.send(GroupCommand::Create {

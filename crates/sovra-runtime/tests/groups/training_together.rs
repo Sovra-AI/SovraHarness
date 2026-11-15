@@ -41,6 +41,7 @@ impl Trainer {
             Some(TrainingConfig {
                 engine: engine.clone(),
                 directory: directory.clone(),
+                outlets: None,
             }),
         );
         Self {

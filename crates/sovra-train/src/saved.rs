@@ -4,15 +4,17 @@
 //! | Bytes | Field |
 //! |---|---|
 //! | 0..8 | `SOVRARUN` |
-//! | 8..12 | format version (3) |
+//! | 8..12 | format version (4) |
 //! | 12..16 | header length |
 //! | 16..24 | text length |
 //! | 24..32 | merge state length |
-//! | then | header (JSON), text (UTF-8), merge state |
+//! | 32..40 | best model's length (version 4 only; zero when there is none) |
+//! | then | header (JSON), text (UTF-8), merge state, best model (f32 values) |
 //!
 //! Every length is checked against its bound and the file's real size before
-//! anything is allocated. Versions 1 and 2 were all-JSON files for the Starter
-//! table; they are still read, so a run saved by the first release carries on.
+//! anything is allocated. Version 3 is the same without the best model, and
+//! still read. Versions 1 and 2 were all-JSON files for the Starter table; they
+//! are still read, so a run saved by the first release carries on.
 
 use serde::{Deserialize, Serialize};
 use sovra_core::group::ContentHash;
@@ -24,8 +26,11 @@ use sovra_core::training::{
 };
 
 const MAGIC: &[u8; 8] = b"SOVRARUN";
-const VERSION: u32 = 3;
-const PREFIX_BYTES: usize = 32;
+const VERSION: u32 = 4;
+/// The version before the best model was kept, still read.
+const VERSION_WITHOUT_BEST: u32 = 3;
+const PREFIX_BYTES: usize = 40;
+const PREFIX_BYTES_WITHOUT_BEST: usize = 32;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 /// The first release's limits, for reading its files.
 const LEGACY_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -52,6 +57,20 @@ pub(crate) struct Header {
     pub(crate) stalled: bool,
     pub(crate) sample: Option<(u32, String)>,
     pub(crate) point: Option<MetricPoint>,
+    /// What the model had learned when the best check was measured, kept with
+    /// the model's values at that moment (the file's last part).
+    #[serde(default)]
+    pub(crate) best: Option<BestPoint>,
+}
+
+/// The progress that goes with the best model kept beside a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct BestPoint {
+    pub(crate) round: u32,
+    pub(crate) tokens: u64,
+    pub(crate) loss_milli: Option<u32>,
+    pub(crate) check_loss_milli: u32,
 }
 
 pub(crate) struct Saved {
@@ -61,16 +80,34 @@ pub(crate) struct Saved {
     /// Set for the oldest files only, which were tied to their text by the run's
     /// own name: the restored merge state must carry exactly this name.
     pub(crate) job: Option<ContentHash>,
+    /// The model's values when the best check was measured, if one was kept.
+    pub(crate) best: Option<Vec<f32>>,
+}
+
+#[cfg(test)]
+impl Saved {
+    /// The model's values as the merge engine holds them.
+    pub(crate) fn grid_params(&self) -> Vec<f32> {
+        sovra_core::swarm::learn::scavenger::GridSyncer::restore(self.grid.clone())
+            .map(|grid| grid.params().to_vec())
+            .unwrap_or_default()
+    }
 }
 
 pub(crate) fn encode(
     header: &Header,
     text: &str,
     grid: &GridCheckpoint,
+    best: Option<&[f32]>,
 ) -> Result<Vec<u8>, TrainingError> {
     let header = serde_json::to_vec(header).map_err(|_| TrainingError::Step)?;
     let grid = grid.to_bytes();
-    let total = PREFIX_BYTES + header.len() + text.len() + grid.len();
+    let best: Vec<u8> = best
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect();
+    let total = PREFIX_BYTES + header.len() + text.len() + grid.len() + best.len();
     let header_len = u32::try_from(header.len()).map_err(|_| TrainingError::Step)?;
     if header.len() > MAX_HEADER_BYTES || total > MAX_CHECKPOINT_BYTES {
         return Err(TrainingError::Step);
@@ -81,9 +118,11 @@ pub(crate) fn encode(
     bytes.extend_from_slice(&header_len.to_le_bytes());
     bytes.extend_from_slice(&(text.len() as u64).to_le_bytes());
     bytes.extend_from_slice(&(grid.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(&(best.len() as u64).to_le_bytes());
     bytes.extend_from_slice(&header);
     bytes.extend_from_slice(text.as_bytes());
     bytes.extend_from_slice(&grid);
+    bytes.extend_from_slice(&best);
     Ok(bytes)
 }
 
@@ -112,24 +151,51 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Saved, TrainingError> {
     if !bytes.starts_with(MAGIC) {
         return legacy(bytes);
     }
-    if u32::from_le_bytes(field(bytes, 8)?) != VERSION {
-        return Err(invalid);
-    }
+    let (prefix, with_best) = match u32::from_le_bytes(field(bytes, 8)?) {
+        VERSION => (PREFIX_BYTES, true),
+        VERSION_WITHOUT_BEST => (PREFIX_BYTES_WITHOUT_BEST, false),
+        _ => return Err(invalid),
+    };
     let header_len = usize::try_from(u32::from_le_bytes(field(bytes, 12)?))
         .ok()
         .filter(|len| *len <= MAX_HEADER_BYTES)
         .ok_or(TrainingError::InvalidCheckpoint)?;
     let text_len = length(bytes, 16, MAX_TEXT_BYTES)?;
     let grid_len = length(bytes, 24, MAX_CHECKPOINT_BYTES)?;
-    if bytes.len() != PREFIX_BYTES + header_len + text_len + grid_len {
+    let best_len = if with_best {
+        length(bytes, 32, MAX_CHECKPOINT_BYTES)?
+    } else {
+        0
+    };
+    if bytes.len() != prefix + header_len + text_len + grid_len + best_len {
         return Err(invalid);
     }
-    let (header, rest) = bytes[PREFIX_BYTES..].split_at(header_len);
-    let (text, grid) = rest.split_at(text_len);
+    let (header, rest) = bytes[prefix..].split_at(header_len);
+    let (text, rest) = rest.split_at(text_len);
+    let (grid, best) = rest.split_at(grid_len);
     let header: Header = serde_json::from_slice(header).map_err(|_| invalid.clone())?;
     // The shape is checked before its size is used to accept the merge state.
     header.plan.validate().map_err(|_| invalid.clone())?;
-    if grid.len() != GridCheckpoint::byte_len(header.plan.architecture.parameters())
+    // A best model is the model's full size and goes with its progress, or
+    // neither is there.
+    let parameters = header.plan.architecture.parameters();
+    if (best_len != 0) != header.best.is_some() || (best_len != 0 && best_len != parameters * 4) {
+        return Err(invalid);
+    }
+    let best: Option<Vec<f32>> = (best_len != 0).then(|| {
+        best.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|bytes| f32::from_le_bytes(*bytes))
+            .collect()
+    });
+    if best
+        .as_ref()
+        .is_some_and(|values| values.iter().any(|value| !value.is_finite()))
+    {
+        return Err(invalid);
+    }
+    if grid.len() != GridCheckpoint::byte_len(parameters)
         || header
             .sample
             .as_ref()
@@ -146,6 +212,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Saved, TrainingError> {
         text: text.to_owned(),
         grid: GridCheckpoint::from_bytes(grid).map_err(|_| invalid)?,
         job: None,
+        best,
     })
 }
 
@@ -229,11 +296,13 @@ fn legacy(bytes: &[u8]) -> Result<Saved, TrainingError> {
         stalled: false,
         sample: None,
         point: None,
+        best: None,
     };
     Ok(Saved {
         job: (saved.version == 1).then(|| legacy_recipe(&saved.text)),
         header,
         text: saved.text,
         grid: saved.grid,
+        best: None,
     })
 }

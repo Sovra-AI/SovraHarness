@@ -14,6 +14,30 @@ package version.
 
 ## [Unreleased]
 
+- **Run your trained models in Ollama.** Press **Add to Ollama** on a Small,
+  Medium or Large model, or turn on **Add finished models to Ollama**, and the
+  model is ready for `ollama run`. Sovra writes it as a GGUF file (llama.cpp's
+  `gpt2` kind with one token for each byte), starts Ollama if needed, checks
+  the version (0.40.15 or newer), and asks Ollama to write one byte before
+  saying it is done. Measured: Ollama writes byte for byte what Sovra writes
+  from the same beginning.
+
+- **Back up finished models to your own storage bucket.** Save any
+  S3-compatible bucket (Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO
+  and others) on the Training page and turn on **Back up finished models**, or
+  press **Back up now**. Each backup is the model file, its GGUF form and a
+  short description. The secret key stays in the keychain. Uploads are signed
+  by Sovra itself, so no storage SDK is added and Sovra stays one executable.
+  Only the finished model leaves; never the text it learned from.
+
+- **The best version is the one you keep.** A run now keeps a copy of the
+  model as it was at its best check and hands that back when it ends. Saved
+  runs move to format version 4; runs saved by 0.6.0 still open.
+
+- **Steadier writing.** Try it and the live sample never pick a letter less
+  than a twentieth as likely as the model's first choice (min-p sampling), so
+  small models write fewer stray characters.
+
 - **Local model setup is clearer.** The getting-started, model, configuration
   and network guides now explain automatic Ollama startup, manual startup for
   other programs, connection wait settings, and memory and input-budget limits.

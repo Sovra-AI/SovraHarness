@@ -22,7 +22,7 @@ use crate::device::{self, EngineChoice, GraphicsCard};
 use crate::net::{Batch, Net};
 use crate::packet::{self, Compute};
 use crate::rng::Rng;
-use crate::saved::{self, Header};
+use crate::saved::{self, BestPoint, Header};
 use crate::{hardware, init, writer};
 
 /// Stands for this computer in the merge engine's list of workers. No real
@@ -100,6 +100,11 @@ struct Session {
     point: Option<MetricPoint>,
     /// Next-byte guesses per second on this computer; zero until measured.
     speed: f64,
+    /// The model as it was at the best check so far, and how far it had got.
+    /// A run keeps it so the model it gives back is the one that did best on
+    /// text it never learned from, not whatever came after: a small model on a
+    /// small text gets worse on new text once it starts memorising.
+    best: Option<(Vec<f32>, BestPoint)>,
 }
 
 fn milli(loss: f32) -> Option<u32> {
@@ -279,6 +284,7 @@ impl TrainingEngine for BurnTrainingEngine {
             sample: None,
             point: None,
             speed: 0.0,
+            best: None,
         }))
     }
 
@@ -333,6 +339,9 @@ impl TrainingEngine for BurnTrainingEngine {
             sample: header.sample,
             point: header.point,
             speed: 0.0,
+            best: saved.best.zip(header.best).filter(|(values, point)| {
+                values.len() == architecture.parameters() && point.round <= round
+            }),
         }))
     }
 
@@ -500,6 +509,15 @@ impl Session {
                 self.check_loss_milli = Some(loss);
                 if self.best_check.is_none_or(|(best, _)| loss < best) {
                     self.best_check = Some((loss, round));
+                    self.best = Some((
+                        self.grid.params().to_vec(),
+                        BestPoint {
+                            round,
+                            tokens: self.grid.tokens(),
+                            loss_milli: self.loss_milli,
+                            check_loss_milli: loss,
+                        },
+                    ));
                 }
                 let limit = self.plan.settings.stop_when_stalled;
                 if limit > 0
@@ -571,6 +589,7 @@ impl Session {
             stalled: self.stalled,
             sample: self.sample.clone(),
             point: self.point,
+            best: self.best.as_ref().map(|(_, point)| *point),
         }
     }
 }
@@ -703,7 +722,12 @@ impl TrainingSession for Session {
     }
 
     fn checkpoint(&self) -> Result<Vec<u8>, TrainingError> {
-        saved::encode(&self.header(), &self.text, &self.grid.checkpoint())
+        saved::encode(
+            &self.header(),
+            &self.text,
+            &self.grid.checkpoint(),
+            self.best.as_ref().map(|(values, _)| values.as_slice()),
+        )
     }
 
     fn plan(&self) -> TrainingPlanSummary {
@@ -719,7 +743,7 @@ impl TrainingSession for Session {
     }
 
     fn export(&self) -> Result<Vec<u8>, TrainingError> {
-        let header = ModelHeader {
+        let mut header = ModelHeader {
             base: self.family,
             architecture: self.net.architecture(),
             rounds: self.base_rounds.saturating_add(self.round()),
@@ -727,6 +751,24 @@ impl TrainingSession for Session {
             loss_milli: self.loss_milli,
             check_loss_milli: self.check_loss_milli,
         };
+        // The best version, unless the model as it stands was checked last and
+        // did as well. An unchecked last stretch (a run stopped early) is not
+        // known to be better, so the checked best is kept.
+        let latest_is_best = self.check_loss_milli.is_some()
+            && self
+                .point
+                .is_some_and(|point| point.check_loss_milli.is_some())
+            && self
+                .best
+                .as_ref()
+                .is_none_or(|(_, best)| self.check_loss_milli <= Some(best.check_loss_milli));
+        if let Some((values, best)) = self.best.as_ref().filter(|_| !latest_is_best) {
+            header.rounds = self.base_rounds.saturating_add(best.round);
+            header.tokens = self.base_tokens.saturating_add(best.tokens);
+            header.loss_milli = best.loss_milli;
+            header.check_loss_milli = Some(best.check_loss_milli);
+            return encode_model(&header, values);
+        }
         encode_model(&header, self.grid.params())
     }
 }

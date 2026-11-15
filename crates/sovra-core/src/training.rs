@@ -10,16 +10,19 @@
 use serde::{Deserialize, Serialize};
 
 mod delivery;
+mod export;
 mod hardware;
 mod library;
 mod metrics;
 mod models;
+mod outlets;
 mod plan;
 mod sample;
 mod work;
 
 use crate::group::{ContentHash, DeviceId, GroupId};
 pub use delivery::{ModelAssembly, held, model_part, offers};
+pub use export::{exports_to_gguf, gguf_needs_output_offsets, to_gguf};
 pub use hardware::{HardwareInfo, MAX_GPUS, MAX_HARDWARE_TEXT_CHARS, TrainingEngineKind};
 pub use library::{
     Delivery, LibraryModel, MAX_DELIVERIES, MAX_LIBRARY_MODELS, MAX_RECEIVED_BYTES,
@@ -34,6 +37,12 @@ pub use models::{
     Architecture, BASE_MODELS, BaseModel, BaseModelInfo, BlockKind, MAX_GROUP_PARAMETERS,
     MAX_MODEL_BYTES, MODEL_HEADER_BYTES, ModelFacts, ModelFile, ModelHeader, ModelId,
     ParameterBlock, VOCABULARY, decode_model, encode_model, inspect_model, model_id,
+};
+pub use outlets::{
+    BucketFile, BucketSettings, CopyState, MAX_BUCKET_SECRET_CHARS, MAX_BUCKET_TEXT_CHARS,
+    MAX_COPY_MESSAGE_CHARS, MAX_COPY_RECORDS, ModelCopies, ModelOutletState, ModelOutlets,
+    OLLAMA_NEEDED, OLLAMA_OLDEST, OllamaModel, Outlet, check_bucket_secret, model_readme,
+    ollama_name, ollama_refusal, outlet_name,
 };
 pub use plan::{
     LEGACY_WORK_BATCH_BYTES, LocalOptimizer, LrSchedule, MAX_FILE_NAME_CHARS, MAX_LOCAL_STEPS,
@@ -82,6 +91,22 @@ pub enum TrainingCommand {
     Share(ModelId),
     /// Stop letting the group help with the current run. The run carries on here.
     StopSharing,
+    /// Remember the storage bucket finished models may be copied to. `secret`
+    /// is its secret key; `None` keeps the one already stored.
+    SaveBucket {
+        settings: BucketSettings,
+        secret: Option<String>,
+    },
+    /// Forget the bucket and its secret key. Nothing in the bucket is touched.
+    ForgetBucket,
+    /// Copy every model that finishes training here to the bucket, or stop.
+    SetAutomaticBackup(bool),
+    /// Add every model that finishes training here to Ollama, or stop.
+    SetAutomaticOllama(bool),
+    /// Copy one library model to the bucket now.
+    BackUp(ModelId),
+    /// Add one library model to the Ollama on this computer now.
+    AddToOllama(ModelId),
 }
 
 impl TrainingCommand {
@@ -99,7 +124,16 @@ impl TrainingCommand {
                 }
             }
             Self::Try { prompt, .. } => check_trial_prompt(prompt),
-            Self::Load
+            Self::SaveBucket { settings, secret } => {
+                settings.validate()?;
+                secret.as_deref().map_or(Ok(()), check_bucket_secret)
+            }
+            Self::ForgetBucket
+            | Self::SetAutomaticBackup(_)
+            | Self::SetAutomaticOllama(_)
+            | Self::BackUp(_)
+            | Self::AddToOllama(_)
+            | Self::Load
             | Self::Pause
             | Self::Resume
             | Self::Stop
@@ -188,6 +222,8 @@ pub struct TrainingState {
     /// "Your models", newest first, at most [`MAX_LIBRARY_MODELS`].
     pub models: Vec<LibraryModel>,
     pub trial: Option<Trial>,
+    /// Where finished models go besides the library, and what has been sent.
+    pub outlets: ModelOutletState,
 }
 
 /// Another computer of the group, as the page lists it.
