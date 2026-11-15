@@ -242,7 +242,7 @@ Read [Architecture](docs/architecture.md) and
 | [Getting started](docs/getting-started.md) | First launch, first chat, and finding features |
 | [Configuration](docs/configuration.md) | Startup variables, data paths, and troubleshooting |
 | [Models](docs/models.md) | Providers, keys, model selection, and routing previews |
-| [Files](docs/files.md) and [Knowledge](docs/knowledge.md) | Attachments, saved details, and sources |
+| [Files](docs/files.md) and [Knowledge](docs/knowledge.md) | Attachments, saved details, sources, and a saved answer that keeps the wording read from a file |
 | [Teams and artifacts](docs/teams-and-artifacts.md) | Helpers and saved work |
 | [Schedules](docs/schedules.md) and [Groups](docs/groups.md) | Recurring work and sharing |
 | [Connections](docs/connected-services.md) | MCP tools and service setup |

@@ -197,7 +197,10 @@ inventory filters and saved-text previews are available in Knowledge → Files; 
 indexing work remains active. See [folder indexing](skills-and-file-knowledge.md).
 
 Knowledge opens to Files. Use Add folders, Browse all files, or a folder's Browse
-files and Scan report actions. Browsing and reports each open a focused view;
+files and Scan report actions. **Save this answer** on a search passage keeps the
+file, the lines, the wording, and the UTC day that version was read. A later edit of
+the file does not replace that saved wording. See
+[Save the wording you read](skills-and-file-knowledge.md#save-the-wording-you-read). Browsing and reports each open a focused view;
 Back to folders returns to the folder controls. Folder settings show three notice
 examples with a direct link to the full report. Memories and How it works remain
 available in the navigation above the scrolling content.

@@ -197,3 +197,73 @@ fn granted_folder_answers_a_question_that_names_no_file() {
     assert!(!removed_text.contains("QX-NEEDLE-17"));
     assert_eq!(removed.passages.len(), 0);
 }
+
+#[test]
+fn saved_answer_keeps_the_wording_that_was_read() {
+    use sovra_core::file_index::{IndexEvent, IndexState};
+
+    let fixture = Fixture::new();
+    fixture.write(
+        "keeper-note.txt",
+        "# Keeper note\n\nThe allotment levy ZX-ORCHID-991 is forty-two dinars.\n",
+    );
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+
+    let found = store.search(&query("ZX-ORCHID-991")).unwrap();
+    let passage = found
+        .into_iter()
+        .find(|passage| passage.path == "keeper-note.txt" && passage.text.contains("forty-two"))
+        .expect("granted folder returns the passage that was read");
+    let mut state = IndexState::default();
+    state.apply(&IndexEvent::Roots(vec![root.clone()]));
+    let request_id = state.begin_search();
+    state.apply(&IndexEvent::Results {
+        request_id,
+        passages: vec![passage.clone()],
+    });
+    let saved = state.save_shown_answer(0).expect("the shown passage saves");
+    let reading = saved.reread();
+    assert_eq!(reading.file, passage.path);
+    assert_eq!(reading.wording, passage.text);
+    assert_eq!(reading.read_on, passage.observed_at);
+    assert_eq!(reading.start_line, passage.start_line);
+    assert_eq!(reading.end_line, passage.end_line);
+    assert_eq!(saved.reference(), &passage.reference);
+
+    fixture.write(
+        "keeper-note.txt",
+        "# Keeper note\n\nThe allotment levy ZX-ORCHID-991 is ninety-nine dinars.\n",
+    );
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let updated = store
+        .search(&query("ZX-ORCHID-991"))
+        .unwrap()
+        .into_iter()
+        .find(|passage| passage.path == "keeper-note.txt")
+        .expect("a new search sees the edited file");
+    assert!(updated.text.contains("ninety-nine"), "{}", updated.text);
+    assert!(
+        !updated.text.contains("forty-two"),
+        "current search must not keep the old wording: {}",
+        updated.text
+    );
+    assert_ne!(updated.reference.version_id, passage.reference.version_id);
+
+    let still = saved.reread();
+    assert_eq!(still.file, reading.file);
+    assert_eq!(still.wording, reading.wording);
+    assert_eq!(still.read_on, reading.read_on);
+    assert_eq!(
+        (still.start_line, still.end_line),
+        (reading.start_line, reading.end_line)
+    );
+    assert!(still.wording.contains("forty-two"));
+    let request_id = state.begin_search();
+    state.apply(&IndexEvent::Results {
+        request_id,
+        passages: vec![updated],
+    });
+    assert_eq!(state.saved_answers[0].reread().wording, reading.wording);
+}

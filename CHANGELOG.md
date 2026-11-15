@@ -14,6 +14,13 @@ package version.
 
 ## [Unreleased]
 
+- **Save the wording you read from a folder.** On Your folders, **Save this
+  answer** keeps the file, the lines, the wording, and the day that version was
+  read. That day is the UTC day the version was read, not a date inside the
+  file and not the file's modified time. A later edit of the file does not replace the
+  saved wording. A new search shows the updated text. File history still only
+  inspects retained observations and is not a copy of the original file.
+
 - **Run your trained models in Ollama.** Press **Add to Ollama** on a Small,
   Medium or Large model, or turn on **Add finished models to Ollama**, and the
   model is ready for `ollama run`. Sovra writes it as a GGUF file (llama.cpp's

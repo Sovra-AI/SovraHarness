@@ -74,6 +74,8 @@ For progress and classification, see [File understanding](file-ontology.md).
 - `/file-history` inspects retained observations and extracted-text versions.
   Filesystem timestamps are not dates of events described inside a document.
   Historical reads require the original folder grant to remain valid.
+  History is not a byte-for-byte backup of the original file, and it is not
+  where a saved answer keeps its wording.
 - `/map-files` proposes relationships grounded in source passages. Review and
   explicitly save a proposal before it becomes reviewed knowledge. Model
   confidence is not a calibrated truth score. Source access, provenance, and
@@ -82,6 +84,26 @@ For progress and classification, see [File understanding](file-ontology.md).
 Readers use opaque, version-bound references. Refreshing or revoking a source
 invalidates stale current references instead of combining passages from different
 versions. Partial text remains labelled even when every saved part has been read.
+
+## Save the wording you read
+
+On **Your folders**, search first, then press **Save this answer** under the
+passage you want to keep. You do not need a shortcut to do this.
+
+The saved card names three things:
+
+- **File** — the file the passage came from.
+- **Passage** — the lines and the wording Sovra read.
+- **Read on** — the UTC day that version was read. This is not a date written
+  in the file, and it is not the time the file was last modified.
+
+A later edit of the file does not replace that saved wording. Search again to
+see the updated text. The card under **Answers you saved** still shows the
+wording, file, lines, and read date from the version you saved.
+
+Saving does not change the file. If you remove the folder, that saved answer
+leaves the screen with it. `/file-history` still only inspects retained
+observations.
 
 ## Meaning search
 

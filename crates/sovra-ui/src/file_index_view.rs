@@ -376,7 +376,7 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
             .child(
                 div()
                     .sovra_text(TextRole::Caption, cx)
-                    .child("Enter a word or phrase from a file to see its saved text and source."),
+                    .child("Enter a word or phrase from a file to see its saved text and source. Press Save this answer to keep the wording you read."),
             )
             .child(Input::new(&shell.file_index.search).aria_label("Search indexed files"))
             .child(
@@ -438,7 +438,67 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
         if let Some(note) = &passage.note {
             result = result.child(div().sovra_text(TextRole::Caption, cx).child(note.clone()));
         }
+        let already = state
+            .saved_answers
+            .iter()
+            .any(|answer| answer.reference() == &passage.reference);
+        result = result.child(
+            design::button(
+                ("save-dated-answer", index),
+                if already { "Saved" } else { "Save this answer" },
+                cx,
+            )
+            .disabled(already)
+            .on_click(cx.listener(move |shell, _, _, cx| {
+                if let Err(error) = shell.file_index.state.save_shown_answer(index) {
+                    shell.file_index.state.notice = Some(error.to_string());
+                }
+                cx.notify();
+            })),
+        );
         panel = panel.child(result);
+    }
+    if !state.saved_answers.is_empty() {
+        panel = panel.child(
+            div()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child("Answers you saved"),
+        );
+        for (index, answer) in state.saved_answers.iter().enumerate() {
+            let words = answer.screen_words();
+            let preview: String = answer.wording().chars().take(800).collect();
+            panel = panel.child(
+                v_flex()
+                    .id(("saved-dated-answer", index))
+                    .test_support()
+                    .aria_label(words)
+                    .min_w_0()
+                    .gap(t.space.compact)
+                    .p(t.space.small)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .child(
+                        div()
+                            .sovra_text(TextRole::Caption, cx)
+                            .child(format!("File: {}", answer.file())),
+                    )
+                    .child(div().sovra_text(TextRole::Caption, cx).child(format!(
+                        "Passage: lines {}–{}",
+                        answer.start_line(),
+                        answer.end_line()
+                    )))
+                    .child(div().sovra_text(TextRole::Body, cx).child(preview))
+                    .child(
+                        div()
+                            .sovra_text(TextRole::Caption, cx)
+                            .child(answer.read_date_sentence()),
+                    )
+                    .child(
+                        div()
+                            .sovra_text(TextRole::Body, cx)
+                            .child("A later edit of the file does not replace this wording."),
+                    ),
+            );
+        }
     }
     panel
 }
@@ -1116,6 +1176,77 @@ mod tests {
         })
         .unwrap();
         assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::FileIndex(IndexCommand::Remove { root_id }) if root_id == "chosen")));
+    }
+
+    #[gpui_kit::test]
+    fn saving_a_folder_answer_shows_the_file_passage_and_read_date(cx: &mut TestAppContext) {
+        let (client, _commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1280.), px(1000.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(0, window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.file_index.apply(&IndexEvent::Roots(vec![root()]));
+                shell.select_tab(NavTab::Knowledge, cx);
+                shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
+            });
+            window.render_frame(cx);
+            assert!(window.try_find(("save-dated-answer", 0usize)).is_none());
+            assert!(window.try_find(("saved-dated-answer", 0usize)).is_none());
+            shell.update(cx, |shell, _cx| {
+                let request_id = shell.file_index.state.begin_search();
+                shell.file_index.apply(&IndexEvent::Results {
+                    request_id,
+                    passages: vec![sovra_core::file_index::IndexPassage {
+                        reference: sovra_core::file_index::PassageRef {
+                            root_id: "chosen".into(),
+                            file_id: "file".into(),
+                            version_id: "version-read".into(),
+                            ordinal: 0,
+                        },
+                        path: "keeper-note.txt".into(),
+                        text: "The allotment levy is forty-two dinars.".into(),
+                        start_line: 3,
+                        end_line: 4,
+                        mime_type: "text/plain".into(),
+                        note: None,
+                        observed_at: 1_700_000_000,
+                        modified_at: Some(1_600_000_000),
+                    }],
+                });
+            });
+            window.render_frame(cx);
+            window.click(("save-dated-answer", 0usize), cx);
+            window.render_frame(cx);
+            let words = window
+                .find(("saved-dated-answer", 0usize))
+                .label()
+                .expect("saved answer is on screen")
+                .to_string();
+            assert!(words.contains("keeper-note.txt"), "{words}");
+            assert!(words.contains("lines 3–4"), "{words}");
+            assert!(words.contains("forty-two dinars"), "{words}");
+            assert!(words.contains("14 November 2023"), "{words}");
+            assert!(
+                words.contains("This date is when this version was read."),
+                "{words}"
+            );
+            assert!(
+                words.contains("A later edit of the file does not replace this wording."),
+                "{words}"
+            );
+            assert!(!words.contains("13 September 2020"), "{words}");
+            let lower = words.to_ascii_lowercase();
+            assert!(!lower.contains("market"), "{words}");
+            assert!(!lower.contains("licen"), "{words}");
+            assert!(!lower.contains("industry"), "{words}");
+        })
+        .unwrap();
     }
 
     #[gpui_kit::test]

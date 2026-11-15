@@ -58,6 +58,14 @@ memory and from files attached to one message. See [Files in chat](files.md) and
 source access and model choices. **Guide** explains the memory concepts; examples
 in that section are illustrative rather than your own saved facts.
 
+Search your folders, then press **Save this answer** under a passage. The card
+under **Answers you saved** names the file, the lines, the wording, and the day
+that version was read. That day is the UTC day Sovra read the version. It is
+not a date written in the file, and it is not the file's modified time. A later edit
+of the file does not replace the saved wording. A new search shows the updated
+text. Removing the folder removes that saved answer from the screen. See
+[Save the wording you read](skills-and-file-knowledge.md#save-the-wording-you-read).
+
 Shared knowledge between computers is managed separately in
 [Groups](groups.md). Local storage and backup limitations are covered
 in [Configuration and local data](configuration.md).

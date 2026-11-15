@@ -8,8 +8,10 @@ pub mod clustering;
 mod options;
 pub use options::{DocumentBudget, ScanOptions};
 
+mod dated;
 pub mod graph;
 mod knowledge_browser;
+pub use dated::{DatedAnswer, DatedReading};
 pub use knowledge_browser::KnowledgeBrowserState;
 mod history;
 pub mod live;
@@ -291,6 +293,8 @@ pub struct IndexState {
     pub browser: BrowserState,
     pub roots: Vec<IndexedRoot>,
     pub passages: Vec<IndexPassage>,
+    /// Wording a person saved from a passage. A later search does not replace these.
+    pub saved_answers: Vec<DatedAnswer>,
     pub request_id: u64,
     pub searching: bool,
     pub search_completed: bool,
@@ -365,6 +369,35 @@ impl IndexState {
         self.request_id
     }
 
+    /// Save a passage that is on screen, from a folder that is still connected.
+    /// Saving the same version again keeps the first wording.
+    pub fn save_shown_answer(&mut self, index: usize) -> Result<DatedAnswer, IndexError> {
+        let passage = self
+            .passages
+            .get(index)
+            .filter(|_| self.search_completed)
+            .cloned()
+            .ok_or_else(|| IndexError("Search again, then save the passage you see.".into()))?;
+        if !self
+            .roots
+            .iter()
+            .any(|root| root.id == passage.reference.root_id)
+        {
+            return Err(IndexError("That folder is no longer connected.".into()));
+        }
+        let saved = DatedAnswer::save(&passage)?;
+        if let Some(existing) = self
+            .saved_answers
+            .iter()
+            .find(|answer| answer.reference() == saved.reference())
+            .cloned()
+        {
+            return Ok(existing);
+        }
+        self.saved_answers.push(saved.clone());
+        Ok(saved)
+    }
+
     pub fn apply(&mut self, event: &IndexEvent) {
         match event {
             IndexEvent::KnowledgeBrowsed { request_id, result } => {
@@ -426,6 +459,11 @@ impl IndexState {
                     .retain(|s| roots.iter().any(|r| r.id == s.setting.root_id));
                 self.passages
                     .retain(|p| roots.iter().any(|r| r.id == p.reference.root_id));
+                self.saved_answers.retain(|answer| {
+                    roots
+                        .iter()
+                        .any(|root| root.id == answer.reference().root_id)
+                });
                 self.knowledge_pending.retain(|p| {
                     p.required_roots
                         .iter()
@@ -1034,5 +1072,73 @@ mod tests {
         });
         assert_eq!(state.passages, [] as [IndexPassage; 0]);
         assert!(!state.searching);
+    }
+
+    #[test]
+    fn a_saved_answer_keeps_its_wording_when_the_folder_search_changes() {
+        let mut state = IndexState::default();
+        state.apply(&IndexEvent::Roots(vec![IndexedRoot {
+            id: "scope".into(),
+            path: "/selected".into(),
+            status: IndexStatus::Ready,
+            progress: IndexProgress::default(),
+            issues: vec![],
+            completed_at: None,
+            auto_refresh: false,
+            scan_options: ScanOptions::default(),
+        }]));
+        let request_id = state.begin_search();
+        let passage = IndexPassage {
+            reference: PassageRef {
+                root_id: "scope".into(),
+                file_id: "file".into(),
+                version_id: "version-read".into(),
+                ordinal: 0,
+            },
+            path: "keeper-note.txt".into(),
+            text: "The allotment levy is forty-two dinars.".into(),
+            start_line: 3,
+            end_line: 4,
+            mime_type: "text/plain".into(),
+            note: None,
+            observed_at: 1_700_000_000,
+            modified_at: Some(1_600_000_000),
+        };
+        state.apply(&IndexEvent::Results {
+            request_id,
+            passages: vec![passage],
+        });
+        let saved = state.save_shown_answer(0).expect("shown passage saves");
+        let again = state
+            .save_shown_answer(0)
+            .expect("saving twice keeps the first");
+        assert_eq!(saved, again);
+        assert_eq!(state.saved_answers.len(), 1);
+        let request_id = state.begin_search();
+        state.apply(&IndexEvent::Results {
+            request_id,
+            passages: vec![IndexPassage {
+                reference: PassageRef {
+                    version_id: "version-later".into(),
+                    ..saved.reference().clone()
+                },
+                path: "keeper-note.txt".into(),
+                text: "The allotment levy is ninety-nine dinars.".into(),
+                start_line: 3,
+                end_line: 4,
+                mime_type: "text/plain".into(),
+                note: None,
+                observed_at: 1_800_000_000,
+                modified_at: Some(1_800_000_000),
+            }],
+        });
+        let reading = state.saved_answers[0].reread();
+        assert_eq!(reading.wording, "The allotment levy is forty-two dinars.");
+        assert_eq!(reading.read_on, 1_700_000_000);
+        assert_eq!(reading.file, "keeper-note.txt");
+        assert_eq!((reading.start_line, reading.end_line), (3, 4));
+        assert_ne!(state.passages[0].text, reading.wording);
+        state.apply(&IndexEvent::Roots(vec![]));
+        assert_eq!(state.saved_answers.as_slice(), []);
     }
 }
