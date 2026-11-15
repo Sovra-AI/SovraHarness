@@ -200,7 +200,7 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             "MicrosoftWorkspace",
             "microsoft_workspace",
             "Microsoft 365 Specialist",
-            "Outlook, Teams, OneDrive, SharePoint, Word, and Excel integration.",
+            "Read Outlook email and calendars, Word, Excel and PowerPoint files, Teams conversations, OneNote pages and Planner tasks; prepare Outlook drafts and add appointments or Microsoft To Do tasks when you ask.",
             false,
             ModelTier::Standard,
         ),

@@ -1,12 +1,6 @@
-//! Bakes Sovra's Google "Desktop app" OAuth client and GitHub OAuth App client id
-//! into the binary, so people press **Connect Google** or **Connect GitHub** with
-//! no setup.
-//!
-//! Values come from the build environment (CI, release pipeline) or, failing
-//! that, the gitignored `google-client.env` / `github-client.env` at the workspace
-//! root (local builds). Google documents a desktop client's secret as not
-//! confidential, and a GitHub device-flow client id is public, so shipping them is
-//! allowed; they still never belong in git.
+//! Bakes the public Google desktop and GitHub client settings into binaries.
+//! Microsoft setup belongs to each user and is saved through Connections instead.
+//! Google/GitHub values come from the build environment or their gitignored env files.
 
 use std::path::Path;
 

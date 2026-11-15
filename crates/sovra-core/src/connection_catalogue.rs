@@ -1,8 +1,7 @@
 //! The Connections page: one closed list of the links this app ships.
 //!
 //! A new kind is one [`CatalogueKind`] variant plus one row in [`KINDS`]. It does not
-//! add a sidebar item or a Settings section. Microsoft is known and deliberately
-//! unavailable, so it is never shown as linked. Each card's status
+//! add a sidebar item or a Settings section. Each card's status
 //! is independent: folding one kind cannot change another.
 //!
 //! The first screen is everyday words only. A token, secret, client id, or base URL
@@ -16,6 +15,7 @@ use crate::connections::{TelegramStatus, WhatsAppStatus};
 use crate::github::GitHubState;
 use crate::google::GoogleState;
 use crate::mcp::{McpPhase, McpService};
+use crate::microsoft::MicrosoftState;
 use crate::models::{CatalogState, ModelConnection, ProviderKind};
 
 /// How many installed links a refresh may probe at once.
@@ -37,11 +37,12 @@ pub enum CatalogueKind {
     Telegram,
     Google,
     GitHub,
+    Microsoft,
     WebAddress,
 }
 
 impl CatalogueKind {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::OnlineAi,
         Self::LocalAi,
         Self::CompatibleService,
@@ -49,6 +50,7 @@ impl CatalogueKind {
         Self::Telegram,
         Self::Google,
         Self::GitHub,
+        Self::Microsoft,
         Self::WebAddress,
     ];
 
@@ -61,23 +63,8 @@ impl CatalogueKind {
             Self::Telegram => "telegram",
             Self::Google => "google",
             Self::GitHub => "github",
+            Self::Microsoft => "microsoft",
             Self::WebAddress => "web-address",
-        }
-    }
-}
-
-/// Products the app knows about and does not ship. Never linked, never listed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnavailableKind {
-    Microsoft,
-}
-
-impl UnavailableKind {
-    pub const ALL: [Self; 1] = [Self::Microsoft];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Microsoft => "Microsoft",
         }
     }
 }
@@ -113,7 +100,7 @@ pub struct KindCopy {
 }
 
 /// The closed list. Adding a kind means adding a row here and a variant above.
-pub const KINDS: [KindCopy; 8] = [
+pub const KINDS: [KindCopy; 9] = [
     KindCopy {
         kind: CatalogueKind::OnlineAi,
         title: "An online AI",
@@ -155,6 +142,12 @@ pub const KINDS: [KindCopy; 8] = [
         title: "GitHub",
         sentence: "Approve Sovra on GitHub's page and it can help with your code projects there.",
         action: "Connect GitHub",
+    },
+    KindCopy {
+        kind: CatalogueKind::Microsoft,
+        title: "Microsoft 365",
+        sentence: "Connect your own Outlook, OneDrive and other Microsoft services with guided setup.",
+        action: "Connect Microsoft 365",
     },
     KindCopy {
         kind: CatalogueKind::WebAddress,
@@ -259,13 +252,6 @@ pub fn first_screen_asks_for_secret(text: &str) -> bool {
         .any(|word| lower.contains(word))
 }
 
-/// Microsoft stays unavailable. There is no path that marks it linked.
-pub const fn unavailable_phase(kind: UnavailableKind) -> LinkPhase {
-    match kind {
-        UnavailableKind::Microsoft => LinkPhase::NotLinked,
-    }
-}
-
 /// The pieces the page already knows, plus any probe that has reported since refresh.
 #[derive(Debug)]
 pub struct CatalogueSources<'a> {
@@ -275,6 +261,7 @@ pub struct CatalogueSources<'a> {
     pub telegram: &'a TelegramStatus,
     pub google: &'a GoogleState,
     pub github: &'a GitHubState,
+    pub microsoft: &'a MicrosoftState,
     pub services: &'a [McpService],
     /// A probe result replaces only that kind's derived phase.
     pub probed: &'a BTreeMap<CatalogueKind, LinkPhase>,
@@ -308,6 +295,7 @@ pub fn catalogue_from(sources: &CatalogueSources<'_>) -> ConnectionCatalogue {
         (CatalogueKind::Telegram, telegram_phase(sources.telegram)),
         (CatalogueKind::Google, google_phase(sources.google)),
         (CatalogueKind::GitHub, github_phase(sources.github)),
+        (CatalogueKind::Microsoft, microsoft_phase(sources.microsoft)),
         (CatalogueKind::WebAddress, web_phase(sources.services)),
     ];
     for (kind, phase) in derived {
@@ -384,6 +372,15 @@ pub fn google_phase(state: &GoogleState) -> LinkPhase {
         GoogleState::Unavailable { .. } | GoogleState::NeedsSignIn(_) => LinkPhase::NeedsYou,
         GoogleState::NotConnected => LinkPhase::NotLinked,
         GoogleState::Connected(_) => LinkPhase::Linked,
+    }
+}
+
+pub fn microsoft_phase(state: &MicrosoftState) -> LinkPhase {
+    match state {
+        MicrosoftState::Loading | MicrosoftState::Connecting { .. } => LinkPhase::Working,
+        MicrosoftState::NeedsSetup | MicrosoftState::NeedsSignIn(_) => LinkPhase::NeedsYou,
+        MicrosoftState::NotConnected => LinkPhase::NotLinked,
+        MicrosoftState::Connected(_) => LinkPhase::Linked,
     }
 }
 
@@ -465,6 +462,7 @@ mod tests {
             telegram,
             google,
             github: &GitHubState::NotConnected,
+            microsoft: &MicrosoftState::NotConnected,
             services,
             probed,
         }
@@ -501,18 +499,23 @@ mod tests {
     }
 
     #[test]
-    fn microsoft_is_never_linked_or_listed() {
+    fn microsoft_is_listed_but_only_linked_after_a_real_connection() {
         let catalogue = ConnectionCatalogue::fresh();
-        let listed = catalogue.first_screen_copy().to_ascii_lowercase();
-        for kind in UnavailableKind::ALL {
-            assert_ne!(unavailable_phase(kind), LinkPhase::Linked);
-            assert_eq!(unavailable_phase(kind), LinkPhase::NotLinked);
-            assert!(
-                !listed.contains(&kind.label().to_ascii_lowercase()),
-                "{} must stay off the first screen",
-                kind.label()
-            );
-        }
+        assert!(catalogue.first_screen_copy().contains("Microsoft 365"));
+        assert_eq!(
+            microsoft_phase(&MicrosoftState::NeedsSetup),
+            LinkPhase::NeedsYou
+        );
+        assert_eq!(
+            microsoft_phase(&MicrosoftState::NotConnected),
+            LinkPhase::NotLinked
+        );
+        assert_eq!(
+            microsoft_phase(&MicrosoftState::Connected(
+                crate::microsoft::MicrosoftAccount::default()
+            )),
+            LinkPhase::Linked
+        );
     }
 
     #[test]
@@ -535,6 +538,7 @@ mod tests {
                 telegram: &TelegramStatus::Disconnected,
                 google: &GoogleState::NotConnected,
                 github: &state,
+                microsoft: &MicrosoftState::NotConnected,
                 services: &[],
                 probed: &BTreeMap::new(),
             });
@@ -719,6 +723,7 @@ mod tests {
             telegram: &TelegramStatus::Disconnected,
             google: &google,
             github: &GitHubState::NotConnected,
+            microsoft: &MicrosoftState::NotConnected,
             services: &services,
             probed: &BTreeMap::new(),
         });

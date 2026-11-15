@@ -25,6 +25,8 @@ mod login;
 mod markdown_segments;
 mod memory_view;
 mod message_review;
+mod microsoft_card;
+mod microsoft_setup;
 mod model_connection_editor;
 mod model_details;
 mod model_home;

@@ -26,6 +26,8 @@ mod memory_graph;
 mod memory_sources;
 #[path = "styling/messaging.rs"]
 mod messaging;
+#[path = "styling/microsoft.rs"]
+mod microsoft;
 #[path = "styling/remote_control.rs"]
 mod remote_control;
 #[path = "styling/research_board.rs"]

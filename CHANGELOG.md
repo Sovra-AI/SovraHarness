@@ -14,6 +14,21 @@ package version.
 
 ## [Unreleased]
 
+- **Microsoft 365 connection.** A four-step Connections guide helps each person
+  register their own Microsoft connection, copy the desktop return address and
+  validate their public IDs before browser sign-in with PKCE. Work/school and
+  personal account instructions, an administrator help request, Edit setup and
+  confirmed Forget setup are included. Saved access and service switches survive
+  restart. Helpers can read
+  Outlook, OneDrive, contacts, To Do and OneNote, prepare email drafts, add
+  appointments without guests, and add to-dos. Optional SharePoint, Teams and
+  Planner access asks for additional permissions when needed. Office files use
+  the existing bounded document readers in the same binary. Google and Microsoft
+  share the native callback code. Installed binaries use the same guided setup;
+  no shared Sovra Microsoft registration or release variables are required.
+  Setup and troubleshooting follow Microsoft's documentation. Live sign-in
+  against a real personal/work registration remains an external verification step.
+
 - **Save the wording you read from a folder.** On Your folders, **Save this
   answer** keeps the file, the lines, the wording, and the day that version was
   read. That day is the UTC day the version was read, not a date inside the

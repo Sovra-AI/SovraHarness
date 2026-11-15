@@ -143,6 +143,13 @@ impl LocalFileStore {
 }
 
 impl FileStore for LocalFileStore {
+    fn read_document(&self, name: &str, bytes: &[u8]) -> Result<FileContent, FileError> {
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(FileError("Choose a file of at most 20 MB.".into()));
+        }
+        prepare_bytes("connected-document", name, bytes)
+    }
+
     fn prepare(&self, id: &str, path: &Path) -> Result<Attachment, FileError> {
         self.location(id)?;
         if !fs::metadata(path)

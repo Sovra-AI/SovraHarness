@@ -25,12 +25,15 @@ mod mcp;
 mod memory_capture;
 mod memory_review;
 mod memory_semantic;
+mod microsoft;
 mod model_priority;
 mod models;
 pub use local_models::LocalModelServers;
 mod recalling;
 mod remembering;
 mod schedules;
+mod secret_vault;
+pub use secret_vault::background_vault;
 mod skills;
 mod terminal;
 pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
@@ -306,6 +309,7 @@ pub fn start_with_auth(
             signin: google,
             google: None,
             github: None,
+            microsoft: None,
             development: None,
             remote_control: None,
             probes: Vec::new(),
@@ -337,6 +341,7 @@ pub struct RuntimeServices {
     pub google: Option<Arc<dyn sovra_core::google::GoogleConnector>>,
     /// The person's GitHub account (Connections page and agent tools).
     pub github: Option<Arc<dyn sovra_core::github::GitHubConnector>>,
+    pub microsoft: Option<Arc<dyn sovra_core::microsoft::MicrosoftConnector>>,
     /// Local control follows the build startup policy and remains revocable in Settings.
     pub development: Option<DevelopmentConfig>,
     /// Independently paired phones; always starts disabled.
@@ -456,6 +461,7 @@ async fn serve(
         signin,
         google,
         github,
+        microsoft,
         development,
         remote_control,
         probes,
@@ -493,6 +499,8 @@ async fn serve(
     );
     let google = google::GoogleRuntime::start(google, events.clone(), &handle);
     let github = github::GitHubRuntime::start(github, events.clone(), &handle);
+    let microsoft =
+        microsoft::MicrosoftRuntime::start(microsoft, files.clone(), events.clone(), &handle);
     let groups = groups::GroupRuntime::start(group_services, events.clone(), &handle);
     let training =
         training::TrainingRuntime::start(training, events.clone(), groups.training(), &handle);
@@ -627,6 +635,7 @@ async fn serve(
         .map(|config| development::DevelopmentRuntime::start(config, events.clone(), &handle));
     google.send(sovra_core::google::GoogleCommand::Load);
     github.send(sovra_core::github::GitHubCommand::Load);
+    microsoft.send(sovra_core::microsoft::MicrosoftCommand::Load);
     let (schedules, events) = schedules::SchedulesRuntime::start(
         schedule_store,
         events,
@@ -733,6 +742,7 @@ async fn serve(
             Command::Skills(command) => skills.send(command),
             Command::Google(command) => google.send(command),
             Command::GitHub(command) => github.send(command),
+            Command::Microsoft(command) => microsoft.send(command),
             Command::Schedule(command) => schedules.send(command),
             Command::Group(command) => {
                 if let Err(problem) = groups.send(command) {
@@ -815,6 +825,10 @@ async fn serve(
                 let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
                 let github_tools = github.tools().await;
                 let base = base.with_github(github_tools.as_ref()).unwrap_or(base);
+                let microsoft_tools = microsoft.tools().await;
+                let base = base
+                    .with_microsoft(microsoft_tools.as_ref())
+                    .unwrap_or(base);
                 let schedule_tools = schedules.tools();
                 let base = base.with_schedules(Some(&schedule_tools)).unwrap_or(base);
                 if let Some(previous) = runs.remove(&session_id) {
@@ -921,6 +935,7 @@ async fn serve(
                         messaging: connections.messaging(&session_id),
                         google: google.tools().await,
                         github: github.tools().await,
+                        microsoft: microsoft.tools().await,
                         terminal: if connections.private_access(&session_id) {
                             terminal.access()
                         } else {
@@ -1094,6 +1109,11 @@ async fn serve(
                 } else {
                     None
                 };
+                let microsoft_tools = if private_access {
+                    microsoft.tools().await
+                } else {
+                    None
+                };
                 let selected = selected.map(|base| {
                     if !private_access {
                         return base;
@@ -1103,6 +1123,9 @@ async fn serve(
                         .unwrap_or(base);
                     let base = base.with_google(google_tools.as_ref()).unwrap_or(base);
                     let base = base.with_github(github_tools.as_ref()).unwrap_or(base);
+                    let base = base
+                        .with_microsoft(microsoft_tools.as_ref())
+                        .unwrap_or(base);
                     let base = match terminal.access() {
                         Some(access) => base.with_terminal(access).unwrap_or(base),
                         None => base,

@@ -5,44 +5,18 @@
 //! decides whether each call is still allowed and performs it. Writes are limited
 //! to drafts, calendar events without guests, and to-dos.
 
-use std::collections::BTreeSet;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use adk_core::{Tool, ToolContext};
 use serde_json::{Value, json};
 use sovra_core::google::{GoogleRequest, GoogleService, result_limit};
 
-type CallFuture = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
-type CallFn = Arc<dyn Fn(GoogleRequest) -> CallFuture + Send + Sync>;
+use crate::connected_tools::ConnectedTools;
 
-/// The connected services and how to reach them, supplied by the runtime.
-#[derive(Clone)]
-pub struct GoogleTools {
-    services: BTreeSet<GoogleService>,
-    call: CallFn,
-}
+type CallFn = crate::connected_tools::CallFn<GoogleRequest>;
 
-impl std::fmt::Debug for GoogleTools {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GoogleTools")
-            .field("services", &self.services)
-            .finish_non_exhaustive()
-    }
-}
-
-impl GoogleTools {
-    pub fn from_fn<F, Fut>(services: BTreeSet<GoogleService>, call: F) -> Self
-    where
-        F: Fn(GoogleRequest) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Value, String>> + Send + 'static,
-    {
-        Self {
-            services,
-            call: Arc::new(move |request| Box::pin(call(request))),
-        }
-    }
-}
+/// Connected Google services and their runtime call boundary.
+pub type GoogleTools = ConnectedTools<GoogleService, GoogleRequest>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {

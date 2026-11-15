@@ -449,6 +449,7 @@ pub struct WorkspaceState {
     pub google: crate::google::GoogleConnection,
     /// The GitHub account, folded from [`Event::GitHub`].
     pub github: crate::github::GitHubConnection,
+    pub microsoft: crate::microsoft::MicrosoftConnection,
     /// Terminal commands, approvals and saved rules, folded from [`Event::Terminal`].
     pub terminal: crate::terminal::TerminalState,
     /// The composer sends prompts to the whole team instead of Sovra alone.
@@ -531,6 +532,7 @@ impl WorkspaceState {
             connections: crate::connections::ConnectionsState::default(),
             google: crate::google::GoogleConnection::default(),
             github: crate::github::GitHubConnection::default(),
+            microsoft: crate::microsoft::MicrosoftConnection::default(),
             terminal: crate::terminal::TerminalState::default(),
             team_mode: false,
             development: crate::development::DevelopmentState::default(),
@@ -1350,6 +1352,10 @@ impl WorkspaceState {
             }
             Event::Google(google_event) => {
                 self.google.apply(google_event);
+                None
+            }
+            Event::Microsoft(event) => {
+                self.microsoft.apply(event);
                 None
             }
             Event::GitHub(github_event) => {

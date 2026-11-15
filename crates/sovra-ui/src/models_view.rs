@@ -129,6 +129,7 @@ pub struct ModelsView {
     pub(crate) google: sovra_core::google::GoogleConnection,
     /// GitHub status for the catalogue. The shell copies each GitHub event here.
     pub(crate) github: sovra_core::github::GitHubConnection,
+    pub(crate) microsoft: sovra_core::microsoft::MicrosoftConnection,
     pub(crate) connection_form: Option<ConnectionForm>,
     pub(crate) manual_form: Option<ManualModelForm>,
     pub(crate) form_subscriptions: Vec<Subscription>,
@@ -155,6 +156,7 @@ pub struct ModelsView {
     pub(crate) google_card: Option<Entity<crate::google_card::GoogleCard>>,
     /// The GitHub card on the Connections tab. The shell owns the view.
     pub(crate) github_card: Option<Entity<crate::github_card::GitHubCard>>,
+    pub(crate) microsoft_card: Option<Entity<crate::microsoft_card::MicrosoftCard>>,
     pub(crate) services: sovra_core::mcp::McpState,
     pub(crate) service_name: Entity<InputState>,
     pub(crate) service_address: Entity<InputState>,
@@ -166,6 +168,7 @@ pub struct ModelsView {
     /// The Groups tab: this computer's group, folded from runtime events.
     pub(crate) groups: sovra_core::group::GroupsView,
     pub(crate) groups_form: crate::groups_view::GroupsForm,
+    pub(crate) connections_scroll: gpui_kit::ScrollHandle,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -343,6 +346,7 @@ impl ModelsView {
             open_kind: None,
             google: sovra_core::google::GoogleConnection::default(),
             github: sovra_core::github::GitHubConnection::default(),
+            microsoft: sovra_core::microsoft::MicrosoftConnection::default(),
             connection_form: None,
             manual_form: None,
             form_subscriptions: Vec::new(),
@@ -366,6 +370,7 @@ impl ModelsView {
             terminal: sovra_core::terminal::TerminalState::default(),
             google_card: None,
             github_card: None,
+            microsoft_card: None,
             services: sovra_core::mcp::McpState::default(),
             service_name,
             service_address,
@@ -375,6 +380,7 @@ impl ModelsView {
             services_screen,
             groups: sovra_core::group::GroupsView::default(),
             groups_form,
+            connections_scroll: gpui_kit::ScrollHandle::new(),
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         }

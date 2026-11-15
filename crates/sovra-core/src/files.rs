@@ -237,6 +237,14 @@ impl std::fmt::Debug for FileContent {
 
 /// Synchronous IO port; runtime calls it only from owned blocking tasks.
 pub trait FileStore: Send + Sync {
+    /// Decode a bounded downloaded document without saving it or executing its contents.
+    /// The runtime invokes this on a blocking worker, like local attachment preparation.
+    fn read_document(&self, _name: &str, _bytes: &[u8]) -> Result<FileContent, FileError> {
+        Err(FileError(
+            "This copy of Sovra cannot read downloaded documents yet.".into(),
+        ))
+    }
+
     fn prepare(&self, id: &str, path: &Path) -> Result<Attachment, FileError>;
     fn load(&self, id: &str) -> Result<FileContent, FileError>;
     fn discard(&self, id: &str) -> Result<(), FileError>;

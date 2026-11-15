@@ -35,6 +35,7 @@ fn fresh_sources<'a>(
         telegram,
         google,
         github: &sovra_core::github::GitHubState::NotConnected,
+        microsoft: &sovra_core::microsoft::MicrosoftState::NotConnected,
         services,
         probed,
     }
@@ -59,6 +60,13 @@ fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppCo
             device_sign_in: true,
         }))
         .expect("loopback accepts the scripted GitHub state");
+    events
+        .send_blocking(Event::Microsoft(
+            sovra_core::microsoft::MicrosoftEvent::Changed(
+                sovra_core::microsoft::MicrosoftState::NotConnected,
+            ),
+        ))
+        .expect("Microsoft state");
     settle(cx);
 
     let connections = Vec::new();
@@ -115,7 +123,6 @@ fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppCo
                 "google-client-id",
                 "mcp-service-address",
                 "connection-url",
-                "connection-card-microsoft",
             ] {
                 assert!(
                     window.try_find(id).is_none(),
@@ -239,6 +246,13 @@ fn connections_nav_names_every_linked_kind(cx: &mut TestAppContext) {
             device_sign_in: true,
         }))
         .expect("loopback accepts the scripted GitHub state");
+    events
+        .send_blocking(Event::Microsoft(
+            sovra_core::microsoft::MicrosoftEvent::Changed(
+                sovra_core::microsoft::MicrosoftState::NotConnected,
+            ),
+        ))
+        .expect("loopback accepts the scripted Microsoft state");
     events
         .send_blocking(Event::Connections(ConnectionEvent::StatusChanged(
             linked_whatsapp(),

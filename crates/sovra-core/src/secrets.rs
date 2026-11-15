@@ -11,3 +11,12 @@ pub trait SecretVault: Send + Sync {
     fn set(&self, key: &str, secret: &str) -> Result<(), String>;
     fn delete(&self, key: &str) -> Result<(), String>;
 }
+
+/// Async facade over the same vault. Runtime supplies owned blocking IO so
+/// adapters can persist rotating OAuth tokens without blocking an async worker.
+#[async_trait::async_trait]
+pub trait AsyncSecretVault: Send + Sync {
+    async fn get(&self, key: &str) -> Result<Option<String>, String>;
+    async fn set(&self, key: &str, secret: &str) -> Result<(), String>;
+    async fn delete(&self, key: &str) -> Result<(), String>;
+}

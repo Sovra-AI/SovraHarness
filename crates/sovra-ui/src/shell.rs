@@ -85,6 +85,7 @@ pub struct Shell {
     /// The Google card on the Connections tab.
     google_card: Entity<crate::google_card::GoogleCard>,
     github_card: Entity<crate::github_card::GitHubCard>,
+    microsoft_card: Entity<crate::microsoft_card::MicrosoftCard>,
     _github_try_asking: Subscription,
     /// The conversation, rendered as a cached view: composer cursor blinks, sidebar
     /// and timer updates reuse its last frame instead of laying out every message.
@@ -529,6 +530,17 @@ impl Shell {
                                 cx.notify();
                             });
                         }
+                        if let sovra_core::Event::Microsoft(event) = &event {
+                            if let sovra_core::microsoft::MicrosoftEvent::OpenSignIn { url } = event
+                            {
+                                cx.open_url(url);
+                            }
+                            shell.models.update(cx, |models, cx| {
+                                models.microsoft.apply(event);
+                                cx.notify();
+                            });
+                            shell.microsoft_card.update(cx, |_, cx| cx.notify());
+                        }
                         // GitHub's page opens with the code already on the clipboard.
                         if let sovra_core::Event::GitHub(event) = &event {
                             if let sovra_core::github::GitHubEvent::OpenSignIn { url, code } = event
@@ -772,6 +784,14 @@ impl Shell {
         models.update(cx, |models, _| {
             models.github_card = Some(github_card.clone());
         });
+        let microsoft_card = {
+            let shell = cx.entity().downgrade();
+            let scroll = models.read(cx).connections_scroll.clone();
+            cx.new(|cx| crate::microsoft_card::MicrosoftCard::new(shell, scroll, window, cx))
+        };
+        models.update(cx, |models, _| {
+            models.microsoft_card = Some(microsoft_card.clone());
+        });
         let github_try_asking = cx.subscribe_in(
             &github_card,
             window,
@@ -856,6 +876,7 @@ impl Shell {
             _try_asking: try_asking,
             google_card,
             github_card,
+            microsoft_card,
             _github_try_asking: github_try_asking,
             turn_ticker: None,
             window_title: String::new(),
@@ -882,6 +903,7 @@ impl Shell {
             NavTab::Settings | NavTab::Connections => {
                 self.google_card.update(cx, |_, cx| cx.notify());
                 self.github_card.update(cx, |_, cx| cx.notify());
+                self.microsoft_card.update(cx, |_, cx| cx.notify());
             }
             NavTab::Chat
             | NavTab::MyAis

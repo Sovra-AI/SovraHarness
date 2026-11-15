@@ -28,6 +28,7 @@ pub enum Command {
     Google(crate::google::GoogleCommand),
     /// The GitHub account on the Connections page.
     GitHub(crate::github::GitHubCommand),
+    Microsoft(crate::microsoft::MicrosoftCommand),
     Mcp(crate::mcp::McpCommand),
     /// Terminal approvals and settings.
     Terminal(crate::terminal::TerminalCommand),
@@ -107,6 +108,7 @@ pub enum Event {
     Connections(crate::connections::ConnectionEvent),
     Google(crate::google::GoogleEvent),
     GitHub(crate::github::GitHubEvent),
+    Microsoft(crate::microsoft::MicrosoftEvent),
     Mcp(crate::mcp::McpEvent),
     /// Terminal cards and settings. Not session-scoped: the state is shared and each
     /// call names its own conversation, so cards for background chats are kept too.
@@ -202,6 +204,7 @@ impl Event {
             | Self::Connections(_)
             | Self::Google(_)
             | Self::GitHub(_)
+            | Self::Microsoft(_)
             | Self::Mcp(_)
             | Self::Terminal(_)
             | Self::Schedule(_)

@@ -236,6 +236,18 @@ Read [Architecture](docs/architecture.md) and
 
 ## Documentation
 
+**Connections → Connect Microsoft 365** guides you through connecting your own
+Microsoft registration in four steps: choose your account, register it with
+Microsoft, save the desktop return address, and paste the public IDs. The guide
+includes copy buttons, ID checks and a help request for your administrator.
+No shared Sovra Microsoft account, client secret, configuration file or custom
+binary is needed. Microsoft Entra registration access is required, even for
+personal Outlook accounts. Outlook, OneDrive, contacts, To Do and OneNote are
+included; Teams, SharePoint and Planner are optional service choices. Word,
+Excel and PowerPoint use the existing document readers. The
+[Microsoft 365 guide](docs/microsoft-365.md) covers setup, troubleshooting,
+permissions and service limits.
+
 | Guide | Covers |
 | --- | --- |
 | [Training](docs/training.md) | Train your own small AI: first run, group training and delivery, live numbers, settings, privacy, and limits |

@@ -4,29 +4,10 @@
 //! runtime calls them on a blocking worker; the async ones only do HTTP.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use super::{GoogleAccount, GoogleError, GoogleRequest, GoogleService};
 
-/// Stops a pending sign-in from any thread; waking the waiter is the adapter's job.
-pub type SignInCanceller = Arc<dyn Fn() + Send + Sync>;
-
-/// What the browser handed back, ready to exchange for tokens. Debug hides it.
-#[derive(Clone, PartialEq, Eq)]
-pub struct AuthorizationGrant {
-    pub code: String,
-    /// PKCE verifier generated for this attempt.
-    pub verifier: String,
-    pub redirect_uri: String,
-}
-
-impl std::fmt::Debug for AuthorizationGrant {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuthorizationGrant")
-            .field("redirect_uri", &self.redirect_uri)
-            .finish_non_exhaustive()
-    }
-}
+pub use crate::oauth::{AuthorizationGrant, SignInCanceller};
 
 /// One sign-in attempt: a link for the browser and a single-use local listener.
 pub trait GoogleSignIn: Send + std::fmt::Debug {

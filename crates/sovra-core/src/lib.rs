@@ -11,6 +11,7 @@ mod capabilities;
 pub mod chat_history;
 mod citations;
 pub mod communications;
+pub mod connected_text;
 pub mod connection_catalogue;
 pub mod connections;
 mod context_budget;
@@ -25,7 +26,9 @@ pub mod group;
 mod knowledge;
 pub mod mcp;
 mod memory;
+pub mod microsoft;
 pub mod models;
+pub mod oauth;
 pub mod people;
 mod protocol;
 pub mod providers;
@@ -67,8 +70,8 @@ pub use chat_history::{
 pub use citations::sources_footer;
 pub use connection_catalogue::{
     CatalogueCard, CatalogueKind, CatalogueSources, ConnectionCatalogue, KindCopy, LinkPhase,
-    LinkProbe, PROBE_BOUND, ProbeReport, UnavailableKind, catalogue_from,
-    first_screen_asks_for_secret, unavailable_phase, whatsapp_phase,
+    LinkProbe, PROBE_BOUND, ProbeReport, catalogue_from, first_screen_asks_for_secret,
+    whatsapp_phase,
 };
 pub use connections::{
     AddressBookSnapshot, BridgedMessage, ChannelError, ChannelEvent, ChannelKind, ChannelSession,

@@ -35,6 +35,7 @@ impl RuntimeStatus {
             | Event::Artifacts(_)
             | Event::Google(_)
             | Event::GitHub(_)
+            | Event::Microsoft(_)
             | Event::Schedule(_)
             | Event::Group(_)
             | Event::AgUi { .. }

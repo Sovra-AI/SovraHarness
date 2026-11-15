@@ -1088,6 +1088,7 @@ impl Actor {
             | Event::Development(_)
             | Event::Google(_)
             | Event::GitHub(_)
+            | Event::Microsoft(_)
             | Event::Mcp(_)
             | Event::Terminal(_)
             | Event::Schedule(_)

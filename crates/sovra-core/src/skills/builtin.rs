@@ -79,7 +79,7 @@ impl Skill {
             "spreadsheet" => "Household budget & table builder",
             "communications" => "Send a WhatsApp, Telegram, or group message",
             "google-workspace" => "Gmail, Calendar & Drive helper",
-            "microsoft-workspace" => "Outlook, Word & Excel helper",
+            "microsoft-workspace" => "Microsoft 365 email, files & tasks helper",
             "scheduler" => "Set a repeating task, a timed text, or a morning search note",
             "todos" => "Personal to-do list organizer",
             "github" => "GitHub code & issue helper",
@@ -318,7 +318,7 @@ impl Skill {
             ),
             "microsoft-workspace" => sample_pair(
                 "microsoft-workspace",
-                "Summarize the action items for our Word handout",
+                "Find my latest project emails in Outlook and summarize the action items",
             ),
             "scheduler" => sample_pair(
                 "scheduler",

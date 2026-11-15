@@ -29,8 +29,8 @@ client, use **Use my own Google Cloud client** as described below.
   "Off — turning it on asks Google".
 - Switching a granted service off keeps it off without signing out. Its tools
   disappear on the next reply, and calls already in flight are refused.
-- The browser lands on a self-contained "You're connected — you can close this
-  tab" page (or "Nothing was connected"). If nothing happens for five minutes,
+- The browser lands on a self-contained "Return to Sovra" page; the app confirms
+  connection after token exchange (or the browser says "Nothing was connected"). If nothing happens for five minutes,
   Sovra stops waiting and says so.
 - "Try asking" examples open Chat with the question filled in.
 - A saved desktop client takes precedence over environment configuration, then
@@ -76,6 +76,8 @@ sovra-adk: AdkHarness::with_google(GoogleTools) — tools per switched-on servic
   bounded reqwest + rustls clients for about 15 endpoints. Generated Google
   crates were avoided because they bring a second HTTP/TLS stack (hyper-rustls)
   and heavy compile times.
+- **`sovra-oauth`** owns the native callback listener and PKCE implementation
+  shared with Microsoft, including state validation and cancellation.
 - **`sovra-runtime/src/google.rs`** owns the state machine: restore on start,
   sign-in with a timeout and cancellation, switches, disconnect, and the
   per-call guard that turns tool calls away when a service is off. When a call

@@ -6,3 +6,4 @@
 /.claude/worktrees/
 /google-client.env
 /github-client.env
+/microsoft-client.env

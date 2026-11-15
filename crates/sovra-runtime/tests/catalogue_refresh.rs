@@ -268,6 +268,7 @@ fn shown_phase(state: &ConnectionsState, kind: CatalogueKind) -> LinkPhase {
         telegram: &state.telegram,
         google: &google,
         github: &sovra_core::github::GitHubState::NotConnected,
+        microsoft: &sovra_core::microsoft::MicrosoftState::NotConnected,
         services: &[] as &[McpService],
         probed: &state.probed,
     })

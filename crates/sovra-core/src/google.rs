@@ -12,15 +12,14 @@
 
 mod port;
 mod request;
-mod text;
 
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::connected_text::{clip_text, html_to_text};
 pub use port::{AuthorizationGrant, GoogleConnector, GoogleSignIn, SignInCanceller};
 pub use request::{GoogleRequest, MAX_RESULTS, result_limit};
-pub use text::{clip_text, html_to_text};
 
 /// What a connected Google account lets Sovra do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

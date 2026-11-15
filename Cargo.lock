@@ -14462,6 +14462,7 @@ dependencies = [
  "sovra-github",
  "sovra-google",
  "sovra-mesh",
+ "sovra-microsoft",
  "sovra-providers",
  "sovra-runtime",
  "sovra-skills",
@@ -14549,12 +14550,11 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "futures",
- "getrandom 0.4.3",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sha2 0.11.1",
  "sovra-core",
+ "sovra-oauth",
  "time",
  "tracing",
  "url",
@@ -14579,6 +14579,33 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "sovra-microsoft"
+version = "0.6.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "http",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sovra-core",
+ "sovra-oauth",
+ "time",
+ "url",
+]
+
+[[package]]
+name = "sovra-oauth"
+version = "0.6.0"
+dependencies = [
+ "base64 0.23.1",
+ "getrandom 0.4.3",
+ "sha2 0.11.1",
+ "sovra-core",
+ "url",
 ]
 
 [[package]]

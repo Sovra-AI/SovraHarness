@@ -38,6 +38,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 - [Development MCP](development-mcp.md): inspect and operate the native app for testing.
 - [Styling](styling.md): native tokens, accessibility, and responsive layout.
 - [Releasing](releasing.md): packaging, signing, and release verification.
+- [Microsoft 365 integration](microsoft-365.md): connect your own account with a four-step guide, troubleshooting and service permissions.
 - [Memory evaluation](agent-memory.md) and [retrieval benchmarks](knowledge-benchmark.md): optional measurement tools and what their results mean.
 - [Documentation maintenance](documentation.md): writing and checking these guides.
 

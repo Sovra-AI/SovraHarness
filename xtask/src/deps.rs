@@ -20,7 +20,13 @@ const LAYERS: &[(&str, &[&str])] = &[
     ("sovra-skills", &["sovra-core"]),
     // Google sign-in, keychain-held tokens and Google REST are their own IO boundary
     // behind the core GoogleConnector port; runtime receives it from the composition root.
-    ("sovra-google", &["sovra-core"]),
+    ("sovra-google", &["sovra-core", "sovra-oauth"]),
+    // Shared native OAuth socket/PKCE boundary prevents Google and Microsoft
+    // from maintaining separate callback parsers and cancellation mechanisms.
+    ("sovra-oauth", &["sovra-core"]),
+    // Microsoft Graph and rotating Microsoft credentials form a separate IO port;
+    // only the native callback/PKCE implementation is shared with Google.
+    ("sovra-microsoft", &["sovra-core", "sovra-oauth"]),
     // GitHub sign-in (device flow or a pasted key), keychain-held access and GitHub REST
     // are their own IO boundary behind the core GitHubConnector port, like Google.
     ("sovra-github", &["sovra-core"]),
@@ -54,6 +60,8 @@ const LAYERS: &[(&str, &[&str])] = &[
             "sovra-files",
             "sovra-github",
             "sovra-google",
+            // Composition root supplies Microsoft Graph through its core port.
+            "sovra-microsoft",
             "sovra-mesh",
             "sovra-providers",
             "sovra-runtime",

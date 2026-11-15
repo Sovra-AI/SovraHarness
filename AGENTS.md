@@ -89,6 +89,8 @@ crates/
   sovra-files     Attachment readers, folder indexing and local file IO.
   sovra-skills    Imported skill packages and bounded YAML parsing.
   sovra-google    Google OAuth and REST behind the core GoogleConnector port.
+  sovra-oauth     Shared native OAuth callback, PKCE and cancellation for account adapters.
+  sovra-microsoft Microsoft public-client OAuth and Graph behind core Microsoft ports.
   sovra-github    GitHub device-flow sign-in (or a pasted key) and REST behind the core
                   GitHubConnector port.
   sovra-providers  HTTP catalogs, connection validation, OS credentials and model metadata.

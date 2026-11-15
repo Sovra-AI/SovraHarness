@@ -22,6 +22,8 @@ sovra-files = { path = "crates/sovra-files" }
 sovra-github = { path = "crates/sovra-github" }
 sovra-google = { path = "crates/sovra-google" }
 sovra-mesh = { path = "crates/sovra-mesh" }
+sovra-microsoft = { path = "crates/sovra-microsoft" }
+sovra-oauth = { path = "crates/sovra-oauth" }
 sovra-providers = { path = "crates/sovra-providers" }
 sovra-runtime = { path = "crates/sovra-runtime" }
 sovra-skills = { path = "crates/sovra-skills" }

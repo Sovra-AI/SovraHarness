@@ -19,6 +19,8 @@ The engineering rules are in [AGENTS.md](../AGENTS.md).
 | `sovra-files` | Managed attachments, document readers, and SQLite folder indexing |
 | `sovra-skills` | Imported skill packages and bounded YAML parsing |
 | `sovra-google`, `sovra-github` | OAuth/token setup and service APIs behind core ports |
+| `sovra-oauth` | Shared native browser callback, PKCE and cancellation for account adapters |
+| `sovra-microsoft` | Microsoft public-client sign-in, rotating credentials and bounded Graph access behind core ports |
 | `sovra-whatsapp`, `sovra-telegram` | Messaging adapters behind `MessagingChannel` |
 | `sovra-mesh` | Group storage, signatures, peer transport, and audit replication |
 | `sovra-train` | Burn training engine behind the core `TrainingEngine` port: built-in byte-level models on the processor or a checked graphics card, work packets, text writing, saved-run format, and the hardware probe. The only crate naming `burn` and `sysinfo`. |

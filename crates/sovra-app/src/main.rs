@@ -123,6 +123,10 @@ fn main() -> anyhow::Result<()> {
         Arc::new(CredentialVault(credential_store(&data_dir))),
     )
     .context("failed to prepare GitHub connections")?;
+    let microsoft = sovra_microsoft::Microsoft::new(sovra_runtime::background_vault(Arc::new(
+        CredentialVault(credential_store(&data_dir)),
+    )))
+    .context("failed to prepare Microsoft connections")?;
     let client = sovra_runtime::start_with_services(
         VERSION,
         agent_config,
@@ -155,6 +159,7 @@ fn main() -> anyhow::Result<()> {
             signin: None,
             google: Some(Arc::new(google)),
             github: Some(Arc::new(github)),
+            microsoft: Some(Arc::new(microsoft)),
             development: Some(development),
             remote_control: remote_services(&data_dir),
             probes: Vec::new(),
