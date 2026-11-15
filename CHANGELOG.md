@@ -22,6 +22,11 @@ package version.
   saying it is done. Measured: Ollama writes byte for byte what Sovra writes
   from the same beginning.
 
+- **Check a bucket or an Ollama from the command line.** The
+  `bucket_selftest` and `ollama_selftest` examples send real uploads and a real
+  model with Sovra's own senders; see
+  [Training: Checking a bucket or an Ollama](docs/training.md#checking-a-bucket-or-an-ollama).
+
 - **Back up finished models to your own storage bucket.** Save any
   S3-compatible bucket (Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO
   and others) on the Training page and turn on **Back up finished models**, or

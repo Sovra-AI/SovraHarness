@@ -617,6 +617,25 @@ from anywhere in the text, for the same number of steps and windows. It shares
 the model code and the check with real runs, so a gap between the two rows
 comes only from how a run is organised.
 
+### Checking a bucket or an Ollama
+
+Two small programs exercise the real senders without the app window:
+
+```sh
+# Three uploads to your bucket, exactly as a backup sends them.
+cargo run -p sovra-app --example bucket_selftest -- <storage address> <region> <bucket> <key ID> <secret key>
+# Trains a model, adds it to the local Ollama as <name>, and prints what Sovra writes.
+cargo run --release -p sovra-app --example ollama_selftest -- <name> <folder> <small|medium|large>
+```
+
+Measured with them on this guide's development computer: uploads to a
+RustFS server (an S3-compatible store) were accepted with real
+authentication and read back byte for byte, their signatures matched AWS's
+own `botocore` signer, and a Medium model with its output offsets ran in
+Ollama 0.40.16 with the same five likeliest next bytes, in the same order, as
+an independent calculation from the model file (log-probabilities within
+0.001). Remove the test model afterwards with `ollama rm <name>`.
+
 ## Troubleshooting
 
 | What you see | What to do |
