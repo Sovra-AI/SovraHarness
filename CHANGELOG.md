@@ -14,7 +14,8 @@ package version.
 
 ## [Unreleased]
 
-## [0.8.0] — 2026-11-17
+- Expanded the decision-record guides with chat entry, account switching,
+  fresh acceptance after edits, and help when acceptance is unavailable.
 
 - **Privacy check: does a model repeat your text?** Sending a model never
   sends your text file, but a small model can learn its text by heart and write
