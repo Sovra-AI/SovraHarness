@@ -17,7 +17,7 @@ The engineering rules are in [AGENTS.md](../AGENTS.md).
 | `sovra-providers` | Model catalogs, connection metadata, credentials, and authentication |
 | `sovra-store-surreal` | Embedded SurrealDB implementation of `MemoryStore` |
 | `sovra-files` | Managed attachments, document readers, and SQLite folder indexing |
-| `sovra-skills` | Imported skill packages and bounded YAML parsing |
+| `sovra-skills` | Imported skill packages, bounded YAML parsing, and downloaded plugin storage/catalog publishing |
 | `sovra-google`, `sovra-github` | OAuth/token setup and service APIs behind core ports |
 | `sovra-oauth` | Shared native browser callback, PKCE and cancellation for account adapters |
 | `sovra-microsoft` | Microsoft public-client sign-in, rotating credentials and bounded Graph access behind core ports |
@@ -66,6 +66,10 @@ flowchart LR
 For a new capability, define its protocol and rules in core, perform IO through
 the runtime/adapters, and render the state in UI. Register user-facing capabilities
 in the Skills catalog; see [contribution rules](../CONTRIBUTING.md).
+
+Plugin packages and static catalog publication follow the [plugin contract](plugins.md).
+The existing skills IO boundary owns their persistence; the runtime owns downloads.
+No additional crate or dependency-layer change is needed.
 
 ## Persistence and credentials
 

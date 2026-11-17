@@ -36,6 +36,7 @@ impl Skill {
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
             "decisions" => "Keep a company decision and its reasons",
+            "plugins" => "Add skills from a plugin catalog",
             "connections" => "Link the things Sovra can use",
             "groups" => "Share with your family or team",
             "share-artifact" => "Share a document or list with your group",
@@ -136,7 +137,7 @@ impl Skill {
                 "/schedules ".to_owned(),
             ),
             "agents" => (
-                "Opens My AI's to see how Sovra chooses helpers for each task.".to_owned(),
+                "See your chat AI, change it, or start chatting.".to_owned(),
                 "/agents ".to_owned(),
             ),
             "remote-control" => (
@@ -164,6 +165,7 @@ impl Skill {
                 "Opens your saved documents, checklists, tables, code and website projects. Use folders, favorites, search and sorting to find your work.".to_owned(),
                 "/artifacts ".to_owned(),
             ),
+            "plugins" => ("Open Plugins, paste a catalog address, and download a weekly planning helper.".into(), "/plugins".into()),
             "connections" => (
                 "Opens Connections, where you link an AI, WhatsApp, Telegram, Google, or a service from a web address."
                     .to_owned(),
@@ -424,7 +426,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "agents",
             "My AIs",
-            "View specialist agents and model routing.",
+            "See or change the AI that answers your messages.",
             SkillAction::Agents,
             &["my-ais"],
         ),
@@ -469,6 +471,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Save a decision with your criteria and quoted evidence, ask a second person to accept it, and keep its review date and history.",
             SkillAction::Decisions,
             &["decision-records"],
+        ),
+        action(
+            "plugins",
+            "Add skills from a plugin catalog",
+            "Browse downloadable helpers from a catalog you trust, then choose which ones to turn on.",
+            SkillAction::Plugins,
+            &[],
         ),
         action(
             "connections",

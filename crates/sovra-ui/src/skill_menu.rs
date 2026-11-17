@@ -92,6 +92,10 @@ impl Shell {
             SkillAction::Help => {
                 self.select_tab(NavTab::Skills, cx);
             }
+            SkillAction::Plugins => {
+                self.skill_library.plugins.open = true;
+                self.select_tab(NavTab::Skills, cx);
+            }
             SkillAction::NewChat => self.start_new_chat(window, cx),
             SkillAction::Training => self.select_tab(NavTab::Training, cx),
             SkillAction::Models => self.select_tab(NavTab::Models, cx),
@@ -202,23 +206,24 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> Option<impl Into
             }))
             .children(matches.into_iter().enumerate().map(|(index, skill)| {
                 let name = skill.name.clone();
-                design::button(
-                    ("skill-command", index),
-                    format!("/{} · {}", skill.name, skill.title),
-                    cx,
-                )
-                .ghost()
-                .selected(index == selected)
-                .w_full()
-                .justify_start()
-                .accessibility_label(format!(
-                    "/{}. {} {}",
-                    skill.name, skill.description, skill.argument_hint
-                ))
-                .tooltip(format!("{} {}", skill.description, skill.argument_hint))
-                .on_click(
-                    cx.listener(move |shell, _, window, cx| shell.choose_skill(&name, window, cx)),
-                )
+                design::button(("skill-command", index), "", cx)
+                    .ghost()
+                    .selected(index == selected)
+                    .w_full()
+                    .justify_start()
+                    .child(design::slash_pill(
+                        gpui_kit::SharedString::from(format!("skill-menu-slash-pill-{index}")),
+                        cx,
+                    ))
+                    .child(format!("{} · {}", skill.name, skill.title))
+                    .accessibility_label(format!(
+                        "/{}. {} {}",
+                        skill.name, skill.description, skill.argument_hint
+                    ))
+                    .tooltip(format!("{} {}", skill.description, skill.argument_hint))
+                    .on_click(cx.listener(move |shell, _, window, cx| {
+                        shell.choose_skill(&name, window, cx);
+                    }))
             })),
     )
 }
@@ -378,6 +383,13 @@ mod tests {
         let (shell, window) = open(cx, size(px(1280.), px(820.)));
         cx.update_window(window.into(), |_, window, cx| {
             draft(&shell, "/", window, cx);
+            assert!(window.find("skill-menu-slash-pill-0").visible());
+            let row = window
+                .find(("skill-command", 0usize))
+                .label()
+                .unwrap()
+                .to_string();
+            assert!(row.starts_with('/'), "{row}");
         })
         .unwrap();
         cx.simulate_keystrokes(window.into(), "down");
@@ -498,6 +510,10 @@ mod tests {
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
             window.render_frame(cx);
             assert!(window.find("sovra-skills-view").visible());
+            assert!(window.find("skills-slash-pill-1").visible());
+            assert!(window.find("skills-slash-pill-2").visible());
+            let tip = window.find("skills-tip").label().unwrap().to_string();
+            assert!(tip.contains('/'), "{tip}");
             assert!(window.try_find("skills-how-it-works").is_none());
             assert!(window.find("skill-category-filters").visible());
             assert!(window.find("skill-import").visible());

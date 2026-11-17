@@ -12,8 +12,8 @@ use gpui_kit::{
 };
 use sovra_core::models::ChromeKey;
 use sovra_core::{
-    ChatHistoryFilter, Command, DecisionBackend, ModelTier, NavTab, RuntimeStatus, ScheduleCommand,
-    ScheduleStatus, ScreenRoute, SelectionMode, TimelineRange, WorkspaceState,
+    ChatHistoryFilter, Command, NavTab, RuntimeStatus, ScheduleCommand, ScheduleStatus,
+    ScreenRoute, TimelineRange, WorkspaceState,
 };
 
 use crate::RuntimeClient;
@@ -67,8 +67,6 @@ pub struct Shell {
     login_password_input: Entity<InputState>,
     /// Enter in the password box uses the same sign-in as the button.
     _login_password_events: Subscription,
-    sim_route_input: Entity<InputState>,
-    pub(crate) my_ais_advanced_open: bool,
     pub(crate) knowledge_times_open: bool,
     pub(crate) knowledge_section: crate::knowledge_view::KnowledgeSection,
     pub(crate) knowledge_scroll: gpui_kit::ScrollHandle,
@@ -216,10 +214,6 @@ impl Shell {
                     shell.submit_login(cx);
                 }
             });
-        let sim_route_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Type any prompt to test Laya / OpenJev routing tree...")
-        });
         let people_message_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Write a message"));
         let people_search_input =
@@ -421,6 +415,9 @@ impl Shell {
                         }
                         if let sovra_core::Event::FileIndex(event) = &event {
                             shell.file_index.apply(event);
+                        }
+                        if let sovra_core::Event::Plugins(event) = &event {
+                            shell.skill_library.plugins.state.apply(event);
                         }
                         if let sovra_core::Event::Skills(event) = &event {
                             shell.skill_library.notice = match shell.skills.apply(event) {
@@ -891,8 +888,6 @@ impl Shell {
             login_email_input,
             login_password_input,
             _login_password_events: login_password_events,
-            sim_route_input,
-            my_ais_advanced_open: false,
             knowledge_times_open: false,
             knowledge_section: crate::knowledge_view::KnowledgeSection::default(),
             knowledge_scroll: gpui_kit::ScrollHandle::new(),
@@ -1062,6 +1057,18 @@ impl Shell {
             .update(cx, |view, cx| view.open_source(action, cx));
     }
 
+    pub(crate) fn navigate_to_tab(
+        &mut self,
+        tab: NavTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Native buttons preserve mouse focus. Release the old page's input so
+        // Tab reaches controls on the newly opened page.
+        self.focus_handle.focus(window, cx);
+        self.select_tab(tab, cx);
+    }
+
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
         self.state.select_tab(tab);
         if tab == NavTab::Training {
@@ -1100,7 +1107,10 @@ impl Shell {
             }
             cx.notify();
         });
-        if matches!(tab, NavTab::Models | NavTab::Settings | NavTab::Connections) {
+        if matches!(
+            tab,
+            NavTab::MyAis | NavTab::Models | NavTab::Settings | NavTab::Connections
+        ) {
             let _ = cx
                 .global::<RuntimeClient>()
                 .0
@@ -1173,78 +1183,9 @@ impl Shell {
         self.models.clone()
     }
 
-    pub fn set_routing_mode(&mut self, mode: SelectionMode, cx: &mut Context<Self>) {
-        self.state.set_routing_mode(mode);
-        self.sync_routing_to_runtime(cx);
-        self.refresh(cx);
-    }
-
-    pub fn set_decision_backend(&mut self, backend: DecisionBackend, cx: &mut Context<Self>) {
-        self.state.set_decision_backend(backend);
-        self.sync_routing_to_runtime(cx);
-        self.refresh(cx);
-    }
-
-    pub fn cycle_specialist_tier(
-        &mut self,
-        specialist_id: &str,
-        next_tier: ModelTier,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(specialist) = self
-            .state
-            .specialists
-            .iter()
-            .find(|spec| spec.id == specialist_id)
-        else {
-            return;
-        };
-        // Effort changes must not silently pin the current global model to a helper.
-        let model_override = specialist.model_override.clone();
-        self.state
-            .set_specialist_model(specialist_id, model_override.clone(), next_tier);
-        let _ = cx
-            .global::<RuntimeClient>()
-            .0
-            .send(Command::SetSpecialistModel {
-                specialist_id: specialist_id.to_owned(),
-                model_override,
-                preferred_tier: next_tier,
-            });
-        self.refresh(cx);
-    }
-
-    pub fn toggle_my_ais_advanced(&mut self, cx: &mut Context<Self>) {
-        self.my_ais_advanced_open = !self.my_ais_advanced_open;
-        self.refresh(cx);
-    }
-
     pub fn toggle_knowledge_times(&mut self, cx: &mut Context<Self>) {
         self.knowledge_times_open = !self.knowledge_times_open;
         self.refresh(cx);
-    }
-
-    pub fn simulate_route_from_input(&mut self, cx: &mut Context<Self>) {
-        let raw = self.sim_route_input.read(cx).value().to_string();
-        let prompt = if raw.trim().is_empty() {
-            "Debug and refactor this Rust trait implementation".to_owned()
-        } else {
-            raw
-        };
-        let _ = self.state.simulate_route_offline(&prompt);
-        let _ = cx
-            .global::<RuntimeClient>()
-            .0
-            .send(Command::SimulateRoute { prompt });
-        self.refresh(cx);
-    }
-
-    fn sync_routing_to_runtime(&self, cx: &mut Context<Self>) {
-        let _ = cx.global::<RuntimeClient>().0.send(Command::UpdateRouting {
-            mode: self.state.routing.mode,
-            backend: self.state.routing.backend,
-            global_model: self.state.routing.global_model.clone(),
-        });
     }
 
     pub fn submit_login(&mut self, cx: &mut Context<Self>) {
@@ -2229,13 +2170,8 @@ impl Shell {
                             .into_any_element()
                     }
                     NavTab::Training => self.training_view.clone().into_any_element(),
-                    NavTab::MyAis => render_my_ais_view(
-                        &self.state,
-                        &self.sim_route_input,
-                        self.my_ais_advanced_open,
-                        cx,
-                    )
-                    .into_any_element(),
+                    NavTab::MyAis => render_my_ais_view(&self.models, self.state.routing.mode, cx)
+                        .into_any_element(),
                     NavTab::Schedules => render_schedules_view(
                         &self.state,
                         &crate::schedules_view::ScheduleForm {

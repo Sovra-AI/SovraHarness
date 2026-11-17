@@ -1,8 +1,10 @@
 # Building and releasing installers
 
-Sovra uses Velopack 1.2.161 for native installers and update feeds. The app handles
-Velopack install hooks at startup, but does not yet check for or apply updates
-through an in-app update flow.
+Sovra uses the Velopack 1.2.161 CLI for native installers and update feeds. The
+Rust startup library is pinned separately to 1.3.39-g8d2844f because the stable
+1.2 library requires vulnerable ZIP dependencies. Its install-hook implementation
+is unchanged. The app handles install hooks at startup, but does not check for
+or apply updates through an in-app update flow.
 
 ## Build a local installer
 

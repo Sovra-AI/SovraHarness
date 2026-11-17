@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "io.github.sovra.weekly-planning",
+      "title": "Weekly planning",
+      "description": "A simple helper for choosing priorities and planning your week.",
+      "version": "1.0.0",
+      "package_url": "https://YOUR-ACCOUNT.github.io/YOUR-REPOSITORY/packages/weekly-planning-1.0.0.json",
+      "sha256": "053af3c0dfbb99abf5de1df5cd3f096acf5708153093604339e280c50595ba13",
+      "api_version": 1
+    }
+  ],
+  "next": null,
+  "previous": null
+}

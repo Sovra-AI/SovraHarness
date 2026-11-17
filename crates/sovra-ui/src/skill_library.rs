@@ -38,10 +38,11 @@ pub(crate) enum SkillCategoryFilter {
     Presentation,
     Workspace,
     Custom,
+    Plugins,
 }
 
 impl SkillCategoryFilter {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::All,
         Self::Research,
         Self::Files,
@@ -50,6 +51,7 @@ impl SkillCategoryFilter {
         Self::Presentation,
         Self::Workspace,
         Self::Custom,
+        Self::Plugins,
     ];
 
     fn id(self) -> &'static str {
@@ -62,6 +64,7 @@ impl SkillCategoryFilter {
             Self::Presentation => "skill-filter-presentation",
             Self::Workspace => "skill-filter-workspace",
             Self::Custom => "skill-filter-custom",
+            Self::Plugins => "skill-filter-plugins",
         }
     }
 
@@ -76,6 +79,7 @@ impl SkillCategoryFilter {
             Self::Presentation => "Presentation",
             Self::Workspace => "Workspace",
             Self::Custom => OWN,
+            Self::Plugins => "Plugins",
         };
         GROUPS.iter().find(|group| group.key == key)
     }
@@ -102,6 +106,7 @@ enum EditorExit {
 }
 
 pub(crate) struct SkillLibrary {
+    pub(crate) plugins: crate::plugin_browser::PluginBrowser,
     search: Entity<InputState>,
     category: SkillCategoryFilter,
     name: Entity<InputState>,
@@ -171,6 +176,7 @@ impl SkillLibrary {
         });
         Self {
             search,
+            plugins: crate::plugin_browser::PluginBrowser::new(window, cx),
             category: SkillCategoryFilter::All,
             name: cx.new(|cx| InputState::new(window, cx).placeholder("e.g. weekly-check-in")),
             title: cx.new(|cx| InputState::new(window, cx).placeholder("e.g. Weekly check-in")),
@@ -477,6 +483,10 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     (view.exit == EditorExit::ConfirmDiscard).then(|| discard_confirmation(cx)),
                 )
                 .children(editing.then(|| editor(view, cx)))
+                .children(
+                    (!editing && view.plugins.open)
+                        .then(|| crate::plugin_browser::render(shell, cx)),
+                )
                 .children((!editing).then(|| render_categories(shell, view, &query, cx)))
                 .children((!editing).then(|| render_skills_catalog(shell, view, &query, cx))),
         )
@@ -496,6 +506,14 @@ fn render_header(
         "{total} skills ready to use. In chat, type / to pick one, or /help to come back here."
     );
     let actions = h_flex()
+        .child(
+            design::button("plugins-open", "Plugins", cx)
+                .disabled(saving)
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    shell.skill_library.plugins.open = !shell.skill_library.plugins.open;
+                    cx.notify();
+                })),
+        )
         .flex_wrap()
         .items_center()
         .gap(t.space.small)
@@ -568,10 +586,11 @@ fn render_header(
                 div()
                     .id("skills-tip")
                     .test_support()
+                    .aria_label(tip.clone())
                     .min_w_0()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
-                    .child(tip),
+                    .child(design::text_with_slash_pills("skills", &tip, cx)),
             ),
     )
 }
@@ -631,11 +650,18 @@ const OWN: &str = "Your skills";
 const OTHER: &str = "";
 
 /// Page order: your own first, everyday helpers next, shortcuts to Sovra's pages last.
-const GROUPS: [Group; 8] = [
+const GROUPS: [Group; 9] = [
     Group {
         key: OWN,
         heading: "Made by you",
         blurb: "Recipes you taught Sovra in your own words.",
+        icon: IconName::BookOpen,
+        tone: |tiles| tiles.categories[4],
+    },
+    Group {
+        key: "Plugins",
+        heading: "From plugins",
+        blurb: "Skills from plugins you have turned on.",
         icon: IconName::BookOpen,
         tone: |tiles| tiles.categories[4],
     },
@@ -691,6 +717,12 @@ const GROUPS: [Group; 8] = [
 ];
 
 fn group_key(skill: &Skill) -> &'static str {
+    if skill
+        .metadata
+        .contains_key(sovra_core::plugins::PLUGIN_METADATA_KEY)
+    {
+        return "Plugins";
+    }
     if !skill.builtin || skill.category == OWN {
         return OWN;
     }
@@ -1032,9 +1064,18 @@ fn editor(view: &SkillLibrary, cx: &mut Context<Shell>) -> impl IntoElement + us
                 )
                 .child(
                     div()
+                        .id("skill-editor-slash-hint")
+                        .test_support()
+                        .aria_label(
+                            "Turn this off to use it only when you pick it from the / menu.",
+                        )
                         .sovra_text(TextRole::Caption, cx)
                         .text_color(t.text_secondary)
-                        .child("Turn this off to use it only when you pick it from the / menu."),
+                        .child(design::text_with_slash_pills(
+                            "skill-editor",
+                            "Turn this off to use it only when you pick it from the / menu.",
+                            cx,
+                        )),
                 ),
         )
         .child(
@@ -1231,8 +1272,13 @@ fn card(
         )
         .child(
             div()
+                .id(("skill-example", index))
+                .test_support()
                 .w_full()
                 .min_w_0()
+                .max_w_full()
+                .overflow_hidden()
+                .whitespace_normal()
                 .py(t.space.compact)
                 .px(t.space.small)
                 .rounded(t.radius.input)
@@ -1241,7 +1287,11 @@ fn card(
                 .bg(t.subtle)
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
-                .child(copy.example_display),
+                .child(
+                    design::paragraph(copy.example_display)
+                        .id(("skill-example-copy", index))
+                        .whitespace_normal(),
+                ),
         )
         // Pushes the buttons to the bottom so cards in a row line up.
         .child(div().flex_1());
@@ -1307,7 +1357,11 @@ fn card(
                 }),
         );
     }
-    if !skill.builtin {
+    if !skill.builtin
+        && !skill
+            .metadata
+            .contains_key(sovra_core::plugins::PLUGIN_METADATA_KEY)
+    {
         actions = actions
             .child(
                 design::button(("skill-edit", index), "Edit", cx)

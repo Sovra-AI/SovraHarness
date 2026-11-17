@@ -88,7 +88,7 @@ in the style you taught them; they do not change the AI answering your chats.
 
 | I want to… | Start here |
 | --- | --- |
-| Inspect routing and effort choices | [My AI's and routing](models.md#my-ais-and-routing) |
+| See or change your chat AI | [My AIs](models.md#my-ais) |
 | Attach a document, picture or recording | [Files in chat](files.md) |
 | Read or search a folder | [Skills and file knowledge](skills-and-file-knowledge.md) |
 | See what Sovra remembers and where it came from | [Reviewing knowledge](knowledge.md) |

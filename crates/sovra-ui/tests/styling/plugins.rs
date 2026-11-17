@@ -1,0 +1,219 @@
+//! Catalog controls use the native command boundary at narrow and enlarged sizes.
+use super::*;
+use sovra_core::{
+    Command, Event,
+    plugins::{
+        InstalledPlugin, PluginCatalog, PluginCommand, PluginEntry, PluginEvent, PluginLibrary,
+    },
+};
+
+fn reveal(
+    window: &mut gpui_kit::Window,
+    id: impl Into<gpui_kit::ElementId>,
+    cx: &mut gpui_kit::App,
+) {
+    reveal_in(window, "sovra-skills-view", id, cx);
+}
+
+fn reveal_in(
+    window: &mut gpui_kit::Window,
+    pane_id: &'static str,
+    id: impl Into<gpui_kit::ElementId>,
+    cx: &mut gpui_kit::App,
+) {
+    let id = id.into();
+    for _ in 0..60 {
+        window.render_frame(cx);
+        let pane = window.find(pane_id).bounds();
+        let target = window.find(id.clone()).bounds();
+        assert!(
+            target.left() >= pane.left() && target.right() <= pane.right(),
+            "plugin control overflows horizontally"
+        );
+        if target.top() >= pane.top() && target.bottom() <= pane.bottom() {
+            return;
+        }
+        let delta = if target.top() < pane.top() {
+            pane.top() - target.top()
+        } else {
+            pane.bottom() - target.bottom()
+        };
+        window.scroll(
+            pane_id,
+            gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), delta)),
+            cx,
+        );
+    }
+    panic!("plugin control must be reachable");
+}
+
+#[gpui_kit::test]
+fn catalog_download_and_activation_controls_fit_supported_sizes(cx: &mut TestAppContext) {
+    for (width, height, scale) in [
+        (640., 420., 100),
+        (2560., 1440., 100),
+        (640., 420., 200),
+        (2560., 1440., 200),
+    ] {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(scale),
+                    cx,
+                );
+            });
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let shell = cx.new(|cx| Shell::new(0, window, cx));
+                shell.update(cx, |shell, cx| {
+                    shell.select_tab(sovra_core::NavTab::Skills, cx);
+                });
+                Root::new(shell, window, cx)
+            });
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, "plugins-open", cx);
+                window.click("plugins-open", cx);
+                reveal(window, "plugin-catalog-url", cx);
+                window.click("plugin-catalog-url", cx);
+                window.input("https://example.github.io/plugins/catalog.json", cx);
+                reveal(window, "plugin-browse", cx);
+                window.click("plugin-browse", cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Plugins(PluginCommand::Browse { url }) if url == "https://example.github.io/plugins/catalog.json")));
+            let entry = PluginEntry::for_package(
+                "https://example.github.io/plugins/package.json".into(),
+                include_bytes!("../../../../examples/plugins/packages/weekly-planning-1.0.0.json"),
+            )
+            .unwrap();
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Catalog {
+                    url: "https://example.github.io/plugins/catalog.json".into(),
+                    catalog: PluginCatalog {
+                        schema_version: 1,
+                        plugins: vec![entry.clone()],
+                        next: Some("https://example.github.io/plugins/page2.json".into()),
+                        previous: None,
+                    },
+                }))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, ("plugin-install", 0usize), cx);
+                window.click(("plugin-install", 0usize), cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Plugins(PluginCommand::Install { id }) if id == entry.id)));
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Loaded(PluginLibrary {
+                    catalog_url: Some("https://example.github.io/plugins/catalog.json".into()),
+                    installed: vec![InstalledPlugin {
+                        entry: entry.clone(),
+                        catalog_url: "https://example.github.io/plugins/catalog.json".into(),
+                        enabled: false,
+                    }],
+                })))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, ("plugin-toggle", 0usize), cx);
+                window.click(("plugin-toggle", 0usize), cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Plugins(PluginCommand::SetEnabled { id, enabled: true }) if id == entry.id)));
+            cx.update_window(window.into(), |_, window, _| window.remove_window())
+                .unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn plugin_services_use_the_existing_connection_form_without_auto_connecting(
+    cx: &mut TestAppContext,
+) {
+    use sovra_core::plugins::{PluginPackage, PluginService};
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
+        shell.update(cx, |shell, cx| {
+            shell.select_tab(sovra_core::NavTab::Skills, cx);
+        });
+        Root::new(shell, window, cx)
+    });
+    let mut package: PluginPackage = serde_json::from_slice(include_bytes!(
+        "../../../../examples/plugins/packages/weekly-planning-1.0.0.json"
+    ))
+    .unwrap();
+    package.services.push(PluginService {
+        name: "Planning service".into(),
+        address: "https://planning.example/mcp".into(),
+    });
+    let entry = PluginEntry::for_package(
+        "https://example.com/package.json".into(),
+        &serde_json::to_vec(&package).unwrap(),
+    )
+    .unwrap();
+    for enabled in [false, true] {
+        events
+            .send_blocking(Event::Plugins(PluginEvent::Loaded(PluginLibrary {
+                catalog_url: None,
+                installed: vec![InstalledPlugin {
+                    entry: entry.clone(),
+                    catalog_url: "https://example.com/catalog.json".into(),
+                    enabled,
+                }],
+            })))
+            .unwrap();
+        events
+            .send_blocking(Event::Plugins(PluginEvent::Details {
+                id: entry.id.clone(),
+                package: package.clone(),
+            }))
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            if !enabled {
+                reveal(window, "plugins-open", cx);
+                window.click("plugins-open", cx);
+            }
+            reveal(window, ("plugin-service", 0usize), cx);
+            if enabled {
+                assert_ne!(
+                    window.find(("plugin-service", 0usize)).disabled(),
+                    Some(true)
+                );
+            } else {
+                assert_eq!(
+                    window.find(("plugin-service", 0usize)).disabled(),
+                    Some(true)
+                );
+            }
+            if enabled {
+                window.click(("plugin-service", 0usize), cx);
+            }
+        })
+        .unwrap();
+    }
+    assert!(
+        !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+            command,
+            Command::Mcp(sovra_core::mcp::McpCommand::Connect { .. })
+        ))
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        reveal_in(window, "connections-scroll", "mcp-connect", cx);
+        assert_ne!(window.find("mcp-connect").disabled(), Some(true));
+        window.click("mcp-connect", cx);
+    })
+    .unwrap();
+    assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Mcp(sovra_core::mcp::McpCommand::Connect { name, address, secret: None }) if name == "Planning service" && address == "https://planning.example/mcp")));
+}

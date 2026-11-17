@@ -31,6 +31,7 @@ pub mod microsoft;
 pub mod models;
 pub mod oauth;
 pub mod people;
+pub mod plugins;
 mod protocol;
 pub mod providers;
 pub mod remote_control;

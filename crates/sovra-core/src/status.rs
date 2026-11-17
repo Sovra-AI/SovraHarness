@@ -38,6 +38,7 @@ impl RuntimeStatus {
             | Event::GitHub(_)
             | Event::Microsoft(_)
             | Event::Schedule(_)
+            | Event::Plugins(_)
             | Event::Group(_)
             | Event::AgUi { .. }
             | Event::FilePrepared(_)

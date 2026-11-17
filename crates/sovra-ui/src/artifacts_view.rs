@@ -27,7 +27,7 @@ use gpui_kit::{
 };
 use sovra_core::artifacts::{
     Artifact, ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactFilter, ArtifactKind,
-    ArtifactSort, ArtifactSource, KINDS,
+    ArtifactSort, ArtifactSource, KINDS, source_card_lines,
 };
 use sovra_core::group::{
     DetailStatus, GroupCommand, OpHash, SharedArtifact, SharingState, check_artifact, lineage_ids,
@@ -78,10 +78,85 @@ fn preview_markdown(kind: ArtifactKind, language: &str, content: &str) -> String
     }
 }
 
-/// The first words of a shared artifact, on one line.
+/// The first words of a shared piece of writing, on one line.
+/// Code and web pages use `source_card_lines` instead.
 fn snippet(content: &str) -> String {
     let flat: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
     flat.chars().take(160).collect()
+}
+
+/// What a card shows under its caption. Source stays text; nothing is run.
+enum CardBlurb {
+    Sentence(String),
+    Source(Vec<String>),
+}
+
+fn card_blurb(kind: ArtifactKind, content: &str, sentence: String) -> CardBlurb {
+    if kind.previews_as_source() {
+        let lines = source_card_lines(content);
+        if !lines.is_empty() {
+            return CardBlurb::Source(lines);
+        }
+    }
+    CardBlurb::Sentence(sentence)
+}
+
+fn blurb_name(blurb: &CardBlurb) -> String {
+    match blurb {
+        CardBlurb::Sentence(sentence) => sentence.clone(),
+        CardBlurb::Source(lines) => lines.join("\n"),
+    }
+}
+
+fn render_card_blurb(
+    id: impl Into<gpui_kit::ElementId>,
+    blurb: &CardBlurb,
+    cx: &mut Context<ArtifactsView>,
+) -> gpui_kit::AnyElement {
+    let t = design::tokens(cx);
+    let name = blurb_name(blurb);
+    match blurb {
+        CardBlurb::Sentence(sentence) => div()
+            .id(id)
+            .test_support()
+            .aria_label(name)
+            .w_full()
+            .min_w_0()
+            .overflow_hidden()
+            .sovra_text(TextRole::Body, cx)
+            .text_color(t.text_secondary)
+            .line_clamp(2)
+            .child(sentence.clone())
+            .into_any_element(),
+        CardBlurb::Source(lines) => {
+            let mono = cx.theme().mono_font_family.clone();
+            let mono_size = cx.theme().mono_font_size;
+            let ink = cx.theme().foreground;
+            v_flex()
+                .id(id)
+                .test_support()
+                .aria_label(name)
+                .w_full()
+                .min_w_0()
+                .max_w_full()
+                .overflow_hidden()
+                .p(t.space.small)
+                .rounded(t.chat.code_radius)
+                .bg(t.code_background)
+                .children(lines.iter().map(|line| {
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .truncate()
+                        .font_family(mono.clone())
+                        .text_size(mono_size)
+                        .text_color(ink)
+                        .child(line.clone())
+                }))
+                .into_any_element()
+        }
+    }
 }
 
 /// A shared artifact as a card shows it, without its (possibly large) content.
@@ -91,7 +166,7 @@ struct SharedCard {
     kind: ArtifactKind,
     shared_by: String,
     shared_at: Timestamp,
-    snippet: String,
+    blurb: CardBlurb,
     two_versions: bool,
     /// "Just you and Dad" for a two-person space.
     space_label: Option<String>,
@@ -306,7 +381,7 @@ impl ArtifactsView {
                 kind: artifact.kind,
                 shared_by: artifact.shared_by.clone(),
                 shared_at: artifact.shared_at,
-                snippet: snippet(&artifact.content),
+                blurb: card_blurb(artifact.kind, &artifact.content, snippet(&artifact.content)),
                 two_versions: matches!(artifact.status, DetailStatus::Disputed { .. }),
                 space_label: groups.space_label(&artifact.space),
             })
@@ -1732,13 +1807,11 @@ fn shared_card(
                 .text_color(t.text_secondary)
                 .child(caption),
         )
-        .child(
-            div()
-                .sovra_text(TextRole::Body, cx)
-                .text_color(t.text_secondary)
-                .line_clamp(2)
-                .child(card.snippet.clone()),
-        )
+        .child(render_card_blurb(
+            ("shared-artifact-blurb", index),
+            &card.blurb,
+            cx,
+        ))
         .child(
             h_flex().child(
                 design::button(("shared-artifact-open", index), "Open", cx)
@@ -1830,13 +1903,11 @@ fn artifact_card(
                     format_relative_time(artifact.updated_at, now)
                 )),
         )
-        .child(
-            div()
-                .sovra_text(TextRole::Body, cx)
-                .text_color(t.text_secondary)
-                .line_clamp(2)
-                .child(artifact.preview()),
-        )
+        .child(render_card_blurb(
+            ("artifact-blurb", index),
+            &card_blurb(artifact.kind, &artifact.content, artifact.preview()),
+            cx,
+        ))
         .child(div().sovra_text(TextRole::Caption, cx).child(format!(
             "{}{}",
             if artifact.pinned { "Favorite · " } else { "" },

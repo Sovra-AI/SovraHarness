@@ -31,6 +31,7 @@ fn new_chat_help_hint_fits_both_themes_and_reduced_motion(cx: &mut TestAppContex
                         let hint = window.find("chat-welcome-help-hint");
                         assert!(hint.visible());
                         assert!(hint.label().unwrap().contains("/help"));
+                        assert!(window.find("welcome-slash-pill-1").visible());
                         let bounds = hint.bounds();
                         assert!(bounds.left() >= px(0.) && bounds.right() <= dimensions.width);
                         assert!(bounds.top() >= px(0.) && bounds.bottom() <= dimensions.height);

@@ -68,7 +68,7 @@ impl NavTab {
     pub fn label(self) -> &'static str {
         match self {
             Self::Chat => "Chat",
-            Self::MyAis => "My AI's",
+            Self::MyAis => "My AIs",
             Self::Knowledge => "Knowledge",
             Self::Models => "Models",
             Self::Schedules => "Schedules",
@@ -1335,6 +1335,7 @@ impl WorkspaceState {
                 | crate::MemoryEvent::Semantic(_),
             )
             | Event::Skills(_)
+            | Event::Plugins(_)
             | Event::FileIndex(_)
             | Event::Ready { .. }
             | Event::Pong

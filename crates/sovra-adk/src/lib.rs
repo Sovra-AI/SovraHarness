@@ -10,7 +10,6 @@ mod capabilities;
 mod code_activity;
 mod communications;
 mod connected_tools;
-pub mod decision_client;
 mod deep_research;
 mod documents;
 mod file_index;
@@ -166,8 +165,6 @@ pub enum Error {
     Session(#[source] adk_core::AdkError),
     #[error("ADK execution failure: {0}")]
     Execution(#[source] adk_core::AdkError),
-    #[error("Laya/OpenJev decision router unavailable: {0}")]
-    DecisionRouter(String),
     #[error("failed to build the web search client: {0}")]
     SearchClient(String),
     #[error("{0}")]

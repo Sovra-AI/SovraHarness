@@ -2,6 +2,10 @@
 //! runtime-owned blocking workers; resources are data, never executable authority.
 
 mod format;
+mod plugins;
+mod publish;
+pub use plugins::LocalPluginStore;
+pub use publish::publish_catalog;
 #[cfg(test)]
 mod tests;
 
@@ -105,6 +109,14 @@ impl SkillStore for LocalSkillStore {
         })?;
         if skill.builtin {
             return Err(SkillError("Built-in skills cannot be overwritten.".into()));
+        }
+        if skill
+            .metadata
+            .contains_key(sovra_core::plugins::PLUGIN_METADATA_KEY)
+        {
+            return Err(SkillError(
+                "Plugin skills must be managed through their plugin.".into(),
+            ));
         }
         let mut candidates = sovra_core::skills::builtin_skills();
         candidates.extend(

@@ -29,6 +29,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 | Connect WhatsApp or Telegram | [Messaging](communications.md) |
 | Use Gmail drafts, Calendar, Drive, Contacts, or Tasks | [Google](google.md) |
 | Work with repositories and issues | [GitHub](github.md) |
+| Download plugins or publish a catalog | [Plugin contract and GitHub Pages](plugins.md) |
 | Add external tools | [MCP servers](connected-services.md) |
 | Allow local commands | [Terminal](terminal.md) |
 

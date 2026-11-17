@@ -450,178 +450,167 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
-fn my_ais_switches_routing_modes_decision_backends_and_simulates_tree(cx: &mut TestAppContext) {
-    fn reveal(
-        window: &mut gpui_kit::Window,
-        id: impl Into<gpui_kit::ElementId>,
-        cx: &mut gpui_kit::App,
-    ) {
-        let id = id.into();
-        for _ in 0..40 {
-            window.render_frame(cx);
-            let bounds = window.find(id.clone()).bounds();
-            let pane = window.find("sovra-my-ais-view").bounds();
-            if bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
-                return;
-            }
-            let delta = if bounds.top() < pane.top() {
-                pane.top() - bounds.top()
-            } else {
-                pane.bottom() - bounds.bottom()
+fn my_ais_uses_the_saved_chat_choice_and_guides_setup(cx: &mut TestAppContext) {
+    use sovra_core::models::{
+        ModelConnection, ModelEvent, ModelKey, ModelPreferences, ProviderKind,
+    };
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        for mode in [
+            gpui_kit::component::ThemeMode::Light,
+            gpui_kit::component::ThemeMode::Dark,
+        ] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                sovra_ui::design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(scale),
+                    cx,
+                );
+                gpui_kit::component::Theme::change(mode, None, cx);
+            });
+            let mut shell_entity = None;
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let view = cx.new(|cx| Shell::new(0, window, cx));
+                shell_entity = Some(view.clone());
+                Root::new(view, window, cx)
+            });
+            let shell = shell_entity.unwrap();
+            let key = ModelKey {
+                connection_id: "test".into(),
+                model_id: "saved-chat-ai".into(),
             };
-            window.scroll(
-                "sovra-my-ais-view",
-                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), delta)),
-                cx,
+            // Test empty, missing-key, ready and unavailable states using runtime events.
+            for (has_choice, has_key, problem, action, chat) in [
+                (false, false, None, "Choose AI", false),
+                (true, false, None, "Connect AI", false),
+                (true, true, None, "Change AI", true),
+                (true, true, Some("Model unavailable"), "Choose AI", false),
+            ] {
+                let mut connection = ModelConnection::new("test", ProviderKind::OpenRouter);
+                connection.has_credential = has_key;
+                events
+                    .send_blocking(Event::Models(ModelEvent::Loaded {
+                        connections: vec![connection],
+                        preferences: ModelPreferences {
+                            active: has_choice.then(|| key.clone()),
+                            ..Default::default()
+                        },
+                    }))
+                    .unwrap();
+                events
+                    .send_blocking(Event::Models(ModelEvent::ActiveModelStatus {
+                        problem: problem.map(str::to_owned),
+                    }))
+                    .unwrap();
+                cx.executor()
+                    .advance_clock(std::time::Duration::from_millis(16));
+                cx.run_until_parked();
+                cx.update_window(window.into(), |_, window, cx| {
+                    shell.update(cx, |shell, cx| shell.select_tab(NavTab::MyAis, cx));
+                    window.render_frame(cx);
+                    assert!(window.find("sovra-my-ais-view").visible());
+                    assert_eq!(
+                        window.find("my-ais-name").label(),
+                        Some(if has_choice {
+                            "saved-chat-ai"
+                        } else {
+                            "Choose your AI"
+                        })
+                    );
+                    assert_eq!(window.find("open-models-catalog-btn").label(), Some(action));
+                    for removed in [
+                        "my-ais-advanced-toggle",
+                        "routing-engine-panel",
+                        "sovra-specialists-list",
+                    ] {
+                        assert!(window.try_find(removed).is_none());
+                    }
+                    let cards: Vec<_> = (0..3usize)
+                        .map(|index| window.find(("routing-mode-btn", index)).bounds())
+                        .collect();
+                    let page = window.find("sovra-my-ais-view").bounds();
+                    let same_row = cards
+                        .iter()
+                        .all(|card| (card.top() - cards[0].top()).abs() < px(2.));
+                    if width >= 2560. {
+                        assert!(
+                            same_row,
+                            "preview choices should share one row at {width}×{height}"
+                        );
+                    }
+                    if same_row {
+                        let height = cards[0].size.height;
+                        for card in &cards {
+                            assert!(
+                                (card.size.height - height).abs() < px(1.),
+                                "preview choices differ in height at {width}×{height} @{scale}%: {cards:?}"
+                            );
+                        }
+                    }
+                    for card in &cards {
+                        assert!(
+                            card.left() >= page.left() - px(1.)
+                                && card.right() <= page.right() + px(1.),
+                            "a preview choice runs outside the page at {width}×{height}"
+                        );
+                    }
+                    if chat {
+                        reveal_my_ai_action(window, "my-ais-chat-btn", cx);
+                        window.click("my-ais-chat-btn", cx);
+                        window.render_frame(cx);
+                        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Chat);
+                        shell.update(cx, |shell, cx| shell.select_tab(NavTab::MyAis, cx));
+                        window.render_frame(cx);
+                    } else {
+                        assert!(window.try_find("my-ais-chat-btn").is_none());
+                    }
+                    reveal_my_ai_action(window, "open-models-catalog-btn", cx);
+                    window.click("open-models-catalog-btn", cx);
+                    window.render_frame(cx);
+                    assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Models);
+                })
+                .unwrap();
+            }
+            let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+            assert!(sent.iter().any(|command| matches!(
+                command,
+                Command::Models(sovra_core::models::ModelCommand::Load)
+            )));
+            assert!(
+                !sent.iter().any(|command| matches!(
+                    command,
+                    Command::UpdateRouting { .. }
+                        | Command::SimulateRoute { .. }
+                        | Command::SetSpecialistModel { .. }
+                        | Command::RunPrompt { .. }
+                )),
+                "Opening My AIs must not change routing or send a prompt"
             );
         }
-        panic!("My AIs control must be reachable");
     }
+}
 
-    let (client, commands, events) = Client::loopback();
-    cx.update(|cx| sovra_ui::init(client, cx));
-
-    let mut shell_entity = None;
-    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
-        let view = cx.new(|cx| Shell::new(0, window, cx));
-        shell_entity = Some(view.clone());
-        Root::new(view, window, cx)
-    });
-    let shell = shell_entity.unwrap();
-    events
-        .send_blocking(Event::Models(
-            sovra_core::models::ModelEvent::PreferencesChanged(
-                sovra_core::models::ModelPreferences {
-                    active: Some(sovra_core::models::ModelKey {
-                        connection_id: "test".into(),
-                        model_id: "test-model".into(),
-                    }),
-                    ..Default::default()
-                },
-            ),
-        ))
-        .unwrap();
-    cx.executor()
-        .advance_clock(std::time::Duration::from_millis(16));
-    cx.run_until_parked();
-
-    cx.update_window(window.into(), |_, window, cx| {
+fn reveal_my_ai_action(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
+    for _ in 0..30 {
         window.render_frame(cx);
-        window.click("nav-my-ais", cx);
-        window.render_frame(cx);
-        assert_eq!(shell.read(cx).workspace().active_tab, NavTab::MyAis);
-        assert!(window.find("sovra-my-ais-view").visible());
-        assert_eq!(shell.read(cx).workspace().specialists.len(), 23);
-        // Engine internals stay folded away until asked for.
-        assert!(window.try_find(("decision-backend-btn", 1usize)).is_none());
-        assert!(window.try_find(("specialist-tier-btn", 0usize)).is_none());
-        reveal(window, "my-ais-advanced-toggle", cx);
-        window.click("my-ais-advanced-toggle", cx);
-        window.render_frame(cx);
-
-        // Switch decision backend from Laya to OpenJev.
-        reveal(window, ("decision-backend-btn", 1usize), cx);
-        window.click(("decision-backend-btn", 1usize), cx);
-        window.render_frame(cx);
-        assert_eq!(
-            shell.read(cx).workspace().routing.backend,
-            sovra_core::DecisionBackend::OpenJev
-        );
-
-        // Simulate a prompt through the routing tree.
-        reveal(window, "simulate-route-btn", cx);
-        window.click("simulate-route-btn", cx);
-        window.render_frame(cx);
-        let eval = shell
-            .read(cx)
-            .workspace()
-            .last_route_evaluation
-            .as_ref()
-            .unwrap();
-        assert_eq!(eval.specialist_id.as_deref(), Some("CodingAgent"));
-
-        // Switch selection mode to Per-Agent Models.
-        reveal(window, ("routing-mode-btn", 1usize), cx);
-        window.click(("routing-mode-btn", 1usize), cx);
-        window.render_frame(cx);
-        assert_eq!(
-            shell.read(cx).workspace().routing.mode,
-            sovra_core::SelectionMode::PerAgentModel
-        );
-        reveal(window, ("specialist-tier-btn", 0usize), cx);
-        assert!(window.find(("specialist-tier-btn", 0usize)).visible());
-        reveal(window, ("specialist-tier-btn", 2usize), cx);
-        window.click(("specialist-tier-btn", 2usize), cx);
-        window.render_frame(cx);
-        assert_eq!(
-            shell.read(cx).workspace().specialists[0].preferred_tier,
-            sovra_core::ModelTier::Deep
-        );
-        assert_eq!(
-            window.find(("specialist-tier-btn", 2usize)).checked(),
-            Some(true)
-        );
-        assert!(
-            shell.read(cx).workspace().specialists[0]
-                .model_override
-                .is_none(),
-            "Changing effort must not pin the current global model to this helper"
-        );
-        reveal(window, ("specialist-tier-btn", 0usize), cx);
-        window.click(("specialist-tier-btn", 0usize), cx);
-        window.render_frame(cx);
-        assert_eq!(
-            shell.read(cx).workspace().specialists[0].preferred_tier,
-            sovra_core::ModelTier::Fast
-        );
-        assert_eq!(
-            window.find(("specialist-tier-btn", 0usize)).checked(),
-            Some(true)
-        );
-    })
-    .unwrap();
-
-    assert!(matches!(
-        commands.recv_blocking().unwrap(),
-        Command::UpdateRouting {
-            backend: sovra_core::DecisionBackend::OpenJev,
-            ..
+        let bounds = window.find(id).bounds();
+        let pane = window.find("sovra-my-ais-view").bounds();
+        assert!(bounds.left() >= pane.left() && bounds.right() <= pane.right());
+        if bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
+            return;
         }
-    ));
-    assert!(matches!(
-        commands.recv_blocking().unwrap(),
-        Command::SimulateRoute { .. }
-    ));
-    let remaining: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
-    let effort_changes: Vec<_> = remaining
-        .iter()
-        .filter_map(|command| {
-            if let Command::SetSpecialistModel {
-                model_override,
-                preferred_tier,
-                ..
-            } = command
-            {
-                assert!(
-                    model_override.is_none(),
-                    "Effort updates must preserve the unpinned model in the runtime command too"
-                );
-                Some(*preferred_tier)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert_eq!(
-        effort_changes,
-        vec![sovra_core::ModelTier::Deep, sovra_core::ModelTier::Fast]
-    );
-    assert!(
-        !remaining
-            .iter()
-            .any(|command| matches!(command, Command::RunPrompt { .. })),
-        "Preview controls must not send a chat"
-    );
+        let delta = if bounds.top() < pane.top() {
+            pane.top() - bounds.top()
+        } else {
+            pane.bottom() - bounds.bottom()
+        };
+        window.scroll(
+            "sovra-my-ais-view",
+            gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), delta)),
+            cx,
+        );
+    }
+    panic!("My AIs action must be reachable");
 }
 
 #[gpui_kit::test]

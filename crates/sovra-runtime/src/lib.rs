@@ -36,6 +36,7 @@ mod remembering;
 mod schedules;
 mod secret_vault;
 pub use secret_vault::background_vault;
+mod plugins;
 mod skills;
 mod terminal;
 pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
@@ -51,7 +52,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
-use sovra_adk::decision_client::fetch_systemone_answers;
 use sovra_adk::{AdkHarness, SearchClient};
 use sovra_core::{
     AgentConfig, Command, Event, MemoryError, MemoryStore, RoutingConfig, SpecialistAgentSpec,
@@ -306,6 +306,7 @@ pub fn start_with_auth(
             models,
             files,
             skills,
+            plugins: None,
             index,
             messaging,
             signin: google,
@@ -335,6 +336,7 @@ pub struct RuntimeServices {
     pub models: Option<ModelsConfig>,
     pub files: Option<Arc<dyn sovra_core::files::FileStore>>,
     pub skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
+    pub plugins: Option<Arc<dyn sovra_core::plugins::PluginStore>>,
     pub index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
     pub messaging: MessagingChannels,
     /// Google Sign-In for the login screen.
@@ -458,6 +460,7 @@ async fn serve(
         models,
         files,
         skills: skill_store,
+        plugins: plugin_store,
         index,
         messaging,
         signin,
@@ -516,8 +519,8 @@ async fn serve(
     let file_jobs = files
         .as_ref()
         .map(|store| files::FileRuntime::start(store.clone(), events.clone(), &handle));
-    let load_skills = skill_store.is_some();
-    let skills = skills::SkillsRuntime::start(skill_store, events.clone(), &handle);
+    let load_skills = skill_store.is_some() || plugin_store.is_some();
+    let skills = skills::SkillsRuntime::start(skill_store, plugin_store, events.clone(), &handle);
     let mut session_files = std::collections::BTreeMap::<String, Vec<String>>::new();
     let harness = build_harness(&agent_config);
     let search =
@@ -743,6 +746,7 @@ async fn serve(
             Command::Decisions(command) => auth.decisions(command),
             Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
+            Command::Plugins(command) => skills.send_plugin(command),
             Command::Google(command) => google.send(command),
             Command::GitHub(command) => github.send(command),
             Command::Microsoft(command) => microsoft.send(command),
@@ -1025,7 +1029,6 @@ async fn serve(
                     &handle,
                     routing_config.clone(),
                     specialists.clone(),
-                    agent_config.api_key.clone(),
                     prompt,
                     events.clone(),
                 );
@@ -1150,7 +1153,6 @@ async fn serve(
                         timeout,
                         routing: routing_config.clone(),
                         specialists: specialists.clone(),
-                        api_key: agent_config.api_key.clone(),
                         web_search_enabled,
                         search: search.clone(),
                         skills: skill_catalog.clone(),
@@ -1253,21 +1255,16 @@ fn spawn_route_simulation(
     handle: &tokio::runtime::Handle,
     routing: RoutingConfig,
     specialists: Vec<SpecialistAgentSpec>,
-    api_key: Option<String>,
     prompt: String,
     events: Sender<Event>,
 ) {
     drop(handle.spawn(async move {
-        let external = fetch_systemone_answers(&routing, api_key.as_deref(), &prompt)
-            .await
-            .ok()
-            .flatten();
         let evaluation = evaluate_routing(
             &routing,
             &specialists,
             &prompt,
-            external.as_ref(),
-            routing.backend,
+            None,
+            sovra_core::DecisionBackend::EmbeddedHeuristic,
         );
         let _ = events
             .send(Event::RouteEvaluated {
@@ -1348,7 +1345,6 @@ struct PromptJob {
     timeout: Option<std::time::Duration>,
     routing: RoutingConfig,
     specialists: Vec<SpecialistAgentSpec>,
-    api_key: Option<String>,
     web_search_enabled: bool,
     search: SearchClient,
     skills: Arc<sovra_core::skills::SkillCatalog>,
@@ -1371,7 +1367,6 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         timeout,
         routing,
         specialists,
-        api_key,
         web_search_enabled,
         search,
         skills,
@@ -1397,16 +1392,12 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
             sovra_core::is_deep_research_skill(&skill.name)
                 || sovra_core::skill_requests_deep_research(&skill.tools)
         });
-        let external = fetch_systemone_answers(&routing, api_key.as_deref(), &prompt)
-            .await
-            .ok()
-            .flatten();
         let evaluation = evaluate_routing(
             &routing,
             &specialists,
             &prompt,
-            external.as_ref(),
-            routing.backend,
+            None,
+            sovra_core::DecisionBackend::EmbeddedHeuristic,
         );
         if events
             .send(Event::RouteEvaluated {
@@ -1606,6 +1597,67 @@ mod tests {
         assert_eq!(events.recv_blocking().unwrap(), Event::Pong);
         client.send(Command::Shutdown).unwrap();
         assert_eq!(events.recv_blocking().unwrap(), Event::Stopped);
+    }
+
+    #[tokio::test]
+    async fn routing_runs_inside_the_binary_even_with_a_legacy_backend_choice() {
+        use sovra_core::{DecisionBackend, SelectionMode, models::ModelKey};
+        assert_eq!(
+            RoutingConfig::default().backend,
+            DecisionBackend::EmbeddedHeuristic
+        );
+        let client = start("test").unwrap();
+        let events = client.events();
+        assert!(matches!(events.recv().await.unwrap(), Event::Ready { .. }));
+        let key = ModelKey {
+            connection_id: "saved".into(),
+            model_id: "my-chat-ai".into(),
+        };
+        for backend in DecisionBackend::ALL {
+            client
+                .send(Command::UpdateRouting {
+                    mode: SelectionMode::SingleGlobalModel,
+                    backend,
+                    global_model: Some(key.clone()),
+                })
+                .unwrap();
+            client
+                .send(Command::SimulateRoute {
+                    prompt: "Explain this Rust function".into(),
+                })
+                .unwrap();
+            let result = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let Event::RouteEvaluated { evaluation } = result else {
+                panic!("expected embedded evaluation");
+            };
+            assert_eq!(evaluation.backend_used, DecisionBackend::EmbeddedHeuristic);
+            assert_eq!(evaluation.selected_model, key);
+            client
+                .send(Command::RunPrompt {
+                    context: None,
+                    session_id: "embedded".into(),
+                    prompt: "Hello".into(),
+                })
+                .unwrap();
+            let result = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let Event::RouteEvaluated { evaluation } = result else {
+                panic!("expected embedded prompt classification");
+            };
+            assert_eq!(evaluation.backend_used, DecisionBackend::EmbeddedHeuristic);
+            assert_eq!(evaluation.selected_model, key);
+            assert!(matches!(
+                events.recv().await.unwrap(),
+                Event::AgentError { .. }
+            ));
+        }
+        client.send(Command::Shutdown).unwrap();
+        assert_eq!(events.recv().await.unwrap(), Event::Stopped);
     }
 
     #[test]

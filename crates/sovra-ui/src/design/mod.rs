@@ -25,27 +25,26 @@ pub use styles::{
     FitsPane, SovraStyled, Surface, TextRole, button, markdown_style, page_header, primary_button,
     round_icon_button, title_button,
 };
+pub(crate) use styles::{slash_pill, text_with_slash_pills};
 pub use tokens::{
     AccentTokens, ChatTokens, GraphTokens, LayoutTokens, MotionTokens, RadiusTokens, SovraTokens,
     SpaceTokens, TileTokens, TileTone, tokens,
 };
 
-/// Type the command, then hold it long enough to read before repeating.
+/// Letters typed after the skills pill. The `/` itself is never drawn as text.
 pub(crate) fn help_hint_command(progress: f32) -> &'static str {
-    if progress < 0.08 {
+    if progress < 0.12 {
         "▏"
-    } else if progress < 0.16 {
-        "/▏"
-    } else if progress < 0.24 {
-        "/h▏"
+    } else if progress < 0.22 {
+        "h▏"
     } else if progress < 0.32 {
-        "/he▏"
-    } else if progress < 0.40 {
-        "/hel▏"
-    } else if progress < 0.48 {
-        "/help▏"
+        "he▏"
+    } else if progress < 0.42 {
+        "hel▏"
+    } else if progress < 0.52 {
+        "help▏"
     } else {
-        "/help"
+        "help"
     }
 }
 

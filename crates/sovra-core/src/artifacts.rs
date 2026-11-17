@@ -174,6 +174,14 @@ impl ArtifactKind {
         self.info().label
     }
 
+    /// A library card shows this kind as source lines. The app does not run it.
+    pub fn previews_as_source(self) -> bool {
+        matches!(
+            self,
+            Self::Code | Self::Diagram | Self::Webpage | Self::Picture | Self::Data | Self::Project
+        )
+    }
+
     /// The kind a fenced block's language names (` ```mermaid ` is a diagram).
     pub fn for_language(language: &str) -> Self {
         match language.trim().to_ascii_lowercase().as_str() {
@@ -378,6 +386,248 @@ fn truncate(text: &str, max: usize) -> String {
     }
     let cut: String = text.chars().take(max.saturating_sub(1)).collect();
     format!("{}…", cut.trim_end())
+}
+
+/// Source lines a library card keeps. Enough to show a page's title, not the file.
+const SOURCE_CARD_LINES: usize = 6;
+/// Characters stored on one card line. The card also clips anything wider.
+const SOURCE_CARD_WIDTH: usize = 72;
+/// How much of a packed file the card formatter reads.
+const SOURCE_CARD_SCAN: usize = 4_000;
+
+/// Short source lines for a library card.
+///
+/// A file that already has line breaks keeps those lines. A packed web page or
+/// picture is split before each tag and indented, so the card is not one long
+/// sentence. This only rearranges text. It does not run or draw the page.
+pub fn source_card_lines(content: &str) -> Vec<String> {
+    let logical: Vec<&str> = content
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    match logical.as_slice() {
+        [] => Vec::new(),
+        [only] if looks_like_markup(only) => format_markup(only.trim()),
+        [only] => wrap_plain(only.trim()),
+        many => many
+            .iter()
+            .take(SOURCE_CARD_LINES)
+            .map(|line| truncate(line, SOURCE_CARD_WIDTH))
+            .collect(),
+    }
+}
+
+fn looks_like_markup(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with('<') {
+        return false;
+    }
+    let sample: String = trimmed.chars().take(SOURCE_CARD_SCAN).collect();
+    let lower = sample.to_ascii_lowercase();
+    let mut open = false;
+    let mut close = false;
+    let bytes = sample.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'<' {
+            match bytes[index + 1] {
+                b'/' => close = true,
+                b'!' | b'?' => open = true,
+                byte if byte.is_ascii_alphabetic() => open = true,
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    open && (close || lower.contains("<!doctype") || lower.contains("<svg"))
+}
+
+fn format_markup(text: &str) -> Vec<String> {
+    let sample: String = text.chars().take(SOURCE_CARD_SCAN).collect();
+    let tokens = markup_tokens(&sample);
+    let mut lines = Vec::new();
+    let mut indent = 0_usize;
+    let mut index = 0;
+    while index < tokens.len() && lines.len() < SOURCE_CARD_LINES {
+        match &tokens[index] {
+            MarkupToken::Text(text) => {
+                push_source_line(&mut lines, indent, text);
+                index += 1;
+            }
+            MarkupToken::Tag(tag) if is_closing_tag(tag) => {
+                indent = indent.saturating_sub(1);
+                push_source_line(&mut lines, indent, tag);
+                index += 1;
+            }
+            MarkupToken::Tag(tag) if is_void_tag(tag) => {
+                push_source_line(&mut lines, indent, tag);
+                index += 1;
+            }
+            MarkupToken::Tag(tag)
+                if tokens.get(index + 1).is_some_and(|next| {
+                    tokens.get(index + 2).is_some_and(|close| {
+                        matches!(next, MarkupToken::Text(_)) && is_matching_close(tag, close)
+                    })
+                }) =>
+            {
+                let MarkupToken::Text(text) = &tokens[index + 1] else {
+                    break;
+                };
+                let MarkupToken::Tag(close) = &tokens[index + 2] else {
+                    break;
+                };
+                push_source_line(&mut lines, indent, &format!("{tag}{text}{close}"));
+                index += 3;
+            }
+            MarkupToken::Tag(tag)
+                if tokens
+                    .get(index + 1)
+                    .is_some_and(|close| is_matching_close(tag, close)) =>
+            {
+                let MarkupToken::Tag(close) = &tokens[index + 1] else {
+                    break;
+                };
+                push_source_line(&mut lines, indent, &format!("{tag}{close}"));
+                index += 2;
+            }
+            MarkupToken::Tag(tag) => {
+                push_source_line(&mut lines, indent, tag);
+                indent += 1;
+                index += 1;
+            }
+        }
+    }
+    lines
+}
+
+enum MarkupToken {
+    Tag(String),
+    Text(String),
+}
+
+fn markup_tokens(text: &str) -> Vec<MarkupToken> {
+    let mut tokens = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(start) = rest.find('<') {
+            push_markup_text(&mut tokens, &rest[..start]);
+            let after = &rest[start..];
+            if let Some(end) = after.find('>') {
+                tokens.push(MarkupToken::Tag(after[..=end].to_owned()));
+                rest = &after[end + 1..];
+            } else {
+                push_markup_text(&mut tokens, after);
+                break;
+            }
+        } else {
+            push_markup_text(&mut tokens, rest);
+            break;
+        }
+    }
+    tokens
+}
+
+fn push_markup_text(tokens: &mut Vec<MarkupToken>, text: &str) {
+    let words = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !words.is_empty() {
+        tokens.push(MarkupToken::Text(words));
+    }
+}
+
+fn push_source_line(lines: &mut Vec<String>, indent: usize, text: &str) {
+    if lines.len() >= SOURCE_CARD_LINES {
+        return;
+    }
+    let mut line = "  ".repeat(indent.min(8));
+    line.push_str(text.trim());
+    lines.push(truncate(&line, SOURCE_CARD_WIDTH));
+}
+
+fn is_closing_tag(tag: &str) -> bool {
+    tag.trim_start().starts_with("</")
+}
+
+fn is_matching_close(open: &str, token: &MarkupToken) -> bool {
+    let MarkupToken::Tag(close) = token else {
+        return false;
+    };
+    is_closing_tag(close) && tag_name(open).eq_ignore_ascii_case(&tag_name(close))
+}
+
+fn is_void_tag(tag: &str) -> bool {
+    let name = tag_name(tag);
+    name.starts_with('!')
+        || name.starts_with('?')
+        || tag.trim_end().ends_with("/>")
+        || matches!(
+            name.to_ascii_lowercase().as_str(),
+            "area"
+                | "base"
+                | "br"
+                | "col"
+                | "embed"
+                | "hr"
+                | "img"
+                | "input"
+                | "link"
+                | "meta"
+                | "source"
+                | "track"
+                | "wbr"
+        )
+}
+
+fn tag_name(tag: &str) -> String {
+    let inner = tag
+        .trim()
+        .trim_start_matches('<')
+        .trim_start_matches('/')
+        .trim_end_matches('>')
+        .trim()
+        .trim_end_matches('/')
+        .trim();
+    inner
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+fn wrap_plain(text: &str) -> Vec<String> {
+    let budget = SOURCE_CARD_LINES * SOURCE_CARD_WIDTH + SOURCE_CARD_WIDTH;
+    let sample: String = text.chars().take(budget).collect();
+    let mut lines = Vec::new();
+    let mut rest = sample.as_str();
+    while !rest.is_empty() && lines.len() < SOURCE_CARD_LINES {
+        if rest.chars().count() <= SOURCE_CARD_WIDTH {
+            lines.push(rest.to_owned());
+            break;
+        }
+        let window: String = rest.chars().take(SOURCE_CARD_WIDTH).collect();
+        if let Some(at) = window.rfind([' ', '{', '}', ';', ',', '[', ']']) {
+            let kept = window[..at].chars().count();
+            if kept >= SOURCE_CARD_WIDTH / 2 {
+                let head = window[..at].trim_end();
+                if !head.is_empty() {
+                    lines.push(head.to_owned());
+                }
+                rest = rest
+                    .char_indices()
+                    .nth(kept + 1)
+                    .map_or("", |(byte, _)| &rest[byte..])
+                    .trim_start();
+                continue;
+            }
+        }
+        lines.push(truncate(&window, SOURCE_CARD_WIDTH));
+        rest = rest
+            .char_indices()
+            .nth(SOURCE_CARD_WIDTH)
+            .map_or("", |(byte, _)| &rest[byte..])
+            .trim_start();
+    }
+    lines
 }
 
 /// A non-empty, single-line title of reasonable length.

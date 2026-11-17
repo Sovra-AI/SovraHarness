@@ -115,7 +115,7 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
                 .role(Role::Alert)
                 .aria_label(notice.clone())
                 .sovra_text(TextRole::Caption, cx)
-                .child(notice.clone())
+                .child(design::text_with_slash_pills("skill-notice", notice, cx))
         }))
         .children((!state.queued_prompts.is_empty()).then(|| {
             div()
@@ -289,7 +289,7 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
                     .aria_label(hint)
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(cx.theme().muted_foreground)
-                    .child(hint)
+                    .child(design::text_with_slash_pills("composer", hint, cx))
                     .into_any_element()
             },
         ))
@@ -309,19 +309,52 @@ fn render_help_hint(session_id: &str, cx: &Context<Shell>) -> impl IntoElement +
         .text_center()
         .sovra_text(TextRole::Caption, cx)
         .text_color(cx.theme().muted_foreground);
-    if motion.help_hint.is_zero() {
-        return label.child(hint).into_any_element();
-    }
-    // Reserve the complete line(s), so typing never moves the message box.
-    label
-        .child(div().opacity(0.).child(hint.replace("/help", "/help▏")))
-        .child(div().absolute().top_0().left_0().w_full().with_animation(
-            gpui_kit::SharedString::from(format!("help-hint-{session_id}")),
-            Animation::new(motion.help_hint).repeat(),
-            move |text, progress| {
-                text.child(hint.replace("/help", design::help_hint_command(progress)))
-            },
+    let Some((before, after)) = hint.split_once("/help") else {
+        return label
+            .child(design::text_with_slash_pills("welcome", hint, cx))
+            .into_any_element();
+    };
+    // The pill stays put. Only the letters after it are typed, and the hidden
+    // "help" reserves the width so the message box does not jump.
+    let typed = h_flex()
+        .items_center()
+        .child(design::slash_pill(
+            gpui_kit::SharedString::from("welcome-slash-pill-1"),
+            cx,
         ))
+        .child(
+            div()
+                .relative()
+                .child(div().opacity(0.).child("help▏"))
+                .child(div().absolute().top_0().left_0().with_animation(
+                    gpui_kit::SharedString::from(format!("help-hint-{session_id}")),
+                    Animation::new(motion.help_hint).repeat(),
+                    move |text, progress| text.child(design::help_hint_command(progress)),
+                )),
+        );
+    label
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .items_center()
+                .justify_center()
+                .gap(design::tokens(cx).space.hair)
+                .child(before.to_string())
+                .child(if motion.help_hint.is_zero() {
+                    h_flex()
+                        .items_center()
+                        .child(design::slash_pill(
+                            gpui_kit::SharedString::from("welcome-slash-pill-1"),
+                            cx,
+                        ))
+                        .child("help")
+                        .into_any_element()
+                } else {
+                    typed.into_any_element()
+                })
+                .child(after.to_string()),
+        )
         .into_any_element()
 }
 
@@ -353,6 +386,7 @@ mod tests {
             });
             window.render_frame(cx);
             assert!(window.find("chat-welcome-help-hint").visible());
+            assert!(window.find("welcome-slash-pill-1").visible());
             assert!(shell.read(cx).composer_input.read(cx).value().is_empty());
             assert_eq!(window.find("composer-send-btn").disabled(), Some(true));
 
@@ -361,6 +395,8 @@ mod tests {
             });
             window.render_frame(cx);
             assert!(window.try_find("chat-welcome-help-hint").is_none());
+            assert!(window.find("composer-slash-pill-1").visible());
+            assert!(window.find("composer-hint").label().unwrap().contains('/'));
         })
         .unwrap();
         // Input change subscriptions run after the update, just as between real keystrokes.

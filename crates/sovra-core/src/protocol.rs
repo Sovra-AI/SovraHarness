@@ -22,6 +22,7 @@ pub enum Command {
     Files(crate::files::FileCommand),
     FileIndex(crate::file_index::IndexCommand),
     Skills(crate::skills::SkillCommand),
+    Plugins(crate::plugins::PluginCommand),
     Teams(crate::teams::TeamCommand),
     Artifacts(crate::artifacts::ArtifactCommand),
     Connections(crate::connections::ConnectionCommand),
@@ -105,6 +106,7 @@ pub enum Event {
     FilePrepared(crate::files::FilePrepared),
     FileIndex(crate::file_index::IndexEvent),
     Skills(crate::skills::SkillEvent),
+    Plugins(crate::plugins::PluginEvent),
     Teams(crate::teams::TeamEvent),
     Artifacts(crate::artifacts::ArtifactEvent),
     Connections(crate::connections::ConnectionEvent),
@@ -202,6 +204,7 @@ impl Event {
             | Self::Models(_)
             | Self::FileIndex(_)
             | Self::Skills(_)
+            | Self::Plugins(_)
             | Self::Teams(_)
             | Self::Artifacts(_)
             | Self::Connections(_)

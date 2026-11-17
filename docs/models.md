@@ -72,34 +72,20 @@ The catalog is not an image/video generation interface. Servers that do not
 advertise capabilities can be tried explicitly; the server ultimately determines
 what the model supports. Switching models starts fresh provider history.
 
-## My AI's and routing
+## My AIs
 
-**My AIs** shows the chat model chosen in Models and lets you explore routing
-previews. Compare your chosen model, preferred effort per helper, and automatic
-routing rules. These previews do not switch the model answering chats or check
-connection availability; their settings last for the current app session. Expand
-**Preview an AI choice** to try a question without sending a chat.
+**My AIs** shows your saved chat AI with **Chat** and **Change AI**. If a
+connection key or a model is missing, the page offers the next setup step instead.
+The choice is the same one saved in Models and restored when Sovra starts.
+Three preview choices sit in one row and share the same height: use your chat
+model, preview effort by task, or preview automatic choice. They do not switch
+the model that answers chats.
 
-Choose **One AI for everything**, **Choose per task**, or **Automatic**,
-with Quick/Balanced/Thorough effort choices.
-
-Routing evaluation and actual provider selection are separate. The current
-ordinary-chat runtime emits a route evaluation, then runs the harness built from
-the saved Models selection. A route's suggested model or tier does not prove that
-a different provider model answered. Use **Models** to change the execution model.
-Routing settings and specialist overrides currently live in runtime state and
-reset at restart.
-
-The default decision backend is Laya at `127.0.0.1:8011`. The optional OpenJev
-backend sends the routing prompt to OpenRouter's decisions endpoint. Failures
-fall back to embedded evaluation after a bounded 1.2-second request. Selecting
-**Embedded Rust Heuristic** avoids that decision request; merely selecting
-**One AI for everything** does not disable the backend request. Route simulation
-also contacts the selected backend. See the [network inventory](network.md#network-destinations).
-
-Implementation: `sovra-core/src/routing_tree.rs`,
-`sovra-adk/src/decision_client.rs`, `sovra-runtime/src/lib.rs`, and
-`sovra-ui/src/my_ais_view.rs`.
+Model setup and selection use the existing Models home. There are no effort
+sliders, decision-engine choices or simulations to configure.
+Internal task classification runs in embedded Rust code in the Sovra executable;
+it does not contact Laya, OpenJev or another routing service. Chat uses the saved
+model. AI providers you choose still receive the requests needed to answer.
 
 ## Connections
 

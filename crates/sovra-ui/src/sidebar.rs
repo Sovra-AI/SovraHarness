@@ -475,7 +475,9 @@ fn render_nav_item(
             .children(spot_pill)
             .children(ctx_pill)
         })
-        .on_click(cx.listener(move |shell, _, _, cx| shell.select_tab(tab, cx)))
+        .on_click(cx.listener(move |shell, _, window, cx| {
+            shell.navigate_to_tab(tab, window, cx);
+        }))
 }
 
 fn render_user_profile(

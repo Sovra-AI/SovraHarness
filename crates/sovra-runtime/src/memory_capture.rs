@@ -157,6 +157,7 @@ pub(crate) fn tap(
                     | Event::Memory(_)
                     | Event::Models(_)
                     | Event::Skills(_)
+                    | Event::Plugins(_)
                     | Event::Teams(_)
                     | Event::Artifacts(_)
                     | Event::Decisions(_)

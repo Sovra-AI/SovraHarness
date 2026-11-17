@@ -4,6 +4,8 @@
 mod agent_progress;
 #[path = "styling/artifact_library.rs"]
 mod artifact_library;
+#[path = "styling/artifact_source.rs"]
+mod artifact_source;
 #[path = "styling/code_panel.rs"]
 mod code_panel;
 #[path = "styling/connection_feedback.rs"]
@@ -32,16 +34,22 @@ mod memory_sources;
 mod messaging;
 #[path = "styling/microsoft.rs"]
 mod microsoft;
+#[path = "styling/plugins.rs"]
+mod plugins;
 #[path = "styling/remote_control.rs"]
 mod remote_control;
 #[path = "styling/research_board.rs"]
 mod research_board;
 #[path = "styling/schedules.rs"]
 mod schedules;
+#[path = "styling/skills_example.rs"]
+mod skills_example;
 #[path = "styling/terminal.rs"]
 mod terminal;
 #[path = "styling/training.rs"]
 mod training;
+#[path = "styling/whatsapp_link.rs"]
+mod whatsapp_link;
 #[path = "styling/workspace_fit.rs"]
 mod workspace_fit;
 
@@ -264,8 +272,12 @@ fn buttons_and_clickable_controls_use_pointer_cursor(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn routing_choices_are_keyboard_operable(cx: &mut TestAppContext) {
-    let (client, _commands, _events) = Client::loopback();
+fn my_ais_actions_are_keyboard_operable(cx: &mut TestAppContext) {
+    use sovra_core::{
+        Event, NavTab,
+        models::{ModelConnection, ModelEvent, ModelKey, ModelPreferences, ProviderKind},
+    };
+    let (client, _commands, events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let mut shell_entity = None;
     let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
@@ -274,25 +286,46 @@ fn routing_choices_are_keyboard_operable(cx: &mut TestAppContext) {
         Root::new(shell, window, cx)
     });
     let shell = shell_entity.unwrap();
+    let mut connection = ModelConnection::new("test", ProviderKind::OpenRouter);
+    connection.has_credential = true;
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection],
+            preferences: ModelPreferences {
+                active: Some(ModelKey {
+                    connection_id: "test".into(),
+                    model_id: "chat-ai".into(),
+                }),
+                ..Default::default()
+            },
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
-        window.click("nav-my-ais", cx);
-        window.render_frame(cx);
-        for _ in 0..50 {
-            window.press("tab", cx);
-            if window.find(("routing-mode-btn", 1usize)).focused() == Some(true) {
-                break;
+        for (id, destination) in [
+            ("my-ais-chat-btn", NavTab::Chat),
+            ("open-models-catalog-btn", NavTab::Models),
+        ] {
+            window.render_frame(cx);
+            window.click("nav-my-ais", cx);
+            window.render_frame(cx);
+            for _ in 0..50 {
+                window.press("tab", cx);
+                if window.find(id).focused() == Some(true) {
+                    break;
+                }
             }
+            assert_eq!(
+                window.find(id).focused(),
+                Some(true),
+                "keyboard focus must reach {id}"
+            );
+            window.press("space", cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).workspace().active_tab, destination);
         }
-        assert_eq!(
-            window.find(("routing-mode-btn", 1usize)).focused(),
-            Some(true)
-        );
-        window.press("space", cx);
-        assert_eq!(
-            shell.read(cx).workspace().routing.mode,
-            sovra_core::SelectionMode::PerAgentModel
-        );
     })
     .unwrap();
 }

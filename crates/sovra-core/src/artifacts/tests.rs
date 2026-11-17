@@ -120,6 +120,54 @@ fn tables_export_as_csv_and_parse_from_either_form() {
 }
 
 #[test]
+fn code_cards_show_short_source_lines() {
+    let html = "<!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"UTF-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> <title>Cyber Council</title></head></html>";
+    let lines = source_card_lines(html);
+    assert_eq!(lines.first().map(String::as_str), Some("<!DOCTYPE html>"));
+    assert_eq!(lines.get(1).map(String::as_str), Some("<html lang=\"en\">"));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("<title>Cyber Council</title>")),
+        "the page title should stay whole: {lines:?}"
+    );
+    assert!(
+        lines.len() > 1 && lines.len() <= 6,
+        "a packed page should become a few lines: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 72),
+        "a card line ran on: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|line| !line.contains("><")),
+        "tags were left smashed together: {lines:?}"
+    );
+
+    let code = "fn main() {\n    println!(\"hi\");\n}\n";
+    assert_eq!(
+        source_card_lines(code),
+        ["fn main() {", "    println!(\"hi\");", "}"]
+    );
+
+    let packed =
+        "const label = \"Cyber Council website banner for the front page of the village hall\";";
+    let wrapped = source_card_lines(packed);
+    assert!(
+        wrapped.len() > 1,
+        "one long code line should break: {wrapped:?}"
+    );
+    assert!(wrapped.iter().all(|line| line.chars().count() <= 72));
+    assert!(wrapped[0].starts_with("const label"));
+
+    assert!(ArtifactKind::Webpage.previews_as_source());
+    assert!(ArtifactKind::Code.previews_as_source());
+    assert!(!ArtifactKind::Note.previews_as_source());
+    assert!(!ArtifactKind::Table.previews_as_source());
+    assert_eq!(source_card_lines("HashMap<String, Vec<u8>>").len(), 1);
+}
+
+#[test]
 fn library_folds_events_filters_and_counts() {
     let make = |id: &str, kind, at| {
         Artifact::from_draft(

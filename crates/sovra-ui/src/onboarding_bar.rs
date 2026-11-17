@@ -144,7 +144,11 @@ fn render_tour_coach_bar(
         .w_full()
         .max_w(t.layout.reading_width)
         .sovra_text(TextRole::Body, cx)
-        .child(step.explanation());
+        .child(design::text_with_slash_pills(
+            "tour",
+            step.explanation(),
+            cx,
+        ));
 
     let tip = step.try_this().map(|tip| {
         h_flex()

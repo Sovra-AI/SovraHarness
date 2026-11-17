@@ -18,7 +18,6 @@ additional destinations; it is not a network allowlist.
 | Your storage bucket (the address you give on the Training page) | **Back up now**, or a finished run with **Back up finished models** on | One signed upload per file: a finished model trained here, its GGUF form and a short description. Nothing else is sent and nothing is read back. The address must be `https://` unless it is on this computer. Off until you save a bucket. See [Training](training.md#back-up-to-your-own-storage-bucket). |
 | OpenAI-compatible and Anthropic endpoints | When configured and used | Model inputs go to the configured URL. Check the destination before saving a connection. |
 | Gemini | Agent fallback when `GEMINI_API_KEY` or `GOOGLE_API_KEY` is configured | Model inputs. Remove unused environment credentials. |
-| Laya (`127.0.0.1:8011`) or OpenJev (OpenRouter decisions endpoint) | Routing evaluation or simulation | Routing prompt. The default Laya address is local. Select **Embedded Rust Heuristic** to avoid the decision request; routing settings reset at restart. |
 | MWMBL, English Wikipedia, optional SearXNG | Helper web search; scheduled research jobs | Search queries. Ordinary helper web search starts enabled; turn it off in helper settings. Review or remove scheduled research separately. |
 | Public web pages | Reading search results | Requests to the selected URLs. The web reader checks addresses and refuses private/loopback destinations. |
 | Google OAuth and APIs | Sign-in and connected Google tools | Consent, drafts, events, tasks, and requested files. Disconnect or disable individual services. |
@@ -34,9 +33,11 @@ additional destinations; it is not a network allowlist.
 Implementation: [composition root](../crates/sovra-app/src/main.rs),
 [provider adapters](../crates/sovra-providers/src),
 [search sources](../crates/sovra-adk/src/web_search/sources.rs),
-[decision client](../crates/sovra-adk/src/decision_client.rs),
 [group transport](../crates/sovra-mesh/src), and
 [browser previews](../crates/sovra-core/src/artifacts.rs).
+
+Internal task classification runs inside the Sovra executable and sends no routing
+requests to a separate service.
 
 ## Configure local operation
 

@@ -181,3 +181,147 @@ fn symlinked_resources_and_packages_cannot_escape_and_storage_is_private() {
     assert!(other.import(&source).is_err());
     assert_eq!(other.list().unwrap().skills, [] as [Skill; 0]);
 }
+
+const PLUGIN: &[u8] =
+    include_bytes!("../../../examples/plugins/packages/weekly-planning-1.0.0.json");
+
+#[test]
+fn plugins_reopen_offline_and_keep_index_and_content_separate() {
+    use sovra_core::plugins::{InstalledPlugin, PluginEntry, PluginLibrary, PluginStore};
+    let fixture = Fixture::new();
+    let directory = fixture.0.join("plugins");
+    let store = LocalPluginStore::new(directory.clone());
+    assert_eq!(store.load().unwrap().installed, [] as [InstalledPlugin; 0]);
+    let entry =
+        PluginEntry::for_package("https://example.com/package.json".into(), PLUGIN).unwrap();
+    store.cache(&entry, PLUGIN).unwrap();
+    let library = PluginLibrary {
+        catalog_url: Some("https://example.com/catalog.json".into()),
+        installed: vec![InstalledPlugin {
+            entry: entry.clone(),
+            enabled: false,
+            catalog_url: "https://example.com/catalog.json".into(),
+        }],
+    };
+    store.save(&library).unwrap();
+    let reopened = LocalPluginStore::new(directory.clone());
+    assert_eq!(reopened.load().unwrap(), library);
+    assert_eq!(reopened.package(&entry).unwrap().id, entry.id);
+    assert!(
+        !fs::read_to_string(directory.join("plugins.json"))
+            .unwrap()
+            .contains("instructions")
+    );
+    let mut changed = library;
+    changed.installed[0].enabled = true;
+    reopened.save(&changed).unwrap();
+    assert!(reopened.load().unwrap().installed[0].enabled);
+    assert!(reopened.cache(&entry, b"changed").is_err());
+    assert_eq!(reopened.package(&entry).unwrap().id, entry.id);
+    fs::write(directory.join(format!("{}.json", entry.sha256)), b"corrupt").unwrap();
+    assert!(reopened.package(&entry).is_err());
+    assert!(
+        reopened.load().is_ok(),
+        "a damaged package must not hide the controls needed to disable it"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(directory.join("plugins.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
+fn publisher_pages_a_large_catalog_and_never_overwrites_an_existing_publication() {
+    use sovra_core::plugins::{PluginCatalog, PluginPackage};
+    let fixture = Fixture::new();
+    let source = fixture.0.join("source");
+    fs::create_dir(&source).unwrap();
+    for index in 0..100 {
+        let mut package: PluginPackage = serde_json::from_slice(PLUGIN).unwrap();
+        package.id = format!("io.example.plugin-{index}");
+        package.title = format!("Helper {index:03}");
+        fs::write(
+            source.join(format!("{index}.json")),
+            serde_json::to_vec(&package).unwrap(),
+        )
+        .unwrap();
+    }
+    let output = fixture.0.join("public");
+    publish_catalog(&source, &output, "https://example.github.io/plugins").unwrap();
+    let first = PluginCatalog::parse(&fs::read(output.join("catalog.json")).unwrap()).unwrap();
+    assert_eq!(first.plugins.len(), 48);
+    assert_eq!(
+        first.next.as_deref(),
+        Some("https://example.github.io/plugins/catalog-2.json")
+    );
+    let last = PluginCatalog::parse(&fs::read(output.join("catalog-3.json")).unwrap()).unwrap();
+    assert_eq!(last.plugins.len(), 4);
+    assert!(last.next.is_none());
+    assert_eq!(
+        last.previous.as_deref(),
+        Some("https://example.github.io/plugins/catalog-2.json")
+    );
+    for entry in first.plugins.iter().chain(&last.plugins) {
+        let bytes = fs::read(
+            output
+                .join("packages")
+                .join(format!("{}.json", entry.sha256)),
+        )
+        .unwrap();
+        entry.verify_package(&bytes).unwrap();
+    }
+    assert!(publish_catalog(&source, &output, "https://example.github.io/plugins").is_err());
+    assert!(output.join("catalog.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn plugin_storage_refuses_symlinked_index_and_packages() {
+    use sovra_core::plugins::{PluginEntry, PluginStore};
+    let fixture = Fixture::new();
+    let outside = fixture.0.join("outside.json");
+    fs::write(&outside, PLUGIN).unwrap();
+    let directory = fixture.0.join("plugins");
+    fs::create_dir(&directory).unwrap();
+    let store = LocalPluginStore::new(directory.clone());
+    let entry =
+        PluginEntry::for_package("https://example.com/package.json".into(), PLUGIN).unwrap();
+    std::os::unix::fs::symlink(&outside, directory.join(format!("{}.json", entry.sha256))).unwrap();
+    assert!(store.package(&entry).is_err());
+    assert!(store.cache(&entry, PLUGIN).is_err());
+    std::os::unix::fs::symlink(&outside, directory.join("plugins.json")).unwrap();
+    assert!(store.load().is_err());
+    assert!(
+        store
+            .save(&sovra_core::plugins::PluginLibrary::default())
+            .is_err()
+    );
+    assert_eq!(fs::read(outside).unwrap(), PLUGIN);
+}
+
+#[test]
+fn personal_skills_cannot_claim_plugin_ownership_and_hide_their_edit_controls() {
+    let fixture = Fixture::new();
+    let store = LocalSkillStore::new(fixture.0.join("skills"));
+    let forged = SOURCE.replace("author: Test", "sovra-plugin: io.example.forged");
+    assert!(format::decode(&forged, "weekly-review").is_err());
+    let mut skill = format::decode(SOURCE, "weekly-review").unwrap();
+    skill.metadata.insert(
+        sovra_core::plugins::PLUGIN_METADATA_KEY.into(),
+        "io.example.forged".into(),
+    );
+    assert!(store.save(&skill).is_err());
+    assert_eq!(store.list().unwrap().skills, [] as [Skill; 0]);
+}

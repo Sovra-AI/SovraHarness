@@ -34,8 +34,9 @@ Chat choices exclude batch-only models. If an older saved choice ends in
 `:batch`, open **Models** and choose a live chat model without that suffix.
 
 Every new chat shows an animated reminder to type `/help` to browse all skills,
-even before you connect an AI. It stops when you start a draft; reduced-motion
-settings show the complete reminder without animation.
+even before you connect an AI. That shortcut is drawn as a book icon in a pill.
+It stops when you start a draft; reduced-motion settings show the complete
+reminder without animation.
 
 > **License:** Source on `main` is available under Sovra's Sustainable Use License.
 > This is fair-code: source-available, and not an OSI open-source license.
@@ -120,6 +121,9 @@ has the first run, group steps, every setting, privacy details and limits.
   [Decision records](docs/decisions.md) for the local-account approval boundary.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
   Connection setup and permissions depend on the service.
+- **Download plugins:** open **Skills → Plugins** to browse a GitHub Pages catalog,
+  download skills, and turn them on or off. See [Plugins](docs/plugins.md) for
+  the package contract and catalog publisher.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
   scheduled search note to a WhatsApp group.
 - **Share with a group:** share selected knowledge, artifacts, helpers, and
@@ -197,8 +201,9 @@ and the [documentation](docs/README.md) for current behavior.
   discovery and encrypted relays. Review the [network inventory](docs/network.md).
 - Local accounts do not provide separate encrypted data stores. Terminal commands
   and local MCP programs run with your OS permissions, without a sandbox.
-- **My AIs** offers routing previews; these do not change the model answering chat
-  or verify connection availability. Preview settings last for the session.
+- **My AIs** shows your saved chat AI, with **Chat** and **Change AI**, and three
+  preview choices of the same height. Internal
+  task classification is built into the executable and needs no routing service.
 - Website hosting supports static output; server backends and server-side
   rendering are not hosted. Hosting stops when Sovra closes.
 - Phone control pairs with the [SovraiOS](https://github.com/Sovra-AI/SovraiOS) and
@@ -267,7 +272,7 @@ permissions and service limits.
 | [Training](docs/training.md) | Train your own small AI: first run, group training and delivery, live numbers, settings, privacy, and limits |
 | [Getting started](docs/getting-started.md) | First launch, first chat, and finding features |
 | [Configuration](docs/configuration.md) | Startup variables, data paths, and troubleshooting |
-| [Models](docs/models.md) | Providers, keys, model selection, and routing previews |
+| [Models](docs/models.md) | Providers, keys, and choosing your chat AI |
 | [Files](docs/files.md) and [Knowledge](docs/knowledge.md) | Attachments, saved details, sources, and a saved answer that keeps the wording read from a file |
 | [Teams and artifacts](docs/teams-and-artifacts.md) | Helpers and saved work |
 | [Schedules](docs/schedules.md) and [Groups](docs/groups.md) | Recurring work and sharing |

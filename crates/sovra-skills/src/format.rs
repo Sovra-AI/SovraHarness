@@ -76,6 +76,14 @@ pub(crate) fn decode(content: &str, directory_name: &str) -> Result<Skill, Skill
             "The skill name must match its folder name.".into(),
         ));
     }
+    if front
+        .metadata
+        .contains_key(sovra_core::plugins::PLUGIN_METADATA_KEY)
+    {
+        return Err(SkillError(
+            "Plugin ownership is assigned by Sovra, not by imported skill metadata.".into(),
+        ));
+    }
     let title = front
         .metadata
         .get("sovra-title")

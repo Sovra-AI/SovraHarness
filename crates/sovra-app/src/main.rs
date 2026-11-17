@@ -142,6 +142,9 @@ fn main() -> anyhow::Result<()> {
             files: Some(Arc::new(sovra_files::LocalFileStore::new(
                 data_dir.as_path().join("attachments"),
             ))),
+            plugins: Some(Arc::new(sovra_skills::LocalPluginStore::new(
+                data_dir.as_path().join("plugins"),
+            ))),
             skills: Some(Arc::new(sovra_skills::LocalSkillStore::new(
                 data_dir.as_path().join("skills"),
             ))),

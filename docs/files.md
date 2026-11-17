@@ -54,7 +54,7 @@ unsupported binary format is **inspectable**, not automatically understood.
 | Family | Actual behavior |
 | --- | --- |
 | Text/source/config/markup | Content-first UTF-8, BOM-marked UTF-16/32, conservative BOM-less UTF-16, and detected legacy encodings. No extension allowlist or downloaded syntax grammar. Source whitespace and line endings are preserved. Legacy encoding guesses are labelled. |
-| PDF and documents | Xberg 1.3.10 with native PDF, Office, spreadsheets, email, HTML/XML, iWork, HWP, notebook and MDX features. Text-like formats without a specialized reader remain readable as source. |
+| PDF and documents | Xberg 1.4.0 with native PDF, Office, spreadsheets, email, HTML/XML, iWork, HWP, notebook and MDX features. Text-like formats without a specialized reader remain readable as source. |
 | ZIP and packaged files | Container signatures distinguish Office from generic archives even under a misleading name. Generic ZIP packages such as JAR/APK are traversed as member inventories. |
 | HWPX | Bounded ZIP/XML member reading with original XML text. Embedded media and page layout are not rendered. |
 | TAR, GZIP, XZ, LZMA, BZip2, Zstandard | Bounded in-memory decompression; GZIP/XZ/Zstandard include concatenated streams/frames. Zstandard skips metadata frames. BZip2 currently decodes the first stream and explicitly warns about later concatenated streams. |

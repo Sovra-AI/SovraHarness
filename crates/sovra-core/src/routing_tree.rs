@@ -4,8 +4,8 @@
 //! `SovraSRXProduction/backend/src/app/services/model_routing/` supporting:
 //! - Three model selection modes: [`SelectionMode::SingleGlobalModel`],
 //!   [`SelectionMode::PerAgentModel`], and [`SelectionMode::DynamicTreeRouting`].
-//! - Selectable System-1 decision engines: [`DecisionBackend::Laya`],
-//!   [`DecisionBackend::OpenJev`], and [`DecisionBackend::EmbeddedHeuristic`].
+//! - Embedded decisions. Legacy backend names remain readable in route traces;
+//!   the application does not contact external decision services.
 //! - Editable `TreeSpec` nodes (`Decision`, `Rule`, `Difficulty`, `Route`), heuristic floor,
 //!   and compact `rc1-<fingerprint>-<path>` route codes.
 
@@ -48,11 +48,11 @@ impl SelectionMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DecisionBackend {
     /// Convai Laya (`laya-english` / `laya-multilingual`) via `/v1/systemone` or `/api/alpha/decisions`.
-    #[default]
     Laya,
     /// `OpenJev` / `TypeSafe` Jev (`openjev-latest` / `typesafe/jev-1.13`) via `/v1/systemone` or `OpenRouter` `/api/alpha/decisions`.
     OpenJev,
     /// Zero-latency embedded Rust complexity + domain heuristic router (works 100% offline).
+    #[default]
     EmbeddedHeuristic,
 }
 
@@ -72,14 +72,6 @@ impl DecisionBackend {
             Self::Laya => "laya-english",
             Self::OpenJev => "typesafe/jev-1.13",
             Self::EmbeddedHeuristic => "rust-heuristic-v1",
-        }
-    }
-
-    pub fn default_endpoint(self) -> &'static str {
-        match self {
-            Self::Laya => "http://127.0.0.1:8011/v1/systemone",
-            Self::OpenJev => "https://openrouter.ai/api/alpha/decisions",
-            Self::EmbeddedHeuristic => "embedded://rust-heuristic",
         }
     }
 }
@@ -203,8 +195,6 @@ pub struct RouteEvaluation {
 pub struct RoutingConfig {
     pub mode: SelectionMode,
     pub backend: DecisionBackend,
-    pub laya_url: String,
-    pub openjev_url: String,
     pub global_model: Option<ModelKey>,
     pub tier_ladder: Vec<TierLadderEntry>,
     pub tree: TreeSpec,
@@ -214,9 +204,7 @@ impl Default for RoutingConfig {
     fn default() -> Self {
         Self {
             mode: SelectionMode::DynamicTreeRouting,
-            backend: DecisionBackend::Laya,
-            laya_url: DecisionBackend::Laya.default_endpoint().to_owned(),
-            openjev_url: DecisionBackend::OpenJev.default_endpoint().to_owned(),
+            backend: DecisionBackend::EmbeddedHeuristic,
             global_model: None,
             tier_ladder: default_tier_ladder(),
             tree: default_sovra_srx_tree(),

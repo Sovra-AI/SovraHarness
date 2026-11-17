@@ -444,37 +444,14 @@ fn workspace_pages_follow_the_pane(cx: &mut TestAppContext) {
                     "open-models-catalog-btn",
                     Some(CappedColumn {
                         id: "my-ais-column",
-                        cap: |tokens| tokens.layout.page_width,
+                        cap: |tokens| tokens.layout.reading_width,
                     }),
                 );
-                inside_window(
-                    window.find(("routing-mode-btn", 0usize)).bounds(),
-                    fit.window_px,
-                    "routing",
-                );
-
                 inside_window(
                     window.find("my-ais-current-choice").bounds(),
                     fit.window_px,
                     "current AI choice",
                 );
-                shell.update(cx, |shell, cx| {
-                    shell.set_routing_mode(sovra_core::SelectionMode::PerAgentModel, cx);
-                });
-                frames(window, cx);
-                for tier_idx in 0..3usize {
-                    reveal(
-                        window,
-                        "sovra-my-ais-view",
-                        ("specialist-tier-btn", tier_idx),
-                        cx,
-                    );
-                    inside_window(
-                        window.find(("specialist-tier-btn", tier_idx)).bounds(),
-                        fit.window_px,
-                        "effort choice",
-                    );
-                }
 
                 shell.update(cx, |shell, cx| shell.select_tab(NavTab::Schedules, cx));
                 check_page(

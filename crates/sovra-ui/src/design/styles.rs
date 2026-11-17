@@ -1,12 +1,14 @@
 //! Small styling recipes; GPUI retains ownership of control behaviour and accessibility.
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _,
+    ActiveTheme as _, Icon,
     button::{Button, ButtonVariants as _},
+    h_flex,
 };
 use gpui_kit::{
-    App, Div, ElementId, FontWeight, InteractiveElement as _, ParentElement as _, SharedString,
-    Styled, div, relative, rems,
+    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, Styled, TestSupportExt as _, div, relative, rems,
 };
 
 use super::tokens;
@@ -145,6 +147,62 @@ pub fn primary_button(
     button(id, label, cx)
         .primary()
         .shadow(vec![t.button_shadow])
+}
+
+/// The skills shortcut, drawn as a book in a pill. Callers keep the `/` character
+/// in the accessible name; this only replaces the glyph people see.
+pub(crate) fn slash_pill(id: SharedString, cx: &App) -> impl IntoElement + use<> {
+    let t = tokens(cx);
+    h_flex()
+        .id(id)
+        .test_support()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(t.layout.icon_medium)
+        .rounded(t.radius.pill)
+        .bg(t.subtle)
+        .border_1()
+        .border_color(t.material_border)
+        .child(
+            Icon::new(IconName::BookOpen)
+                .size(t.space.medium)
+                .text_color(cx.theme().foreground),
+        )
+}
+
+/// Inline text with every `/` drawn as [`slash_pill`]. The spoken sentence stays
+/// on the parent label, so a screen reader still hears the shortcut.
+///
+/// Skill examples do not use this. A web address in an example contains `/`
+/// and must stay readable text.
+pub(crate) fn text_with_slash_pills(prefix: &str, text: &str, cx: &App) -> Div {
+    let t = tokens(cx);
+    let mut children: Vec<AnyElement> = Vec::new();
+    for (index, piece) in text.split('/').enumerate() {
+        if index > 0 {
+            children.push(
+                slash_pill(
+                    SharedString::from(format!("{prefix}-slash-pill-{index}")),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        if !piece.is_empty() {
+            children.push(
+                div()
+                    .child(SharedString::from(piece.to_string()))
+                    .into_any_element(),
+            );
+        }
+    }
+    h_flex()
+        .flex_wrap()
+        .items_center()
+        .min_w_0()
+        .gap(t.space.hair)
+        .children(children)
 }
 
 /// Round icon-only button (composer send/stop). GPUI keeps focus, hover and

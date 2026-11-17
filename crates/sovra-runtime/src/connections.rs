@@ -1081,6 +1081,7 @@ impl Actor {
             | Event::Models(_)
             | Event::FileIndex(_)
             | Event::Skills(_)
+            | Event::Plugins(_)
             | Event::Teams(_)
             | Event::Artifacts(_)
             | Event::Decisions(_)

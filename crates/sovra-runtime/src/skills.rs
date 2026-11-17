@@ -8,10 +8,15 @@ use sovra_core::skills::{
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+enum LibraryCommand {
+    Skill(SkillCommand),
+    Plugin(sovra_core::plugins::PluginCommand),
+}
+
 pub(crate) struct SkillsRuntime {
     pub(crate) resources: Option<Arc<dyn sovra_core::skills::SkillResources>>,
     pub(crate) catalog: Arc<RwLock<Arc<SkillCatalog>>>,
-    commands: Sender<SkillCommand>,
+    commands: Sender<LibraryCommand>,
     events: Sender<Event>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -19,6 +24,7 @@ pub(crate) struct SkillsRuntime {
 impl SkillsRuntime {
     pub(crate) fn start(
         store: Option<Arc<dyn SkillStore>>,
+        plugins: Option<Arc<dyn sovra_core::plugins::PluginStore>>,
         events: Sender<Event>,
         handle: &tokio::runtime::Handle,
     ) -> Self {
@@ -30,52 +36,119 @@ impl SkillsRuntime {
         let current = catalog.clone();
         let output = events.clone();
         let task = handle.spawn(async move {
+            let mut remote_catalog = None;
             while let Ok(command) = receiver.recv().await {
-                let Some(store) = store.clone() else {
-                    let _ = output.send(Event::Skills(SkillEvent::Error("User skill storage is unavailable in this session.".into()))).await;
-                    continue;
-                };
+                let plugin_command = matches!(&command, LibraryCommand::Plugin(_));
                 let saved = match &command {
-                    SkillCommand::Save(skill) => Some(skill.clone()),
-                    SkillCommand::Refresh | SkillCommand::Import { .. } | SkillCommand::Remove { .. } | SkillCommand::SetEnabled { .. } => None,
+                    LibraryCommand::Skill(SkillCommand::Save(skill)) => Some(skill.clone()),
+                    LibraryCommand::Skill(_) | LibraryCommand::Plugin(_) => None,
                 };
-                let result = tokio::task::spawn_blocking(move || {
-                    match command {
-                        SkillCommand::Refresh => {}
-                        SkillCommand::Save(skill) => store.save(&skill)?,
-                        SkillCommand::Import { directory } => { store.import(&directory)?; }
-                        SkillCommand::Remove { name } => store.remove(&name)?,
-                        SkillCommand::SetEnabled { name, enabled } => {
-                            let mut skill = store.list()?.skills.into_iter().find(|skill| skill.name == name)
-                                .ok_or_else(|| SkillError("This user skill is no longer installed.".into()))?;
-                            skill.enabled = enabled;
-                            store.save(&skill)?;
+                let mut discovered = None;
+                let result = match command {
+                    LibraryCommand::Plugin(command) => {
+                        let _ = output
+                            .send(Event::Plugins(sovra_core::plugins::PluginEvent::Busy))
+                            .await;
+                        if let Some(plugins) = plugins.clone() {
+                            crate::plugins::handle(
+                                command,
+                                plugins,
+                                store.clone(),
+                                &mut remote_catalog,
+                            )
+                            .await
+                            .map(|(_, found)| {
+                                discovered = found;
+                            })
+                        } else {
+                            Err(SkillError(
+                                "Plugin storage is unavailable in this session.".into(),
+                            ))
                         }
                     }
-                    store.list()
-                }).await;
+                    LibraryCommand::Skill(command) => {
+                        let store = store.clone();
+                        let plugins = plugins.clone();
+                        tokio::task::spawn_blocking(move || {
+                            update_skill(command, store.as_deref(), plugins.as_deref())
+                        })
+                        .await
+                        .map_err(|_| {
+                            SkillError("The skill storage worker stopped unexpectedly.".into())
+                        })
+                        .and_then(|result| result)
+                    }
+                };
+                let result = match result {
+                    Ok(()) => {
+                        let store = store.clone();
+                        let plugins = plugins.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let library = plugins
+                                .as_ref()
+                                .map(|store| store.load())
+                                .transpose()?
+                                .unwrap_or_default();
+                            let listing = crate::plugins::listing(
+                                store.as_deref(),
+                                &library,
+                                plugins.as_deref(),
+                                crate::plugins::Admission::Recover,
+                            )?;
+                            Ok::<_, SkillError>((listing, library))
+                        })
+                        .await
+                        .map_err(|_| {
+                            SkillError("The skill library worker stopped unexpectedly.".into())
+                        })
+                        .and_then(|result| result)
+                    }
+                    Err(error) => Err(error),
+                };
                 match result {
-                    Ok(Ok(listing)) => {
+                    Ok((listing, library)) => {
                         let mut all = sovra_core::skills::builtin_skills();
                         all.extend(listing.skills);
                         match SkillCatalog::new(all.clone()) {
                             Ok(catalog) => {
                                 *current.write().await = Arc::new(catalog);
-                                let _ = output.send(Event::Skills(SkillEvent::Loaded { skills: all, issues: listing.issues })).await;
+                                let _ = output
+                                    .send(Event::Skills(SkillEvent::Loaded {
+                                        skills: all,
+                                        issues: listing.issues,
+                                    }))
+                                    .await;
+                                if plugins.is_some() {
+                                    let _ = output
+                                        .send(Event::Plugins(
+                                            sovra_core::plugins::PluginEvent::Loaded(library),
+                                        ))
+                                        .await;
+                                }
+                                if let Some(event) = discovered {
+                                    let _ = output.send(Event::Plugins(event)).await;
+                                }
                                 if let Some(skill) = saved {
-                                    let _ = output.send(Event::Skills(SkillEvent::Saved(skill))).await;
+                                    let _ =
+                                        output.send(Event::Skills(SkillEvent::Saved(skill))).await;
                                 }
                             }
-                            Err(error) => { let _ = output.send(Event::Skills(SkillEvent::Error(error.to_string()))).await; }
+                            Err(error) => {
+                                let _ = output
+                                    .send(Event::Skills(SkillEvent::Error(error.to_string())))
+                                    .await;
+                            }
                         }
                     }
-                    other => {
-                        let message = match other {
-                            Ok(Err(error)) => error.to_string(),
-                            Err(_) => "The skill storage worker stopped unexpectedly. Try refreshing Skills.".into(),
-                            Ok(Ok(_)) => unreachable!("success handled above"),
+                    Err(error) => {
+                        let event = if plugin_command {
+                            Event::Plugins(sovra_core::plugins::PluginEvent::Error(
+                                error.to_string(),
+                            ))
+                        } else {
+                            Event::Skills(SkillEvent::Error(error.to_string()))
                         };
-                        let _ = output.send(Event::Skills(SkillEvent::Error(message))).await;
+                        let _ = output.send(event).await;
                     }
                 }
             }
@@ -90,12 +163,102 @@ impl SkillsRuntime {
     }
 
     pub(crate) fn send(&self, command: SkillCommand) {
-        if self.commands.try_send(command).is_err() {
+        if self
+            .commands
+            .try_send(LibraryCommand::Skill(command))
+            .is_err()
+        {
             let _ = self.events.try_send(Event::Skills(SkillEvent::Error(
                 "Too many skill updates are pending. Wait briefly and try again.".into(),
             )));
         }
     }
+
+    pub(crate) fn send_plugin(&self, command: sovra_core::plugins::PluginCommand) {
+        if self
+            .commands
+            .try_send(LibraryCommand::Plugin(command))
+            .is_err()
+        {
+            let _ = self
+                .events
+                .try_send(Event::Plugins(sovra_core::plugins::PluginEvent::Error(
+                    "Too many plugin updates are pending. Wait briefly and try again.".into(),
+                )));
+        }
+    }
+}
+
+fn update_skill(
+    command: SkillCommand,
+    store: Option<&dyn SkillStore>,
+    plugins: Option<&dyn sovra_core::plugins::PluginStore>,
+) -> Result<(), SkillError> {
+    if matches!(command, SkillCommand::Refresh) {
+        return Ok(());
+    }
+    let store = store
+        .ok_or_else(|| SkillError("User skill storage is unavailable in this session.".into()))?;
+    let library = plugins
+        .map(sovra_core::plugins::PluginStore::load)
+        .transpose()?
+        .unwrap_or_default();
+    let owned: Vec<_> =
+        crate::plugins::listing(None, &library, plugins, crate::plugins::Admission::Recover)?
+            .skills;
+    let name = match &command {
+        SkillCommand::Save(skill) => Some(skill.name.as_str()),
+        SkillCommand::Remove { name } | SkillCommand::SetEnabled { name, .. } => {
+            Some(name.as_str())
+        }
+        SkillCommand::Refresh | SkillCommand::Import { .. } => None,
+    };
+    if name.is_some_and(|name| owned.iter().any(|skill| skill.name == name)) {
+        return Err(SkillError(
+            "Manage this skill through its plugin on the Skills page.".into(),
+        ));
+    }
+    match command {
+        SkillCommand::Refresh => {}
+        SkillCommand::Save(skill) => {
+            let mut candidates = sovra_core::skills::builtin_skills();
+            candidates.extend(
+                store
+                    .list()?
+                    .skills
+                    .into_iter()
+                    .filter(|old| old.name != skill.name),
+            );
+            candidates.extend(owned);
+            candidates.push(*skill.clone());
+            SkillCatalog::new(candidates)?;
+            store.save(&skill)?;
+        }
+        SkillCommand::Import { directory } => {
+            let skill = store.import(&directory)?;
+            if let Err(error) = crate::plugins::listing(
+                Some(store),
+                &library,
+                plugins,
+                crate::plugins::Admission::ValidateAll,
+            ) {
+                store.remove(&skill.name)?;
+                return Err(error);
+            }
+        }
+        SkillCommand::Remove { name } => store.remove(&name)?,
+        SkillCommand::SetEnabled { name, enabled } => {
+            let mut skill = store
+                .list()?
+                .skills
+                .into_iter()
+                .find(|skill| skill.name == name)
+                .ok_or_else(|| SkillError("This user skill is no longer installed.".into()))?;
+            skill.enabled = enabled;
+            store.save(&skill)?;
+        }
+    }
+    Ok(())
 }
 
 impl Drop for SkillsRuntime {

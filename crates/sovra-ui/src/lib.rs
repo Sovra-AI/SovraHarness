@@ -35,6 +35,7 @@ mod models_view;
 mod my_ais_view;
 mod native_surface;
 mod onboarding_bar;
+mod plugin_browser;
 mod remote_control_view;
 mod schedules_view;
 mod service_connect_view;

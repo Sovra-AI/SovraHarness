@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "io.github.sovra.weekly-planning",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "plan",
+      "title": "Plan a calmer week",
+      "description": "Turn your upcoming tasks into a manageable plan with time to rest.",
+      "instructions": "Ask what needs doing this week and which days are busy. Suggest three priorities, spread tasks across the available days, and leave room for rest. Ask before adding anything to a calendar."
+    }
+  ],
+  "services": [],
+  "api_version": 1,
+  "title": "Weekly planning",
+  "description": "A simple helper for choosing priorities and planning your week."
+}

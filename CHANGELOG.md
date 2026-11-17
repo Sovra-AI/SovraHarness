@@ -14,6 +14,46 @@ package version.
 
 ## [Unreleased]
 
+- **My AI preview choices are the same height.** Use my chat model, Preview
+  effort by task, and Preview automatic choice share one height when they sit
+  in a row.
+
+- **Code on an artifact card stays readable.** A web page, picture, diagram, or
+  other code is shown as a few short source lines inside the card. A packed
+  page is split before each tag, so it is not one cut-off line. The card does
+  not run the page; Open still shows it in the browser.
+
+- **WhatsApp link instructions stay on the card.** The steps for scanning the
+  code wrap inside the link window, above the code and beside Cancel.
+
+- **Simpler My AIs:** shows the saved chat AI with Chat and Change AI, or the
+  next setup step. The three preview choices share one height. Effort controls
+  and decision-engine settings are gone. Internal task classification now runs entirely in the Sovra binary;
+  removed the Laya/OpenJev HTTP client and its per-prompt service call. Navigation
+  releases the previous page's keyboard focus so the new actions remain reachable.
+
+- Update the file reader to xberg 1.4.0 and pin Velopack's upstream
+  1.3.39-g8d2844f prerelease to remove their vulnerable ZIP dependencies. The
+  installer startup hook is unchanged; in-app updating remains off. Remove the
+  now-unused ZIP and spreadsheet security exceptions.
+
+- **Downloadable plugins:** Skills now browses paged HTTPS catalogs, including
+  GitHub Pages, downloads checksum-verified packages, and saves offline on/off
+  choices. Plugins can bundle skills and suggested service connections. A
+  versioned publisher contract and static catalog builder support large catalogs;
+  updates preserve publisher identity and reject changed or older versions.
+
+- The skills shortcut is shown as a book icon in a pill wherever the app used
+  to draw a forward slash: the new-chat reminder, the line under the message
+  box, the Skills page, the guided tour, each row in the skills menu, the note
+  when a skill name is not recognised, and the skill editor. Typing `/` still
+  opens that menu.
+
+- **Skills examples stay inside the card.** A long example on the Skills page
+  wraps inside its card, above Try in chat, Open now, and Try the example,
+  including “Find answers in your folders”. A web address in an example keeps
+  its slashes. The card's name still includes the full example.
+
 - **"Don't search the web" is respected.** Saying "do not search the web",
   "don't google it" or "no need to search online" was read as a request to
   search, so Sovra sent the whole sentence to the web search helper as a

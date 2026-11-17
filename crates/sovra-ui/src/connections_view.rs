@@ -570,40 +570,55 @@ impl ModelsView {
                 .into_any_element(),
         };
 
+        let instructions = "On your phone, open WhatsApp → Settings (or ⋮) → Linked devices → Link a device, then point the camera at the code. It will show as Sovra connection.";
         v_flex()
             .id("whatsapp-qr-modal")
             .test_support()
             .w_full()
+            .min_w_0()
+            .max_w_full()
             .p(t.space.medium)
             .gap(t.space.medium)
             .sovra_surface(Surface::Elevated, cx)
             .child(
-                h_flex()
+                v_flex()
                     .w_full()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
-                    .gap(t.space.small)
+                    .min_w_0()
+                    .gap(t.space.hair)
                     .child(
-                        v_flex()
-                            .gap(t.space.hair)
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .items_center()
+                            .justify_between()
+                            .gap(t.space.small)
                             .child(
                                 div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal()
                                     .sovra_text(TextRole::SectionTitle, cx)
                                     .child("Link WhatsApp to this computer"),
                             )
-                            .child(caption(
-                                "On your phone, open WhatsApp → Settings (or ⋮) → Linked devices → Link a device, then point the camera at the code. It will show as Sovra connection.",
-                                cx,
-                            )),
+                            .child(
+                                design::button("whatsapp-qr-close", "Cancel", cx)
+                                    .small()
+                                    .ghost()
+                                    .flex_shrink_0()
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.send_connection(ConnectionCommand::CancelPairing, cx);
+                                    })),
+                            ),
                     )
                     .child(
-                        design::button("whatsapp-qr-close", "Cancel", cx)
-                            .small()
-                            .ghost()
-                            .on_click(cx.listener(|view, _, _, cx| {
-                                view.send_connection(ConnectionCommand::CancelPairing, cx);
-                            })),
+                        caption(instructions, cx)
+                            .id("whatsapp-link-instructions")
+                            .test_support()
+                            .aria_label(instructions)
+                            .w_full()
+                            .min_w_0()
+                            .max_w_full()
+                            .whitespace_normal(),
                     ),
             )
             .child(body)
