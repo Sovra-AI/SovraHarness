@@ -14,6 +14,17 @@ package version.
 
 ## [Unreleased]
 
+- **Enter in the password box signs you in.** On the sign-in page, Enter in the
+  password field does the same thing as the sign-in button, including when you
+  are creating an account. Enter in the email field does not submit. A second
+  Enter while sign-in is already in progress does nothing.
+
+- **WhatsApp reading is spelled out.** While Sovra is running and a linked
+  WhatsApp Web session is online, new message text arrives. A chat backfill
+  keeps people and chats and does not store old message text. A helper sees
+  only a short local list, not the phone's history. Groups are not answered
+  automatically. Status updates, broadcast lists, and newsletters are not stored.
+
 - **Keep company decisions and their reasons.** Artifacts → Decisions saves the
   question, decision, company-written criteria, quoted passages, review date and
   conditions that would end it. Chat replies offer **Record a decision**. A
@@ -24,9 +35,13 @@ package version.
   restart and can be copied with their history.
   The sign-in page now offers **Create another account**, so a second person can
   join the review using the native controls.
+  A hard-stop check applies only to the exact wording reviewed, including when
+  someone saves immediately after changing that wording.
 
 - Release-workflow tests locate the invoked workspace instead of a compiled-in
   checkout path, keeping the full CI gate usable with shared build caches.
+- The distributed-training check verifies that the saved model has the best
+  measured check score, which can come before the final round of a completed run.
 
 - **Saved chat is easier to find again.** A question can bring back another
   statement from the same conversation when that statement shares a

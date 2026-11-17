@@ -1,5 +1,6 @@
 //! Decisions remain reachable, bounded and readable at every required size.
 use super::*;
+use gpui_kit::test::TestQueryExt as _;
 use sovra_core::decisions::{
     DecisionCommand, DecisionDraft, DecisionEvent, DecisionEvidence, DecisionPerson, DecisionRecord,
 };
@@ -11,14 +12,19 @@ fn settle(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-fn reveal(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
+fn reveal(
+    window: &mut gpui_kit::Window,
+    id: impl Into<gpui_kit::ElementId>,
+    cx: &mut gpui_kit::App,
+) {
+    let id = id.into();
     for _ in 0..60 {
         window.render_frame(cx);
         let pane = window.find("sovra-decisions-view").bounds();
-        let item = window.find(id).bounds();
+        let item = window.find(id.clone()).bounds();
         assert!(
             item.left() >= pane.left() && item.right() <= pane.right(),
-            "{id}: {item:?} outside {pane:?}"
+            "{id:?}: {item:?} outside {pane:?}"
         );
         if item.top() >= pane.top() && item.bottom() <= pane.bottom() {
             return;
@@ -34,7 +40,154 @@ fn reveal(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::Ap
             cx,
         );
     }
-    panic!("{id} must be reachable");
+    panic!("{id:?} must be reachable");
+}
+
+#[gpui_kit::test]
+fn a_chat_reply_keeps_its_source_and_changed_stops_need_a_fresh_check(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.expect("shell created");
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("Should we renew our workshop lease?", window, cx);
+        });
+    })
+    .expect("window available");
+    let session = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    let reply = "Renew for one year, subject to the company's checks.";
+    for event in [
+        Event::AgentResponseStarted {
+            session_id: session.clone(),
+            model: sovra_core::ResponseModel {
+                model_id: "test".into(),
+                name: "Test model".into(),
+                provider: "Test".into(),
+            },
+        },
+        Event::AgentChunk {
+            session_id: session.clone(),
+            text: reply.into(),
+        },
+        Event::AgentCompleted {
+            session_id: session.clone(),
+        },
+    ] {
+        events
+            .send_blocking(event)
+            .expect("scripted reply delivered");
+    }
+    settle(cx);
+    let message = shell.read_with(cx, |shell, _| {
+        shell
+            .workspace()
+            .messages
+            .last()
+            .expect("reply exists")
+            .id
+            .clone()
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("record-decision", 1usize), cx);
+        for (label, value) in [
+            ("Question", "Should we renew our workshop lease?"),
+            ("Our criteria", "Rent stays within the budget."),
+            ("Review on (YYYY-MM-DD, UTC)", "2099-01-01"),
+            (
+                "What would end this decision?",
+                "The workshop is no longer available.",
+            ),
+            ("Cited passage 1", "The lease can be renewed for one year."),
+        ] {
+            window.render_frame(cx);
+            let id = window
+                .find_by_label(label)
+                .path()
+                .last()
+                .expect("input has a native ID")
+                .clone();
+            reveal(window, id.clone(), cx);
+            window.click(id, cx);
+            window.input(value, cx);
+        }
+        reveal(window, ("decision-source", 0usize), cx);
+        window.click(("decision-source", 0usize), cx);
+        window.input("Lease page 2", cx);
+        reveal(window, "decision-add-stop", cx);
+        window.click("decision-add-stop", cx);
+        reveal(window, ("decision-stop", 0usize), cx);
+        window.click(("decision-stop", 0usize), cx);
+        window.input("Budget reviewed", cx);
+        reveal(window, ("decision-stop-cleared", 0usize), cx);
+        window.click(("decision-stop-cleared", 0usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("decision-stop-cleared", 0usize)).checked(),
+            Some(true)
+        );
+        reveal(window, ("decision-stop", 0usize), cx);
+        window.click(("decision-stop", 0usize), cx);
+        window.input(" plus manager approval", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("decision-stop-cleared", 0usize)).checked(),
+            Some(false)
+        );
+        reveal(window, "decision-save", cx);
+        window.click("decision-save", cx);
+    })
+    .expect("window available");
+    let draft = std::iter::from_fn(|| commands.try_recv().ok())
+        .find_map(|command| match command {
+            Command::Decisions(DecisionCommand::Save {
+                id: None,
+                expected_revision: 0,
+                draft,
+            }) => Some(draft),
+            _ => None,
+        })
+        .expect("chat-started decision sends a valid draft");
+    assert_eq!(draft.decision, reply);
+    assert_eq!(
+        draft.chat,
+        Some(DecisionEvidence {
+            reference: format!("Chat {session} / reply {message}"),
+            passage: reply.into()
+        })
+    );
+    assert_eq!(draft.evidence[0].reference, "Lease page 2");
+    assert_eq!(draft.hard_stops.len(), 1);
+    assert!(draft.hard_stops[0].condition.contains("manager approval"));
+    assert!(
+        !draft.hard_stops[0].cleared,
+        "changing a written condition requires checking it again"
+    );
+    events
+        .send_blocking(Event::Decisions(DecisionEvent::Error(
+            "Test save failure".into(),
+        )))
+        .expect("save failure delivered");
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        reveal(window, ("decision-stop-cleared", 0usize), cx);
+        window.click(("decision-stop-cleared", 0usize), cx);
+        reveal(window, "decision-save", cx);
+        window.click("decision-save", cx);
+    })
+    .expect("window available");
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command,
+            Command::Decisions(DecisionCommand::Save { draft, .. }) if draft.hard_stops[0].cleared
+        )),
+        "the person can explicitly check the revised wording"
+    );
 }
 
 fn record() -> DecisionRecord {

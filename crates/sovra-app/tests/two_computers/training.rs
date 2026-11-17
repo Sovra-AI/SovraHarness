@@ -268,7 +268,24 @@ async fn a_group_trains_a_small_model_together_and_both_computers_get_it() {
     assert_eq!(trained.card.name, "Garden writer");
     assert_eq!(trained.card.base, BaseModel::Small);
     assert_eq!(trained.card.origin, ModelOrigin::TrainedHere);
-    assert_eq!(trained.card.rounds, 160);
+    // Helpers change the learning path, so the best checked model can precede
+    // the final round. The run still completes all 160 rounds above.
+    let best_check = done
+        .metrics
+        .points
+        .iter()
+        .filter_map(|point| point.check_loss_milli)
+        .min()
+        .expect("the run checked its models");
+    let kept = done
+        .metrics
+        .points
+        .iter()
+        .find(|point| point.round == trained.card.rounds)
+        .expect("the saved model comes from a measured round");
+    assert_eq!(kept.check_loss_milli, Some(best_check));
+    assert_eq!(trained.card.check_loss_milli, kept.check_loss_milli);
+    assert_eq!(trained.card.loss_milli, Some(kept.loss_milli));
     let loss = trained.card.loss_milli.expect("a measured loss");
     assert!(
         loss < LEARNED_MILLI,

@@ -20,6 +20,16 @@ Telegram user account.
 Review the automatic-reply settings before leaving a channel connected. Sovra
 must be running to answer. Use the connection's disconnect control to unlink it.
 
+## Reading WhatsApp messages
+
+While Sovra is running and the linked WhatsApp Web session is online, Sovra
+receives the text of new messages. A helper can read only a short local list of
+those recent messages. That list is not the phone's full history.
+
+A chat backfill keeps the people and the chats. It does not store the old
+message text. Groups are never answered automatically. Status updates, broadcast
+lists, and newsletters are not stored.
+
 ## Send from desktop chat
 
 Ask Sovra to prepare a message with the recipient and exact text. Review the
