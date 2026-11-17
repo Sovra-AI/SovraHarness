@@ -42,6 +42,8 @@ package version.
   choices. Plugins can bundle skills and suggested service connections. A
   versioned publisher contract and static catalog builder support large catalogs;
   updates preserve publisher identity and reject changed or older versions.
+  Plugin authors get a versioned JSON Schema, explicit extension rules, and a
+  read-only catalog check with source-file errors before publishing.
 
 - The skills shortcut is shown as a book icon in a pill wherever the app used
   to draw a forward slash: the new-chat reminder, the line under the message

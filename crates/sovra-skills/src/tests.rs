@@ -259,6 +259,9 @@ fn publisher_pages_a_large_catalog_and_never_overwrites_an_existing_publication(
         .unwrap();
     }
     let output = fixture.0.join("public");
+    check_catalog(&source, "https://example.github.io/plugins").unwrap();
+    assert!(!output.exists());
+    assert_eq!(fs::read_dir(&source).unwrap().count(), 100);
     publish_catalog(&source, &output, "https://example.github.io/plugins").unwrap();
     let first = PluginCatalog::parse(&fs::read(output.join("catalog.json")).unwrap()).unwrap();
     assert_eq!(first.plugins.len(), 48);
@@ -284,6 +287,29 @@ fn publisher_pages_a_large_catalog_and_never_overwrites_an_existing_publication(
     }
     assert!(publish_catalog(&source, &output, "https://example.github.io/plugins").is_err());
     assert!(output.join("catalog.json").exists());
+}
+
+#[test]
+fn catalog_check_names_invalid_sources_and_leaves_them_untouched() {
+    let fixture = Fixture::new();
+    let source = fixture.0.join("source");
+    fs::create_dir(&source).unwrap();
+    let bad_path = source.join("broken.json");
+    fs::write(&bad_path, b"{}").unwrap();
+    let url = "https://example.github.io/plugins";
+    let error = check_catalog(&source, url).unwrap_err();
+    assert!(error.0.contains("broken.json"));
+    assert_eq!(fs::read(&bad_path).unwrap(), b"{}");
+    let output = fixture.0.join("public");
+    assert_eq!(publish_catalog(&source, &output, url).unwrap_err(), error);
+    assert!(!output.exists());
+
+    fs::write(&bad_path, PLUGIN).unwrap();
+    fs::write(source.join("duplicate.json"), PLUGIN).unwrap();
+    let duplicate = check_catalog(&source, url).unwrap_err();
+    assert!(duplicate.0.contains("io.github.sovra.weekly-planning"));
+    assert!(duplicate.0.contains("is repeated"));
+    assert_eq!(fs::read_dir(&source).unwrap().count(), 2);
 }
 
 #[cfg(unix)]

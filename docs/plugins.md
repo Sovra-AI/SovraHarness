@@ -40,6 +40,53 @@ and [example catalog](../examples/plugins/catalog.json) are checked in tests.
 Unknown fields, repeated JSON fields, unsupported format versions and invalid
 contents are rejected. All strings are UTF-8.
 
+### Validate while authoring
+
+The [version 1 JSON Schema](../schemas/plugins-v1.schema.json) describes both
+packages and catalog pages, with reusable definitions for their entries, skills
+and services. Associate it with those JSON files in your editor's settings for
+field completion and structural validation. Keep the association in editor
+settings: `$schema` is not an accepted field inside a plugin package or catalog.
+
+Before publishing a collection, run the read-only check:
+
+```sh
+cargo run -p sovra-skills --example check_catalog -- \
+  https://YOUR-ACCOUNT.github.io/YOUR-REPOSITORY \
+  examples/plugins/packages
+```
+
+Exit status zero means the source packages and proposed catalog pages passed
+the same preparation used by the catalog builder. A failed package identifies
+its source path. The check leaves the source folder unchanged and creates no
+publication folder, so it can run in a publisher's CI before deployment.
+
+The schema catches field names, types, required contributions and array bounds.
+The shared Rust parser also checks UTF-8 byte budgets, URL policy, unique plugin
+IDs and skill names, and numeric version bounds. JSON Schema string lengths
+count characters; they cannot replace the byte limits. Exact downloaded bytes,
+checksums and catalog/package agreement are checked during publication and
+installation. Contract tests exercise both validators against the examples and
+invalid packages. The schema uses
+[JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12/json-schema-validation).
+
+### Version and extension rules
+
+| Version | What it identifies | When to change it |
+| --- | --- | --- |
+| Package `version` | One immutable release of a plugin ID | Any change to the published package bytes, including descriptions and instructions |
+| `schema_version` | The fields and structure of a package or catalog | A new field, contribution shape, or incompatible format change |
+| `api_version` | What Sovra must understand to use a package | A new host capability or changed interpretation of existing contributions |
+
+Version 1 accepts the `skills` and `services` contributions described below.
+A new contribution needs its schema, core validation, runtime behavior and
+contract tests implemented together before a publisher emits it. Bump the
+relevant versions and preserve fixtures for supported older versions; do not
+extend version 1 by putting executable behavior in instruction text or adding
+unknown fields. A catalog can display an entry for a newer API, but the current
+host will leave its download unavailable. Publishers targeting older hosts
+should retain a compatible catalog URL while introducing a newer contract.
+
 ### Package
 
 A package is one self-contained JSON document:
@@ -163,6 +210,5 @@ plugin storage path once. The UI sends commands and renders events.
 Version 1 establishes that boundary for future content kinds. Executable plugins,
 declared permissions, dependency solving, signed catalogs, global remote search,
 cache collection and multi-catalog discovery need explicit contracts and tests
-before being supported. New kinds must get an API revision or a deliberately
-compatible schema change; accepting arbitrary unknown fields is not an extension
-mechanism.
+before being supported. Follow the version and extension rules above when adding
+them.

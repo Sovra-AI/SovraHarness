@@ -1,5 +1,7 @@
 use super::*;
 
+mod schema;
+
 const CATALOG: &[u8] = include_bytes!("../../../../examples/plugins/catalog.json");
 const PACKAGE: &[u8] =
     include_bytes!("../../../../examples/plugins/packages/weekly-planning-1.0.0.json");

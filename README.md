@@ -123,7 +123,7 @@ has the first run, group steps, every setting, privacy details and limits.
   Connection setup and permissions depend on the service.
 - **Download plugins:** open **Skills → Plugins** to browse a GitHub Pages catalog,
   download skills, and turn them on or off. See [Plugins](docs/plugins.md) for
-  the package contract and catalog publisher.
+  the package contract, editor schema, read-only catalog check, and publisher.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
   scheduled search note to a WhatsApp group.
 - **Share with a group:** share selected knowledge, artifacts, helpers, and

@@ -5,7 +5,7 @@ mod format;
 mod plugins;
 mod publish;
 pub use plugins::LocalPluginStore;
-pub use publish::publish_catalog;
+pub use publish::{check_catalog, publish_catalog};
 #[cfg(test)]
 mod tests;
 
