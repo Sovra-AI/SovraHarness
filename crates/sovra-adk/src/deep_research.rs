@@ -213,6 +213,9 @@ impl AdkHarness {
     }
 }
 
+/// How often a writing helper reports its word count to the chat.
+const WRITING_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 const PLAN_INSTRUCTION: &str = "\
 You are a research planner. Create a research plan, not a summary.
 
@@ -389,11 +392,27 @@ impl ResearchRun<'_> {
                 .map_err(|error| harness.safe_error(&error))?;
             let mut deltas = EventTextDeltas::default();
             let mut text = String::new();
+            // A long write-up is otherwise silent until it ends; reporting its
+            // progress keeps the chat from treating it as a stalled model.
+            let mut reported = std::time::Instant::now();
             while let Some(item) = stream.next().await {
                 let event = item.map_err(|error| harness.safe_error(&error))?;
                 let delta_event = deltas.push(&event);
                 if let (_, Some(chunk)) = extract_output(&delta_event) {
                     text.push_str(&chunk);
+                    if reported.elapsed() >= WRITING_REPORT_INTERVAL {
+                        reported = std::time::Instant::now();
+                        self.board
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .report_writing(
+                                Some(invocation_suffix),
+                                text.split_whitespace().count(),
+                            );
+                        if !self.snapshot().await {
+                            return Err("The chat closed while research was writing.".to_owned());
+                        }
+                    }
                 }
             }
             Ok(text)
@@ -572,6 +591,8 @@ mod tests {
         active: Arc<AtomicUsize>,
         max_active: Arc<AtomicUsize>,
         goal_calls: Arc<AtomicUsize>,
+        /// Streams the final document in pieces spread over a few seconds.
+        slow_compose: bool,
     }
 
     #[async_trait::async_trait]
@@ -594,6 +615,26 @@ mod tests {
             } else if seen.contains("Write a clear, cited research document")
                 || seen.contains("final research document")
             {
+                if self.slow_compose {
+                    let pieces = [
+                        "# Heat pumps vs gas boilers\n\n",
+                        "Heat pumps win on running cost ",
+                        "in most climates.\n\n## Sources\n\n",
+                        "- Example Source — https://example.test/heat-pumps\n",
+                    ];
+                    let stream = futures::StreamExt::then(
+                        futures::stream::iter(pieces),
+                        |piece| async move {
+                            tokio::time::sleep(Duration::from_millis(900)).await;
+                            Ok(LlmResponse {
+                                content: Some(Content::new("model").with_text(piece)),
+                                partial: true,
+                                ..LlmResponse::default()
+                            })
+                        },
+                    );
+                    return Ok(Box::pin(stream));
+                }
                 "# Heat pumps vs gas boilers\n\nHeat pumps win on running cost in most climates.\n\n## Sources\n\n- Example Source — https://example.test/heat-pumps\n".to_owned()
             } else if seen.contains("complete this deliverable") {
                 "| Option | Running cost |\n| --- | --- |\n| Heat pump | Lower |\n| Gas boiler | Higher |\n".to_owned()
@@ -615,7 +656,7 @@ mod tests {
         }
     }
 
-    async fn run_research() -> (Vec<Event>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    async fn run_research(slow_compose: bool) -> (Vec<Event>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
         let active = Arc::new(AtomicUsize::new(0));
         let max_active = Arc::new(AtomicUsize::new(0));
         let goal_calls = Arc::new(AtomicUsize::new(0));
@@ -623,6 +664,7 @@ mod tests {
             active: Arc::clone(&active),
             max_active: Arc::clone(&max_active),
             goal_calls: Arc::clone(&goal_calls),
+            slow_compose,
         });
         let base =
             AdkHarness::with_llm_and_tools(&AgentConfig::default(), llm, vec![]).expect("harness");
@@ -659,7 +701,7 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_goals_overlap_emit_board_and_save_document() {
-        let (events, max_active, goal_calls) = run_research().await;
+        let (events, max_active, goal_calls) = run_research(false).await;
         assert!(
             max_active.load(Ordering::SeqCst) >= 2,
             "independent research goals must overlap in time"
@@ -746,5 +788,33 @@ mod tests {
             "only the closing note should appear in chat text: {text_messages:?}"
         );
         assert!(text_messages[0].contains("research document is ready"));
+    }
+
+    /// Regression: a long write-up sent nothing until it ended, so the chat's
+    /// stall timer stopped deep research mid-document. It now reports progress.
+    #[tokio::test]
+    async fn a_slow_write_up_reports_its_progress_while_writing() {
+        let (events, _, _) = run_research(true).await;
+        let statuses: Vec<String> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::AgUi {
+                    event:
+                        AgUiEvent::ActivitySnapshot {
+                            activity: LiveActivity::Research(board),
+                            ..
+                        },
+                    ..
+                } => Some(board.status.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            statuses.iter().any(
+                |status| status.starts_with("Writing your research document…")
+                    && status.ends_with("so far")
+            ),
+            "{statuses:?}"
+        );
     }
 }

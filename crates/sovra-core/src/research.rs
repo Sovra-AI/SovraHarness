@@ -145,6 +145,20 @@ impl ResearchBoard {
         }
     }
 
+    /// Live progress while a helper writes: `goal_id` names the goal being written,
+    /// or `None` for the final document. Showing it also tells the chat the run is
+    /// still working, so a long write-up is not mistaken for a stalled model.
+    pub fn report_writing(&mut self, goal_id: Option<&str>, words: usize) {
+        let unit = if words == 1 { "word" } else { "words" };
+        self.status = match goal_id.and_then(|id| self.goals.iter().find(|g| g.id == id)) {
+            Some(goal) => format!(
+                "Writing: {} · {words} {unit} so far",
+                truncate_words(&goal.text, 8)
+            ),
+            None => format!("Writing your research document… {words} {unit} so far"),
+        };
+    }
+
     pub fn begin_writing(&mut self) {
         self.phase = ResearchPhase::Writing;
         "Writing your research document…".clone_into(&mut self.status);
@@ -311,6 +325,33 @@ pub fn research_board_title(prompt: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writing_progress_names_the_goal_or_the_document_and_counts_words() {
+        let mut board = ResearchBoard::planning("UAE company");
+        board.with_plan(
+            parse_research_plan("- [DELIVERABLE] Synthesise findings into a step-by-step guide")
+                .into_iter()
+                .map(ParsedResearchGoal::into_goal)
+                .collect(),
+        );
+        let id = board.goals[0].id.clone();
+        board.report_writing(Some(&id), 1);
+        assert_eq!(
+            board.status,
+            "Writing: Synthesise findings into a step-by-step guide · 1 word so far"
+        );
+        board.report_writing(None, 350);
+        assert_eq!(
+            board.status,
+            "Writing your research document… 350 words so far"
+        );
+        board.report_writing(Some("missing"), 2);
+        assert_eq!(
+            board.status,
+            "Writing your research document… 2 words so far"
+        );
+    }
 
     #[test]
     fn tagged_plan_splits_research_and_deliverable() {

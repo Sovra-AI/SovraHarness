@@ -23,6 +23,12 @@ package version.
   step restarts it, so a busy reply can run as long as it keeps making progress,
   and a model that stops sending is still stopped. The same rule covers deep
   research, team replies and replies about attached files.
+- **Deep research shows its progress while it writes.** A long write-up used to
+  say nothing until it ended, so deep research was stopped part-way ("Deep
+  research timed out") with three of its four goals already done, and the
+  next answer started over without that research. The board now shows
+  "Writing … · 350 words so far" every two seconds while a helper writes,
+  which also tells the chat the research is still working.
 
 - Expanded the decision-record guides with chat entry, account switching,
   fresh acceptance after edits, and help when acceptance is unavailable.
