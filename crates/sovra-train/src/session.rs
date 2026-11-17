@@ -12,10 +12,12 @@ use std::time::Instant;
 use sovra_core::group::{ContentHash, DeviceId};
 use sovra_core::swarm::learn::scavenger::{Contribution, GridSyncer, WorkLease};
 use sovra_core::training::{
-    BaseModel, HardwareInfo, MAX_SAMPLE_BYTES, MetricPoint, ModelFacts, ModelHeader, TrainingBase,
-    TrainingEngine, TrainingError, TrainingPlan, TrainingPlanSummary, TrainingProgress,
-    TrainingRecipe, TrainingResult, TrainingSession, TrainingTask, check_text, check_trial_prompt,
-    decode_model, encode_model, encode_parameters, inspect_model, model_id, sample_text,
+    BaseModel, HardwareInfo, MAX_SAMPLE_BYTES, MetricPoint, ModelFacts, ModelHeader,
+    REPEAT_PROMPT_BYTES, REPEAT_WRITE_BYTES, RepeatCheck, TrainingBase, TrainingEngine,
+    TrainingError, TrainingPlan, TrainingPlanSummary, TrainingProgress, TrainingRecipe,
+    TrainingResult, TrainingSession, TrainingTask, check_text, check_trial_prompt, decode_model,
+    encode_model, encode_parameters, inspect_model, matched_bytes, model_id, repeat_probes,
+    sample_text,
 };
 
 use crate::device::{self, EngineChoice, GraphicsCard};
@@ -743,6 +745,43 @@ impl TrainingSession for Session {
     }
 
     fn export(&self) -> Result<Vec<u8>, TrainingError> {
+        let (header, values) = self.kept();
+        encode_model(&header, values)
+    }
+
+    fn repeat_check(&self) -> Option<RepeatCheck> {
+        let (header, values) = self.kept();
+        let learned = &self.text.as_bytes()[..self.split];
+        let starts = repeat_probes(learned.len());
+        if starts.is_empty() {
+            return None;
+        }
+        let matches: Vec<usize> = starts
+            .iter()
+            .map(|start| {
+                let truth = start + REPEAT_PROMPT_BYTES;
+                // The likeliest letter every time: what the model most wants to
+                // write is what someone drawing text out of it would get.
+                writer::write(
+                    header.architecture,
+                    values,
+                    &learned[*start..truth],
+                    REPEAT_WRITE_BYTES,
+                    0,
+                    0,
+                )
+                .map_or(0, |written| {
+                    matched_bytes(&written, &learned[truth..truth + REPEAT_WRITE_BYTES])
+                })
+            })
+            .collect();
+        Some(RepeatCheck::from_matches(&matches))
+    }
+}
+
+impl Session {
+    /// The model a finished run gives back, and its description.
+    fn kept(&self) -> (ModelHeader, &[f32]) {
         let mut header = ModelHeader {
             base: self.family,
             architecture: self.net.architecture(),
@@ -767,9 +806,9 @@ impl TrainingSession for Session {
             header.tokens = self.base_tokens.saturating_add(best.tokens);
             header.loss_milli = best.loss_milli;
             header.check_loss_milli = Some(best.check_loss_milli);
-            return encode_model(&header, values);
+            return (header, values);
         }
-        encode_model(&header, self.grid.params())
+        (header, self.grid.params())
     }
 }
 

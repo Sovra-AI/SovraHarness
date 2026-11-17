@@ -69,15 +69,18 @@ impl Actor {
             .take()
             .ok_or("Resume the saved training to continue.")?;
         let (session, exported) = tokio::task::spawn_blocking(move || {
+            // The privacy check reads the same model the file holds, while the
+            // run's text is still here to compare with.
             let exported = session
                 .export()
-                .and_then(|file| engine.inspect(&file).map(|facts| (facts, file)));
+                .and_then(|file| engine.inspect(&file).map(|facts| (facts, file)))
+                .map(|(facts, file)| (facts, file, session.repeat_check()));
             (session, exported)
         })
         .await
         .map_err(|_| "The training worker stopped.".to_owned())?;
         self.session = Some(session);
-        let (facts, file) = exported.map_err(|error| error.to_string())?;
+        let (facts, file, repeats) = exported.map_err(|error| error.to_string())?;
         let name = self
             .state
             .plan
@@ -104,6 +107,9 @@ impl Actor {
         self.store_model(card, file).await?;
         self.ending.exported = Some(facts.id);
         self.write_notes().await?;
+        if let Some(check) = repeats {
+            self.record_check(facts.id, check).await;
+        }
         self.send_finished(facts.id);
         if group.is_some() {
             // Trained with the group: every computer of it gets the model.

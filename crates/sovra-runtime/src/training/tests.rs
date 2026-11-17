@@ -198,6 +198,10 @@ impl TrainingSession for Session {
         (round > 0).then(|| (round, format!("written at round {round}")))
     }
 
+    fn repeat_check(&self) -> Option<sovra_core::training::RepeatCheck> {
+        None
+    }
+
     fn export(&self) -> Result<Vec<u8>, TrainingError> {
         let architecture = self.saved.plan.architecture;
         #[expect(clippy::cast_precision_loss, reason = "a test value")]

@@ -13,10 +13,10 @@ use sovra_core::{
     training::{
         BaseModel, BucketSettings, CopyState, Delivery, HardwareInfo, HelpingPhase, LibraryModel,
         LrSchedule, MetricPoint, ModelCard, ModelFacts, ModelHeader, ModelOrigin, ModelOutletState,
-        Outlet, RunSummary, SAMPLE_TEXT, TrainingBase, TrainingCommand, TrainingEngineKind,
-        TrainingEvent, TrainingGroup, TrainingHelp, TrainingMetrics, TrainingPeer, TrainingPhase,
-        TrainingPlan, TrainingPreset, TrainingProgress, TrainingSettings, TrainingSource,
-        TrainingState, Trial,
+        Outlet, RepeatCheck, RunSummary, SAMPLE_TEXT, TrainingBase, TrainingCommand,
+        TrainingEngineKind, TrainingEvent, TrainingGroup, TrainingHelp, TrainingMetrics,
+        TrainingPeer, TrainingPhase, TrainingPlan, TrainingPreset, TrainingProgress,
+        TrainingSettings, TrainingSource, TrainingState, Trial,
     },
 };
 use sovra_runtime::Client;
@@ -289,6 +289,15 @@ fn copies() -> ModelOutletState {
             "The storage service refused the upload. Check that the keys may write to this bucket and folder. (It answered 403 AccessDenied.)".into(),
         ),
     );
+    // The first model learned its text by heart; the second did not.
+    outlets.record_check(
+        ContentHash([9; 32]),
+        RepeatCheck::from_matches(&[64, 64, 40, 0]),
+    );
+    outlets.record_check(
+        ContentHash([8; 32]),
+        RepeatCheck::from_matches(&[3, 5, 0, 1]),
+    );
     outlets
 }
 
@@ -488,6 +497,8 @@ fn every_part_of_the_training_page_fits_each_layout(cx: &mut TestAppContext) {
                 reveal(window, ("training-model-ollama", 0usize), cx);
                 reveal(window, ("training-model-backup-state", 0usize), cx);
                 reveal(window, ("training-model-ollama-state", 0usize), cx);
+                reveal(window, ("training-model-privacy", 0usize), cx);
+                reveal(window, ("training-model-privacy", 1usize), cx);
                 reveal(window, "training-bucket-saved", cx);
                 reveal(window, "training-bucket-change", cx);
                 click(window, ("training-model-try", 0usize), cx);
@@ -1094,6 +1105,17 @@ fn finished_models_go_to_your_bucket_and_to_ollama_when_you_choose(cx: &mut Test
             label(window, ("training-model-backup-state", 1usize))
                 .starts_with("Backup did not work: The storage service refused")
         );
+        // Each model says plainly whether it gives its text back.
+        assert!(
+            label(window, ("training-model-privacy", 0usize))
+                .starts_with("Privacy check: it repeats your text.")
+        );
+        assert!(
+            label(window, ("training-model-privacy", 1usize))
+                .starts_with("Privacy check: given 4 beginnings from your text, it never wrote more than 5 letters")
+        );
+        // A model received from the group was never checked here: no line.
+        assert!(window.try_find(("training-model-privacy", 2usize)).is_none());
         click(window, ("training-model-backup", 1usize), cx);
     })
     .expect("window open");

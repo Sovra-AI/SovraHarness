@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use sovra_core::training::{
     BucketFile, BucketSettings, CopyState, ModelId, ModelOrigin, ModelOutletState, ModelOutlets,
-    OLLAMA_NEEDED, OLLAMA_OLDEST, OllamaModel, Outlet, exports_to_gguf, gguf_needs_output_offsets,
-    model_readme, ollama_name, ollama_refusal, outlet_name, to_gguf,
+    OLLAMA_NEEDED, OLLAMA_OLDEST, OllamaModel, Outlet, RepeatCheck, RepeatLevel, exports_to_gguf,
+    gguf_needs_output_offsets, model_readme, ollama_name, ollama_refusal, outlet_name, to_gguf,
 };
 
 use super::{Actor, library::unix_ms, storage};
@@ -24,6 +24,8 @@ const MAX_OUTLETS_BYTES: u64 = 512 * 1024;
 const NO_OUTLETS: &str = "Copying models out of Sovra is unavailable in this build.";
 const NO_BUCKET: &str = "Set up your storage bucket first.";
 const NO_MODEL: &str = "That model is no longer in Your models.";
+/// Said on a model held back from automatic copies by the privacy check.
+pub(super) const HELD: &str = "Not sent by itself, because this model repeats your text. Read the privacy check, then press the button if you still want to send it.";
 
 /// How one copy ended.
 pub(super) struct Sent {
@@ -138,6 +140,15 @@ impl Actor {
         Ok(())
     }
 
+    /// Keeps a new model's privacy check with its other details on this
+    /// computer. Losing it costs only the line on the page.
+    pub(super) async fn record_check(&mut self, model: ModelId, check: RepeatCheck) {
+        self.state.outlets.record_check(model, check);
+        if let Err(error) = self.save_outlets().await {
+            tracing::warn!(%error, "a model's privacy check could not be saved");
+        }
+    }
+
     pub(super) async fn set_automatic_backup(&mut self, on: bool) -> Result<(), String> {
         if on {
             self.outlets().ok_or(NO_OUTLETS)?;
@@ -164,6 +175,7 @@ impl Actor {
         let root = self.root().ok_or("Training is unavailable.")?;
         let bucket = self.state.outlets.bucket.clone().ok_or(NO_BUCKET)?;
         let entry = self.state.model(model).ok_or(NO_MODEL)?.clone();
+        let repeats = self.state.outlets.repeats(model);
         if self.state.outlets.working(model, Outlet::Bucket) {
             return Ok(());
         }
@@ -180,7 +192,7 @@ impl Actor {
                 let stem = outlet_name(&entry.card.name, model);
                 let architecture = entry.card.architecture;
                 let name = entry.card.name.clone();
-                let readme = model_readme(&entry, &stem);
+                let readme = model_readme(&entry, &stem, repeats);
                 let (file, gguf) = tokio::task::spawn_blocking(move || {
                     let file = storage::read_model(&root, model)?;
                     let gguf = exports_to_gguf(architecture)
@@ -276,6 +288,11 @@ impl Actor {
     /// A model has just finished training here: send it wherever the person
     /// asked for finished models to go. Nothing here can fail the run; a copy
     /// that does not arrive is shown on the model.
+    ///
+    /// A model the privacy check found repeating the text is held back from
+    /// automatic copies. Switching a copy on was a choice about models in
+    /// general; sending one that gives the text back is a choice about this
+    /// model, so it waits for the person to press the button themselves.
     pub(super) fn send_finished(&mut self, model: ModelId) {
         let Some(entry) = self.state.model(model) else {
             return;
@@ -284,11 +301,32 @@ impl Actor {
             return;
         }
         let architecture = entry.card.architecture;
-        if self.state.outlets.backup_automatically {
-            let _ = self.back_up(model);
-        }
-        if self.state.outlets.ollama_automatically && ollama_refusal(architecture).is_none() {
-            let _ = self.add_to_ollama(model);
+        let wanted = [
+            (Outlet::Bucket, self.state.outlets.backup_automatically),
+            (
+                Outlet::Ollama,
+                self.state.outlets.ollama_automatically && ollama_refusal(architecture).is_none(),
+            ),
+        ];
+        let repeats = self
+            .state
+            .outlets
+            .repeats(model)
+            .is_some_and(|check| check.level() != RepeatLevel::NotFound);
+        for (outlet, on) in wanted {
+            if !on {
+                continue;
+            }
+            if repeats {
+                self.state
+                    .outlets
+                    .record(model, outlet, CopyState::Failed(HELD.into()));
+                continue;
+            }
+            let _ = match outlet {
+                Outlet::Bucket => self.back_up(model),
+                Outlet::Ollama => self.add_to_ollama(model),
+            };
         }
     }
 

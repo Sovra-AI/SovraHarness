@@ -17,6 +17,7 @@ mod metrics;
 mod models;
 mod outlets;
 mod plan;
+mod repeats;
 mod sample;
 mod work;
 
@@ -50,6 +51,10 @@ pub use plan::{
     MIN_TEXT_BYTES, MIN_WORK_BATCH_BYTES, SAMPLE_TEXT, SourceKind, SourceSummary, TrainingBase,
     TrainingPlan, TrainingPlanSummary, TrainingPreset, TrainingSettings, TrainingSource,
     check_name, check_text, text_from_file_bytes,
+};
+pub use repeats::{
+    REPEAT_COUNTED_BYTES, REPEAT_MUCH_PERCENT, REPEAT_PROBES, REPEAT_PROMPT_BYTES,
+    REPEAT_WRITE_BYTES, RepeatCheck, RepeatLevel, matched_bytes, repeat_probes,
 };
 pub use work::{
     BYTE_MODEL_PARAMETERS, MAX_MODEL_PART_BYTES, MAX_OFFER_HAVE, MAX_OFFERED_MODELS, RunSummary,
@@ -400,6 +405,9 @@ pub trait TrainingSession: Send {
     fn sample(&self) -> Option<(u32, String)>;
     /// The model as it is now, as a model file.
     fn export(&self) -> Result<Vec<u8>, TrainingError>;
+    /// Whether the model [`Self::export`] gives back repeats the text it
+    /// learned from. `None` when the text is too short to check.
+    fn repeat_check(&self) -> Option<RepeatCheck>;
 }
 
 #[cfg(test)]

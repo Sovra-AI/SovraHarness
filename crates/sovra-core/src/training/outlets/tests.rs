@@ -2,8 +2,8 @@ use super::*;
 use crate::group::ContentHash;
 use crate::training::library::tests::{card_for, micro_file};
 use crate::training::{
-    Architecture, BaseModel, ModelCard, ModelHeader, ModelOrigin, TrainingCommand, encode_model,
-    inspect_model,
+    Architecture, BaseModel, ModelCard, ModelHeader, ModelOrigin, RepeatCheck, TrainingCommand,
+    encode_model, inspect_model,
 };
 
 type Change = Box<dyn Fn(&mut BucketSettings)>;
@@ -263,7 +263,7 @@ fn names_for_files_and_for_ollama_are_plain_and_never_collide() {
 #[test]
 fn the_description_says_what_the_model_is_and_never_what_it_read() {
     let small = library_model(0.25, "Garden notes");
-    let text = model_readme(&small, "garden-notes-1234abcd");
+    let text = model_readme(&small, "garden-notes-1234abcd", None);
     assert!(text.starts_with("# Garden notes\n"));
     assert!(text.contains("| Starting point | Small |"));
     assert!(text.contains("garden-notes-1234abcd.model"));
@@ -273,11 +273,43 @@ fn the_description_says_what_the_model_is_and_never_what_it_read() {
     assert_eq!(ollama_refusal(small.card.architecture), None);
 
     let starter = starter_model();
-    let text = model_readme(&starter, "letters-1");
+    let text = model_readme(&starter, "letters-1", None);
     assert!(text.contains("letters-1.model") && !text.contains(".gguf"));
     assert!(
         ollama_refusal(starter.card.architecture)
             .unwrap()
             .contains("Starter")
     );
+}
+
+#[test]
+fn the_privacy_check_is_kept_with_the_model_and_said_in_its_description() {
+    let model = library_model(0.25, "Diary");
+    let id = model.card.id;
+    let mut state = ModelOutletState::default();
+    assert_eq!(state.repeats(id), None);
+    let check = RepeatCheck::from_matches(&[64, 40, 0, 0]);
+    state.record_check(id, check);
+    assert_eq!(state.repeats(id), Some(check));
+    // Copies made later keep the check beside them.
+    state.record(id, Outlet::Bucket, CopyState::Working);
+    assert_eq!(state.repeats(id), Some(check));
+    // A check alone survives saving; a model that left the library does not.
+    let saved =
+        serde_json::to_string(&state.clone().settled(std::slice::from_ref(&model))).unwrap();
+    let reopened: ModelOutletState = serde_json::from_str(&saved).unwrap();
+    assert_eq!(reopened.repeats(id), Some(check));
+    assert_eq!(state.settled(&[]).repeats(id), None);
+    // A file written before the check existed still reads.
+    let older = format!(
+        r#"{{"copies":[{{"model":"{}","bucket":null}}]}}"#,
+        id.to_hex()
+    );
+    let older: ModelOutletState = serde_json::from_str(&older).unwrap();
+    assert_eq!(older.repeats(id), None);
+
+    let text = model_readme(&model, "diary-1", Some(check));
+    assert!(text.contains("Privacy check: it repeats your text"));
+    assert!(text.contains("may be able to draw some of it out"));
+    assert!(model_readme(&model, "diary-1", None).contains("not measured"));
 }

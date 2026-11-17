@@ -3,8 +3,8 @@
 use sovra_core::group::Bytes;
 use sovra_core::swarm::learn::scavenger::{GridCheckpoint, GridSettings};
 use sovra_core::training::{
-    Architecture, LocalOptimizer, LrSchedule, SAMPLE_TEXT, SourceKind, TrainingPreset,
-    TrainingSettings, TrainingSource, WorkRecipe,
+    Architecture, LocalOptimizer, LrSchedule, REPEAT_PROBES, SAMPLE_TEXT, SourceKind,
+    TrainingPreset, TrainingSettings, TrainingSource, WorkRecipe,
 };
 
 use std::fmt::Write as _;
@@ -1108,4 +1108,52 @@ fn runs_saved_before_best_models_were_kept_still_open() {
     let mut reopened = reopened;
     reopened.advance(100).unwrap();
     assert!(engine().restore(&reopened.checkpoint().unwrap()).is_ok());
+}
+
+#[test]
+fn the_privacy_check_finds_a_model_that_learned_its_text_by_heart() {
+    // Numbered lines: each continuation has exactly one right answer.
+    let mut text = String::new();
+    for line in 0..60 {
+        writeln!(text, "line {line:02}: the garden notebook of the family.").unwrap();
+    }
+    let fresh = micro_session(&text, b"fresh");
+    let check = fresh
+        .repeat_check()
+        .expect("the text is long enough to check");
+    assert_eq!(usize::from(check.probes), REPEAT_PROBES);
+    assert_eq!(
+        check.level(),
+        sovra_core::training::RepeatLevel::NotFound,
+        "{check:?}"
+    );
+
+    // The Starter table trained hard on the text predicts each next letter
+    // from the one before, which repeats the fixed parts of every line.
+    let mut settings = settings(Architecture::STARTER, &text);
+    settings.rounds = 400;
+    let mut table = engine()
+        .create(
+            &plan(TrainingBase::Fresh(BaseModel::Starter), settings),
+            &text,
+            None,
+            ContentHash::of(b"by heart"),
+        )
+        .unwrap();
+    run_rounds(table.as_mut(), 400);
+    let learned = table.repeat_check().unwrap();
+    assert!(
+        learned.longest > check.longest,
+        "{learned:?} against {check:?}"
+    );
+    // The check reads the model the run gives back, and changes nothing.
+    let before = table.export().unwrap();
+    let _ = table.repeat_check();
+    assert_eq!(table.export().unwrap(), before);
+    // A text too short for one beginning and what followed is not checked.
+    assert!(
+        micro_session(&"ab".repeat(40), b"short")
+            .repeat_check()
+            .is_none()
+    );
 }

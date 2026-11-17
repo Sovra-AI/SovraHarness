@@ -10,7 +10,8 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::training::{
-    BucketSettings, CopyState, LibraryModel, Outlet, TrainingCommand, ollama_refusal,
+    BucketSettings, CopyState, LibraryModel, ModelOrigin, Outlet, RepeatLevel, TrainingCommand,
+    ollama_refusal,
 };
 
 /// The bucket fields in the order they are shown: id, label, hint.
@@ -220,7 +221,7 @@ impl TrainingView {
         let mut card = parts::card(self.compact(), cx)
             .child(parts::title("Send finished models", cx))
             .child(parts::caption(
-                "Keep a copy of every model you finish in your own storage bucket, and run it in Ollama. Only the finished model goes: never the text it learned from.",
+                "Keep a copy of every model you finish in your own storage bucket, and run it in Ollama. Your text file never leaves, but a model can repeat parts of what it learned, so each model shows a privacy check. A model that repeats your text is sent only when you press its button.",
                 cx,
             ));
         card = card.child(self.outlet_switch(
@@ -309,6 +310,29 @@ impl TrainingView {
         let id = model.card.id;
         let copies = outlets.copies(id);
         let mut lines = Vec::new();
+        let privacy = match outlets.repeats(id) {
+            Some(check) => Some((check.sentence(), check.level() != RepeatLevel::NotFound)),
+            None if model.card.origin == ModelOrigin::TrainedHere => Some((
+                "Privacy check: not measured for this model, which was made before Sovra checked. A small model can repeat parts of the text it learned.".to_owned(),
+                false,
+            )),
+            None => None,
+        };
+        if let Some((text, repeats)) = privacy {
+            let text = SharedString::from(text);
+            lines.push(
+                div()
+                    .id(("training-model-privacy", index))
+                    .test_support()
+                    .role(if repeats { Role::Alert } else { Role::Status })
+                    .aria_label(text.clone())
+                    .min_w_0()
+                    .whitespace_normal()
+                    .sovra_text(TextRole::Caption, cx)
+                    .child(text)
+                    .into_any_element(),
+            );
+        }
         for (outlet, name, copy) in [
             (
                 Outlet::Bucket,

@@ -1903,6 +1903,10 @@ impl TrainingSession for LeaseSession {
         None
     }
 
+    fn repeat_check(&self) -> Option<sovra_core::training::RepeatCheck> {
+        None
+    }
+
     fn export(&self) -> Result<Vec<u8>, TrainingError> {
         encode_model(
             &ModelHeader {

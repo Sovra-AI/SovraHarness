@@ -14,6 +14,20 @@ package version.
 
 ## [Unreleased]
 
+- **Privacy check: does a model repeat your text?** Sending a model never
+  sends your text file, but a small model can learn its text by heart and write
+  it back out. Every model trained here is now checked when it is made: given
+  32 beginnings from the text it learned, how much of what you really wrote
+  does it write back? **Your models** says so in plain words, the description
+  that goes with every backup says so, and a model that repeats your text is no
+  longer sent to your bucket or Ollama by itself; it waits for you to press the
+  button. Measured: on the recommended settings models repeated nothing; with
+  the guards turned off they repeated all of it.
+
+- **Fixed: the Training page and guides said a finished model never carries
+  your text.** They now explain that the text file never leaves but the model
+  can repeat parts of it.
+
 ## [0.7.0] — 2026-11-15
 
 - **Microsoft 365 connection.** A four-step Connections guide helps each person
@@ -57,7 +71,8 @@ package version.
   press **Back up now**. Each backup is the model file, its GGUF form and a
   short description. The secret key stays in the keychain. Uploads are signed
   by Sovra itself, so no storage SDK is added and Sovra stays one executable.
-  Only the finished model leaves; never the text it learned from.
+  Your text file never leaves, but a model can repeat parts of it; see the
+  privacy check below.
 
 - **The best version is the one you keep.** A run now keeps a copy of the
   model as it was at its best check and hands that back when it ends. Saved
