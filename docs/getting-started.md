@@ -57,6 +57,19 @@ separately. See [local model setup](local-models.md) for presets and troubleshoo
 A local chat model alone does not disable web search, remote
 tools or group networking; see [network destinations](network.md#network-destinations).
 
+## Keep a company decision
+
+Open **Artifacts → Decisions → New decision**, or choose **Record a decision**
+under a completed chat reply. Add the question, your company's criteria, quoted
+evidence, a review date and what would end the decision, then save the draft.
+
+A second person signs in with a different local account to review and accept
+it. Use **Sign out**, then **Create another account** if that person is new here.
+The record becomes the company position only after **Confirm acceptance**.
+Edits retain earlier versions and need fresh acceptance. See
+[Decision records](decisions.md) for hard stops, review dates and the limits of
+local-account approval.
+
 ## Train your own small AI
 
 Open **Training** and press **Start training**. The sample text, a model size
@@ -80,6 +93,7 @@ in the style you taught them; they do not change the AI answering your chats.
 | Read or search a folder | [Skills and file knowledge](skills-and-file-knowledge.md) |
 | See what Sovra remembers and where it came from | [Reviewing knowledge](knowledge.md) |
 | Ask several helpers together or keep a reply | [Teams and artifacts](teams-and-artifacts.md) |
+| Keep a decision, its evidence and acceptance | [Decision records](decisions.md) |
 | Run something later | [Schedules](schedules.md) |
 | Share a detail with family or colleagues | [Groups](groups.md) |
 | Train your own small AI, alone or with my group | [Training](training.md) |

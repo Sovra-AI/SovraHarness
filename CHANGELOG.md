@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-17
+
 - **Enter in the password box signs you in.** On the sign-in page, Enter in the
   password field does the same thing as the sign-in button, including when you
   are creating an account. Enter in the email field does not submit. A second

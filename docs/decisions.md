@@ -67,6 +67,15 @@ whether an ending condition has happened, watch external business events, send
 reminders, or supply rules for any industry. The company writes its own criteria
 and stops and records when those conditions have been met or broken.
 
+## If acceptance is unavailable
+
+| What you see | What to do |
+| --- | --- |
+| A second person must sign in | Sign out and let someone who has not drafted any version use their own account. Creating a new version yourself does not make you its reviewer. |
+| Blocked by your hard stops | Review each condition your company wrote. Save a new version with a condition checked only when it has been met, then ask the second person to accept it. |
+| The review date has arrived | Save a reviewed version with a future date, then obtain fresh acceptance. |
+| Already accepted or no longer valid | Keep the existing record as history. Use **Save a new version** when a new company position is needed. |
+
 ## Storage and tests
 
 The decision table lives in the existing local memory database, independently

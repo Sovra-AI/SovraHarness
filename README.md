@@ -112,8 +112,10 @@ has the first run, group steps, every setting, privacy details and limits.
 - **Save your work:** organize versioned documents, code, and other artifacts
   into folders and favorites. Preview saved websites in your browser.
 - **Keep company decisions:** record reasons, quoted evidence, review dates and
-  company-written hard stops in **Artifacts → Decisions**. A second account
-  accepts the saved version; earlier versions remain available. See
+  company-written hard stops in **Artifacts → Decisions**, or start from a chat
+  reply with **Record a decision**. A second person signs in with a different
+  local account to accept the saved version. Edits keep earlier versions and
+  require fresh acceptance. See
   [Decision records](docs/decisions.md) for the local-account approval boundary.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
   Connection setup and permissions depend on the service.
