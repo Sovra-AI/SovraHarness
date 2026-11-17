@@ -317,14 +317,18 @@ async fn run(
         .unwrap_or(24_000)
         .min(24_000)
         / 2;
-    tokio::time::timeout(
+    // Reading many pages is slow but visible; stop only when progress stops.
+    let (relay, relayed) = crate::quiet_deadline::relay();
+    crate::quiet_deadline::forward(
+        harness.run_with_files(&job.session_id, &prompt, char_budget, &relay),
+        &relayed,
+        &job.events,
         timeout,
-        harness.run_with_files(&job.session_id, &prompt, char_budget, &job.events),
     )
     .await
     .map_err(|_| {
         FileError(
-            "The model took too long to read these files. Try again, or send fewer files at once."
+            "The AI stopped responding while reading these files. Try again, or send fewer files at once."
                 .into(),
         )
     })?;

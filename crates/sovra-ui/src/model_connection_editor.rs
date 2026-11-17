@@ -562,7 +562,7 @@ impl ModelsView {
                     "connection-timeout",
                     "Wait time (seconds)",
                     &form.timeout,
-                    "Wait setting: 5–600 seconds. Chat on this computer allows at least 600 seconds for the model to load.",
+                    "How long to wait when the AI goes quiet: 5–600 seconds. A reply that keeps working can take longer. Chat on this computer allows at least 600 seconds for the model to load.",
                     cx,
                 ));
             if matches!(kind, ProviderKind::OpenAiCompatible | ProviderKind::Ollama) {

@@ -32,6 +32,9 @@ mod memory;
 #[path = "models/semantic.rs"]
 mod semantic;
 
+#[path = "models/parallel.rs"]
+mod parallel;
+
 #[path = "models/summaries.rs"]
 mod summaries;
 

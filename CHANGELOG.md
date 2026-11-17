@@ -14,6 +14,16 @@ package version.
 
 ## [Unreleased]
 
+- **Chats running side by side no longer time out while they are working.**
+  The model connection's timeout used to cap the whole reply, so an answer that
+  searched the web several times, or that shared the AI with other chats running
+  at the same time, was stopped with "The model response timed out" just before
+  it answered (seen live: eight finished web searches, then a timeout at 60 s).
+  The timeout now counts only silence. Each piece of text, reasoning or helper
+  step restarts it, so a busy reply can run as long as it keeps making progress,
+  and a model that stops sending is still stopped. The same rule covers deep
+  research, team replies and replies about attached files.
+
 - Expanded the decision-record guides with chat entry, account switching,
   fresh acceptance after edits, and help when acceptance is unavailable.
 

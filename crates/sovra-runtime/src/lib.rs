@@ -29,6 +29,7 @@ mod memory_semantic;
 mod microsoft;
 mod model_priority;
 mod models;
+mod quiet_deadline;
 pub use local_models::LocalModelServers;
 mod recalling;
 mod remembering;
@@ -1512,37 +1513,39 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
                 run_id: sovra_adk::new_research_run_id(),
                 prompt,
             };
-            let run = adk.run_deep_research(&turn, &events);
             if let Some(timeout) = timeout {
-                if tokio::time::timeout(timeout, run).await.is_err() {
+                let (relay, relayed) = quiet_deadline::relay();
+                let run = adk.run_deep_research(&turn, &relay);
+                if quiet_deadline::forward(run, &relayed, &events, timeout).await.is_err() {
                     adk.interrupt(&session_id);
                     let _ = events
                         .send(Event::AgUi {
                             session_id,
                             event: sovra_core::AgUiEvent::RunError {
-                                message: "Deep research timed out. Increase the connection timeout or try a shorter question.".into(),
+                                message: "Deep research stopped making progress. Increase the connection timeout or try a shorter question.".into(),
                             },
                         })
                         .await;
                 }
             } else {
-                run.await;
+                adk.run_deep_research(&turn, &events).await;
             }
             return;
         }
-        let run = adk.run_prompt(&session_id, &prompt, &events);
         if let Some(timeout) = timeout {
-            if tokio::time::timeout(timeout, run).await.is_err() {
+            let (relay, relayed) = quiet_deadline::relay();
+            let run = adk.run_prompt(&session_id, &prompt, &relay);
+            if quiet_deadline::forward(run, &relayed, &events, timeout).await.is_err() {
                 adk.interrupt(&session_id);
                 let _ = events
                     .send(Event::AgentError {
                         session_id,
-                        message: "The model response timed out. Increase the connection timeout or try again.".into(),
+                        message: "The AI stopped responding. Increase the connection timeout or try again.".into(),
                     })
                     .await;
             }
         } else {
-            run.await;
+            adk.run_prompt(&session_id, &prompt, &events).await;
         }
     });
     ActiveRun {

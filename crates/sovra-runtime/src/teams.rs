@@ -130,25 +130,28 @@ impl TeamRuntime {
                 history,
                 members,
             };
-            let run = harness.run_team(&turn, &runtime.events);
-            // Every member may take as long as one normal reply.
-            let limit =
-                timeout.map(|t| t * u32::try_from(teams::MAX_REPLIES_PER_TURN).unwrap_or(8));
-            match limit {
-                Some(limit) => {
-                    if tokio::time::timeout(limit, run).await.is_err() {
+            match timeout {
+                // A long team turn is fine while members keep replying; stop only
+                // when nobody has said anything for the whole timeout.
+                Some(quiet) => {
+                    let (relay, relayed) = crate::quiet_deadline::relay();
+                    let run = harness.run_team(&turn, &relay);
+                    if crate::quiet_deadline::forward(run, &relayed, &runtime.events, quiet)
+                        .await
+                        .is_err()
+                    {
                         let _ = runtime
                             .events
                             .send(Event::AgUi {
                                 session_id,
                                 event: AgUiEvent::RunError {
-                                    message: "Your team took too long to answer. Try again.".into(),
+                                    message: "Your team stopped responding. Try again.".into(),
                                 },
                             })
                             .await;
                     }
                 }
-                None => run.await,
+                None => harness.run_team(&turn, &runtime.events).await,
             }
         });
         ActiveRun {
