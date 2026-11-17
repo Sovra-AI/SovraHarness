@@ -727,8 +727,8 @@ impl ModelActor {
     ) -> Result<(AdkHarness, ModelInfo, ModelConnection), ModelError> {
         let connection = self.connection(&key.connection_id)?;
         let model = self.find_model(key)?;
-        if !model.can_chat() {
-            return Err(ModelError("This model produces a non-chat output. Its information is available in the catalog, but it cannot be used as the chat assistant.".into()));
+        if let Some(reason) = model.chat_unavailable_reason() {
+            return Err(ModelError(reason.into()));
         }
         let secret = self.secret(&connection).await?;
         if connection.authentication != Authentication::None && secret.0.is_empty() {

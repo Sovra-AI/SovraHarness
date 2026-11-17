@@ -30,6 +30,13 @@ schedule tasks. Sovra also trains small AI models from your own text: on your
 computer, with the computers in your group helping, and with the finished
 model delivered to everyone in the group.
 
+Chat choices exclude batch-only models. If an older saved choice ends in
+`:batch`, open **Models** and choose a live chat model without that suffix.
+
+Every new chat shows an animated reminder to type `/help` to browse all skills,
+even before you connect an AI. It stops when you start a draft; reduced-motion
+settings show the complete reminder without animation.
+
 > **License:** Source on `main` is available under Sovra's Sustainable Use License.
 > This is fair-code: source-available, and not an OSI open-source license.
 > Enterprise files have separate terms. See [License](#license).
@@ -105,6 +112,10 @@ has the first run, group steps, every setting, privacy details and limits.
   details, and explore their sources and connections.
 - **Save your work:** organize versioned documents, code, and other artifacts
   into folders and favorites. Preview saved websites in your browser.
+- **Keep company decisions:** record reasons, quoted evidence, review dates and
+  company-written hard stops in **Artifacts → Decisions**. A second account
+  accepts the saved version; earlier versions remain available. See
+  [Decision records](docs/decisions.md) for the local-account approval boundary.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
   Connection setup and permissions depend on the service.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a

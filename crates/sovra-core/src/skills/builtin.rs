@@ -35,6 +35,7 @@ impl Skill {
             "settings" => "Appearance, text size & settings",
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
+            "decisions" => "Keep a company decision and its reasons",
             "connections" => "Link the things Sovra can use",
             "groups" => "Share with your family or team",
             "share-artifact" => "Share a document or list with your group",
@@ -154,6 +155,10 @@ impl Skill {
             "team" => (
                 "Switches chat so your whole team of AI helpers answers together.".to_owned(),
                 "/team ".to_owned(),
+            ),
+            "decisions" => (
+                "Record why we chose a supplier, the quoted evidence, who accepted it and when to review it.".to_owned(),
+                "/decisions".to_owned(),
             ),
             "artifacts" => (
                 "Opens your saved documents, checklists, tables, code and website projects. Use folders, favorites, search and sorting to find your work.".to_owned(),
@@ -457,6 +462,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             "Find saved documents, code and website projects using folders, favorites, search and sorting.",
             SkillAction::Artifacts,
             &["saved-work"],
+        ),
+        action(
+            "decisions",
+            "Keep a company decision and its reasons",
+            "Save a decision with your criteria and quoted evidence, ask a second person to accept it, and keep its review date and history.",
+            SkillAction::Decisions,
+            &["decision-records"],
         ),
         action(
             "connections",

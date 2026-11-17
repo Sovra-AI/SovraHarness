@@ -7,7 +7,7 @@
 //! migration arm in [`super::SurrealStore::open`].
 
 /// Bump when stored data (not just indexes) needs migrating.
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 /// Statements that don't depend on configuration.
 pub(crate) const STATIC_SCHEMA: &str = "
@@ -28,6 +28,8 @@ DEFINE INDEX OVERWRITE chat_thread_updated ON chat_thread FIELDS updated_at;
 DEFINE TABLE OVERWRITE team SCHEMALESS;
 
 DEFINE TABLE OVERWRITE artifact SCHEMALESS;
+DEFINE TABLE OVERWRITE decision SCHEMALESS;
+DEFINE INDEX OVERWRITE decision_id ON decision FIELDS decision_id UNIQUE;
 DEFINE INDEX OVERWRITE artifact_updated ON artifact FIELDS updated_at;
 
 DEFINE TABLE OVERWRITE fact SCHEMALESS;

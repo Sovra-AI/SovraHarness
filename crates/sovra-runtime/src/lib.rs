@@ -8,6 +8,7 @@ mod artifacts;
 mod auth;
 mod chat_history;
 mod connections;
+mod decisions;
 mod development;
 mod private_storage;
 mod remote_control;
@@ -738,6 +739,7 @@ async fn serve(
         match command {
             Command::Training(command) => training.send(command),
             Command::Auth(command) => auth.handle(command),
+            Command::Decisions(command) => auth.decisions(command),
             Command::Memory(command) => memory_review.send(command),
             Command::Skills(command) => skills.send(command),
             Command::Google(command) => google.send(command),

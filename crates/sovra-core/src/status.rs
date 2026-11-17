@@ -21,6 +21,7 @@ impl RuntimeStatus {
                 };
             }
             Event::Training(_)
+            | Event::Decisions(_)
             | Event::Auth(_)
             | Event::Memory(_)
             | Event::Connections(_)

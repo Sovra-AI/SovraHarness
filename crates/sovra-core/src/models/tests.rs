@@ -1,6 +1,90 @@
 use super::*;
 
 #[test]
+fn batch_models_are_browsable_but_never_chat_recommendations_or_readers() {
+    let mut state = fixture();
+    state.connections[0].has_credential = true;
+    let mut batch = state.catalogs["router"].snapshot.models[1].clone();
+    batch.id = "google/gemini-3.8-flash:batch".into();
+    batch.supported_parameters = vec!["tools".into(), "reasoning".into()];
+    batch.input_modalities = vec![
+        "text".into(),
+        "image".into(),
+        "audio".into(),
+        "video".into(),
+    ];
+    assert!(
+        !batch.can_chat(),
+        "text output does not imply live chat support"
+    );
+    assert_eq!(batch.kind(), ModelKind::Other);
+    for purpose in crate::files::ModelPurpose::ALL {
+        assert!(!purpose.accepts(&batch, ProviderKind::OpenRouter));
+    }
+    assert!(
+        ModelDestination::for_work(&state.connections[0], &batch, ModelWork::Summaries).is_none()
+    );
+    let models = &mut state.catalogs.get_mut("router").unwrap().snapshot.models;
+    *models = vec![batch.clone()];
+    assert!(state.recommended_chat_model().is_none());
+    assert_eq!(state.recommended_model_cards(), []);
+    assert_eq!(
+        state.filtered(&ModelFilter {
+            connection_id: Some("router".into()),
+            kind: Some(ModelKind::Chat),
+            ..Default::default()
+        }),
+        []
+    );
+    assert_eq!(
+        state.filtered(&ModelFilter {
+            connection_id: Some("router".into()),
+            ..Default::default()
+        }),
+        vec![batch.key("router")]
+    );
+    for reasoning in [false, true] {
+        let batch = &mut state.catalogs.get_mut("router").unwrap().snapshot.models[0];
+        batch.pricing = [
+            ("prompt".into(), "0.000001".into()),
+            ("completion".into(), "0.000001".into()),
+        ]
+        .into();
+        batch.supported_parameters = vec!["tools".into()];
+        if reasoning {
+            batch.supported_parameters.push("reasoning".into());
+        }
+        assert_eq!(state.recommended_model_cards(), []);
+    }
+}
+
+#[test]
+fn batch_variant_check_preserves_live_variants_and_unknown_capabilities() {
+    for id in [
+        "google/gemini-3.8-flash",
+        "example/chat:free",
+        "example/chat:thinking",
+        "example/batch-helper",
+        "local:latest",
+    ] {
+        let model = ModelInfo {
+            id: id.into(),
+            ..Default::default()
+        };
+        assert!(model.can_chat(), "{id}");
+    }
+    let manual = ModelInfo {
+        id: "google/gemini-3.8-flash:batch".into(),
+        manual: true,
+        ..Default::default()
+    };
+    assert!(
+        !manual.can_chat(),
+        "manual entries with unknown metadata must not bypass the guard"
+    );
+}
+
+#[test]
 fn starter_recommendation_never_picks_paid_unknown_or_non_chat_models() {
     let mut state = fixture();
     assert!(

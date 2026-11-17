@@ -7,8 +7,9 @@ use gpui_kit::component::{
     input::Textarea, v_flex,
 };
 use gpui_kit::{
-    Context, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
+    Animation, AnimationExt as _, Context, InteractiveElement as _, IntoElement,
+    ParentElement as _, Role, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
+    div,
 };
 use sovra_core::files::AttachmentState;
 use sovra_core::models::ChromeKey;
@@ -264,22 +265,140 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
             }))
             .child(send),
         )
-        .child(h_flex().justify_center().child({
-            let hint = if has_files && generating {
-                design::chrome(cx, ChromeKey::ChatHintFilesGenerating)
-            } else if has_files {
-                design::chrome(cx, ChromeKey::ChatHintFiles)
-            } else if generating {
-                design::chrome(cx, ChromeKey::ChatHintGenerating)
+        .child(h_flex().w_full().justify_center().child(
+            if state.messages.is_empty()
+                && !generating
+                && !has_files
+                && composer_input.read(cx).value().is_empty()
+                && !shell.started_chat_drafts.contains(&state.session_id)
+            {
+                render_help_hint(&state.session_id, cx).into_any_element()
             } else {
-                design::chrome(cx, ChromeKey::ChatHintIdle)
-            };
-            div()
-                .id("composer-hint")
-                .test_support()
-                .aria_label(hint)
-                .sovra_text(TextRole::Caption, cx)
-                .text_color(cx.theme().muted_foreground)
-                .child(hint)
-        }))
+                let hint = if has_files && generating {
+                    design::chrome(cx, ChromeKey::ChatHintFilesGenerating)
+                } else if has_files {
+                    design::chrome(cx, ChromeKey::ChatHintFiles)
+                } else if generating {
+                    design::chrome(cx, ChromeKey::ChatHintGenerating)
+                } else {
+                    design::chrome(cx, ChromeKey::ChatHintIdle)
+                };
+                div()
+                    .id("composer-hint")
+                    .test_support()
+                    .aria_label(hint)
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(hint)
+                    .into_any_element()
+            },
+        ))
+}
+
+fn render_help_hint(session_id: &str, cx: &Context<Shell>) -> impl IntoElement + use<> {
+    let hint = design::chrome(cx, ChromeKey::ChatWelcomeHelpHint);
+    let motion = design::tokens(cx).motion;
+    let label = div()
+        .id("chat-welcome-help-hint")
+        .test_support()
+        // Keep the complete instruction available to screen readers throughout the loop.
+        .aria_label(hint)
+        .relative()
+        .w_full()
+        .min_w_0()
+        .text_center()
+        .sovra_text(TextRole::Caption, cx)
+        .text_color(cx.theme().muted_foreground);
+    if motion.help_hint.is_zero() {
+        return label.child(hint).into_any_element();
+    }
+    // Reserve the complete line(s), so typing never moves the message box.
+    label
+        .child(div().opacity(0.).child(hint.replace("/help", "/help▏")))
+        .child(div().absolute().top_0().left_0().w_full().with_animation(
+            gpui_kit::SharedString::from(format!("help-hint-{session_id}")),
+            Animation::new(motion.help_hint).repeat(),
+            move |text, progress| {
+                text.child(hint.replace("/help", design::help_hint_command(progress)))
+            },
+        ))
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::component::Root;
+    use gpui_kit::test::TestWindowExt as _;
+    use gpui_kit::{AppContext as _, TestAppContext, px, size};
+    use sovra_core::{Command, NavTab};
+    use sovra_runtime::Client;
+
+    #[gpui_kit::test]
+    fn help_hint_is_available_without_an_ai_and_returns_for_each_new_chat(cx: &mut TestAppContext) {
+        let (client, commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let mut shell = None;
+        let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(0, window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.state.models_loaded = true;
+                shell.state.has_active_llm = false;
+                shell.refresh(cx);
+            });
+            window.render_frame(cx);
+            assert!(window.find("chat-welcome-help-hint").visible());
+            assert!(shell.read(cx).composer_input.read(cx).value().is_empty());
+            assert_eq!(window.find("composer-send-btn").disabled(), Some(true));
+
+            shell.update(cx, |shell, cx| {
+                shell.fill_composer_draft("hello", window, cx);
+            });
+            window.render_frame(cx);
+            assert!(window.try_find("chat-welcome-help-hint").is_none());
+        })
+        .unwrap();
+        // Input change subscriptions run after the update, just as between real keystrokes.
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.fill_composer_draft("", window, cx));
+            window.render_frame(cx);
+            assert!(window.try_find("chat-welcome-help-hint").is_none());
+        })
+        .unwrap();
+        cx.run_until_parked();
+
+        for _ in 0..2 {
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.start_new_chat(window, cx));
+                window.render_frame(cx);
+                assert!(window.find("chat-welcome-help-hint").visible());
+                shell.update(cx, |shell, cx| {
+                    shell.fill_composer_draft("/help", window, cx);
+                });
+                window.render_frame(cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.submit_composer(window, cx));
+                window.render_frame(cx);
+                assert_eq!(shell.read(cx).state.active_tab, NavTab::Skills);
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Chat, cx));
+                window.render_frame(cx);
+                assert!(window.try_find("chat-welcome-help-hint").is_none());
+            })
+            .unwrap();
+            cx.run_until_parked();
+        }
+        assert!(
+            !std::iter::from_fn(|| commands.try_recv().ok())
+                .any(|command| matches!(command, Command::RunPrompt { .. }))
+        );
+    }
 }

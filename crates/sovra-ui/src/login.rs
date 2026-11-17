@@ -27,12 +27,10 @@ pub(crate) fn render_login_screen(
     email_input: &Entity<InputState>,
     password_input: &Entity<InputState>,
     auth: &AuthState,
+    creating: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    // Until the runtime reports, the form reads as a sign-in; the first
-    // submit on a fresh install creates the account instead.
-    let creating = !auth.has_accounts && !matches!(auth.phase, AuthPhase::Unknown);
     let (title, subtitle) = if creating {
         (
             design::chrome(cx, ChromeKey::LoginCreateTitle),
@@ -127,6 +125,27 @@ fn login_form(
     v_flex()
         .w_full()
         .gap(t.space.small)
+        .when(auth.has_accounts, |form| {
+            form.child(
+                design::button(
+                    "login-account-mode",
+                    design::chrome(
+                        cx,
+                        if creating {
+                            ChromeKey::LoginUseExisting
+                        } else {
+                            ChromeKey::LoginCreateAnother
+                        },
+                    ),
+                    cx,
+                )
+                .w_full()
+                .disabled(busy)
+                .on_click(cx.listener(|shell, _, window, cx| {
+                    shell.switch_login_form(window, cx);
+                })),
+            )
+        })
         .when(!creating && !auth.local_profiles.is_empty(), |form| {
             form.child(
                 v_flex().w_full().gap(t.space.small).children(

@@ -213,7 +213,65 @@ impl SurrealStore {
                     .collect::<Result<Vec<_>, MemoryError>>()?,
             );
         }
-        Ok(sovra_core::fuse_memory_sources(legs, 12))
+        let fused = sovra_core::fuse_memory_sources(legs, 12);
+        let extras = self.same_conversation_turns(&query, &fused, now).await?;
+        Ok(sovra_core::attach_conversation_sources(fused, extras, 12))
+    }
+
+    /// Other saved statements from a conversation that already matched, when
+    /// they share a distinctive question word. Short words such as "st" are
+    /// left out so they cannot drag in a whole chat.
+    async fn same_conversation_turns(
+        &self,
+        query: &MemorySearch,
+        ranked: &[MemorySourceEvidence],
+        now: Timestamp,
+    ) -> Result<Vec<MemorySourceEvidence>, MemoryError> {
+        let mut sessions = Vec::new();
+        for source in ranked {
+            if !sessions.contains(&source.conversation) {
+                sessions.push(source.conversation.clone());
+            }
+        }
+        if sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+        let before = query.known_at.unwrap_or(now).millis();
+        let entity = query.entity.as_ref().map(|name| name.to_lowercase());
+        let rows: Vec<SourceEvidenceRow> = self
+            .query(
+                "SELECT id, session_id, kind, content, occurred_at, source_version, false AS support_changed FROM episode
+                 WHERE session_id IN $sessions
+                 AND (SELECT VALUE enabled FROM ONLY meta:remembering)
+                 AND permission_scope = 'private' AND origin = 'user_statement'
+                 AND revoked_at IS NONE AND raw_withdrawn_at IS NONE
+                 AND kind IN ['user_message', 'note']
+                 AND source_version > 0 AND occurred_at <= $before
+                 AND ($entity IS NONE OR string::contains(string::lowercase(content), $entity))
+                 AND array::len(<-derived_from<-fact[WHERE stopped_at IS NOT NONE]) = 0;",
+                ("sessions", sessions, "before", before, "entity", entity),
+            )
+            .await?
+            .take(0)
+            .map_err(|error| backend(&error))?;
+        let ranked_ids: std::collections::BTreeSet<_> = ranked
+            .iter()
+            .map(|source| source.source_id.0.clone())
+            .collect();
+        let terms = query.terms();
+        let mut extras = Vec::new();
+        for row in rows {
+            if ranked_ids.contains(&row.id.to_sql()) {
+                continue;
+            }
+            let strength = distinctive_term_length(&row.content, &terms);
+            if strength == 0 {
+                continue;
+            }
+            extras.push((strength, row.into_evidence(query)?));
+        }
+        extras.sort_by_key(|(strength, _)| std::cmp::Reverse(*strength));
+        Ok(extras.into_iter().map(|(_, evidence)| evidence).collect())
     }
 
     pub(super) async fn evidence_batch(
@@ -355,6 +413,16 @@ impl SourceReviewRow {
             detail_count: Some(self.linked.len()),
         })
     }
+}
+
+fn distinctive_term_length(content: &str, terms: &[String]) -> usize {
+    let lower = content.to_lowercase();
+    terms
+        .iter()
+        .filter(|term| term.len() >= 4 && lower.contains(term.as_str()))
+        .map(String::len)
+        .max()
+        .unwrap_or(0)
 }
 
 fn search_statement(parameter: usize) -> String {

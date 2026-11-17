@@ -64,6 +64,10 @@ virtualized rather than rendering hundreds of rows at once.
 persists the choice. A missing credential opens its connection settings. Models
 advertised exclusively for images, video, embeddings, transcription or other
 non-chat outputs remain browsable but cannot be selected as the chat assistant.
+Batch-only variants (IDs ending in `:batch`) also remain browsable under **Other
+specialist tools**, but cannot be recommended or selected for live chat, file
+reading or summaries. A saved batch choice asks you to choose a model without
+`:batch`; Sovra does not silently switch to a differently priced model.
 The catalog is not an image/video generation interface. Servers that do not
 advertise capabilities can be tried explicitly; the server ultimately determines
 what the model supports. Switching models starts fresh provider history.

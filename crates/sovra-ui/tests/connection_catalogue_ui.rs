@@ -228,7 +228,7 @@ fn connections_mark(window: &gpui_kit::Window) -> Option<String> {
 }
 
 #[gpui_kit::test]
-fn connections_nav_names_every_linked_kind(cx: &mut TestAppContext) {
+fn connections_nav_counts_every_linked_kind(cx: &mut TestAppContext) {
     let (client, _commands, events) = sovra_runtime::Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let window = cx.open_window(size(px(1100.), px(2400.)), |window, cx| {
@@ -266,22 +266,8 @@ fn connections_nav_names_every_linked_kind(cx: &mut TestAppContext) {
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             Theme::change(mode, Some(window), cx);
             window.render_frame(cx);
-            let summary = connections_mark(window).expect("WhatsApp on its own still shows a mark");
-            assert!(summary.contains("WhatsApp"), "{summary}");
-            for other in [
-                "Google",
-                "Telegram",
-                "GitHub",
-                "MCP servers",
-                "An online AI",
-                "An AI on this computer",
-                "Another compatible service",
-            ] {
-                assert!(
-                    !summary.contains(other),
-                    "{summary} should leave {other} off while only WhatsApp is linked"
-                );
-            }
+            let summary = connections_mark(window).expect("one link still shows a mark");
+            assert_eq!(summary, "1");
             assert_eq!(
                 window.find("connection-status-whatsapp").label(),
                 Some("Linked")
@@ -324,9 +310,7 @@ fn connections_nav_names_every_linked_kind(cx: &mut TestAppContext) {
                 "the catalogue stays up while several kinds are linked"
             );
             let summary = connections_mark(window).expect("linked kinds show a mark");
-            assert_ne!(summary, "WhatsApp");
-            assert!(summary.contains("WhatsApp"), "{summary}");
-            assert!(summary.contains("Google"), "{summary}");
+            assert_eq!(summary, "2");
             for kind in CatalogueKind::ALL {
                 let slug = kind.slug();
                 assert!(
@@ -375,13 +359,7 @@ fn connections_nav_names_every_linked_kind(cx: &mut TestAppContext) {
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             Theme::change(mode, Some(window), cx);
             window.render_frame(cx);
-            let summary = connections_mark(window);
-            assert!(
-                summary
-                    .as_ref()
-                    .is_none_or(|text| !text.contains("WhatsApp")),
-                "{summary:?}"
-            );
+            assert_eq!(connections_mark(window), None);
             assert_eq!(
                 window.find("connection-status-whatsapp").label(),
                 Some("Not linked")

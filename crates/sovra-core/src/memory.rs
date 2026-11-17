@@ -698,6 +698,36 @@ pub trait MemoryStore: Send + Sync {
         Ok(None)
     }
 
+    /// One page plus one look-ahead summary; full histories are loaded individually.
+    async fn list_decisions(
+        &self,
+        _offset: usize,
+    ) -> Result<Vec<crate::decisions::DecisionSummary>, MemoryError> {
+        Err(MemoryError::Backend(
+            "Decision storage is unavailable.".into(),
+        ))
+    }
+
+    async fn decision(
+        &self,
+        _id: &str,
+    ) -> Result<Option<crate::decisions::DecisionRecord>, MemoryError> {
+        Err(MemoryError::Backend(
+            "Decision storage is unavailable.".into(),
+        ))
+    }
+
+    /// Atomically refuses stale writes. Zero means the record must not exist yet.
+    async fn save_decision(
+        &self,
+        _record: &crate::decisions::DecisionRecord,
+        _expected_revision: u64,
+    ) -> Result<(), MemoryError> {
+        Err(MemoryError::Backend(
+            "Decision storage is unavailable.".into(),
+        ))
+    }
+
     /// Saves sign-in accounts and the active session.
     async fn save_auth(&self, _records: &crate::auth::AuthRecords) -> Result<(), MemoryError> {
         Ok(())

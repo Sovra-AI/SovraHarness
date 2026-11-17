@@ -10,6 +10,7 @@
 //! Fact writes and their provenance/replacement edges commit together. A failed
 //! correction must never leave a new belief beside an unchanged or missing source.
 
+mod decisions;
 mod facts;
 mod ingestion;
 mod lifecycle;
@@ -171,7 +172,7 @@ impl SurrealStore {
                     None
                 }
             }
-            Some(2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | schema::SCHEMA_VERSION) => Some(
+            Some(2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | schema::SCHEMA_VERSION) => Some(
                 self.embedding_index()
                     .await?
                     .ok_or_else(|| MemoryError::Backend("missing memory index metadata".into()))?,
@@ -217,6 +218,7 @@ impl SurrealStore {
         } else {
             ""
         };
+        // Version 13 adds the decision table; existing records need no data rewrite.
         // Version 12 separates whole-source revocation from raw wording withdrawn by a fact edit.
         // Existing revocations remain conservative; missing raw_withdrawn_at means none.
         // Version 11 adds optional source/time fields inside serialized chat messages.
@@ -881,6 +883,28 @@ impl MemoryStore for SurrealStore {
                     .map_err(|e| MemoryError::Backend(format!("deserialize artifact: {e}")))
             })
             .collect()
+    }
+
+    async fn list_decisions(
+        &self,
+        offset: usize,
+    ) -> Result<Vec<sovra_core::decisions::DecisionSummary>, MemoryError> {
+        self.decision_list(offset).await
+    }
+
+    async fn decision(
+        &self,
+        id: &str,
+    ) -> Result<Option<sovra_core::decisions::DecisionRecord>, MemoryError> {
+        self.decision_get(id).await
+    }
+
+    async fn save_decision(
+        &self,
+        record: &sovra_core::decisions::DecisionRecord,
+        expected_revision: u64,
+    ) -> Result<(), MemoryError> {
+        self.decision_save(record, expected_revision).await
     }
 
     async fn save_artifact(&self, artifact: &Artifact) -> Result<(), MemoryError> {

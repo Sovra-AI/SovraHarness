@@ -73,8 +73,8 @@ impl ModelsView {
         } else {
             "Use this model"
         };
-        let status_summary = if !model.can_chat() {
-            "This model generates non-text output (such as images, video, or embeddings) and cannot be used for chat."
+        let status_summary = if let Some(reason) = model.chat_unavailable_reason() {
+            reason
         } else if missing_key {
             "Ready to connect — add your key once in Connections to start chatting."
         } else if self.choosing_purpose.is_some() {
@@ -125,7 +125,7 @@ impl ModelsView {
                     design::primary_button("model-details-go-chat", "Go to Chat →", cx)
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(crate::models_view::GoToChat)))
                 })))
-            .child(caption(if model.can_chat() { "Your next message will use this model. Replies already in progress finish with the old one." } else { "This model makes something other than text (for example images or video), so it can't be used in chat yet." },cx))
+            .child(caption(model.chat_unavailable_reason().unwrap_or("Your next message will use this model. Replies already in progress finish with the old one."),cx))
             .child(section("What it does", cx))
             .child(div().sovra_text(TextRole::Body,cx).child(if model.description.is_empty() { "No description available.".into() } else { model.description.clone() }))
             .child(section("At a glance", cx))

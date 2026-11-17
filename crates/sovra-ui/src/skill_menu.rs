@@ -100,6 +100,7 @@ impl Shell {
             SkillAction::Agents => self.select_tab(NavTab::MyAis, cx),
             SkillAction::TeamChat => self.ask_team(None, window, cx),
             SkillAction::Artifacts => self.select_tab(NavTab::Artifacts, cx),
+            SkillAction::Decisions => self.open_decisions(cx),
             SkillAction::Connections => self.select_tab(NavTab::Connections, cx),
             SkillAction::ConnectService => {
                 self.present_connections(

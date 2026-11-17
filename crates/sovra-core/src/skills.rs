@@ -33,6 +33,7 @@ pub enum SkillAction {
     Agents,
     TeamChat,
     Artifacts,
+    Decisions,
     Connections,
     /// Opens Connections on the card that asks for a web address.
     ConnectService,
