@@ -1181,6 +1181,105 @@ mod tests {
         }
     }
 
+    /// Main AI hands the search helper the bare follow-up, as models often do;
+    /// the helper records everything it is sent.
+    #[derive(Default)]
+    struct FollowUpLlm {
+        helper_saw: Mutex<Vec<String>>,
+        helper_calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl Llm for FollowUpLlm {
+        fn name(&self) -> &'static str {
+            "follow-up"
+        }
+
+        async fn generate_content(
+            &self,
+            request: LlmRequest,
+            _stream: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            if request.tools.contains_key("web_search") {
+                if self.helper_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    self.helper_saw
+                        .lock()
+                        .expect("helper notes")
+                        .push(serde_json::to_string(&request.contents).unwrap_or_default());
+                    return Ok(once_call(
+                        "web_search",
+                        json!({ "queries": ["uae ai company licence cost"] }),
+                        "search-1",
+                    ));
+                }
+                return Ok(once_text("A DIFC AI licence costs about USD 1,500 a year."));
+            }
+            if let Some(text) = delegated_response(&request, WEB_SEARCH_AGENT_ID) {
+                return Ok(once_text(&text));
+            }
+            Ok(once_call(
+                WEB_SEARCH_AGENT_ID,
+                json!({ "request": "concice whats the price" }),
+                "delegate-1",
+            ))
+        }
+    }
+
+    /// Guards follow-ups end to end: when the main AI hands a helper only the
+    /// bare words ("concice whats the price"), the helper still sees the chat
+    /// it continues, so it can answer about the UAE company, not "what product?".
+    #[test]
+    fn a_helper_sees_the_chat_a_bare_follow_up_continues() {
+        drive(async {
+            let llm = Arc::new(FollowUpLlm::default());
+            let search = SearchClient::from_fn(|_query| async {
+                Ok(r#"{"results":[{"title":"DIFC fees","url":"https://difc.example/fees","content":"USD 1,500"}]}"#.to_owned())
+            });
+            let earlier = sovra_core::ConversationContext::from_messages(&[
+                sovra_core::ChatMessage::user(
+                    "1",
+                    "I want to incorporate an AI company called Sovra in the UAE",
+                    "now",
+                ),
+                sovra_core::ChatMessage::assistant(
+                    "2",
+                    "Dubai Internet City or a DIFC AI licence suit an AI company.",
+                    "now",
+                    Vec::new(),
+                ),
+            ]);
+            let harness = harness_with(Arc::clone(&llm) as Arc<dyn Llm>)
+                .with_web_search(search)
+                .and_then(|harness| harness.with_working_context(Some(&earlier)))
+                .expect("harness with the chat so far");
+            let (tx, rx) = async_channel::unbounded();
+            harness
+                .run_prompt("uae-chat", "concice whats the price", &tx)
+                .await;
+            let answer = collect_answer(&rx).await;
+            assert!(answer.contains("USD 1,500"), "{answer}");
+            let seen = llm.helper_saw.lock().expect("helper notes").clone();
+            let [helper_request] = &seen[..] else {
+                panic!("the search helper must run once: {seen:?}");
+            };
+            assert!(
+                helper_request.contains("concice whats the price"),
+                "{helper_request}"
+            );
+            assert!(
+                helper_request.contains("incorporate an AI company called Sovra in the UAE"),
+                "the helper must see the chat's topic: {helper_request}"
+            );
+            assert_eq!(
+                helper_request
+                    .matches("incorporate an AI company called Sovra in the UAE")
+                    .count(),
+                1,
+                "the chat is sent once, not twice"
+            );
+        });
+    }
+
     struct ParallelLlm {
         notes: Arc<BranchNotes>,
         release_tx: Sender<()>,

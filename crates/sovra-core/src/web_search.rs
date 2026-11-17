@@ -80,21 +80,58 @@ pub struct WebPage {
 /// Deliberately narrow: an explicit request also drops unrelated attachments, so
 /// "search for the bug in this file" must not match.
 pub fn is_explicit_web_search(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    [
-        "search the web",
-        "search the internet",
-        "search the net",
-        "web search for",
-        "search online",
-        "look online",
-        "look it up online",
-        "look up online",
-        "find online",
-        "google it",
-    ]
-    .iter()
-    .any(|phrase| lower.contains(phrase))
+    web_search_mentions(prompt).any(|refused| !refused)
+}
+
+/// True when the user said not to search the web ("do not search the web",
+/// "don't google it"). Such a turn must never be forced through the search helper.
+pub(crate) fn refuses_web_search(prompt: &str) -> bool {
+    web_search_mentions(prompt).any(|refused| refused)
+}
+
+const WEB_SEARCH_PHRASES: &[&str] = &[
+    "search the web",
+    "search the internet",
+    "search the net",
+    "web search for",
+    "search online",
+    "look online",
+    "look it up online",
+    "look up online",
+    "find online",
+    "google it",
+];
+
+/// One entry per web-search phrase in `prompt`: whether that mention is refused.
+fn web_search_mentions(prompt: &str) -> impl Iterator<Item = bool> {
+    let lower = prompt.to_lowercase().replace('’', "'");
+    let mentions: Vec<bool> = WEB_SEARCH_PHRASES
+        .iter()
+        .flat_map(|phrase| lower.match_indices(phrase).map(|(at, _)| at))
+        .map(|at| refused_before(&lower[..at]))
+        .collect();
+    mentions.into_iter()
+}
+
+/// Whether the words just before a mention refuse it ("do not", "never", "no need to").
+fn refused_before(text: &str) -> bool {
+    let words: Vec<&str> = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let last = |n: usize| {
+        words
+            .len()
+            .checked_sub(n)
+            .map(|start| words[start..].join(" "))
+    };
+    words.last().is_some_and(|word| {
+        matches!(
+            *word,
+            "not" | "don't" | "dont" | "never" | "without" | "stop" | "avoid"
+        )
+    }) || matches!(last(2).as_deref(), Some("no need" | "please don't"))
+        || last(3).as_deref() == Some("no need to")
 }
 
 /// Canonical `http`/`https` URL used as the dedupe key.

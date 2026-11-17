@@ -228,6 +228,28 @@ mod tests {
         ));
     }
 
+    /// Regression (seen live): "Do not search the web…" was turned into a
+    /// forced search with the sentence as its query.
+    #[test]
+    fn being_told_not_to_search_lets_the_model_answer_from_the_chat() {
+        let llm = RequiredFirstCall::wrap(
+            Arc::new(Stubborn {
+                calls: AtomicUsize::new(0),
+            }),
+            FirstCall::Delegate {
+                procedure_requests: None,
+            },
+        );
+        let user = Content::new("user")
+            .with_text("Do not search the web. Quote the first message I sent in this chat.");
+        let out = parts(&llm, request(vec![user]));
+        assert!(
+            out.iter()
+                .all(|part| !matches!(part, Part::FunctionCall { .. })),
+            "{out:?}"
+        );
+    }
+
     #[test]
     fn an_equipped_specialist_searches_even_when_the_model_answers_from_memory() {
         let llm = RequiredFirstCall::wrap(

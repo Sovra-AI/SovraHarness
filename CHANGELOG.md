@@ -14,6 +14,13 @@ package version.
 
 ## [Unreleased]
 
+- **"Don't search the web" is respected.** Saying "do not search the web",
+  "don't google it" or "no need to search online" was read as a request to
+  search, so Sovra sent the whole sentence to the web search helper as a
+  search and answered from the results instead of from the chat (seen live
+  when asked to quote an earlier message). Refusals now let the AI answer from
+  the conversation; "search the web for…" still always searches.
+
 - **Chats running side by side no longer time out while they are working.**
   The model connection's timeout used to cap the whole reply, so an answer that
   searched the web several times, or that shared the AI with other chats running

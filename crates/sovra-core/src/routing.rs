@@ -7,7 +7,7 @@
 //! model answers "what is the latest…" from stale memory. The adapter enforces
 //! the specialist named here on the turn's first model call.
 
-use crate::web_search::{WEB_SEARCH_AGENT_ID, is_explicit_web_search};
+use crate::web_search::{WEB_SEARCH_AGENT_ID, is_explicit_web_search, refuses_web_search};
 
 /// Words that only current facts can answer. Matched as whole words.
 const CURRENT_FACT_WORDS: &[&str] = &[
@@ -79,8 +79,10 @@ pub fn required_delegate<'a>(
         {
             return Some("CommunicationsAgent");
         }
-        (is_explicit_web_search(latest_user_text) || needs_current_facts(latest_user_text))
-            .then_some(WEB_SEARCH_AGENT_ID)
+        // "Do not search the web" is an instruction, not a search request.
+        (!refuses_web_search(latest_user_text)
+            && (is_explicit_web_search(latest_user_text) || needs_current_facts(latest_user_text)))
+        .then_some(WEB_SEARCH_AGENT_ID)
     })?;
     offered.iter().copied().find(|tool| *tool == wanted)
 }
@@ -135,6 +137,33 @@ mod tests {
             ),
             Some(WEB_SEARCH_AGENT_ID)
         );
+    }
+
+    /// Regression (seen live): "Do not search the web. Quote…" was forced
+    /// through the search helper with the sentence as its query, so the chat
+    /// answered from a web search instead of from its own conversation.
+    #[test]
+    fn being_told_not_to_search_never_forces_the_search_helper() {
+        for prompt in [
+            "Do not search the web. Quote the first message I sent in this chat.",
+            "don't google it, what is the latest thing I told you?",
+            "Don’t search online — what price did you quote earlier?",
+            "No need to search the internet, just summarise.",
+            "Never search the web for this.",
+        ] {
+            assert_eq!(required_delegate(prompt, &OFFERED, None), None, "{prompt}");
+        }
+        for prompt in [
+            "Search the web for the Rust site",
+            "I don't know it, so search the web for the Rust site",
+            "Please google it",
+        ] {
+            assert_eq!(
+                required_delegate(prompt, &OFFERED, None),
+                Some(WEB_SEARCH_AGENT_ID),
+                "{prompt}"
+            );
+        }
     }
 
     #[test]
