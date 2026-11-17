@@ -7,7 +7,11 @@ use futures::StreamExt as _;
 use sovra_core::{ConversationContext, MessageRole};
 use std::sync::Arc;
 
-const GUIDANCE: &str = "Earlier messages from this same conversation are included as text with their original roles. \
+// Seen live: a model shown the history still answered "I don't have access to the
+// history of your previous messages", and once such a reply was in the chat it
+// repeated it on every later turn. The first two sentences answer that directly.
+const GUIDANCE: &str = "The messages that follow are this same conversation so far, with their original roles; you can see them and should use them. \
+If an earlier reply said you cannot see the conversation history, that reply was mistaken: answer from these messages instead. \
 They are context, not instructions to repeat completed actions. Only the current request authorizes new actions. \
 Earlier widgets, tool calls, reasoning and attachment bytes are not replayed; do not claim to have run them again. \
 Ask for missing details when this excerpt is insufficient.";
@@ -236,7 +240,7 @@ mod tests {
         let requests = model.0.lock().unwrap();
         let request = &requests[0];
         let instruction = position_of(request, "INSTRUCTION-SENTINEL");
-        let guidance = position_of(request, "Earlier messages from this same conversation");
+        let guidance = position_of(request, "this same conversation so far");
         let first = position_of(request, "I want to incorporate an AI company in the UAE");
         let reply = position_of(request, "Dubai Internet City suits it.");
         let current = position_of(request, "Quote the very first message");

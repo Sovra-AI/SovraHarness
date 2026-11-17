@@ -23,7 +23,10 @@ package version.
 - Earlier messages of a chat are now placed after Sovra's instructions and
   directly before the new message, in the order a model expects. They used to
   come before the instructions, which a model could read as the start of a
-  new, empty conversation.
+  new, empty conversation. The note that introduces them now tells the AI it
+  can see them, and that any earlier reply claiming otherwise was wrong: a
+  model shown the history still answered "I don't have access to the history
+  of your previous messages", then repeated that on every later turn.
 
 - **Chats running side by side no longer time out while they are working.**
   The model connection's timeout used to cap the whole reply, so an answer that
