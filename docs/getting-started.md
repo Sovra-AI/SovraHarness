@@ -13,7 +13,8 @@ launched normally. The interface starts in English; the sign-in screen and Setti
 picker and **Text size** from 75–200%.
 
 On a fresh workspace, create a local account with your name. Email and password
-are optional and must be supplied together. A name-only account can be reopened
+are optional and must be supplied together. Press Enter in the password box to
+sign in or finish creating the account. A name-only account can be reopened
 using its named sign-in button on this computer.
 Later launches restore the session or ask you to sign in. Google sign-in needs a
 configured desktop OAuth client; see [Google](google.md). Local accounts do not

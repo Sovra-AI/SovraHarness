@@ -14,7 +14,8 @@ page, as does `/decisions`.
 4. Set **Review on** as `YYYY-MM-DD`. Dates use UTC. Write what would make the
    decision no longer valid.
 5. Add any company-written hard stops. Check **This condition has been met**
-   only when it has. An unchecked condition blocks acceptance.
+   only when it has. A check applies to the exact wording reviewed; check a
+   changed condition again. An unchecked condition blocks acceptance.
 6. Choose **Save decision draft**. The record is saved only after storage succeeds.
    A failed save keeps your fields. Back asks before discarding unsaved changes.
 

@@ -32,8 +32,15 @@ struct EvidenceInput {
 }
 struct StopInput {
     condition: Entity<InputState>,
-    cleared: bool,
+    /// A check applies to the exact wording the person reviewed, even before
+    /// queued input notifications have been processed.
+    cleared_wording: Option<String>,
     _events: Subscription,
+}
+impl StopInput {
+    fn cleared(&self, cx: &App) -> bool {
+        self.cleared_wording.as_deref() == Some(self.condition.read(cx).value().as_str())
+    }
 }
 struct Editor {
     id: Option<String>,
@@ -110,21 +117,14 @@ fn stop_input(
     cx: &mut Context<DecisionsView>,
 ) -> StopInput {
     let condition = input(value, window, cx);
-    let events = cx.subscribe(&condition, |view, input, event, cx| {
-        if matches!(event, InputEvent::Change)
-            && let Some(editor) = &mut view.editor
-        {
-            for stop in &mut editor.stops {
-                if stop.condition.entity_id() == input.entity_id() {
-                    stop.cleared = false;
-                }
-            }
+    let events = cx.subscribe(&condition, |_, _, event, cx| {
+        if matches!(event, InputEvent::Change) {
             cx.notify();
         }
     });
     StopInput {
         condition,
-        cleared,
+        cleared_wording: cleared.then(|| value.to_owned()),
         _events: events,
     }
 }
@@ -189,7 +189,7 @@ impl Editor {
                 .iter()
                 .map(|stop| DecisionStop {
                     condition: stop.condition.read(cx).value().to_string(),
-                    cleared: stop.cleared,
+                    cleared: stop.cleared(cx),
                 })
                 .collect(),
             chat: self.chat.clone(),
@@ -508,11 +508,13 @@ impl DecisionsView {
                         Checkbox::new(("decision-stop-cleared", index))
                             .cursor_pointer()
                             .label("This condition has been met")
-                            .checked(stop.cleared)
+                            .checked(stop.cleared(cx))
                             .disabled(self.pending)
-                            .on_click(cx.listener(move |view, checked, _, cx| {
+                            .on_click(cx.listener(move |view, checked: &bool, _, cx| {
                                 if let Some(editor) = &mut view.editor {
-                                    editor.stops[index].cleared = *checked;
+                                    let stop = &mut editor.stops[index];
+                                    stop.cleared_wording = checked
+                                        .then(|| stop.condition.read(cx).value().to_string());
                                 }
                                 cx.notify();
                             })),

@@ -65,6 +65,8 @@ pub struct Shell {
     login_create_account: bool,
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
+    /// Enter in the password box uses the same sign-in as the button.
+    _login_password_events: Subscription,
     sim_route_input: Entity<InputState>,
     pub(crate) my_ais_advanced_open: bool,
     pub(crate) knowledge_times_open: bool,
@@ -202,6 +204,18 @@ impl Shell {
                 .placeholder(login_password_placeholder)
                 .masked(true)
         });
+        let login_password_events =
+            cx.subscribe_in(&login_password_input, window, |shell, _, event, _, cx| {
+                if matches!(
+                    event,
+                    InputEvent::PressEnter {
+                        secondary: false,
+                        shift: false,
+                    }
+                ) {
+                    shell.submit_login(cx);
+                }
+            });
         let sim_route_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Type any prompt to test Laya / OpenJev routing tree...")
@@ -876,6 +890,7 @@ impl Shell {
             login_create_account: false,
             login_email_input,
             login_password_input,
+            _login_password_events: login_password_events,
             sim_route_input,
             my_ais_advanced_open: false,
             knowledge_times_open: false,
@@ -1233,6 +1248,9 @@ impl Shell {
     }
 
     pub fn submit_login(&mut self, cx: &mut Context<Self>) {
+        if self.state.auth.busy() {
+            return;
+        }
         let email = self.login_email_input.read(cx).value().to_string();
         let password = self.login_password_input.read(cx).value().to_string();
         let full_name = self.login_name_input.read(cx).value().to_string();

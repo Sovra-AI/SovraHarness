@@ -66,6 +66,60 @@ fn an_existing_workspace_can_create_a_second_account_for_decision_review(cx: &mu
     }
 }
 
+#[gpui_kit::test]
+fn enter_on_the_password_field_signs_in(cx: &mut TestAppContext) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let window = cx.open_window(size(px(1100.), px(800.)), |window, cx| {
+        Root::new(cx.new(|cx| Shell::new(0, window, cx)), window, cx)
+    });
+    events
+        .send_blocking(Event::Auth(sovra_core::AuthEvent::Loaded {
+            session: None,
+            has_accounts: true,
+            google_ready: false,
+        }))
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        reveal_login_control(window, "login-email-input", cx);
+        window.click("login-email-input", cx);
+        window.input("ada@example.com", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(
+        std::iter::from_fn(|| commands.try_recv().ok()).all(|command| !matches!(
+            command,
+            Command::Auth(sovra_core::AuthCommand::SignIn { .. })
+        ))
+    );
+    cx.update_window(window.into(), |_, window, cx| {
+        reveal_login_control(window, "login-password-input", cx);
+        window.click("login-password-input", cx);
+        window.input("correct horse", cx);
+        window.press("enter", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let sign_ins: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
+        .filter_map(|command| match command {
+            Command::Auth(sovra_core::AuthCommand::SignIn { email, password }) => {
+                Some((email, password))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sign_ins,
+        vec![("ada@example.com".to_owned(), "correct horse".to_owned())]
+    );
+}
+
 fn reveal_login_control(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
     for _ in 0..40 {
         window.render_frame(cx);
