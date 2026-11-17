@@ -1150,10 +1150,9 @@ fn the_privacy_check_finds_a_model_that_learned_its_text_by_heart() {
     let before = table.export().unwrap();
     let _ = table.repeat_check();
     assert_eq!(table.export().unwrap(), before);
-    // A text too short for one beginning and what followed is not checked.
-    assert!(
-        micro_session(&"ab".repeat(40), b"short")
-            .repeat_check()
-            .is_none()
-    );
+    // Even a short text, the easiest to learn by heart, is checked.
+    let short = micro_session(&"ab".repeat(40), b"short")
+        .repeat_check()
+        .expect("an 80-byte text is checked");
+    assert_eq!(short.probes, 1, "{short:?}");
 }

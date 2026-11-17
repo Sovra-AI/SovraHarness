@@ -13,11 +13,11 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Beginnings taken from the text.
+/// Beginnings taken from the text, at most.
 pub const REPEAT_PROBES: usize = 32;
-/// Bytes of each beginning given to the model.
+/// Bytes of each beginning given to the model, at most.
 pub const REPEAT_PROMPT_BYTES: usize = 32;
-/// Bytes the model is asked to write after each beginning.
+/// Bytes the model is asked to write after each beginning, at most.
 pub const REPEAT_WRITE_BYTES: usize = 64;
 /// A continuation that matches the text for this many bytes or more counts as
 /// repeating it: about four or five words, written exactly as they were.
@@ -25,6 +25,54 @@ pub const REPEAT_COUNTED_BYTES: usize = 24;
 /// From this share of beginnings repeated (in percent), the model repeats the
 /// text, not just some phrases of it.
 pub const REPEAT_MUCH_PERCENT: u16 = 25;
+/// Beginnings are at least this far apart, so a short text still gets many of
+/// them. Overlapping beginnings are fine: each is its own question.
+const REPEAT_STEP_BYTES: usize = 4;
+/// The shortest beginning and continuation worth checking.
+const REPEAT_MIN_PROMPT_BYTES: usize = 4;
+const REPEAT_MIN_WRITE_BYTES: usize = 8;
+
+/// How a text of a given length is checked. A short text, the easiest to learn
+/// by heart, gets shorter beginnings and continuations instead of no check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepeatPlan {
+    /// Where each beginning starts in the learned text.
+    pub starts: Vec<usize>,
+    /// Bytes of each beginning.
+    pub prompt: usize,
+    /// Bytes asked for after it.
+    pub write: usize,
+    /// A match this long counts as repeating.
+    pub counted: usize,
+}
+
+/// The check for a text the model learned from, `learned` bytes long, or
+/// `None` when it is too short to ask anything.
+pub fn repeat_plan(learned: usize) -> Option<RepeatPlan> {
+    let prompt = REPEAT_PROMPT_BYTES.min(learned / 3);
+    let write = REPEAT_WRITE_BYTES.min(learned.saturating_sub(prompt));
+    if prompt < REPEAT_MIN_PROMPT_BYTES || write < REPEAT_MIN_WRITE_BYTES {
+        return None;
+    }
+    let room = learned - prompt - write;
+    let count = REPEAT_PROBES.min(room / REPEAT_STEP_BYTES + 1);
+    let starts = (0..count)
+        .map(|index| {
+            if count == 1 {
+                0
+            } else {
+                index * room / (count - 1)
+            }
+        })
+        .collect();
+    Some(RepeatPlan {
+        starts,
+        prompt,
+        write,
+        // Half of a short continuation, never more than the usual five words.
+        counted: REPEAT_COUNTED_BYTES.min(write.div_ceil(2)),
+    })
+}
 
 /// What the check found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,27 +98,6 @@ pub enum RepeatLevel {
     Much,
 }
 
-/// Where each beginning starts in the text the model learned from, `learned`
-/// bytes long: evenly spaced, each leaving room for its beginning and for what
-/// followed it. Empty when the text is too short to check.
-pub fn repeat_probes(learned: usize) -> Vec<usize> {
-    let span = REPEAT_PROMPT_BYTES + REPEAT_WRITE_BYTES;
-    if learned < span {
-        return Vec::new();
-    }
-    let room = learned - span;
-    let count = REPEAT_PROBES.min(room / REPEAT_PROMPT_BYTES + 1);
-    (0..count)
-        .map(|index| {
-            if count == 1 {
-                0
-            } else {
-                index * room / (count - 1)
-            }
-        })
-        .collect()
-}
-
 /// How many bytes `written` matches `truth` from the start, exactly.
 pub fn matched_bytes(written: &[u8], truth: &[u8]) -> usize {
     written
@@ -81,15 +108,16 @@ pub fn matched_bytes(written: &[u8], truth: &[u8]) -> usize {
 }
 
 impl RepeatCheck {
-    /// The check from each beginning's matched length.
-    pub fn from_matches(matches: &[usize]) -> Self {
+    /// The check from each beginning's matched length, where a match of
+    /// `counted` bytes or more counts as repeating.
+    pub fn from_matches(matches: &[usize], counted: usize) -> Self {
         let bounded = |value: usize| u16::try_from(value).unwrap_or(u16::MAX);
         Self {
             probes: bounded(matches.len()),
             repeated: bounded(
                 matches
                     .iter()
-                    .filter(|matched| **matched >= REPEAT_COUNTED_BYTES)
+                    .filter(|matched| **matched >= counted)
                     .count(),
             ),
             longest: bounded(matches.iter().copied().max().unwrap_or(0)),
@@ -112,16 +140,17 @@ impl RepeatCheck {
     pub fn sentence(&self) -> String {
         let probes = self.probes;
         let longest = self.longest;
+        let letters = if longest == 1 { "letter" } else { "letters" };
         match self.level() {
             RepeatLevel::NotFound => format!(
-                "Privacy check: given {probes} beginnings from your text, it never wrote more than {longest} letters of what came next. That lowers the risk; it does not prove none of your text can be drawn out."
+                "Privacy check: given {probes} beginnings from your text, it never wrote more than {longest} {letters} of what came next. That lowers the risk; it does not prove none of your text can be drawn out."
             ),
             RepeatLevel::Phrases => format!(
-                "Privacy check: it repeats phrases of your text. Given {probes} beginnings, it wrote {} of them on exactly as you did (up to {longest} letters). Anyone who gets this model can draw out parts of your text.",
+                "Privacy check: it repeats phrases of your text. Given {probes} beginnings, it wrote {} of them on exactly as you did (up to {longest} {letters}). Anyone who gets this model can draw out parts of your text.",
                 self.repeated
             ),
             RepeatLevel::Much => format!(
-                "Privacy check: it repeats your text. Given {probes} beginnings, it wrote {} of them on exactly as you did (up to {longest} letters). Anyone who gets this model can read much of your text back out of it.",
+                "Privacy check: it repeats your text. Given {probes} beginnings, it wrote {} of them on exactly as you did (up to {longest} {letters}). Anyone who gets this model can read much of your text back out of it.",
                 self.repeated
             ),
         }
@@ -133,25 +162,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn beginnings_are_spread_over_the_text_and_leave_room_for_what_followed() {
-        assert_eq!(repeat_probes(0), Vec::<usize>::new());
-        assert_eq!(repeat_probes(95), Vec::<usize>::new());
-        // Just room for one.
-        assert_eq!(repeat_probes(96), vec![0]);
-        let long = repeat_probes(100_000);
-        assert_eq!(long.len(), REPEAT_PROBES);
-        assert_eq!(long[0], 0);
-        assert_eq!(*long.last().unwrap(), 100_000 - 96);
-        assert!(long.windows(2).all(|pair| pair[0] < pair[1]));
-        // A short text gets fewer, never overlapping beginnings.
-        let short = repeat_probes(400);
-        assert!(short.len() < REPEAT_PROBES && short.len() > 1);
-        assert!(
-            short
-                .windows(2)
-                .all(|pair| pair[1] - pair[0] >= REPEAT_PROMPT_BYTES)
-        );
-        assert!(short.iter().all(|start| start + 96 <= 400));
+    fn every_text_long_enough_to_train_on_gets_a_check() {
+        // Too short to ask anything.
+        assert_eq!(repeat_plan(0), None);
+        assert_eq!(repeat_plan(11), None);
+        // The shortest text training takes (32 bytes) is checked.
+        let tiny = repeat_plan(32).unwrap();
+        assert_eq!((tiny.prompt, tiny.write), (10, 22));
+        assert_eq!(tiny.counted, 11);
+        assert_eq!(tiny.starts, vec![0]);
+        // A short note gets short beginnings, many of them, overlapping.
+        let note = repeat_plan(149).unwrap();
+        assert_eq!((note.prompt, note.write, note.counted), (32, 64, 24));
+        assert_eq!(note.starts.len(), 14);
+        assert!(note.starts.windows(2).all(|pair| pair[1] - pair[0] >= 4));
+        assert!(note.starts.iter().all(|start| start + 96 <= 149));
+        // A long text: the full 32, spread from end to end.
+        let long = repeat_plan(100_000).unwrap();
+        assert_eq!(long.starts.len(), REPEAT_PROBES);
+        assert_eq!(long.starts[0], 0);
+        assert_eq!(*long.starts.last().unwrap(), 100_000 - 96);
+        assert!(long.starts.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
@@ -164,7 +195,7 @@ mod tests {
 
     #[test]
     fn the_verdict_says_plainly_how_much_of_the_text_comes_back() {
-        let none = RepeatCheck::from_matches(&[0, 3, 23, 5]);
+        let none = RepeatCheck::from_matches(&[0, 3, 23, 5], 24);
         assert_eq!(
             none,
             RepeatCheck {
@@ -177,20 +208,27 @@ mod tests {
         assert!(none.sentence().contains("never wrote more than 23 letters"));
         assert!(none.sentence().contains("does not prove"));
 
-        let some = RepeatCheck::from_matches(&[64, 0, 0, 0, 0]);
+        let some = RepeatCheck::from_matches(&[64, 0, 0, 0, 0], 24);
         assert_eq!(some.level(), RepeatLevel::Phrases);
         assert!(some.sentence().contains("repeats phrases"));
         assert!(some.sentence().contains("1 of them"));
 
-        let much = RepeatCheck::from_matches(&[64, 30, 0, 0]);
+        let much = RepeatCheck::from_matches(&[64, 30, 0, 0], 24);
         assert_eq!(much.level(), RepeatLevel::Much);
         assert!(much.sentence().contains("repeats your text"));
         assert!(much.sentence().contains("up to 64 letters"));
         assert!(RepeatLevel::Much > RepeatLevel::Phrases);
 
         assert_eq!(
-            RepeatCheck::from_matches(&[]).level(),
+            RepeatCheck::from_matches(&[], 24).level(),
             RepeatLevel::NotFound
+        );
+        // A short continuation counts at half its length.
+        assert_eq!(RepeatCheck::from_matches(&[11, 3], 11).repeated, 1);
+        assert!(
+            RepeatCheck::from_matches(&[1], 24)
+                .sentence()
+                .contains("more than 1 letter of")
         );
     }
 }

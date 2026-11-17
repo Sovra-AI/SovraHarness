@@ -144,6 +144,8 @@ struct Measured {
     check_loss: Option<f64>,
     /// The privacy check on the model the run gives back.
     repeats: Option<sovra_core::training::RepeatCheck>,
+    /// How long the privacy check took.
+    check_ms: f64,
 }
 
 fn thousandths(value: Option<u32>) -> Option<f64> {
@@ -274,6 +276,9 @@ fn run(
     } else {
         0.0
     };
+    let checking = Instant::now();
+    let repeats = session.repeat_check();
+    let check_ms = checking.elapsed().as_secs_f64() * 1000.0;
     Ok(Measured {
         model: model.info().title,
         rounds: progress.rounds,
@@ -284,7 +289,8 @@ fn run(
         steady_speed,
         loss: thousandths(progress.loss_milli),
         check_loss,
-        repeats: session.repeat_check(),
+        repeats,
+        check_ms,
     })
 }
 
@@ -342,11 +348,12 @@ fn main() -> Result<(), Failure> {
             measured.repeats.map_or_else(
                 || "not checked".to_owned(),
                 |check| format!(
-                    "{:?}: {} of {} beginnings, longest {} bytes",
+                    "{:?}: {} of {} beginnings, longest {} bytes ({:.0} ms)",
                     check.level(),
                     check.repeated,
                     check.probes,
-                    check.longest
+                    check.longest,
+                    measured.check_ms
                 )
             ),
         )?;

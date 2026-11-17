@@ -93,6 +93,10 @@ fn copy_words(outlet: Outlet, copy: Option<&CopyState>) -> Option<String> {
             Outlet::Ollama => format!("In Ollama as {place}. Run it with: ollama run {place}"),
         },
         CopyState::Failed(why) => format!("{what} did not work: {why}"),
+        CopyState::Held => match outlet {
+            Outlet::Bucket => "Not backed up by itself, because this model repeats your text. Press Back up now if you still want to send it.".to_owned(),
+            Outlet::Ollama => "Not added to Ollama by itself, because this model repeats your text. Press Add to Ollama if you still want to send it.".to_owned(),
+        },
     })
 }
 
@@ -347,7 +351,7 @@ impl TrainingView {
         ] {
             if let Some(text) = copy_words(outlet, copy) {
                 let text = SharedString::from(text);
-                let role = if matches!(copy, Some(CopyState::Failed(_))) {
+                let role = if matches!(copy, Some(CopyState::Failed(_) | CopyState::Held)) {
                     Role::Alert
                 } else {
                     Role::Status
@@ -419,6 +423,13 @@ mod tests {
             )
             .unwrap(),
             "Backup did not work: No network."
+        );
+        assert!(
+            copy_words(Outlet::Ollama, Some(&CopyState::Held))
+                .unwrap()
+                .starts_with(
+                    "Not added to Ollama by itself, because this model repeats your text."
+                )
         );
     }
 }

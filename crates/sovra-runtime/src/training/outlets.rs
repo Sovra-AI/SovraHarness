@@ -24,8 +24,6 @@ const MAX_OUTLETS_BYTES: u64 = 512 * 1024;
 const NO_OUTLETS: &str = "Copying models out of Sovra is unavailable in this build.";
 const NO_BUCKET: &str = "Set up your storage bucket first.";
 const NO_MODEL: &str = "That model is no longer in Your models.";
-/// Said on a model held back from automatic copies by the privacy check.
-pub(super) const HELD: &str = "Not sent by itself, because this model repeats your text. Read the privacy check, then press the button if you still want to send it.";
 
 /// How one copy ended.
 pub(super) struct Sent {
@@ -318,9 +316,7 @@ impl Actor {
                 continue;
             }
             if repeats {
-                self.state
-                    .outlets
-                    .record(model, outlet, CopyState::Failed(HELD.into()));
+                self.state.outlets.record(model, outlet, CopyState::Held);
                 continue;
             }
             let _ = match outlet {

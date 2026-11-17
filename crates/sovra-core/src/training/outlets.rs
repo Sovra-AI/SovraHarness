@@ -172,6 +172,9 @@ pub enum CopyState {
     Done { place: String, at_unix_ms: u64 },
     /// Not sent, with the reason in plain words.
     Failed(String),
+    /// Not sent by itself, on purpose: the privacy check found the model
+    /// repeating its text, so it waits for the person to send it by hand.
+    Held,
 }
 
 /// The copies of one library model.

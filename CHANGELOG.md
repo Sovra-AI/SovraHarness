@@ -21,8 +21,11 @@ package version.
   does it write back? **Your models** says so in plain words, the description
   that goes with every backup says so, and a model that repeats your text is no
   longer sent to your bucket or Ollama by itself; it waits for you to press the
-  button. Measured: on the recommended settings models repeated nothing; with
-  the guards turned off they repeated all of it.
+  button. A short note, the easiest to learn by heart, gets about a dozen
+  closely spaced beginnings rather than one or two, and the check runs on the
+  training engine's threads (under 0.4 s for a Large model). Measured: on the
+  recommended settings models repeated nothing; with the guards turned off
+  they repeated all of it.
 
 - **Fixed: the Training page and guides said a finished model never carries
   your text.** They now explain that the text file never leaves but the model

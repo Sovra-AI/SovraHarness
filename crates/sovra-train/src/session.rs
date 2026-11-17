@@ -7,17 +7,18 @@
 //! runs, and the same counts are checked.
 
 use std::collections::BTreeMap;
+
+use rayon::prelude::*;
 use std::time::Instant;
 
 use sovra_core::group::{ContentHash, DeviceId};
 use sovra_core::swarm::learn::scavenger::{Contribution, GridSyncer, WorkLease};
 use sovra_core::training::{
-    BaseModel, HardwareInfo, MAX_SAMPLE_BYTES, MetricPoint, ModelFacts, ModelHeader,
-    REPEAT_PROMPT_BYTES, REPEAT_WRITE_BYTES, RepeatCheck, TrainingBase, TrainingEngine,
-    TrainingError, TrainingPlan, TrainingPlanSummary, TrainingProgress, TrainingRecipe,
-    TrainingResult, TrainingSession, TrainingTask, check_text, check_trial_prompt, decode_model,
-    encode_model, encode_parameters, inspect_model, matched_bytes, model_id, repeat_probes,
-    sample_text,
+    BaseModel, HardwareInfo, MAX_SAMPLE_BYTES, MetricPoint, ModelFacts, ModelHeader, RepeatCheck,
+    TrainingBase, TrainingEngine, TrainingError, TrainingPlan, TrainingPlanSummary,
+    TrainingProgress, TrainingRecipe, TrainingResult, TrainingSession, TrainingTask, check_text,
+    check_trial_prompt, decode_model, encode_model, encode_parameters, inspect_model,
+    matched_bytes, model_id, repeat_plan, sample_text,
 };
 
 use crate::device::{self, EngineChoice, GraphicsCard};
@@ -752,30 +753,34 @@ impl TrainingSession for Session {
     fn repeat_check(&self) -> Option<RepeatCheck> {
         let (header, values) = self.kept();
         let learned = &self.text.as_bytes()[..self.split];
-        let starts = repeat_probes(learned.len());
-        if starts.is_empty() {
-            return None;
-        }
-        let matches: Vec<usize> = starts
-            .iter()
-            .map(|start| {
-                let truth = start + REPEAT_PROMPT_BYTES;
-                // The likeliest letter every time: what the model most wants to
-                // write is what someone drawing text out of it would get.
-                writer::write(
-                    header.architecture,
-                    values,
-                    &learned[*start..truth],
-                    REPEAT_WRITE_BYTES,
-                    0,
-                    0,
-                )
-                .map_or(0, |written| {
-                    matched_bytes(&written, &learned[truth..truth + REPEAT_WRITE_BYTES])
+        let plan = repeat_plan(learned.len())?;
+        // The beginnings are independent, so they are written side by side on
+        // the engine's own threads: a Large model's check went from 1.4 s to a
+        // fraction of that, and the save it delays with it. Each one is still
+        // written greedily from its own beginning, so the result is the same.
+        let matches: Vec<usize> = self.compute.run(|| {
+            plan.starts
+                .par_iter()
+                .map(|start| {
+                    let truth = start + plan.prompt;
+                    // The likeliest letter every time: what the model most
+                    // wants to write is what someone drawing text out of it
+                    // would get.
+                    writer::write(
+                        header.architecture,
+                        values,
+                        &learned[*start..truth],
+                        plan.write,
+                        0,
+                        0,
+                    )
+                    .map_or(0, |written| {
+                        matched_bytes(&written, &learned[truth..truth + plan.write])
+                    })
                 })
-            })
-            .collect();
-        Some(RepeatCheck::from_matches(&matches))
+                .collect()
+        });
+        Some(RepeatCheck::from_matches(&matches, plan.counted))
     }
 }
 

@@ -292,11 +292,11 @@ fn copies() -> ModelOutletState {
     // The first model learned its text by heart; the second did not.
     outlets.record_check(
         ContentHash([9; 32]),
-        RepeatCheck::from_matches(&[64, 64, 40, 0]),
+        RepeatCheck::from_matches(&[64, 64, 40, 0], 24),
     );
     outlets.record_check(
         ContentHash([8; 32]),
-        RepeatCheck::from_matches(&[3, 5, 0, 1]),
+        RepeatCheck::from_matches(&[3, 5, 0, 1], 24),
     );
     outlets
 }

@@ -288,7 +288,7 @@ fn the_privacy_check_is_kept_with_the_model_and_said_in_its_description() {
     let id = model.card.id;
     let mut state = ModelOutletState::default();
     assert_eq!(state.repeats(id), None);
-    let check = RepeatCheck::from_matches(&[64, 40, 0, 0]);
+    let check = RepeatCheck::from_matches(&[64, 40, 0, 0], 24);
     state.record_check(id, check);
     assert_eq!(state.repeats(id), Some(check));
     // Copies made later keep the check beside them.

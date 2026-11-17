@@ -508,8 +508,8 @@ async fn a_model_that_repeats_its_text_is_held_back_from_automatic_copies() {
             state.models.first().is_some_and(|model| {
                 let copies = state.outlets.copies(model.card.id);
                 copies.is_some_and(|copies| {
-                    matches!(copies.bucket, Some(CopyState::Failed(_)))
-                        && matches!(copies.ollama, Some(CopyState::Failed(_)))
+                    matches!(copies.bucket, Some(CopyState::Held))
+                        && matches!(copies.ollama, Some(CopyState::Held))
                 })
             })
         })
@@ -521,11 +521,6 @@ async fn a_model_that_repeats_its_text_is_held_back_from_automatic_copies() {
         sovra_core::training::RepeatLevel::NotFound,
         "{check:?}"
     );
-    let copies = held.outlets.copies(model).unwrap();
-    let Some(CopyState::Failed(why)) = &copies.bucket else {
-        unreachable!("checked above");
-    };
-    assert!(why.contains("repeats your text"), "{why}");
     // Nothing left this computer by itself.
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert!(storage.seen().is_empty());

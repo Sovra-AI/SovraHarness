@@ -548,15 +548,21 @@ your text. A small model that has read a short text many times can learn it
 by heart, and anyone who has the model can then make it write that text back
 out, a beginning at a time.
 
-So every model trained here is checked when it is made. Sovra gives it 32
-beginnings taken from the text it learned, each 32 letters long, lets it write
-the next 64 letters as it most wants to, and compares that with what you
-really wrote. The result is shown on the model in **Your models** and written
-into the description that goes with every backup:
+So every model trained here is checked when it is made. Sovra gives it up to
+32 beginnings taken from the text it learned, each 32 letters long, lets it
+write the next 64 letters as it most wants to, and compares that with what you
+really wrote. A short text, the easiest to learn by heart, still gets a full
+check: its beginnings may be as little as 4 letters apart, so a 150-letter
+note gets about a dozen, and a text too short for 32 and 64 letters gets
+shorter beginnings and continuations. The beginnings are written side by side
+on the training engine's own threads; on this guide's development computer
+the check takes under 0.1 s for a Small model and under 0.4 s for Large. The
+result is shown on the model in **Your models** and written into the
+description that goes with every backup:
 
 | What the check says | What it found |
 | --- | --- |
-| **It never wrote more than N letters of what came next** | No beginning was continued with 24 or more letters exactly as you wrote them. This lowers the risk; it does not prove none of your text can be drawn out. |
+| **It never wrote more than N letters of what came next** | No beginning was continued with 24 or more letters exactly as you wrote them (half the continuation, for a text too short for 64). This lowers the risk; it does not prove none of your text can be drawn out. |
 | **It repeats phrases of your text** | Some beginnings were continued with at least 24 letters (about four or five words) exactly as you wrote them. |
 | **It repeats your text** | A quarter or more of them were. Much of your text can be read back out of the model. |
 

@@ -268,7 +268,14 @@ async fn a_group_trains_a_small_model_together_and_both_computers_get_it() {
     assert_eq!(trained.card.name, "Garden writer");
     assert_eq!(trained.card.base, BaseModel::Small);
     assert_eq!(trained.card.origin, ModelOrigin::TrainedHere);
-    assert_eq!(trained.card.rounds, 160);
+    // The model is the version that did best on the held-back text, which is
+    // not always the last one: the helper's late rounds can make it a little
+    // worse. Whichever it is, it comes from this run.
+    assert!(
+        (1..=160).contains(&trained.card.rounds),
+        "kept a version from this run: round {}",
+        trained.card.rounds
+    );
     let loss = trained.card.loss_milli.expect("a measured loss");
     assert!(
         loss < LEARNED_MILLI,

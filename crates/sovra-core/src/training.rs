@@ -54,7 +54,7 @@ pub use plan::{
 };
 pub use repeats::{
     REPEAT_COUNTED_BYTES, REPEAT_MUCH_PERCENT, REPEAT_PROBES, REPEAT_PROMPT_BYTES,
-    REPEAT_WRITE_BYTES, RepeatCheck, RepeatLevel, matched_bytes, repeat_probes,
+    REPEAT_WRITE_BYTES, RepeatCheck, RepeatLevel, RepeatPlan, matched_bytes, repeat_plan,
 };
 pub use work::{
     BYTE_MODEL_PARAMETERS, MAX_MODEL_PART_BYTES, MAX_OFFER_HAVE, MAX_OFFERED_MODELS, RunSummary,
