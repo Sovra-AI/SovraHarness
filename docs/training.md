@@ -384,8 +384,10 @@ starting point and size, how far it was trained, and where it came from
   [Back up to your own storage bucket](#back-up-to-your-own-storage-bucket).
 - **Continue this** under **Starting point** trains a model further.
 
-Each model shows how its copies went: **Backed up to …**, **In Ollama as …**,
-or, in the alert colour, why a copy did not work.
+Each model shows its [privacy check](#does-the-model-repeat-your-text) and
+how its copies went: **Backed up to …**, **In Ollama as …**, or, in the alert
+colour, why a copy did not work or that it was **not sent by itself**
+because the model repeats your text.
 
 ### The best version is the one you keep
 
