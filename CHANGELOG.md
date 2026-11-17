@@ -20,6 +20,10 @@ package version.
   search and answered from the results instead of from the chat (seen live
   when asked to quote an earlier message). Refusals now let the AI answer from
   the conversation; "search the web for…" still always searches.
+- Earlier messages of a chat are now placed after Sovra's instructions and
+  directly before the new message, in the order a model expects. They used to
+  come before the instructions, which a model could read as the start of a
+  new, empty conversation.
 
 - **Chats running side by side no longer time out while they are working.**
   The model connection's timeout used to cap the whole reply, so an answer that
