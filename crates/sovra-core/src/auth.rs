@@ -436,6 +436,11 @@ pub struct AuthState {
 }
 
 impl AuthState {
+    /// First-run signup and an explicitly requested additional account share one form.
+    pub fn creating_account(&self, requested: bool) -> bool {
+        !matches!(self.phase, AuthPhase::Unknown) && (requested || !self.has_accounts)
+    }
+
     pub fn apply(&mut self, event: &AuthEvent) {
         match event {
             AuthEvent::LocalProfiles(profiles) => self.local_profiles.clone_from(profiles),
@@ -536,6 +541,26 @@ pub fn callback_page(success: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signup_is_available_after_the_first_account_without_changing_saved_account_state() {
+        let mut state = AuthState::default();
+        assert!(!state.creating_account(true));
+        state.apply(&AuthEvent::Loaded {
+            session: None,
+            has_accounts: false,
+            google_ready: false,
+        });
+        assert!(state.creating_account(false));
+        state.apply(&AuthEvent::Loaded {
+            session: None,
+            has_accounts: true,
+            google_ready: false,
+        });
+        assert!(!state.creating_account(false));
+        assert!(state.creating_account(true));
+        assert!(state.has_accounts);
+    }
 
     #[test]
     fn local_profiles_never_include_accounts_with_credentials() {

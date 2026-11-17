@@ -16,6 +16,7 @@ pub mod connection_catalogue;
 pub mod connections;
 mod context_budget;
 mod conversation_context;
+pub mod decisions;
 pub mod development;
 pub mod document_reading;
 pub mod file_index;
@@ -99,18 +100,18 @@ pub use memory::{
     MAX_MEMORY_CANDIDATES, MAX_MEMORY_CITATIONS, MAX_MEMORY_CONNECTIONS, MAX_MEMORY_CONTEXT_BYTES,
     MAX_MEMORY_CONTEXT_ITEMS, MAX_MEMORY_INPUT_BYTES, MAX_MEMORY_OUTPUT_BYTES, MAX_MEMORY_PAGE,
     MAX_MEMORY_PRIMARY_ITEMS, MAX_MEMORY_SEARCHES, MAX_MEMORY_SOURCE_DEPENDENCIES,
-    MAX_PENDING_MEMORIES, MAX_RECALL_RESULTS, MEMORY_CHUNK_BYTES, MEMORY_EMBEDDING_BATCH,
-    MEMORY_GRAPH_SQUARE, MEMORY_LEASE_MILLIS, MEMORY_RETRY_MILLIS, MEMORY_REVIEW_SESSION,
-    MEMORY_SEMANTIC_CANDIDATES, MEMORY_SIMILARITY_FLOOR, MemoryAction, MemoryActivity,
-    MemoryCandidate, MemoryCitationRef, MemoryCitationTarget, MemoryClaim, MemoryCommand,
-    MemoryConnection, MemoryConnectionReason, MemoryContext, MemoryCorrection, MemoryCursor,
-    MemoryDependencyTracker, MemoryDetail, MemoryDuplicateReport, MemoryEmbeddingInput,
-    MemoryError, MemoryEvent, MemoryEvidence, MemoryExtractedChunk, MemoryExtraction,
-    MemoryFactChat, MemoryGraph, MemoryGraphEdge, MemoryGraphEdgeKind, MemoryGraphNode,
-    MemoryGraphNodeId, MemoryGraphRecord, MemoryInput, MemoryJob, MemoryJobState, MemoryListQuery,
-    MemoryNeighborhood, MemoryNote, MemoryOverview, MemoryPage, MemoryPoint, MemoryPolicy,
-    MemoryReader, MemoryReviewEvent, MemoryReviewResult, MemoryReviewState, MemorySameDetail,
-    MemorySearch, MemorySemanticHit, MemorySemanticPhase, MemorySemanticSetting,
+    MAX_MEMORY_SOURCE_ITEMS, MAX_PENDING_MEMORIES, MAX_RECALL_RESULTS, MEMORY_CHUNK_BYTES,
+    MEMORY_EMBEDDING_BATCH, MEMORY_GRAPH_SQUARE, MEMORY_LEASE_MILLIS, MEMORY_RETRY_MILLIS,
+    MEMORY_REVIEW_SESSION, MEMORY_SEMANTIC_CANDIDATES, MEMORY_SIMILARITY_FLOOR, MemoryAction,
+    MemoryActivity, MemoryCandidate, MemoryCitationRef, MemoryCitationTarget, MemoryClaim,
+    MemoryCommand, MemoryConnection, MemoryConnectionReason, MemoryContext, MemoryCorrection,
+    MemoryCursor, MemoryDependencyTracker, MemoryDetail, MemoryDuplicateReport,
+    MemoryEmbeddingInput, MemoryError, MemoryEvent, MemoryEvidence, MemoryExtractedChunk,
+    MemoryExtraction, MemoryFactChat, MemoryGraph, MemoryGraphEdge, MemoryGraphEdgeKind,
+    MemoryGraphNode, MemoryGraphNodeId, MemoryGraphRecord, MemoryInput, MemoryJob, MemoryJobState,
+    MemoryListQuery, MemoryNeighborhood, MemoryNote, MemoryOverview, MemoryPage, MemoryPoint,
+    MemoryPolicy, MemoryReader, MemoryReviewEvent, MemoryReviewResult, MemoryReviewState,
+    MemorySameDetail, MemorySearch, MemorySemanticHit, MemorySemanticPhase, MemorySemanticSetting,
     MemorySemanticState, MemorySemanticStatus, MemorySourceAdmission, MemorySourceAttribution,
     MemorySourceAuthor, MemorySourceCursor, MemorySourceDependencies, MemorySourceEvidence,
     MemorySourceMessage, MemorySourceMetadata, MemorySourceOrigin, MemorySourcePage,
@@ -118,11 +119,11 @@ pub use memory::{
     MemorySourceScope, MemorySourceSummary, MemoryStatementPair, MemoryStatus, MemoryStore,
     MemorySubject, MemorySubjectPage, MemorySubjectQuery, MemoryVector, NewEpisode, NewFact, RRF_K,
     RecallQuery, RecalledFact, ReplyInputObserver, TeamMemoryCapture, Timestamp,
-    check_memory_duplicates, confirm_memory_duplicate, consolidation_context, fuse_memory_sources,
-    fuse_rrf, hide_memory_citation_tokens, layout_memory_graph, memory_chunk_end,
-    memory_citation_refs, memory_citations, memory_graph, memory_neighborhood,
-    memory_source_citations, parse_memory_candidates, statement_key, stored_version_link,
-    validate_memory_batch, validate_memory_searches, validate_memory_vectors,
+    attach_conversation_sources, check_memory_duplicates, confirm_memory_duplicate,
+    consolidation_context, fuse_memory_sources, fuse_rrf, hide_memory_citation_tokens,
+    layout_memory_graph, memory_chunk_end, memory_citation_refs, memory_citations, memory_graph,
+    memory_neighborhood, memory_source_citations, parse_memory_candidates, statement_key,
+    stored_version_link, validate_memory_batch, validate_memory_searches, validate_memory_vectors,
 };
 pub use people::{
     EMPTY_PEOPLE_NOTE, Handle, Lookup, NameMatch, PEOPLE_PAGE, PEOPLE_PULL_FAILED_NOTE, PeopleBook,

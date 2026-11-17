@@ -14,6 +14,37 @@ package version.
 
 ## [Unreleased]
 
+- **Keep company decisions and their reasons.** Artifacts → Decisions saves the
+  question, decision, company-written criteria, quoted passages, review date and
+  conditions that would end it. Chat replies offer **Record a decision**. A
+  different signed-in account must explicitly accept the saved version; writers
+  and unresolved company-written hard stops cannot approve it. Edits retain
+  earlier versions and require fresh acceptance. Review dates and confirmed
+  endings remove current-position status. Records stay on this computer, survive
+  restart and can be copied with their history.
+  The sign-in page now offers **Create another account**, so a second person can
+  join the review using the native controls.
+
+- Release-workflow tests locate the invoked workspace instead of a compiled-in
+  checkout path, keeping the full CI gate usable with shared build caches.
+
+- **Saved chat is easier to find again.** A question can bring back another
+  statement from the same conversation when that statement shares a
+  distinctive word, and up to eight matching statements can be included when
+  they fit.
+- **Chat choices exclude batch-only models.** Models ending in `:batch` remain
+  browsable, but cannot be recommended or used for live chat, file reading or
+  summaries. A previously saved batch choice explains how to pick a chat model
+  before sending a request, instead of failing at the provider's chat endpoint.
+
+- **Connections shows a count.** The sidebar mark is the number of links that
+  are on. The Connections page still lists each kind and its own status.
+
+- **Discover skills in every new chat.** An animated `/help` reminder now appears
+  beside the message box, including before an AI is connected. It stops once you
+  start a draft and returns for each new chat. Reduced motion keeps the complete
+  hint still, and the explanation follows your interface language.
+
 ## [0.7.0] — 2026-11-15
 
 - **Microsoft 365 connection.** A four-step Connections guide helps each person

@@ -32,6 +32,10 @@ Editing keeps versions. Back and Cancel ask before discarding unsaved edits;
 a failed save keeps the draft. Deletion is soft and asks for confirmation.
 See the website section below for browser previews and build requirements.
 
+**Artifacts → Decisions** keeps a company decision as its own record, with
+criteria, cited wording, a second person's acceptance and retained versions.
+Chat replies also offer **Record a decision**. See [Decision records](decisions.md).
+
 ## Everything streams as AG-UI
 
 A team turn is a multi-agent run, so it uses the AG-UI protocol's own events

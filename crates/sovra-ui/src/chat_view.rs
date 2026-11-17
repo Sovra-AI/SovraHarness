@@ -624,18 +624,9 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
         .sovra_text(TextRole::Body, cx)
         .text_color(t.text_secondary)
         .child(subtitle);
-    let help_hint = design::chrome(cx, ChromeKey::ChatWelcomeHelpHint);
-    let mut help_hint_el = div()
-        .id("chat-welcome-help-hint")
-        .test_support()
-        .aria_label(help_hint)
-        .sovra_text(TextRole::Caption, cx)
-        .text_color(t.text_secondary)
-        .child(help_hint);
     if design::is_rtl(cx) {
         title_el = title_el.w_full().text_right();
         subtitle_el = subtitle_el.w_full().text_right();
-        help_hint_el = help_hint_el.w_full().text_right();
     }
     // Scrolls inside its pane in short windows, so the composer always fits.
     h_flex()
@@ -679,9 +670,7 @@ fn render_welcome(state: &WorkspaceState, cx: &mut Context<Shell>) -> impl IntoE
                                     );
                                 }))
                         }))
-                }))
-                // Points newcomers at the full list of skills without leaving the chat.
-                .children(starters.then_some(help_hint_el)),
+                })),
         )
 }
 
@@ -1320,6 +1309,14 @@ fn render_assistant_segment(
                 .iter()
                 .any(|artifact| artifact.source.message_id == msg.id);
             let save_text = copy_text.clone();
+            let decision_draft = sovra_core::decisions::DecisionDraft {
+                decision: copy_text.clone(),
+                chat: Some(sovra_core::decisions::DecisionEvidence {
+                    reference: format!("Chat {} / reply {}", state.session_id, msg.id),
+                    passage: copy_text.clone(),
+                }),
+                ..Default::default()
+            };
             let source = sovra_core::artifacts::ArtifactSource {
                 session_id: state.session_id.clone(),
                 message_id: msg.id.clone(),
@@ -1390,7 +1387,15 @@ fn render_assistant_segment(
                         msg.model
                             .as_ref()
                             .map(|model| render_model_pill(model, index, cx)),
-                    ),
+                    )
+                    .children(answering.then(|| {
+                        design::button(("record-decision", index), "Record a decision", cx)
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(move |shell, _, window, cx| {
+                                shell.record_decision(decision_draft.clone(), window, cx);
+                            }))
+                    })),
             );
         }
     }

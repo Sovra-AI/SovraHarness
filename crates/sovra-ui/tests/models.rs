@@ -13,6 +13,9 @@ use sovra_core::{Command, Event};
 use sovra_runtime::Client;
 use sovra_ui::Shell;
 
+#[path = "models/batch.rs"]
+mod batch;
+
 fn open_shell(
     cx: &mut TestAppContext,
     client: Client,
@@ -1709,8 +1712,11 @@ fn default_chrome_is_english_and_choosing_another_language_updates_labels(cx: &m
             Some(chrome(&UiLanguage::default(), ChromeKey::ChatStarterEmail))
         );
         assert_eq!(
-            window.find("composer-hint").label(),
-            Some(chrome(&UiLanguage::default(), ChromeKey::ChatHintIdle))
+            window.find("chat-welcome-help-hint").label(),
+            Some(chrome(
+                &UiLanguage::default(),
+                ChromeKey::ChatWelcomeHelpHint
+            ))
         );
         assert_eq!(
             shell.read(cx).composer_placeholder(cx),
@@ -1971,8 +1977,11 @@ fn default_chrome_is_english_and_choosing_another_language_updates_labels(cx: &m
             Some(welcome.as_str())
         );
         assert_eq!(
-            window.find("composer-hint").label(),
-            Some(chrome(&UiLanguage::english(), ChromeKey::ChatHintIdle))
+            window.find("chat-welcome-help-hint").label(),
+            Some(chrome(
+                &UiLanguage::english(),
+                ChromeKey::ChatWelcomeHelpHint
+            ))
         );
         assert_eq!(
             shell.read(cx).composer_placeholder(cx),

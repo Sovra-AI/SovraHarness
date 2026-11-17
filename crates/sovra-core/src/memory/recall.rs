@@ -6,6 +6,10 @@ pub const MAX_MEMORY_CONTEXT_BYTES: usize = 16 * 1024;
 pub const MAX_MEMORY_CONTEXT_ITEMS: usize = 8;
 pub const MAX_MEMORY_PRIMARY_ITEMS: usize = 6;
 pub const MAX_MEMORY_SEARCHES: usize = 4;
+/// Saved statements quoted for one question. Two turns in one conversation
+/// often share the answer, and the encoded-context cap still drops a quote
+/// that does not fit beside the others.
+pub const MAX_MEMORY_SOURCE_ITEMS: usize = 8;
 const MAX_BACKGROUND_ITEMS: usize = 8;
 const MAX_BACKGROUND_BYTES: usize = 4 * 1024;
 const MAX_RELATED_ITEMS: usize = MAX_MEMORY_CONTEXT_ITEMS - MAX_MEMORY_PRIMARY_ITEMS;
@@ -271,7 +275,7 @@ impl MemoryContext {
         }
     }
     pub fn push_source(&mut self, source: super::MemorySourceEvidence) -> bool {
-        if self.sources.len() >= 4
+        if self.sources.len() >= MAX_MEMORY_SOURCE_ITEMS
             || self
                 .sources
                 .iter()

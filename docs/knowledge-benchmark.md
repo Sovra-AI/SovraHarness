@@ -17,7 +17,10 @@ model extraction, embeddings, runtime scheduling, disk durability, and generatio
 It scores labeled user evidence; imported assistant turns lack certified provider
 input lineage. Unscorable and abstention cases are reported separately.
 Returning the right source ID does not prove that its bounded excerpt contains
-the answer. The application also supports reformulated lookup batches; this
+the answer. A matched statement can also bring back up to two other statements
+from that same conversation when they share a distinctive word from the
+question, and up to eight statements are kept when they fit the shared size
+cap. The application also supports reformulated lookup batches; this
 single-query diagnostic does not evaluate that complete path.
 
 ```sh

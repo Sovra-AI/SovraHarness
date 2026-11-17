@@ -8,10 +8,14 @@ mod artifact_library;
 mod code_panel;
 #[path = "styling/connection_feedback.rs"]
 mod connection_feedback;
+#[path = "styling/decisions.rs"]
+mod decisions;
 #[path = "styling/development.rs"]
 mod development;
 #[path = "styling/file_knowledge.rs"]
 mod file_knowledge;
+#[path = "styling/help_hint.rs"]
+mod help_hint;
 #[path = "styling/knowledge_profile.rs"]
 mod knowledge_profile;
 #[path = "styling/memory_citations.rs"]
@@ -180,6 +184,7 @@ fn both_modes_keep_native_components_and_product_surfaces_readable(cx: &mut Test
         cx.set_reduce_motion(true);
         let motion = design::tokens(cx).motion;
         assert!(motion.enter.is_zero() && motion.exit.is_zero() && motion.press.is_zero());
+        assert!(motion.help_hint.is_zero());
         assert_eq!(motion.enter_distance, px(0.));
     });
 }

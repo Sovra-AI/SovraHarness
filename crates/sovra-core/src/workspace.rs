@@ -443,6 +443,7 @@ pub struct WorkspaceState {
     pub team: crate::teams::TeamRoster,
     /// Saved artifacts, folded from [`Event::Artifacts`].
     pub artifacts: crate::artifacts::ArtifactLibrary,
+    pub decisions: crate::decisions::DecisionBook,
     /// Personal channel connections (`WhatsApp` Personal companion state, QR pairing, bridged messages).
     pub connections: crate::connections::ConnectionsState,
     /// The Google account, folded from [`Event::Google`].
@@ -529,6 +530,7 @@ impl WorkspaceState {
             model_connections: Vec::new(),
             team: crate::teams::TeamRoster::default(),
             artifacts: crate::artifacts::ArtifactLibrary::default(),
+            decisions: crate::decisions::DecisionBook::default(),
             connections: crate::connections::ConnectionsState::default(),
             google: crate::google::GoogleConnection::default(),
             github: crate::github::GitHubConnection::default(),
@@ -1344,6 +1346,10 @@ impl WorkspaceState {
             }
             Event::Artifacts(artifact_event) => {
                 self.artifacts.apply(artifact_event);
+                None
+            }
+            Event::Decisions(event) => {
+                self.decisions.apply(event);
                 None
             }
             Event::Connections(connection_event) => {

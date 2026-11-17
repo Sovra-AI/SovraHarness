@@ -874,7 +874,7 @@ impl ModelsView {
         })
     }
 
-    /// Sidebar text for the Connections tab, from the same catalogue the page shows.
+    /// Sidebar count for the Connections tab, from the same catalogue the page shows.
     pub(crate) fn connection_nav_summary(&self) -> Option<String> {
         self.current_catalogue().nav_summary()
     }

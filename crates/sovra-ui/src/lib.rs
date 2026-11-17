@@ -12,6 +12,7 @@ mod chat_view;
 mod code_panel;
 mod composer;
 mod connections_view;
+mod decisions_view;
 pub mod design;
 mod development_view;
 mod file_index_view;

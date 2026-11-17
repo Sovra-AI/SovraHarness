@@ -22,6 +22,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 | Read documents, images, or recordings | [Files in chat](files.md) |
 | Review and correct saved knowledge | [Knowledge](knowledge.md) |
 | Work with helpers and save their output | [Teams and artifacts](teams-and-artifacts.md) |
+| Keep company decisions, evidence and acceptance | [Decision records](decisions.md) |
 | Run prompts or send messages later | [Schedules](schedules.md) |
 | Share selected work across computers | [Groups](groups.md) |
 | Train your own small AI, alone or with your group | [Training](training.md) |

@@ -30,6 +30,9 @@ mod profile;
 #[path = "store/removal.rs"]
 mod removal;
 
+#[path = "store/decisions.rs"]
+mod decisions;
+
 #[cfg(test)]
 #[path = "store/reply_dependencies.rs"]
 mod reply_dependencies;
@@ -1703,6 +1706,78 @@ async fn relevant_original_evidence_survives_newer_questions_with_a_common_searc
         .await
         .unwrap();
     assert!(sources.iter().all(|source| source.source_id != original));
+}
+
+#[tokio::test]
+async fn saved_user_statement_is_recalled_for_a_later_question_and_stays_out_after_it_is_stopped() {
+    let store = open_store().await;
+    let mut input = memory_input("recall-chat", "cat-name");
+    input.episode.content = "My cat's name is Luna.".into();
+    input.episode.occurred_at = Timestamp(1_000);
+    let saved = store.enqueue_memory(input).await.unwrap();
+    let query = sovra_core::MemorySearch {
+        text: "What is the name of my cat?".into(),
+        ..Default::default()
+    };
+    let found = store
+        .search_memory_sources(query.clone(), Timestamp(2_000))
+        .await
+        .unwrap();
+    assert!(
+        found.iter().any(|source| source.source_id == saved),
+        "a later question must return the saved statement it depends on"
+    );
+    store
+        .stop_memory_source(&saved, Timestamp(3_000))
+        .await
+        .unwrap();
+    let again = store
+        .search_memory_sources(query, Timestamp(4_000))
+        .await
+        .unwrap();
+    assert!(
+        again.iter().all(|source| source.source_id != saved),
+        "stopping that knowledge must keep it out of a later recall"
+    );
+}
+
+#[tokio::test]
+async fn a_later_statement_in_the_same_conversation_returns_with_the_matched_turn() {
+    let store = open_store().await;
+    let mut anchor = memory_input("phone-chat", "screen");
+    anchor.episode.content = "lumenpin lumenpin lumenpin lumenpin.".into();
+    anchor.episode.occurred_at = Timestamp(100);
+    let anchor_id = store.enqueue_memory(anchor).await.unwrap();
+    let mut sibling = memory_input("phone-chat", "color");
+    sibling.episode.content = format!("{} lumenpin.", "unrelated note ".repeat(80));
+    sibling.episode.occurred_at = Timestamp(1);
+    let sibling_id = store.enqueue_memory(sibling).await.unwrap();
+    for index in 0..20 {
+        let mut noise = memory_input(&format!("other-{index}"), &format!("noise-{index}"));
+        noise.episode.content = format!("lumenpin lumenpin. {}", "filler ".repeat(40));
+        noise.episode.occurred_at = Timestamp(50 + index);
+        store.enqueue_memory(noise).await.unwrap();
+    }
+    let found = store
+        .search_memory_sources(
+            sovra_core::MemorySearch {
+                text: "Where did I put the lumenpin?".into(),
+                ..Default::default()
+            },
+            Timestamp(100),
+        )
+        .await
+        .unwrap();
+    let anchor_at = found
+        .iter()
+        .position(|source| source.source_id == anchor_id)
+        .expect("the repeated word must match");
+    let sibling_at = found
+        .iter()
+        .position(|source| source.source_id == sibling_id)
+        .expect("the later statement in that conversation must be returned too");
+    assert!(sibling_at > anchor_at);
+    assert!(found.len() <= 12);
 }
 
 #[tokio::test]

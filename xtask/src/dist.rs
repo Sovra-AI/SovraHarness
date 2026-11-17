@@ -159,10 +159,7 @@ mod tests {
 
     /// The release workflow and the workspace manifest on disk, not a copy of either.
     fn shipped_release_sources() -> (String, String) {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("xtask lives in the workspace")
-            .to_path_buf();
+        let root = crate::root().expect("release test runs from the invoked workspace");
         let manifest = std::fs::read_to_string(root.join("Cargo.toml")).expect("root Cargo.toml");
         let workflow = std::fs::read_to_string(root.join(".github/workflows/release.yml"))
             .expect("shipped release workflow");

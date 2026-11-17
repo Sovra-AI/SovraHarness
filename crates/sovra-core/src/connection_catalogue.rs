@@ -208,22 +208,20 @@ impl ConnectionCatalogue {
         }
     }
 
-    /// Names of every linked kind, in catalogue order.
+    /// How many kinds are linked, for the sidebar mark.
     ///
-    /// One title when only that kind is linked. Several titles when more than
-    /// one is linked, so one kind cannot stand in for the rest. `None` when
-    /// nothing is linked.
+    /// `None` when nothing is linked. The number counts every linked kind, so
+    /// one name cannot stand in for the rest.
     pub fn nav_summary(&self) -> Option<String> {
-        let titles: Vec<&str> = self
+        let count = self
             .cards
             .iter()
             .filter(|card| card.phase == LinkPhase::Linked)
-            .map(|card| card.title)
-            .collect();
-        if titles.is_empty() {
+            .count();
+        if count == 0 {
             None
         } else {
-            Some(titles.join(", "))
+            Some(count.to_string())
         }
     }
 
@@ -671,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn nav_summary_names_every_linked_kind() {
+    fn nav_summary_counts_every_linked_kind() {
         assert_eq!(ConnectionCatalogue::fresh().nav_summary(), None);
 
         let connecting = WhatsAppStatus::Connecting { pairing: false };
@@ -704,7 +702,7 @@ mod tests {
             &[],
             &BTreeMap::new(),
         ));
-        assert_eq!(only_whatsapp.nav_summary().as_deref(), Some("WhatsApp"));
+        assert_eq!(only_whatsapp.nav_summary().as_deref(), Some("1"));
 
         let google = GoogleState::Connected(crate::google::GoogleAccount::default());
         let services = vec![McpService {
@@ -727,13 +725,7 @@ mod tests {
             services: &services,
             probed: &BTreeMap::new(),
         });
-        let summary = several.nav_summary().expect("linked kinds have names");
-        assert_ne!(summary, "WhatsApp");
-        assert!(summary.contains("WhatsApp"), "{summary}");
-        assert!(summary.contains("Google"), "{summary}");
-        assert!(summary.contains("MCP servers"), "{summary}");
-        assert!(summary.find("WhatsApp") < summary.find("Google"));
-        assert!(summary.find("Google") < summary.find("MCP servers"));
+        assert_eq!(several.nav_summary().as_deref(), Some("3"));
         assert_eq!(
             several.card(CatalogueKind::Telegram).phase,
             LinkPhase::NotLinked

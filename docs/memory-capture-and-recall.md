@@ -131,7 +131,7 @@ recall results are invalidated.
 | Boundary | Current limit |
 | --- | --- |
 | Initial recall | 2-second runtime deadline |
-| Injected memory | 8 fact items and 16 KiB of encoded context; raw source/background content shares bounded budgets |
+| Injected memory | 8 fact items, 8 saved statements, and 16 KiB of encoded context; raw source and background content share that size cap |
 | Primary facts | Up to 6, leaving room for related facts |
 | Lookup batch | Up to 4 searches |
 | Extraction capacity | Default 4 slots; `SOVRA_MEMORY_EXTRACTION_SLOTS` uses the default for zero and is otherwise clamped to 1–16 |

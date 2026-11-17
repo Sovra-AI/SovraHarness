@@ -159,6 +159,7 @@ pub(crate) fn tap(
                     | Event::Skills(_)
                     | Event::Teams(_)
                     | Event::Artifacts(_)
+                    | Event::Decisions(_)
                     | Event::Connections(_)
                     | Event::RemoteControl(_)
                     | Event::Development(_)

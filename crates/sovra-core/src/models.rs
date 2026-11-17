@@ -314,9 +314,27 @@ impl ModelInfo {
     }
 
     pub fn can_chat(&self) -> bool {
+        self.chat_unavailable_reason().is_none()
+    }
+
+    /// Shared explanation for model pickers and execution, including saved choices.
+    pub fn chat_unavailable_reason(&self) -> Option<&'static str> {
+        // OpenRouter's :batch variant uses its Batch API even when it advertises
+        // text and tools. Check the ID so old caches and manual entries are covered.
+        if self.id.ends_with(":batch") {
+            return Some(
+                "This is a batch-only model for queued jobs, so it cannot answer live chats. Open Models and choose a chat model without :batch.",
+            );
+        }
         // Compatible servers often omit capability metadata. They may be tried
         // explicitly; known non-text models remain unavailable for chat.
-        self.output_modalities.is_empty() || self.output_modalities.iter().any(|m| m == "text")
+        if self.output_modalities.is_empty() || self.output_modalities.iter().any(|m| m == "text") {
+            None
+        } else {
+            Some(
+                "This model produces a non-chat output, such as pictures, video or embeddings. Open Models and choose a chat model.",
+            )
+        }
     }
 
     pub fn kind(&self) -> ModelKind {
@@ -1189,10 +1207,11 @@ impl ModelsState {
                     .models
                     .iter()
                     .filter(|model| {
-                        model
-                            .output_modalities
-                            .iter()
-                            .any(|output| output == "text")
+                        model.can_chat()
+                            && model
+                                .output_modalities
+                                .iter()
+                                .any(|output| output == "text")
                             && model.is_free()
                             && model.pricing.contains_key("prompt")
                             && model.pricing.contains_key("completion")

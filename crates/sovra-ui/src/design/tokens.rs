@@ -175,6 +175,8 @@ pub struct MotionTokens {
     pub press: Duration,
     pub control: Duration,
     pub material: Duration,
+    /// Repeating typing demonstration for discovering skills in a new chat.
+    pub help_hint: Duration,
     pub enter_distance: Pixels,
 }
 
@@ -415,6 +417,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
             press: duration(100),
             control: duration(180),
             material: duration(220),
+            help_hint: duration(4000),
             enter_distance: px(if cx.reduce_motion() { 0. } else { 8. }),
         },
         chat: ChatTokens {

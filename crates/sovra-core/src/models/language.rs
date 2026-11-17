@@ -150,6 +150,8 @@ pub enum ChromeKey {
     LoginPassword,
     LoginSignIn,
     LoginCreateStart,
+    LoginCreateAnother,
+    LoginUseExisting,
     LoginSigningIn,
     LoginCreating,
     LoginGoogle,
@@ -237,7 +239,7 @@ pub enum ChromeKey {
 }
 
 impl ChromeKey {
-    pub const ALL: [Self; 92] = [
+    pub const ALL: [Self; 94] = [
         Self::LoginWelcomeTitle,
         Self::LoginWelcomeSubtitle,
         Self::LoginCreateTitle,
@@ -246,6 +248,8 @@ impl ChromeKey {
         Self::LoginPassword,
         Self::LoginSignIn,
         Self::LoginCreateStart,
+        Self::LoginCreateAnother,
+        Self::LoginUseExisting,
         Self::LoginSigningIn,
         Self::LoginCreating,
         Self::LoginGoogle,
@@ -994,6 +998,8 @@ fn arabic(key: ChromeKey) -> &'static str {
         ChromeKey::LoginPassword => "كلمة المرور",
         ChromeKey::LoginSignIn => "تسجيل الدخول إلى Sovra",
         ChromeKey::LoginCreateStart => "إنشاء الحساب والبدء",
+        ChromeKey::LoginCreateAnother => "إنشاء حساب آخر",
+        ChromeKey::LoginUseExisting => "استخدام حساب موجود",
         ChromeKey::LoginSigningIn => "جارٍ تسجيل الدخول…",
         ChromeKey::LoginCreating => "جارٍ إنشاء حسابك…",
         ChromeKey::LoginGoogle => "المتابعة باستخدام Google",
@@ -1101,6 +1107,8 @@ fn english(key: ChromeKey) -> &'static str {
         ChromeKey::LoginPassword => "Password",
         ChromeKey::LoginSignIn => "Sign in to Sovra",
         ChromeKey::LoginCreateStart => "Create account & start",
+        ChromeKey::LoginCreateAnother => "Create another account",
+        ChromeKey::LoginUseExisting => "Use an existing account",
         ChromeKey::LoginSigningIn => "Signing in…",
         ChromeKey::LoginCreating => "Creating your account…",
         ChromeKey::LoginGoogle => "Continue with Google",

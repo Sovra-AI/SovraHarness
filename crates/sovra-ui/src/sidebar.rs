@@ -316,8 +316,7 @@ fn nav_context_badge(
         NavTab::Schedules if !state.schedules.is_empty() => {
             Some((state.schedules.len().to_string(), false))
         }
-        // The page's catalogue already decided which kinds are linked. Naming
-        // only WhatsApp hid Google, GitHub, Telegram, AI setup, and MCP.
+        // A count of every linked catalogue kind. Zero hides the mark.
         NavTab::Connections => connections_summary.map(|summary| (summary.to_owned(), true)),
         _ => None,
     }
@@ -381,7 +380,6 @@ fn badge_pill(
     div()
         .id(id)
         .test_support()
-        // The full list stays available when the pill is narrower than the names.
         .aria_label(text.clone())
         .max_w(t.layout.filter_width)
         .min_w_0()

@@ -23,6 +23,9 @@ use sovra_runtime::{Client, ModelsConfig};
 #[path = "models/live_web_search.rs"]
 mod live_web_search;
 
+#[path = "models/batch.rs"]
+mod batch;
+
 #[path = "models/memory.rs"]
 mod memory;
 

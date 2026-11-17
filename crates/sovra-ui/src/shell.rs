@@ -1,7 +1,7 @@
 //! The main window's root view: title bar (when the app draws one), Login / 3-column Main Chat workspace, and status bar.
 
 use gpui_kit::component::{
-    ActiveTheme as _, TitleBar, h_flex,
+    ActiveTheme as _, Selectable as _, TitleBar, h_flex,
     input::{InputEvent, InputState, TextareaState},
     v_flex,
 };
@@ -42,6 +42,8 @@ pub struct Shell {
     inspector_docked: bool,
     code_panel_open: bool,
     pub(crate) composer_input: Entity<TextareaState>,
+    /// Once a draft has been started, don't restart its introductory animation.
+    pub(crate) started_chat_drafts: std::collections::HashSet<String>,
     pub(crate) skills: sovra_core::skills::SkillCatalog,
     pub(crate) skill_menu: crate::skill_menu::MenuState,
     pub(crate) skill_library: crate::skill_library::SkillLibrary,
@@ -60,6 +62,7 @@ pub struct Shell {
     schedule_scroll: gpui_kit::ScrollHandle,
     schedule_timeline_range: TimelineRange,
     login_name_input: Entity<InputState>,
+    login_create_account: bool,
     login_email_input: Entity<InputState>,
     login_password_input: Entity<InputState>,
     sim_route_input: Entity<InputState>,
@@ -82,6 +85,8 @@ pub struct Shell {
     team_view: Entity<crate::team_view::TeamView>,
     training_view: Entity<crate::training_view::TrainingView>,
     artifacts_view: Entity<crate::artifacts_view::ArtifactsView>,
+    decisions_view: Entity<crate::decisions_view::DecisionsView>,
+    decisions_open: bool,
     /// The Google card on the Connections tab.
     google_card: Entity<crate::google_card::GoogleCard>,
     github_card: Entity<crate::github_card::GitHubCard>,
@@ -146,6 +151,11 @@ impl Shell {
                     shift: false,
                 } => shell.submit_composer(window, cx),
                 InputEvent::Change => {
+                    if !shell.composer_input.read(cx).value().is_empty() {
+                        shell
+                            .started_chat_drafts
+                            .insert(shell.state.session_id.clone());
+                    }
                     shell.skill_menu = crate::skill_menu::MenuState::default();
                     cx.notify();
                 }
@@ -512,6 +522,11 @@ impl Shell {
                                 .artifacts_view
                                 .update(cx, |view, cx| view.artifact_event(event, cx));
                         }
+                        if let sovra_core::Event::Decisions(event) = &event {
+                            shell
+                                .decisions_view
+                                .update(cx, |view, cx| view.apply(event, cx));
+                        }
                         if let sovra_core::Event::Artifacts(
                             sovra_core::artifacts::ArtifactEvent::Deployed { url, .. },
                         ) = &event
@@ -770,6 +785,10 @@ impl Shell {
             let shell = shell_handle.clone();
             cx.new(|cx| crate::artifacts_view::ArtifactsView::new(shell, window, cx))
         };
+        let decisions_view = {
+            let shell = shell_handle.clone();
+            cx.new(|cx| crate::decisions_view::DecisionsView::new(shell, window, cx))
+        };
         let google_card = {
             let shell = shell_handle.clone();
             cx.new(|cx| crate::google_card::GoogleCard::new(shell, window, cx))
@@ -835,6 +854,7 @@ impl Shell {
             inspector_docked: design::WidthClass::of_window(window).fits_side_pane(),
             code_panel_open: true,
             composer_input,
+            started_chat_drafts: std::collections::HashSet::new(),
             skills: sovra_core::skills::SkillCatalog::default(),
             skill_menu: crate::skill_menu::MenuState::default(),
             skill_library,
@@ -853,6 +873,7 @@ impl Shell {
             schedule_scroll: gpui_kit::ScrollHandle::new(),
             schedule_timeline_range: TimelineRange::Hours24,
             login_name_input,
+            login_create_account: false,
             login_email_input,
             login_password_input,
             sim_route_input,
@@ -872,6 +893,8 @@ impl Shell {
             training_view: cx.new(|cx| crate::training_view::TrainingView::new(window, cx)),
             team_view,
             artifacts_view,
+            decisions_view,
+            decisions_open: false,
             _team_ask: team_ask,
             _try_asking: try_asking,
             google_card,
@@ -898,7 +921,10 @@ impl Shell {
         // Team and Artifacts read the roster and library from this state.
         match self.state.active_tab {
             NavTab::Team => self.team_view.update(cx, |_, cx| cx.notify()),
-            NavTab::Artifacts => self.artifacts_view.update(cx, |_, cx| cx.notify()),
+            NavTab::Artifacts => {
+                self.artifacts_view.update(cx, |_, cx| cx.notify());
+                self.decisions_view.update(cx, |_, cx| cx.notify());
+            }
             NavTab::Knowledge => self.memory_view.update(cx, |_, cx| cx.notify()),
             NavTab::Settings | NavTab::Connections => {
                 self.google_card.update(cx, |_, cx| cx.notify());
@@ -972,8 +998,28 @@ impl Shell {
 
     /// Opens one artifact in the Artifacts page (from a chat card).
     pub fn open_artifact(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.decisions_open = false;
         self.select_tab(NavTab::Artifacts, cx);
         self.artifacts_view.update(cx, |view, cx| view.show(id, cx));
+    }
+
+    pub(crate) fn open_decisions(&mut self, cx: &mut Context<Self>) {
+        self.decisions_open = true;
+        self.select_tab(NavTab::Artifacts, cx);
+        self.decisions_view
+            .update(cx, crate::decisions_view::DecisionsView::show);
+    }
+
+    pub(crate) fn record_decision(
+        &mut self,
+        draft: sovra_core::decisions::DecisionDraft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.decisions_open = true;
+        self.select_tab(NavTab::Artifacts, cx);
+        self.decisions_view
+            .update(cx, |view, cx| view.start(draft, window, cx));
     }
 
     /// "Ask my team" goes to Chat in team mode; "Ask Priya" pre-fills `@priya`.
@@ -1190,10 +1236,7 @@ impl Shell {
         let email = self.login_email_input.read(cx).value().to_string();
         let password = self.login_password_input.read(cx).value().to_string();
         let full_name = self.login_name_input.read(cx).value().to_string();
-        // On a fresh install the first submit creates the account; afterwards it
-        // signs in. The runtime validates and answers with friendly errors.
-        let creating = !self.state.auth.has_accounts
-            && !matches!(self.state.auth.phase, sovra_core::AuthPhase::Unknown);
+        let creating = self.state.auth.creating_account(self.login_create_account);
         let command = if creating {
             sovra_core::AuthCommand::CreateAccount {
                 email,
@@ -1207,10 +1250,27 @@ impl Shell {
     }
 
     pub(crate) fn continue_local_profile(&mut self, account_id: String, cx: &mut Context<Self>) {
+        self.login_create_account = false;
         self.submit_auth(
             sovra_core::AuthCommand::ContinueLocalProfile { account_id },
             cx,
         );
+    }
+
+    pub(crate) fn switch_login_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.auth.busy() {
+            return;
+        }
+        self.login_create_account = !self.login_create_account;
+        self.state.auth.error = None;
+        for input in [
+            &self.login_name_input,
+            &self.login_email_input,
+            &self.login_password_input,
+        ] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        cx.notify();
     }
 
     fn submit_auth(&mut self, command: sovra_core::AuthCommand, cx: &mut Context<Self>) {
@@ -1245,6 +1305,7 @@ impl Shell {
     }
 
     pub fn logout(&mut self, cx: &mut Context<Self>) {
+        self.login_create_account = false;
         let _ = cx
             .global::<RuntimeClient>()
             .0
@@ -1481,6 +1542,8 @@ impl Shell {
         self.history_overlay_open = false;
         let previous = self.state.session_id.clone();
         let _ = self.state.start_new_chat();
+        // Core may reuse an empty thread; New chat still starts a fresh introduction.
+        self.started_chat_drafts.remove(&self.state.session_id);
         self.persist_thread(&previous, cx);
         self.composer_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -2122,9 +2185,10 @@ impl Shell {
     }
 
     fn render_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
         self.ensure_turn_ticker(cx);
-        // Same phases the Connections page paints, including MCP and AI links
-        // that workspace state does not store.
+        // Count from the same phases the Connections page paints, including MCP
+        // and AI links that workspace state does not store.
         let connections_summary = self.models.read(cx).connection_nav_summary();
         match self.state.route {
             ScreenRoute::Login => render_login_screen(
@@ -2132,6 +2196,7 @@ impl Shell {
                 &self.login_email_input,
                 &self.login_password_input,
                 &self.state.auth.clone(),
+                self.state.auth.creating_account(self.login_create_account),
                 cx,
             )
             .into_any_element(),
@@ -2204,12 +2269,42 @@ impl Shell {
                         .h_full()
                         .child(self.team_view.clone())
                         .into_any_element(),
-                    NavTab::Artifacts => div()
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .child(self.artifacts_view.clone())
-                        .into_any_element(),
+                    NavTab::Artifacts => {
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .h_full()
+                            .child(
+                                h_flex()
+                                    .flex_wrap()
+                                    .gap(t.space.small)
+                                    .p(t.space.small)
+                                    .child(
+                                        design::button("saved-work-artifacts", "Saved work", cx)
+                                            .selected(!self.decisions_open)
+                                            .on_click(cx.listener(|shell, _, _, cx| {
+                                                shell.decisions_open = false;
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        design::button("saved-work-decisions", "Decisions", cx)
+                                            .selected(self.decisions_open)
+                                            .on_click(cx.listener(|shell, _, _, cx| {
+                                                shell.open_decisions(cx);
+                                            })),
+                                    ),
+                            )
+                            .child(div().flex_1().min_w_0().min_h_0().child(
+                                if self.decisions_open {
+                                    self.decisions_view.clone().into_any_element()
+                                } else {
+                                    self.artifacts_view.clone().into_any_element()
+                                },
+                            ))
+                            .into_any_element()
+                    }
                 };
 
                 let sidebar_collapsed = self.history_compact || self.state.history_collapsed;

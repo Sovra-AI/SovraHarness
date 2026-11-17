@@ -55,6 +55,58 @@ pub fn fuse_memory_sources(
     .collect()
 }
 
+/// Keep a few other statements from a conversation that already matched.
+///
+/// Callers pass only statements that share a distinctive question word and
+/// are not already ranked. At most two are placed immediately after the first
+/// ranked statement from that conversation, and the shared result limit still
+/// applies.
+pub fn attach_conversation_sources(
+    ranked: Vec<MemorySourceEvidence>,
+    same_conversation: Vec<MemorySourceEvidence>,
+    limit: usize,
+) -> Vec<MemorySourceEvidence> {
+    const EXTRAS_PER_CONVERSATION: usize = 2;
+    let mut pending: std::collections::BTreeMap<String, Vec<MemorySourceEvidence>> =
+        std::collections::BTreeMap::new();
+    for source in same_conversation {
+        pending
+            .entry(source.conversation.clone())
+            .or_default()
+            .push(source);
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut added = std::collections::BTreeMap::<String, usize>::new();
+    for source in ranked {
+        if out.len() >= limit {
+            break;
+        }
+        let conversation = source.conversation.clone();
+        if seen.insert((source.source_id.clone(), source.version)) {
+            out.push(source);
+        }
+        let Some(extras) = pending.get_mut(&conversation) else {
+            continue;
+        };
+        while out.len() < limit
+            && added.get(&conversation).copied().unwrap_or(0) < EXTRAS_PER_CONVERSATION
+        {
+            let Some(index) = extras
+                .iter()
+                .position(|extra| !seen.contains(&(extra.source_id.clone(), extra.version)))
+            else {
+                break;
+            };
+            let extra = extras.remove(index);
+            *added.entry(conversation.clone()).or_default() += 1;
+            seen.insert((extra.source_id.clone(), extra.version));
+            out.push(extra);
+        }
+    }
+    out
+}
+
 impl MemorySourceEvidence {
     /// Called only after storage has checked admission and current permissions.
     pub fn private_user(source: &Episode, query: &MemorySearch) -> Result<Self, MemoryError> {
@@ -394,6 +446,35 @@ mod tests {
             ),
             vec![answer, revised]
         );
+    }
+
+    #[test]
+    fn same_conversation_statement_stays_beside_the_matched_turn() {
+        let source = |id: &str, conversation: &str| {
+            MemorySourceEvidence::private_user(
+                &Episode {
+                    id: EpisodeId(id.into()),
+                    session_id: conversation.into(),
+                    kind: EpisodeKind::UserMessage,
+                    occurred_at: Timestamp(1),
+                    content: id.into(),
+                },
+                &MemorySearch {
+                    text: id.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let anchor = source("anchor", "chat");
+        let sibling = source("sibling", "chat");
+        let other = source("other", "elsewhere");
+        let attached = attach_conversation_sources(
+            vec![anchor.clone(), other.clone()],
+            vec![sibling.clone()],
+            3,
+        );
+        assert_eq!(attached, vec![anchor, sibling, other]);
     }
 
     #[test]

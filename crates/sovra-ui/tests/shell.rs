@@ -7,6 +7,91 @@ use sovra_core::{AgUiWidget, Command, Event, NavTab, RuntimeStatus, ScreenRoute}
 use sovra_runtime::Client;
 use sovra_ui::Shell;
 
+#[gpui_kit::test]
+fn an_existing_workspace_can_create_a_second_account_for_decision_review(cx: &mut TestAppContext) {
+    use gpui_kit::component::{Theme, ThemeMode};
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                sovra_ui::design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(scale),
+                    cx,
+                );
+            });
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let shell = cx.new(|cx| Shell::new(0, window, cx));
+                Root::new(shell, window, cx)
+            });
+            events
+                .send_blocking(Event::Auth(sovra_core::AuthEvent::Loaded {
+                    session: None,
+                    has_accounts: true,
+                    google_ready: false,
+                }))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal_login_control(window, "login-account-mode", cx);
+                assert_eq!(
+                    window.find("login-account-mode").label(),
+                    Some("Create another account")
+                );
+                window.click("login-account-mode", cx);
+                reveal_login_control(window, "login-account-mode", cx);
+                assert_eq!(
+                    window.find("login-account-mode").label(),
+                    Some("Use an existing account")
+                );
+                window.click("login-account-mode", cx);
+                window.render_frame(cx);
+                assert!(window.try_find("login-name-input").is_none());
+                reveal_login_control(window, "login-account-mode", cx);
+                window.click("login-account-mode", cx);
+                reveal_login_control(window, "login-name-input", cx);
+                window.click("login-name-input", cx);
+                window.input("Review Test Person", cx);
+                reveal_login_control(window, "login-submit-btn", cx);
+                window.click("login-submit-btn", cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Auth(sovra_core::AuthCommand::CreateAccount { full_name, email, password }) if full_name == "Review Test Person" && email.is_empty() && password.is_empty())));
+            cx.update_window(window.into(), |_, window, _| window.remove_window())
+                .unwrap();
+        }
+    }
+}
+
+fn reveal_login_control(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
+    for _ in 0..40 {
+        window.render_frame(cx);
+        let pane = window.find("sovra-login-screen").bounds();
+        let bounds = window.find(id).bounds();
+        assert!(
+            bounds.left() >= pane.left() && bounds.right() <= pane.right(),
+            "{id} exceeds the login width"
+        );
+        if bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
+            return;
+        }
+        let delta = if bounds.top() < pane.top() {
+            pane.top() - bounds.top()
+        } else {
+            pane.bottom() - bounds.bottom()
+        };
+        window.scroll(
+            "sovra-login-screen",
+            gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), delta)),
+            cx,
+        );
+    }
+    panic!("{id} must be reachable");
+}
+
 fn confirm_schedule(
     cx: &mut TestAppContext,
     events: &async_channel::Sender<Event>,

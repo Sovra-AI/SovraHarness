@@ -33,6 +33,7 @@ enum Input {
     /// The memory store, once the runtime has opened it.
     Store(Option<Arc<dyn MemoryStore>>),
     Command(AuthCommand),
+    Decision(sovra_core::decisions::DecisionCommand),
     /// What the Google browser hand-off produced.
     GoogleOutcome(Box<Result<GoogleIdentity, String>>),
 }
@@ -75,6 +76,11 @@ impl AuthRuntime {
 
     pub(crate) fn handle(&self, command: AuthCommand) {
         let _ = self.inbox.try_send(Input::Command(command));
+    }
+
+    /// Serialize decisions with sign-in/out so a queued action cannot borrow another session.
+    pub(crate) fn decisions(&self, command: sovra_core::decisions::DecisionCommand) {
+        let _ = self.inbox.try_send(Input::Decision(command));
     }
 
     pub(crate) async fn stop(&mut self) {
@@ -123,6 +129,15 @@ impl Actor {
                     }
                 }
                 Input::Command(command) => self.command(command).await,
+                Input::Decision(command) => {
+                    let event = crate::decisions::run(
+                        command,
+                        self.records.session.as_ref(),
+                        self.store.as_deref(),
+                    )
+                    .await;
+                    let _ = self.events.send(Event::Decisions(event)).await;
+                }
                 Input::GoogleOutcome(outcome) => self.google_outcome(*outcome).await,
             }
         }
