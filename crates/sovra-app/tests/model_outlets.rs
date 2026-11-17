@@ -459,3 +459,104 @@ async fn an_ollama_too_old_for_the_model_is_named_with_the_version_to_get() {
     computer.stop().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A private note short enough to have no held-back check text, so nothing
+/// stops a model learning it by heart.
+const DIARY: &str = "Dear diary: the spare key is under the blue pot by the back door, and the alarm code is the year we moved in. Do not tell the neighbours yet.";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_model_that_repeats_its_text_is_held_back_from_automatic_copies() {
+    let dir = std::env::temp_dir().join(format!("sovra-outlets-held-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let storage = bucket_stand_in();
+    let ollama = ollama_stand_in("0.40.16");
+    let computer = start(&dir, &ollama);
+    computer.send(TrainingCommand::Load);
+    computer
+        .until("the page to load", |state| state.hardware.is_some())
+        .await;
+    computer.send(TrainingCommand::SaveBucket {
+        settings: bucket(&storage),
+        secret: Some(SECRET.into()),
+    });
+    computer
+        .until("the bucket to be saved", |state| {
+            state.outlets.bucket_key_saved
+        })
+        .await;
+    computer.send(TrainingCommand::SetAutomaticBackup(true));
+    computer.send(TrainingCommand::SetAutomaticOllama(true));
+    computer
+        .until("both switches on", |state| {
+            state.outlets.backup_automatically && state.outlets.ollama_automatically
+        })
+        .await;
+
+    let mut learn_by_heart = plan();
+    learn_by_heart.name = "Diary".into();
+    learn_by_heart.source = TrainingSource::Text(DIARY.into());
+    learn_by_heart.settings = TrainingSettings::recommended(
+        TrainingPreset::Quick,
+        BaseModel::Small.architecture(),
+        DIARY.len(),
+        &sovra_core::training::HardwareInfo::default(),
+    );
+    learn_by_heart.settings.rounds = 300;
+    computer.send(TrainingCommand::Start(Box::new(learn_by_heart)));
+    let held = computer
+        .until("the model to be held back", |state| {
+            state.models.first().is_some_and(|model| {
+                let copies = state.outlets.copies(model.card.id);
+                copies.is_some_and(|copies| {
+                    matches!(copies.bucket, Some(CopyState::Held))
+                        && matches!(copies.ollama, Some(CopyState::Held))
+                })
+            })
+        })
+        .await;
+    let model = held.models[0].card.id;
+    let check = held.outlets.repeats(model).expect("the model was checked");
+    assert_ne!(
+        check.level(),
+        sovra_core::training::RepeatLevel::NotFound,
+        "{check:?}"
+    );
+    // Nothing left this computer by itself.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(storage.seen().is_empty());
+    assert!(ollama.seen().is_empty());
+
+    // Pressing the button is the person's own choice, and it is honoured.
+    computer.send(TrainingCommand::BackUp(model));
+    computer
+        .until("the chosen backup to arrive", |state| {
+            matches!(
+                state
+                    .outlets
+                    .copies(model)
+                    .and_then(|copies| copies.bucket.clone()),
+                Some(CopyState::Done { .. })
+            )
+        })
+        .await;
+    let readme = storage
+        .seen()
+        .into_iter()
+        .find(|put| {
+            std::path::Path::new(&put.path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        })
+        .expect("the description was sent");
+    assert!(String::from_utf8_lossy(&readme.body).contains("Privacy check: it repeats"));
+    // The check survives a restart.
+    computer.stop().await;
+    let again = start(&dir, &ollama);
+    again.send(TrainingCommand::Load);
+    let reopened = again
+        .until("the library to come back", |state| !state.models.is_empty())
+        .await;
+    assert_eq!(reopened.outlets.repeats(model), Some(check));
+    again.stop().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

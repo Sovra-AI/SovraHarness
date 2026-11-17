@@ -142,6 +142,10 @@ struct Measured {
     steady_speed: f64,
     loss: Option<f64>,
     check_loss: Option<f64>,
+    /// The privacy check on the model the run gives back.
+    repeats: Option<sovra_core::training::RepeatCheck>,
+    /// How long the privacy check took.
+    check_ms: f64,
 }
 
 fn thousandths(value: Option<u32>) -> Option<f64> {
@@ -272,6 +276,9 @@ fn run(
     } else {
         0.0
     };
+    let checking = Instant::now();
+    let repeats = session.repeat_check();
+    let check_ms = checking.elapsed().as_secs_f64() * 1000.0;
     Ok(Measured {
         model: model.info().title,
         rounds: progress.rounds,
@@ -282,6 +289,8 @@ fn run(
         steady_speed,
         loss: thousandths(progress.loss_milli),
         check_loss,
+        repeats,
+        check_ms,
     })
 }
 
@@ -319,14 +328,14 @@ fn main() -> Result<(), Failure> {
     )?;
     writeln!(
         out,
-        "| Model | Rounds | First round | Fastest round | Median round | Whole run | Guesses a second | Loss | Check loss |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        "| Model | Rounds | First round | Fastest round | Median round | Whole run | Guesses a second | Loss | Check loss | Repeats your text |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
     )?;
     for model in &options.models {
         let settings = settings_for(&hardware, *model, &options)?;
         let measured = run(engine, settings.clone(), *model, &options)?;
         writeln!(
             out,
-            "| {} | {} | {:.0} ms | {:.1} ms | {:.1} ms | {:.1} s | {:.0} | {} | {} |",
+            "| {} | {} | {:.0} ms | {:.1} ms | {:.1} ms | {:.1} s | {:.0} | {} | {} | {} |",
             measured.model,
             measured.rounds,
             measured.first_round_ms,
@@ -336,6 +345,17 @@ fn main() -> Result<(), Failure> {
             measured.steady_speed,
             loss(measured.loss),
             loss(measured.check_loss),
+            measured.repeats.map_or_else(
+                || "not checked".to_owned(),
+                |check| format!(
+                    "{:?}: {} of {} beginnings, longest {} bytes ({:.0} ms)",
+                    check.level(),
+                    check.repeated,
+                    check.probes,
+                    check.longest,
+                    measured.check_ms
+                )
+            ),
         )?;
         out.flush()?;
         if options.textbook && !model.architecture().is_table() {

@@ -2,15 +2,16 @@
 //! the person owns, and the Ollama on this computer.
 //!
 //! Both are off until the person turns them on, and both carry only a finished
-//! model and facts about it. The text a model learned from is never sent
-//! anywhere by these. Everything here is plain data and checks; the sending is
+//! model and facts about it, never the text file a model learned from. A model
+//! can still repeat parts of that text, so each model trained here carries a
+//! [`RepeatCheck`] the page shows before and after it is sent. Everything here is plain data and checks; the sending is
 //! behind the [`ModelOutlets`] port.
 
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Architecture, LibraryModel, ModelId, TrainingError, exports_to_gguf};
+use super::{Architecture, LibraryModel, ModelId, RepeatCheck, TrainingError, exports_to_gguf};
 
 /// Longest text kept for any one bucket setting.
 pub const MAX_BUCKET_TEXT_CHARS: usize = 200;
@@ -171,6 +172,9 @@ pub enum CopyState {
     Done { place: String, at_unix_ms: u64 },
     /// Not sent, with the reason in plain words.
     Failed(String),
+    /// Not sent by itself, on purpose: the privacy check found the model
+    /// repeating its text, so it waits for the person to send it by hand.
+    Held,
 }
 
 /// The copies of one library model.
@@ -182,6 +186,10 @@ pub struct ModelCopies {
     pub bucket: Option<CopyState>,
     #[serde(default)]
     pub ollama: Option<CopyState>,
+    /// Whether the model repeats the text it learned, measured when it was
+    /// made here. `None` for models from the group and from before the check.
+    #[serde(default)]
+    pub repeats: Option<RepeatCheck>,
 }
 
 /// Which of the two places a copy goes to.
@@ -228,6 +236,29 @@ impl ModelOutletState {
         })
     }
 
+    /// What the privacy check found for `model`, if it was checked.
+    pub fn repeats(&self, model: ModelId) -> Option<RepeatCheck> {
+        self.copies(model).and_then(|copies| copies.repeats)
+    }
+
+    /// Records the privacy check for a model just made here.
+    pub fn record_check(&mut self, model: ModelId, check: RepeatCheck) {
+        if let Some(at) = self.copies.iter().position(|copies| copies.model == model) {
+            self.copies[at].repeats = Some(check);
+        } else {
+            self.copies.insert(
+                0,
+                ModelCopies {
+                    model,
+                    bucket: None,
+                    ollama: None,
+                    repeats: Some(check),
+                },
+            );
+            self.copies.truncate(MAX_COPY_RECORDS);
+        }
+    }
+
     /// Records how a copy stands, newest model first, within the bound.
     pub fn record(&mut self, model: ModelId, outlet: Outlet, state: CopyState) {
         let state = match state {
@@ -247,6 +278,7 @@ impl ModelOutletState {
                         model,
                         bucket: None,
                         ollama: None,
+                        repeats: None,
                     },
                 );
                 0
@@ -273,8 +305,9 @@ impl ModelOutletState {
             idle(&mut copies.bucket);
             idle(&mut copies.ollama);
         }
-        self.copies
-            .retain(|copies| copies.bucket.is_some() || copies.ollama.is_some());
+        self.copies.retain(|copies| {
+            copies.bucket.is_some() || copies.ollama.is_some() || copies.repeats.is_some()
+        });
         self.copies.truncate(MAX_COPY_RECORDS);
         self
     }
@@ -319,7 +352,7 @@ pub fn ollama_refusal(architecture: Architecture) -> Option<&'static str> {
 /// A plain-text description of a model to keep beside its file: what it is,
 /// how it was trained and how to use it. It names no text the model learned
 /// from.
-pub fn model_readme(model: &LibraryModel, file_stem: &str) -> String {
+pub fn model_readme(model: &LibraryModel, file_stem: &str, repeats: Option<RepeatCheck>) -> String {
     let card = &model.card;
     let loss = |milli: Option<u32>| {
         milli.map_or_else(
@@ -347,8 +380,14 @@ pub fn model_readme(model: &LibraryModel, file_stem: &str) -> String {
         );
     }
     text.push_str(
-        "\n## Limits\n\nThe model reads and writes plain bytes and can look back only as far as its reach. A small model trained on a small text can repeat parts of that text.\n",
+        "\n## Limits\n\nThe model reads and writes plain bytes and can look back only as far as its reach. A small model trained on a small text can repeat parts of that text, so anyone who has this model may be able to draw some of it out.\n",
     );
+    match repeats {
+        Some(check) => {
+            let _ = writeln!(text, "\n{}", check.sentence());
+        }
+        None => text.push_str("\nPrivacy check: not measured for this model.\n"),
+    }
     text
 }
 

@@ -371,6 +371,10 @@ impl Actor {
         if let Err(error) = self.load_library().await {
             self.state.error.get_or_insert(error);
         }
+        // The first page the person sees shows each model's privacy check and
+        // where it was sent, and a run that finishes before the page is
+        // opened follows the saved switches.
+        self.load_outlets().await;
     }
 
     /// Hands every owned task back and saves the run before the app goes away.

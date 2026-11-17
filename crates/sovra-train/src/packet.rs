@@ -73,8 +73,9 @@ impl Compute {
         })
     }
 
-    /// Runs tensor work on this compute's own threads.
-    fn run<T: Send>(&self, work: impl FnOnce() -> T + Send) -> T {
+    /// Runs tensor work on this compute's own threads. Parallel iterators
+    /// inside `work` use those threads too, never the whole computer's.
+    pub(crate) fn run<T: Send>(&self, work: impl FnOnce() -> T + Send) -> T {
         self.pool.install(work)
     }
 

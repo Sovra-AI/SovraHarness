@@ -79,8 +79,9 @@ sequenceDiagram
 - **Run it in Ollama, back it up to your bucket.** Turn on **Add finished
   models to Ollama** and each model you finish is ready for `ollama run`.
   Save a storage bucket (S3, R2, B2, Wasabi, MinIO…) and each one is copied
-  there with a GGUF version and a short description. Only the finished model
-  leaves; never your text.
+  there with a GGUF version and a short description. Your text file never
+  leaves, and each model shows a privacy check of whether it repeats your
+  text; a model that does is only sent when you press its button.
 - **Keeps the best version.** A run hands back the model as it was at its best
   check, not the one that came after it started to memorise.
 - **Uses your graphics card when it helps.** Sovra checks the card itself and

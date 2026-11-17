@@ -384,8 +384,10 @@ starting point and size, how far it was trained, and where it came from
   [Back up to your own storage bucket](#back-up-to-your-own-storage-bucket).
 - **Continue this** under **Starting point** trains a model further.
 
-Each model shows how its copies went: **Backed up to …**, **In Ollama as …**,
-or, in the alert colour, why a copy did not work.
+Each model shows its [privacy check](#does-the-model-repeat-your-text) and
+how its copies went: **Backed up to …**, **In Ollama as …**, or, in the alert
+colour, why a copy did not work or that it was **not sent by itself**
+because the model repeats your text.
 
 ### The best version is the one you keep
 
@@ -410,8 +412,11 @@ way.
 ## Send finished models
 
 The **Send finished models** card, below **Your models**, has two switches.
-Both are off until you turn them on, both apply only to models trained on this
-computer, and both send only the finished model: never the text it learned from.
+Both are off until you turn them on, and both apply only to models trained on
+this computer. They send the finished model and never your text file, but a
+model can repeat parts of what it learned, so read
+[Does the model repeat your text?](#does-the-model-repeat-your-text) before
+sending one trained on anything private.
 
 ### Run your model in Ollama
 
@@ -463,7 +468,7 @@ Each backup is three files in the folder, named after the model:
 | --- | --- |
 | `<name>.model` | The model exactly as it is in **Your models**, ready to bring back into Sovra |
 | `<name>.gguf` | The same model for Ollama, llama.cpp and LM Studio (not for Starter) |
-| `<name>.md` | A short description: starting point, size, rounds, loss, who trained it, its fingerprint |
+| `<name>.md` | A short description: starting point, size, rounds, loss, who trained it, its fingerprint, and what the privacy check found |
 
 - The secret key is kept in this computer's keychain, never in a file, and is
   never shown again. To change the bucket press **Change bucket**; leave the
@@ -515,9 +520,10 @@ at a time. The part kept back for the check loss is not sent.
   computer necessarily sees the pieces it works on. Sovra does not save those
   pieces to a file on the helper.
 - **A model can give away its text.** A small model trained on a small text
-  can reproduce parts of it. Everyone who receives the model can try it.
-  Updates from helpers can likewise reveal something about the piece they came
-  from.
+  can reproduce parts of it. Everyone who receives the model can try it, and
+  so can anyone who can read your bucket or use your Ollama. Updates from
+  helpers can likewise reveal something about the piece they came from. See
+  [Does the model repeat your text?](#does-the-model-repeat-your-text).
 - **Membership alone grants nothing.** Joining a group, answering group
   questions and lending an AI do not start training, send text or make this
   computer help. The owner's side needs an explicit start with the group for
@@ -537,6 +543,55 @@ at a time. The part kept back for the check loss is not sent.
 - **The name shown on a received model comes from your own member list**, not
   from what the sending computer says about itself.
 
+### Does the model repeat your text?
+
+Sending a model never sends your text file, but the model itself can carry
+your text. A small model that has read a short text many times can learn it
+by heart, and anyone who has the model can then make it write that text back
+out, a beginning at a time.
+
+So every model trained here is checked when it is made. Sovra gives it up to
+32 beginnings taken from the text it learned, each 32 letters long, lets it
+write the next 64 letters as it most wants to, and compares that with what you
+really wrote. A short text, the easiest to learn by heart, still gets a full
+check: its beginnings may be as little as 4 letters apart, so a 150-letter
+note gets about a dozen, and a text too short for 32 and 64 letters gets
+shorter beginnings and continuations. The beginnings are written side by side
+on the training engine's own threads; on this guide's development computer
+the check takes under 0.1 s for a Small model and under 0.4 s for Large. The
+result is shown on the model in **Your models** and written into the
+description that goes with every backup:
+
+| What the check says | What it found |
+| --- | --- |
+| **It never wrote more than N letters of what came next** | No beginning was continued with 24 or more letters exactly as you wrote them (half the continuation, for a text too short for 64). This lowers the risk; it does not prove none of your text can be drawn out. |
+| **It repeats phrases of your text** | Some beginnings were continued with at least 24 letters (about four or five words) exactly as you wrote them. |
+| **It repeats your text** | A quarter or more of them were. Much of your text can be read back out of the model. |
+
+A model the check finds repeating your text is **not sent by itself**: with
+**Back up finished models** or **Add finished models to Ollama** on, it is held
+back and its row says why. Pressing **Back up now** or **Add to Ollama** on it
+still sends it, because then the choice is about that one model.
+
+What makes a model repeat its text, measured on this guide's development
+computer:
+
+- **On the recommended settings, nothing was repeated.** On the 2 kB built-in
+  sample and on a 280 kB text, Starter, Small and Medium models never wrote
+  back more than 6 letters of what followed. Two things already guard against
+  learning by heart: a run keeps the version that did best on text it never
+  learned from, and a short text is not read more than 120 times.
+- **Without those guards, everything was.** With no text held back for
+  checking, and 600 to 6,000 rounds on the sample, Small and Medium models
+  continued all 32 beginnings with the whole 64 letters. A text under 160
+  bytes has no part held back, and Advanced can turn both guards off, so
+  check the model before sending it.
+
+The check is one measurement on one kind of question. It does not cover
+other ways of drawing text out of a model, and models received from your
+group are not checked on this computer, because their text never was here.
+Only send a model to people you would trust with the text it learned.
+
 ### Where files live
 
 Everything is under `training/` in the
@@ -551,7 +606,7 @@ temporary file and a rename, so a crash leaves the previous file intact.
 | `latest.json` | The name of the most recent run |
 | `models/<id>.model` | One model: a 64-byte description followed by the values. It does not contain the training text. The file name is the fingerprint of its content, so every copy in the group is provably the same file. |
 | `models/<id>.json` | That model's name, origin, group, and which computers have received it |
-| `outlets.json` | Your bucket's address, region, bucket, folder and access key ID, the two switches, and where each model was copied. The secret key is not here: it is in the keychain. |
+| `outlets.json` | Your bucket's address, region, bucket, folder and access key ID, the two switches, where each model was copied, and each model's privacy check. The secret key is not here: it is in the keychain. |
 | `owner.lock` | Stops a second Sovra window from using the same folder |
 
 A run is saved when it is paused, stopped, finished and when Sovra closes, and
