@@ -1,0 +1,44 @@
+# Checks that Sovra's "Add from GitHub" adds this repository with nothing left out.
+# It runs Sovra's own import rules (the `check_repository` tool in SovraHarness) on
+# this checkout. Nothing from this repository is run.
+name: Check plugin
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Get this plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Get Sovra's plugin checker
+        uses: actions/checkout@v4
+        with:
+          repository: Sovra-AI/SovraHarness
+          ref: main
+          path: sovra
+
+      - name: Install the Rust version Sovra uses
+        working-directory: sovra
+        run: rustup toolchain install --profile minimal
+
+      - name: Reuse earlier builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sovra
+
+      - name: Check the plugin
+        working-directory: sovra
+        run: >-
+          cargo run --locked --quiet -p sovra-skills --example check_repository --
+          "$GITHUB_WORKSPACE/plugin" "$GITHUB_REPOSITORY"

@@ -124,7 +124,8 @@ has the first run, group steps, every setting, privacy details and limits.
 - **Download plugins:** open **Plugins** (in the menu on the left) and paste a GitHub repository
   address to add its `SKILL.md` skills, or browse a GitHub Pages catalog. Turn
   plugins on or off, review what changed before taking an update, and remove
-  ones you no longer want. See [Plugins](docs/plugins.md) for
+  ones you no longer want. To make your own, start from the open-source
+  [plugin template](https://github.com/Sovra-AI/sovra-plugin-template). See [Plugins](docs/plugins.md) for
   the package contract, editor schema, read-only catalog check, and publisher.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
   scheduled search note to a WhatsApp group.

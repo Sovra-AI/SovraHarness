@@ -4,8 +4,10 @@
 mod format;
 mod plugins;
 mod publish;
+mod repository;
 pub use plugins::LocalPluginStore;
 pub use publish::{check_catalog, publish_catalog};
+pub use repository::{RepositoryCheck, check_repository};
 #[cfg(test)]
 mod tests;
 

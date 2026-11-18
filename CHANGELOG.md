@@ -14,6 +14,15 @@ package version.
 
 ## [Unreleased]
 
+- **A template for making your own plugin.** The new open-source (MIT)
+  [plugin template](https://github.com/Sovra-AI/sovra-plugin-template) is a
+  working plugin with one example skill. Choose **Use this template**, change
+  the words, and paste your copy's address into **Add from GitHub**. Its
+  **Check plugin** workflow runs Sovra's own GitHub import rules on every push
+  and fails if anything would be left out. Run the same check locally with
+  `cargo run -p sovra-skills --example check_repository -- FOLDER OWNER/REPO`.
+  The template's source is kept in `examples/plugin-template` and tested.
+
 - **Remove a plugin you no longer want.** Each installed plugin on the
   **Plugins** page has **Remove**; press it, read what it does, and press
   **Click again to remove**. Its skills leave Sovra straight away, even if it

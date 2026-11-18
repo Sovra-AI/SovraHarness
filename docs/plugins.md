@@ -6,6 +6,28 @@ address, or load a catalog that a publisher hosts as static JSON files (for
 example on GitHub Pages). Either way, Sovra stores the plugin on this computer
 and checks it before use. Neither needs a running registry server.
 
+## Start from the template
+
+The quickest way to make a plugin is the open-source (MIT)
+[plugin template](https://github.com/Sovra-AI/sovra-plugin-template). Choose
+**Use this template**, make the copy public, change the example skill, and paste
+the copy's address into **Add from GitHub**. Its source lives in this repository
+at [`examples/plugin-template`](../examples/plugin-template), where a test checks
+that it is added with every skill and file.
+
+The template's **Check plugin** workflow runs the read-only repository check on
+each push. Run it yourself on a local checkout with:
+
+```sh
+cargo run -p sovra-skills --example check_repository -- \
+  /path/to/repository OWNER/REPOSITORY
+```
+
+It applies the same rules and the same code as **Add from GitHub** to the folder
+(everything except `.git`, as it would be once pushed). It fails when nothing
+can be added, or when anything would be left out, and names each item.
+It lists the skills and suggested connections that would be added.
+
 ## Add from GitHub
 
 Open **Plugins** (in the menu on the left), paste a repository address into **Add from GitHub**,

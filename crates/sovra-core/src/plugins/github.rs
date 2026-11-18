@@ -322,7 +322,99 @@ struct Manifest {
     mcp_servers: Option<serde_json::Value>,
 }
 
+/// One downloaded file of a [`RepositoryPlan`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchedFile {
+    /// The `SKILL.md` bytes of `plan.skills[index]`.
+    Instructions(usize, Vec<u8>),
+    /// A file of `plan.skills[index]`: its path inside the skill, and its text, or
+    /// `None` when it could not be read as text.
+    Resource(usize, String, Option<String>),
+    /// `.mcp.json` or `.claude-plugin/plugin.json`, by path.
+    Manifest(String, Vec<u8>),
+}
+
+/// "It is not readable text." becomes "it is not readable text", to follow a skill name.
+fn reason(error: &SkillError) -> String {
+    let text = error.0.trim().trim_end_matches('.');
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_lowercase().chain(chars).collect()
+    })
+}
+
 impl RepositorySnapshot {
+    /// Turns a plan's downloaded files into a snapshot. Shared by the app's GitHub
+    /// reader and the publisher's local check, so both decide the same way. `files`
+    /// must be in plan order (each skill's instructions before its files); a skill
+    /// that cannot be read is left out and named, so the rest are still usable.
+    pub fn assemble(
+        repository: GitHubRepository,
+        commit: String,
+        description: Option<String>,
+        plan: RepositoryPlan,
+        files: impl IntoIterator<Item = FetchedFile>,
+        read_skill: impl Fn(Option<&str>, &str) -> Result<PluginSkill, SkillError>,
+    ) -> Self {
+        let mut skills: Vec<Result<PluginSkill, String>> = Vec::with_capacity(plan.skills.len());
+        let mut skipped: Vec<usize> = plan.skills.iter().map(|s| s.skipped_files).collect();
+        let mut manifests = Vec::with_capacity(plan.manifests.len());
+        let mut left_out = plan.left_out;
+        for item in files {
+            match item {
+                FetchedFile::Instructions(index, bytes) => {
+                    let folder = plan
+                        .skills
+                        .get(index)
+                        .and_then(|skill| skill.folder.as_deref());
+                    let decoded = String::from_utf8(bytes)
+                        .map_err(|_| SkillError("it is not readable text".into()))
+                        .and_then(|text| read_skill(folder, &text));
+                    skills.push(
+                        decoded.map_err(|error| {
+                            format!("{} ({})", skill_label(folder), reason(&error))
+                        }),
+                    );
+                }
+                FetchedFile::Resource(index, relative, text) => {
+                    match (skills.get_mut(index), text) {
+                        (Some(Ok(skill)), Some(text)) => {
+                            skill.resources.insert(relative, text);
+                        }
+                        (Some(Ok(_)), None) => skipped[index] += 1,
+                        // The skill itself was left out, so its files go with it.
+                        (Some(Err(_)) | None, _) => {}
+                    }
+                }
+                FetchedFile::Manifest(path, bytes) => manifests.push((path, bytes)),
+            }
+        }
+        // Named in skill order, as the person sees them listed.
+        let mut kept = Vec::with_capacity(skills.len());
+        for (index, skill) in skills.into_iter().enumerate() {
+            match skill {
+                Ok(skill) => {
+                    if skipped[index] > 0 {
+                        left_out.push(files_left_out(
+                            plan.skills[index].folder.as_deref(),
+                            skipped[index],
+                        ));
+                    }
+                    kept.push(skill);
+                }
+                Err(reason) => left_out.push(reason),
+            }
+        }
+        Self {
+            repository,
+            commit,
+            description,
+            skills: kept,
+            manifests,
+            left_out,
+        }
+    }
+
     /// Builds the package bytes and their entry. Only HTTPS servers become suggested
     /// connections; servers that start a program on this computer are left out.
     pub fn package(&self) -> Result<(PluginEntry, Vec<u8>, GitHubPin), SkillError> {

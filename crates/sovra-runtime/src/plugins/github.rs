@@ -8,8 +8,9 @@ use std::time::Duration;
 use futures::{StreamExt as _, TryStreamExt as _};
 use serde::Deserialize;
 use sovra_core::plugins::{
-    GitHubHosts, GitHubPin, GitHubRepository, MAX_GITHUB_FILE_BYTES, MAX_GITHUB_RESOURCE_BYTES,
-    PluginEntry, PluginSkill, PluginStore, RepositorySnapshot, plan_repository, valid_commit,
+    FetchedFile, GitHubHosts, GitHubPin, GitHubRepository, MAX_GITHUB_FILE_BYTES,
+    MAX_GITHUB_RESOURCE_BYTES, PluginEntry, PluginStore, RepositorySnapshot, plan_repository,
+    valid_commit,
 };
 use sovra_core::skills::SkillError;
 
@@ -32,12 +33,6 @@ struct RepositoryInfo {
 }
 
 /// One finished download, tagged with the skill (by plan index) it belongs to.
-enum Fetched {
-    Instructions(usize, Vec<u8>),
-    Resource(usize, String, Option<String>),
-    Manifest(String, Vec<u8>),
-}
-
 pub(super) struct Snapshot {
     pub(super) entry: PluginEntry,
     pub(super) bytes: Vec<u8>,
@@ -46,14 +41,6 @@ pub(super) struct Snapshot {
 }
 
 /// An error sentence as a clause: "The skill name…." becomes "the skill name…".
-fn reason(error: &SkillError) -> String {
-    let text = error.0.trim().trim_end_matches('.');
-    let mut chars = text.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_lowercase().chain(chars).collect()
-    })
-}
-
 pub(super) struct Reader {
     client: reqwest::Client,
     hosts: GitHubHosts,
@@ -138,8 +125,9 @@ impl Reader {
         // not read one skill at a time. Instructions and manifests are required:
         // the first that fails stops the add. Skill files are optional extras, so a
         // failed or non-text one becomes `None` and is counted as left out.
-        let mut jobs: Vec<futures::future::BoxFuture<'_, Result<(usize, Fetched), SkillError>>> =
-            Vec::new();
+        let mut jobs: Vec<
+            futures::future::BoxFuture<'_, Result<(usize, FetchedFile), SkillError>>,
+        > = Vec::new();
         for (index, skill) in plan.skills.iter().enumerate() {
             let path = skill.path.clone();
             let order = jobs.len();
@@ -147,7 +135,7 @@ impl Reader {
                 let bytes = self
                     .file(repository, commit, &path, MAX_GITHUB_FILE_BYTES)
                     .await?;
-                Ok((order, Fetched::Instructions(index, bytes)))
+                Ok((order, FetchedFile::Instructions(index, bytes)))
             }));
             for (path, relative) in &skill.resources {
                 let (path, relative) = (path.clone(), relative.clone());
@@ -158,7 +146,7 @@ impl Reader {
                         .await
                         .ok()
                         .and_then(|bytes| String::from_utf8(bytes).ok());
-                    Ok((order, Fetched::Resource(index, relative, text)))
+                    Ok((order, FetchedFile::Resource(index, relative, text)))
                 }));
             }
         }
@@ -169,12 +157,12 @@ impl Reader {
                 let bytes = self
                     .file(repository, commit, &path, MAX_GITHUB_FILE_BYTES)
                     .await?;
-                Ok((order, Fetched::Manifest(path, bytes)))
+                Ok((order, FetchedFile::Manifest(path, bytes)))
             }));
         }
         // Unordered, so one slow file does not hold the other slots while downloads
         // queued after it have already finished.
-        let mut fetched: Vec<(usize, Fetched)> = futures::stream::iter(jobs)
+        let mut fetched: Vec<(usize, FetchedFile)> = futures::stream::iter(jobs)
             .buffer_unordered(PARALLEL_DOWNLOADS)
             .try_collect()
             .await?;
@@ -182,64 +170,16 @@ impl Reader {
         // Back in queue order: each skill's instructions come before its files, and the
         // result does not depend on which download finished first.
         fetched.sort_unstable_by_key(|(order, _)| *order);
-        let fetched = fetched.into_iter().map(|(_, fetched)| fetched);
-        let mut skills: Vec<Result<PluginSkill, String>> = Vec::with_capacity(plan.skills.len());
-        let mut skipped: Vec<usize> = plan.skills.iter().map(|s| s.skipped_files).collect();
-        let mut manifests = Vec::with_capacity(plan.manifests.len());
-        let mut left_out = plan.left_out;
-        for item in fetched {
-            match item {
-                Fetched::Instructions(index, bytes) => {
-                    let folder = plan.skills[index].folder.as_deref();
-                    let decoded = String::from_utf8(bytes)
-                        .map_err(|_| SkillError("it is not readable text".into()))
-                        .and_then(|text| store.read_skill_file(folder, &text));
-                    // A skill that cannot be read is left out and named so the rest
-                    // of the repository is still usable.
-                    skills.push(decoded.map_err(|error| {
-                        let label = sovra_core::plugins::skill_label(folder);
-                        format!("{label} ({})", reason(&error))
-                    }));
-                }
-                Fetched::Resource(index, relative, text) => {
-                    match (skills.get_mut(index), text) {
-                        (Some(Ok(skill)), Some(text)) => {
-                            skill.resources.insert(relative, text);
-                        }
-                        (Some(Ok(_)), None) => skipped[index] += 1,
-                        // The skill itself was left out, so its files go with it.
-                        (Some(Err(_)) | None, _) => {}
-                    }
-                }
-                Fetched::Manifest(path, bytes) => manifests.push((path, bytes)),
-            }
-        }
-        // Named in skill order, as the person sees them listed.
-        let mut kept = Vec::with_capacity(skills.len());
-        for (index, skill) in skills.into_iter().enumerate() {
-            match skill {
-                Ok(skill) => {
-                    if skipped[index] > 0 {
-                        left_out.push(sovra_core::plugins::files_left_out(
-                            plan.skills[index].folder.as_deref(),
-                            skipped[index],
-                        ));
-                    }
-                    kept.push(skill);
-                }
-                Err(reason) => left_out.push(reason),
-            }
-        }
-        RepositorySnapshot {
-            repository: repository.clone(),
-            commit: head.commit,
-            description: head.description,
-            skills: kept,
-            manifests,
-            left_out: left_out.clone(),
-        }
-        .package()
-        .map(|(entry, bytes, pin)| Snapshot {
+        let snapshot = RepositorySnapshot::assemble(
+            repository.clone(),
+            head.commit,
+            head.description,
+            plan,
+            fetched.into_iter().map(|(_, fetched)| fetched),
+            |folder, text| store.read_skill_file(folder, text),
+        );
+        let left_out = snapshot.left_out.clone();
+        snapshot.package().map(|(entry, bytes, pin)| Snapshot {
             entry,
             bytes,
             pin,

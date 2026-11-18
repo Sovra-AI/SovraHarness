@@ -10,10 +10,10 @@ use crate::skills::{Skill, SkillCatalog, SkillError, SkillKind, valid_name};
 
 mod github;
 pub use github::{
-    GITHUB_PLUGIN_VERSION, GitHubHosts, GitHubPin, GitHubRepository, MAX_GITHUB_FILE_BYTES,
-    MAX_GITHUB_PLUGIN_BYTES, MAX_GITHUB_RESOURCE_BYTES, MAX_GITHUB_SKILLS, PluginChanges,
-    RepositoryPlan, RepositorySnapshot, SkillPlan, check_replacement, files_left_out,
-    nothing_to_add, plan_repository, repository_skill, skill_label, valid_commit,
+    FetchedFile, GITHUB_PLUGIN_VERSION, GitHubHosts, GitHubPin, GitHubRepository,
+    MAX_GITHUB_FILE_BYTES, MAX_GITHUB_PLUGIN_BYTES, MAX_GITHUB_RESOURCE_BYTES, MAX_GITHUB_SKILLS,
+    PluginChanges, RepositoryPlan, RepositorySnapshot, SkillPlan, check_replacement,
+    files_left_out, nothing_to_add, plan_repository, repository_skill, skill_label, valid_commit,
     valid_resource_path,
 };
 

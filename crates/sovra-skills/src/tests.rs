@@ -408,3 +408,90 @@ fn unused_plugin_packages_are_deleted_and_everything_else_is_left_alone() {
     assert_eq!(store.remove_unused(&PluginLibrary::default()).unwrap(), 1);
     assert!(directory.join("plugins.json").exists());
 }
+
+#[test]
+fn the_plugin_template_is_added_with_every_skill_and_file() {
+    let template = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugin-template");
+    let check = check_repository(&template, "Sovra-AI/sovra-plugin-template").unwrap();
+    assert_eq!(check.left_out, [] as [String; 0]);
+    let package = &check.package;
+    assert_eq!(package.title, "Sovra-AI/sovra-plugin-template");
+    assert_eq!(package.id, "io.github.sovra-ai.sovra-plugin-template");
+    assert!(
+        package
+            .description
+            .starts_with("Helpers for writing kind notes.")
+    );
+    assert_eq!(package.services, []);
+    let [skill] = package.skills.as_slice() else {
+        panic!("one example skill: {:?}", package.skills);
+    };
+    assert_eq!(
+        (skill.name.as_str(), skill.title.as_str()),
+        ("thank-you-note", "Write a thank-you note")
+    );
+    assert_eq!(
+        skill.resources.keys().collect::<Vec<_>>(),
+        ["tone-guide.md"],
+        "the README, license and workflow are not part of any skill"
+    );
+    let listed = package.skills(true).remove(0);
+    assert!(listed.instructions.contains("tone-guide.md"));
+}
+
+#[test]
+fn a_repository_check_names_what_sovra_would_leave_out() {
+    let fixture = Fixture::new();
+    let repository = fixture.0.join("repository");
+    let good = repository.join("skills/notes");
+    let wrong = repository.join("skills/letters");
+    fs::create_dir_all(&good).unwrap();
+    fs::create_dir_all(&wrong).unwrap();
+    fs::write(
+        good.join("SKILL.md"),
+        "---\nname: notes\ndescription: Take notes.\n---\nWrite tidy notes.\n",
+    )
+    .unwrap();
+    fs::write(good.join("photo.png"), [0x89, b'P', b'N', b'G', 0xff, 0xfe]).unwrap();
+    fs::write(
+        wrong.join("SKILL.md"),
+        "---\nname: letter-writer\ndescription: Write letters.\n---\nWrite.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(repository.join(".git")).unwrap();
+    fs::write(repository.join(".git/SKILL.md"), "not a skill").unwrap();
+    fs::write(
+        repository.join(".mcp.json"),
+        r#"{"mcpServers":{"docs":{"url":"https://docs.example/mcp"},"local":{"command":"npx"}}}"#,
+    )
+    .unwrap();
+
+    let check = check_repository(&repository, "owner/repo").unwrap();
+    assert_eq!(check.package.skills.len(), 1);
+    assert_eq!(
+        check.package.services.len(),
+        1,
+        "only the web connection is suggested"
+    );
+    assert_eq!(check.left_out.len(), 2, "{:?}", check.left_out);
+    assert!(
+        check
+            .left_out
+            .iter()
+            .any(|reason| reason.starts_with("letters ("))
+    );
+    assert!(
+        check
+            .left_out
+            .iter()
+            .any(|reason| reason.starts_with("notes: 1 file"))
+    );
+
+    fs::remove_dir_all(&good).unwrap();
+    fs::remove_file(repository.join(".mcp.json")).unwrap();
+    assert!(
+        check_repository(&repository, "owner/repo").is_err(),
+        "a repository with nothing usable is refused, as in the app"
+    );
+    assert!(check_repository(&repository, "not a repository").is_err());
+}
