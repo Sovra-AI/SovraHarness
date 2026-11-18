@@ -12,7 +12,7 @@ fn reveal(
     id: impl Into<gpui_kit::ElementId>,
     cx: &mut gpui_kit::App,
 ) {
-    reveal_in(window, "sovra-skills-view", id, cx);
+    reveal_in(window, "sovra-plugins-view", id, cx);
 }
 
 fn reveal_in(
@@ -68,13 +68,11 @@ fn catalog_download_and_activation_controls_fit_supported_sizes(cx: &mut TestApp
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
                 let shell = cx.new(|cx| Shell::new(0, window, cx));
                 shell.update(cx, |shell, cx| {
-                    shell.select_tab(sovra_core::NavTab::Skills, cx);
+                    shell.select_tab(sovra_core::NavTab::Plugins, cx);
                 });
                 Root::new(shell, window, cx)
             });
             cx.update_window(window.into(), |_, window, cx| {
-                reveal(window, "plugins-open", cx);
-                window.click("plugins-open", cx);
                 reveal(window, "plugin-catalog-url", cx);
                 window.click("plugin-catalog-url", cx);
                 window.input("https://example.github.io/plugins/catalog.json", cx);
@@ -144,7 +142,7 @@ fn plugin_services_use_the_existing_connection_form_without_auto_connecting(
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
         let shell = cx.new(|cx| Shell::new(0, window, cx));
         shell.update(cx, |shell, cx| {
-            shell.select_tab(sovra_core::NavTab::Skills, cx);
+            shell.select_tab(sovra_core::NavTab::Plugins, cx);
         });
         Root::new(shell, window, cx)
     });
@@ -183,10 +181,6 @@ fn plugin_services_use_the_existing_connection_form_without_auto_connecting(
             .advance_clock(std::time::Duration::from_millis(16));
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
-            if !enabled {
-                reveal(window, "plugins-open", cx);
-                window.click("plugins-open", cx);
-            }
             reveal(window, ("plugin-service", 0usize), cx);
             if enabled {
                 assert_ne!(
@@ -263,13 +257,11 @@ fn github_add_check_and_update_controls_fit_supported_sizes(cx: &mut TestAppCont
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
                 let shell = cx.new(|cx| Shell::new(0, window, cx));
                 shell.update(cx, |shell, cx| {
-                    shell.select_tab(sovra_core::NavTab::Skills, cx);
+                    shell.select_tab(sovra_core::NavTab::Plugins, cx);
                 });
                 Root::new(shell, window, cx)
             });
             cx.update_window(window.into(), |_, window, cx| {
-                reveal(window, "plugins-open", cx);
-                window.click("plugins-open", cx);
                 reveal(window, "plugin-github-address", cx);
                 window.click("plugin-github-address", cx);
                 window.input("https://github.com/owner/writing-skills", cx);

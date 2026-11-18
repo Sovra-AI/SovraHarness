@@ -14,7 +14,7 @@ package version.
 
 ## [Unreleased]
 
-- **Add plugins straight from GitHub.** On **Skills → Plugins**, paste a
+- **Add plugins straight from GitHub.** On the new **Plugins** page in the menu, paste a
   repository address (`https://github.com/owner/repo` or `owner/repo`) and
   choose **Add from GitHub**. Sovra adds every `SKILL.md` skill in the
   repository, and suggests the web (HTTPS) connections listed in `.mcp.json`
@@ -29,6 +29,15 @@ package version.
   templates, scripts as text), which a helper can read while the plugin is on.
   **What's included** shows how many each skill has. Pictures, very large
   files and anything over the limits are left out and counted in the message.
+  Files download six at a time, so a large collection such as
+  `anthropics/skills` (18 skills, about 240 files) is added in a second or two.
+  Adding a repository that is already there is refused before anything is
+  downloaded.
+
+- **Plugins have their own page.** A plugin brings skills and suggested
+  connections, so it is no longer a panel inside Skills. **Plugins** sits under
+  Skills in the menu, has its own stop on the guided tour, and `/plugins` opens
+  it. Skills from plugins still show on the Skills page under **From plugins**.
 
 - **My AI preview choices are the same height.** Use my chat model, Preview
   effort by task, and Preview automatic choice share one height when they sit

@@ -871,6 +871,20 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
         window.click("chat-filter-scheduled", cx);
         window.render_frame(cx);
         assert!(window.find("chat-history-scheduled-placeholder").visible());
+        // The history list scrolls; bring the button into its viewport first.
+        for _ in 0..40 {
+            let list = window.find("chat-history-list").bounds();
+            let button = window.find("chat-scheduled-open-schedules-btn").bounds();
+            if button.bottom() <= list.bottom() {
+                break;
+            }
+            window.scroll(
+                "chat-history-list",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-40.))),
+                cx,
+            );
+            window.render_frame(cx);
+        }
 
         // Click "Open Schedules" CTA from the Scheduled history placeholder -> navigates to Schedules tab.
         window.click("chat-scheduled-open-schedules-btn", cx);

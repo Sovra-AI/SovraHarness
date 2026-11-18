@@ -378,6 +378,12 @@ impl PluginEntry {
     }
 }
 
+/// The start of every skill command from plugin `id`. A skill file can then be found
+/// by opening only that plugin's package instead of every switched-on one.
+pub fn skill_command_prefix(id: &str) -> String {
+    format!("plugin-{}-", &sha256_hex(id.as_bytes())[..16])
+}
+
 impl PluginPackage {
     fn validate(&self, entry: &PluginEntry) -> Result<(), SkillError> {
         if self.schema_version != 1
@@ -427,19 +433,16 @@ impl PluginPackage {
 
     /// The command name a package skill is listed under.
     pub fn skill_command(&self, skill: &PluginSkill) -> String {
-        format!(
-            "plugin-{}-{}",
-            &sha256_hex(self.id.as_bytes())[..16],
-            skill.name
-        )
+        format!("{}{}", skill_command_prefix(&self.id), skill.name)
     }
 
     /// A skill file by the command name the model used and the file's path.
     pub fn resource(&self, command: &str, path: &str) -> Option<&str> {
         let path = path.strip_prefix("./").unwrap_or(path);
+        let name = command.strip_prefix(&skill_command_prefix(&self.id))?;
         self.skills
             .iter()
-            .find(|skill| self.skill_command(skill) == command)
+            .find(|skill| skill.name == name)
             .and_then(|skill| skill.resources.get(path))
             .map(String::as_str)
     }

@@ -8,7 +8,7 @@ and checks it before use. Neither needs a running registry server.
 
 ## Add from GitHub
 
-Open **Skills → Plugins**, paste a repository address into **Add from GitHub**,
+Open **Plugins** (in the menu on the left), paste a repository address into **Add from GitHub**,
 and choose **Add from GitHub**. These forms all work:
 `https://github.com/owner/repo`, `github.com/owner/repo.git` and `owner/repo`.
 Paste the repository's main address. A link to a folder or file inside it
@@ -53,7 +53,14 @@ If the commit is the same, Sovra says it is up to date and downloads nothing
 else. Otherwise it lists each skill and connection that the newer commit adds,
 changes or removes, and any it would leave out. **Update** installs exactly what was listed, keeping the
 on/off choice; **Not now** keeps the installed copy. A repository that is
-already added cannot be added a second time; use **Check for update**.
+already added cannot be added a second time; Sovra says so before asking GitHub
+for anything. Use **Check for update** instead.
+
+Files are downloaded six at a time from one shared queue, so one slow file
+does not hold up the rest. Adding `anthropics/skills` (18 skills, about 240
+files) takes one to two seconds on a typical connection. A skill file is read
+from the package of the one plugin its skill belongs to, never by opening every
+switched-on plugin.
 
 Limits:
 
@@ -72,7 +79,7 @@ Limits:
 
 ## Use a catalog
 
-Open **Skills → Plugins**, paste the full HTTPS address of `catalog.json`, and
+Open **Plugins** (in the menu on the left), paste the full HTTPS address of `catalog.json`, and
 choose **Load catalog**. No default publisher is configured. The last successfully
 loaded catalog address is saved; leaving the address box empty loads that address.
 Use the previous/next buttons to browse pages. The filter searches the current

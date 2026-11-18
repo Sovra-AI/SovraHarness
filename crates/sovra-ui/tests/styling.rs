@@ -341,7 +341,7 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
     });
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-schedules", cx);
+        click_nav(window, cx, "nav-schedules");
         window.render_frame(cx);
         window.click("schedule-create-toggle-btn", cx);
         window.render_frame(cx);
@@ -396,6 +396,7 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
                 ("nav-knowledge", "sovra-knowledge-view"),
                 ("nav-schedules", "sovra-schedules-view"),
                 ("nav-skills", "sovra-skills-view"),
+                ("nav-plugins", "sovra-plugins-view"),
                 ("nav-settings", "sovra-settings-view"),
                 ("nav-connections", "connections-page"),
                 ("nav-groups", "sovra-groups-view"),
@@ -666,6 +667,7 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
             ("nav-knowledge", "sovra-knowledge-view"),
             ("nav-schedules", "sovra-schedules-view"),
             ("nav-skills", "sovra-skills-view"),
+            ("nav-plugins", "sovra-plugins-view"),
             ("nav-settings", "sovra-settings-view"),
             ("nav-connections", "connections-page"),
             ("nav-groups", "sovra-groups-view"),

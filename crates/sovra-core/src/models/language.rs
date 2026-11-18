@@ -236,10 +236,12 @@ pub enum ChromeKey {
     NavGroupsTooltip,
     LoginName,
     LoginNamePlaceholder,
+    NavPlugins,
+    NavPluginsTooltip,
 }
 
 impl ChromeKey {
-    pub const ALL: [Self; 94] = [
+    pub const ALL: [Self; 96] = [
         Self::LoginWelcomeTitle,
         Self::LoginWelcomeSubtitle,
         Self::LoginCreateTitle,
@@ -334,6 +336,8 @@ impl ChromeKey {
         Self::ChatWelcomeHelpHint,
         Self::NavTraining,
         Self::NavTrainingTooltip,
+        Self::NavPlugins,
+        Self::NavPluginsTooltip,
     ];
 }
 
@@ -1088,6 +1092,8 @@ fn arabic(key: ChromeKey) -> &'static str {
         ChromeKey::LoginPasswordPlaceholder => "أدخل كلمة المرور",
         ChromeKey::NavTraining => "التدريب",
         ChromeKey::NavTrainingTooltip => "علّم نموذج ذكاء اصطناعي خاصاً بك، مع مجموعتك",
+        ChromeKey::NavPlugins => "الإضافات",
+        ChromeKey::NavPluginsTooltip => "أضف مهارات واتصالات من GitHub أو من فهرس تثق به",
         ChromeKey::NavGroups => "المجموعات",
         ChromeKey::NavGroupsTooltip => "شارك مع عائلتك أو فريقك",
         ChromeKey::LoginName => "اسمك",
@@ -1201,6 +1207,10 @@ fn english(key: ChromeKey) -> &'static str {
         ChromeKey::LoginPasswordPlaceholder => "Enter your password",
         ChromeKey::NavTraining => "Training",
         ChromeKey::NavTrainingTooltip => "Teach your own AI model, with your group",
+        ChromeKey::NavPlugins => "Plugins",
+        ChromeKey::NavPluginsTooltip => {
+            "Add skills and connections from GitHub or a catalog you trust"
+        }
         ChromeKey::NavGroups => "Groups",
         ChromeKey::NavGroupsTooltip => "Share with your family or team",
         ChromeKey::LoginName => "Your name",

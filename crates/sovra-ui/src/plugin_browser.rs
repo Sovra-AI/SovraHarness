@@ -23,7 +23,7 @@ use crate::{
 const INSTALLED_PAGE_SIZE: usize = 20;
 
 pub(crate) struct PluginBrowser {
-    pub(crate) open: bool,
+    scroll: gpui_kit::ScrollHandle,
     pub(crate) state: PluginState,
     url: Entity<InputState>,
     github: Entity<InputState>,
@@ -39,12 +39,12 @@ impl PluginBrowser {
         });
         let subscription = cx.subscribe(&search, |shell, _, event, cx| {
             if matches!(event, InputEvent::Change) {
-                shell.skill_library.plugins.installed_page = 0;
+                shell.plugins.installed_page = 0;
                 cx.notify();
             }
         });
         Self {
-            open: false,
+            scroll: gpui_kit::ScrollHandle::new(),
             state: PluginState::default(),
             url: cx.new(|cx| {
                 InputState::new(window, cx)
@@ -62,11 +62,11 @@ impl PluginBrowser {
 
 impl Shell {
     pub(crate) fn plugin_command(&mut self, command: PluginCommand, cx: &mut Context<Self>) {
-        if self.skill_library.plugins.state.busy {
+        if self.plugins.state.busy {
             return;
         }
         if matches!(&command, PluginCommand::Browse { .. }) {
-            self.skill_library.plugins.state.catalog = None;
+            self.plugins.state.catalog = None;
         }
         let event = match cx
             .global::<RuntimeClient>()
@@ -78,14 +78,40 @@ impl Shell {
                 "The runtime is unavailable. Try again when Sovra is ready.".into(),
             ),
         };
-        self.skill_library.plugins.state.apply(&event);
+        self.plugins.state.apply(&event);
         cx.notify();
     }
 }
 
-pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+/// The Plugins page. Plugins bring skills *and* suggested connections, so they have
+/// their own page instead of living inside Skills or Connections.
+pub(crate) fn page(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let browser = &shell.skill_library.plugins;
+    v_flex()
+        .id("sovra-plugins-view")
+        .test_support()
+        .flex_1()
+        .min_w_0()
+        .min_h_0()
+        .h_full()
+        .overflow_y_scroll()
+        .track_scroll(&shell.plugins.scroll)
+        .items_center()
+        .p(t.space.medium)
+        .child(
+            div()
+                .w_full()
+                .max_w(t.layout.page_width)
+                .min_w_0()
+                .mx_auto()
+                .flex_shrink_0()
+                .child(render(shell, cx)),
+        )
+}
+
+fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let browser = &shell.plugins;
     let state = &browser.state;
     let busy = state.busy;
     let query = browser.search.read(cx).value().trim().to_lowercase();
@@ -104,18 +130,18 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     let page = browser.installed_page.min(last_page);
     let mut panel = v_flex().id("plugin-browser").test_support().w_full().min_w_0()
         .gap(t.space.medium).p(t.space.medium).sovra_surface(Surface::Matte, cx)
-        .child(design::page_header("Plugins", "Add extra skills from a GitHub repository or a catalog you trust. Installed plugins work offline; turn them on when you want Sovra to use their instructions.", cx))
+        .child(design::page_header("Plugins", "Add skills and suggested connections from a GitHub repository or a catalog you trust. Installed plugins work offline; turn one on when you want Sovra to use it.", cx))
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Add from GitHub"))
         .child(div().w_full().max_w(t.layout.reading_width).sovra_text(TextRole::Caption, cx).child("Paste a repository's address. Sovra adds its skills (SKILL.md files) and suggested web connections exactly as they are now. Nothing in it is run on your computer."))
         .child(div().w_full().max_w(t.layout.reading_width).child(Input::new(&browser.github).id("plugin-github-address").aria_label("GitHub repository address")))
         .child(design::button("plugin-github-add", "Add from GitHub", cx).disabled(busy).on_click(cx.listener(|shell, _, _, cx| {
-            let address = shell.skill_library.plugins.github.read(cx).value().trim().to_owned();
+            let address = shell.plugins.github.read(cx).value().trim().to_owned();
             shell.plugin_command(PluginCommand::AddFromGitHub { address }, cx);
         })))
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Add from a catalog"))
         .child(div().w_full().max_w(t.layout.reading_width).child(Input::new(&browser.url).id("plugin-catalog-url").aria_label("Plugin catalog address")))
         .child(design::button("plugin-browse", "Load catalog", cx).disabled(busy).on_click(cx.listener(|shell, _, _, cx| {
-            let browser = &shell.skill_library.plugins;
+            let browser = &shell.plugins;
             let typed = browser.url.read(cx).value();
             let url = if typed.trim().is_empty() { browser.state.library.catalog_url.clone().unwrap_or_default() } else { typed.trim().to_owned() };
             shell.plugin_command(PluginCommand::Browse { url }, cx);
@@ -235,7 +261,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     design::button("plugin-installed-previous", "Previous installed", cx)
                         .disabled(page == 0)
                         .on_click(cx.listener(move |shell, _, _, cx| {
-                            shell.skill_library.plugins.installed_page = page.saturating_sub(1);
+                            shell.plugins.installed_page = page.saturating_sub(1);
                             cx.notify();
                         })),
                 )
@@ -243,7 +269,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     design::button("plugin-installed-next", "More installed", cx)
                         .disabled(page == last_page)
                         .on_click(cx.listener(move |shell, _, _, cx| {
-                            shell.skill_library.plugins.installed_page = page + 1;
+                            shell.plugins.installed_page = page + 1;
                             cx.notify();
                         })),
                 ),
@@ -452,7 +478,7 @@ fn update_review(
                 design::button("plugin-skip-update", "Not now", cx)
                     .disabled(busy)
                     .on_click(cx.listener(|shell, _, _, cx| {
-                        shell.skill_library.plugins.state.update = None;
+                        shell.plugins.state.update = None;
                         cx.notify();
                     })),
             ),

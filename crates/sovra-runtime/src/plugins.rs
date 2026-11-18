@@ -10,6 +10,9 @@ use sovra_core::plugins::{
 };
 use sovra_core::skills::{SkillCatalog, SkillError, SkillListing, SkillStore};
 
+const ALREADY_ADDED: &str =
+    "This repository is already added. Choose Check for update to get its newer changes.";
+
 mod github;
 
 pub(crate) async fn download(url: &str, limit: usize) -> Result<Vec<u8>, SkillError> {
@@ -245,6 +248,21 @@ pub(crate) async fn handle(
         }
         PluginCommand::AddFromGitHub { address } => {
             let repository = GitHubRepository::parse(address)?;
+            // Refused before reading GitHub: a repository can be megabytes of files,
+            // and its unsigned requests count against GitHub's hourly limit. The save
+            // step checks again in case it was added meanwhile.
+            let id = repository.plugin_id();
+            let library = {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.load())
+                    .await
+                    .map_err(|_| {
+                        SkillError("The plugin storage worker stopped. Try again.".into())
+                    })??
+            };
+            if library.installed.iter().any(|plugin| plugin.entry.id == id) {
+                return Err(SkillError(ALREADY_ADDED.into()));
+            }
             let reader = github::Reader::new(&session.hosts)?;
             let head = reader.head(&repository).await?;
             let github::Snapshot {
@@ -364,10 +382,7 @@ pub(crate) async fn handle(
                     .find(|existing| existing.entry.id == plugin.entry.id)
                 {
                     if adding {
-                        return Err(SkillError(
-                            "This repository is already added. Choose Check for update to get its newer changes."
-                                .into(),
-                        ));
+                        return Err(SkillError(ALREADY_ADDED.into()));
                     }
                     check_replacement(existing, &plugin)?;
                     plugin.enabled = existing.enabled;

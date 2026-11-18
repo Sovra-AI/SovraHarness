@@ -301,12 +301,12 @@ fn plugin_resource(
     name: &str,
     path: &str,
 ) -> Result<String, SkillError> {
-    for plugin in plugins
-        .load()?
-        .installed
-        .iter()
-        .filter(|plugin| plugin.enabled)
-    {
+    for plugin in plugins.load()?.installed.iter().filter(|plugin| {
+        // Only the plugin the name points to is opened; each package is
+        // verified and parsed on read, and can be a few megabytes.
+        plugin.enabled
+            && name.starts_with(&sovra_core::plugins::skill_command_prefix(&plugin.entry.id))
+    }) {
         let package = plugins.package(&plugin.entry)?;
         if package
             .skills
@@ -432,6 +432,7 @@ mod tests {
     struct OnePlugin {
         library: sovra_core::plugins::PluginLibrary,
         bytes: Vec<u8>,
+        opened: std::sync::atomic::AtomicUsize,
     }
 
     impl sovra_core::plugins::PluginStore for OnePlugin {
@@ -445,6 +446,8 @@ mod tests {
             &self,
             entry: &sovra_core::plugins::PluginEntry,
         ) -> Result<sovra_core::plugins::PluginPackage, SkillError> {
+            self.opened
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             entry.verify_package(&self.bytes)
         }
         fn cache(&self, _: &sovra_core::plugins::PluginEntry, _: &[u8]) -> Result<(), SkillError> {
@@ -492,7 +495,15 @@ mod tests {
                 github: Some(pin),
             }],
         };
-        (OnePlugin { library, bytes }, command)
+        let opened = std::sync::atomic::AtomicUsize::new(0);
+        (
+            OnePlugin {
+                library,
+                bytes,
+                opened,
+            },
+            command,
+        )
     }
 
     #[test]
@@ -503,7 +514,13 @@ mod tests {
             "Page sizes."
         );
         assert!(plugin_resource(&store, &command, "missing.md").is_err());
+        let opened = store.opened.load(std::sync::atomic::Ordering::Relaxed);
         assert!(plugin_resource(&store, "plugin-0000000000000000-pdf", "reference.md").is_err());
+        assert_eq!(
+            store.opened.load(std::sync::atomic::Ordering::Relaxed),
+            opened,
+            "a skill from another plugin opens no package"
+        );
         let (off, command) = github_store(false);
         assert!(plugin_resource(&off, &command, "reference.md").is_err());
     }

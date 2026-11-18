@@ -47,6 +47,7 @@ pub struct Shell {
     pub(crate) skills: sovra_core::skills::SkillCatalog,
     pub(crate) skill_menu: crate::skill_menu::MenuState,
     pub(crate) skill_library: crate::skill_library::SkillLibrary,
+    pub(crate) plugins: crate::plugin_browser::PluginBrowser,
     pub(crate) file_index: crate::file_index_view::FileIndexView,
     pub(crate) memory_view: Entity<crate::memory_view::MemoryView>,
     search_input: Entity<InputState>,
@@ -169,6 +170,7 @@ impl Shell {
         let search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search anything..."));
         let skill_library = crate::skill_library::SkillLibrary::new(window, cx);
+        let plugins = crate::plugin_browser::PluginBrowser::new(window, cx);
         let file_index = crate::file_index_view::FileIndexView::new(window, cx);
         let history_search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search chats…"));
@@ -417,7 +419,7 @@ impl Shell {
                             shell.file_index.apply(event);
                         }
                         if let sovra_core::Event::Plugins(event) = &event {
-                            shell.skill_library.plugins.state.apply(event);
+                            shell.plugins.state.apply(event);
                         }
                         if let sovra_core::Event::Skills(event) = &event {
                             shell.skill_library.notice = match shell.skills.apply(event) {
@@ -869,6 +871,7 @@ impl Shell {
             skills: sovra_core::skills::SkillCatalog::default(),
             skill_menu: crate::skill_menu::MenuState::default(),
             skill_library,
+            plugins,
             file_index,
             memory_view,
             search_input,
@@ -946,6 +949,7 @@ impl Shell {
             | NavTab::Models
             | NavTab::Schedules
             | NavTab::Skills
+            | NavTab::Plugins
             | NavTab::Groups
             | NavTab::Training => {}
         }
@@ -2217,6 +2221,7 @@ impl Shell {
                         .into_any_element(),
                     NavTab::Knowledge => render_knowledge_view(self, cx).into_any_element(),
                     NavTab::Skills => crate::skill_library::render(self, cx).into_any_element(),
+                    NavTab::Plugins => crate::plugin_browser::page(self, cx).into_any_element(),
                     NavTab::Team => div()
                         .flex_1()
                         .min_w_0()

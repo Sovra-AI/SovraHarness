@@ -599,12 +599,17 @@ async fn github_repository_adds_switched_off_then_updates_only_after_review() {
     assert_eq!(saved.catalog_url, "https://github.com/owner/skills");
     assert_eq!(saved.github.as_ref().unwrap().commit, FIRST);
 
+    requests.lock().unwrap().clear();
     send(PluginCommand::AddFromGitHub {
         address: "owner/skills".into(),
     });
     let again = until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
     assert!(
         matches!(again.last(), Some(Event::Plugins(PluginEvent::Error(text))) if text.contains("already added"))
+    );
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "adding a repository twice is refused before anything is downloaded"
     );
 
     send(PluginCommand::SetEnabled {

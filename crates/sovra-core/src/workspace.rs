@@ -47,10 +47,13 @@ pub enum NavTab {
     /// Family or team computers joined together (`crate::group`).
     Groups,
     Training,
+    /// Add-ons from GitHub or a catalog: skills plus suggested connections, so
+    /// neither the Skills nor the Connections page alone describes them.
+    Plugins,
 }
 
 impl NavTab {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Chat,
         Self::Team,
         Self::Artifacts,
@@ -59,6 +62,7 @@ impl NavTab {
         Self::MyAis,
         Self::Knowledge,
         Self::Skills,
+        Self::Plugins,
         Self::Models,
         Self::Schedules,
         Self::Connections,
@@ -79,6 +83,7 @@ impl NavTab {
             Self::Connections => "Connections",
             Self::Groups => "Groups",
             Self::Training => "Training",
+            Self::Plugins => "Plugins",
         }
     }
 
@@ -96,6 +101,7 @@ impl NavTab {
             Self::Connections => crate::models::ChromeKey::NavConnections,
             Self::Groups => crate::models::ChromeKey::NavGroups,
             Self::Training => crate::models::ChromeKey::NavTraining,
+            Self::Plugins => crate::models::ChromeKey::NavPlugins,
         }
     }
 
@@ -113,6 +119,7 @@ impl NavTab {
             Self::Connections => crate::models::ChromeKey::NavConnectionsTooltip,
             Self::Groups => crate::models::ChromeKey::NavGroupsTooltip,
             Self::Training => crate::models::ChromeKey::NavTrainingTooltip,
+            Self::Plugins => crate::models::ChromeKey::NavPluginsTooltip,
         }
     }
 
@@ -148,6 +155,8 @@ pub enum TourStep {
     AskAnything,
     /// Skills: every built-in ability, each with an example to try.
     Skills,
+    /// Plugins: more skills and suggested connections from GitHub or a catalog.
+    Plugins,
     /// Knowledge: what Sovra remembers and how to check or correct it.
     Knowledge,
     /// Connections: Google, GitHub, `WhatsApp` and Telegram.
@@ -166,11 +175,12 @@ pub enum TourStep {
 }
 
 impl TourStep {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Welcome,
         Self::ConnectAi,
         Self::AskAnything,
         Self::Skills,
+        Self::Plugins,
         Self::Knowledge,
         Self::Connections,
         Self::Team,
@@ -190,14 +200,15 @@ impl TourStep {
             Self::ConnectAi => 1,
             Self::AskAnything => 2,
             Self::Skills => 3,
-            Self::Knowledge => 4,
-            Self::Connections => 5,
-            Self::Team => 6,
-            Self::Schedules => 7,
-            Self::SavedWork => 8,
-            Self::Groups => 9,
-            Self::Training => 10,
-            Self::MakeItYours => 11,
+            Self::Plugins => 4,
+            Self::Knowledge => 5,
+            Self::Connections => 6,
+            Self::Team => 7,
+            Self::Schedules => 8,
+            Self::SavedWork => 9,
+            Self::Groups => 10,
+            Self::Training => 11,
+            Self::MakeItYours => 12,
         }
     }
 
@@ -211,6 +222,7 @@ impl TourStep {
             Self::Welcome | Self::AskAnything => NavTab::Chat,
             Self::ConnectAi => NavTab::Models,
             Self::Skills => NavTab::Skills,
+            Self::Plugins => NavTab::Plugins,
             Self::Knowledge => NavTab::Knowledge,
             Self::Connections => NavTab::Connections,
             Self::Team => NavTab::Team,
@@ -228,6 +240,7 @@ impl TourStep {
             Self::ConnectAi => "Give Sovra a brain",
             Self::AskAnything => "Ask anything",
             Self::Skills => "See everything Sovra can do",
+            Self::Plugins => "Add more from others",
             Self::Knowledge => "Sovra remembers for you",
             Self::Connections => "Link your apps",
             Self::Team => "Meet your AI team",
@@ -253,6 +266,9 @@ impl TourStep {
             }
             Self::Skills => {
                 "Each card is one thing Sovra can do for you, from searching the web to tidying a folder. You never need special words: just ask in chat. If you are not sure what to ask, press Try an example on any card."
+            }
+            Self::Plugins => {
+                "People share extra skills on GitHub or in lists called catalogs. Paste an address here to add them. Each one arrives switched off: look at what's included, then press Turn on. Nothing from it is run on your computer, and you choose when to update."
             }
             Self::Knowledge => {
                 "When you tell Sovra something worth keeping, like a birthday or your doctor's name, it saves it here so you never have to repeat yourself. Open any detail to see where it came from, correct it, or tell Sovra to forget it."
@@ -306,6 +322,9 @@ impl TourStep {
                 "Press Start training to try the garden sample. Nothing starts, and no text leaves this computer, until you press the button.",
             ),
             Self::SavedWork | Self::Groups => None,
+            Self::Plugins => {
+                Some("Try pasting github.com/anthropics/skills, then press Add from GitHub.")
+            }
             Self::MakeItYours => {
                 Some("Press Take a guided tour at the bottom of the menu to watch this tour again.")
             }

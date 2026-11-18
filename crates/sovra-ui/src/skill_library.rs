@@ -106,7 +106,6 @@ enum EditorExit {
 }
 
 pub(crate) struct SkillLibrary {
-    pub(crate) plugins: crate::plugin_browser::PluginBrowser,
     search: Entity<InputState>,
     category: SkillCategoryFilter,
     name: Entity<InputState>,
@@ -176,7 +175,6 @@ impl SkillLibrary {
         });
         Self {
             search,
-            plugins: crate::plugin_browser::PluginBrowser::new(window, cx),
             category: SkillCategoryFilter::All,
             name: cx.new(|cx| InputState::new(window, cx).placeholder("e.g. weekly-check-in")),
             title: cx.new(|cx| InputState::new(window, cx).placeholder("e.g. Weekly check-in")),
@@ -483,10 +481,6 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     (view.exit == EditorExit::ConfirmDiscard).then(|| discard_confirmation(cx)),
                 )
                 .children(editing.then(|| editor(view, cx)))
-                .children(
-                    (!editing && view.plugins.open)
-                        .then(|| crate::plugin_browser::render(shell, cx)),
-                )
                 .children((!editing).then(|| render_categories(shell, view, &query, cx)))
                 .children((!editing).then(|| render_skills_catalog(shell, view, &query, cx))),
         )
@@ -506,14 +500,6 @@ fn render_header(
         "{total} skills ready to use. In chat, type / to pick one, or /help to come back here."
     );
     let actions = h_flex()
-        .child(
-            design::button("plugins-open", "Plugins", cx)
-                .disabled(saving)
-                .on_click(cx.listener(|shell, _, _, cx| {
-                    shell.skill_library.plugins.open = !shell.skill_library.plugins.open;
-                    cx.notify();
-                })),
-        )
         .flex_wrap()
         .items_center()
         .gap(t.space.small)

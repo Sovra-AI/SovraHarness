@@ -93,8 +93,7 @@ impl Shell {
                 self.select_tab(NavTab::Skills, cx);
             }
             SkillAction::Plugins => {
-                self.skill_library.plugins.open = true;
-                self.select_tab(NavTab::Skills, cx);
+                self.select_tab(NavTab::Plugins, cx);
             }
             SkillAction::NewChat => self.start_new_chat(window, cx),
             SkillAction::Training => self.select_tab(NavTab::Training, cx),
