@@ -66,8 +66,8 @@ The shared Rust parser also checks UTF-8 byte budgets, URL policy, unique plugin
 IDs and skill names, and numeric version bounds. JSON Schema string lengths
 count characters; they cannot replace the byte limits. Exact downloaded bytes,
 checksums and catalog/package agreement are checked during publication and
-installation. Contract tests exercise both validators against the examples and
-invalid packages. The schema uses
+installation. Contract tests validate the schema against its declared standard
+and exercise both validators against the examples and invalid packages. The schema uses
 [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12/json-schema-validation).
 
 ### Version and extension rules

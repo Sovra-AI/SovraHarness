@@ -2,14 +2,17 @@ use super::{CATALOG, PACKAGE};
 use crate::plugins::{PluginCatalog, PluginEntry};
 use serde_json::{Value, json};
 
-fn validator() -> jsonschema::Validator {
-    let schema = serde_json::from_slice(include_bytes!(
+fn schema() -> Value {
+    serde_json::from_slice(include_bytes!(
         "../../../../../schemas/plugins-v1.schema.json"
     ))
-    .unwrap();
+    .unwrap()
+}
+
+fn validator() -> jsonschema::Validator {
     jsonschema::options()
         .should_validate_formats(true)
-        .build(&schema)
+        .build(&schema())
         .unwrap()
 }
 
@@ -19,6 +22,16 @@ fn package_is_valid(value: &Value) -> bool {
         &serde_json::to_vec(value).unwrap(),
     )
     .is_ok()
+}
+
+#[test]
+fn published_schema_conforms_to_its_declared_json_schema_standard() {
+    let schema = schema();
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
+    jsonschema::meta::validate(&schema).unwrap();
 }
 
 #[test]
