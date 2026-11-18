@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::{Mutex, atomic::Ordering};
 
 use sovra_core::plugins::{
-    MAX_PLUGIN_BYTES, MAX_PLUGIN_LIBRARY_BYTES, PluginEntry, PluginLibrary, PluginPackage,
-    PluginStore,
+    MAX_PLUGIN_LIBRARY_BYTES, PluginEntry, PluginLibrary, PluginPackage, PluginSkill, PluginStore,
+    package_limit, repository_skill,
 };
 use sovra_core::skills::SkillError;
 
@@ -56,7 +56,7 @@ impl PluginStore for LocalPluginStore {
         private_directory(&self.directory)?;
         let bytes = read_bytes(
             &self.directory.join(format!("{}.json", entry.sha256)),
-            MAX_PLUGIN_BYTES,
+            package_limit(&entry.package_url),
         )?;
         entry.verify_package(&bytes)
     }
@@ -72,6 +72,22 @@ impl PluginStore for LocalPluginStore {
         // Immutable content-addressed files can be shared by installations and
         // retained across updates; only the small index is rewritten.
         self.write(&path, bytes)
+    }
+
+    fn read_skill_file(
+        &self,
+        folder: Option<&str>,
+        content: &str,
+    ) -> Result<PluginSkill, SkillError> {
+        // Same parser as imported skill folders. Tool grants in `allowed-tools` are
+        // dropped: plugin skills are instructions only.
+        let skill = crate::format::decode_named(content, folder)?;
+        repository_skill(
+            skill.name,
+            &skill.title,
+            &skill.description,
+            skill.instructions,
+        )
     }
 
     fn save(&self, library: &PluginLibrary) -> Result<(), SkillError> {

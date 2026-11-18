@@ -8,6 +8,15 @@ use sha2::{Digest as _, Sha256};
 
 use crate::skills::{Skill, SkillCatalog, SkillError, SkillKind, valid_name};
 
+mod github;
+pub use github::{
+    GITHUB_PLUGIN_VERSION, GitHubHosts, GitHubPin, GitHubRepository, MAX_GITHUB_FILE_BYTES,
+    MAX_GITHUB_PLUGIN_BYTES, MAX_GITHUB_RESOURCE_BYTES, MAX_GITHUB_SKILLS, PluginChanges,
+    RepositoryPlan, RepositorySnapshot, SkillPlan, check_replacement, files_left_out,
+    nothing_to_add, plan_repository, repository_skill, skill_label, valid_commit,
+    valid_resource_path,
+};
+
 pub const MAX_CATALOG_BYTES: usize = 256 * 1024;
 pub const MAX_PLUGIN_BYTES: usize = 512 * 1024;
 pub const MAX_PLUGIN_LIBRARY_BYTES: usize = 8 * 1024 * 1024;
@@ -56,6 +65,10 @@ pub struct PluginSkill {
     pub title: String,
     pub description: String,
     pub instructions: String,
+    /// Text files from the skill's folder, by relative path. Only plugins added
+    /// from GitHub carry them; catalog packages (format version 1) must not.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub resources: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +99,9 @@ pub struct InstalledPlugin {
     pub entry: PluginEntry,
     pub catalog_url: String,
     pub enabled: bool,
+    /// Set for plugins added from a GitHub repository; `catalog_url` is then the repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github: Option<GitHubPin>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +117,13 @@ pub trait PluginStore: Send + Sync + std::fmt::Debug {
     fn save(&self, library: &PluginLibrary) -> Result<(), SkillError>;
     fn package(&self, entry: &PluginEntry) -> Result<PluginPackage, SkillError>;
     fn cache(&self, entry: &PluginEntry, bytes: &[u8]) -> Result<(), SkillError>;
+    /// Decodes one Agent Skills `SKILL.md`. `folder` is `None` at a repository root,
+    /// where the skill's own name is used instead of a folder name.
+    fn read_skill_file(
+        &self,
+        folder: Option<&str>,
+        content: &str,
+    ) -> Result<PluginSkill, SkillError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,13 +144,44 @@ pub enum PluginCommand {
         id: String,
         enabled: bool,
     },
+    /// Installs a public repository's skills at its latest commit, switched off.
+    AddFromGitHub {
+        address: String,
+    },
+    /// Reads the newest commit of a GitHub plugin and reports what would change.
+    CheckForUpdate {
+        id: String,
+    },
+    /// Takes the update most recently reported by `CheckForUpdate` for this plugin.
+    ApplyUpdate {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginEvent {
     Loaded(PluginLibrary),
-    Catalog { url: String, catalog: PluginCatalog },
-    Details { id: String, package: PluginPackage },
+    Catalog {
+        url: String,
+        catalog: PluginCatalog,
+    },
+    Details {
+        id: String,
+        package: PluginPackage,
+    },
+    /// `left_out` names skills the repository has that could not be added, and why.
+    Added {
+        id: String,
+        package: PluginPackage,
+        left_out: Vec<String>,
+    },
+    UpdateReady {
+        id: String,
+        changes: PluginChanges,
+    },
+    UpToDate {
+        id: String,
+    },
     Busy,
     Error(String),
 }
@@ -138,6 +192,8 @@ pub struct PluginState {
     pub catalog: Option<PluginCatalog>,
     pub catalog_url: String,
     pub details: Option<(String, PluginPackage)>,
+    /// An update the person has been shown but not yet accepted.
+    pub update: Option<(String, PluginChanges)>,
     pub busy: bool,
     pub notice: String,
 }
@@ -148,6 +204,7 @@ impl PluginState {
             PluginEvent::Loaded(library) => {
                 self.library = library.clone();
                 self.details = None;
+                self.update = None;
                 if self.catalog.is_none() {
                     self.catalog_url = library.catalog_url.clone().unwrap_or_default();
                 }
@@ -166,6 +223,36 @@ impl PluginState {
                 self.busy = false;
                 self.notice.clear();
             }
+            PluginEvent::Added {
+                id,
+                package,
+                left_out,
+            } => {
+                self.details = Some((id.clone(), package.clone()));
+                self.busy = false;
+                let skipped = if left_out.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Left out: {}.", left_out.join("; "))
+                };
+                self.notice = format!(
+                    "Added {} with {} skill{}. It stays off until you choose Turn on.{skipped}",
+                    package.title,
+                    package.skills.len(),
+                    if package.skills.len() == 1 { "" } else { "s" }
+                );
+            }
+            PluginEvent::UpdateReady { id, changes } => {
+                self.update = Some((id.clone(), changes.clone()));
+                self.busy = false;
+                self.notice =
+                    "A newer version is ready. Check what changes, then choose Update.".into();
+            }
+            PluginEvent::UpToDate { id } => {
+                self.update = None;
+                self.busy = false;
+                self.notice = format!("{} is already up to date.", self.title(id));
+            }
             PluginEvent::Busy => {
                 self.busy = true;
                 self.notice = "Updating plugins…".into();
@@ -175,6 +262,25 @@ impl PluginState {
                 self.notice.clone_from(message);
             }
         }
+    }
+}
+
+impl PluginState {
+    pub fn title(&self, id: &str) -> String {
+        self.library
+            .installed
+            .iter()
+            .find(|plugin| plugin.entry.id == id)
+            .map_or_else(|| "This plugin".into(), |plugin| plugin.entry.title.clone())
+    }
+}
+
+/// GitHub plugins can carry skill files, so their packages may be larger.
+pub fn package_limit(package_url: &str) -> usize {
+    if github::is_github_package_url(package_url) {
+        MAX_GITHUB_PLUGIN_BYTES
+    } else {
+        MAX_PLUGIN_BYTES
     }
 }
 
@@ -236,7 +342,7 @@ impl PluginEntry {
 
     /// Builds a catalog entry from exact package bytes, for static catalog publishers.
     pub fn for_package(package_url: String, bytes: &[u8]) -> Result<Self, SkillError> {
-        if bytes.len() > MAX_PLUGIN_BYTES {
+        if bytes.len() > package_limit(&package_url) {
             return Err(error("The plugin package is too large."));
         }
         let package: PluginPackage =
@@ -257,7 +363,7 @@ impl PluginEntry {
 
     pub fn verify_package(&self, bytes: &[u8]) -> Result<PluginPackage, SkillError> {
         self.validate()?;
-        if bytes.len() > MAX_PLUGIN_BYTES {
+        if bytes.len() > package_limit(&self.package_url) {
             return Err(error("The plugin download is too large."));
         }
         if sha256_hex(bytes) != self.sha256 {
@@ -281,7 +387,12 @@ impl PluginPackage {
             || self.description != entry.description
             || self.id != entry.id
             || self.version != entry.version
-            || self.skills.len() > 16
+            || self.skills.len()
+                > if github::is_github_package_url(&entry.package_url) {
+                    MAX_GITHUB_SKILLS
+                } else {
+                    16
+                }
             || self.services.len() > 8
             || (self.skills.is_empty() && self.services.is_empty())
         {
@@ -290,12 +401,19 @@ impl PluginPackage {
             ));
         }
         let mut names = BTreeSet::new();
+        let github = github::is_github_package_url(&entry.package_url);
         for skill in &self.skills {
             if !valid_name(&skill.name) || skill.name.len() > 32 || !names.insert(&skill.name) {
                 return Err(error(
                     "Plugin skill names must be unique, short lowercase names.",
                 ));
             }
+            if !skill.resources.is_empty() && !github {
+                return Err(error(
+                    "Catalog plugin packages cannot include skill files in format version 1.",
+                ));
+            }
+            github::check_resources(&skill.resources)?;
         }
         SkillCatalog::new(self.skills(true))?;
         for service in &self.services {
@@ -307,18 +425,33 @@ impl PluginPackage {
         Ok(())
     }
 
+    /// The command name a package skill is listed under.
+    pub fn skill_command(&self, skill: &PluginSkill) -> String {
+        format!(
+            "plugin-{}-{}",
+            &sha256_hex(self.id.as_bytes())[..16],
+            skill.name
+        )
+    }
+
+    /// A skill file by the command name the model used and the file's path.
+    pub fn resource(&self, command: &str, path: &str) -> Option<&str> {
+        let path = path.strip_prefix("./").unwrap_or(path);
+        self.skills
+            .iter()
+            .find(|skill| self.skill_command(skill) == command)
+            .and_then(|skill| skill.resources.get(path))
+            .map(String::as_str)
+    }
+
     pub fn skills(&self, enabled: bool) -> Vec<Skill> {
         self.skills
             .iter()
             .map(|skill| Skill {
-                name: format!(
-                    "plugin-{}-{}",
-                    &sha256_hex(self.id.as_bytes())[..16],
-                    skill.name
-                ),
+                name: self.skill_command(skill),
                 title: skill.title.clone(),
                 description: skill.description.clone(),
-                instructions: skill.instructions.clone(),
+                instructions: github::with_file_list(&skill.instructions, &skill.resources),
                 category: "Plugins".into(),
                 aliases: Vec::new(),
                 kind: SkillKind::Procedure,
@@ -348,6 +481,9 @@ impl PluginLibrary {
         for installed in &self.installed {
             installed.entry.validate()?;
             check_download_url(&installed.catalog_url)?;
+            if let Some(pin) = &installed.github {
+                pin.validate(installed)?;
+            }
             if !ids.insert(&installed.entry.id) {
                 return Err(error("The plugin library repeats a plugin identifier."));
             }

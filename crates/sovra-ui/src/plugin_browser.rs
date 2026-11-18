@@ -11,7 +11,7 @@ use gpui_kit::{
 };
 use sovra_core::{
     Command,
-    plugins::{PluginCommand, PluginEntry, PluginEvent, PluginState},
+    plugins::{PluginChanges, PluginCommand, PluginEntry, PluginEvent, PluginState},
 };
 
 use crate::{
@@ -26,6 +26,7 @@ pub(crate) struct PluginBrowser {
     pub(crate) open: bool,
     pub(crate) state: PluginState,
     url: Entity<InputState>,
+    github: Entity<InputState>,
     search: Entity<InputState>,
     installed_page: usize,
     _search: Subscription,
@@ -48,6 +49,9 @@ impl PluginBrowser {
             url: cx.new(|cx| {
                 InputState::new(window, cx)
                     .placeholder("https://publisher.github.io/plugins/catalog.json")
+            }),
+            github: cx.new(|cx| {
+                InputState::new(window, cx).placeholder("https://github.com/owner/repository")
             }),
             search,
             installed_page: 0,
@@ -100,7 +104,15 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     let page = browser.installed_page.min(last_page);
     let mut panel = v_flex().id("plugin-browser").test_support().w_full().min_w_0()
         .gap(t.space.medium).p(t.space.medium).sovra_surface(Surface::Matte, cx)
-        .child(design::page_header("Plugins", "Download extra skills from a catalog you trust. Installed plugins work offline; turn them on when you want Sovra to use their instructions.", cx))
+        .child(design::page_header("Plugins", "Add extra skills from a GitHub repository or a catalog you trust. Installed plugins work offline; turn them on when you want Sovra to use their instructions.", cx))
+        .child(div().sovra_text(TextRole::SectionTitle, cx).child("Add from GitHub"))
+        .child(div().w_full().max_w(t.layout.reading_width).sovra_text(TextRole::Caption, cx).child("Paste a repository's address. Sovra adds its skills (SKILL.md files) and suggested web connections exactly as they are now. Nothing in it is run on your computer."))
+        .child(div().w_full().max_w(t.layout.reading_width).child(Input::new(&browser.github).id("plugin-github-address").aria_label("GitHub repository address")))
+        .child(design::button("plugin-github-add", "Add from GitHub", cx).disabled(busy).on_click(cx.listener(|shell, _, _, cx| {
+            let address = shell.skill_library.plugins.github.read(cx).value().trim().to_owned();
+            shell.plugin_command(PluginCommand::AddFromGitHub { address }, cx);
+        })))
+        .child(div().sovra_text(TextRole::SectionTitle, cx).child("Add from a catalog"))
         .child(div().w_full().max_w(t.layout.reading_width).child(Input::new(&browser.url).id("plugin-catalog-url").aria_label("Plugin catalog address")))
         .child(design::button("plugin-browse", "Load catalog", cx).disabled(busy).on_click(cx.listener(|shell, _, _, cx| {
             let browser = &shell.skill_library.plugins;
@@ -116,7 +128,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         panel = panel.child(
             div()
                 .sovra_text(TextRole::Body, cx)
-                .child("No installed plugins match. Load a catalog to find one."),
+                .child("No installed plugins match. Add one from GitHub or load a catalog."),
         );
     }
     for (index, plugin) in installed
@@ -136,7 +148,10 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                 .child(div().sovra_text(TextRole::Body, cx).child(format!(
                     "{} · {} · {}",
                     plugin.entry.title,
-                    plugin.entry.version,
+                    plugin.github.as_ref().map_or_else(
+                        || plugin.entry.version.clone(),
+                        |pin| format!("from GitHub, version {}", pin.short_commit())
+                    ),
                     if enabled { "On" } else { "Off" }
                 )))
                 .child(
@@ -187,9 +202,29 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                                         cx,
                                     );
                                 })),
-                        ),
+                        )
+                        .children(plugin.github.is_some().then(|| {
+                            let update_id = plugin.entry.id.clone();
+                            design::button(("plugin-check-update", index), "Check for update", cx)
+                                .disabled(busy)
+                                .accessibility_label(format!(
+                                    "Check for an update to {}",
+                                    plugin.entry.title
+                                ))
+                                .on_click(cx.listener(move |shell, _, _, cx| {
+                                    shell.plugin_command(
+                                        PluginCommand::CheckForUpdate {
+                                            id: update_id.clone(),
+                                        },
+                                        cx,
+                                    );
+                                }))
+                        })),
                 ),
         );
+    }
+    if let Some((id, changes)) = &state.update {
+        panel = panel.child(update_review(id, changes, state, busy, cx));
     }
     if last_page > 0 {
         panel = panel.child(
@@ -226,11 +261,16 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                 .child("What's included"),
         );
         for skill in &package.skills {
-            panel = panel.child(
-                div()
-                    .sovra_text(TextRole::Body, cx)
-                    .child(format!("{}: {}", skill.title, skill.description)),
-            );
+            panel = panel.child(div().sovra_text(TextRole::Body, cx).child(
+                match skill.resources.len() {
+                    0 => format!("{}: {}", skill.title, skill.description),
+                    1 => format!("{}: {} (with 1 file)", skill.title, skill.description),
+                    files => format!(
+                        "{}: {} (with {files} files)",
+                        skill.title, skill.description
+                    ),
+                },
+            ));
         }
         for (index, service) in package.services.iter().enumerate() {
             let name = service.name.clone();
@@ -344,4 +384,77 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         );
     }
     panel
+}
+
+/// Shows what an update would change, so nothing new reaches a helper unseen.
+fn update_review(
+    id: &str,
+    changes: &PluginChanges,
+    state: &PluginState,
+    busy: bool,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let title = state.title(id);
+    let mut lines = Vec::new();
+    for (label, names) in [
+        ("New skill", &changes.added),
+        ("Changed skill", &changes.changed),
+        ("Removed skill", &changes.removed),
+        ("New suggested connection", &changes.connections_added),
+        ("Removed suggested connection", &changes.connections_removed),
+    ] {
+        lines.extend(names.iter().map(|name| format!("{label}: {name}")));
+    }
+    if lines.is_empty() {
+        lines.push("Only files Sovra doesn't use have changed.".into());
+    }
+    lines.extend(
+        changes
+            .left_out
+            .iter()
+            .map(|reason| format!("Can't be added: {reason}")),
+    );
+    let mut review = v_flex()
+        .id("plugin-update-review")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .max_w(t.layout.reading_width)
+        .gap(t.space.small)
+        .child(
+            div()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child(format!("Update for {title}")),
+        );
+    for line in lines {
+        review = review.child(div().min_w_0().sovra_text(TextRole::Body, cx).child(line));
+    }
+    let apply_id = id.to_owned();
+    review.child(
+        h_flex()
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(
+                design::button("plugin-apply-update", "Update", cx)
+                    .disabled(busy)
+                    .accessibility_label(format!("Update {title}"))
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        shell.plugin_command(
+                            PluginCommand::ApplyUpdate {
+                                id: apply_id.clone(),
+                            },
+                            cx,
+                        );
+                    })),
+            )
+            .child(
+                design::button("plugin-skip-update", "Not now", cx)
+                    .disabled(busy)
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.skill_library.plugins.state.update = None;
+                        cx.notify();
+                    })),
+            ),
+    )
 }

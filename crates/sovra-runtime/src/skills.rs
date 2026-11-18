@@ -25,18 +25,22 @@ impl SkillsRuntime {
     pub(crate) fn start(
         store: Option<Arc<dyn SkillStore>>,
         plugins: Option<Arc<dyn sovra_core::plugins::PluginStore>>,
+        hosts: sovra_core::plugins::GitHubHosts,
         events: Sender<Event>,
         handle: &tokio::runtime::Handle,
     ) -> Self {
-        let resources = store.as_ref().map(|store| {
-            Arc::new(ResourceReader(store.clone())) as Arc<dyn sovra_core::skills::SkillResources>
+        let resources = (store.is_some() || plugins.is_some()).then(|| {
+            Arc::new(ResourceReader {
+                skills: store.clone(),
+                plugins: plugins.clone(),
+            }) as Arc<dyn sovra_core::skills::SkillResources>
         });
         let (commands, receiver) = async_channel::bounded(32);
         let catalog = Arc::new(RwLock::new(Arc::new(SkillCatalog::default())));
         let current = catalog.clone();
         let output = events.clone();
         let task = handle.spawn(async move {
-            let mut remote_catalog = None;
+            let mut session = crate::plugins::PluginSession::new(hosts);
             while let Ok(command) = receiver.recv().await {
                 let plugin_command = matches!(&command, LibraryCommand::Plugin(_));
                 let saved = match &command {
@@ -50,16 +54,11 @@ impl SkillsRuntime {
                             .send(Event::Plugins(sovra_core::plugins::PluginEvent::Busy))
                             .await;
                         if let Some(plugins) = plugins.clone() {
-                            crate::plugins::handle(
-                                command,
-                                plugins,
-                                store.clone(),
-                                &mut remote_catalog,
-                            )
-                            .await
-                            .map(|(_, found)| {
-                                discovered = found;
-                            })
+                            crate::plugins::handle(command, plugins, store.clone(), &mut session)
+                                .await
+                                .map(|(_, found)| {
+                                    discovered = found;
+                                })
                         } else {
                             Err(SkillError(
                                 "Plugin storage is unavailable in this session.".into(),
@@ -268,17 +267,66 @@ impl Drop for SkillsRuntime {
 }
 
 #[derive(Debug)]
-struct ResourceReader(Arc<dyn SkillStore>);
+struct ResourceReader {
+    skills: Option<Arc<dyn SkillStore>>,
+    plugins: Option<Arc<dyn sovra_core::plugins::PluginStore>>,
+}
 
 impl sovra_core::skills::SkillResources for ResourceReader {
     fn read(&self, name: String, path: String) -> sovra_core::skills::SkillResourceFuture {
-        let store = self.0.clone();
+        let skills = self.skills.clone();
+        let plugins = self.plugins.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || store.resource(&name, &path))
-                .await
-                .map_err(|_| SkillError("The skill resource reader stopped unexpectedly.".into()))?
+            tokio::task::spawn_blocking(move || {
+                // Plugin skills are never folders in the personal skills directory;
+                // their files live inside the verified package of a switched-on plugin.
+                if name.starts_with("plugin-") {
+                    let plugins = plugins.ok_or_else(|| {
+                        SkillError("Plugin storage is unavailable in this session.".into())
+                    })?;
+                    return plugin_resource(plugins.as_ref(), &name, &path);
+                }
+                skills
+                    .ok_or_else(|| SkillError("Skill storage is unavailable.".into()))?
+                    .resource(&name, &path)
+            })
+            .await
+            .map_err(|_| SkillError("The skill resource reader stopped unexpectedly.".into()))?
         })
     }
+}
+
+fn plugin_resource(
+    plugins: &dyn sovra_core::plugins::PluginStore,
+    name: &str,
+    path: &str,
+) -> Result<String, SkillError> {
+    for plugin in plugins
+        .load()?
+        .installed
+        .iter()
+        .filter(|plugin| plugin.enabled)
+    {
+        let package = plugins.package(&plugin.entry)?;
+        if package
+            .skills
+            .iter()
+            .any(|skill| package.skill_command(skill) == name)
+        {
+            return package
+                .resource(name, path)
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    SkillError(
+                        "This skill has no file at that path. Use a path from its file list."
+                            .into(),
+                    )
+                });
+        }
+    }
+    Err(SkillError(
+        "This plugin skill is not switched on or no longer installed.".into(),
+    ))
 }
 
 pub(crate) fn resolve(
@@ -378,5 +426,85 @@ mod tests {
             &SkillCatalog::default(),
             "search the web for news"
         ));
+    }
+
+    #[derive(Debug)]
+    struct OnePlugin {
+        library: sovra_core::plugins::PluginLibrary,
+        bytes: Vec<u8>,
+    }
+
+    impl sovra_core::plugins::PluginStore for OnePlugin {
+        fn load(&self) -> Result<sovra_core::plugins::PluginLibrary, SkillError> {
+            Ok(self.library.clone())
+        }
+        fn save(&self, _: &sovra_core::plugins::PluginLibrary) -> Result<(), SkillError> {
+            Ok(())
+        }
+        fn package(
+            &self,
+            entry: &sovra_core::plugins::PluginEntry,
+        ) -> Result<sovra_core::plugins::PluginPackage, SkillError> {
+            entry.verify_package(&self.bytes)
+        }
+        fn cache(&self, _: &sovra_core::plugins::PluginEntry, _: &[u8]) -> Result<(), SkillError> {
+            Ok(())
+        }
+        fn read_skill_file(
+            &self,
+            _: Option<&str>,
+            _: &str,
+        ) -> Result<sovra_core::plugins::PluginSkill, SkillError> {
+            Err(SkillError("unused".into()))
+        }
+    }
+
+    fn github_store(enabled: bool) -> (OnePlugin, String) {
+        let mut skill = sovra_core::plugins::repository_skill(
+            "pdf".into(),
+            "PDF",
+            "Work with PDF files.",
+            "Read reference.md.".into(),
+        )
+        .expect("valid skill");
+        skill
+            .resources
+            .insert("reference.md".into(), "Page sizes.".into());
+        let snapshot = sovra_core::plugins::RepositorySnapshot {
+            repository: sovra_core::plugins::GitHubRepository::parse("owner/pdf")
+                .expect("valid repository"),
+            commit: "0123456789abcdef0123456789abcdef01234567".into(),
+            description: None,
+            skills: vec![skill],
+            manifests: Vec::new(),
+            left_out: Vec::new(),
+        };
+        let (entry, bytes, pin) = snapshot.package().expect("package");
+        let command = entry.verify_package(&bytes).expect("verified").skills(true)[0]
+            .name
+            .clone();
+        let library = sovra_core::plugins::PluginLibrary {
+            catalog_url: None,
+            installed: vec![sovra_core::plugins::InstalledPlugin {
+                entry,
+                catalog_url: snapshot.repository.web_url(),
+                enabled,
+                github: Some(pin),
+            }],
+        };
+        (OnePlugin { library, bytes }, command)
+    }
+
+    #[test]
+    fn plugin_skill_files_are_readable_only_while_the_plugin_is_on() {
+        let (store, command) = github_store(true);
+        assert_eq!(
+            plugin_resource(&store, &command, "reference.md").expect("file"),
+            "Page sizes."
+        );
+        assert!(plugin_resource(&store, &command, "missing.md").is_err());
+        assert!(plugin_resource(&store, "plugin-0000000000000000-pdf", "reference.md").is_err());
+        let (off, command) = github_store(false);
+        assert!(plugin_resource(&off, &command, "reference.md").is_err());
     }
 }

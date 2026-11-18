@@ -4,10 +4,13 @@
 use std::{sync::Arc, time::Duration};
 
 use sovra_core::plugins::{
-    InstalledPlugin, MAX_CATALOG_BYTES, MAX_PLUGIN_BYTES, PluginCatalog, PluginCommand,
-    PluginLibrary, PluginStore, check_download_url,
+    GitHubHosts, GitHubPin, GitHubRepository, InstalledPlugin, MAX_CATALOG_BYTES, MAX_PLUGIN_BYTES,
+    PluginCatalog, PluginChanges, PluginCommand, PluginEntry, PluginEvent, PluginLibrary,
+    PluginStore, check_download_url, check_replacement,
 };
 use sovra_core::skills::{SkillCatalog, SkillError, SkillListing, SkillStore};
+
+mod github;
 
 pub(crate) async fn download(url: &str, limit: usize) -> Result<Vec<u8>, SkillError> {
     check_download_url(url)?;
@@ -19,7 +22,7 @@ pub(crate) async fn download(url: &str, limit: usize) -> Result<Vec<u8>, SkillEr
         .connect_timeout(Duration::from_secs(10))
         .build()
         .map_err(|_| SkillError("The plugin downloader could not start.".into()))?;
-    let mut response = client
+    let response = client
         .get(url)
         .header("Accept", "application/json")
         .send()
@@ -36,6 +39,14 @@ pub(crate) async fn download(url: &str, limit: usize) -> Result<Vec<u8>, SkillEr
             response.status().as_u16()
         )));
     }
+    read_limited(response, limit).await
+}
+
+/// Reads a body without trusting its declared length.
+pub(crate) async fn read_limited(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, SkillError> {
     if response
         .content_length()
         .is_some_and(|size| size > limit as u64)
@@ -133,50 +144,87 @@ pub(crate) struct RemoteCatalog {
     catalog: PluginCatalog,
 }
 
+/// Remote state the worker keeps between commands: the current catalog page and
+/// an update the person has been shown but not yet accepted.
+pub(crate) struct PluginSession {
+    hosts: GitHubHosts,
+    catalog: Option<RemoteCatalog>,
+    pending: Option<(String, Download)>,
+}
+
+impl PluginSession {
+    pub(crate) fn new(hosts: GitHubHosts) -> Self {
+        Self {
+            hosts,
+            catalog: None,
+            pending: None,
+        }
+    }
+}
+
+/// Verified package bytes and where they came from, ready to persist.
+struct Download {
+    entry: PluginEntry,
+    bytes: Vec<u8>,
+    catalog_url: String,
+    github: Option<GitHubPin>,
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one serialized match over every plugin command keeps download and persistence ordering visible"
+)]
 pub(crate) async fn handle(
     command: PluginCommand,
     store: Arc<dyn PluginStore>,
     skills: Option<Arc<dyn SkillStore>>,
-    catalog: &mut Option<RemoteCatalog>,
-) -> Result<(PluginLibrary, Option<sovra_core::plugins::PluginEvent>), SkillError> {
-    use sovra_core::plugins::{PluginEvent, check_update};
+    session: &mut PluginSession,
+) -> Result<(PluginLibrary, Option<PluginEvent>), SkillError> {
     let mut discovered = None;
     let mut downloaded = None;
     let root = match &command {
         PluginCommand::Browse { url } => url.clone(),
         PluginCommand::Install { .. } | PluginCommand::NextPage | PluginCommand::PreviousPage => {
-            catalog
+            session
+                .catalog
                 .as_ref()
                 .ok_or_else(|| SkillError("Reload the plugin catalog first.".into()))?
                 .root
                 .clone()
         }
-        PluginCommand::SetEnabled { .. } | PluginCommand::Inspect { .. } => String::new(),
+        PluginCommand::SetEnabled { .. }
+        | PluginCommand::Inspect { .. }
+        | PluginCommand::AddFromGitHub { .. }
+        | PluginCommand::CheckForUpdate { .. }
+        | PluginCommand::ApplyUpdate { .. } => String::new(),
     };
     match &command {
         PluginCommand::Browse { .. } | PluginCommand::NextPage | PluginCommand::PreviousPage => {
+            let page = session.catalog.as_ref().map(|page| &page.catalog);
             let url = match &command {
                 PluginCommand::Browse { url } => url.clone(),
-                PluginCommand::NextPage => catalog
-                    .as_ref()
-                    .and_then(|page| page.catalog.next.clone())
+                PluginCommand::NextPage => page
+                    .and_then(|page| page.next.clone())
                     .ok_or_else(|| SkillError("There is no next catalog page.".into()))?,
-                PluginCommand::PreviousPage => catalog
-                    .as_ref()
-                    .and_then(|page| page.catalog.previous.clone())
+                PluginCommand::PreviousPage => page
+                    .and_then(|page| page.previous.clone())
                     .ok_or_else(|| SkillError("There is no previous catalog page.".into()))?,
                 PluginCommand::Install { .. }
                 | PluginCommand::SetEnabled { .. }
-                | PluginCommand::Inspect { .. } => unreachable!("catalog commands only"),
+                | PluginCommand::Inspect { .. }
+                | PluginCommand::AddFromGitHub { .. }
+                | PluginCommand::CheckForUpdate { .. }
+                | PluginCommand::ApplyUpdate { .. } => unreachable!("catalog commands only"),
             };
             if matches!(&command, PluginCommand::Browse { .. }) {
-                *catalog = None;
+                session.catalog = None;
             }
             let next = PluginCatalog::parse(&download(&url, MAX_CATALOG_BYTES).await?)?;
             discovered = Some(PluginEvent::Catalog { url, catalog: next });
         }
         PluginCommand::Install { id } => {
-            let entry = catalog
+            let entry = session
+                .catalog
                 .as_ref()
                 .and_then(|page| page.catalog.plugins.iter().find(|entry| &entry.id == id))
                 .ok_or_else(|| SkillError("Reload the plugin catalog before installing.".into()))?
@@ -188,33 +236,144 @@ pub(crate) async fn handle(
             }
             let bytes = download(&entry.package_url, MAX_PLUGIN_BYTES).await?;
             entry.verify_package(&bytes)?;
-            downloaded = Some((entry, bytes));
+            downloaded = Some(Download {
+                entry,
+                bytes,
+                catalog_url: root.clone(),
+                github: None,
+            });
+        }
+        PluginCommand::AddFromGitHub { address } => {
+            let repository = GitHubRepository::parse(address)?;
+            let reader = github::Reader::new(&session.hosts)?;
+            let head = reader.head(&repository).await?;
+            let github::Snapshot {
+                entry,
+                bytes,
+                pin,
+                left_out,
+            } = reader.snapshot(&repository, head, store.as_ref()).await?;
+            discovered = Some(PluginEvent::Added {
+                id: entry.id.clone(),
+                package: entry.verify_package(&bytes)?,
+                left_out,
+            });
+            downloaded = Some(Download {
+                entry,
+                bytes,
+                catalog_url: repository.web_url(),
+                github: Some(pin),
+            });
+        }
+        PluginCommand::CheckForUpdate { id } => {
+            session.pending = None;
+            let (library, installed, current) = {
+                let store = store.clone();
+                let id = id.clone();
+                tokio::task::spawn_blocking(move || {
+                    let library = store.load()?;
+                    let installed = library
+                        .installed
+                        .iter()
+                        .find(|plugin| plugin.entry.id == id)
+                        .cloned()
+                        .ok_or_else(|| SkillError("This plugin is no longer installed.".into()))?;
+                    let current = store.package(&installed.entry)?;
+                    Ok::<_, SkillError>((library, installed, current))
+                })
+                .await
+                .map_err(|_| SkillError("The plugin storage worker stopped. Try again.".into()))??
+            };
+            let Some(pin) = installed.github else {
+                return Err(SkillError(
+                    "This plugin came from a catalog. Load its catalog to see newer versions."
+                        .into(),
+                ));
+            };
+            let reader = github::Reader::new(&session.hosts)?;
+            let head = reader.head(&pin.repository).await?;
+            if head.commit == pin.commit {
+                return Ok((library, Some(PluginEvent::UpToDate { id: id.clone() })));
+            }
+            let github::Snapshot {
+                entry,
+                bytes,
+                pin,
+                left_out,
+            } = reader
+                .snapshot(&pin.repository, head, store.as_ref())
+                .await?;
+            let mut changes = PluginChanges::between(&current, &entry.verify_package(&bytes)?);
+            changes.left_out = left_out;
+            session.pending = Some((
+                id.clone(),
+                Download {
+                    entry,
+                    bytes,
+                    catalog_url: installed.catalog_url,
+                    github: Some(pin),
+                },
+            ));
+            return Ok((
+                library,
+                Some(PluginEvent::UpdateReady {
+                    id: id.clone(),
+                    changes,
+                }),
+            ));
+        }
+        PluginCommand::ApplyUpdate { id } => {
+            // Only the exact bytes the person reviewed are applied, never a fresh download.
+            let (_, pending) = session
+                .pending
+                .take()
+                .filter(|(pending, _)| pending == id)
+                .ok_or_else(|| {
+                    SkillError("Choose Check for update again before updating.".into())
+                })?;
+            downloaded = Some(pending);
         }
         PluginCommand::SetEnabled { .. } | PluginCommand::Inspect { .. } => {}
     }
-    let index_root = root.clone();
+    let adding = matches!(&command, PluginCommand::AddFromGitHub { .. });
+    let updating = matches!(&command, PluginCommand::ApplyUpdate { .. });
     let (library, details) = tokio::task::spawn_blocking(move || {
         let mut library = store.load()?;
         let mut details = None;
         let mut required_plugin = None;
         match command {
             PluginCommand::Browse { url } => library.catalog_url = Some(url),
-            PluginCommand::Install { .. } => {
-                let (entry, bytes) = downloaded
-                    .expect("install downloads and verifies its package before persistence");
+            PluginCommand::Install { .. }
+            | PluginCommand::AddFromGitHub { .. }
+            | PluginCommand::ApplyUpdate { .. } => {
+                let Download {
+                    entry,
+                    bytes,
+                    catalog_url,
+                    github,
+                } = downloaded.expect("installs download and verify their package first");
                 let mut plugin = InstalledPlugin {
                     entry,
-                    catalog_url: index_root,
+                    catalog_url,
                     enabled: false,
+                    github,
                 };
                 if let Some(existing) = library
                     .installed
                     .iter_mut()
                     .find(|existing| existing.entry.id == plugin.entry.id)
                 {
-                    check_update(existing, &plugin.entry, &plugin.catalog_url)?;
+                    if adding {
+                        return Err(SkillError(
+                            "This repository is already added. Choose Check for update to get its newer changes."
+                                .into(),
+                        ));
+                    }
+                    check_replacement(existing, &plugin)?;
                     plugin.enabled = existing.enabled;
                     *existing = plugin.clone();
+                } else if updating {
+                    return Err(SkillError("This plugin is no longer installed.".into()));
                 } else {
                     library.installed.push(plugin.clone());
                 }
@@ -247,7 +406,9 @@ pub(crate) async fn handle(
                 });
                 return Ok::<_, SkillError>((library, details));
             }
-            PluginCommand::NextPage | PluginCommand::PreviousPage => return Ok((library, details)),
+            PluginCommand::NextPage
+            | PluginCommand::PreviousPage
+            | PluginCommand::CheckForUpdate { .. } => return Ok((library, details)),
         }
         library.validate()?;
         let admission = required_plugin
@@ -260,7 +421,7 @@ pub(crate) async fn handle(
     .await
     .map_err(|_| SkillError("The plugin storage worker stopped. Try again.".into()))??;
     if let Some(PluginEvent::Catalog { catalog: found, .. }) = &discovered {
-        *catalog = Some(RemoteCatalog {
+        session.catalog = Some(RemoteCatalog {
             root,
             catalog: found.clone(),
         });

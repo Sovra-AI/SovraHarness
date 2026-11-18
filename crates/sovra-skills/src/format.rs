@@ -32,6 +32,14 @@ struct Frontmatter {
 }
 
 pub(crate) fn decode(content: &str, directory_name: &str) -> Result<Skill, SkillError> {
+    decode_named(content, Some(directory_name))
+}
+
+/// `None` accepts the frontmatter's own name, for a `SKILL.md` at a repository root.
+pub(crate) fn decode_named(
+    content: &str,
+    directory_name: Option<&str>,
+) -> Result<Skill, SkillError> {
     if content.len() > MAX_SKILL_BYTES {
         return Err(SkillError("SKILL.md exceeds 64 KB.".into()));
     }
@@ -71,7 +79,7 @@ pub(crate) fn decode(content: &str, directory_name: &str) -> Result<Skill, Skill
     };
     let front: Frontmatter = serde_saphyr::from_str_with_options(&header, options)
         .map_err(|_| SkillError("Invalid or overly complex skill frontmatter. Check names, strings and metadata; YAML anchors and tags are not supported.".into()))?;
-    if front.name != directory_name {
+    if directory_name.is_some_and(|directory| front.name != directory) {
         return Err(SkillError(
             "The skill name must match its folder name.".into(),
         ));

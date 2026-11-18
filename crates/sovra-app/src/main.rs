@@ -145,6 +145,7 @@ fn main() -> anyhow::Result<()> {
             plugins: Some(Arc::new(sovra_skills::LocalPluginStore::new(
                 data_dir.as_path().join("plugins"),
             ))),
+            plugin_hosts: sovra_core::plugins::GitHubHosts::default(),
             skills: Some(Arc::new(sovra_skills::LocalSkillStore::new(
                 data_dir.as_path().join("skills"),
             ))),

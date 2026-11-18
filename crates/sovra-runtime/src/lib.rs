@@ -307,6 +307,7 @@ pub fn start_with_auth(
             files,
             skills,
             plugins: None,
+            plugin_hosts: sovra_core::plugins::GitHubHosts::default(),
             index,
             messaging,
             signin: google,
@@ -337,6 +338,8 @@ pub struct RuntimeServices {
     pub files: Option<Arc<dyn sovra_core::files::FileStore>>,
     pub skills: Option<Arc<dyn sovra_core::skills::SkillStore>>,
     pub plugins: Option<Arc<dyn sovra_core::plugins::PluginStore>>,
+    /// Where plugins added from a GitHub repository are read from.
+    pub plugin_hosts: sovra_core::plugins::GitHubHosts,
     pub index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
     pub messaging: MessagingChannels,
     /// Google Sign-In for the login screen.
@@ -461,6 +464,7 @@ async fn serve(
         files,
         skills: skill_store,
         plugins: plugin_store,
+        plugin_hosts,
         index,
         messaging,
         signin,
@@ -520,7 +524,13 @@ async fn serve(
         .as_ref()
         .map(|store| files::FileRuntime::start(store.clone(), events.clone(), &handle));
     let load_skills = skill_store.is_some() || plugin_store.is_some();
-    let skills = skills::SkillsRuntime::start(skill_store, plugin_store, events.clone(), &handle);
+    let skills = skills::SkillsRuntime::start(
+        skill_store,
+        plugin_store,
+        plugin_hosts,
+        events.clone(),
+        &handle,
+    );
     let mut session_files = std::collections::BTreeMap::<String, Vec<String>>::new();
     let harness = build_harness(&agent_config);
     let search =

@@ -14,6 +14,22 @@ package version.
 
 ## [Unreleased]
 
+- **Add plugins straight from GitHub.** On **Skills → Plugins**, paste a
+  repository address (`https://github.com/owner/repo` or `owner/repo`) and
+  choose **Add from GitHub**. Sovra adds every `SKILL.md` skill in the
+  repository, and suggests the web (HTTPS) connections listed in `.mcp.json`
+  or `.claude-plugin/plugin.json`. It is added switched off and fixed to the
+  commit it was read at. **Check for update** lists the skills and connections a
+  newer commit adds, changes or removes, and nothing changes until you choose
+  **Update**. Nothing from the repository is run: scripts, tool grants and
+  servers that start a program are left out. A skill that can't be used (too
+  large, or its name doesn't match its folder) is named and skipped, and the
+  rest are still added. Public repositories only, up to 32 skills each.
+  Each skill keeps the text files in its folder (reference documents,
+  templates, scripts as text), which a helper can read while the plugin is on.
+  **What's included** shows how many each skill has. Pictures, very large
+  files and anything over the limits are left out and counted in the message.
+
 - **My AI preview choices are the same height.** Use my chat model, Preview
   effort by task, and Preview automatic choice share one height when they sit
   in a row.

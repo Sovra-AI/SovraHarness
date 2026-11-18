@@ -79,6 +79,7 @@ fn library_validates_saved_data_and_state_keeps_installed_plugins_on_failure() {
         entry,
         catalog_url: "https://example.github.io/plugins/catalog.json".into(),
         enabled: true,
+        github: None,
     };
     let mut library = PluginLibrary {
         catalog_url: None,
@@ -110,6 +111,7 @@ fn updates_preserve_publisher_identity_and_immutable_versions() {
         entry: entry.clone(),
         catalog_url: "https://example.com/catalog.json".into(),
         enabled: true,
+        github: None,
     };
     assert!(check_update(&installed, &entry, &installed.catalog_url).is_ok());
     assert!(check_update(&installed, &entry, "https://other.example/catalog.json").is_err());

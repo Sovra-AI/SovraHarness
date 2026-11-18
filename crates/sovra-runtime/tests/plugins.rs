@@ -48,6 +48,35 @@ impl PluginStore for Store {
             .insert(entry.sha256.clone(), bytes.to_vec());
         Ok(())
     }
+    /// A minimal stand-in for the skills adapter's `SKILL.md` parser.
+    fn read_skill_file(
+        &self,
+        folder: Option<&str>,
+        content: &str,
+    ) -> Result<sovra_core::plugins::PluginSkill, SkillError> {
+        let (header, body) = content
+            .strip_prefix("---\n")
+            .and_then(|rest| rest.split_once("\n---\n"))
+            .ok_or_else(|| SkillError("no frontmatter".into()))?;
+        let field = |key: &str| {
+            header
+                .lines()
+                .find_map(|line| line.strip_prefix(key))
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let name = field("name:");
+        if folder.is_some_and(|folder| folder != name) {
+            return Err(SkillError("name must match folder".into()));
+        }
+        sovra_core::plugins::repository_skill(
+            name.clone(),
+            &name,
+            &field("description:"),
+            body.trim().into(),
+        )
+    }
 }
 
 async fn until(client: &Client, done: impl Fn(&PluginEvent) -> bool) -> Vec<Event> {
@@ -289,6 +318,7 @@ async fn a_damaged_active_package_keeps_its_disable_controls_and_other_skills() 
             entry: entry.clone(),
             catalog_url: "https://example.com/catalog.json".into(),
             enabled: true,
+            github: None,
         });
     let client = sovra_runtime::start_with_services(
         "plugin-test",
@@ -324,6 +354,7 @@ async fn damaged_plugins_can_be_disabled_individually() {
             entry,
             catalog_url: "https://example.com/catalog.json".into(),
             enabled: true,
+            github: None,
         })
         .collect();
     let client = sovra_runtime::start_with_services(
@@ -385,6 +416,7 @@ async fn activation_at_capacity_cannot_displace_an_existing_enabled_plugin() {
             entry,
             catalog_url: "https://example.com/catalog.json".into(),
             enabled: index > 0,
+            github: None,
         });
     }
     store.save(&library).unwrap();
@@ -417,4 +449,234 @@ async fn activation_at_capacity_cannot_displace_an_existing_enabled_plugin() {
     );
     assert_eq!(store.load().unwrap(), library);
     client.send(Command::Shutdown).unwrap();
+}
+
+const FIRST: &str = "0123456789abcdef0123456789abcdef01234567";
+const SECOND: &str = "89abcdef0123456789abcdef0123456789abcdef";
+
+fn skill_file(name: &str, body: &str) -> Vec<u8> {
+    format!("---\nname: {name}\ndescription: Helps with {name}.\n---\n{body}\n").into_bytes()
+}
+
+fn github_commit(routes: &mut BTreeMap<String, Vec<u8>>, commit: &str, skills: &[(&str, &str)]) {
+    routes.insert(
+        "/api/repos/owner/skills/commits/main".into(),
+        commit.as_bytes().to_vec(),
+    );
+    // A skill whose name does not match its folder is left out, never fatal, and so
+    // is a picture inside a skill folder.
+    let mut tree = vec![
+        serde_json::json!({"path": "skills/notes/logo.png", "type": "blob", "size": 20}),
+        serde_json::json!({"path": ".mcp.json", "type": "blob"}),
+        serde_json::json!({"path": "skills/template/SKILL.md", "type": "blob"}),
+    ];
+    routes.insert(
+        format!("/raw/owner/skills/{commit}/skills/template/SKILL.md"),
+        skill_file("template-skill", "Replace me."),
+    );
+    for (name, body) in skills {
+        tree.push(serde_json::json!({"path": format!("skills/{name}/SKILL.md"), "type": "blob"}));
+        tree.push(serde_json::json!({"path": format!("skills/{name}/guide.md"), "type": "blob", "size": 20}));
+        routes.insert(
+            format!("/raw/owner/skills/{commit}/skills/{name}/guide.md"),
+            format!("Guide for {name}.").into_bytes(),
+        );
+        routes.insert(
+            format!("/raw/owner/skills/{commit}/skills/{name}/SKILL.md"),
+            skill_file(name, body),
+        );
+    }
+    routes.insert(
+        format!("/api/repos/owner/skills/git/trees/{commit}?recursive=1"),
+        serde_json::to_vec(&serde_json::json!({"tree": tree, "truncated": false}))
+            .expect("tree json"),
+    );
+    routes.insert(
+        format!("/raw/owner/skills/{commit}/.mcp.json"),
+        br#"{"mcpServers":{"docs":{"url":"https://docs.example/mcp"},"local":{"command":"npx"}}}"#
+            .to_vec(),
+    );
+}
+
+#[tokio::test]
+async fn github_repository_adds_switched_off_then_updates_only_after_review() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let root = format!("http://{}", listener.local_addr().unwrap());
+    let mut initial = BTreeMap::from([(
+        "/api/repos/owner/skills".to_owned(),
+        br#"{"default_branch":"main","description":"Writing helpers","private":false}"#.to_vec(),
+    )]);
+    github_commit(&mut initial, FIRST, &[("notes", "Take tidy notes.")]);
+    let routes = Arc::new(Mutex::new(initial));
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (served, requested) = (routes.clone(), requests.clone());
+    let _server = tokio::runtime::Handle::current().spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = vec![0; 8192];
+            let length = socket.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..length]);
+            let path = request.split_whitespace().nth(1).unwrap().to_owned();
+            requested.lock().unwrap().push(path.clone());
+            let body = served.lock().unwrap().get(&path).cloned();
+            let head = match &body {
+                Some(body) => format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                ),
+                None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .into(),
+            };
+            socket.write_all(head.as_bytes()).await.unwrap();
+            socket.write_all(&body.unwrap_or_default()).await.unwrap();
+        }
+    });
+    let store = Arc::new(Store::default());
+    let client = sovra_runtime::start_with_services(
+        "plugin-github-test",
+        AgentConfig::default(),
+        RuntimeServices {
+            plugins: Some(store.clone()),
+            plugin_hosts: sovra_core::plugins::GitHubHosts {
+                api: format!("{root}/api"),
+                raw: format!("{root}/raw"),
+            },
+            ..RuntimeServices::default()
+        },
+    )
+    .unwrap();
+    until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    let send = |command| client.send(Command::Plugins(command)).unwrap();
+
+    send(PluginCommand::AddFromGitHub {
+        address: "https://github.com/owner/skills".into(),
+    });
+    let added = until(&client, |event| {
+        matches!(event, PluginEvent::Added { .. } | PluginEvent::Error(_))
+    })
+    .await;
+    let Some(Event::Plugins(PluginEvent::Added {
+        id,
+        package,
+        left_out,
+    })) = added.last()
+    else {
+        panic!("expected the repository to be added: {added:?}");
+    };
+    assert_eq!(
+        left_out,
+        &[
+            "notes: 1 file that is not text, very large, or over the limit",
+            "template (name must match folder)"
+        ],
+        "a skill that cannot be read is named and skipped; the rest are still added"
+    );
+    let id = id.clone();
+    assert_eq!(id, "io.github.owner.skills");
+    assert_eq!(package.skills[0].instructions, "Take tidy notes.");
+    assert_eq!(
+        package.skills[0]
+            .resources
+            .get("guide.md")
+            .map(String::as_str),
+        Some("Guide for notes."),
+        "the skill folder's text files come with it"
+    );
+    assert_eq!(
+        package.services,
+        [sovra_core::plugins::PluginService {
+            name: "docs".into(),
+            address: "https://docs.example/mcp".into(),
+        }],
+        "only web connections are suggested; program-starting servers are skipped"
+    );
+    assert!(
+        !contains_plugin_skill(&added),
+        "adding does not switch it on"
+    );
+    let saved = store.load().unwrap().installed.remove(0);
+    assert!(!saved.enabled);
+    assert_eq!(saved.catalog_url, "https://github.com/owner/skills");
+    assert_eq!(saved.github.as_ref().unwrap().commit, FIRST);
+
+    send(PluginCommand::AddFromGitHub {
+        address: "owner/skills".into(),
+    });
+    let again = until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+    assert!(
+        matches!(again.last(), Some(Event::Plugins(PluginEvent::Error(text))) if text.contains("already added"))
+    );
+
+    send(PluginCommand::SetEnabled {
+        id: id.clone(),
+        enabled: true,
+    });
+    assert!(contains_plugin_skill(
+        &until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await
+    ));
+
+    requests.lock().unwrap().clear();
+    send(PluginCommand::CheckForUpdate { id: id.clone() });
+    until(&client, |event| {
+        matches!(event, PluginEvent::UpToDate { .. })
+    })
+    .await;
+    assert!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|path| !path.contains("/trees/")),
+        "an unchanged commit is not downloaded again"
+    );
+
+    github_commit(
+        &mut routes.lock().unwrap(),
+        SECOND,
+        &[("notes", "Take tidier notes."), ("plan", "Plan the week.")],
+    );
+    send(PluginCommand::CheckForUpdate { id: id.clone() });
+    let ready = until(&client, |event| {
+        matches!(
+            event,
+            PluginEvent::UpdateReady { .. } | PluginEvent::Error(_)
+        )
+    })
+    .await;
+    let Some(Event::Plugins(PluginEvent::UpdateReady { changes, .. })) = ready.last() else {
+        panic!("expected an update: {ready:?}");
+    };
+    assert_eq!(changes.added, ["plan"]);
+    assert_eq!(changes.changed, ["notes"]);
+    assert_eq!(
+        store.load().unwrap().installed[0]
+            .github
+            .as_ref()
+            .unwrap()
+            .commit,
+        FIRST,
+        "checking never replaces the installed copy"
+    );
+
+    send(PluginCommand::ApplyUpdate { id: id.clone() });
+    let applied = until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    assert!(
+        contains_plugin_skill(&applied),
+        "the update keeps it switched on"
+    );
+    let updated = store.load().unwrap().installed.remove(0);
+    assert_eq!(updated.github.as_ref().unwrap().commit, SECOND);
+    assert!(updated.enabled);
+
+    send(PluginCommand::ApplyUpdate { id: id.clone() });
+    until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+
+    send(PluginCommand::AddFromGitHub {
+        address: "owner/missing".into(),
+    });
+    let missing = until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+    assert!(
+        matches!(missing.last(), Some(Event::Plugins(PluginEvent::Error(text))) if text.contains("couldn't find"))
+    );
+    assert_eq!(store.load().unwrap().installed.len(), 1);
 }

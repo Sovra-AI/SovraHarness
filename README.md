@@ -121,8 +121,9 @@ has the first run, group steps, every setting, privacy details and limits.
   [Decision records](docs/decisions.md) for the local-account approval boundary.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
   Connection setup and permissions depend on the service.
-- **Download plugins:** open **Skills → Plugins** to browse a GitHub Pages catalog,
-  download skills, and turn them on or off. See [Plugins](docs/plugins.md) for
+- **Download plugins:** open **Skills → Plugins** and paste a GitHub repository
+  address to add its `SKILL.md` skills, or browse a GitHub Pages catalog. Turn
+  plugins on or off, and review what changed before taking an update. See [Plugins](docs/plugins.md) for
   the package contract, editor schema, read-only catalog check, and publisher.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
   scheduled search note to a WhatsApp group.

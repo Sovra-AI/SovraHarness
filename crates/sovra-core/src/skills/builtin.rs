@@ -36,7 +36,7 @@ impl Skill {
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
             "decisions" => "Keep a company decision and its reasons",
-            "plugins" => "Add skills from a plugin catalog",
+            "plugins" => "Add skills from GitHub or a catalog",
             "connections" => "Link the things Sovra can use",
             "groups" => "Share with your family or team",
             "share-artifact" => "Share a document or list with your group",
@@ -165,7 +165,7 @@ impl Skill {
                 "Opens your saved documents, checklists, tables, code and website projects. Use folders, favorites, search and sorting to find your work.".to_owned(),
                 "/artifacts ".to_owned(),
             ),
-            "plugins" => ("Open Plugins, paste a catalog address, and download a weekly planning helper.".into(), "/plugins".into()),
+            "plugins" => ("Open Plugins, paste a GitHub address like github.com/owner/skills, and add its helpers.".into(), "/plugins".into()),
             "connections" => (
                 "Opens Connections, where you link an AI, WhatsApp, Telegram, Google, or a service from a web address."
                     .to_owned(),
@@ -474,8 +474,8 @@ pub fn builtin_skills() -> Vec<Skill> {
         ),
         action(
             "plugins",
-            "Add skills from a plugin catalog",
-            "Browse downloadable helpers from a catalog you trust, then choose which ones to turn on.",
+            "Add skills from GitHub or a catalog",
+            "Paste a GitHub address or a catalog you trust to add new helpers, check what changed before updating, and choose which ones to turn on.",
             SkillAction::Plugins,
             &[],
         ),

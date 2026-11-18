@@ -1,9 +1,74 @@
 # Downloadable plugins
 
 Sovra's first plugin API bundles reusable instructions and suggested service
-connections. A publisher hosts static JSON files, including on GitHub Pages.
-Sovra browses catalog metadata, downloads only the selected package, verifies it,
-and stores it on this computer. Publishers do not need a running registry server.
+connections. There are two ways to get one: paste a public GitHub repository
+address, or load a catalog that a publisher hosts as static JSON files (for
+example on GitHub Pages). Either way, Sovra stores the plugin on this computer
+and checks it before use. Neither needs a running registry server.
+
+## Add from GitHub
+
+Open **Skills → Plugins**, paste a repository address into **Add from GitHub**,
+and choose **Add from GitHub**. These forms all work:
+`https://github.com/owner/repo`, `github.com/owner/repo.git` and `owner/repo`.
+Paste the repository's main address. A link to a folder or file inside it
+(`/tree/…`, `/blob/…`) is refused.
+
+Sovra reads the newest commit on the repository's default branch and takes:
+
+- **Skills:** every `SKILL.md` in the
+  [Agent Skills format](skills-and-file-knowledge.md#add-reusable-instructions),
+  in any folder. Folders that start with a dot are skipped, except `.claude`.
+  So are `node_modules`, `target`, `vendor` and `__pycache__`. Each skill's
+  `name` must match its folder, apart from a `SKILL.md` at the repository root.
+  When one skill name appears in two places, the first usable path in sorted
+  order is used. A skill that can't be used (a file over 64 KB, a name that
+  doesn't match its folder, unreadable frontmatter, or a name longer than 32
+  characters) is left out and named in the message. The rest are still added.
+- **Suggested connections:** servers in `.mcp.json` at the root and in the
+  `mcpServers` object of `.claude-plugin/plugin.json` that have an HTTPS `url`.
+  At most eight are kept. Servers that start a program (`command`) and plain
+  HTTP addresses are left out. **Set up connection** works as it does for
+  catalog plugins.
+
+Each skill also keeps the **text files in its folder**: reference documents,
+templates, and scripts (kept as text only). Files inside a nested skill's
+folder belong to that skill. Hidden files, `node_modules` and the like,
+pictures and other non-text files, and files over 128 KB are left out. A skill
+keeps at most 64 files, and a repository at most 1.5 MB of them; when there are
+more, the smallest files are kept first, so every skill gets its short guides.
+The rest are left out. The message gives the number left out for each skill. The skill's
+instructions end with a list of its files, so the helper can read one when the
+instructions mention it (`load_skill` with the skill name and the file's path
+as `resource`). Files can only be read while the plugin is switched on.
+
+`allowed-tools` does not grant tools, and nothing from the repository is run,
+scripts included. The title is `owner/repo`. The description comes from `plugin.json`, otherwise
+from the repository's GitHub description.
+
+A repository is added **switched off**, like a catalog download, and is fixed
+to the commit it was read at. The installed row shows the first seven
+characters of that commit. **Check for update** reads the newest commit again.
+If the commit is the same, Sovra says it is up to date and downloads nothing
+else. Otherwise it lists each skill and connection that the newer commit adds,
+changes or removes, and any it would leave out. **Update** installs exactly what was listed, keeping the
+on/off choice; **Not now** keeps the installed copy. A repository that is
+already added cannot be added a second time; use **Check for update**.
+
+Limits:
+
+- Public repositories only. Requests are not signed in, so GitHub allows about
+  60 an hour from one computer. Adding a repository makes three of those
+  requests and an up-to-date check makes two; file contents are downloaded
+  from the commit's raw file addresses.
+- Up to 32 skills per repository (catalog packages stay at 16), 64 KB per
+  `SKILL.md`, and 4 MB for the whole plugin with its files (catalog packages
+  stay at 512 KB and cannot include files). Every skill also counts toward
+  Sovra's 256-skill total.
+- Redirects are refused. A renamed or moved repository asks for its new
+  address. A plugin stays tied to the repository address it was added from.
+- A repository is identified as `io.github.<owner>.<repo>` (lowercased). That
+  is a name, not proof of ownership. Trust comes from the repository you choose.
 
 ## Use a catalog
 

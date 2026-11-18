@@ -201,6 +201,7 @@ fn plugins_reopen_offline_and_keep_index_and_content_separate() {
             entry: entry.clone(),
             enabled: false,
             catalog_url: "https://example.com/catalog.json".into(),
+            github: None,
         }],
     };
     store.save(&library).unwrap();
@@ -350,4 +351,19 @@ fn personal_skills_cannot_claim_plugin_ownership_and_hide_their_edit_controls() 
     );
     assert!(store.save(&skill).is_err());
     assert_eq!(store.list().unwrap().skills, [] as [Skill; 0]);
+}
+
+#[test]
+fn repository_skill_files_decode_without_their_tool_grants() {
+    use sovra_core::plugins::PluginStore as _;
+    let store = LocalPluginStore::new(std::env::temp_dir().join("unused-plugin-store"));
+    let content = "---\nname: pdf\ndescription: >\n  Read and fill\n  PDF forms.\nallowed-tools: Bash\n---\n\nUse the form.\n";
+    let skill = store.read_skill_file(Some("pdf"), content).unwrap();
+    assert_eq!(skill.name, "pdf");
+    assert_eq!(skill.description, "Read and fill PDF forms.");
+    assert_eq!(skill.instructions, "Use the form.");
+    // A root SKILL.md has no folder, so its own name is used.
+    assert_eq!(store.read_skill_file(None, content).unwrap().name, "pdf");
+    assert!(store.read_skill_file(Some("other"), content).is_err());
+    assert!(store.read_skill_file(None, "no frontmatter").is_err());
 }
