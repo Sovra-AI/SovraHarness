@@ -137,3 +137,62 @@ fn updates_preserve_publisher_identity_and_immutable_versions() {
         .is_err()
     );
 }
+
+#[test]
+fn only_package_files_no_installed_plugin_uses_are_collectable() {
+    let entry = PluginCatalog::parse(CATALOG).unwrap().plugins.remove(0);
+    let library = PluginLibrary {
+        catalog_url: None,
+        installed: vec![InstalledPlugin {
+            entry: entry.clone(),
+            catalog_url: "https://example.com/catalog.json".into(),
+            enabled: true,
+            github: None,
+        }],
+    };
+    let kept = format!("{}.json", entry.sha256);
+    assert_eq!(library.package_files(), BTreeSet::from([kept.clone()]));
+    assert!(PluginLibrary::is_package_file(&kept));
+    for not_a_package in [
+        "plugins.json".to_owned(),
+        ".write-1-2".into(),
+        format!("{}.JSON", entry.sha256),
+        format!("{}.json", entry.sha256.to_uppercase()),
+        format!("{}.json", &entry.sha256[1..]),
+        format!("../{}.json", &entry.sha256[3..]),
+    ] {
+        assert!(
+            !PluginLibrary::is_package_file(&not_a_package),
+            "{not_a_package}"
+        );
+    }
+}
+
+#[test]
+fn removing_a_plugin_closes_its_open_panels_and_says_connections_stay() {
+    let package: PluginPackage = serde_json::from_slice(PACKAGE).unwrap();
+    let mut state = PluginState {
+        details: Some(("io.example.gone".into(), package.clone())),
+        update: Some(("io.example.gone".into(), PluginChanges::default())),
+        busy: true,
+        ..PluginState::default()
+    };
+    let mut other = state.clone();
+    other.details = Some(("io.example.kept".into(), package));
+    let removed = PluginEvent::Removed {
+        id: "io.example.gone".into(),
+        title: "Weekly planning".into(),
+    };
+    state.apply(&removed);
+    assert_eq!(
+        (state.details, state.update, state.busy),
+        (None, None, false)
+    );
+    assert!(state.notice.contains("Removed Weekly planning"));
+    assert!(state.notice.contains("Connections"));
+    other.apply(&removed);
+    assert!(
+        other.details.is_some(),
+        "another plugin's details stay open"
+    );
+}

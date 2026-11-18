@@ -453,6 +453,12 @@ mod tests {
         fn cache(&self, _: &sovra_core::plugins::PluginEntry, _: &[u8]) -> Result<(), SkillError> {
             Ok(())
         }
+        fn remove_unused(
+            &self,
+            _: &sovra_core::plugins::PluginLibrary,
+        ) -> Result<usize, SkillError> {
+            Ok(0)
+        }
         fn read_skill_file(
             &self,
             _: Option<&str>,

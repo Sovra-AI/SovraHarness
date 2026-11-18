@@ -313,3 +313,80 @@ fn github_add_check_and_update_controls_fit_supported_sizes(cx: &mut TestAppCont
         }
     }
 }
+
+#[gpui_kit::test]
+fn removing_a_plugin_asks_twice_and_fits_supported_sizes(cx: &mut TestAppContext) {
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(scale),
+                    cx,
+                );
+            });
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let shell = cx.new(|cx| Shell::new(0, window, cx));
+                shell.update(cx, |shell, cx| {
+                    shell.select_tab(sovra_core::NavTab::Plugins, cx);
+                });
+                Root::new(shell, window, cx)
+            });
+            let plugin = github_plugin();
+            let id = plugin.entry.id.clone();
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Loaded(PluginLibrary {
+                    catalog_url: None,
+                    installed: vec![plugin],
+                })))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            while commands.try_recv().is_ok() {}
+            cx.update_window(window.into(), |_, window, cx| {
+                assert!(window.try_find(("plugin-remove-warning", 0usize)).is_none());
+                reveal(window, ("plugin-remove", 0usize), cx);
+                window.click(("plugin-remove", 0usize), cx);
+                window.render_frame(cx);
+                // The first press only explains what removing does.
+                reveal(window, ("plugin-remove-warning", 0usize), cx);
+            })
+            .unwrap();
+            assert!(
+                commands.try_recv().is_err(),
+                "one press must not remove anything"
+            );
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, ("plugin-remove", 0usize), cx);
+                window.click(("plugin-remove", 0usize), cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(&command, Command::Plugins(PluginCommand::Remove { id: removed }) if *removed == id)));
+            events
+                .send_blocking(Event::Plugins(
+                    PluginEvent::Loaded(PluginLibrary::default()),
+                ))
+                .unwrap();
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Removed {
+                    id: id.clone(),
+                    title: "owner/writing-skills".into(),
+                }))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert!(window.try_find(("plugin-remove", 0usize)).is_none());
+                assert!(window.try_find(("plugin-remove-warning", 0usize)).is_none());
+                reveal(window, "plugin-notice", cx);
+                window.remove_window();
+            })
+            .unwrap();
+        }
+    }
+}

@@ -475,7 +475,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "plugins",
             "Add skills from GitHub or a catalog",
-            "Paste a GitHub address or a catalog you trust to add new helpers, check what changed before updating, and choose which ones to turn on.",
+            "Paste a GitHub address or a catalog you trust to add new helpers, check what changed before updating, choose which ones to turn on, and remove the ones you no longer want.",
             SkillAction::Plugins,
             &[],
         ),

@@ -14,6 +14,14 @@ package version.
 
 ## [Unreleased]
 
+- **Remove a plugin you no longer want.** Each installed plugin on the
+  **Plugins** page has **Remove**; press it, read what it does, and press
+  **Click again to remove**. Its skills leave Sovra straight away, even if it
+  was switched on, and its stored copy is deleted from this computer.
+  Connections you set up from it stay in **Connections**. You can add it again
+  later. Sovra also now deletes the stored copy of an older version after an
+  update, so updates no longer pile up old files.
+
 - **Add plugins straight from GitHub.** On the new **Plugins** page in the menu, paste a
   repository address (`https://github.com/owner/repo` or `owner/repo`) and
   choose **Add from GitHub**. Sovra adds every `SKILL.md` skill in the

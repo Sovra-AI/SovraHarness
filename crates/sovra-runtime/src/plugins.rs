@@ -199,7 +199,8 @@ pub(crate) async fn handle(
         | PluginCommand::Inspect { .. }
         | PluginCommand::AddFromGitHub { .. }
         | PluginCommand::CheckForUpdate { .. }
-        | PluginCommand::ApplyUpdate { .. } => String::new(),
+        | PluginCommand::ApplyUpdate { .. }
+        | PluginCommand::Remove { .. } => String::new(),
     };
     match &command {
         PluginCommand::Browse { .. } | PluginCommand::NextPage | PluginCommand::PreviousPage => {
@@ -217,7 +218,8 @@ pub(crate) async fn handle(
                 | PluginCommand::Inspect { .. }
                 | PluginCommand::AddFromGitHub { .. }
                 | PluginCommand::CheckForUpdate { .. }
-                | PluginCommand::ApplyUpdate { .. } => unreachable!("catalog commands only"),
+                | PluginCommand::ApplyUpdate { .. }
+                | PluginCommand::Remove { .. } => unreachable!("catalog commands only"),
             };
             if matches!(&command, PluginCommand::Browse { .. }) {
                 session.catalog = None;
@@ -351,10 +353,26 @@ pub(crate) async fn handle(
                 })?;
             downloaded = Some(pending);
         }
-        PluginCommand::SetEnabled { .. } | PluginCommand::Inspect { .. } => {}
+        PluginCommand::SetEnabled { .. }
+        | PluginCommand::Inspect { .. }
+        | PluginCommand::Remove { .. } => {}
     }
     let adding = matches!(&command, PluginCommand::AddFromGitHub { .. });
     let updating = matches!(&command, PluginCommand::ApplyUpdate { .. });
+    let removing = match &command {
+        PluginCommand::Remove { id } => Some(id.clone()),
+        PluginCommand::Browse { .. }
+        | PluginCommand::Install { .. }
+        | PluginCommand::NextPage
+        | PluginCommand::PreviousPage
+        | PluginCommand::Inspect { .. }
+        | PluginCommand::SetEnabled { .. }
+        | PluginCommand::AddFromGitHub { .. }
+        | PluginCommand::CheckForUpdate { .. }
+        | PluginCommand::ApplyUpdate { .. } => None,
+    };
+    // Installs, updates and removals can leave a package file nothing refers to.
+    let packages_change = removing.is_some() || downloaded.is_some();
     let (library, details) = tokio::task::spawn_blocking(move || {
         let mut library = store.load()?;
         let mut details = None;
@@ -409,6 +427,15 @@ pub(crate) async fn handle(
                     required_plugin = Some(id);
                 }
             }
+            PluginCommand::Remove { id } => {
+                let index = library
+                    .installed
+                    .iter()
+                    .position(|plugin| plugin.entry.id == id)
+                    .ok_or_else(|| SkillError("This plugin is no longer installed.".into()))?;
+                let title = library.installed.remove(index).entry.title;
+                details = Some(PluginEvent::Removed { id, title });
+            }
             PluginCommand::Inspect { id } => {
                 let plugin = library
                     .installed
@@ -431,10 +458,27 @@ pub(crate) async fn handle(
             .map_or(Admission::Recover, Admission::ValidatePlugin);
         listing(skills.as_deref(), &library, Some(store.as_ref()), admission)?;
         store.save(&library)?;
+        if packages_change {
+            // The saved index is already correct; a file left behind only costs space
+            // and is retried after the next change, so this never fails the command.
+            match store.remove_unused(&library) {
+                Ok(0) => {}
+                Ok(removed) => tracing::debug!(removed, "deleted unused plugin packages"),
+                Err(error) => tracing::warn!(%error, "could not delete unused plugin packages"),
+            }
+        }
         Ok((library, details))
     })
     .await
     .map_err(|_| SkillError("The plugin storage worker stopped. Try again.".into()))??;
+    if removing.is_some_and(|id| {
+        session
+            .pending
+            .as_ref()
+            .is_some_and(|(pending, _)| *pending == id)
+    }) {
+        session.pending = None;
+    }
     if let Some(PluginEvent::Catalog { catalog: found, .. }) = &discovered {
         session.catalog = Some(RemoteCatalog {
             root,

@@ -117,6 +117,9 @@ pub trait PluginStore: Send + Sync + std::fmt::Debug {
     fn save(&self, library: &PluginLibrary) -> Result<(), SkillError>;
     fn package(&self, entry: &PluginEntry) -> Result<PluginPackage, SkillError>;
     fn cache(&self, entry: &PluginEntry, bytes: &[u8]) -> Result<(), SkillError>;
+    /// Deletes stored packages that no entry in `library` refers to (removed plugins and
+    /// replaced versions) and returns how many were deleted.
+    fn remove_unused(&self, library: &PluginLibrary) -> Result<usize, SkillError>;
     /// Decodes one Agent Skills `SKILL.md`. `folder` is `None` at a repository root,
     /// where the skill's own name is used instead of a folder name.
     fn read_skill_file(
@@ -156,6 +159,10 @@ pub enum PluginCommand {
     ApplyUpdate {
         id: String,
     },
+    /// Takes a plugin off this computer. Connections set up from it are kept.
+    Remove {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +188,11 @@ pub enum PluginEvent {
     },
     UpToDate {
         id: String,
+    },
+    /// Sent after the `Loaded` library that no longer lists the plugin.
+    Removed {
+        id: String,
+        title: String,
     },
     Busy,
     Error(String),
@@ -252,6 +264,18 @@ impl PluginState {
                 self.update = None;
                 self.busy = false;
                 self.notice = format!("{} is already up to date.", self.title(id));
+            }
+            PluginEvent::Removed { id, title } => {
+                if self.details.as_ref().is_some_and(|(shown, _)| shown == id) {
+                    self.details = None;
+                }
+                if self.update.as_ref().is_some_and(|(shown, _)| shown == id) {
+                    self.update = None;
+                }
+                self.busy = false;
+                self.notice = format!(
+                    "Removed {title}. Its skills are gone from Sovra. Connections you set up from it stay in Connections."
+                );
             }
             PluginEvent::Busy => {
                 self.busy = true;
@@ -473,6 +497,26 @@ impl PluginPackage {
 }
 
 impl PluginLibrary {
+    /// File names (`<sha256>.json`) of the packages this library still uses. Anything
+    /// else in the package folder is safe to delete.
+    pub fn package_files(&self) -> BTreeSet<String> {
+        self.installed
+            .iter()
+            .map(|plugin| format!("{}.json", plugin.entry.sha256))
+            .collect()
+    }
+
+    /// Whether `name` has the shape of a stored package file, so collection never
+    /// touches the index, staging files or anything a person put there.
+    pub fn is_package_file(name: &str) -> bool {
+        name.strip_suffix(".json").is_some_and(|hash| {
+            hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        })
+    }
+
     pub fn validate(&self) -> Result<(), SkillError> {
         if self.installed.len() > MAX_PLUGINS {
             return Err(error("At most 4096 plugins can be installed."));

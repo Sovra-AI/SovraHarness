@@ -123,7 +123,8 @@ has the first run, group steps, every setting, privacy details and limits.
   Connection setup and permissions depend on the service.
 - **Download plugins:** open **Plugins** (in the menu on the left) and paste a GitHub repository
   address to add its `SKILL.md` skills, or browse a GitHub Pages catalog. Turn
-  plugins on or off, and review what changed before taking an update. See [Plugins](docs/plugins.md) for
+  plugins on or off, review what changed before taking an update, and remove
+  ones you no longer want. See [Plugins](docs/plugins.md) for
   the package contract, editor schema, read-only catalog check, and publisher.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
   scheduled search note to a WhatsApp group.

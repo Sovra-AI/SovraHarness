@@ -367,3 +367,44 @@ fn repository_skill_files_decode_without_their_tool_grants() {
     assert!(store.read_skill_file(Some("other"), content).is_err());
     assert!(store.read_skill_file(None, "no frontmatter").is_err());
 }
+
+#[test]
+fn unused_plugin_packages_are_deleted_and_everything_else_is_left_alone() {
+    use sovra_core::plugins::{
+        InstalledPlugin, PluginEntry, PluginLibrary, PluginPackage, PluginStore,
+    };
+    let fixture = Fixture::new();
+    let directory = fixture.0.join("plugins");
+    let store = LocalPluginStore::new(directory.clone());
+    let kept = PluginEntry::for_package("https://example.com/kept.json".into(), PLUGIN).unwrap();
+    let mut other: PluginPackage = serde_json::from_slice(PLUGIN).unwrap();
+    other.version = "1.0.1".into();
+    let other_bytes = serde_json::to_vec(&other).unwrap();
+    let replaced =
+        PluginEntry::for_package("https://example.com/old.json".into(), &other_bytes).unwrap();
+    store.cache(&kept, PLUGIN).unwrap();
+    store.cache(&replaced, &other_bytes).unwrap();
+    let library = PluginLibrary {
+        catalog_url: None,
+        installed: vec![InstalledPlugin {
+            entry: kept.clone(),
+            catalog_url: "https://example.com/catalog.json".into(),
+            enabled: true,
+            github: None,
+        }],
+    };
+    store.save(&library).unwrap();
+    fs::write(directory.join("notes.txt"), "mine").unwrap();
+    let lookalike = directory.join(format!("{}.json", "a".repeat(64)));
+    fs::create_dir(&lookalike).unwrap();
+
+    assert_eq!(store.remove_unused(&library).unwrap(), 1);
+    assert!(store.package(&kept).is_ok());
+    assert!(store.package(&replaced).is_err());
+    assert_eq!(store.load().unwrap(), library);
+    assert!(directory.join("notes.txt").exists());
+    assert!(lookalike.is_dir(), "only regular package files are deleted");
+    assert_eq!(store.remove_unused(&library).unwrap(), 0);
+    assert_eq!(store.remove_unused(&PluginLibrary::default()).unwrap(), 1);
+    assert!(directory.join("plugins.json").exists());
+}

@@ -1,7 +1,9 @@
 //! Paged remote discovery and local plugin controls on the Skills page.
 
 use gpui_kit::component::{
-    Disableable as _, h_flex,
+    Disableable as _,
+    button::ButtonVariants as _,
+    h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
 };
@@ -29,6 +31,8 @@ pub(crate) struct PluginBrowser {
     github: Entity<InputState>,
     search: Entity<InputState>,
     installed_page: usize,
+    /// The plugin whose **Remove** was pressed once; a second press removes it.
+    confirm_remove: Option<String>,
     _search: Subscription,
 }
 
@@ -55,6 +59,7 @@ impl PluginBrowser {
             }),
             search,
             installed_page: 0,
+            confirm_remove: None,
             _search: subscription,
         }
     }
@@ -65,6 +70,7 @@ impl Shell {
         if self.plugins.state.busy {
             return;
         }
+        self.plugins.confirm_remove = None;
         if matches!(&command, PluginCommand::Browse { .. }) {
             self.plugins.state.catalog = None;
         }
@@ -165,7 +171,9 @@ fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     {
         let id = plugin.entry.id.clone();
         let detail_id = id.clone();
+        let remove_id = id.clone();
         let enabled = plugin.enabled;
+        let confirming = browser.confirm_remove.as_deref() == Some(id.as_str());
         panel = panel.child(
             v_flex()
                 .w_full()
@@ -245,8 +253,51 @@ fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
                                         cx,
                                     );
                                 }))
-                        })),
-                ),
+                        }))
+                        .child(
+                            design::button(
+                                ("plugin-remove", index),
+                                if confirming {
+                                    "Click again to remove"
+                                } else {
+                                    "Remove"
+                                },
+                                cx,
+                            )
+                            .ghost()
+                            .disabled(busy)
+                            .accessibility_label(if confirming {
+                                format!("Confirm removing {}", plugin.entry.title)
+                            } else {
+                                format!("Remove {}", plugin.entry.title)
+                            })
+                            .on_click(cx.listener(
+                                move |shell, _, _, cx| {
+                                    if shell.plugins.confirm_remove.as_ref() == Some(&remove_id) {
+                                        shell.plugin_command(
+                                            PluginCommand::Remove {
+                                                id: remove_id.clone(),
+                                            },
+                                            cx,
+                                        );
+                                    } else {
+                                        shell.plugins.confirm_remove = Some(remove_id.clone());
+                                        cx.notify();
+                                    }
+                                },
+                            )),
+                        ),
+                )
+                .children(confirming.then(|| {
+                    div()
+                        .id(("plugin-remove-warning", index))
+                        .test_support()
+                        .min_w_0()
+                        .sovra_text(TextRole::Caption, cx)
+                        .child(
+                            "This takes its skills off this computer. Connections you set up from it stay in Connections. You can add it again later.",
+                        )
+                })),
         );
     }
     if let Some((id, changes)) = &state.update {

@@ -77,6 +77,19 @@ Limits:
 - A repository is identified as `io.github.<owner>.<repo>` (lowercased). That
   is a name, not proof of ownership. Trust comes from the repository you choose.
 
+## Remove a plugin
+
+Choose **Remove** on an installed plugin, then **Click again to remove**. A
+plugin that is switched on is switched off and removed in the same step: its
+skills leave the Skills page and new chats at once. A chat already using one of
+its skills finishes with the copy it started with, as with **Turn off**.
+
+Removing deletes the plugin's stored copy from this computer, so nothing of it
+is left behind. Connections you set up from its suggestions are yours and stay
+in **Connections**; stop them there. An update you checked but did not take is
+dropped too. To use the plugin again, add it from GitHub or download it from its
+catalog again; it comes back switched off, at the newest version.
+
 ## Use a catalog
 
 Open **Plugins** (in the menu on the left), paste the full HTTPS address of `catalog.json`, and
@@ -101,7 +114,8 @@ installation scripts, or permission grants.
 Installed packages and their on/off choices work offline after restart. Failed
 downloads, invalid packages and incompatible updates leave the installed version
 and its choice intact. Updates preserve the on/off choice. There are no automatic
-updates, uninstall UI, dependency downloads, or executable plugin API in version 1.
+updates, dependency downloads, or executable plugin API in version 1. To uninstall
+one, see [Remove a plugin](#remove-a-plugin).
 
 ## Publisher contract: version 1
 
@@ -270,7 +284,8 @@ together so page navigation does not mix releases.
 | Package storage | Separate immutable files named by checksum; updates replace the index atomically, not every installed package |
 | Activation | Only enabled package contents enter the skill catalog; Sovra's existing 256-skill limit includes built-in and personal skills, and activation fails clearly if that budget is exceeded |
 | Failure isolation | A damaged active package is reported and omitted at startup while installed controls remain available to turn it off |
-| Updates | Explicit, serialized, checksum-verified and identity-bound; prior cache blobs are retained, with no cache collection or rollback UI yet |
+| Updates | Explicit, serialized, checksum-verified and identity-bound; there is no rollback UI |
+| Cache collection | After every install, update or removal is saved, package files no installed entry names are deleted. Only regular `<sha256>.json` files are candidates; the index, staging files and anything else in the folder are left alone. A failed deletion is logged and retried after the next change, never failing the command |
 
 Core owns validation, identity rules, commands/events and the UI reducer.
 `sovra-skills` owns private storage and publisher filesystem IO behind the core
@@ -280,7 +295,7 @@ one serialized library worker; shutdown cancels its task. `sovra-app` supplies t
 plugin storage path once. The UI sends commands and renders events.
 
 Version 1 establishes that boundary for future content kinds. Executable plugins,
-declared permissions, dependency solving, signed catalogs, global remote search,
-cache collection and multi-catalog discovery need explicit contracts and tests
+declared permissions, dependency solving, signed catalogs, global remote search
+and multi-catalog discovery need explicit contracts and tests
 before being supported. Follow the version and extension rules above when adding
 them.

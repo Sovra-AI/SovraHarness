@@ -74,6 +74,31 @@ impl PluginStore for LocalPluginStore {
         self.write(&path, bytes)
     }
 
+    fn remove_unused(&self, library: &PluginLibrary) -> Result<usize, SkillError> {
+        // Same lock as `save`, so the index and the files it names change in order.
+        let _guard = self
+            .writes
+            .lock()
+            .map_err(|_| SkillError("Plugin storage is unavailable.".into()))?;
+        private_directory(&self.directory)?;
+        let keep = library.package_files();
+        let mut removed = 0;
+        for item in fs::read_dir(&self.directory).map_err(|error| io_error(&error))? {
+            let item = item.map_err(|error| io_error(&error))?;
+            let Some(name) = item.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            // Only regular files shaped like a package are candidates; a link or folder
+            // with that name was not written by this store.
+            let regular = item.file_type().is_ok_and(|kind| kind.is_file());
+            if regular && PluginLibrary::is_package_file(&name) && !keep.contains(&name) {
+                fs::remove_file(item.path()).map_err(|error| io_error(&error))?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     fn read_skill_file(
         &self,
         folder: Option<&str>,

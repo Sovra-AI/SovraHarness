@@ -48,6 +48,17 @@ impl PluginStore for Store {
             .insert(entry.sha256.clone(), bytes.to_vec());
         Ok(())
     }
+    fn remove_unused(&self, library: &PluginLibrary) -> Result<usize, SkillError> {
+        let keep: Vec<_> = library
+            .installed
+            .iter()
+            .map(|plugin| plugin.entry.sha256.clone())
+            .collect();
+        let mut packages = self.packages.lock().expect("plugin packages");
+        let before = packages.len();
+        packages.retain(|sha256, _| keep.contains(sha256));
+        Ok(before - packages.len())
+    }
     /// A minimal stand-in for the skills adapter's `SKILL.md` parser.
     fn read_skill_file(
         &self,
@@ -453,6 +464,7 @@ async fn activation_at_capacity_cannot_displace_an_existing_enabled_plugin() {
 
 const FIRST: &str = "0123456789abcdef0123456789abcdef01234567";
 const SECOND: &str = "89abcdef0123456789abcdef0123456789abcdef";
+const THIRD: &str = "fedcba9876543210fedcba9876543210fedcba98";
 
 fn skill_file(name: &str, body: &str) -> Vec<u8> {
     format!("---\nname: {name}\ndescription: Helps with {name}.\n---\n{body}\n").into_bytes()
@@ -684,4 +696,69 @@ async fn github_repository_adds_switched_off_then_updates_only_after_review() {
         matches!(missing.last(), Some(Event::Plugins(PluginEvent::Error(text))) if text.contains("couldn't find"))
     );
     assert_eq!(store.load().unwrap().installed.len(), 1);
+    assert_eq!(
+        store.packages.lock().unwrap().len(),
+        1,
+        "the replaced version's stored copy is deleted after the update"
+    );
+
+    github_commit(
+        &mut routes.lock().unwrap(),
+        THIRD,
+        &[("notes", "Take the tidiest notes.")],
+    );
+    send(PluginCommand::CheckForUpdate { id: id.clone() });
+    until(&client, |event| {
+        matches!(event, PluginEvent::UpdateReady { .. })
+    })
+    .await;
+    send(PluginCommand::Remove { id: id.clone() });
+    let removed = until(&client, |event| {
+        matches!(event, PluginEvent::Removed { .. } | PluginEvent::Error(_))
+    })
+    .await;
+    assert!(
+        matches!(removed.last(), Some(Event::Plugins(PluginEvent::Removed { id: gone, title })) if *gone == id && title == "owner/skills"),
+        "{removed:?}"
+    );
+    assert!(
+        removed.iter().any(|event| matches!(event, Event::Plugins(PluginEvent::Loaded(library)) if library.installed.is_empty())),
+        "the new list arrives before the removal notice"
+    );
+    assert!(
+        !contains_plugin_skill(&removed),
+        "a removed plugin's skills leave the library at once, even while it was on"
+    );
+    assert_eq!(store.load().unwrap().installed, []);
+    assert_eq!(
+        store.packages.lock().unwrap().len(),
+        0,
+        "nothing from the plugin is left on this computer"
+    );
+    send(PluginCommand::ApplyUpdate { id: id.clone() });
+    until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+    assert_eq!(
+        store.load().unwrap().installed,
+        [],
+        "an update reviewed before removal cannot bring the plugin back"
+    );
+    send(PluginCommand::Remove { id: id.clone() });
+    let twice = until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+    assert!(
+        matches!(twice.last(), Some(Event::Plugins(PluginEvent::Error(text))) if text.contains("no longer installed"))
+    );
+
+    send(PluginCommand::AddFromGitHub {
+        address: "owner/skills".into(),
+    });
+    until(&client, |event| matches!(event, PluginEvent::Added { .. })).await;
+    assert_eq!(
+        store.load().unwrap().installed[0]
+            .github
+            .as_ref()
+            .unwrap()
+            .commit,
+        THIRD,
+        "a removed repository can be added again"
+    );
 }
