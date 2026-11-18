@@ -17,12 +17,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Get this plugin
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: plugin
 
       - name: Get Sovra's plugin checker
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Sovra-AI/SovraHarness
           ref: main
