@@ -14,6 +14,14 @@ package version.
 
 ## [Unreleased]
 
+- **Plugin skills show a real example.** A skill's card on the **Skills** page
+  used to show its command name, like `/plugin-d58da42cb19b11c0-thank-you-note`.
+  Now it shows the everyday request its author wrote with `sovra-example` in
+  `SKILL.md` (for example *"Help me thank my neighbour for watering my
+  plants"*), and **Try the example** puts it in the chat. A skill without one
+  says *Use it in chat* with its name. The plugin template has an example. This
+  also works for skill folders you import.
+
 - **A template for making your own plugin.** The new open-source (MIT)
   [plugin template](https://github.com/Sovra-AI/sovra-plugin-template) is a
   working plugin with one example skill. Choose **Use this template**, change

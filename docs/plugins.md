@@ -47,6 +47,9 @@ Sovra reads the newest commit on the repository's default branch and takes:
   order is used. A skill that can't be used (a file over 64 KB, a name that
   doesn't match its folder, unreadable frontmatter, or a name longer than 32
   characters) is left out and named in the message. The rest are still added.
+  An optional `sovra-example` in a skill's `metadata` is the everyday request
+  its **Skills** page card shows (one line, at most 200 bytes); without it, the
+  card names the skill instead of showing its command.
 - **Suggested connections:** servers in `.mcp.json` at the root and in the
   `mcpServers` object of `.claude-plugin/plugin.json` that have an HTTPS `url`.
   At most eight are kept. Servers that start a program (`command`) and plain

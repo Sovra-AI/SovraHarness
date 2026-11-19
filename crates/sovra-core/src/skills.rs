@@ -14,6 +14,9 @@ pub use builtin::{SkillCardCopy, builtin_skills};
 
 pub const MAX_SKILL_BYTES: usize = 64 * 1024;
 pub const MAX_SKILLS: usize = 256;
+/// Skill metadata holding an everyday request for the Skills page, so a skill someone
+/// adds can show a real example instead of its command name.
+pub const EXAMPLE_METADATA_KEY: &str = "sovra-example";
 /// The standing list rides on every turn, so it is bounded; `load_skill` searches the rest.
 const AUTO_APPLY_LISTING_BYTES: usize = 6 * 1024;
 const AUTO_APPLY_DESCRIPTION_CHARS: usize = 280;

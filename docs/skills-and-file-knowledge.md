@@ -40,6 +40,8 @@ tool availability constrains the list. A model-selected skill is not treated as
 an explicit user selection. Untrusted messaging senders do not receive private
 skills or their resources. Package metadata can disable automatic use with
 `sovra-auto-apply: false` or `disable-model-invocation: true`.
+`sovra-example` in a skill's metadata is the everyday request its **Skills** page
+card shows and **Try the example** puts in the chat.
 
 ## Add and read folders
 

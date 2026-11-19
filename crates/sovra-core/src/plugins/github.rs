@@ -503,7 +503,7 @@ impl RepositorySnapshot {
     }
 }
 
-fn clean_text(value: &str, max: usize) -> String {
+pub(super) fn clean_text(value: &str, max: usize) -> String {
     let mut text: String = value
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -540,6 +540,7 @@ pub fn repository_skill(
         description: description.trim().into(),
         instructions,
         resources: BTreeMap::new(),
+        example: String::new(),
     })
 }
 

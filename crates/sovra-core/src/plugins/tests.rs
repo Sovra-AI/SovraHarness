@@ -196,3 +196,39 @@ fn removing_a_plugin_closes_its_open_panels_and_says_connections_stay() {
         "another plugin's details stay open"
     );
 }
+
+#[test]
+fn plugin_skill_cards_show_an_everyday_example_never_the_command_name() {
+    let catalog = PluginCatalog::parse(CATALOG).unwrap();
+    let mut package = catalog.plugins[0].verify_package(PACKAGE).unwrap();
+    let plain = package.skills(true).remove(0).friendly_card_copy();
+    assert!(
+        !plain.example_display.contains("plugin-"),
+        "{}",
+        plain.example_display
+    );
+    assert!(plain.example_display.contains(&plain.friendly_title));
+    assert!(plain.sample_draft.starts_with("/plugin-"));
+
+    let long = format!("Plan   my\nweek {}", "x".repeat(300));
+    package.skills[0] = package.skills[0].clone().with_example(&long);
+    assert!(package.skills[0].example.starts_with("Plan my week x"));
+    assert!(package.skills[0].example.len() <= 200);
+    package.skills[0] = package.skills[0]
+        .clone()
+        .with_example("Plan my week around the school run");
+    package.validate(&catalog.plugins[0]).unwrap();
+    let skill = package.skills(true).remove(0);
+    let copy = skill.friendly_card_copy();
+    assert_eq!(
+        copy.example_display,
+        "Example: “Plan my week around the school run”"
+    );
+    assert_eq!(
+        copy.sample_draft,
+        format!("/{} Plan my week around the school run", skill.name)
+    );
+
+    package.skills[0].example = "Two\nlines".into();
+    assert!(package.validate(&catalog.plugins[0]).is_err());
+}

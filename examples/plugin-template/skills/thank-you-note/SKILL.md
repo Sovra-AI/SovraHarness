@@ -3,6 +3,7 @@ name: thank-you-note
 description: Use when someone wants to thank a person for a gift, a favour or their help, and would like a short, warm note written for them.
 metadata:
   sovra-title: Write a thank-you note
+  sovra-example: Help me thank my neighbour for watering my plants
 ---
 
 # Write a thank-you note

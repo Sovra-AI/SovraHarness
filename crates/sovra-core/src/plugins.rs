@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::skills::{Skill, SkillCatalog, SkillError, SkillKind, valid_name};
+use crate::skills::{EXAMPLE_METADATA_KEY, Skill, SkillCatalog, SkillError, SkillKind, valid_name};
 
 mod github;
 pub use github::{
@@ -69,7 +69,23 @@ pub struct PluginSkill {
     /// from GitHub carry them; catalog packages (format version 1) must not.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub resources: BTreeMap<String, String>,
+    /// An everyday request the Skills page shows, from `sovra-example` in `SKILL.md`.
+    /// Left out when empty so packages without one keep their checksums.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub example: String,
 }
+
+impl PluginSkill {
+    /// Sets the Skills page example, on one line and at most 200 bytes.
+    #[must_use]
+    pub fn with_example(mut self, example: &str) -> Self {
+        self.example = github::clean_text(example, MAX_EXAMPLE_BYTES);
+        self
+    }
+}
+
+/// Room for one plain sentence on a Skills page card.
+const MAX_EXAMPLE_BYTES: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -444,6 +460,12 @@ impl PluginPackage {
                 ));
             }
             github::check_resources(&skill.resources)?;
+            if !skill.example.is_empty() && !short_text(&skill.example, MAX_EXAMPLE_BYTES) {
+                return Err(error(&format!(
+                    "The example for \"{}\" must be one short line.",
+                    skill.name
+                )));
+            }
         }
         SkillCatalog::new(self.skills(true))?;
         for service in &self.services {
@@ -490,7 +512,14 @@ impl PluginPackage {
                 builtin: false,
                 license: None,
                 compatibility: None,
-                metadata: BTreeMap::from([(PLUGIN_METADATA_KEY.into(), self.id.clone())]),
+                metadata: BTreeMap::from_iter(
+                    [(PLUGIN_METADATA_KEY.into(), self.id.clone())]
+                        .into_iter()
+                        .chain(
+                            (!skill.example.is_empty())
+                                .then(|| (EXAMPLE_METADATA_KEY.into(), skill.example.clone())),
+                        ),
+                ),
             })
             .collect()
     }

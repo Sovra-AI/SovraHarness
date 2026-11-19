@@ -437,6 +437,11 @@ fn the_plugin_template_is_added_with_every_skill_and_file() {
     );
     let listed = package.skills(true).remove(0);
     assert!(listed.instructions.contains("tone-guide.md"));
+    assert_eq!(
+        listed.friendly_card_copy().example_display,
+        "Example: “Help me thank my neighbour for watering my plants”",
+        "the Skills page shows the author's example, not the command name"
+    );
 }
 
 #[test]

@@ -339,13 +339,25 @@ impl Skill {
                 "github",
                 "Are there any pull requests on GitHub waiting for my review?",
             ),
+            // Skills people add show the example their author wrote. Without one, the
+            // card names the skill in words: command names like `/plugin-…` mean
+            // nothing to most people.
             _ => {
-                let sample = if self.argument_hint.is_empty() {
-                    format!("/{} ", self.name)
+                if let Some(example) = self
+                    .metadata
+                    .get(super::EXAMPLE_METADATA_KEY)
+                    .map(|example| example.trim())
+                    .filter(|example| !example.is_empty())
+                {
+                    sample_pair(&self.name, example)
                 } else {
-                    format!("/{} {}", self.name, self.argument_hint)
-                };
-                (format!("Example: {sample}"), sample)
+                    let sample = if self.argument_hint.is_empty() {
+                        format!("/{} ", self.name)
+                    } else {
+                        format!("/{} {}", self.name, self.argument_hint)
+                    };
+                    (format!("Use it in chat: “{friendly_title}”"), sample)
+                }
             }
         };
 

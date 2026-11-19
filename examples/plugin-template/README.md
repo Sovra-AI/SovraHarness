@@ -48,6 +48,7 @@ name: thank-you-note
 description: Use when someone wants to thank a person for a gift or a favour.
 metadata:
   sovra-title: Write a thank-you note
+  sovra-example: Help me thank my neighbour for watering my plants
 ---
 
 Ask who the note is for, then write three to five warm sentences.
@@ -58,6 +59,7 @@ Ask who the note is for, then write three to five warm sentences.
 | `name` | The folder's name, exactly. Lowercase letters and numbers joined by single hyphens, at most 32 characters, like `thank-you-note`. |
 | `description` | When Sovra should use this skill, in one or two sentences. Sovra reads it to pick the right skill on its own. |
 | `sovra-title` | Optional. The friendly name people see. Without it, the name is used with spaces. |
+| `sovra-example` | Optional. Something a person might ask, in their own words. The **Skills** page shows it, and **Try the example** puts it in the chat. One line, at most 200 characters. |
 | The instructions | Plain steps, as you would explain the job to a helpful person. |
 
 To add a skill, copy the `thank-you-note` folder, rename the folder, and set

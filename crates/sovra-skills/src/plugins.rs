@@ -107,12 +107,18 @@ impl PluginStore for LocalPluginStore {
         // Same parser as imported skill folders. Tool grants in `allowed-tools` are
         // dropped: plugin skills are instructions only.
         let skill = crate::format::decode_named(content, folder)?;
-        repository_skill(
+        let example = skill
+            .metadata
+            .get(sovra_core::skills::EXAMPLE_METADATA_KEY)
+            .cloned()
+            .unwrap_or_default();
+        Ok(repository_skill(
             skill.name,
             &skill.title,
             &skill.description,
             skill.instructions,
-        )
+        )?
+        .with_example(&example))
     }
 
     fn save(&self, library: &PluginLibrary) -> Result<(), SkillError> {
