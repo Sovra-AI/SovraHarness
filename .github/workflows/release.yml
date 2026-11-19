@@ -38,7 +38,8 @@ jobs:
           - { os: windows-latest, channel: win, exe: sovra.exe }
           - { os: ubuntu-24.04, channel: linux, exe: sovra }
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    # A cold macOS build exceeded two hours before reaching the final link.
+    timeout-minutes: ${{ matrix.channel == 'osx' && 300 || 120 }}
     permissions:
       contents: read
       id-token: write # Azure OIDC for Windows signing
@@ -67,6 +68,9 @@ jobs:
           echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
           free -h
           df -h /
+      - name: Limit parallel builds on the Apple Silicon runner
+        if: runner.os == 'macOS'
+        run: echo "CARGO_BUILD_JOBS=3" >> "$GITHUB_ENV"
       - run: rustup show
       - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
         with:

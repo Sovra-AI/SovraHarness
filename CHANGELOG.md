@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-19
+
 - **Plugin skills show a real example.** A skill's card on the **Skills** page
   used to show its command name, like `/plugin-d58da42cb19b11c0-thank-you-note`.
   Now it shows the everyday request its author wrote with `sovra-example` in
