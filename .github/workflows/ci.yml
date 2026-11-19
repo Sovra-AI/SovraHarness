@@ -14,6 +14,11 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
+    inputs:
+      revision:
+        description: Optional release tag or commit to validate
+        type: string
+        required: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -36,6 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - run: ./scripts/install-linux-deps.sh
       - run: rustup show
@@ -56,10 +62,14 @@ jobs:
   test:
     name: Test
     runs-on: macos-15
-    timeout-minutes: 45
+    # A cold build of the test executables alone takes over 45 minutes.
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: 3
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - run: rustup show
       - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
@@ -81,6 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - run: rustup show
       - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3

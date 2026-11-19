@@ -42,7 +42,9 @@ installer on its target OS.
 1. Update the workspace version in `Cargo.toml` and keep `Cargo.lock` consistent.
 2. Move the relevant **Unreleased** entries in `CHANGELOG.md` under the release
    version and date; update user guides for changed behavior.
-3. Run `cargo xtask ci`. Resolve failures before releasing.
+3. Run `cargo xtask ci`. Resolve failures before releasing. To recheck an
+   existing release with the current CI runners, use `gh workflow run ci.yml
+   --ref main -f revision=vX.Y.Z`.
 4. Build and install-test the packages on their target systems. Verify normal
    startup, credential storage and Development mode starting off.
 5. Verify signing configuration and the resulting signatures before distribution.

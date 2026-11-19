@@ -14,6 +14,9 @@ package version.
 
 ## [Unreleased]
 
+- CI allows a cold macOS test build to finish and can validate a specific
+  release tag using the current runner configuration.
+
 - Release builds start on version bumps or matching tags. Each release tag
   identifies the commit used to build all three installers, even if more work
   lands on `main` during packaging.
