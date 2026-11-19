@@ -390,3 +390,143 @@ fn removing_a_plugin_asks_twice_and_fits_supported_sizes(cx: &mut TestAppContext
         }
     }
 }
+
+fn plugins_window(
+    cx: &mut TestAppContext,
+    (width, height, scale): (f32, f32, u16),
+    mode: ThemeMode,
+) -> (
+    gpui_kit::WindowHandle<Root>,
+    async_channel::Receiver<Command>,
+    async_channel::Sender<Event>,
+) {
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| {
+        sovra_ui::init(client, cx);
+        Theme::change(mode, None, cx);
+        design::set_interface_scale(sovra_core::models::InterfaceScale::from_percent(scale), cx);
+    });
+    let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+        let shell = cx.new(|cx| Shell::new(0, window, cx));
+        shell.update(cx, |shell, cx| {
+            shell.select_tab(sovra_core::NavTab::Plugins, cx);
+        });
+        Root::new(shell, window, cx)
+    });
+    (window, commands, events)
+}
+
+const SIZES: [(f32, f32, u16); 3] = [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)];
+
+#[gpui_kit::test]
+fn a_first_visit_offers_the_example_plugin_at_supported_sizes(cx: &mut TestAppContext) {
+    for sizing in SIZES {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (window, commands, _events) = plugins_window(cx, sizing, mode);
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, "plugin-add-example", cx);
+                window.click("plugin-add-example", cx);
+                reveal(window, "plugin-template-link", cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(&command, Command::Plugins(PluginCommand::AddFromGitHub { address }) if address == sovra_core::plugins::PLUGIN_TEMPLATE)));
+            cx.update_window(window.into(), |_, window, _| window.remove_window())
+                .unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn whats_included_opens_inside_its_plugin_card_and_closes_without_a_command(
+    cx: &mut TestAppContext,
+) {
+    use sovra_core::plugins::{PluginPackage, PluginService};
+    for sizing in SIZES {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (window, commands, events) = plugins_window(cx, sizing, mode);
+            let plugin = github_plugin();
+            let id = plugin.entry.id.clone();
+            let mut package: PluginPackage = serde_json::from_slice(include_bytes!(
+                "../../../../examples/plugins/packages/weekly-planning-1.0.0.json"
+            ))
+            .unwrap();
+            package.services.push(PluginService {
+                name: "A planning service with a long name that has to wrap".into(),
+                address: "https://planning.example/a/very/long/address/for/the/mcp/server".into(),
+            });
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Loaded(PluginLibrary {
+                    catalog_url: None,
+                    installed: vec![plugin],
+                })))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                assert!(window.try_find("plugin-empty").is_none());
+                reveal(window, ("plugin-details", 0usize), cx);
+                window.click(("plugin-details", 0usize), cx);
+            })
+            .unwrap();
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(&command, Command::Plugins(PluginCommand::Inspect { id: inspected }) if *inspected == id)));
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Details {
+                    id: id.clone(),
+                    package,
+                }))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, ("plugin-service", 0usize), cx);
+                let card = window.find(("plugin-card", 0usize)).bounds();
+                let included = window.find(("plugin-included", 0usize)).bounds();
+                assert!(
+                    included.top() >= card.top() && included.bottom() <= card.bottom(),
+                    "what's included belongs to its plugin's card"
+                );
+                reveal(window, ("plugin-details", 0usize), cx);
+                window.click(("plugin-details", 0usize), cx);
+                window.render_frame(cx);
+                assert!(window.try_find(("plugin-included", 0usize)).is_none());
+            })
+            .unwrap();
+            assert!(
+                commands.try_recv().is_err(),
+                "hiding the details asks the runtime for nothing"
+            );
+            cx.update_window(window.into(), |_, window, _| window.remove_window())
+                .unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn the_two_ways_to_add_sit_side_by_side_only_when_they_fit(cx: &mut TestAppContext) {
+    for sizing in SIZES {
+        let (window, _commands, _events) = plugins_window(cx, sizing, ThemeMode::Light);
+        cx.update_window(window.into(), |_, window, cx| {
+            // The first frame measures the column; the second lays out for it.
+            window.render_frame(cx);
+            reveal(window, "plugin-github-add", cx);
+            let github = window.find("plugin-add-github").bounds();
+            let catalog = window.find("plugin-add-catalog").bounds();
+            let wide = sizing.0 > 2000.;
+            if wide {
+                assert!(
+                    catalog.left() > github.right(),
+                    "wide windows put the catalog beside GitHub"
+                );
+            } else {
+                assert!(
+                    catalog.left() <= github.left(),
+                    "narrow windows stack the two ways"
+                );
+            }
+            window.remove_window();
+        })
+        .unwrap();
+    }
+}

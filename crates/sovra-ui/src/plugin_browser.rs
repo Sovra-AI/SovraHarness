@@ -1,25 +1,32 @@
-//! Paged remote discovery and local plugin controls on the Skills page.
+//! The Plugins page: the plugins you have as cards, ways to add one, and a catalog's
+//! listing. Everything it changes goes through `PluginCommand`; it never runs a package.
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    Disableable as _,
+    Disableable as _, Icon, Sizable as _,
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, Window, div,
+    AnyElement, AppContext as _, Context, Div, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
+    TestSupportExt as _, Window, div, relative,
 };
 use sovra_core::{
     Command,
-    plugins::{PluginChanges, PluginCommand, PluginEntry, PluginEvent, PluginState},
+    plugins::{
+        InstalledPlugin, PLUGIN_TEMPLATE, PluginChanges, PluginCommand, PluginEntry, PluginEvent,
+        PluginPackage, PluginState,
+    },
 };
 
 use crate::{
     RuntimeClient,
     design::{self, SovraStyled as _, Surface, TextRole},
     shell::Shell,
+    skill_library::tile,
 };
 
 const INSTALLED_PAGE_SIZE: usize = 20;
@@ -33,14 +40,16 @@ pub(crate) struct PluginBrowser {
     installed_page: usize,
     /// The plugin whose **Remove** was pressed once; a second press removes it.
     confirm_remove: Option<String>,
+    /// The page column's width, so the two ways of adding sit side by side only
+    /// when both fit.
+    width_class: design::WidthClass,
     _search: Subscription,
 }
 
 impl PluginBrowser {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let search = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Filter this page and your installed plugins")
-        });
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Find a plugin by name or words"));
         let subscription = cx.subscribe(&search, |shell, _, event, cx| {
             if matches!(event, InputEvent::Change) {
                 shell.plugins.installed_page = 0;
@@ -60,6 +69,7 @@ impl PluginBrowser {
             search,
             installed_page: 0,
             confirm_remove: None,
+            width_class: design::WidthClass::Compact,
             _search: subscription,
         }
     }
@@ -105,62 +115,191 @@ pub(crate) fn page(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement +
         .items_center()
         .p(t.space.medium)
         .child(
-            div()
+            v_flex()
+                .id("plugin-browser")
+                .test_support()
+                .relative()
                 .w_full()
                 .max_w(t.layout.page_width)
                 .min_w_0()
                 .mx_auto()
                 .flex_shrink_0()
-                .child(render(shell, cx)),
+                .gap(t.space.large)
+                // Measures this column, not the window, so the layout also fits
+                // beside the sidebar and at large text sizes.
+                .child(design::width_probe(cx, |shell: &mut Shell| {
+                    &mut shell.plugins.width_class
+                }))
+                .child(design::page_header(
+                    "Plugins",
+                    "A plugin adds ready-made skills to Sovra, and can suggest online services to connect. Nothing in a plugin runs on your computer, and a new plugin stays off until you turn it on.",
+                    cx,
+                ))
+                .children(notice(&shell.plugins.state, cx))
+                .child(installed_section(shell, cx))
+                .child(add_section(shell, cx))
+                .children(catalog_section(shell, cx)),
         )
 }
 
-fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+/// What just happened, or what went wrong. Hidden when there is nothing to say.
+fn notice(state: &PluginState, cx: &Context<Shell>) -> Option<impl IntoElement + use<>> {
+    let t = design::tokens(cx);
+    if state.notice.is_empty() {
+        return None;
+    }
+    let (icon, tone) = if state.problem {
+        (IconName::TriangleAlert, t.tiles.categories[3])
+    } else if state.busy {
+        (IconName::LoaderCircle, t.tiles.neutral)
+    } else {
+        (IconName::Info, t.tiles.categories[1])
+    };
+    Some(
+        h_flex()
+            .id("plugin-notice")
+            .test_support()
+            .aria_label(state.notice.clone())
+            .w_full()
+            .min_w_0()
+            .items_start()
+            .gap(t.space.small)
+            .p(t.space.small)
+            .rounded(t.radius.input)
+            .border_l_2()
+            .border_color(tone.foreground)
+            .bg(tone.background)
+            .child(
+                Icon::new(icon)
+                    .flex_shrink_0()
+                    .size(t.layout.icon_small)
+                    .text_color(tone.foreground),
+            )
+            .child(
+                design::paragraph(state.notice.clone())
+                    .id("plugin-notice-text")
+                    .min_w_0()
+                    .flex_1()
+                    .whitespace_normal()
+                    .sovra_text(TextRole::Caption, cx),
+            ),
+    )
+}
+
+/// A section title with an optional count and a one-line explanation.
+fn heading(title: &str, count: Option<usize>, blurb: &str, cx: &Context<Shell>) -> Div {
+    let t = design::tokens(cx);
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.compact)
+        .child(
+            h_flex()
+                .min_w_0()
+                .items_center()
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child(title.to_owned()),
+                )
+                .children(count.map(|count| pill(count.to_string(), t.tiles.neutral, cx))),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(blurb.to_owned()),
+        )
+}
+
+fn pill(text: impl Into<SharedString>, tone: design::TileTone, cx: &Context<Shell>) -> Div {
+    let t = design::tokens(cx);
+    div()
+        .flex_shrink_0()
+        .px(t.space.small)
+        .rounded(t.radius.pill)
+        .bg(tone.background)
+        .sovra_text(TextRole::Caption, cx)
+        .text_color(tone.foreground)
+        .child(text.into())
+}
+
+fn card(cx: &Context<Shell>) -> Div {
+    let t = design::tokens(cx);
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.small)
+        .p(t.space.medium)
+        .sovra_surface(Surface::Glass, cx)
+}
+
+/// Where a plugin came from, in words.
+fn source(plugin: &InstalledPlugin) -> String {
+    plugin.github.as_ref().map_or_else(
+        || format!("From a catalog · version {}", plugin.entry.version),
+        // The title is already the repository's name.
+        |pin| format!("From GitHub · version {}", pin.short_commit()),
+    )
+}
+
+fn matches(entry: &PluginEntry, query: &str) -> bool {
+    [&entry.title, &entry.description, &entry.id]
+        .iter()
+        .any(|text| text.to_lowercase().contains(query))
+}
+
+fn installed_section(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let browser = &shell.plugins;
     let state = &browser.state;
-    let busy = state.busy;
+    let total = state.library.installed.len();
     let query = browser.search.read(cx).value().trim().to_lowercase();
-    let matches = |entry: &PluginEntry| {
-        [&entry.title, &entry.description, &entry.id]
-            .iter()
-            .any(|text| text.to_lowercase().contains(&query))
-    };
     let installed: Vec<_> = state
         .library
         .installed
         .iter()
-        .filter(|plugin| matches(&plugin.entry))
+        .filter(|plugin| matches(&plugin.entry, &query))
         .collect();
     let last_page = installed.len().saturating_sub(1) / INSTALLED_PAGE_SIZE;
     let page = browser.installed_page.min(last_page);
-    let mut panel = v_flex().id("plugin-browser").test_support().w_full().min_w_0()
-        .gap(t.space.medium).p(t.space.medium).sovra_surface(Surface::Matte, cx)
-        .child(design::page_header("Plugins", "Add skills and suggested connections from a GitHub repository or a catalog you trust. Installed plugins work offline; turn one on when you want Sovra to use it.", cx))
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child("Add from GitHub"))
-        .child(div().w_full().max_w(t.layout.reading_width).sovra_text(TextRole::Caption, cx).child("Paste a repository's address. Sovra adds its skills (SKILL.md files) and suggested web connections exactly as they are now. Nothing in it is run on your computer."))
-        .child(div().w_full().max_w(t.layout.reading_width).child(Input::new(&browser.github).id("plugin-github-address").aria_label("GitHub repository address")))
-        .child(design::button("plugin-github-add", "Add from GitHub", cx).disabled(busy).on_click(cx.listener(|shell, _, _, cx| {
-            let address = shell.plugins.github.read(cx).value().trim().to_owned();
-            shell.plugin_command(PluginCommand::AddFromGitHub { address }, cx);
-        })))
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child("Add from a catalog"))
-        .child(div().w_full().max_w(t.layout.reading_width).child(Input::new(&browser.url).id("plugin-catalog-url").aria_label("Plugin catalog address")))
-        .child(design::button("plugin-browse", "Load catalog", cx).disabled(busy).on_click(cx.listener(|shell, _, _, cx| {
-            let browser = &shell.plugins;
-            let typed = browser.url.read(cx).value();
-            let url = if typed.trim().is_empty() { browser.state.library.catalog_url.clone().unwrap_or_default() } else { typed.trim().to_owned() };
-            shell.plugin_command(PluginCommand::Browse { url }, cx);
-        })))
-        .children(state.library.catalog_url.as_ref().map(|url| div().min_w_0().sovra_text(TextRole::Caption, cx).child(format!("Saved catalog: {url}"))))
-        .child(div().w_full().max_w(t.layout.reading_width).child(Input::new(&browser.search).id("plugin-search").aria_label("Filter plugins on this page and installed plugins")))
-        .child(div().id("plugin-notice").test_support().aria_label(state.notice.clone()).sovra_text(TextRole::Caption, cx).child(state.notice.clone()))
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child(format!("Installed ({})", state.library.installed.len())));
+    let mut section = v_flex()
+        .id("plugin-installed")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.medium)
+        .child(heading(
+            "Your plugins",
+            Some(total),
+            "Turn a plugin on to let Sovra use its skills. Its skills then appear on the Skills page.",
+            cx,
+        ));
+    // Worth searching only once the list is longer than a glance.
+    if total > 3 || state.catalog.is_some() {
+        section = section.child(
+            div().w_full().max_w(t.layout.reading_width).child(
+                Input::new(&browser.search)
+                    .id("plugin-search")
+                    .aria_label("Find a plugin on this page by name or words"),
+            ),
+        );
+    }
+    if total == 0 {
+        return section.child(empty_state(state.busy, cx));
+    }
     if installed.is_empty() {
-        panel = panel.child(
+        section = section.child(
             div()
+                .id("plugin-no-match")
+                .test_support()
                 .sovra_text(TextRole::Body, cx)
-                .child("No installed plugins match. Add one from GitHub or load a catalog."),
+                .text_color(t.text_secondary)
+                .child("None of your plugins match. Clear the search box to see them all."),
         );
     }
     for (index, plugin) in installed
@@ -169,147 +308,15 @@ fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
         .take(INSTALLED_PAGE_SIZE)
         .enumerate()
     {
-        let id = plugin.entry.id.clone();
-        let detail_id = id.clone();
-        let remove_id = id.clone();
-        let enabled = plugin.enabled;
-        let confirming = browser.confirm_remove.as_deref() == Some(id.as_str());
-        panel = panel.child(
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(t.space.small)
-                .child(div().sovra_text(TextRole::Body, cx).child(format!(
-                    "{} · {} · {}",
-                    plugin.entry.title,
-                    plugin.github.as_ref().map_or_else(
-                        || plugin.entry.version.clone(),
-                        |pin| format!("from GitHub, version {}", pin.short_commit())
-                    ),
-                    if enabled { "On" } else { "Off" }
-                )))
-                .child(
-                    div()
-                        .sovra_text(TextRole::Caption, cx)
-                        .child(plugin.entry.description.clone()),
-                )
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap(t.space.small)
-                        .child(
-                            design::button(
-                                ("plugin-toggle", index),
-                                if enabled { "Turn off" } else { "Turn on" },
-                                cx,
-                            )
-                            .accessibility_label(format!(
-                                "{} {}",
-                                if enabled { "Turn off" } else { "Turn on" },
-                                plugin.entry.title
-                            ))
-                            .disabled(busy)
-                            .on_click(cx.listener(
-                                move |shell, _, _, cx| {
-                                    shell.plugin_command(
-                                        PluginCommand::SetEnabled {
-                                            id: id.clone(),
-                                            enabled: !enabled,
-                                        },
-                                        cx,
-                                    );
-                                },
-                            )),
-                        )
-                        .child(
-                            design::button(("plugin-details", index), "What's included", cx)
-                                .disabled(busy)
-                                .accessibility_label(format!(
-                                    "What's included in {}",
-                                    plugin.entry.title
-                                ))
-                                .on_click(cx.listener(move |shell, _, _, cx| {
-                                    shell.plugin_command(
-                                        PluginCommand::Inspect {
-                                            id: detail_id.clone(),
-                                        },
-                                        cx,
-                                    );
-                                })),
-                        )
-                        .children(plugin.github.is_some().then(|| {
-                            let update_id = plugin.entry.id.clone();
-                            design::button(("plugin-check-update", index), "Check for update", cx)
-                                .disabled(busy)
-                                .accessibility_label(format!(
-                                    "Check for an update to {}",
-                                    plugin.entry.title
-                                ))
-                                .on_click(cx.listener(move |shell, _, _, cx| {
-                                    shell.plugin_command(
-                                        PluginCommand::CheckForUpdate {
-                                            id: update_id.clone(),
-                                        },
-                                        cx,
-                                    );
-                                }))
-                        }))
-                        .child(
-                            design::button(
-                                ("plugin-remove", index),
-                                if confirming {
-                                    "Click again to remove"
-                                } else {
-                                    "Remove"
-                                },
-                                cx,
-                            )
-                            .ghost()
-                            .disabled(busy)
-                            .accessibility_label(if confirming {
-                                format!("Confirm removing {}", plugin.entry.title)
-                            } else {
-                                format!("Remove {}", plugin.entry.title)
-                            })
-                            .on_click(cx.listener(
-                                move |shell, _, _, cx| {
-                                    if shell.plugins.confirm_remove.as_ref() == Some(&remove_id) {
-                                        shell.plugin_command(
-                                            PluginCommand::Remove {
-                                                id: remove_id.clone(),
-                                            },
-                                            cx,
-                                        );
-                                    } else {
-                                        shell.plugins.confirm_remove = Some(remove_id.clone());
-                                        cx.notify();
-                                    }
-                                },
-                            )),
-                        ),
-                )
-                .children(confirming.then(|| {
-                    div()
-                        .id(("plugin-remove-warning", index))
-                        .test_support()
-                        .min_w_0()
-                        .sovra_text(TextRole::Caption, cx)
-                        .child(
-                            "This takes its skills off this computer. Connections you set up from it stay in Connections. You can add it again later.",
-                        )
-                })),
-        );
-    }
-    if let Some((id, changes)) = &state.update {
-        panel = panel.child(update_review(id, changes, state, busy, cx));
+        section = section.child(plugin_card(index, plugin, browser, cx));
     }
     if last_page > 0 {
-        panel = panel.child(
+        section = section.child(
             h_flex()
                 .flex_wrap()
                 .gap(t.space.small)
                 .child(
-                    design::button("plugin-installed-previous", "Previous installed", cx)
+                    design::button("plugin-installed-previous", "Previous plugins", cx)
                         .disabled(page == 0)
                         .on_click(cx.listener(move |shell, _, _, cx| {
                             shell.plugins.installed_page = page.saturating_sub(1);
@@ -317,7 +324,7 @@ fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
                         })),
                 )
                 .child(
-                    design::button("plugin-installed-next", "More installed", cx)
+                    design::button("plugin-installed-next", "More plugins", cx)
                         .disabled(page == last_page)
                         .on_click(cx.listener(move |shell, _, _, cx| {
                             shell.plugins.installed_page = page + 1;
@@ -326,153 +333,454 @@ fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
                 ),
         );
     }
-    if let Some((id, package)) = &state.details {
-        let enabled = state
-            .library
-            .installed
-            .iter()
-            .any(|plugin| &plugin.entry.id == id && plugin.enabled);
-        panel = panel.child(
+    section
+}
+
+/// First visit: say what a plugin is and offer one safe plugin to try.
+fn empty_state(busy: bool, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    card(cx)
+        .id("plugin-empty")
+        .test_support()
+        .child(
+            h_flex()
+                .min_w_0()
+                .items_center()
+                .gap(t.space.small)
+                .child(tile(IconName::Puzzle, t.tiles.categories[0], cx))
+                .child(
+                    div()
+                        .min_w_0()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("No plugins yet"),
+                ),
+        )
+        .child(
             div()
-                .sovra_text(TextRole::SectionTitle, cx)
-                .child("What's included"),
-        );
-        for skill in &package.skills {
-            panel = panel.child(div().sovra_text(TextRole::Body, cx).child(
-                match skill.resources.len() {
-                    0 => format!("{}: {}", skill.title, skill.description),
-                    1 => format!("{}: {} (with 1 file)", skill.title, skill.description),
-                    files => format!(
-                        "{}: {} (with {files} files)",
-                        skill.title, skill.description
-                    ),
-                },
-            ));
-        }
-        for (index, service) in package.services.iter().enumerate() {
-            let name = service.name.clone();
-            let address = service.address.clone();
-            panel = panel.child(
-                v_flex()
-                    .min_w_0()
-                    .gap(t.space.small)
-                    .child(
-                        div()
-                            .sovra_text(TextRole::Caption, cx)
-                            .child(format!("{name}: {address}")),
-                    )
-                    .child(
-                        design::button(("plugin-service", index), "Set up connection", cx)
-                            .disabled(!enabled || busy)
-                            .accessibility_label(format!("Set up {}", service.name))
-                            .on_click(cx.listener(move |shell, _, window, cx| {
-                                shell.present_connections(
-                                    Some(sovra_core::CatalogueKind::WebAddress),
-                                    false,
-                                    window,
-                                    cx,
-                                );
-                                shell.models().update(cx, |models, cx| {
-                                    models.service_name.update(cx, |input, cx| {
-                                        input.set_value(name.clone(), window, cx);
-                                    });
-                                    models.service_address.update(cx, |input, cx| {
-                                        input.set_value(address.clone(), window, cx);
-                                    });
-                                });
-                            })),
-                    ),
-            );
-        }
-        panel = panel.child(div().sovra_text(TextRole::Caption, cx).child("Connections are set up separately. To stop a connected service, turn it off in Connections."));
-    }
-    if let Some(catalog) = &state.catalog {
-        panel = panel.child(
-            div()
-                .sovra_text(TextRole::SectionTitle, cx)
-                .child("Available on this catalog page"),
-        );
-        for (index, entry) in catalog
-            .plugins
-            .iter()
-            .filter(|entry| matches(entry))
-            .enumerate()
-        {
-            let installed = state
-                .library
-                .installed
-                .iter()
-                .find(|plugin| plugin.entry.id == entry.id);
-            let same = installed.is_some_and(|plugin| plugin.entry.sha256 == entry.sha256);
-            let compatible = entry.api_version == 1;
-            let id = entry.id.clone();
-            let label = if !compatible {
-                "Unavailable"
-            } else if same {
-                "Installed"
-            } else if installed.is_some() {
-                "Update"
-            } else {
-                "Download"
-            };
-            panel = panel.child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(t.space.small)
-                    .child(
-                        div()
-                            .sovra_text(TextRole::Body, cx)
-                            .child(format!("{} · {}", entry.title, entry.version)),
-                    )
-                    .child(
-                        div()
-                            .sovra_text(TextRole::Caption, cx)
-                            .child(entry.description.clone()),
-                    )
-                    .child(
-                        design::button(("plugin-install", index), label, cx)
-                            .disabled(busy || same || !compatible)
-                            .accessibility_label(format!("{label} {}", entry.title))
-                            .on_click(cx.listener(move |shell, _, _, cx| {
-                                shell.plugin_command(PluginCommand::Install { id: id.clone() }, cx);
-                            })),
-                    ),
-            );
-        }
-        panel = panel.child(
+                .w_full()
+                .min_w_0()
+                .max_w(t.layout.reading_width)
+                .whitespace_normal()
+                .sovra_text(TextRole::Body, cx)
+                .text_color(t.text_secondary)
+                .child("Try the example plugin to see how plugins work. It adds one skill that helps you write a thank-you note. You can remove it again at any time."),
+        )
+        .child(
             h_flex()
                 .flex_wrap()
                 .gap(t.space.small)
+                .pt(t.space.compact)
                 .child(
-                    design::button("plugin-catalog-previous", "Previous catalog page", cx)
-                        .disabled(busy || catalog.previous.is_none())
+                    design::primary_button("plugin-add-example", "Add the example plugin", cx)
+                        .icon(IconName::Sparkles)
+                        .disabled(busy)
                         .on_click(cx.listener(|shell, _, _, cx| {
-                            shell.plugin_command(PluginCommand::PreviousPage, cx);
+                            shell.plugin_command(
+                                PluginCommand::AddFromGitHub {
+                                    address: PLUGIN_TEMPLATE.into(),
+                                },
+                                cx,
+                            );
                         })),
+                ),
+        )
+}
+
+fn plugin_card(
+    index: usize,
+    plugin: &InstalledPlugin,
+    browser: &PluginBrowser,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let state = &browser.state;
+    let busy = state.busy;
+    let title = plugin.entry.title.clone();
+    let enabled = plugin.enabled;
+    let id = plugin.entry.id.clone();
+    let confirming = browser.confirm_remove.as_deref() == Some(id.as_str());
+    let details = state
+        .details
+        .as_ref()
+        .filter(|(shown, _)| *shown == id)
+        .map(|(_, package)| package);
+    let update = state
+        .update
+        .as_ref()
+        .filter(|(shown, _)| *shown == id)
+        .map(|(_, changes)| changes);
+    let (icon, tone) = if plugin.github.is_some() {
+        (IconName::Code, t.tiles.categories[1])
+    } else {
+        (IconName::LibraryBig, t.tiles.categories[5])
+    };
+    let status = if enabled {
+        pill("On", t.tiles.categories[2], cx)
+    } else {
+        pill("Off", t.tiles.neutral, cx)
+    };
+
+    let toggle_id = id.clone();
+    let toggle_label = if enabled { "Turn off" } else { "Turn on" };
+    let toggle = if enabled {
+        design::button(("plugin-toggle", index), toggle_label, cx)
+    } else {
+        design::primary_button(("plugin-toggle", index), toggle_label, cx)
+    }
+    .small()
+    .accessibility_label(format!("{toggle_label} {title}"))
+    .disabled(busy)
+    .on_click(cx.listener(move |shell, _, _, cx| {
+        shell.plugin_command(
+            PluginCommand::SetEnabled {
+                id: toggle_id.clone(),
+                enabled: !enabled,
+            },
+            cx,
+        );
+    }));
+
+    let detail_id = id.clone();
+    let open = details.is_some();
+    let details_button = design::button(
+        ("plugin-details", index),
+        if open {
+            "Hide what's included"
+        } else {
+            "What's included"
+        },
+        cx,
+    )
+    .small()
+    .icon(if open {
+        IconName::ChevronDown
+    } else {
+        IconName::ChevronRight
+    })
+    .disabled(busy)
+    .accessibility_label(if open {
+        format!("Hide what's included in {title}")
+    } else {
+        format!("What's included in {title}")
+    })
+    .on_click(cx.listener(move |shell, _, _, cx| {
+        if open {
+            shell.plugins.state.details = None;
+            cx.notify();
+        } else {
+            shell.plugin_command(
+                PluginCommand::Inspect {
+                    id: detail_id.clone(),
+                },
+                cx,
+            );
+        }
+    }));
+
+    let remove_id = id.clone();
+    let remove = design::button(
+        ("plugin-remove", index),
+        if confirming {
+            "Click again to remove"
+        } else {
+            "Remove"
+        },
+        cx,
+    )
+    .small()
+    .ghost()
+    .icon(IconName::Trash)
+    .disabled(busy)
+    .accessibility_label(if confirming {
+        format!("Confirm removing {title}")
+    } else {
+        format!("Remove {title}")
+    })
+    .on_click(cx.listener(move |shell, _, _, cx| {
+        if shell.plugins.confirm_remove.as_ref() == Some(&remove_id) {
+            shell.plugin_command(
+                PluginCommand::Remove {
+                    id: remove_id.clone(),
+                },
+                cx,
+            );
+        } else {
+            shell.plugins.confirm_remove = Some(remove_id.clone());
+            cx.notify();
+        }
+    }));
+
+    let mut actions = h_flex()
+        .w_full()
+        .min_w_0()
+        .flex_wrap()
+        .items_center()
+        .gap(t.space.small)
+        .pt(t.space.compact)
+        .child(toggle)
+        .child(details_button);
+    if plugin.github.is_some() {
+        let update_id = id.clone();
+        actions = actions.child(
+            design::button(("plugin-check-update", index), "Check for update", cx)
+                .small()
+                .disabled(busy)
+                .accessibility_label(format!("Check for an update to {title}"))
+                .on_click(cx.listener(move |shell, _, _, cx| {
+                    shell.plugin_command(
+                        PluginCommand::CheckForUpdate {
+                            id: update_id.clone(),
+                        },
+                        cx,
+                    );
+                })),
+        );
+    }
+    actions = actions.child(remove);
+
+    let mut card = card(cx)
+        .id(("plugin-card", index))
+        .test_support()
+        .aria_label(format!(
+            "{title}, {}. {}",
+            if enabled { "on" } else { "off" },
+            source(plugin)
+        ))
+        .hover(|style| style.border_color(t.material_border_strong))
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_center()
+                .gap(t.space.small)
+                .child(tile(icon, tone, cx))
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .child(title.clone()),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(t.text_secondary)
+                                .child(source(plugin)),
+                        ),
+                )
+                .child(status),
+        );
+    if !plugin.entry.description.trim().is_empty() {
+        card = card.child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Body, cx)
+                .text_color(t.text_secondary)
+                .child(plugin.entry.description.clone()),
+        );
+    }
+    card = card.child(actions);
+    if confirming {
+        card = card.child(
+            div()
+                .id(("plugin-remove-warning", index))
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .p(t.space.small)
+                .rounded(t.radius.input)
+                .bg(t.tiles.categories[3].background)
+                .text_color(t.tiles.categories[3].foreground)
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .child(
+                    "This takes its skills off this computer. Connections you set up from it stay in Connections. You can add it again later.",
+                ),
+        );
+    }
+    if let Some(package) = details {
+        card = card.child(included(index, package, enabled, busy, cx));
+    }
+    if let Some(changes) = update {
+        card = card.child(update_review(&id, &title, changes, busy, cx));
+    }
+    card
+}
+
+/// The skills and suggested connections inside one plugin, shown in its card.
+fn included(
+    index: usize,
+    package: &PluginPackage,
+    enabled: bool,
+    busy: bool,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let mut panel = v_flex()
+        .id(("plugin-included", index))
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.small)
+        .p(t.space.small)
+        .sovra_surface(Surface::Subtle, cx)
+        .child(
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(match package.skills.len() {
+                    1 => "1 skill".to_owned(),
+                    count => format!("{count} skills"),
+                }),
+        );
+    for skill in &package.skills {
+        let files = match skill.resources.len() {
+            0 => String::new(),
+            1 => " Comes with 1 file it can read.".to_owned(),
+            count => format!(" Comes with {count} files it can read."),
+        };
+        panel = panel.child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_start()
+                .gap(t.space.small)
+                .child(
+                    Icon::new(IconName::BookOpen)
+                        .flex_shrink_0()
+                        .size(t.layout.icon_small)
+                        .text_color(t.text_secondary),
                 )
                 .child(
-                    design::button("plugin-catalog-next", "Next catalog page", cx)
-                        .disabled(busy || catalog.next.is_none())
-                        .on_click(cx.listener(|shell, _, _, cx| {
-                            shell.plugin_command(PluginCommand::NextPage, cx);
+                    v_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Body, cx)
+                                .child(skill.title.clone()),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(t.text_secondary)
+                                .child(format!("{}{files}", skill.description)),
+                        ),
+                ),
+        );
+    }
+    if !package.services.is_empty() {
+        panel = panel.child(
+            div()
+                .pt(t.space.compact)
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("Suggested connections"),
+        );
+    }
+    for (index, service) in package.services.iter().enumerate() {
+        let name = service.name.clone();
+        let address = service.address.clone();
+        panel = panel.child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .items_center()
+                .gap(t.space.small)
+                .child(
+                    Icon::new(IconName::Plug)
+                        .flex_shrink_0()
+                        .size(t.layout.icon_small)
+                        .text_color(t.text_secondary),
+                )
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .flex_basis(relative(0.5))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Body, cx)
+                                .child(name.clone()),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Caption, cx)
+                                .text_color(t.text_secondary)
+                                .child(address.clone()),
+                        ),
+                )
+                .child(
+                    design::button(("plugin-service", index), "Set up connection", cx)
+                        .small()
+                        .disabled(!enabled || busy)
+                        .accessibility_label(format!("Set up {}", service.name))
+                        .on_click(cx.listener(move |shell, _, window, cx| {
+                            shell.present_connections(
+                                Some(sovra_core::CatalogueKind::WebAddress),
+                                false,
+                                window,
+                                cx,
+                            );
+                            shell.models().update(cx, |models, cx| {
+                                models.service_name.update(cx, |input, cx| {
+                                    input.set_value(name.clone(), window, cx);
+                                });
+                                models.service_address.update(cx, |input, cx| {
+                                    input.set_value(address.clone(), window, cx);
+                                });
+                            });
                         })),
                 ),
         );
     }
-    panel
+    let footer = match (enabled, package.services.is_empty()) {
+        (false, true) => Some("Turn the plugin on to use these skills."),
+        (false, false) => Some(
+            "Turn the plugin on to use these skills and set up its connections. Connections are set up separately, in Connections.",
+        ),
+        (true, false) => Some(
+            "Connections are set up separately. To stop a connected service, turn it off in Connections.",
+        ),
+        (true, true) => None,
+    };
+    panel.children(footer.map(|text| {
+        div()
+            .w_full()
+            .min_w_0()
+            .whitespace_normal()
+            .sovra_text(TextRole::Caption, cx)
+            .text_color(t.text_secondary)
+            .child(text)
+    }))
 }
 
 /// Shows what an update would change, so nothing new reaches a helper unseen.
 fn update_review(
     id: &str,
+    title: &str,
     changes: &PluginChanges,
-    state: &PluginState,
     busy: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let title = state.title(id);
     let mut lines = Vec::new();
     for (label, names) in [
         ("New skill", &changes.added),
@@ -497,23 +805,33 @@ fn update_review(
         .test_support()
         .w_full()
         .min_w_0()
-        .max_w(t.layout.reading_width)
         .gap(t.space.small)
+        .p(t.space.small)
+        .sovra_surface(Surface::Subtle, cx)
         .child(
             div()
-                .sovra_text(TextRole::SectionTitle, cx)
-                .child(format!("Update for {title}")),
+                .sovra_text(TextRole::Body, cx)
+                .child("A newer version is ready"),
         );
     for line in lines {
-        review = review.child(div().min_w_0().sovra_text(TextRole::Body, cx).child(line));
+        review = review.child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .child(line),
+        );
     }
     let apply_id = id.to_owned();
     review.child(
         h_flex()
             .flex_wrap()
             .gap(t.space.small)
+            .pt(t.space.compact)
             .child(
-                design::button("plugin-apply-update", "Update", cx)
+                design::primary_button("plugin-apply-update", "Update", cx)
+                    .small()
                     .disabled(busy)
                     .accessibility_label(format!("Update {title}"))
                     .on_click(cx.listener(move |shell, _, _, cx| {
@@ -527,6 +845,7 @@ fn update_review(
             )
             .child(
                 design::button("plugin-skip-update", "Not now", cx)
+                    .small()
                     .disabled(busy)
                     .on_click(cx.listener(|shell, _, _, cx| {
                         shell.plugins.state.update = None;
@@ -534,4 +853,298 @@ fn update_review(
                     })),
             ),
     )
+}
+
+/// The two ways to add a plugin, plus where to start making one.
+fn add_section(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let browser = &shell.plugins;
+    let busy = browser.state.busy;
+    let github = card(cx)
+        .id("plugin-add-github")
+        .test_support()
+        .child(
+            h_flex()
+                .min_w_0()
+                .items_center()
+                .gap(t.space.small)
+                .child(tile(IconName::Code, t.tiles.categories[1], cx))
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("From GitHub"),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("Paste a repository's address. Sovra adds its skills and suggested connections exactly as they are now."),
+        )
+        .child(
+            Input::new(&browser.github)
+                .id("plugin-github-address")
+                .aria_label("GitHub repository address"),
+        )
+        .child(
+            design::primary_button("plugin-github-add", "Add from GitHub", cx)
+                .self_start()
+                .icon(IconName::Plus)
+                .disabled(busy)
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    let address = shell.plugins.github.read(cx).value().trim().to_owned();
+                    shell.plugin_command(PluginCommand::AddFromGitHub { address }, cx);
+                })),
+        );
+    let catalog = card(cx)
+        .id("plugin-add-catalog")
+        .test_support()
+        .child(
+            h_flex()
+                .min_w_0()
+                .items_center()
+                .gap(t.space.small)
+                .child(tile(IconName::LibraryBig, t.tiles.categories[5], cx))
+                .child(
+                    div()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child("From a catalog"),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("A catalog is a list of plugins a publisher shares on their website. Paste its address to see what it offers."),
+        )
+        .child(
+            Input::new(&browser.url)
+                .id("plugin-catalog-url")
+                .aria_label("Plugin catalog address"),
+        )
+        .child(
+            design::button("plugin-browse", "Load catalog", cx)
+                .self_start()
+                .disabled(busy)
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    let browser = &shell.plugins;
+                    let typed = browser.url.read(cx).value();
+                    let url = if typed.trim().is_empty() {
+                        browser.state.library.catalog_url.clone().unwrap_or_default()
+                    } else {
+                        typed.trim().to_owned()
+                    };
+                    shell.plugin_command(PluginCommand::Browse { url }, cx);
+                })),
+        )
+        .children(browser.state.library.catalog_url.as_ref().map(|url| {
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(format!(
+                    "Last used: {url}. Leave the box empty to load it again."
+                ))
+        }));
+    let side_by_side = browser.width_class.fits_detail_pane();
+    let ways = if side_by_side {
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .items_stretch()
+            .gap(t.space.medium)
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .flex_basis(relative(0.))
+                    .min_w_0()
+                    .child(github),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .flex_basis(relative(0.))
+                    .min_w_0()
+                    .child(catalog),
+            )
+    } else {
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.medium)
+            .child(github)
+            .child(catalog)
+    };
+    v_flex()
+        .id("plugin-add")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.medium)
+        .child(heading(
+            "Add a plugin",
+            None,
+            "Only add plugins from people you trust. Nothing in a plugin is run on your computer.",
+            cx,
+        ))
+        .child(ways)
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .items_center()
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(
+                            "Want to share your own skills? Start from the free plugin template.",
+                        ),
+                )
+                .child(
+                    design::button("plugin-template-link", "Open the plugin template", cx)
+                        .small()
+                        .ghost()
+                        .icon(IconName::ExternalLink)
+                        .on_click(|_, _, cx| cx.open_url(PLUGIN_TEMPLATE)),
+                ),
+        )
+}
+
+/// One page of a loaded catalog.
+fn catalog_section(shell: &Shell, cx: &mut Context<Shell>) -> Option<AnyElement> {
+    let t = design::tokens(cx);
+    let browser = &shell.plugins;
+    let state = &browser.state;
+    let catalog = state.catalog.as_ref()?;
+    let busy = state.busy;
+    let query = browser.search.read(cx).value().trim().to_lowercase();
+    let entries: Vec<_> = catalog
+        .plugins
+        .iter()
+        .filter(|entry| matches(entry, &query))
+        .collect();
+    let mut section = v_flex()
+        .id("plugin-catalog")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.medium)
+        .child(heading(
+            "Available from this catalog",
+            Some(entries.len()),
+            "Adding a plugin downloads it switched off. Turn it on in Your plugins.",
+            cx,
+        ));
+    for (index, entry) in entries.into_iter().enumerate() {
+        let installed = state
+            .library
+            .installed
+            .iter()
+            .find(|plugin| plugin.entry.id == entry.id);
+        let same = installed.is_some_and(|plugin| plugin.entry.sha256 == entry.sha256);
+        let compatible = entry.api_version == 1;
+        let id = entry.id.clone();
+        let label = if !compatible {
+            "Needs a newer Sovra"
+        } else if same {
+            "Added"
+        } else if installed.is_some() {
+            "Update"
+        } else {
+            "Add"
+        };
+        let action = if same || !compatible {
+            design::button(("plugin-install", index), label, cx)
+        } else {
+            design::primary_button(("plugin-install", index), label, cx)
+        };
+        section = section.child(
+            card(cx)
+                .id(("plugin-catalog-entry", index))
+                .test_support()
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .gap(t.space.small)
+                        .child(tile(IconName::Puzzle, t.tiles.categories[0], cx))
+                        .child(
+                            v_flex()
+                                .min_w_0()
+                                .flex_1()
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .whitespace_normal()
+                                        .sovra_text(TextRole::SectionTitle, cx)
+                                        .child(entry.title.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .sovra_text(TextRole::Caption, cx)
+                                        .text_color(t.text_secondary)
+                                        .child(format!("Version {}", entry.version)),
+                                ),
+                        )
+                        .children(same.then(|| pill("Added", t.tiles.categories[2], cx))),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .sovra_text(TextRole::Body, cx)
+                        .text_color(t.text_secondary)
+                        .child(entry.description.clone()),
+                )
+                .child(
+                    action
+                        .small()
+                        .self_start()
+                        .icon(IconName::Download)
+                        .disabled(busy || same || !compatible)
+                        .accessibility_label(format!("{label} {}", entry.title))
+                        .on_click(cx.listener(move |shell, _, _, cx| {
+                            shell.plugin_command(PluginCommand::Install { id: id.clone() }, cx);
+                        })),
+                ),
+        );
+    }
+    section = section.child(
+        h_flex()
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(
+                design::button("plugin-catalog-previous", "Previous page", cx)
+                    .disabled(busy || catalog.previous.is_none())
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.plugin_command(PluginCommand::PreviousPage, cx);
+                    })),
+            )
+            .child(
+                design::button("plugin-catalog-next", "Next page", cx)
+                    .disabled(busy || catalog.next.is_none())
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.plugin_command(PluginCommand::NextPage, cx);
+                    })),
+            ),
+    );
+    Some(section.into_any_element())
 }

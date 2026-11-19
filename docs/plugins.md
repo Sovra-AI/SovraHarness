@@ -6,6 +6,22 @@ address, or load a catalog that a publisher hosts as static JSON files (for
 example on GitHub Pages). Either way, Sovra stores the plugin on this computer
 and checks it before use. Neither needs a running registry server.
 
+## The Plugins page
+
+Open **Plugins** in the menu on the left. **Your plugins** lists each plugin
+as a card: where it came from, its version, an **On** or **Off** label, and its
+buttons (**Turn on**/**Turn off**, **What's included**, **Check for update** for
+GitHub plugins, and **Remove**). **What's included**, an update's list of
+changes, and the remove warning open inside that plugin's card. A search box
+appears once there are more than three plugins or a catalog is loaded.
+
+With no plugins yet, the page offers **Add the example plugin**, which adds the
+[plugin template](https://github.com/Sovra-AI/sovra-plugin-template) from GitHub
+(switched off, like any other). **Add a plugin** has a card for each way in,
+**From GitHub** and **From a catalog**, side by side when the page is wide
+enough, and **Open the plugin template** for making your own. Messages about
+the last action appear at the top of the page; problems are shown as warnings.
+
 ## Start from the template
 
 The quickest way to make a plugin is the open-source (MIT)
@@ -72,7 +88,7 @@ scripts included. The title is `owner/repo`. The description comes from `plugin.
 from the repository's GitHub description.
 
 A repository is added **switched off**, like a catalog download, and is fixed
-to the commit it was read at. The installed row shows the first seven
+to the commit it was read at. The plugin's card shows the first seven
 characters of that commit. **Check for update** reads the newest commit again.
 If the commit is the same, Sovra says it is up to date and downloads nothing
 else. Otherwise it lists each skill and connection that the newer commit adds,
@@ -120,10 +136,12 @@ catalog again; it comes back switched off, at the newest version.
 Open **Plugins** (in the menu on the left), paste the full HTTPS address of `catalog.json`, and
 choose **Load catalog**. No default publisher is configured. The last successfully
 loaded catalog address is saved; leaving the address box empty loads that address.
-Use the previous/next buttons to browse pages. The filter searches the current
-remote page and all installed metadata; it is not a global remote search.
+Its plugins appear under **Available from this catalog**; use **Previous page**
+and **Next page** to browse. The search box searches the current remote page
+and all installed metadata; it is not a global remote search.
 
-**Download** installs a plugin switched off. **What's included** shows its skills
+**Add** downloads a plugin switched off (**Update** when a newer version of
+one you have is listed). **What's included** shows its skills
 and suggested connections. **Turn on** makes its skills available in chat and
 under **From plugins** on the Skills page, including automatic selection when the
 description matches a request. **Turn off** removes those skills from future

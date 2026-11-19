@@ -22,6 +22,8 @@ pub const MAX_PLUGIN_BYTES: usize = 512 * 1024;
 pub const MAX_PLUGIN_LIBRARY_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PLUGINS: usize = 4096;
 pub const PLUGIN_METADATA_KEY: &str = "sovra-plugin";
+/// The open-source starting point for making a plugin; also a safe one to try.
+pub const PLUGIN_TEMPLATE: &str = "https://github.com/Sovra-AI/sovra-plugin-template";
 
 /// Lowercase hex of the SHA-256 digest. `GenericArray` no longer implements `LowerHex`.
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
@@ -224,10 +226,13 @@ pub struct PluginState {
     pub update: Option<(String, PluginChanges)>,
     pub busy: bool,
     pub notice: String,
+    /// The notice reports something that went wrong, so it is shown as a warning.
+    pub problem: bool,
 }
 
 impl PluginState {
     pub fn apply(&mut self, event: &PluginEvent) {
+        self.problem = matches!(event, PluginEvent::Error(_));
         match event {
             PluginEvent::Loaded(library) => {
                 self.library = library.clone();
@@ -237,7 +242,8 @@ impl PluginState {
                     self.catalog_url = library.catalog_url.clone().unwrap_or_default();
                 }
                 self.busy = false;
-                self.notice = "Your installed plugin list is ready.".into();
+                // The cards show the new state; events with news set it after this.
+                self.notice.clear();
             }
             PluginEvent::Catalog { url, catalog } => {
                 self.catalog_url.clone_from(url);

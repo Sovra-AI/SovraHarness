@@ -232,3 +232,25 @@ fn plugin_skill_cards_show_an_everyday_example_never_the_command_name() {
     package.skills[0].example = "Two\nlines".into();
     assert!(package.validate(&catalog.plugins[0]).is_err());
 }
+
+#[test]
+fn only_a_failure_marks_the_notice_as_a_problem() {
+    let mut state = PluginState::default();
+    state.apply(&PluginEvent::Error(
+        "That address isn't a GitHub repository.".into(),
+    ));
+    assert!(state.problem);
+    state.apply(&PluginEvent::Busy);
+    assert!(!state.problem, "trying again clears the warning");
+    state.apply(&PluginEvent::Error("Still no.".into()));
+    state.apply(&PluginEvent::Loaded(PluginLibrary::default()));
+    assert!(!state.problem);
+}
+
+#[test]
+fn a_fresh_plugin_list_leaves_no_notice_behind() {
+    let mut state = PluginState::default();
+    state.apply(&PluginEvent::Busy);
+    state.apply(&PluginEvent::Loaded(PluginLibrary::default()));
+    assert_eq!((state.notice.as_str(), state.busy), ("", false));
+}

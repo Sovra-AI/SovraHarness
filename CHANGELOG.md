@@ -14,6 +14,14 @@ package version.
 
 ## [Unreleased]
 
+- **A clearer Plugins page.** Your plugins are now cards with an **On** or
+  **Off** label and where each came from. **What's included**, updates and the
+  remove warning open inside that plugin's card instead of at the bottom of the
+  page. With no plugins yet, **Add the example plugin** adds the template so you
+  can see how plugins work. **From GitHub** and **From a catalog** sit side by
+  side on wide windows, and **Open the plugin template** helps you make your
+  own. Problems show as warnings, and the "plugin list is ready" message is gone.
+
 ## [0.8.0] — 2026-11-19
 
 - **Plugin skills show a real example.** A skill's card on the **Skills** page
