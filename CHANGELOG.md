@@ -14,6 +14,10 @@ package version.
 
 ## [Unreleased]
 
+- Release builds start on version bumps or matching tags. Each release tag
+  identifies the commit used to build all three installers, even if more work
+  lands on `main` during packaging.
+
 - **A clearer Plugins page.** Your plugins are now cards with an **On** or
   **Off** label and where each came from. **What's included**, updates and the
   remove warning open inside that plugin's card instead of at the bottom of the

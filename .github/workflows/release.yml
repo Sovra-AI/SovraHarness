@@ -28,7 +28,48 @@ env:
   PACK_ID: SovraHarness
 
 jobs:
+  prepare:
+    name: Select release version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      build: ${{ steps.release.outputs.build }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: release
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          package_version() {
+            awk '
+              $0 == "[workspace.package]" { in_pkg = 1; next }
+              in_pkg && /^\[/ { in_pkg = 0 }
+              in_pkg && /^version = / { gsub(/"/, "", $3); print $3 }
+            '
+          }
+          version=$(package_version < Cargo.toml)
+          if [[ "$version" == "main" || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Package version must be a semantic version, not the branch name (got: ${version:-empty})."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package version v$version."
+            exit 1
+          fi
+          build=true
+          if [[ "$GITHUB_REF_TYPE" == "branch" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            previous=$(git show "$BEFORE:Cargo.toml" | package_version)
+            if [[ "$previous" == "$version" ]]; then build=false; fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   package:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
     name: Package (${{ matrix.channel }})
     strategy:
       fail-fast: false
@@ -82,27 +123,6 @@ jobs:
           dotnet-version: "8.0.x"
       - run: dotnet tool install -g vpk --version 1.2.161
 
-      - name: Read the package version
-        id: package_version
-        shell: bash
-        run: |
-          # The download feed uses the workspace package version. A push to
-          # main must not publish the branch name.
-          version=$(awk '
-            $0 == "[workspace.package]" { in_pkg = 1; next }
-            in_pkg && /^\[/ { in_pkg = 0 }
-            in_pkg && /^version = / { gsub(/"/, "", $3); print $3; exit }
-          ' Cargo.toml)
-          if [[ "$version" == "main" || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Package version must be a semantic version, not the branch name (got: ${version:-empty})."
-            exit 1
-          fi
-          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package version v$version."
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
       - name: Build
         shell: bash
         run: |
@@ -147,7 +167,7 @@ jobs:
       - name: Package with Velopack
         shell: bash
         run: |
-          version="${{ steps.package_version.outputs.version }}"
+          version="${{ needs.prepare.outputs.version }}"
           ARGS=(pack --packId "$PACK_ID" --packVersion "$version" --packDir target/pack
                 --mainExe "${{ matrix.exe }}" --channel "${{ matrix.channel }}" --outputDir target/dist)
           if [[ "$RUNNER_OS" == "macOS" ]]; then
@@ -175,7 +195,10 @@ jobs:
 
   publish:
     name: Publish GitHub Release + update feeds
-    needs: package
+    needs: [prepare, package]
+    concurrency:
+      group: publish-${{ needs.prepare.outputs.version }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -183,6 +206,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -195,15 +219,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version=$(awk '
-            $0 == "[workspace.package]" { in_pkg = 1; next }
-            in_pkg && /^\[/ { in_pkg = 0 }
-            in_pkg && /^version = / { gsub(/"/, "", $3); print $3; exit }
-          ' Cargo.toml)
-          if [[ "$version" == "main" || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Refusing to publish the branch name as a version (got: ${version:-empty})."
-            exit 1
-          fi
+          version="${{ needs.prepare.outputs.version }}"
           tag="v$version"
           # Asset names are unique. macOS and Linux both build `sovra`, so the
           # release lists them as sovra-macos and sovra-linux. Windows is sovra.exe.
@@ -222,6 +238,17 @@ jobs:
           if [[ "$have_all" == "1" ]]; then
             echo "$tag already has the macOS, Windows, and Linux executables. The same version is not published again."
             exit 0
+          fi
+          # Velopack otherwise creates a tag at the current default branch tip,
+          # which can move while the three packages are building.
+          sha=$(git rev-parse HEAD)
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            if [[ "$(git rev-parse "refs/tags/$tag^{commit}")" != "$sha" ]]; then
+              echo "::error::$tag points to a different commit than these binaries."
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$sha"
           fi
           for channel in osx win linux; do
             vpk upload github --repoUrl "${{ github.server_url }}/${{ github.repository }}" \

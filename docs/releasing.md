@@ -31,7 +31,7 @@ explicitly uses the checkout's `target/`, even if `CARGO_TARGET_DIR` is set.
 | Linux | `.AppImage` | ARM64, x86-64 |
 
 These mappings are not proof that every architecture has been release-tested.
-A push to `main`, and a matching `vX.Y.Z` tag, packages macOS `sovra` on
+A version bump on `main`, or a matching `vX.Y.Z` tag, packages macOS `sovra` on
 `macos-15`, Windows `sovra.exe` on `windows-latest`, and Linux `sovra` on
 `ubuntu-24.04`, with `cargo build --release --locked --package sovra-app`.
 That workflow does not provide the full local architecture matrix. Build each
@@ -50,7 +50,8 @@ installer on its target OS.
    The workflow reads the package version from `Cargo.toml` (never the branch
    name `main`), keeps that version and the changelog heading together, builds
    the three release executables, and publishes that version on the existing
-   GitHub Release and Velopack feed. A matching `vX.Y.Z` tag runs the same
+   GitHub Release and Velopack feed. The tag is tied to the commit that built
+   the packages. Later commits with the same version skip packaging. A matching `vX.Y.Z` tag runs the same
    [release.yml](../.github/workflows/release.yml) when the tag equals `v` plus
    that package version. A release that already has the macOS, Windows, and
    Linux executables is not published again. A release that exists but is
