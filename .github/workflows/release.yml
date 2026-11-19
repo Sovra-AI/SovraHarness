@@ -211,34 +211,12 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
-        with:
-          dotnet-version: "8.0.x"
-      - run: dotnet tool install -g vpk --version 1.2.161
       - name: Upload each channel to one release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version="${{ needs.prepare.outputs.version }}"
           tag="v$version"
-          # Asset names are unique. macOS and Linux both build `sovra`, so the
-          # release lists them as sovra-macos and sovra-linux. Windows is sovra.exe.
-          # A tag with no assets, or with only some of these, is not updated yet.
-          required=(sovra-macos sovra.exe sovra-linux)
-          have_all=0
-          if assets=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' 2>/dev/null); then
-            have_all=1
-            for name in "${required[@]}"; do
-              if ! grep -qx "$name" <<< "$assets"; then
-                echo "$tag is missing $name"
-                have_all=0
-              fi
-            done
-          fi
-          if [[ "$have_all" == "1" ]]; then
-            echo "$tag already has the macOS, Windows, and Linux executables. The same version is not published again."
-            exit 0
-          fi
           # Velopack otherwise creates a tag at the current default branch tip,
           # which can move while the three packages are building.
           sha=$(git rev-parse HEAD)
@@ -250,24 +228,66 @@ jobs:
           else
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$sha"
           fi
-          for channel in osx win linux; do
-            vpk upload github --repoUrl "${{ github.server_url }}/${{ github.repository }}" \
-              --token "$GH_TOKEN" --outputDir "dist/dist-$channel" --channel "$channel" \
-              --tag "$tag" --releaseName "SovraHarness $tag" \
-              --merge --publish
-          done
-          # `file#text` only sets a display label, so copy to the real asset
-          # names; otherwise macOS and Linux both upload as `sovra` and clash.
+          # Asset names are unique. macOS and Linux both build `sovra`, so the
+          # release lists them as sovra-macos and sovra-linux. Windows is sovra.exe.
+          # A tag with no assets, or with only some of these, is not updated yet.
+          required=(sovra-macos sovra.exe sovra-linux)
+          required+=(SovraHarness-osx-Setup.pkg SovraHarness-win-Setup.exe SovraHarness.AppImage)
+          required+=(releases.osx.json releases.win.json releases.linux.json)
+          required+=("$PACK_ID-$version-osx-full.nupkg" "$PACK_ID-$version-full.nupkg" "$PACK_ID-$version-linux-full.nupkg")
+          required+=(SovraHarness-osx-Portable.zip SovraHarness-win-Portable.zip RELEASES)
+          uploaded_assets() {
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
+              --jq '.assets[] | select(.state == "uploaded" and .size > 0) | .name'
+          }
+          publish_draft() {
+            local draft_id
+            draft_id=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId,isDraft --jq 'select(.isDraft) | .databaseId')
+            if [[ -n "$draft_id" ]]; then
+              gh api --silent --method PATCH "repos/$GITHUB_REPOSITORY/releases/$draft_id" -F draft=false -f make_latest=legacy
+            fi
+          }
+          have_all=0
+          if assets=$(uploaded_assets); then
+            have_all=1
+            for name in "${required[@]}"; do
+              if ! grep -Fxq -- "$name" <<< "$assets"; then
+                echo "$tag is missing $name"
+                have_all=0
+              fi
+            done
+          else
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+              --title "SovraHarness $tag" --generate-notes
+          fi
+          if [[ "$have_all" == "1" ]]; then
+            publish_draft
+            echo "$tag already has the macOS, Windows, and Linux executables, installers and update feeds."
+            exit 0
+          fi
+          # vpk pack has already produced the per-channel feeds and packages.
+          # Stage their exact filenames. Replacing a partial draft on retry keeps
+          # each feed together with the package from the same build.
           mkdir -p named
+          for channel in osx win linux; do
+            output="dist/dist-$channel"
+            jq -er '.[].RelativeFileName' "$output/assets.$channel.json" > files.txt
+            while IFS= read -r file; do cp "$output/$file" named/; done < files.txt
+            cp "$output/releases.$channel.json" named/
+          done
+          cp dist/dist-win/RELEASES named/
           cp dist/executable-osx/sovra named/sovra-macos
           cp dist/executable-win/sovra.exe named/sovra.exe
           cp dist/executable-linux/sovra named/sovra-linux
-          gh release upload "$tag" --repo "${{ github.repository }}" --clobber \
-            named/sovra-macos named/sovra.exe named/sovra-linux
-          assets=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name')
           for name in "${required[@]}"; do
-            if ! grep -qx "$name" <<< "$assets"; then
-              echo "::error::Release $tag is missing the executable $name."
+            test -s "named/$name" || { echo "::error::Missing build artifact: $name"; exit 1; }
+          done
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber named/*
+          assets=$(uploaded_assets)
+          for name in "${required[@]}"; do
+            if ! grep -Fxq -- "$name" <<< "$assets"; then
+              echo "::error::Release $tag is missing $name."
               exit 1
             fi
           done
+          publish_draft

@@ -63,8 +63,9 @@ installer on its target OS.
 
 The workflow builds with the lockfile (`cargo build --release --locked --package sovra-app`)
 on `macos-15` (`sovra`), `windows-latest` (`sovra.exe`), and `ubuntu-24.04`
-(`sovra`), packages each platform, then publishes all three channels to one
-GitHub Release with Velopack update feeds. Signing still skips when its secrets
+(`sovra`), packages each platform, then uploads the three channels into a draft. Once every executable, installer,
+feed, and full update package is attached, it publishes the GitHub Release.
+The website uses that public release directly. Signing still skips when its secrets
 are absent. In-app update checking is not implemented. It does not run the
 entire CI suite itself, so release from a reviewed revision with green CI.
 

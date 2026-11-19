@@ -14,6 +14,10 @@ package version.
 
 ## [Unreleased]
 
+- The download site can use the official release as soon as it is published.
+  All three installers, executables, and update feeds are uploaded and checked
+  together before the release becomes public.
+
 - CI allows a cold macOS test build to finish and can validate a specific
   release tag using the current runner configuration.
 

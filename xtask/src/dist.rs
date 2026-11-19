@@ -235,7 +235,8 @@ mod tests {
         assert!(workflow.contains("version = "));
         assert!(workflow.contains("packVersion \"$version\""));
         assert!(workflow.contains("tag=\"v$version\""));
-        assert!(workflow.contains("--tag \"$tag\""));
+        assert!(workflow.contains("gh release create \"$tag\""));
+        assert!(workflow.contains("--verify-tag --draft"));
         assert!(workflow.contains("path: target/release/${{ matrix.exe }}"));
         assert!(!workflow.contains("VERSION=\"${GITHUB_REF_NAME#v}\""));
         assert!(!workflow.contains("--tag \"$GITHUB_REF_NAME\""));
@@ -276,14 +277,26 @@ mod tests {
             let rename = workflow.find(copy).expect("unique executable asset name");
             assert!(rename < upload, "asset is named before upload: {copy}");
         }
-        assert!(workflow[upload..].contains("named/sovra-macos named/sovra.exe named/sovra-linux"));
+        assert!(workflow[upload..].contains("--clobber named/*"));
         assert!(workflow.contains("for channel in osx win linux"));
         let missing = workflow
-            .find("Release $tag is missing the executable")
-            .expect("a missing executable fails the publish step");
+            .find("Release $tag is missing")
+            .expect("a missing release asset fails the publish step");
         let exit_missing = workflow[missing..]
             .find("exit 1")
             .expect("missing executable is a failed publish");
         assert!(exit_ok < upload && upload < missing && exit_missing > 0);
+        assert!(!workflow.contains("--merge --publish"));
+        for asset in [
+            "SovraHarness-osx-Setup.pkg",
+            "SovraHarness-win-Setup.exe",
+            "SovraHarness.AppImage",
+            "releases.osx.json",
+            "releases.win.json",
+            "releases.linux.json",
+        ] {
+            assert!(workflow[required..assets_check].contains(asset));
+        }
+        assert!(workflow[missing..].contains("publish_draft"));
     }
 }
