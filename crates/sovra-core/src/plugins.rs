@@ -173,9 +173,17 @@ pub enum PluginCommand {
     Inspect {
         id: String,
     },
+    /// Turning a plugin with code on needs [`PluginCommand::AllowCode`] instead.
     SetEnabled {
         id: String,
         enabled: bool,
+    },
+    /// Turns on a plugin with code after the person saw what it can reach. Refused
+    /// unless `package_sha256` is still the installed package, so an update that
+    /// lands between looking and allowing is never switched on unseen.
+    AllowCode {
+        id: String,
+        package_sha256: String,
     },
     /// Installs a public repository's skills at its latest commit, switched off.
     AddFromGitHub {
@@ -559,6 +567,39 @@ impl PluginPackage {
 }
 
 impl PluginLibrary {
+    /// Switches a plugin on or off. A plugin with code is only switched on through
+    /// [`PluginLibrary::allow_code`], so every way in asks the person first.
+    pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<(), SkillError> {
+        let plugin = self.installed_mut(id)?;
+        if enabled && plugin.entry.api_version == CODE_API_VERSION {
+            return Err(error(
+                "This plugin runs its own code. Choose Turn on in Plugins to see what it can reach first.",
+            ));
+        }
+        plugin.enabled = enabled;
+        Ok(())
+    }
+
+    /// Switches a plugin with code on after the person saw the package with this
+    /// checksum.
+    pub fn allow_code(&mut self, id: &str, package_sha256: &str) -> Result<(), SkillError> {
+        let plugin = self.installed_mut(id)?;
+        if plugin.entry.sha256 != package_sha256 {
+            return Err(error(
+                "This plugin changed after you looked at it. Look at what it can reach again.",
+            ));
+        }
+        plugin.enabled = true;
+        Ok(())
+    }
+
+    fn installed_mut(&mut self, id: &str) -> Result<&mut InstalledPlugin, SkillError> {
+        self.installed
+            .iter_mut()
+            .find(|plugin| plugin.entry.id == id)
+            .ok_or_else(|| error("This plugin is no longer installed."))
+    }
+
     /// File names (`<sha256>.json`) of the packages this library still uses. Anything
     /// else in the package folder is safe to delete.
     pub fn package_files(&self) -> BTreeSet<String> {

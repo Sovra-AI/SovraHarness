@@ -209,6 +209,7 @@ pub(crate) async fn handle(
                 .clone()
         }
         PluginCommand::SetEnabled { .. }
+        | PluginCommand::AllowCode { .. }
         | PluginCommand::Inspect { .. }
         | PluginCommand::AddFromGitHub { .. }
         | PluginCommand::CheckForUpdate { .. }
@@ -228,6 +229,7 @@ pub(crate) async fn handle(
                     .ok_or_else(|| SkillError("There is no previous catalog page.".into()))?,
                 PluginCommand::Install { .. }
                 | PluginCommand::SetEnabled { .. }
+                | PluginCommand::AllowCode { .. }
                 | PluginCommand::Inspect { .. }
                 | PluginCommand::AddFromGitHub { .. }
                 | PluginCommand::CheckForUpdate { .. }
@@ -372,6 +374,7 @@ pub(crate) async fn handle(
             downloaded = Some(pending);
         }
         PluginCommand::SetEnabled { .. }
+        | PluginCommand::AllowCode { .. }
         | PluginCommand::Inspect { .. }
         | PluginCommand::Remove { .. } => {}
     }
@@ -385,6 +388,7 @@ pub(crate) async fn handle(
         | PluginCommand::PreviousPage
         | PluginCommand::Inspect { .. }
         | PluginCommand::SetEnabled { .. }
+        | PluginCommand::AllowCode { .. }
         | PluginCommand::AddFromGitHub { .. }
         | PluginCommand::CheckForUpdate { .. }
         | PluginCommand::ApplyUpdate { .. } => None,
@@ -436,15 +440,14 @@ pub(crate) async fn handle(
                 store.cache(&plugin.entry, &bytes)?;
             }
             PluginCommand::SetEnabled { id, enabled } => {
-                let plugin = library
-                    .installed
-                    .iter_mut()
-                    .find(|plugin| plugin.entry.id == id)
-                    .ok_or_else(|| SkillError("This plugin is no longer installed.".into()))?;
-                plugin.enabled = enabled;
+                library.set_enabled(&id, enabled)?;
                 if enabled {
                     required_plugin = Some(id);
                 }
+            }
+            PluginCommand::AllowCode { id, package_sha256 } => {
+                library.allow_code(&id, &package_sha256)?;
+                required_plugin = Some(id);
             }
             PluginCommand::Remove { id } => {
                 let index = library

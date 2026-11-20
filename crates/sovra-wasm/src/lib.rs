@@ -25,7 +25,8 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use sovra_core::plugins::{
-    CodeFetch, CodeHost, LoadedCode, MAX_FETCHES_PER_CALL, MAX_MODULE_BYTES, PluginCodeEngine,
+    CodeFetch, CodeHost, LoadedCode, MAX_FETCH_BODY_BYTES, MAX_FETCHES_PER_CALL, MAX_MODULE_BYTES,
+    PluginCodeEngine,
 };
 use sovra_core::skills::SkillError;
 use wasmi::{
@@ -40,6 +41,12 @@ const MEMORY_LIMIT: usize = 64 * 1024 * 1024;
 /// Largest tool name plus arguments handed in, and largest reply taken back.
 const MAX_INPUT_BYTES: usize = 256 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+/// Function-table slots one call may hold. Without a cap a small module could
+/// declare a table of a billion entries and make Sovra allocate gigabytes.
+const MAX_TABLE_ELEMENTS: usize = 10_000;
+/// Largest internet request a module may hand over: the body Sovra allows, room
+/// for JSON escaping of it, and the address and headers.
+const MAX_FETCH_REQUEST_BYTES: usize = MAX_FETCH_BODY_BYTES * 2 + 64 * 1024;
 const MAX_LOG_LINES: usize = 32;
 const MAX_LOG_BYTES: usize = 300;
 const IMPORT_MODULE: &str = "sovra";
@@ -157,6 +164,7 @@ impl LoadedCode for WasmCode {
                     .memory_size(MEMORY_LIMIT)
                     .memories(1)
                     .tables(4)
+                    .table_elements(MAX_TABLE_ELEMENTS)
                     .instances(1)
                     .build(),
                 host,
@@ -170,7 +178,14 @@ impl LoadedCode for WasmCode {
         let instance = self
             .linker
             .instantiate_and_start(&mut store, &self.module)
-            .map_err(|problem| explain(&problem))?;
+            .map_err(|problem| {
+                tracing::debug!(%problem, "plugin code did not start");
+                match problem.as_trap_code() {
+                    Some(TrapCode::OutOfFuel) => explain(&problem),
+                    _ => "The plugin's code could not start: it asks for more than Sovra allows."
+                        .to_owned(),
+                }
+            })?;
         let memory = instance
             .get_memory(&store, "memory")
             .ok_or_else(|| BROKEN.to_owned())?;
@@ -227,7 +242,9 @@ fn explain(problem: &wasmi::Error) -> String {
             "The plugin's code needed more memory than Sovra allows and was stopped.".into()
         }
         Some(_) => "The plugin's code crashed. Try again, or tell its maker.".into(),
-        // A host function's own refusal (a blocked address, too many requests).
+        // Only Sovra's own functions stop a running call without a trap code, and
+        // their messages are written for people (a blocked address, too many
+        // requests).
         None => problem.to_string(),
     }
 }
@@ -257,6 +274,7 @@ fn read_guest(
     caller: &Caller<'_, Guest>,
     pointer: i32,
     length: i32,
+    limit: usize,
 ) -> Result<Vec<u8>, wasmi::Error> {
     let Some(Extern::Memory(memory)) = caller.get_export("memory") else {
         return Err(wasmi::Error::new(BROKEN));
@@ -264,7 +282,7 @@ fn read_guest(
     let (Ok(pointer), Ok(length)) = (usize::try_from(pointer), usize::try_from(length)) else {
         return Err(wasmi::Error::new(BROKEN));
     };
-    if length > MAX_INPUT_BYTES {
+    if length > limit {
         return Err(wasmi::Error::new("The plugin's request is too large."));
     }
     let mut bytes = vec![0; length];
@@ -284,7 +302,7 @@ fn link(linker: &mut Linker<Guest>, network: bool) -> Result<(), wasmi::Error> {
             }
             caller.data_mut().logs += 1;
             let length = length.clamp(0, i32::try_from(MAX_LOG_BYTES).unwrap_or(i32::MAX));
-            let line = read_guest(&caller, pointer, length)?;
+            let line = read_guest(&caller, pointer, length, MAX_LOG_BYTES)?;
             tracing::debug!(line = %String::from_utf8_lossy(&line), "plugin code");
             Ok(())
         },
@@ -302,7 +320,7 @@ fn link(linker: &mut Linker<Guest>, network: bool) -> Result<(), wasmi::Error> {
                 ));
             }
             caller.data_mut().fetches += 1;
-            let request = read_guest(&caller, pointer, length)?;
+            let request = read_guest(&caller, pointer, length, MAX_FETCH_REQUEST_BYTES)?;
             let reply = match serde_json::from_slice::<CodeFetch>(&request) {
                 Ok(request) => match caller.data().host.fetch(request) {
                     Ok(reply) => json!({"status": reply.status, "body": reply.body}),

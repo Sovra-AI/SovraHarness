@@ -254,3 +254,38 @@ fn a_fresh_plugin_list_leaves_no_notice_behind() {
     state.apply(&PluginEvent::Loaded(PluginLibrary::default()));
     assert_eq!((state.notice.as_str(), state.busy), ("", false));
 }
+
+#[test]
+fn code_is_only_switched_on_for_the_package_the_person_saw() {
+    let skills_only = PluginCatalog::parse(CATALOG).unwrap().plugins.remove(0);
+    let mut code = skills_only.clone();
+    code.id = "io.github.owner.dates".into();
+    code.api_version = CODE_API_VERSION;
+    let plugin = |entry: &PluginEntry| InstalledPlugin {
+        entry: entry.clone(),
+        catalog_url: "https://example.com/catalog.json".into(),
+        enabled: false,
+        github: None,
+    };
+    let mut library = PluginLibrary {
+        catalog_url: None,
+        installed: vec![plugin(&skills_only), plugin(&code)],
+    };
+
+    library.set_enabled(&skills_only.id, true).unwrap();
+    assert!(library.installed[0].enabled, "skills switch on directly");
+
+    let refused = library.set_enabled(&code.id, true).unwrap_err();
+    assert!(refused.0.contains("runs its own code"), "{refused}");
+    let stale = library
+        .allow_code(&code.id, "an older package")
+        .unwrap_err();
+    assert!(stale.0.contains("changed after you looked"), "{stale}");
+    assert!(!library.installed[1].enabled);
+
+    library.allow_code(&code.id, &code.sha256).unwrap();
+    assert!(library.installed[1].enabled);
+    library.set_enabled(&code.id, false).unwrap();
+    assert!(!library.installed[1].enabled, "switching off never asks");
+    assert!(library.set_enabled("gone", false).is_err());
+}

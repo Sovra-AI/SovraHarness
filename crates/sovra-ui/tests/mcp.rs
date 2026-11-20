@@ -164,6 +164,7 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
             McpPhase::Connected,
             "Connected.",
             vec![McpToolInfo {
+                title: String::new(),
                 name: "echo".into(),
                 description: "Repeat a short note.".into(),
                 input_schema: serde_json::Value::Null,

@@ -77,6 +77,7 @@ fn parallel_work() -> WorkActivity {
             tool,
             args: &request,
             asks_helper: Some(name),
+            title: None,
             at_ms: 0,
         });
     }
@@ -88,6 +89,7 @@ fn parallel_work() -> WorkActivity {
         tool: "web_search",
         args: &query,
         asks_helper: None,
+        title: None,
         at_ms: 400,
     });
     work

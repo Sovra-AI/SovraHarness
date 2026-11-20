@@ -892,9 +892,22 @@ async fn a_code_plugin_is_added_off_runs_when_on_and_asks_again_for_new_addresse
         "nothing runs while the plugin is off"
     );
 
+    // Turning code on without the approval step is refused, whoever sends it.
     send(PluginCommand::SetEnabled {
         id: id.clone(),
         enabled: true,
+    });
+    let refused = until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+    assert!(
+        refused.iter().any(|event| matches!(event, Event::Plugins(PluginEvent::Error(message)) if message.contains("runs its own code"))),
+        "{refused:?}"
+    );
+    assert!(!store.load().unwrap().installed[0].enabled);
+    let seen = store.load().unwrap().installed[0].entry.sha256.clone();
+
+    send(PluginCommand::AllowCode {
+        id: id.clone(),
+        package_sha256: seen.clone(),
     });
     let on = until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
     assert!(
@@ -929,9 +942,17 @@ async fn a_code_plugin_is_added_off_runs_when_on_and_asks_again_for_new_addresse
     assert_eq!(updated.github.as_ref().unwrap().commit, SECOND);
     assert!(!updated.enabled, "new access needs the person's approval");
 
-    send(PluginCommand::SetEnabled {
+    // Approval given for the old package does not switch the update on.
+    send(PluginCommand::AllowCode {
         id: id.clone(),
-        enabled: true,
+        package_sha256: seen,
+    });
+    until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+    assert!(!store.load().unwrap().installed[0].enabled);
+
+    send(PluginCommand::AllowCode {
+        id: id.clone(),
+        package_sha256: updated.entry.sha256.clone(),
     });
     until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
     assert_eq!(

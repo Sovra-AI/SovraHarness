@@ -645,6 +645,10 @@ pub fn copy_is_plain(text: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpToolInfo {
     pub name: String,
+    /// Plain words for the tool, when its maker gave some ("Count the days
+    /// between two dates"). Shown in the work log instead of `name`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
     pub description: String,
     #[serde(default)]
     pub input_schema: Value,
@@ -1242,6 +1246,9 @@ pub fn rpc_result(value: &Value) -> Option<&Value> {
     value.get("result")
 }
 
+/// Longest tool title kept from a service; the work log clips further.
+const MAX_TOOL_TITLE_CHARS: usize = 80;
+
 pub fn parse_tool_list(result: &Value) -> Vec<McpToolInfo> {
     result
         .get("tools")
@@ -1265,8 +1272,20 @@ pub fn parse_tool_list(result: &Value) -> Vec<McpToolInfo> {
                         .get("inputSchema")
                         .cloned()
                         .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+                    // MCP puts a display name in `title`; older servers use
+                    // `annotations.title`.
+                    let title = tool
+                        .get("title")
+                        .or_else(|| tool.pointer("/annotations/title"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .chars()
+                        .take(MAX_TOOL_TITLE_CHARS)
+                        .collect();
                     Some(McpToolInfo {
                         name: name.to_owned(),
+                        title,
                         description,
                         input_schema,
                     })
@@ -1596,6 +1615,7 @@ mod tests {
             InitializeOutcome::Modern {
                 name: Some("Recipe box".into()),
                 tools: Some(vec![McpToolInfo {
+                    title: String::new(),
                     name: "echo".into(),
                     description: "Repeat a short note.".into(),
                     input_schema: json!({"type": "object", "properties": {}}),
@@ -1626,6 +1646,15 @@ mod tests {
             &json!({"tools":[{"name":"echo","description":"Repeats a short note."}]}),
         );
         assert_eq!(listed[0].name, "echo");
+        assert_eq!(listed[0].title, "", "no title given, none made up");
+        let titled = parse_tool_list(&json!({"tools":[
+            {"name":"a","title":"  Find a note  "},
+            {"name":"b","annotations":{"title":"Older form"}},
+            {"name":"c","title":"x".repeat(200)},
+        ]}));
+        assert_eq!(titled[0].title, "Find a note");
+        assert_eq!(titled[1].title, "Older form");
+        assert_eq!(titled[2].title.chars().count(), MAX_TOOL_TITLE_CHARS);
         assert_eq!(
             parse_tool_text(&json!({"content":[{"type":"text","text":"hello"}]})),
             "hello"
@@ -1654,6 +1683,7 @@ mod tests {
             phase: McpPhase::Connected,
             message: McpPhase::Connected.label().into(),
             tools: vec![McpToolInfo {
+                title: String::new(),
                 name: "echo".into(),
                 description: "Repeats a short note.".into(),
                 input_schema: json!({}),

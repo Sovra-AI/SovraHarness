@@ -321,11 +321,13 @@ fn service(id: &str, name: &str, phase: McpPhase, enabled: bool) -> McpService {
         message: String::new(),
         tools: vec![
             McpToolInfo {
+                title: String::new(),
                 name: "search_notes".into(),
                 description: String::new(),
                 input_schema: Value::Null,
             },
             McpToolInfo {
+                title: String::new(),
                 name: "delete_note".into(),
                 description: String::new(),
                 input_schema: Value::Null,

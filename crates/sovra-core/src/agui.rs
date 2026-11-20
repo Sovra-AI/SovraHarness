@@ -454,8 +454,11 @@ pub fn llm_setup_widget_for_stage(
 }
 
 /// Native component vocabulary; no GUI or ADK dependency crosses the domain boundary.
+///
+/// Saved through [`StoredComponent`]: serde cannot write an internally tagged
+/// variant that wraps a list or a string, and chat history stores these as JSON.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(into = "StoredComponent", from = "StoredComponent")]
 pub enum UiComponent {
     Text {
         text: String,
@@ -488,6 +491,120 @@ pub enum UiComponent {
         disabled: bool,
     },
     Divider,
+}
+
+/// [`UiComponent`] as JSON. Struct variants keep the format replies were already
+/// saved in; the four wrapping variants get a named field so they can be saved.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum StoredComponent {
+    Text {
+        text: String,
+        heading: bool,
+    },
+    Card {
+        title: String,
+        description: String,
+        children: Vec<UiComponent>,
+    },
+    Row {
+        items: Vec<UiComponent>,
+    },
+    Column {
+        items: Vec<UiComponent>,
+    },
+    Table {
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    Code {
+        code: String,
+    },
+    Badge {
+        label: String,
+    },
+    Alert {
+        title: String,
+        description: String,
+    },
+    Progress {
+        label: String,
+        value: u8,
+    },
+    Button {
+        label: String,
+        action_id: String,
+        disabled: bool,
+    },
+    Divider,
+}
+
+impl From<UiComponent> for StoredComponent {
+    fn from(component: UiComponent) -> Self {
+        match component {
+            UiComponent::Text { text, heading } => Self::Text { text, heading },
+            UiComponent::Card {
+                title,
+                description,
+                children,
+            } => Self::Card {
+                title,
+                description,
+                children,
+            },
+            UiComponent::Row(items) => Self::Row { items },
+            UiComponent::Column(items) => Self::Column { items },
+            UiComponent::Table { headers, rows } => Self::Table { headers, rows },
+            UiComponent::Code(code) => Self::Code { code },
+            UiComponent::Badge(label) => Self::Badge { label },
+            UiComponent::Alert { title, description } => Self::Alert { title, description },
+            UiComponent::Progress { label, value } => Self::Progress { label, value },
+            UiComponent::Button {
+                label,
+                action_id,
+                disabled,
+            } => Self::Button {
+                label,
+                action_id,
+                disabled,
+            },
+            UiComponent::Divider => Self::Divider,
+        }
+    }
+}
+
+impl From<StoredComponent> for UiComponent {
+    fn from(component: StoredComponent) -> Self {
+        match component {
+            StoredComponent::Text { text, heading } => Self::Text { text, heading },
+            StoredComponent::Card {
+                title,
+                description,
+                children,
+            } => Self::Card {
+                title,
+                description,
+                children,
+            },
+            StoredComponent::Row { items } => Self::Row(items),
+            StoredComponent::Column { items } => Self::Column(items),
+            StoredComponent::Table { headers, rows } => Self::Table { headers, rows },
+            StoredComponent::Code { code } => Self::Code(code),
+            StoredComponent::Badge { label } => Self::Badge(label),
+            StoredComponent::Alert { title, description } => Self::Alert { title, description },
+            StoredComponent::Progress { label, value } => Self::Progress { label, value },
+            StoredComponent::Button {
+                label,
+                action_id,
+                disabled,
+            } => Self::Button {
+                label,
+                action_id,
+                disabled,
+            },
+            StoredComponent::Divider => Self::Divider,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -533,5 +650,43 @@ mod setup_tests {
         assert!(description.contains("setup:recommended-models"));
         assert!(!description.contains("OpenRouter"));
         assert!(!description.contains("setup:openrouter-key"));
+    }
+}
+
+#[cfg(test)]
+mod component_storage_tests {
+    use super::UiComponent;
+
+    /// Chat history stores replies as JSON. Every component must round-trip, or the
+    /// whole conversation fails to save.
+    #[test]
+    fn every_component_survives_being_saved_and_read_back() {
+        let reply = UiComponent::Column(vec![
+            UiComponent::Row(vec![
+                UiComponent::Badge("New".into()),
+                UiComponent::Code("let x = 1;".into()),
+            ]),
+            UiComponent::Text {
+                text: "Hi".into(),
+                heading: false,
+            },
+            UiComponent::Divider,
+        ]);
+        let saved = serde_json::to_string(&reply).expect("components serialize");
+        let read: UiComponent = serde_json::from_str(&saved).expect("components deserialize");
+        assert_eq!(read, reply);
+    }
+
+    /// Replies saved before this fix keep loading.
+    #[test]
+    fn components_saved_earlier_still_load() {
+        let earlier = r#"{"type":"text","text":"Hi","heading":true}"#;
+        assert_eq!(
+            serde_json::from_str::<UiComponent>(earlier).unwrap(),
+            UiComponent::Text {
+                text: "Hi".into(),
+                heading: true
+            }
+        );
     }
 }

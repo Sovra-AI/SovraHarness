@@ -201,6 +201,8 @@ pub struct AdkHarness {
     artifact_saver: Option<ArtifactSaver>,
     /// Skills the model may apply unasked; appended only while `load_skill` is offered.
     skill_guide: Option<String>,
+    /// Connected tool name → its own title, so the work log shows the title.
+    tool_titles: Arc<HashMap<String, String>>,
 }
 
 impl std::fmt::Debug for AdkHarness {
@@ -265,7 +267,19 @@ impl AdkHarness {
         let mut tools = self.base_tools.clone();
         tools.retain(|tool| !tool.name().starts_with("connected_"));
         tools.extend(remote_tools::tools(offers, &caller));
-        self.rebuild(self.base_instruction.clone(), tools)
+        let mut harness = self.rebuild(self.base_instruction.clone(), tools)?;
+        harness.tool_titles = Arc::new(
+            offers
+                .iter()
+                .map(|offer| {
+                    (
+                        sovra_core::mcp::tool_alias(&offer.service_id, &offer.tool.name),
+                        offer.tool.title.clone(),
+                    )
+                })
+                .collect(),
+        );
+        Ok(harness)
     }
 
     /// Apply an explicitly selected procedure without inserting it into user history.
@@ -759,6 +773,7 @@ impl AdkHarness {
             search,
             web_search_enabled,
             tools_enabled,
+            tool_titles: Arc::default(),
         })
     }
 
@@ -832,7 +847,11 @@ impl AdkHarness {
         let started = std::time::Instant::now();
         // The log attaches to the reply being written, so its id only needs to
         // name the conversation.
-        let mut work = work_log::WorkTracker::new(format!("work-{session_id}"), started);
+        let mut work = work_log::WorkTracker::new(
+            format!("work-{session_id}"),
+            started,
+            Arc::clone(&self.tool_titles),
+        );
         while let Some(item) = stream.next().await {
             match item {
                 Ok(adk_event) => {

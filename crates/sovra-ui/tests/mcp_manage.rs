@@ -40,6 +40,7 @@ fn reveal(window: &mut Window, id: &'static str, cx: &mut App) -> bool {
 
 fn tool(name: &str, description: &str) -> McpToolInfo {
     McpToolInfo {
+        title: String::new(),
         name: name.into(),
         description: description.into(),
         input_schema: serde_json::Value::Null,

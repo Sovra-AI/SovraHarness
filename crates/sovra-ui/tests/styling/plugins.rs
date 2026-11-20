@@ -660,7 +660,7 @@ fn a_code_plugin_turns_on_only_after_its_access_is_shown_and_allowed(cx: &mut Te
             window.click(("plugin-code-allow", 0usize), cx);
         })
         .unwrap();
-        assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Plugins(PluginCommand::SetEnabled { id, enabled: true }) if *id == plugin.entry.id)));
+        assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Plugins(PluginCommand::AllowCode { id, package_sha256 }) if *id == plugin.entry.id && *package_sha256 == plugin.entry.sha256)));
         cx.update_window(window.into(), |_, window, _| window.remove_window())
             .unwrap();
     }

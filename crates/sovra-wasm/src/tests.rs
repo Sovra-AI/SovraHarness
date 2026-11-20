@@ -130,6 +130,18 @@ fn memory_cannot_grow_past_the_cap() {
     );
 }
 
+#[test]
+fn a_huge_table_is_refused_before_it_is_allocated() {
+    // A billion slots would be about 8 GB if the sandbox built it.
+    let huge = module("", &format!("(table 1000000000 funcref) {ECHO}"));
+    let code = load(&huge, false);
+    let refused = code.call("echo", &json!({"text": "hi"}), network());
+    assert_eq!(
+        refused,
+        Err("The plugin's code could not start: it asks for more than Sovra allows.".into())
+    );
+}
+
 const FETCHING: &str = r#"(import "sovra" "fetch" (func $fetch (param i32 i32) (result i32)))
     (import "sovra" "take_reply" (func $take (param i32)))"#;
 

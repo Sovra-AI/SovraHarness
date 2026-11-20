@@ -65,7 +65,15 @@ reach, in its card. Nothing runs until you choose **Allow and turn on**. The
 card shows a **Tools** label, and **What's included** lists each tool. An update
 that lets code run for the first time, or reach an address it could not reach
 before, says so in its list of changes and comes back switched off, so you
-approve the new access yourself.
+approve the new access yourself. An update that only changes the code or its
+tools, with nothing new to reach, stays on: like browser extension permissions,
+the question is asked again when access widens, because the code can still
+reach only addresses its publisher already controlled and you already allowed.
+Its list of changes still says the code changed. The runtime holds the same rule, not just the
+page: a plugin with code is only switched on by an approval naming the exact
+package you were shown (`PluginCommand::AllowCode` with its checksum), so a
+plain switch-on from anywhere else, or an approval for an older version, is
+refused.
 
 Tools from switched-on plugins are offered to helpers in chats that may use your
 connected services, the same way as tools from **Connections**.
@@ -140,8 +148,14 @@ The module's side, checked when the plugin is added and again before it runs:
   to 256 KB) and returns the length of the JSON reply, `{"status", "body"}` or
   `{"error"}`; then `take_reply(ptr: i32)` copies that reply into memory from
   `sovra_alloc`. Redirects are not followed, replies are cut off at 1 MB, and
-  headers such as `Host` and `Cookie` cannot be set. Any other import, WASI
+  headers such as `Host` and `Cookie` cannot be set. Requests ignore system proxy
+  settings, and an address that leads to this computer or the local network,
+  including IPv6 forms that carry such an IPv4 address (NAT64, 6to4), is refused.
+  Requests stop when the 60-second call time runs out. Any other import, WASI
   included, is refused.
+- **Limits per call:** 64 MB of memory, 10,000 function-table entries, one
+  instance, and a fixed instruction budget. A module that declares more cannot
+  start.
 
 [`examples/code-plugin/src/lib.rs`](../examples/code-plugin/src/lib.rs) is a
 complete module in Rust, built for `wasm32-unknown-unknown`. The read-only

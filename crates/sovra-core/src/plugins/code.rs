@@ -153,6 +153,7 @@ impl PluginPackage {
                 service_name: self.title.clone(),
                 tool: McpToolInfo {
                     name: tool.name.clone(),
+                    title: tool.title.clone(),
                     description: tool.description.clone(),
                     input_schema: tool.input_schema.clone(),
                 },
@@ -595,8 +596,11 @@ pub fn public_address(address: std::net::IpAddr) -> bool {
                 || v4.is_broadcast()
                 || v4.is_documentation()
                 || v4.is_multicast()
-                // Shared carrier space, benchmarking and reserved ranges.
+                // Shared carrier space, protocol assignments, 6to4 relays,
+                // benchmarking and reserved ranges.
                 || (a == 100 && (64..128).contains(&b))
+                || (a == 192 && b == 0 && v4.octets()[2] == 0)
+                || (a == 192 && b == 88 && v4.octets()[2] == 99)
                 || (a == 198 && (b == 18 || b == 19))
                 || a == 0
                 || a >= 240)
@@ -605,14 +609,24 @@ pub fn public_address(address: std::net::IpAddr) -> bool {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return public_address(IpAddr::V4(v4));
             }
-            let first = v6.segments()[0];
+            let segments = v6.segments();
+            let first = segments[0];
             !(v6.is_loopback()
                 || v6.is_unspecified()
                 || v6.is_multicast()
-                // Unique local fc00::/7, link-local fe80::/10, documentation 2001:db8::/32.
+                // Unique local fc00::/7, link-local fe80::/10, old site-local
+                // fec0::/10, documentation 2001:db8::/32.
                 || (first & 0xfe00) == 0xfc00
                 || (first & 0xffc0) == 0xfe80
-                || (first == 0x2001 && v6.segments()[1] == 0x0db8))
+                || (first & 0xffc0) == 0xfec0
+                || (first == 0x2001 && segments[1] == 0x0db8)
+                // Forms that carry an IPv4 address a gateway may deliver to the
+                // local network: IPv4-compatible ::/96, NAT64 64:ff9b::/96 and
+                // 64:ff9b:1::/48, and 6to4 2002::/16. None is needed to reach a
+                // public service by name.
+                || segments[..6] == [0; 6]
+                || (first == 0x0064 && segments[1] == 0xff9b)
+                || first == 0x2002)
         }
     }
 }
@@ -906,7 +920,13 @@ mod tests {
 
     #[test]
     fn only_public_internet_addresses_are_reachable() {
-        for public in ["93.184.216.34", "1.1.1.1", "2606:4700:4700::1111"] {
+        for public in [
+            "93.184.216.34",
+            "1.1.1.1",
+            "192.1.0.255",
+            "2606:4700:4700::1111",
+            "2a00:1450:4009::200e",
+        ] {
             assert!(public_address(public.parse().unwrap()), "{public}");
         }
         for local in [
@@ -924,6 +944,13 @@ mod tests {
             "fe80::1",
             "::ffff:192.168.1.1",
             "2001:db8::1",
+            "192.0.0.1",
+            "192.88.99.1",
+            "fec0::1",
+            "::192.168.1.1",
+            "64:ff9b::a00:1",
+            "64:ff9b:1::a00:1",
+            "2002:c0a8:101::1",
         ] {
             assert!(!public_address(local.parse().unwrap()), "{local}");
         }

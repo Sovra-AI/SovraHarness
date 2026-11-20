@@ -630,7 +630,15 @@ fn plugin_card(
         );
     }
     if approving {
-        card = card.child(approval(index, &id, &title, details, busy, cx));
+        card = card.child(approval(
+            index,
+            &id,
+            &plugin.entry.sha256,
+            &title,
+            details,
+            busy,
+            cx,
+        ));
     } else if let Some(package) = details {
         card = card.child(included(index, package, enabled, busy, cx));
     }
@@ -644,6 +652,8 @@ fn plugin_card(
 fn approval(
     index: usize,
     id: &str,
+    // A library reload clears shown details, so this is the package on screen.
+    package_sha256: &str,
     title: &str,
     package: Option<&PluginPackage>,
     busy: bool,
@@ -700,6 +710,7 @@ fn approval(
         }
     }
     let allow_id = id.to_owned();
+    let allow_sha256 = package_sha256.to_owned();
     panel.child(
         h_flex()
             .w_full()
@@ -716,9 +727,9 @@ fn approval(
                     .accessibility_label(format!("Allow {title} to run its code and turn it on"))
                     .on_click(cx.listener(move |shell, _, _, cx| {
                         shell.plugin_command(
-                            PluginCommand::SetEnabled {
+                            PluginCommand::AllowCode {
                                 id: allow_id.clone(),
-                                enabled: true,
+                                package_sha256: allow_sha256.clone(),
                             },
                             cx,
                         );

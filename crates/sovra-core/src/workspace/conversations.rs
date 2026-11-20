@@ -495,6 +495,7 @@ mod tests {
             tool: "web_search",
             args: &args,
             asks_helper: None,
+            title: None,
             at_ms: 0,
         });
         let snapshot = |work: &crate::work::WorkActivity| AgUiEvent::ActivitySnapshot {

@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use sovra_core::mcp::{RemoteCall, RemoteOutput, RemoteToolCaller, TOOL_FAILED_TEXT, ToolOffer};
 use sovra_core::plugins::{
@@ -24,6 +24,10 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// One switched-on plugin whose code loaded.
 struct Running {
+    /// The package it came from and the module inside, so a refresh that finds the
+    /// same package again reuses all of this without reading it from disk.
+    package_sha256: String,
+    module_sha256: String,
     title: String,
     network: Vec<String>,
     code: Arc<dyn LoadedCode>,
@@ -38,6 +42,9 @@ pub(crate) struct CodeTools {
     /// Compiled modules by checksum, so turning another plugin on or off does not
     /// recompile every module.
     compiled: RwLock<HashMap<String, Arc<dyn LoadedCode>>>,
+    /// One internet client for every plugin request, so connections and TLS setup
+    /// are reused instead of rebuilt for each fetch.
+    http: OnceLock<reqwest::Client>,
 }
 
 impl std::fmt::Debug for CodeTools {
@@ -63,11 +70,25 @@ impl CodeTools {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
+        let unchanged: HashMap<String, Arc<Running>> = self
+            .running
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .map(|plugin| (plugin.package_sha256.clone(), Arc::clone(plugin)))
+            .collect();
         for plugin in library
             .installed
             .iter()
             .filter(|plugin| plugin.enabled && plugin.entry.api_version == CODE_API_VERSION)
         {
+            if let Some(same) = unchanged.get(&plugin.entry.sha256)
+                && let Some(offer) = same.offers.first()
+            {
+                compiled.insert(same.module_sha256.clone(), Arc::clone(&same.code));
+                running.insert(offer.service_id.clone(), Arc::clone(same));
+                continue;
+            }
             let loaded = store.package(&plugin.entry).and_then(|package| {
                 let Some(engine) = engine else {
                     return Err(sovra_core::skills::SkillError(
@@ -87,6 +108,8 @@ impl CodeTools {
                 };
                 compiled.insert(code.module_sha256.clone(), Arc::clone(&module));
                 Ok(Running {
+                    package_sha256: plugin.entry.sha256.clone(),
+                    module_sha256: code.module_sha256.clone(),
                     title: package.title.clone(),
                     network: code.network.clone(),
                     code: module,
@@ -132,6 +155,25 @@ impl CodeTools {
         offers
     }
 
+    /// The shared internet client, built on first use.
+    fn http(&self) -> Result<reqwest::Client, String> {
+        if let Some(client) = self.http.get() {
+            return Ok(client.clone());
+        }
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(FETCH_TIMEOUT)
+            .connect_timeout(Duration::from_secs(10))
+            .https_only(true)
+            // A system proxy would look the address up itself, past PublicOnly.
+            .no_proxy()
+            .dns_resolver(Arc::new(PublicOnly))
+            .user_agent("Sovra plugin")
+            .build()
+            .map_err(|_| "The plugin's request could not be prepared.".to_owned())?;
+        Ok(self.http.get_or_init(|| client).clone())
+    }
+
     fn get(&self, service_id: &str) -> Option<Arc<Running>> {
         self.running
             .read()
@@ -165,8 +207,15 @@ impl RemoteToolCaller for ToolRouter {
         let plugin = self.code.get(&request.service_id).ok_or_else(|| {
             "That plugin is switched off now, so its tools cannot be used.".to_owned()
         })?;
+        let client = if plugin.network.is_empty() {
+            None
+        } else {
+            Some(self.code.http()?)
+        };
         let gate: Arc<dyn CodeHost> = Arc::new(Gate {
             allowed: plugin.network.clone(),
+            client,
+            deadline: Instant::now() + CALL_TIMEOUT,
             handle: self.handle.clone(),
         });
         let title = plugin.title.clone();
@@ -187,30 +236,41 @@ impl RemoteToolCaller for ToolRouter {
 /// The only way plugin code reaches the internet.
 struct Gate {
     allowed: Vec<String>,
+    /// None when the plugin lists no addresses: its module cannot even import fetch.
+    client: Option<reqwest::Client>,
+    /// When the chat stops waiting for this call. The sandbox thread can outlive
+    /// that wait, so requests after it are refused rather than sent.
+    deadline: Instant,
     handle: tokio::runtime::Handle,
 }
 
 impl CodeHost for Gate {
     fn fetch(&self, request: CodeFetch) -> Result<CodeFetchReply, String> {
         let url = check_fetch(&request, &self.allowed)?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| "This plugin may not use the internet.".to_owned())?;
+        let left = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(|| "The plugin ran out of time for internet requests.".to_owned())?;
         // Called on a blocking thread, so waiting here never stalls the runtime.
-        self.handle.block_on(send(url, request))
+        self.handle
+            .block_on(send(client, url, request, left.min(FETCH_TIMEOUT)))
     }
 }
 
-async fn send(url: url::Url, request: CodeFetch) -> Result<CodeFetchReply, String> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(FETCH_TIMEOUT)
-        .connect_timeout(Duration::from_secs(10))
-        .https_only(true)
-        .dns_resolver(Arc::new(PublicOnly))
-        .user_agent("Sovra plugin")
-        .build()
-        .map_err(|_| "The plugin's request could not be prepared.".to_owned())?;
+async fn send(
+    client: &reqwest::Client,
+    url: url::Url,
+    request: CodeFetch,
+    timeout: Duration,
+) -> Result<CodeFetchReply, String> {
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|_| "The plugin used an unknown request method.".to_owned())?;
-    let mut builder = client.request(method, url.as_str());
+    let mut builder = client.request(method, url.as_str()).timeout(timeout);
     for (name, value) in &request.headers {
         builder = builder.header(name, value);
     }
@@ -270,7 +330,16 @@ mod tests {
     const MODULE: &[u8] = include_bytes!("../../../../plugin.wasm");
 
     fn code_plugin(repository: &str, network: &[&str]) -> (PluginEntry, Vec<u8>, InstalledPlugin) {
+        code_plugin_at(repository, network, "Date tools.")
+    }
+
+    fn code_plugin_at(
+        repository: &str,
+        network: &[&str],
+        description: &str,
+    ) -> (PluginEntry, Vec<u8>, InstalledPlugin) {
         let manifest = json!({
+            "description": description,
             "tools": [{"name": "weekday", "title": "Find the weekday",
                        "description": "Use to find a weekday.",
                        "input_schema": {"type": "object"}}],
@@ -301,6 +370,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct Store {
         packages: Vec<(PluginEntry, Vec<u8>)>,
+        reads: AtomicUsize,
     }
 
     impl PluginStore for Store {
@@ -311,6 +381,7 @@ mod tests {
             Ok(())
         }
         fn package(&self, entry: &PluginEntry) -> Result<PluginPackage, SkillError> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
             let (_, bytes) = self
                 .packages
                 .iter()
@@ -395,6 +466,7 @@ mod tests {
         off.enabled = false;
         let store = Store {
             packages: vec![(on_entry, on_bytes), (off_entry, off_bytes)],
+            ..Store::default()
         };
         let library = PluginLibrary {
             catalog_url: None,
@@ -417,6 +489,26 @@ mod tests {
             1,
             "the module compiled once"
         );
+        assert_eq!(
+            store.reads.load(Ordering::Relaxed),
+            1,
+            "an unchanged package is not read from disk again"
+        );
+        assert_eq!(tools.offers(), offers);
+
+        // An update with a new package but the same module rereads the package
+        // and still does not compile again.
+        let (updated_entry, updated_bytes, updated) =
+            code_plugin_at("owner/dates", &[], "Date tools, now with better wording.");
+        let store = Store {
+            packages: vec![(updated_entry, updated_bytes)],
+            ..Store::default()
+        };
+        let mut updated_library = library.clone();
+        updated_library.installed[0] = updated;
+        let _ = tools.refresh(&updated_library, &store, Some(&engine));
+        assert_eq!(store.reads.load(Ordering::Relaxed), 1);
+        assert_eq!(engine.loads.load(Ordering::Relaxed), 1);
 
         let mut all_off = library;
         all_off.installed[0].enabled = false;
@@ -429,6 +521,7 @@ mod tests {
         let (entry, bytes, plugin) = code_plugin("owner/weather", &["api.example.com"]);
         let store = Store {
             packages: vec![(entry, bytes)],
+            ..Store::default()
         };
         let library = PluginLibrary {
             catalog_url: None,
@@ -455,6 +548,7 @@ mod tests {
         let (entry, bytes, plugin) = code_plugin("owner/dates", &[]);
         let store = Store {
             packages: vec![(entry, bytes)],
+            ..Store::default()
         };
         let mut library = PluginLibrary {
             catalog_url: None,
@@ -494,6 +588,8 @@ mod tests {
         let refused = tokio::task::spawn_blocking(move || {
             let gate = Gate {
                 allowed: vec!["api.example.com".into()],
+                client: Some(CodeTools::default().http().unwrap()),
+                deadline: Instant::now() + CALL_TIMEOUT,
                 handle,
             };
             gate.fetch(CodeFetch {
@@ -510,6 +606,26 @@ mod tests {
                 .unwrap_err()
                 .contains("only contact api.example.com")
         );
+
+        // A sandbox thread still running after the chat stopped waiting sends nothing.
+        let handle = tokio::runtime::Handle::current();
+        let late = tokio::task::spawn_blocking(move || {
+            Gate {
+                allowed: vec!["api.example.com".into()],
+                client: Some(CodeTools::default().http().unwrap()),
+                deadline: Instant::now(),
+                handle,
+            }
+            .fetch(CodeFetch {
+                url: "https://api.example.com/".into(),
+                method: "GET".into(),
+                headers: std::collections::BTreeMap::new(),
+                body: String::new(),
+            })
+        })
+        .await
+        .unwrap();
+        assert!(late.unwrap_err().contains("ran out of time"));
 
         let local = reqwest::dns::Resolve::resolve(&PublicOnly, "localhost".parse().unwrap()).await;
         assert!(

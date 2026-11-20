@@ -259,10 +259,16 @@ pub(crate) struct WorkTracker {
     message_id: String,
     /// Specialist id → "Web Search helper".
     helpers: HashMap<String, String>,
+    /// Connected tool name → the tool's own title.
+    titles: Arc<HashMap<String, String>>,
 }
 
 impl WorkTracker {
-    pub(crate) fn new(message_id: String, started: Instant) -> Self {
+    pub(crate) fn new(
+        message_id: String,
+        started: Instant,
+        titles: Arc<HashMap<String, String>>,
+    ) -> Self {
         let helpers = sovra_core::default_sovra_srx_agents()
             .into_iter()
             .map(|spec| (spec.id, helper_display_name(&spec.name)))
@@ -272,6 +278,7 @@ impl WorkTracker {
             started,
             message_id,
             helpers,
+            titles,
         }
     }
 
@@ -314,6 +321,7 @@ impl WorkTracker {
                         tool: name,
                         args,
                         asks_helper: asks.as_deref(),
+                        title: self.titles.get(name).map(String::as_str),
                         at_ms,
                     });
                 }
@@ -351,6 +359,7 @@ impl WorkTracker {
                     tool: &note.tool,
                     args: &note.args,
                     asks_helper: asks.as_deref(),
+                    title: self.titles.get(&note.tool).map(String::as_str),
                     at_ms,
                 });
             }
@@ -421,7 +430,7 @@ mod tests {
 
     #[test]
     fn calls_and_results_become_steps_once() {
-        let mut tracker = WorkTracker::new("work".into(), Instant::now());
+        let mut tracker = WorkTracker::new("work".into(), Instant::now(), Arc::default());
         assert!(tracker.is_empty());
         let streamed = event(
             "OrchestratorAgent",
@@ -444,8 +453,42 @@ mod tests {
     }
 
     #[test]
+    fn a_connected_tool_is_shown_by_its_own_title() {
+        let alias = "connected_plugin_io_github_owner_dates_days_between";
+        let titles = Arc::new(HashMap::from([(
+            alias.to_owned(),
+            "Count the days between two dates".to_owned(),
+        )]));
+        let mut tracker = WorkTracker::new("work".into(), Instant::now(), titles);
+        tracker.observe(&event(
+            "OrchestratorAgent",
+            vec![call(alias, Some("c1"), json!({"from": "2026-01-01"}))],
+            false,
+        ));
+        tracker.observe(&event(
+            "OrchestratorAgent",
+            vec![call("connected_svc_search", Some("c2"), json!({}))],
+            false,
+        ));
+        let labels: Vec<_> = tracker
+            .activity
+            .steps
+            .iter()
+            .map(|step| step.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Count the days between two dates",
+                "Using connected svc search"
+            ],
+            "a tool without a title still reads as words"
+        );
+    }
+
+    #[test]
     fn delegations_open_helper_lanes_and_errors_fail_steps() {
-        let mut tracker = WorkTracker::new("work".into(), Instant::now());
+        let mut tracker = WorkTracker::new("work".into(), Instant::now(), Arc::default());
         tracker.observe(&event(
             "OrchestratorAgent",
             vec![
@@ -471,7 +514,7 @@ mod tests {
 
     #[test]
     fn tapped_helper_steps_land_in_their_lane() {
-        let mut tracker = WorkTracker::new("work".into(), Instant::now());
+        let mut tracker = WorkTracker::new("work".into(), Instant::now(), Arc::default());
         let note = StepNote {
             lane: "d1".into(),
             helper: "WebSearchAgent".into(),

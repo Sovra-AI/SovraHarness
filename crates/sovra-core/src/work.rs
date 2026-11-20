@@ -159,6 +159,9 @@ pub struct StepCall<'a> {
     pub args: &'a Value,
     /// Set when the call hands work to a specialist helper: its display name.
     pub asks_helper: Option<&'a str>,
+    /// The tool's own title, when it came with one (a plugin's or a connected
+    /// service's tool): shown instead of its machine name.
+    pub title: Option<&'a str>,
     pub at_ms: u64,
 }
 
@@ -182,6 +185,8 @@ impl WorkActivity {
                 ask_label(name, call.args),
                 Some(call.id.to_owned()),
             )
+        } else if let Some(title) = call.title.filter(|title| !title.trim().is_empty()) {
+            (StepKind::Other, clip(title.trim()), None)
         } else {
             let (kind, label) = describe_step(call.tool, call.args);
             (kind, label, None)
@@ -611,6 +616,7 @@ mod tests {
             tool,
             args,
             asks_helper: None,
+            title: None,
             at_ms,
         }
     }
@@ -668,6 +674,7 @@ mod tests {
         let request = json!({"request": "What are today's opening hours of the Louvre and the British Museum in London?"});
         log.start(StepCall {
             asks_helper: Some("Web Search helper"),
+            title: None,
             ..call("a", "WebSearchAgent", &request, 0)
         });
         let label = &log.steps[0].label;
@@ -717,6 +724,7 @@ mod tests {
         let request = json!({"request": "find a recipe"});
         let ask = |id, tool, name| StepCall {
             asks_helper: Some(name),
+            title: None,
             ..call(id, tool, &request, 0)
         };
         log.start(ask("a", "WebSearchAgent", "Web Search helper"));

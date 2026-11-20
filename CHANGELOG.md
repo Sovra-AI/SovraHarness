@@ -25,6 +25,27 @@ package version.
   `Sovra-AI/SovraHarness` to count days between dates, find weekdays, and add
   days to a date. See [Plugins with code](docs/plugins.md#plugins-with-code).
 
+- **Plugin code can only be turned on by you.** Sovra itself, not just the
+  Plugins page, refuses to switch on a plugin with code unless you approved the
+  exact version you were shown, so an update that lands while you look is
+  never switched on unseen. Plugin code is also held to a cap on the tables it
+  declares, ignores system proxy settings, refuses more IPv6 and IPv4 forms
+  that lead to the local network, and stops reaching the internet once its
+  call has timed out.
+
+- **The steps under a reply name tools in plain words.** A plugin's tool shows
+  its own title, like "Count the days between two dates", and so does a
+  connected service's tool when the service gives one, instead of its machine
+  name.
+
+- **Chats with cards, rows, code or badges save again.** Replies that showed one
+  of these failed to save, so the conversation was lost on restart. They are
+  saved now, and conversations saved before still open.
+
+- **Plugin tools that use the internet answer sooner.** Their requests share one
+  connection setup instead of starting from scratch each time, and changing the
+  plugin list no longer rereads every switched-on plugin's code from disk.
+
 - **One roadmap.** Open work is listed in [docs/roadmap.md](docs/roadmap.md).
   Guides describe the current checkout. A gap in a guide states today's limit
   and points at that page, instead of keeping a second list or a delivery date.
