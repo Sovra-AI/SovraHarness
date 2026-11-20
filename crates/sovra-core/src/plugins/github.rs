@@ -8,8 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    InstalledPlugin, PluginEntry, PluginPackage, PluginService, PluginSkill, check_download_url,
-    check_update, error, short_text,
+    CODE_API_VERSION, CODE_MANIFEST_PATH, CODE_MODULE_PATH, CodeChanges, CodeManifest,
+    InstalledPlugin, MAX_MODULE_BYTES, PluginEntry, PluginPackage, PluginService, PluginSkill,
+    check_download_url, check_update, error, short_text,
 };
 use crate::skills::{MAX_SKILL_BYTES, SkillError, valid_name};
 
@@ -25,8 +26,9 @@ pub const MAX_GITHUB_RESOURCE_BYTES: usize = 128 * 1024;
 const MAX_RESOURCES_PER_SKILL: usize = 64;
 /// Total skill-file bytes per repository, leaving room in the package for instructions.
 const MAX_RESOURCE_TOTAL: u64 = 1536 * 1024;
-/// Packages are stored and parsed whole, so they stay bounded even with skill files.
-pub const MAX_GITHUB_PLUGIN_BYTES: usize = 4 * 1024 * 1024;
+/// Packages are stored and parsed whole, so they stay bounded even with skill files
+/// and a plugin's code (a 2 MB module is about 2.7 MB once stored as text).
+pub const MAX_GITHUB_PLUGIN_BYTES: usize = 8 * 1024 * 1024;
 /// Files that are never text; downloading them would only be discarded.
 const BINARY_EXTENSIONS: [&str; 22] = [
     "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "pdf", "zip", "gz", "tgz", "tar", "ttf",
@@ -192,6 +194,8 @@ impl GitHubPin {
 pub struct RepositoryPlan {
     pub skills: Vec<SkillPlan>,
     pub manifests: Vec<String>,
+    /// `plugin.wasm`, downloaded only when `sovra-plugin.json` sits beside it.
+    pub module: Option<String>,
     /// Skills that cannot be added, with the reason, so the rest still can.
     pub left_out: Vec<String>,
 }
@@ -255,8 +259,18 @@ pub fn plan_repository(tree_json: &[u8]) -> Result<RepositoryPlan, SkillError> {
     let mut names = BTreeSet::new();
     for (path, size) in &paths {
         let (path, size) = (path.clone(), *size);
-        if path == ".mcp.json" || path == ".claude-plugin/plugin.json" {
+        if path == ".mcp.json" || path == ".claude-plugin/plugin.json" || path == CODE_MANIFEST_PATH
+        {
             plan.manifests.push(path);
+            continue;
+        }
+        if path == CODE_MODULE_PATH {
+            if size > MAX_MODULE_BYTES as u64 {
+                return Err(error(
+                    "This repository's plugin.wasm is larger than 2 MB, which is more than Sovra can run.",
+                ));
+            }
+            plan.module = Some(path);
             continue;
         }
         let mut parts: Vec<&str> = path.split('/').collect();
@@ -288,6 +302,14 @@ pub fn plan_repository(tree_json: &[u8]) -> Result<RepositoryPlan, SkillError> {
             skipped_files: 0,
         });
     }
+    if !plan.manifests.iter().any(|path| path == CODE_MANIFEST_PATH) {
+        // A module nobody describes is never downloaded, let alone run.
+        plan.module = None;
+    } else if plan.module.is_none() {
+        return Err(error(
+            "This repository has sovra-plugin.json but no plugin.wasm beside it at the top of the repository.",
+        ));
+    }
     plan_resources(&mut plan, &paths);
     if plan.skills.len() > MAX_GITHUB_SKILLS {
         return Err(SkillError(format!(
@@ -308,8 +330,10 @@ pub struct RepositorySnapshot {
     pub commit: String,
     pub description: Option<String>,
     pub skills: Vec<PluginSkill>,
-    /// `(path, bytes)` of `.mcp.json` and `.claude-plugin/plugin.json`.
+    /// `(path, bytes)` of `.mcp.json`, `.claude-plugin/plugin.json` and `sovra-plugin.json`.
     pub manifests: Vec<(String, Vec<u8>)>,
+    /// The bytes of `plugin.wasm`, when the plan asked for it.
+    pub module: Option<Vec<u8>>,
     /// Skills found but not usable, with the reason.
     pub left_out: Vec<String>,
 }
@@ -330,8 +354,10 @@ pub enum FetchedFile {
     /// A file of `plan.skills[index]`: its path inside the skill, and its text, or
     /// `None` when it could not be read as text.
     Resource(usize, String, Option<String>),
-    /// `.mcp.json` or `.claude-plugin/plugin.json`, by path.
+    /// `.mcp.json`, `.claude-plugin/plugin.json` or `sovra-plugin.json`, by path.
     Manifest(String, Vec<u8>),
+    /// `plugin.wasm`, as raw bytes.
+    Module(Vec<u8>),
 }
 
 /// "It is not readable text." becomes "it is not readable text", to follow a skill name.
@@ -359,6 +385,7 @@ impl RepositorySnapshot {
         let mut skills: Vec<Result<PluginSkill, String>> = Vec::with_capacity(plan.skills.len());
         let mut skipped: Vec<usize> = plan.skills.iter().map(|s| s.skipped_files).collect();
         let mut manifests = Vec::with_capacity(plan.manifests.len());
+        let mut module = None;
         let mut left_out = plan.left_out;
         for item in files {
             match item {
@@ -387,6 +414,7 @@ impl RepositorySnapshot {
                     }
                 }
                 FetchedFile::Manifest(path, bytes) => manifests.push((path, bytes)),
+                FetchedFile::Module(bytes) => module = Some(bytes),
             }
         }
         // Named in skill order, as the person sees them listed.
@@ -411,6 +439,7 @@ impl RepositorySnapshot {
             description,
             skills: kept,
             manifests,
+            module,
             left_out,
         }
     }
@@ -424,7 +453,22 @@ impl RepositorySnapshot {
         }
         let mut description = None;
         let mut services: Vec<PluginService> = Vec::new();
+        let mut code = None;
+        let mut code_description = None;
         for (path, bytes) in &self.manifests {
+            if path == CODE_MANIFEST_PATH {
+                // Code is all or nothing: a mistake here stops the add instead of
+                // quietly leaving the plugin's tools out.
+                let module = self.module.as_deref().ok_or_else(|| {
+                    error(
+                        "This repository has sovra-plugin.json but plugin.wasm could not be read.",
+                    )
+                })?;
+                let manifest = CodeManifest::parse(bytes)?;
+                code_description.clone_from(&manifest.description);
+                code = Some(manifest.with_module(module)?);
+                continue;
+            }
             let Ok(manifest) = serde_json::from_slice::<Manifest>(bytes) else {
                 continue;
             };
@@ -458,22 +502,29 @@ impl RepositorySnapshot {
                 }
             }
         }
-        if self.skills.is_empty() && services.is_empty() {
+        if self.skills.is_empty() && services.is_empty() && code.is_none() {
             return Err(nothing_to_add(&self.left_out));
         }
         let description = description
+            .or(code_description)
             .or_else(|| self.description.clone())
             .map(|text| clean_text(&text, 1000))
             .filter(|text| short_text(text, 1000))
             .unwrap_or_else(|| {
                 format!(
-                    "Skills from github.com/{}/{}.",
-                    self.repository.owner, self.repository.name
+                    "{} from github.com/{}/{}.",
+                    if self.skills.is_empty() && code.is_some() {
+                        "Tools"
+                    } else {
+                        "Skills"
+                    },
+                    self.repository.owner,
+                    self.repository.name
                 )
             });
         let package = PluginPackage {
             schema_version: 1,
-            api_version: 1,
+            api_version: if code.is_some() { CODE_API_VERSION } else { 1 },
             id: self.repository.plugin_id(),
             version: GITHUB_PLUGIN_VERSION.into(),
             title: clean_text(
@@ -483,12 +534,13 @@ impl RepositorySnapshot {
             description,
             skills: self.skills.clone(),
             services,
+            code,
         };
         let bytes = serde_json::to_vec(&package)
             .map_err(|_| error("The repository could not be turned into a plugin."))?;
         if bytes.len() > MAX_GITHUB_PLUGIN_BYTES {
             return Err(error(
-                "This repository's skills are larger than 4 MB together, which is more than Sovra can add.",
+                "This repository's skills and code are larger than 8 MB together, which is more than Sovra can add.",
             ));
         }
         let entry = PluginEntry::for_package(
@@ -674,12 +726,16 @@ pub struct PluginChanges {
     pub connections_removed: Vec<String>,
     /// Skills in the newer commit that cannot be added, with the reason.
     pub left_out: Vec<String>,
+    /// What changes in the plugin's code, its tools and the addresses it may contact.
+    pub code: CodeChanges,
 }
 
 /// Explains an empty result, naming the skills that were found but could not be used.
 pub fn nothing_to_add(left_out: &[String]) -> SkillError {
     if left_out.is_empty() {
-        error("This repository has no SKILL.md files or MCP connection settings for Sovra to add.")
+        error(
+            "This repository has no SKILL.md files, MCP connection settings or plugin code for Sovra to add.",
+        )
     } else {
         SkillError(format!(
             "None of this repository's skills could be added: {}.",
@@ -717,6 +773,7 @@ impl PluginChanges {
                     .push(format!("{}: {}", service.name, service.address));
             }
         }
+        changes.code = CodeChanges::between(old.code.as_ref(), new.code.as_ref());
         changes
     }
 
@@ -726,6 +783,7 @@ impl PluginChanges {
             && self.changed.is_empty()
             && self.connections_added.is_empty()
             && self.connections_removed.is_empty()
+            && self.code.is_empty()
     }
 }
 

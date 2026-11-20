@@ -13,7 +13,17 @@ use sovra_core::skills::{SkillCatalog, SkillError, SkillListing, SkillStore};
 const ALREADY_ADDED: &str =
     "This repository is already added. Choose Check for update to get its newer changes.";
 
+pub(crate) mod code;
 mod github;
+
+/// What the plugin library worker needs: storage, where GitHub is, and the sealed
+/// box with the set of running code plugins it keeps current.
+pub(crate) struct PluginServices {
+    pub(crate) store: Option<Arc<dyn PluginStore>>,
+    pub(crate) hosts: GitHubHosts,
+    pub(crate) engine: Option<Arc<dyn sovra_core::plugins::PluginCodeEngine>>,
+    pub(crate) code: Arc<code::CodeTools>,
+}
 
 pub(crate) async fn download(url: &str, limit: usize) -> Result<Vec<u8>, SkillError> {
     check_download_url(url)?;
@@ -171,6 +181,9 @@ struct Download {
     bytes: Vec<u8>,
     catalog_url: String,
     github: Option<GitHubPin>,
+    /// The update lets code run for the first time or reach somewhere new, so it
+    /// is installed switched off and the person turns it on again themselves.
+    requires_approval: bool,
 }
 
 #[expect(
@@ -246,6 +259,8 @@ pub(crate) async fn handle(
                 bytes,
                 catalog_url: root.clone(),
                 github: None,
+                // Catalog packages cannot carry code.
+                requires_approval: false,
             });
         }
         PluginCommand::AddFromGitHub { address } => {
@@ -283,6 +298,8 @@ pub(crate) async fn handle(
                 bytes,
                 catalog_url: repository.web_url(),
                 github: Some(pin),
+                // Added switched off anyway.
+                requires_approval: false,
             });
         }
         PluginCommand::CheckForUpdate { id } => {
@@ -332,6 +349,7 @@ pub(crate) async fn handle(
                     bytes,
                     catalog_url: installed.catalog_url,
                     github: Some(pin),
+                    requires_approval: changes.code.needs_approval(),
                 },
             ));
             return Ok((
@@ -387,6 +405,7 @@ pub(crate) async fn handle(
                     bytes,
                     catalog_url,
                     github,
+                    requires_approval,
                 } = downloaded.expect("installs download and verify their package first");
                 let mut plugin = InstalledPlugin {
                     entry,
@@ -403,7 +422,7 @@ pub(crate) async fn handle(
                         return Err(SkillError(ALREADY_ADDED.into()));
                     }
                     check_replacement(existing, &plugin)?;
-                    plugin.enabled = existing.enabled;
+                    plugin.enabled = existing.enabled && !requires_approval;
                     *existing = plugin.clone();
                 } else if updating {
                     return Err(SkillError("This plugin is no longer installed.".into()));

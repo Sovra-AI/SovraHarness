@@ -510,6 +510,45 @@ fn github_commit(routes: &mut BTreeMap<String, Vec<u8>>, commit: &str, skills: &
     );
 }
 
+/// Answers GitHub API and raw-file requests from `routes`, recording each path.
+fn serve_github(
+    listener: tokio::net::TcpListener,
+    served: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    requested: Arc<Mutex<Vec<String>>>,
+) {
+    tokio::runtime::Handle::current().spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.expect("test fixture");
+            let mut buffer = vec![0; 8192];
+            let length = socket.read(&mut buffer).await.expect("test fixture");
+            let request = String::from_utf8_lossy(&buffer[..length]);
+            let path = request
+                .split_whitespace()
+                .nth(1)
+                .expect("test fixture")
+                .to_owned();
+            requested.lock().expect("test fixture").push(path.clone());
+            let body = served.lock().expect("test fixture").get(&path).cloned();
+            let head = match &body {
+                Some(body) => format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                ),
+                None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .into(),
+            };
+            socket
+                .write_all(head.as_bytes())
+                .await
+                .expect("test fixture");
+            socket
+                .write_all(&body.unwrap_or_default())
+                .await
+                .expect("test fixture");
+        }
+    });
+}
+
 #[tokio::test]
 async fn github_repository_adds_switched_off_then_updates_only_after_review() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -521,28 +560,7 @@ async fn github_repository_adds_switched_off_then_updates_only_after_review() {
     github_commit(&mut initial, FIRST, &[("notes", "Take tidy notes.")]);
     let routes = Arc::new(Mutex::new(initial));
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
-    let (served, requested) = (routes.clone(), requests.clone());
-    let _server = tokio::runtime::Handle::current().spawn(async move {
-        loop {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buffer = vec![0; 8192];
-            let length = socket.read(&mut buffer).await.unwrap();
-            let request = String::from_utf8_lossy(&buffer[..length]);
-            let path = request.split_whitespace().nth(1).unwrap().to_owned();
-            requested.lock().unwrap().push(path.clone());
-            let body = served.lock().unwrap().get(&path).cloned();
-            let head = match &body {
-                Some(body) => format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                ),
-                None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                    .into(),
-            };
-            socket.write_all(head.as_bytes()).await.unwrap();
-            socket.write_all(&body.unwrap_or_default()).await.unwrap();
-        }
-    });
+    serve_github(listener, routes.clone(), requests.clone());
     let store = Arc::new(Store::default());
     let client = sovra_runtime::start_with_services(
         "plugin-github-test",
@@ -761,4 +779,165 @@ async fn github_repository_adds_switched_off_then_updates_only_after_review() {
         THIRD,
         "a removed repository can be added again"
     );
+}
+
+/// Stands in for the sealed box (the runtime never names it); counts what it loads.
+#[derive(Debug, Default)]
+struct CountingEngine {
+    loads: Mutex<Vec<bool>>,
+}
+
+#[derive(Debug)]
+struct Answer;
+
+impl sovra_core::plugins::LoadedCode for Answer {
+    fn call(
+        &self,
+        _: &str,
+        _: &serde_json::Value,
+        _: Arc<dyn sovra_core::plugins::CodeHost>,
+    ) -> Result<String, String> {
+        Ok("answered".into())
+    }
+}
+
+impl sovra_core::plugins::PluginCodeEngine for CountingEngine {
+    fn load(
+        &self,
+        _: &[u8],
+        network: bool,
+    ) -> Result<Arc<dyn sovra_core::plugins::LoadedCode>, SkillError> {
+        self.loads.lock().expect("test fixture").push(network);
+        Ok(Arc::new(Answer))
+    }
+}
+
+fn code_commit(routes: &mut BTreeMap<String, Vec<u8>>, commit: &str, network: &[&str]) {
+    routes.insert(
+        "/api/repos/owner/dates/commits/main".into(),
+        commit.as_bytes().to_vec(),
+    );
+    let tree = serde_json::json!({"tree": [
+        {"path": "sovra-plugin.json", "type": "blob", "size": 400},
+        {"path": "plugin.wasm", "type": "blob", "size": 70_000},
+        {"path": "src/lib.rs", "type": "blob", "size": 9000},
+    ], "truncated": false});
+    routes.insert(
+        format!("/api/repos/owner/dates/git/trees/{commit}?recursive=1"),
+        serde_json::to_vec(&tree).expect("test fixture"),
+    );
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../sovra-plugin.json")).expect("test fixture");
+    manifest["network"] = serde_json::json!(network);
+    routes.insert(
+        format!("/raw/owner/dates/{commit}/sovra-plugin.json"),
+        serde_json::to_vec(&manifest).expect("test fixture"),
+    );
+    routes.insert(
+        format!("/raw/owner/dates/{commit}/plugin.wasm"),
+        include_bytes!("../../../plugin.wasm").to_vec(),
+    );
+}
+
+#[tokio::test]
+async fn a_code_plugin_is_added_off_runs_when_on_and_asks_again_for_new_addresses() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let root = format!("http://{}", listener.local_addr().unwrap());
+    let mut initial = BTreeMap::from([(
+        "/api/repos/owner/dates".to_owned(),
+        br#"{"default_branch":"main","private":false}"#.to_vec(),
+    )]);
+    code_commit(&mut initial, FIRST, &[]);
+    let routes = Arc::new(Mutex::new(initial));
+    serve_github(listener, routes.clone(), Arc::default());
+    let store = Arc::new(Store::default());
+    let engine = Arc::new(CountingEngine::default());
+    let client = sovra_runtime::start_with_services(
+        "plugin-code-test",
+        AgentConfig::default(),
+        RuntimeServices {
+            plugins: Some(store.clone()),
+            plugin_hosts: sovra_core::plugins::GitHubHosts {
+                api: format!("{root}/api"),
+                raw: format!("{root}/raw"),
+            },
+            plugin_code: Some(engine.clone()),
+            ..RuntimeServices::default()
+        },
+    )
+    .unwrap();
+    until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    let send = |command| client.send(Command::Plugins(command)).unwrap();
+
+    send(PluginCommand::AddFromGitHub {
+        address: "owner/dates".into(),
+    });
+    let added = until(&client, |event| {
+        matches!(event, PluginEvent::Added { .. } | PluginEvent::Error(_))
+    })
+    .await;
+    let Some(Event::Plugins(PluginEvent::Added { id, package, .. })) = added.last() else {
+        panic!("expected the code plugin to be added: {added:?}");
+    };
+    let id = id.clone();
+    let code = package.code.as_ref().expect("the package carries its code");
+    assert_eq!(code.tools.len(), 3);
+    assert_eq!(
+        code.module_bytes().unwrap(),
+        include_bytes!("../../../plugin.wasm")
+    );
+    assert!(package.description.starts_with("Exact date sums"));
+    assert!(
+        engine.loads.lock().unwrap().is_empty(),
+        "nothing runs while the plugin is off"
+    );
+
+    send(PluginCommand::SetEnabled {
+        id: id.clone(),
+        enabled: true,
+    });
+    let on = until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    assert!(
+        on.iter().any(|event| matches!(event, Event::Skills(SkillEvent::Loaded { issues, .. }) if issues.is_empty())),
+        "{on:?}"
+    );
+    assert_eq!(
+        *engine.loads.lock().unwrap(),
+        [false],
+        "loaded once, without the internet"
+    );
+
+    // The next commit wants to reach a new address: the update says so, and the
+    // plugin comes back switched off until the person turns it on again.
+    code_commit(&mut routes.lock().unwrap(), SECOND, &["api.example.com"]);
+    send(PluginCommand::CheckForUpdate { id: id.clone() });
+    let ready = until(&client, |event| {
+        matches!(
+            event,
+            PluginEvent::UpdateReady { .. } | PluginEvent::Error(_)
+        )
+    })
+    .await;
+    let Some(Event::Plugins(PluginEvent::UpdateReady { changes, .. })) = ready.last() else {
+        panic!("expected an update: {ready:?}");
+    };
+    assert_eq!(changes.code.network_added, ["api.example.com"]);
+    assert!(changes.code.needs_approval());
+    send(PluginCommand::ApplyUpdate { id: id.clone() });
+    until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    let updated = store.load().unwrap().installed.remove(0);
+    assert_eq!(updated.github.as_ref().unwrap().commit, SECOND);
+    assert!(!updated.enabled, "new access needs the person's approval");
+
+    send(PluginCommand::SetEnabled {
+        id: id.clone(),
+        enabled: true,
+    });
+    until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    assert_eq!(
+        *engine.loads.lock().unwrap(),
+        [false, true],
+        "turned on again, it loads with the internet it now lists"
+    );
+    client.send(Command::Shutdown).unwrap();
 }

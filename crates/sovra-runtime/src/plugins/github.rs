@@ -9,8 +9,8 @@ use futures::{StreamExt as _, TryStreamExt as _};
 use serde::Deserialize;
 use sovra_core::plugins::{
     FetchedFile, GitHubHosts, GitHubPin, GitHubRepository, MAX_GITHUB_FILE_BYTES,
-    MAX_GITHUB_RESOURCE_BYTES, PluginEntry, PluginStore, RepositorySnapshot, plan_repository,
-    valid_commit,
+    MAX_GITHUB_RESOURCE_BYTES, MAX_MODULE_BYTES, PluginEntry, PluginStore, RepositorySnapshot,
+    plan_repository, valid_commit,
 };
 use sovra_core::skills::SkillError;
 
@@ -158,6 +158,15 @@ impl Reader {
                     .file(repository, commit, &path, MAX_GITHUB_FILE_BYTES)
                     .await?;
                 Ok((order, FetchedFile::Manifest(path, bytes)))
+            }));
+        }
+        if let Some(path) = plan.module.clone() {
+            let order = jobs.len();
+            jobs.push(Box::pin(async move {
+                let bytes = self
+                    .file(repository, commit, &path, MAX_MODULE_BYTES)
+                    .await?;
+                Ok((order, FetchedFile::Module(bytes)))
             }));
         }
         // Unordered, so one slow file does not hold the other slots while downloads

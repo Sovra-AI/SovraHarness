@@ -308,6 +308,7 @@ pub fn start_with_auth(
             skills,
             plugins: None,
             plugin_hosts: sovra_core::plugins::GitHubHosts::default(),
+            plugin_code: None,
             index,
             messaging,
             signin: google,
@@ -340,6 +341,8 @@ pub struct RuntimeServices {
     pub plugins: Option<Arc<dyn sovra_core::plugins::PluginStore>>,
     /// Where plugins added from a GitHub repository are read from.
     pub plugin_hosts: sovra_core::plugins::GitHubHosts,
+    /// The sealed box plugin code runs in. `None` leaves code plugins' tools out.
+    pub plugin_code: Option<Arc<dyn sovra_core::plugins::PluginCodeEngine>>,
     pub index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
     pub messaging: MessagingChannels,
     /// Google Sign-In for the login screen.
@@ -465,6 +468,7 @@ async fn serve(
         skills: skill_store,
         plugins: plugin_store,
         plugin_hosts,
+        plugin_code,
         index,
         messaging,
         signin,
@@ -524,10 +528,15 @@ async fn serve(
         .as_ref()
         .map(|store| files::FileRuntime::start(store.clone(), events.clone(), &handle));
     let load_skills = skill_store.is_some() || plugin_store.is_some();
+    let code_tools = Arc::new(plugins::code::CodeTools::default());
     let skills = skills::SkillsRuntime::start(
         skill_store,
-        plugin_store,
-        plugin_hosts,
+        plugins::PluginServices {
+            store: plugin_store,
+            hosts: plugin_hosts,
+            engine: plugin_code,
+            code: Arc::clone(&code_tools),
+        },
         events.clone(),
         &handle,
     );
@@ -1174,11 +1183,17 @@ async fn serve(
                         },
                         messaging: connections.messaging(&session_id),
                         remote_tools: if private_access {
-                            mcp.offers()
+                            let mut offers = mcp.offers();
+                            offers.extend(code_tools.offers());
+                            offers
                         } else {
                             Vec::new()
                         },
-                        remote_caller: mcp.caller(),
+                        remote_caller: Arc::new(plugins::code::ToolRouter {
+                            services: mcp.caller(),
+                            code: Arc::clone(&code_tools),
+                            handle: handle.clone(),
+                        }),
                         memory_reader: if private_access {
                             inputs.reader(groups.knowledge.wrap(recalling::reader(
                                 memory.as_ref(),
@@ -1362,7 +1377,7 @@ struct PromptJob {
     indexed_files: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
     messaging: Option<Arc<dyn sovra_core::communications::MessagingAccess>>,
     remote_tools: Vec<sovra_core::mcp::ToolOffer>,
-    remote_caller: Arc<mcp::ServiceCaller>,
+    remote_caller: Arc<plugins::code::ToolRouter>,
 }
 
 fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {

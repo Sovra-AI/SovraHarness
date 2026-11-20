@@ -24,11 +24,16 @@ pub(crate) struct SkillsRuntime {
 impl SkillsRuntime {
     pub(crate) fn start(
         store: Option<Arc<dyn SkillStore>>,
-        plugins: Option<Arc<dyn sovra_core::plugins::PluginStore>>,
-        hosts: sovra_core::plugins::GitHubHosts,
+        plugin_services: crate::plugins::PluginServices,
         events: Sender<Event>,
         handle: &tokio::runtime::Handle,
     ) -> Self {
+        let crate::plugins::PluginServices {
+            store: plugins,
+            hosts,
+            engine,
+            code,
+        } = plugin_services;
         let resources = (store.is_some() || plugins.is_some()).then(|| {
             Arc::new(ResourceReader {
                 skills: store.clone(),
@@ -82,18 +87,29 @@ impl SkillsRuntime {
                     Ok(()) => {
                         let store = store.clone();
                         let plugins = plugins.clone();
+                        let engine = engine.clone();
+                        let code = Arc::clone(&code);
                         tokio::task::spawn_blocking(move || {
                             let library = plugins
                                 .as_ref()
                                 .map(|store| store.load())
                                 .transpose()?
                                 .unwrap_or_default();
-                            let listing = crate::plugins::listing(
+                            let mut listing = crate::plugins::listing(
                                 store.as_deref(),
                                 &library,
                                 plugins.as_deref(),
                                 crate::plugins::Admission::Recover,
                             )?;
+                            // Switched-on code plugins follow the same library, so
+                            // their tools appear and disappear with the plugin.
+                            if let Some(plugins) = plugins.as_deref() {
+                                listing.issues.extend(code.refresh(
+                                    &library,
+                                    plugins,
+                                    engine.as_deref(),
+                                ));
+                            }
                             Ok::<_, SkillError>((listing, library))
                         })
                         .await
@@ -486,6 +502,7 @@ mod tests {
             description: None,
             skills: vec![skill],
             manifests: Vec::new(),
+            module: None,
             left_out: Vec::new(),
         };
         let (entry, bytes, pin) = snapshot.package().expect("package");

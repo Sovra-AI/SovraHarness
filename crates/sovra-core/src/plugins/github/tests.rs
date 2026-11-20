@@ -24,6 +24,7 @@ fn snapshot(commit: &str, skills: Vec<PluginSkill>) -> RepositorySnapshot {
         description: Some("Handy  skills\nfor writing.".into()),
         skills,
         manifests: Vec::new(),
+        module: None,
         left_out: Vec::new(),
     }
 }
@@ -192,10 +193,10 @@ fn a_snapshot_becomes_a_verifiable_package_pinned_to_its_commit() {
     let mut bad = plain;
     bad.commit = "main".into();
     assert!(bad.package().is_err());
-    // Each file is within its limit, but together they pass the 4 MB package limit.
+    // Each file is within its limit, but together they pass the 8 MB package limit.
     let oversized = self::snapshot(
         COMMIT,
-        (0..2)
+        (0..4)
             .map(|n| {
                 let mut big = skill(&format!("s{n}"), "x");
                 for file in 0..20 {
@@ -208,7 +209,7 @@ fn a_snapshot_becomes_a_verifiable_package_pinned_to_its_commit() {
             })
             .collect(),
     );
-    assert!(oversized.package().unwrap_err().0.contains("4 MB"));
+    assert!(oversized.package().unwrap_err().0.contains("8 MB"));
 }
 
 #[test]
@@ -502,4 +503,139 @@ fn large_files_in_one_skill_cannot_use_up_every_later_skills_budget() {
         schemas.skipped_files > 0,
         "the 1.5 MB repository budget applies"
     );
+}
+
+fn tree_of(paths: &[(&str, u64)]) -> Vec<u8> {
+    let tree: Vec<_> = paths
+        .iter()
+        .map(|(path, size)| serde_json::json!({"path": path, "type": "blob", "size": size}))
+        .collect();
+    serde_json::to_vec(&serde_json::json!({ "tree": tree })).unwrap()
+}
+
+const CODE_MANIFEST: &[u8] = br#"{"tools": [{"name": "add_days", "title": "Add days to a date",
+    "description": "Use to find the date a number of days after another date.",
+    "input_schema": {"type": "object", "properties": {"date": {"type": "string"}}}}],
+    "network": ["api.example.com"]}"#;
+
+fn module() -> Vec<u8> {
+    crate::plugins::code::test_module()
+}
+
+fn code_snapshot(commit: &str, manifest: &[u8], module: &[u8]) -> RepositorySnapshot {
+    let mut snapshot = snapshot(commit, Vec::new());
+    snapshot.manifests = vec![(CODE_MANIFEST_PATH.into(), manifest.to_vec())];
+    snapshot.module = Some(module.to_vec());
+    snapshot
+}
+
+#[test]
+fn a_repository_with_code_downloads_its_module_only_beside_a_manifest() {
+    let plan = plan_repository(&tree_of(&[
+        ("sovra-plugin.json", 300),
+        ("plugin.wasm", 9000),
+    ]))
+    .unwrap();
+    assert_eq!(plan.manifests, ["sovra-plugin.json"]);
+    assert_eq!(plan.module.as_deref(), Some("plugin.wasm"));
+
+    let skills_only = plan_repository(&tree_of(&[
+        ("plugin.wasm", 9000),
+        ("skills/notes/SKILL.md", 200),
+    ]))
+    .unwrap();
+    assert_eq!(
+        skills_only.module, None,
+        "an undescribed module is never fetched"
+    );
+
+    let nested = plan_repository(&tree_of(&[
+        ("sovra-plugin.json", 300),
+        ("build/plugin.wasm", 9000),
+    ]))
+    .unwrap_err();
+    assert!(nested.0.contains("no plugin.wasm beside it"), "{nested}");
+
+    let large = plan_repository(&tree_of(&[
+        ("sovra-plugin.json", 300),
+        ("plugin.wasm", (MAX_MODULE_BYTES + 1) as u64),
+    ]))
+    .unwrap_err();
+    assert!(large.0.contains("larger than 2 MB"), "{large}");
+}
+
+#[test]
+fn code_becomes_an_api_two_package_that_only_github_may_carry() {
+    let (entry, bytes, _) = code_snapshot(COMMIT, CODE_MANIFEST, &module())
+        .package()
+        .unwrap();
+    assert_eq!(entry.api_version, CODE_API_VERSION);
+    let package = entry.verify_package(&bytes).unwrap();
+    let code = package.code.as_ref().unwrap();
+    assert_eq!(code.network, ["api.example.com"]);
+    assert_eq!(code.module_bytes().unwrap(), module());
+    assert_eq!(package.description, "Handy skills for writing.");
+    let [offer] = package.tool_offers().try_into().unwrap();
+    assert_eq!(offer.service_id, "plugin:io.github.owner.skills");
+    assert_eq!(offer.service_name, "owner/skills");
+    assert_eq!(offer.tool.name, "add_days");
+
+    // The same package from a catalog address is refused: code needs a pinned repository.
+    let catalog = PluginEntry::for_package("https://plugins.example/p.json".into(), &bytes);
+    assert!(catalog.is_err());
+    // And a version 1 package cannot smuggle code in.
+    let mut downgraded = package.clone();
+    downgraded.api_version = 1;
+    let downgraded = serde_json::to_vec(&downgraded).unwrap();
+    assert!(PluginEntry::for_package(entry.package_url, &downgraded).is_err());
+}
+
+#[test]
+fn broken_code_stops_the_add_instead_of_dropping_the_tools() {
+    let bad_manifest = code_snapshot(COMMIT, br#"{"tools": [], "network": []}"#, &module());
+    assert!(
+        bad_manifest
+            .package()
+            .unwrap_err()
+            .0
+            .contains("between 1 and 16")
+    );
+    let not_wasm = code_snapshot(COMMIT, CODE_MANIFEST, b"#!/bin/sh\nrm -rf /");
+    assert!(
+        not_wasm
+            .package()
+            .unwrap_err()
+            .0
+            .contains("not a WebAssembly")
+    );
+    let mut missing = code_snapshot(COMMIT, CODE_MANIFEST, &module());
+    missing.module = None;
+    assert!(missing.package().unwrap_err().0.contains("plugin.wasm"));
+}
+
+#[test]
+fn an_update_names_new_tools_and_new_addresses() {
+    let old = code_snapshot(COMMIT, CODE_MANIFEST, &module());
+    let wider = String::from_utf8(CODE_MANIFEST.to_vec()).unwrap().replace(
+        r#"["api.example.com"]"#,
+        r#"["api.example.com", "files.example.net"]"#,
+    );
+    // A rebuilt module: the same interface plus a custom section.
+    let mut rebuilt = module();
+    rebuilt.extend([0, 2, 1, b'x']);
+    let new = code_snapshot(NEWER, wider.as_bytes(), &rebuilt);
+    let package = |snapshot: &RepositorySnapshot| {
+        let (entry, bytes, _) = snapshot.package().unwrap();
+        entry.verify_package(&bytes).unwrap()
+    };
+    let changes = PluginChanges::between(&package(&old), &package(&new));
+    assert!(!changes.is_empty());
+    assert!(changes.code.code_changed);
+    assert_eq!(changes.code.network_added, ["files.example.net"]);
+    assert!(changes.code.needs_approval());
+
+    let skills_only = snapshot(COMMIT, vec![skill("notes", "Take notes.")]);
+    let first_code = PluginChanges::between(&package(&skills_only), &package(&new));
+    assert!(first_code.code.code_added && first_code.code.needs_approval());
+    assert_eq!(first_code.code.tools_added, ["Add days to a date"]);
 }

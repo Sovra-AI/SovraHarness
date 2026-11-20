@@ -14,6 +14,17 @@ package version.
 
 ## [Unreleased]
 
+- **Plugins can bring tools that run their own code, in a sealed box.** A GitHub
+  repository with `sovra-plugin.json` and a `plugin.wasm` adds tools that helpers
+  call for exact answers. The code cannot see your files or programs, reaches
+  only the internet addresses its plugin lists (never this computer or your
+  local network), and stops when it runs too long or asks for too much memory.
+  **Turn on** first shows what the code can reach; nothing runs until you choose
+  **Allow and turn on**. An update that gives the code something new to reach
+  comes back switched off. SovraHarness is the first such plugin: add
+  `Sovra-AI/SovraHarness` to count days between dates, find weekdays, and add
+  days to a date. See [Plugins with code](docs/plugins.md#plugins-with-code).
+
 - **One roadmap.** Open work is listed in [docs/roadmap.md](docs/roadmap.md).
   Guides describe the current checkout. A gap in a guide states today's limit
   and points at that page, instead of keeping a second list or a delivery date.

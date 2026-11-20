@@ -2,3 +2,5 @@
 channel = "1.99.1"
 profile = "minimal"
 components = ["rustfmt", "clippy", "rust-analyzer"]
+# This repository ships a code plugin; `cargo xtask ci` rebuilds it for WebAssembly.
+targets = ["wasm32-unknown-unknown"]

@@ -444,6 +444,53 @@ fn the_plugin_template_is_added_with_every_skill_and_file() {
     );
 }
 
+/// Copies `from` into `to` without what GitHub never serves for this repository:
+/// `.git` and the build and worktree folders `.gitignore` excludes.
+fn copy_as_pushed(from: &Path, to: &Path, top_level: bool) {
+    fs::create_dir_all(to).unwrap();
+    for item in fs::read_dir(from).unwrap() {
+        let item = item.unwrap();
+        let name = item.file_name();
+        let kind = item.file_type().unwrap();
+        if top_level && (name == ".git" || name == "target") {
+            continue;
+        }
+        if kind.is_dir() {
+            if name == "worktrees" && from.ends_with(".claude") {
+                continue;
+            }
+            copy_as_pushed(&item.path(), &to.join(&name), false);
+        } else if kind.is_file() {
+            fs::copy(item.path(), to.join(&name)).unwrap();
+        }
+    }
+}
+
+#[test]
+fn this_repository_is_added_as_a_code_plugin_with_its_date_tools() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture = Fixture::new();
+    let checkout = fixture.0.join("SovraHarness");
+    copy_as_pushed(&root, &checkout, true);
+    let check = check_repository(&checkout, "Sovra-AI/SovraHarness").unwrap();
+    assert_eq!(check.left_out, [] as [String; 0]);
+    let package = &check.package;
+    assert_eq!(package.api_version, sovra_core::plugins::CODE_API_VERSION);
+    assert!(package.description.starts_with("Exact date sums"));
+    let code = package.code.as_ref().expect("the repository brings code");
+    let tools: Vec<_> = code.tools.iter().map(|tool| tool.name.as_str()).collect();
+    assert_eq!(tools, ["days_between", "weekday", "add_days"]);
+    assert_eq!(
+        code.network,
+        [] as [String; 0],
+        "the date helper needs no internet"
+    );
+    assert_eq!(
+        code.module_bytes().unwrap(),
+        fs::read(root.join("plugin.wasm")).unwrap()
+    );
+}
+
 #[test]
 fn a_repository_check_names_what_sovra_would_leave_out() {
     let fixture = Fixture::new();

@@ -8,7 +8,15 @@ use sha2::{Digest as _, Sha256};
 
 use crate::skills::{EXAMPLE_METADATA_KEY, Skill, SkillCatalog, SkillError, SkillKind, valid_name};
 
+mod code;
 mod github;
+pub use code::{
+    CODE_API_VERSION, CODE_MANIFEST_PATH, CODE_MODULE_PATH, CodeChanges, CodeFetch, CodeFetchReply,
+    CodeHost, CodeManifest, LoadedCode, MAX_FETCH_BODY_BYTES, MAX_FETCH_REPLY_BYTES,
+    MAX_FETCHES_PER_CALL, MAX_MODULE_BYTES, MAX_NETWORK_HOSTS, MAX_TOOLS, PLUGIN_SERVICE_PREFIX,
+    PluginCode, PluginCodeEngine, PluginTool, check_fetch, code_service_id, public_address,
+    valid_host,
+};
 pub use github::{
     FetchedFile, GITHUB_PLUGIN_VERSION, GitHubHosts, GitHubPin, GitHubRepository,
     MAX_GITHUB_FILE_BYTES, MAX_GITHUB_PLUGIN_BYTES, MAX_GITHUB_RESOURCE_BYTES, MAX_GITHUB_SKILLS,
@@ -109,6 +117,10 @@ pub struct PluginPackage {
     pub skills: Vec<PluginSkill>,
     #[serde(default)]
     pub services: Vec<PluginService>,
+    /// Code that runs in a sealed box. Only plugins added from GitHub carry it, at
+    /// `api_version` 2; left out when absent so earlier packages keep their checksums.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<PluginCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,11 +281,17 @@ impl PluginState {
                 } else {
                     format!(" Left out: {}.", left_out.join("; "))
                 };
+                let tools = package.code.as_ref().map_or(0, |code| code.tools.len());
+                let contents = match (package.skills.len(), tools) {
+                    (skills, 0) => plural(skills, "skill"),
+                    (0, tools) => plural(tools, "tool"),
+                    (skills, tools) => {
+                        format!("{} and {}", plural(skills, "skill"), plural(tools, "tool"))
+                    }
+                };
                 self.notice = format!(
-                    "Added {} with {} skill{}. It stays off until you choose Turn on.{skipped}",
+                    "Added {} with {contents}. It stays off until you choose Turn on.{skipped}",
                     package.title,
-                    package.skills.len(),
-                    if package.skills.len() == 1 { "" } else { "s" }
                 );
             }
             PluginEvent::UpdateReady { id, changes } => {
@@ -432,8 +450,15 @@ pub fn skill_command_prefix(id: &str) -> String {
 
 impl PluginPackage {
     fn validate(&self, entry: &PluginEntry) -> Result<(), SkillError> {
+        let github = github::is_github_package_url(&entry.package_url);
+        // Version 1 is skills and connections; version 2 adds code, which only a
+        // GitHub repository can bring.
+        let api_matches = match &self.code {
+            None => self.api_version == 1,
+            Some(_) => self.api_version == CODE_API_VERSION && github,
+        };
         if self.schema_version != 1
-            || self.api_version != 1
+            || !api_matches
             || self.api_version != entry.api_version
             || self.title != entry.title
             || self.description != entry.description
@@ -446,14 +471,13 @@ impl PluginPackage {
                     16
                 }
             || self.services.len() > 8
-            || (self.skills.is_empty() && self.services.is_empty())
+            || (self.skills.is_empty() && self.services.is_empty() && self.code.is_none())
         {
             return Err(error(
                 "The package does not match its catalog entry or has unsupported contents.",
             ));
         }
         let mut names = BTreeSet::new();
-        let github = github::is_github_package_url(&entry.package_url);
         for skill in &self.skills {
             if !valid_name(&skill.name) || skill.name.len() > 32 || !names.insert(&skill.name) {
                 return Err(error(
@@ -479,6 +503,9 @@ impl PluginPackage {
                 return Err(error("A plugin service needs a short name."));
             }
             check_download_url(&service.address)?;
+        }
+        if let Some(code) = &self.code {
+            code.validate()?;
         }
         Ok(())
     }
@@ -572,6 +599,11 @@ impl PluginLibrary {
         }
         Ok(())
     }
+}
+
+/// "1 skill", "3 tools".
+fn plural(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
 fn short_text(value: &str, max: usize) -> bool {

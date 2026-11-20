@@ -1,0 +1,43 @@
+{
+  "description": "Exact date sums: how many days between two dates, what weekday a date falls on, and the date a number of days from now.",
+  "tools": [
+    {
+      "name": "days_between",
+      "title": "Count the days between two dates",
+      "description": "Use for any question about how many days lie between two calendar dates. Gives the exact count.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "from": { "type": "string", "description": "The first date, as YYYY-MM-DD." },
+          "to": { "type": "string", "description": "The second date, as YYYY-MM-DD." }
+        },
+        "required": ["from", "to"]
+      }
+    },
+    {
+      "name": "weekday",
+      "title": "Find the day of the week for a date",
+      "description": "Use to find which day of the week (Monday to Sunday) a calendar date falls on.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "description": "The date, as YYYY-MM-DD." }
+        },
+        "required": ["date"]
+      }
+    },
+    {
+      "name": "add_days",
+      "title": "Find the date some days before or after another",
+      "description": "Use to find the calendar date a number of days after (or, with a negative number, before) a date, with its weekday.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "description": "The starting date, as YYYY-MM-DD." },
+          "days": { "type": "integer", "description": "Days to add; negative to go back." }
+        },
+        "required": ["date", "days"]
+      }
+    }
+  ]
+}

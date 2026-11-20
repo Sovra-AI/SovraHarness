@@ -146,6 +146,7 @@ fn main() -> anyhow::Result<()> {
                 data_dir.as_path().join("plugins"),
             ))),
             plugin_hosts: sovra_core::plugins::GitHubHosts::default(),
+            plugin_code: Some(Arc::new(sovra_wasm::WasmCodeEngine::default())),
             skills: Some(Arc::new(sovra_skills::LocalSkillStore::new(
                 data_dir.as_path().join("skills"),
             ))),

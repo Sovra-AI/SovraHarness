@@ -16,6 +16,7 @@ mod dist;
 mod docs;
 mod hook;
 mod license;
+mod plugin;
 mod styles;
 
 use std::path::{Path, PathBuf};
@@ -31,13 +32,16 @@ cargo xtask <command>
   run          Run the desktop app (debug build, without SOVRA_DEV)
   clean-cache  Report / reclaim Cargo target (and optional ~/.cargo) disk use when idle
                Prefer `just clear-cache` to reclaim reclaimable build artefacts
-  ci           Every gate CI runs: fmt, clippy, check-deps, check-styles, check-docs, deny, shear, tests
+  ci           Every gate CI runs: fmt, clippy, check-deps, check-styles, check-docs, check-plugin,
+               deny, shear, tests
   fix          Auto-fix: cargo fmt + clippy --fix
   check-deps   Enforce the crate layering rules (see xtask/src/deps.rs)
   check-styles Enforce the UI colour boundary and single SVG brand asset
   check-docs   Enforce README mermaid graphs and that docs markdown links resolve
   hook         Agent post-edit hook: reads hook JSON on stdin, checks the edited file
   dist         Build and verify a single native installer (requires pinned Velopack)
+  plugin-wasm  Rebuild plugin.wasm (this repository's code plugin) from examples/code-plugin
+  check-plugin Check that the committed plugin.wasm is what examples/code-plugin builds to
 ";
 
 /// Development tools; versions match `.github/workflows/ci.yml`.
@@ -71,6 +75,8 @@ fn dispatch(args: &[String]) -> anyhow::Result<ExitCode> {
         Some("check-docs") => docs::check(&root()?)?,
         Some("hook") => return Ok(hook::run(&root()?)),
         Some("dist") => dist::run(&root()?)?,
+        Some("plugin-wasm") => plugin::write(&root()?)?,
+        Some("check-plugin") => plugin::check(&root()?)?,
         Some("help" | "-h" | "--help") | None => print!("{HELP}"),
         Some(other) => bail!("unknown command `{other}`\n\n{HELP}"),
     }
@@ -101,6 +107,7 @@ fn ci() -> anyhow::Result<()> {
     step("check-deps", || deps::check(&root()?))?;
     step("check-styles", || styles::check(&root()?))?;
     step("check-docs", || docs::check(&root()?))?;
+    step("check-plugin", || plugin::check(&root()?))?;
     step("deny", || cargo(&["deny", "--all-features", "check"]))?;
     step("shear", || cargo(&["shear"]))?;
     step("test", || {

@@ -52,6 +52,9 @@ const LAYERS: &[(&str, &[&str])] = &[
     // the core `TrainingEngine` and swarm `Objective` ports, so only plain data
     // (parameter values, model files, hardware facts) ever leaves it.
     ("sovra-train", &["sovra-core"]),
+    // Plugin code runs in a WebAssembly interpreter, its own dependency set behind
+    // the core PluginCodeEngine port; runtime receives the engine from the composition root.
+    ("sovra-wasm", &["sovra-core"]),
     ("sovra-ui", &["sovra-core", "sovra-runtime"]),
     (
         "sovra-app",
@@ -72,6 +75,8 @@ const LAYERS: &[(&str, &[&str])] = &[
             "sovra-train",
             "sovra-ui",
             "sovra-whatsapp",
+            // Composition root supplies the plugin code sandbox through its core port.
+            "sovra-wasm",
         ],
     ),
     ("xtask", &[]),
@@ -119,6 +124,11 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
         "sysinfo",
         "sovra-train",
         "hardware probing is the training adapter's job; core carries the facts as plain data",
+    ),
+    (
+        "wasmi",
+        "sovra-wasm",
+        "plugin code runs only inside the sandbox adapter, behind the core PluginCodeEngine port",
     ),
     (
         "velopack",

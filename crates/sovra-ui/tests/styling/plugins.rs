@@ -230,6 +230,7 @@ fn github_plugin() -> InstalledPlugin {
             .expect("valid skill"),
         ],
         manifests: Vec::new(),
+        module: None,
         left_out: Vec::new(),
     };
     let (entry, _, pin) = snapshot.package().expect("package");
@@ -542,5 +543,125 @@ fn the_two_ways_to_add_sit_side_by_side_only_when_they_fit(cx: &mut TestAppConte
             window.remove_window();
         })
         .unwrap();
+    }
+}
+
+/// This repository's date helper as Sovra would add it from GitHub.
+fn code_plugin() -> (InstalledPlugin, sovra_core::plugins::PluginPackage) {
+    use sovra_core::plugins::{GitHubRepository, RepositorySnapshot};
+    let snapshot = RepositorySnapshot {
+        repository: GitHubRepository::parse("Sovra-AI/SovraHarness")
+            .expect("the date helper is a valid plugin"),
+        commit: "0123456789abcdef0123456789abcdef01234567".into(),
+        description: None,
+        skills: Vec::new(),
+        manifests: vec![(
+            sovra_core::plugins::CODE_MANIFEST_PATH.into(),
+            include_bytes!("../../../../sovra-plugin.json").to_vec(),
+        )],
+        module: Some(include_bytes!("../../../../plugin.wasm").to_vec()),
+        left_out: Vec::new(),
+    };
+    let (entry, bytes, pin) = snapshot
+        .package()
+        .expect("the date helper is a valid plugin");
+    let package = entry
+        .verify_package(&bytes)
+        .expect("the date helper is a valid plugin");
+    (
+        InstalledPlugin {
+            entry,
+            catalog_url: snapshot.repository.web_url(),
+            enabled: false,
+            github: Some(pin),
+        },
+        package,
+    )
+}
+
+#[gpui_kit::test]
+fn a_code_plugin_turns_on_only_after_its_access_is_shown_and_allowed(cx: &mut TestAppContext) {
+    let (plugin, package) = code_plugin();
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        let (client, commands, events) = Client::loopback();
+        cx.update(|cx| {
+            sovra_ui::init(client, cx);
+            design::set_interface_scale(
+                sovra_core::models::InterfaceScale::from_percent(scale),
+                cx,
+            );
+        });
+        let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+            let shell = cx.new(|cx| Shell::new(0, window, cx));
+            shell.update(cx, |shell, cx| {
+                shell.select_tab(sovra_core::NavTab::Plugins, cx);
+            });
+            Root::new(shell, window, cx)
+        });
+        let settle = |cx: &mut TestAppContext| {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+        };
+        events
+            .send_blocking(Event::Plugins(PluginEvent::Loaded(PluginLibrary {
+                catalog_url: None,
+                installed: vec![plugin.clone()],
+            })))
+            .unwrap();
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            reveal(window, ("plugin-toggle", 0usize), cx);
+            window.click(("plugin-toggle", 0usize), cx);
+        })
+        .unwrap();
+        let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+        assert!(
+            sent.iter().any(|command| matches!(command, Command::Plugins(PluginCommand::Inspect { id }) if *id == plugin.entry.id)),
+            "Turn on first shows what the code can reach: {sent:?}"
+        );
+        assert!(
+            !sent.iter().any(|command| matches!(
+                command,
+                Command::Plugins(PluginCommand::SetEnabled { .. })
+            )),
+            "a code plugin is never switched on by the first press"
+        );
+
+        // Until the details arrive, there is nothing to allow.
+        cx.update_window(window.into(), |_, window, cx| {
+            reveal(window, ("plugin-code-allow", 0usize), cx);
+            window.click(("plugin-code-allow", 0usize), cx);
+        })
+        .unwrap();
+        assert!(commands.try_recv().is_err(), "Allow waits for the details");
+
+        events
+            .send_blocking(Event::Plugins(PluginEvent::Details {
+                id: plugin.entry.id.clone(),
+                package: package.clone(),
+            }))
+            .unwrap();
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let question = window
+                .find(("plugin-code-approval", 0usize))
+                .label()
+                .unwrap_or_default()
+                .to_owned();
+            assert!(question.starts_with("Allow Sovra-AI/SovraHarness to run its own code?"));
+            assert!(question.contains("cannot use the internet"), "{question}");
+            assert!(
+                question.contains("Count the days between two dates"),
+                "{question}"
+            );
+            reveal(window, ("plugin-code-allow", 0usize), cx);
+            window.click(("plugin-code-allow", 0usize), cx);
+        })
+        .unwrap();
+        assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Plugins(PluginCommand::SetEnabled { id, enabled: true }) if *id == plugin.entry.id)));
+        cx.update_window(window.into(), |_, window, _| window.remove_window())
+            .unwrap();
     }
 }

@@ -1,7 +1,8 @@
 # Downloadable plugins
 
-Sovra's first plugin API bundles reusable instructions and suggested service
-connections. There are two ways to get one: paste a public GitHub repository
+Sovra's plugins bundle reusable instructions and suggested service connections,
+and a plugin from GitHub can also bring tools whose code runs in a sealed box
+([Plugins with code](#plugins-with-code)). There are two ways to get one: paste a public GitHub repository
 address, or load a catalog that a publisher hosts as static JSON files (for
 example on GitHub Pages). Either way, Sovra stores the plugin on this computer
 and checks it before use. Neither needs a running registry server.
@@ -44,6 +45,109 @@ It applies the same rules and the same code as **Add from GitHub** to the folder
 can be added, or when anything would be left out, and names each item.
 It lists the skills and suggested connections that would be added.
 
+## Plugins with code
+
+A plugin can bring **tools**: small programs a helper calls to get an exact
+answer, like counting the days between two dates. Their code is one WebAssembly
+module that Sovra runs in a **sealed box**:
+
+- It cannot see your files, your other programs, the clock, or anything else on
+  this computer. Sovra gives it nothing but the tool's request.
+- It can use the internet only if its plugin lists addresses, and then only those
+  addresses, over HTTPS. A listed name that points at this computer or your local
+  network is refused.
+- Every tool call starts from a fresh copy and has a fixed budget of work
+  (about a few seconds), 64 MB of memory, and at most eight internet requests.
+  A tool that runs over is stopped and the helper is told why.
+
+**Turn on** for a plugin with code first shows what it adds and what it can
+reach, in its card. Nothing runs until you choose **Allow and turn on**. The
+card shows a **Tools** label, and **What's included** lists each tool. An update
+that lets code run for the first time, or reach an address it could not reach
+before, says so in its list of changes and comes back switched off, so you
+approve the new access yourself.
+
+Tools from switched-on plugins are offered to helpers in chats that may use your
+connected services, the same way as tools from **Connections**.
+
+### This repository is a code plugin
+
+SovraHarness itself is the first one: paste `Sovra-AI/SovraHarness` into **Add
+from GitHub** to get its date tools (count the days between two dates, find the
+weekday of a date, and find the date some days before or after another). They
+need no internet. The plugin also brings the plugin template's example
+`thank-you-note` skill, because every `SKILL.md` in a repository is added.
+
+Its source is [`examples/code-plugin`](../examples/code-plugin), a small Rust
+crate. `cargo xtask plugin-wasm` rebuilds the root `plugin.wasm` from it, and
+`cargo xtask ci` checks that the committed file is exactly what the source builds
+to. The build rewrites every absolute path, so the module names no one's computer.
+
+### Publisher contract: code (API version 2)
+
+Put two files at the top of the repository:
+
+```text
+sovra-plugin.json   the tools, and any internet addresses the code may contact
+plugin.wasm         the code: a WebAssembly module, at most 2 MB
+```
+
+```json
+{
+  "description": "Exact date sums.",
+  "tools": [{
+    "name": "weekday",
+    "title": "Find the day of the week for a date",
+    "description": "Use to find which day of the week a calendar date falls on.",
+    "input_schema": {
+      "type": "object",
+      "properties": { "date": { "type": "string" } },
+      "required": ["date"]
+    }
+  }],
+  "network": []
+}
+```
+
+| Field | Contract |
+| --- | --- |
+| `description` | Optional; used when `.claude-plugin/plugin.json` gives none |
+| `tools` | 1 to 16 tools |
+| Tool `name` | What the module receives: lowercase letters, digits and `_`, starting with a letter, at most 48 bytes, unique |
+| Tool `title`, `description` | Plain words for people (at most 120 bytes) and for the helper deciding when to call it (at most 1000 bytes) |
+| Tool `input_schema` | A JSON Schema object (`"type": "object"`), at most 16 KB |
+| `network` | Up to eight host names, like `api.example.com`: lowercase, no scheme, port, path, wildcard or IP address, and not a local name such as `localhost` or `*.local` |
+
+Unknown fields are refused. A repository with `sovra-plugin.json` but no root
+`plugin.wasm`, or a manifest or module that breaks these rules, is not added at
+all: code is never quietly dropped. A `plugin.wasm` without `sovra-plugin.json`
+is never downloaded. The package Sovra stores has `api_version` 2 and carries the
+module in base64 with its SHA-256; older Sovra versions refuse it. Catalog
+packages cannot carry code.
+
+The module's side, checked when the plugin is added and again before it runs:
+
+- **Exports:** `memory`; `sovra_alloc(len: i32) -> i32`, which returns room for
+  `len` bytes; and `sovra_call(name_ptr, name_len, args_ptr, args_len: i32) -> i64`.
+  Sovra writes the tool name and its JSON arguments into memory from
+  `sovra_alloc`, and `sovra_call` returns `(pointer << 32) | length` of a UTF-8
+  JSON reply: `{"text": "…"}` for the answer, or `{"error": "…"}` for a sentence
+  the helper can pass on. Replies are at most 256 KB.
+- **Imports:** only from the module `sovra`. `log(ptr, len: i32)` writes a line
+  to Sovra's log (32 lines per call). With `network` addresses listed, also
+  `fetch(ptr, len: i32) -> i32`, which takes a JSON request (`url`, and
+  optionally `method` GET/POST/PUT/PATCH/DELETE, `headers` and a text `body` up
+  to 256 KB) and returns the length of the JSON reply, `{"status", "body"}` or
+  `{"error"}`; then `take_reply(ptr: i32)` copies that reply into memory from
+  `sovra_alloc`. Redirects are not followed, replies are cut off at 1 MB, and
+  headers such as `Host` and `Cookie` cannot be set. Any other import, WASI
+  included, is refused.
+
+[`examples/code-plugin/src/lib.rs`](../examples/code-plugin/src/lib.rs) is a
+complete module in Rust, built for `wasm32-unknown-unknown`. The read-only
+`check_repository` example also lists a repository's tools and what its code can
+reach, and refuses a module Sovra would not run.
+
 ## Add from GitHub
 
 Open **Plugins** (in the menu on the left), paste a repository address into **Add from GitHub**,
@@ -84,8 +188,10 @@ instructions mention it (`load_skill` with the skill name and the file's path
 as `resource`). Files can only be read while the plugin is switched on.
 
 `allowed-tools` does not grant tools, and nothing from the repository is run,
-scripts included. The title is `owner/repo`. The description comes from `plugin.json`, otherwise
-from the repository's GitHub description.
+scripts included, except a `plugin.wasm` described by `sovra-plugin.json`, which
+runs only in the sealed box (see [Plugins with code](#plugins-with-code)). The
+title is `owner/repo`. The description comes from `plugin.json`, otherwise from
+`sovra-plugin.json`, otherwise from the repository's GitHub description.
 
 A repository is added **switched off**, like a catalog download, and is fixed
 to the commit it was read at. The plugin's card shows the first seven
@@ -110,7 +216,7 @@ Limits:
   requests and an up-to-date check makes two; file contents are downloaded
   from the commit's raw file addresses.
 - Up to 32 skills per repository (catalog packages stay at 16), 64 KB per
-  `SKILL.md`, and 4 MB for the whole plugin with its files (catalog packages
+  `SKILL.md`, and 8 MB for the whole plugin with its files and code (catalog packages
   stay at 512 KB and cannot include files). Every skill also counts toward
   Sovra's 256-skill total.
 - Redirects are refused. A renamed or moved repository asks for its new
@@ -151,14 +257,16 @@ turns; it does not interrupt a turn already using a snapshot of the skill librar
 address filled in. The person still chooses to connect and completes that
 service's authentication. Connections have their own lifecycle: turning a plugin
 off does not disconnect an independently configured service. Stop it in
-**Connections**. A package cannot contain credentials, shell commands, binaries,
-installation scripts, or permission grants.
+**Connections**. A catalog package cannot contain credentials, shell commands,
+binaries, installation scripts, or permission grants. Code comes only from a
+GitHub repository, as described in [Plugins with code](#plugins-with-code).
 
 Installed packages and their on/off choices work offline after restart. Failed
 downloads, invalid packages and incompatible updates leave the installed version
-and its choice intact. Updates preserve the on/off choice. There are no automatic
-updates, dependency downloads, or executable plugin API in version 1. To uninstall
-one, see [Remove a plugin](#remove-a-plugin).
+and its choice intact. Updates preserve the on/off choice, except that an update
+which gives a plugin's code something new to reach comes back switched off. There
+are no automatic updates or dependency downloads. To uninstall one, see
+[Remove a plugin](#remove-a-plugin).
 
 ## Publisher contract: version 1
 
@@ -337,8 +445,10 @@ adding another archive extractor. `sovra-runtime` owns bounded HTTP downloads an
 one serialized library worker; shutdown cancels its task. `sovra-app` supplies the
 plugin storage path once. The UI sends commands and renders events.
 
-Version 1 establishes that boundary for future content kinds. Executable plugins,
-declared permissions, dependency solving, signed catalogs, global remote search
-and multi-catalog discovery need explicit contracts and tests
-before being supported. Follow the version and extension rules above when adding
-them.
+Version 1 established that boundary; API version 2 adds sealed-box code from
+GitHub repositories on top of it. Code `sovra-wasm` runs behind the core
+`PluginCodeEngine` port, which `sovra-app` supplies; the runtime keeps the set of
+switched-on code plugins current and owns their network gate. Dependency
+solving, signed catalogs, code in catalog packages, global remote search and
+multi-catalog discovery need explicit contracts and tests before being
+supported. Follow the version and extension rules above when adding them.

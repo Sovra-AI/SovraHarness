@@ -106,6 +106,8 @@ crates/
                   CPU backend, and on a graphics card that passes the engine's own
                   checks when built with the `gpu` feature (`sovra-app` enables it).
                   The only crate naming burn and sysinfo.
+  sovra-wasm      The sealed box plugin code runs in: a WebAssembly interpreter behind the
+                  core PluginCodeEngine port. The only crate naming wasmi.
   sovra-ui        GPUI views. The only crate allowed to use gpui-kit.
   sovra-app       binary + composition root: velopack hook, paths, logging, wiring. No logic.
 xtask/            automation: ci, hooks, layering rules (xtask/src/deps.rs)

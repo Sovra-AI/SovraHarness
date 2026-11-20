@@ -1,5 +1,7 @@
 //! The Plugins page: the plugins you have as cards, ways to add one, and a catalog's
 //! listing. Everything it changes goes through `PluginCommand`; it never runs a package.
+//! A plugin that brings code is turned on only after its card has shown what the
+//! code can reach and the person has chosen **Allow and turn on**.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -17,8 +19,8 @@ use gpui_kit::{
 use sovra_core::{
     Command,
     plugins::{
-        InstalledPlugin, PLUGIN_TEMPLATE, PluginChanges, PluginCommand, PluginEntry, PluginEvent,
-        PluginPackage, PluginState,
+        CODE_API_VERSION, InstalledPlugin, PLUGIN_TEMPLATE, PluginChanges, PluginCommand,
+        PluginEntry, PluginEvent, PluginPackage, PluginState,
     },
 };
 
@@ -40,6 +42,9 @@ pub(crate) struct PluginBrowser {
     installed_page: usize,
     /// The plugin whose **Remove** was pressed once; a second press removes it.
     confirm_remove: Option<String>,
+    /// The code plugin whose **Turn on** was pressed; it turns on only after the
+    /// person has seen what its code can reach and allowed it.
+    confirm_code: Option<String>,
     /// The page column's width, so the two ways of adding sit side by side only
     /// when both fit.
     width_class: design::WidthClass,
@@ -69,6 +74,7 @@ impl PluginBrowser {
             search,
             installed_page: 0,
             confirm_remove: None,
+            confirm_code: None,
             width_class: design::WidthClass::Compact,
             _search: subscription,
         }
@@ -81,6 +87,7 @@ impl Shell {
             return;
         }
         self.plugins.confirm_remove = None;
+        self.plugins.confirm_code = None;
         if matches!(&command, PluginCommand::Browse { .. }) {
             self.plugins.state.catalog = None;
         }
@@ -132,7 +139,7 @@ pub(crate) fn page(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement +
                 }))
                 .child(design::page_header(
                     "Plugins",
-                    "A plugin adds ready-made skills to Sovra, and can suggest online services to connect. Nothing in a plugin runs on your computer, and a new plugin stays off until you turn it on.",
+                    "A plugin adds ready-made skills or tools to Sovra, and can suggest online services to connect. A plugin's own code runs only in a sealed box, and a new plugin stays off until you turn it on.",
                     cx,
                 ))
                 .children(notice(&shell.plugins.state, cx))
@@ -421,6 +428,8 @@ fn plugin_card(
     };
 
     let toggle_id = id.clone();
+    let has_code = plugin.entry.api_version == CODE_API_VERSION;
+    let approving = browser.confirm_code.as_deref() == Some(id.as_str());
     let toggle_label = if enabled { "Turn off" } else { "Turn on" };
     let toggle = if enabled {
         design::button(("plugin-toggle", index), toggle_label, cx)
@@ -429,15 +438,28 @@ fn plugin_card(
     }
     .small()
     .accessibility_label(format!("{toggle_label} {title}"))
-    .disabled(busy)
+    .disabled(busy || approving)
     .on_click(cx.listener(move |shell, _, _, cx| {
-        shell.plugin_command(
-            PluginCommand::SetEnabled {
-                id: toggle_id.clone(),
-                enabled: !enabled,
-            },
-            cx,
-        );
+        if has_code && !enabled {
+            // Show what the code can reach first; `plugin_command` clears the
+            // question, so it is asked after the details are requested.
+            shell.plugin_command(
+                PluginCommand::Inspect {
+                    id: toggle_id.clone(),
+                },
+                cx,
+            );
+            shell.plugins.confirm_code = Some(toggle_id.clone());
+            cx.notify();
+        } else {
+            shell.plugin_command(
+                PluginCommand::SetEnabled {
+                    id: toggle_id.clone(),
+                    enabled: !enabled,
+                },
+                cx,
+            );
+        }
     }));
 
     let detail_id = id.clone();
@@ -574,6 +596,7 @@ fn plugin_card(
                                 .child(source(plugin)),
                         ),
                 )
+                .children(has_code.then(|| pill("Tools", t.tiles.categories[4], cx)))
                 .child(status),
         );
     if !plugin.entry.description.trim().is_empty() {
@@ -606,13 +629,175 @@ fn plugin_card(
                 ),
         );
     }
-    if let Some(package) = details {
+    if approving {
+        card = card.child(approval(index, &id, &title, details, busy, cx));
+    } else if let Some(package) = details {
         card = card.child(included(index, package, enabled, busy, cx));
     }
     if let Some(changes) = update {
-        card = card.child(update_review(&id, &title, changes, busy, cx));
+        card = card.child(update_review(&id, &title, changes, enabled, busy, cx));
     }
     card
+}
+
+/// The question before a plugin's code may run: what it adds and what it can reach.
+fn approval(
+    index: usize,
+    id: &str,
+    title: &str,
+    package: Option<&PluginPackage>,
+    busy: bool,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let code = package.and_then(|package| package.code.as_ref());
+    // Read in full by screen readers: the question, what it can reach and its tools.
+    let spoken = code.map_or_else(
+        || format!("Allow {title} to run its own code? Checking what it can do."),
+        |code| {
+            format!(
+                "Allow {title} to run its own code? {} Tools: {}.",
+                code.access_summary(),
+                code.tools
+                    .iter()
+                    .map(|tool| tool.title.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        },
+    );
+    let mut panel = v_flex()
+        .id(("plugin-code-approval", index))
+        .test_support()
+        .aria_label(spoken)
+        .w_full()
+        .min_w_0()
+        .gap(t.space.small)
+        .p(t.space.small)
+        .sovra_surface(Surface::Subtle, cx)
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Body, cx)
+                .child(format!("Allow {title} to run its own code?")),
+        );
+    match code {
+        Some(code) => {
+            panel = panel.child(access_line(code, cx));
+            for tool in &code.tools {
+                panel = panel.child(tool_row(&tool.title, &tool.description, cx));
+            }
+        }
+        None => {
+            panel = panel.child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(t.text_secondary)
+                    .child("Checking what this plugin can do…"),
+            );
+        }
+    }
+    let allow_id = id.to_owned();
+    panel.child(
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .gap(t.space.small)
+            .pt(t.space.compact)
+            .child(
+                design::primary_button(("plugin-code-allow", index), "Allow and turn on", cx)
+                    .small()
+                    .icon(IconName::Lock)
+                    // Only once the person can read what they are allowing.
+                    .disabled(busy || code.is_none())
+                    .accessibility_label(format!("Allow {title} to run its code and turn it on"))
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        shell.plugin_command(
+                            PluginCommand::SetEnabled {
+                                id: allow_id.clone(),
+                                enabled: true,
+                            },
+                            cx,
+                        );
+                    })),
+            )
+            .child(
+                design::button(("plugin-code-cancel", index), "Cancel", cx)
+                    .small()
+                    .accessibility_label(format!("Keep {title} off"))
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.plugins.confirm_code = None;
+                        shell.plugins.state.details = None;
+                        cx.notify();
+                    })),
+            ),
+    )
+}
+
+/// One line saying what the plugin's code can reach.
+fn access_line(code: &sovra_core::plugins::PluginCode, cx: &Context<Shell>) -> Div {
+    let t = design::tokens(cx);
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_start()
+        .gap(t.space.small)
+        .child(
+            Icon::new(if code.network.is_empty() {
+                IconName::Lock
+            } else {
+                IconName::Globe
+            })
+            .flex_shrink_0()
+            .size(t.layout.icon_small)
+            .text_color(t.text_secondary),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .child(code.access_summary()),
+        )
+}
+
+fn tool_row(title: &str, description: &str, cx: &Context<Shell>) -> Div {
+    let t = design::tokens(cx);
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_start()
+        .gap(t.space.small)
+        .child(
+            Icon::new(IconName::Wrench)
+                .flex_shrink_0()
+                .size(t.layout.icon_small)
+                .text_color(t.text_secondary),
+        )
+        .child(
+            v_flex()
+                .min_w_0()
+                .flex_1()
+                .child(
+                    div()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .sovra_text(TextRole::Body, cx)
+                        .child(title.to_owned()),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(description.to_owned()),
+                ),
+        )
 }
 
 /// The skills and suggested connections inside one plugin, shown in its card.
@@ -632,15 +817,15 @@ fn included(
         .gap(t.space.small)
         .p(t.space.small)
         .sovra_surface(Surface::Subtle, cx)
-        .child(
+        .children((!package.skills.is_empty()).then(|| {
             div()
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
                 .child(match package.skills.len() {
                     1 => "1 skill".to_owned(),
                     count => format!("{count} skills"),
-                }),
-        );
+                })
+        }));
     for skill in &package.skills {
         let files = match skill.resources.len() {
             0 => String::new(),
@@ -680,6 +865,23 @@ fn included(
                         ),
                 ),
         );
+    }
+    if let Some(code) = &package.code {
+        panel = panel
+            .child(
+                div()
+                    .pt(t.space.compact)
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(t.text_secondary)
+                    .child(match code.tools.len() {
+                        1 => "1 tool, from the plugin's own code".to_owned(),
+                        count => format!("{count} tools, from the plugin's own code"),
+                    }),
+            )
+            .child(access_line(code, cx));
+        for tool in &code.tools {
+            panel = panel.child(tool_row(&tool.title, &tool.description, cx));
+        }
     }
     if !package.services.is_empty() {
         panel = panel.child(
@@ -752,9 +954,9 @@ fn included(
         );
     }
     let footer = match (enabled, package.services.is_empty()) {
-        (false, true) => Some("Turn the plugin on to use these skills."),
+        (false, true) => Some("Turn the plugin on to use it."),
         (false, false) => Some(
-            "Turn the plugin on to use these skills and set up its connections. Connections are set up separately, in Connections.",
+            "Turn the plugin on to use it and set up its connections. Connections are set up separately, in Connections.",
         ),
         (true, false) => Some(
             "Connections are set up separately. To stop a connected service, turn it off in Connections.",
@@ -777,6 +979,7 @@ fn update_review(
     id: &str,
     title: &str,
     changes: &PluginChanges,
+    enabled: bool,
     busy: bool,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
@@ -788,8 +991,26 @@ fn update_review(
         ("Removed skill", &changes.removed),
         ("New suggested connection", &changes.connections_added),
         ("Removed suggested connection", &changes.connections_removed),
+        ("New tool", &changes.code.tools_added),
+        ("Removed tool", &changes.code.tools_removed),
+        ("Can now contact", &changes.code.network_added),
+        ("No longer contacts", &changes.code.network_removed),
     ] {
         lines.extend(names.iter().map(|name| format!("{label}: {name}")));
+    }
+    let code = &changes.code;
+    if code.code_added {
+        lines.push("It now brings its own code, which runs in a sealed box.".into());
+    } else if code.code_removed {
+        lines.push("It no longer brings any code.".into());
+    } else if code.code_changed {
+        lines.push("Its code has changed.".into());
+    }
+    if enabled && code.needs_approval() {
+        lines.push(
+            "Updating turns this plugin off, because its code would be able to do something new. Turn it on again to allow that."
+                .into(),
+        );
     }
     if lines.is_empty() {
         lines.push("Only files Sovra doesn't use have changed.".into());

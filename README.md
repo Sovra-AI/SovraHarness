@@ -122,7 +122,10 @@ has the first run, group steps, every setting, privacy details and limits.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
   Connection setup and permissions depend on the service.
 - **Download plugins:** open **Plugins** (in the menu on the left) and paste a GitHub repository
-  address to add its `SKILL.md` skills, or browse a GitHub Pages catalog. Turn
+  address to add its `SKILL.md` skills and tools, or browse a GitHub Pages catalog. A plugin's
+  tools run their own code in a sealed box that sees nothing on your computer and reaches only
+  the internet addresses it lists, and only after you choose **Allow and turn on**. This
+  repository is one: add `Sovra-AI/SovraHarness` for exact date sums. Turn
   plugins on or off, review what changed before taking an update, and remove
   ones you no longer want. To make your own, start from the open-source
   [plugin template](https://github.com/Sovra-AI/sovra-plugin-template). See [Plugins](docs/plugins.md) for

@@ -23,6 +23,7 @@ The engineering rules are in [AGENTS.md](../AGENTS.md).
 | `sovra-microsoft` | Microsoft public-client sign-in, rotating credentials and bounded Graph access behind core ports |
 | `sovra-whatsapp`, `sovra-telegram` | Messaging adapters behind `MessagingChannel` |
 | `sovra-mesh` | Group storage, signatures, peer transport, and audit replication |
+| `sovra-wasm` | The sealed box plugin code runs in: a WebAssembly interpreter (`wasmi`) behind the core `PluginCodeEngine` port, with an instruction budget, a memory cap and no imports beyond Sovra's own. The only crate naming `wasmi`. |
 | `sovra-train` | Burn training engine behind the core `TrainingEngine` port: built-in byte-level models on the processor or a checked graphics card, work packets, text writing, saved-run format, and the hardware probe. The only crate naming `burn` and `sysinfo`. |
 | `xtask` | Checks, development launch, hooks, and packaging |
 
@@ -41,6 +42,8 @@ flowchart TB
   adapters --> core
   app --> train["sovra-train: Burn training engine"]
   train --> core
+  app --> wasm["sovra-wasm: plugin code sandbox"]
+  wasm --> core
 ```
 
 The graph summarizes ownership; the dependency table includes the exact allowed

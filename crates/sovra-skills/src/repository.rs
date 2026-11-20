@@ -6,8 +6,8 @@ use std::fs;
 use std::path::Path;
 
 use sovra_core::plugins::{
-    FetchedFile, GitHubRepository, MAX_GITHUB_FILE_BYTES, MAX_GITHUB_RESOURCE_BYTES, PluginPackage,
-    PluginStore as _, RepositorySnapshot, plan_repository,
+    FetchedFile, GitHubRepository, MAX_GITHUB_FILE_BYTES, MAX_GITHUB_RESOURCE_BYTES,
+    MAX_MODULE_BYTES, PluginPackage, PluginStore as _, RepositorySnapshot, plan_repository,
 };
 use sovra_core::skills::SkillError;
 
@@ -54,6 +54,11 @@ pub fn check_repository(folder: &Path, repository: &str) -> Result<RepositoryChe
         let bytes = read_bytes(&folder.join(path), MAX_GITHUB_FILE_BYTES)
             .map_err(|error| SkillError(format!("{path}: {error}")))?;
         fetched.push(FetchedFile::Manifest(path.clone(), bytes));
+    }
+    if let Some(path) = &plan.module {
+        let bytes = read_bytes(&folder.join(path), MAX_MODULE_BYTES)
+            .map_err(|error| SkillError(format!("{path}: {error}")))?;
+        fetched.push(FetchedFile::Module(bytes));
     }
     // The parser never touches this folder; it only decodes `SKILL.md` text.
     let parser = LocalPluginStore::new(folder.join(".sovra-check-unused"));

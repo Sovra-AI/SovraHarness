@@ -38,12 +38,26 @@ fn main() -> Result<(), SkillError> {
                 service.name, service.address
             )?;
         }
+        if let Some(code) = &check.package.code {
+            for tool in &code.tools {
+                writeln!(out, "tool {} ({})", tool.name, tool.title)?;
+            }
+            writeln!(out, "code: {}", code.access_summary())?;
+        }
         writeln!(
             out,
-            "ok: Sovra adds {} as \"{}\" with {} skill(s) and {} suggested connection(s).",
+            "ok: Sovra adds {} as \"{}\" with {} skill(s){} and {} suggested connection(s).",
             repository,
             check.package.title,
             check.package.skills.len(),
+            check
+                .package
+                .code
+                .as_ref()
+                .map_or_else(String::new, |code| format!(
+                    ", {} tool(s)",
+                    code.tools.len()
+                )),
             check.package.services.len()
         )
     };
