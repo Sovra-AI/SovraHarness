@@ -35,6 +35,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 
 ## Develop and test
 
+- [Roadmap](roadmap.md): the only list of work that is still open. No dates.
 - [Contributing](../CONTRIBUTING.md): issues, branches, pull requests, and required checks.
 - [Native development](development.md): prerequisites, manual launch, and build caches.
 - [Development MCP](development-mcp.md): inspect and operate the native app for testing.

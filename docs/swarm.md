@@ -101,7 +101,8 @@ non-finite value. `ModelId` is the content hash of the file.
 packet and returned update each fit one 8 MiB group message, where bytes travel
 as hex. A core test serialises the worst-case packet and update for every
 group-capable row and asserts the bound. Large does not fit and chunked work
-transfer is not built, so Large trains on one computer.
+transfer is not built, so Large trains on one computer. That work is on the
+[roadmap](roadmap.md).
 
 ### Plans, presets and settings
 

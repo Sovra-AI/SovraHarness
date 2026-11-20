@@ -120,9 +120,10 @@ address learned for each peer. Invites are not in it.
 If the credential store cannot keep the device key, or the network endpoint
 cannot bind, the Groups worker accepts **Load** and ignores it. The screen
 then stays on "Getting your group ready…". The words for a missing keychain
-exist on `GroupProblem::NoKeychain` and are not emitted today. A later
-command, if one were sent, would say "Groups aren't available in this session."
-or "Groups can't connect on this computer right now: …".
+exist on `GroupProblem::NoKeychain` and are not emitted today. That gap is on
+the [roadmap](roadmap.md). A later command, if one were sent, would say
+"Groups aren't available in this session." or "Groups can't connect on this
+computer right now: …".
 
 ## Protocol and authorization
 
@@ -207,8 +208,8 @@ Current boundaries between protocol support and screen controls:
 
 | Capability | State |
 | --- | --- |
-| Viewer and Contributor | The fold refuses additions from Viewers. No screen control sets either role yet. |
-| Correct a detail from the screen | `GroupCommand::Correct` and the dispute fold exist. The screen has no correction button, and Share does not set `replaces` or `valid_at`. |
+| Viewer and Contributor | The fold refuses additions from Viewers. No screen control sets either role. See the [roadmap](roadmap.md). |
+| Correct a detail from the screen | `GroupCommand::Correct` and the dispute fold exist. The screen has no correction button, and Share does not set `replaces` or `valid_at`. See the [roadmap](roadmap.md). |
 | Handed-off answers | Streamed, stoppable within a second, handed to the next free computer if the helper vanishes first. Chat only: no embedding or indexing jobs (another computer's vectors are not comparable), and no tools on the helping computer. |
 | Same-room codes | Need both computers on one network (mDNS). No SPAKE2: one guess per code plus the picture check. |
 | A second admin's extra signature to remove an admin | Not required. One admin's signature is enough. The last admin cannot be removed while other people remain, or demoted. |

@@ -301,8 +301,9 @@ losses of 2.15 (Small), 2.41 (Medium) and 2.60 (Large), on either engine.
 These are one machine's numbers, not a promise for yours; the page measures
 your computer's own speed once a run is going. A development build
 (`cargo xtask dev`) trains several times slower than a released build. No
-speed-up from adding group computers has been measured yet. To measure your
-own computer, see [Measuring it](#measuring-it).
+speed-up from adding group computers has been measured. That measurement is
+on the [roadmap](roadmap.md). To measure your own computer, see
+[Measuring it](#measuring-it).
 
 ## Advanced reference
 
@@ -728,7 +729,8 @@ an independent calculation from the model file (log-probabilities within
   continue text in the style they were taught. They do not chat, follow
   instructions or answer questions, and they cannot be selected as a chat AI.
 - **No pretrained models.** Importing or fine-tuning an existing language
-  model, and tokenizer files, are not supported. Models go out to other tools
+  model, and tokenizer files, are not supported. That work is on the
+  [roadmap](roadmap.md). Models go out to other tools
   as GGUF only, through **Add to Ollama** or a bucket backup; there is no
   download button for the GGUF file itself, and nothing in GGUF or any other
   format can be brought in.
@@ -748,7 +750,8 @@ an independent calculation from the model file (log-probabilities within
   Measured on one card only (an NVIDIA RTX 2080 Ti on Linux); Metal and
   DirectX have not been measured.
 - **Large is not trained with the group.** The group helps with Starter, Small
-  and Medium, whose work fits in one group message. A Large model reaches the
+  and Medium, whose work fits in one group message. Chunked transfer for Large
+  is on the [roadmap](roadmap.md). A Large model reaches the
   group only through **Share with my group**.
 - **One text, one run at a time.** A run learns from one pasted text or one
   `.txt`/`.md` file of up to 4 MiB. There is no folder import and no picker
@@ -756,12 +759,14 @@ an independent calculation from the model file (log-probabilities within
 - **One group, one run to help.** A helper joins the first shared run it finds
   and stays with it until that run ends. There is no balancing between several
   runs.
-- **No measured group speed-up yet**, and no test across separate machines on
+- **No measured group speed-up**, and no test across separate machines on
   different networks. Tests run several complete Sovra runtimes in one process.
+  That measurement is on the [roadmap](roadmap.md).
 - **Mixed versions.** Sovra 0.5.0 computers cannot receive models and can help
   only a Starter run on recommended settings.
 - **No formal privacy protection.** Noise-based privacy and secure aggregation
-  exist as library code and are not applied to this training; see
+  exist as library code and are not applied to this training. Review before
+  any use is on the [roadmap](roadmap.md). See
   [Swarm internals](swarm.md#integration-and-security-limits).
 - **No resource budgets.** Training yields to chat but has no power,
   temperature or operating-system idle detection.

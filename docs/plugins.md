@@ -246,7 +246,7 @@ A package is one self-contained JSON document:
 | `schema_version` | File format version, currently exactly `1` |
 | `api_version` | Host capability contract, currently exactly `1`; catalog entries for other APIs can be displayed but cannot be installed |
 | `id` | Stable reverse-domain identifier, at least three dot-separated lowercase name segments, at most 128 bytes; use a namespace you control |
-| `version` | Immutable `major.minor.patch`, each an unsigned 32-bit integer without leading zeroes; prerelease/range syntax is not supported yet |
+| `version` | Immutable `major.minor.patch`, each an unsigned 32-bit integer without leading zeroes; prerelease and range syntax are not accepted. That gap is on the [roadmap](roadmap.md) |
 | `title`, `description` | Plain descriptions, required, at most 120 and 1000 bytes respectively; must match the catalog |
 | `skills` | Up to 16 procedures; no aliases, actions, tool grants or filesystem resources |
 | Skill `name` | Unique within the package; lowercase letters/digits joined with single hyphens, at most 32 bytes |

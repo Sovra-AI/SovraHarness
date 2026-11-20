@@ -187,8 +187,9 @@ OAuth connections. Read the downloaded bytes with Sovra's existing bounded
 document readers. This also reads Excel without granting file writes: even
 [listing worksheets with the Excel API](https://learn.microsoft.com/en-us/graph/api/worksheet-list?view=graph-rest-1.0)
 requires `Files.ReadWrite`. Live spreadsheet editing, Office automation, Power
-BI, Dynamics, Azure administration, and Purview are separate future capabilities;
-the connection must not claim to implement them.
+BI, Dynamics, Azure administration, and Purview are not part of this connection.
+Those items are on the [roadmap](roadmap.md). The connection must not claim to
+implement them.
 
 ## Desktop sign-in
 

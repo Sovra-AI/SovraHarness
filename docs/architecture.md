@@ -111,6 +111,7 @@ unsafe code; this does not claim that third-party dependencies contain none.
 `cargo xtask dist` packages the host platform; GitHub Actions builds release
 assets for macOS, Windows, and Linux. Signing is conditional on configured secrets.
 In-app update checking is not implemented. Follow [Releasing](releasing.md).
+The open list is the [roadmap](roadmap.md).
 
 ## Checks and tests
 

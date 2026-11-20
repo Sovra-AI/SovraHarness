@@ -14,6 +14,14 @@ package version.
 
 ## [Unreleased]
 
+- **One roadmap.** Open work is listed in [docs/roadmap.md](docs/roadmap.md).
+  Guides describe the current checkout. A gap in a guide states today's limit
+  and points at that page, instead of keeping a second list or a delivery date.
+
+- **Plugin actions stay with their fields.** Add from GitHub and Load catalog
+  are only as wide as their labels, beside the address boxes, instead of
+  stretching across the page.
+
 - The download site can use the official release as soon as it is published.
   All three installers, executables, and update feeds are uploaded and checked
   together before the release becomes public.

@@ -133,4 +133,5 @@ Until then, GitHub returns 403 and the tool says so in plain words.
 - Fine-grained keys work, but the key page link creates a classic key, because
   fine-grained keys cannot be pre-filled by URL.
 - GitHub Enterprise Server addresses are not configurable from the screen
-  (`sovra_github::Endpoints` supports them in code).
+  (`sovra_github::Endpoints` supports them in code). That screen is on the
+  [roadmap](roadmap.md).

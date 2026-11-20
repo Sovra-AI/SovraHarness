@@ -3,7 +3,10 @@
 Documentation describes behavior present in this checkout. Update the relevant
 guide in the same pull request as a behavior change, and keep the README concise.
 Record release history in [CHANGELOG.md](../CHANGELOG.md), not in dated appendices
-to user guides. Track proposals and future work in GitHub issues.
+to user guides. Open work has one list, the [roadmap](roadmap.md). A GitHub
+issue is the detail for one item on that list, not a second list. A guide
+states the current limit and links to the roadmap. It does not promise a
+feature or a delivery date.
 
 ## Choose the right guide
 

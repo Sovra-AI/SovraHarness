@@ -38,6 +38,7 @@ Read before writing code:
 - [docs/styling.md](docs/styling.md) — the native design system (required for UI work)
 - [docs/README.md](docs/README.md) — documentation map
 - [docs/documentation.md](docs/documentation.md) — writing and verifying documentation
+- [docs/roadmap.md](docs/roadmap.md) — the only list of work that is still open
 
 ## Best practices
 
@@ -147,6 +148,7 @@ release-builds the three executables — macOS `sovra` on `macos-15`, Windows
 `cargo build --release --locked --package sovra-app`, and publishes them on
 that existing feed. A matching `vX.Y.Z` tag runs the same workflow when the tag
 equals that package version. Signing is skipped when its secrets are absent.
-In-app update checks are not implemented. Do not bump the version on a push
+In-app update checks are not implemented. See the [roadmap](docs/roadmap.md).
+Do not bump the version on a push
 that does not publish executables, and do not publish the same version twice.
 Follow the [release guide](docs/releasing.md) before publishing.

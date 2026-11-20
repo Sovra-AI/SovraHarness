@@ -5,7 +5,7 @@ files in each crate add crate-specific rules; the closest file wins. Reasoning a
 `docs/architecture.md`.
 
 Native Rust desktop app (a local LLM agent harness). GPUI via `gpui-kit` for UI, tokio for
-async, Velopack for installers and update feeds (in-app update checks are not wired). Rust 1.99.1 (pinned), edition 2024.
+async, Velopack for installers and update feeds (in-app update checks are not wired; open work is only `docs/roadmap.md`). Rust 1.99.1 (pinned), edition 2024.
 
 ## Commands
 

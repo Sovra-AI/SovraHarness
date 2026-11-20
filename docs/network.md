@@ -58,4 +58,5 @@ requests to a separate service.
 These settings control known integration paths. They do not provide a global
 "offline mode" or prevent arbitrary commands or web content from networking.
 Verify traffic in your deployment environment before relying on isolation.
-The app has installer hooks but no in-app update-check flow.
+The app has installer hooks but no in-app update-check flow. See the
+[roadmap](roadmap.md).

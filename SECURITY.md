@@ -48,8 +48,8 @@ backport policy.
 - `unsafe` is forbidden across the workspace.
 - The Rust toolchain is pinned (`rust-toolchain.toml`); the release workflow
   packages with Velopack and signs when signing credentials are configured.
-  Unsigned local installers are for testing; automatic update checks are not yet
-  implemented in the app.
+  Unsigned local installers are for testing; automatic update checks are not
+  implemented in the app. See the [roadmap](docs/roadmap.md).
 
 ## Data and execution boundaries
 

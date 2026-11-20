@@ -267,8 +267,8 @@ Cancellation takes effect at the decoder's cooperative checkpoints; formats with
 internal checkpoints may still finish their current decode first. Cancelled reads
 preserve the previous searchable version and do not count as failed files. Runtime
 owns the signal watcher and releases it when the decode finishes. The configured
-decoder timeout is still not enforced without Xberg's tokio-runtime feature; a hard
-parser deadline remains open work. Text-stream cancellation is checked between blocks.
+decoder timeout is still not enforced without Xberg's tokio-runtime feature. A hard
+parser deadline is on the [roadmap](roadmap.md). Text-stream cancellation is checked between blocks.
 
 Decoder processing warnings and per-input errors are retained as reader notes,
 separate from source text. Indexed documents with usable text and a reported

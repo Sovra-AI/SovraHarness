@@ -97,7 +97,7 @@ sequenceDiagram
 
 What to expect: these are small models that continue text in the style
 you taught them. They do not replace the AI that answers chat, pretrained
-models cannot be imported yet, and one graphics card at most is used.
+models cannot be imported, and one graphics card at most is used.
 Computers that help can read the pieces of text they work on, so share text
 you are willing for your group to read. The [Training guide](docs/training.md)
 has the first run, group steps, every setting, privacy details and limits.
@@ -143,7 +143,8 @@ for a tour of the features.
 Open [GitHub Releases](https://github.com/Sovra-AI/SovraHarness/releases), choose
 an asset for your operating system and architecture, and follow the release's
 installation notes. Signing depends on the credentials available for that build;
-check its release notes. In-app update checks are not implemented yet.
+check its release notes. In-app update checks are not implemented. See the
+[roadmap](docs/roadmap.md).
 
 After launching:
 
@@ -196,8 +197,9 @@ additional prerequisites in the [release guide](docs/releasing.md).
 
 ## Status and data boundaries
 
-Sovra is under active development. Read the [changelog](CHANGELOG.md) for changes
-and the [documentation](docs/README.md) for current behavior.
+Sovra is under active development. Read the [changelog](CHANGELOG.md) for changes,
+the [documentation](docs/README.md) for current behavior, and the
+[roadmap](docs/roadmap.md) for the only list of work that is still open.
 
 - Local storage does not make every operation offline. Cloud models and connected
   tools receive the content needed for their requests; group networking can use
@@ -211,7 +213,7 @@ and the [documentation](docs/README.md) for current behavior.
   rendering are not hosted. Hosting stops when Sovra closes.
 - Phone control pairs with the [SovraiOS](https://github.com/Sovra-AI/SovraiOS) and
   [SovraAndroid](https://github.com/Sovra-AI/SovraAndroid) apps, built from source;
-  no store release is published yet. Groups support borrowing another computer's AI for chat; embedding and indexing work are not handed off.
+  no store release is published. Groups support borrowing another computer's AI for chat; embedding and indexing work are not handed off.
 - Training teaches small built-in models from text you choose; it does not
   import or fine-tune pretrained models. A run started with your group sends
   pieces of that text to group computers that help. See

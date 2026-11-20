@@ -266,7 +266,21 @@ fn github_add_check_and_update_controls_fit_supported_sizes(cx: &mut TestAppCont
                 window.click("plugin-github-address", cx);
                 window.input("https://github.com/owner/writing-skills", cx);
                 reveal(window, "plugin-github-add", cx);
+                let address = window.find("plugin-github-address").bounds();
+                let add = window.find("plugin-github-add").bounds();
+                assert!(
+                    add.size.width <= address.size.width,
+                    "Add from GitHub is wider than its address field"
+                );
                 window.click("plugin-github-add", cx);
+                reveal(window, "plugin-catalog-url", cx);
+                reveal(window, "plugin-browse", cx);
+                let catalog = window.find("plugin-catalog-url").bounds();
+                let load = window.find("plugin-browse").bounds();
+                assert!(
+                    load.size.width <= catalog.size.width,
+                    "Load catalog is wider than its address field"
+                );
             })
             .unwrap();
             assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::Plugins(PluginCommand::AddFromGitHub { address }) if address == "https://github.com/owner/writing-skills")));
