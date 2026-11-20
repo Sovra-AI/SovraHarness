@@ -1,0 +1,6 @@
+{
+  "name": "sovra-harness",
+  "description": "Helpers for working on Sovra itself: add a feature, change a screen, fix a bug, finish a change so every check passes, and make your own Sovra plugin. In Sovra it also adds exact date tools.",
+  "homepage": "https://github.com/Sovra-AI/SovraHarness",
+  "repository": "https://github.com/Sovra-AI/SovraHarness"
+}

@@ -239,6 +239,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull request workflow and
 [AGENTS.md](AGENTS.md) for engineering rules. To test the running app through an
 MCP client, follow [Development MCP](docs/development-mcp.md).
 
+This repository is also a plugin with skills for working on Sovra: adding a
+feature, changing a screen, fixing a bug, finishing a change, and making your own
+plugin. In Sovra, paste `Sovra-AI/SovraHarness` into **Plugins → Add from GitHub**.
+In Claude Code, run:
+
+```text
+/plugin install sovra-harness --marketplace Sovra-AI/SovraHarness
+```
+
+The skills live in [`skills/`](skills); see
+[This repository as a plugin](docs/plugins.md#this-repository-as-a-plugin).
+
 ### Architecture
 
 Domain decisions live in `sovra-core`, IO lives in adapters, and views live in

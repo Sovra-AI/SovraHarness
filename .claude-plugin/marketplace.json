@@ -1,0 +1,13 @@
+{
+  "name": "sovra-harness",
+  "owner": {
+    "name": "Sovra-AI"
+  },
+  "plugins": [
+    {
+      "name": "sovra-harness",
+      "source": "./",
+      "description": "Helpers for working on Sovra itself: add a feature, change a screen, fix a bug, finish a change so every check passes, and make your own Sovra plugin."
+    }
+  ]
+}

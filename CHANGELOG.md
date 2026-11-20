@@ -21,6 +21,11 @@ package version.
   azure/login, rust-cache, install-action). Replaces Dependabot PRs #4, #5, #6, #8
   and #12, which were failing against an older `main`.
 
+- **SovraHarness is a plugin.** Add `Sovra-AI/SovraHarness` from **Plugins → Add
+  from GitHub**, or install `sovra-harness` in Claude Code, for skills that help
+  add a feature, change a screen, fix a bug, finish a change, and make your own
+  plugin. A test checks that Sovra adds every skill.
+
 - **Searching is faster.** Typing in the Models, chat history, Artifacts and People
   searches no longer copies every model description, conversation and document
   for each keystroke, and the Models page builds its filter choices without

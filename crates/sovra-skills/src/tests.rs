@@ -476,7 +476,10 @@ fn this_repository_is_added_as_a_code_plugin_with_its_date_tools() {
     assert_eq!(check.left_out, [] as [String; 0]);
     let package = &check.package;
     assert_eq!(package.api_version, sovra_core::plugins::CODE_API_VERSION);
-    assert!(package.description.starts_with("Exact date sums"));
+    assert!(
+        package.description.ends_with("In Sovra it also adds exact date tools."),
+        "plugin.json describes the skills and the tools together"
+    );
     let code = package.code.as_ref().expect("the repository brings code");
     let tools: Vec<_> = code.tools.iter().map(|tool| tool.name.as_str()).collect();
     assert_eq!(tools, ["days_between", "weekday", "add_days"]);
@@ -489,6 +492,52 @@ fn this_repository_is_added_as_a_code_plugin_with_its_date_tools() {
         code.module_bytes().unwrap(),
         fs::read(root.join("plugin.wasm")).unwrap()
     );
+}
+
+#[test]
+fn this_repository_is_added_as_a_plugin_with_every_skill() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture = Fixture::new();
+    let checkout = fixture.0.join("SovraHarness");
+    copy_as_pushed(&root, &checkout, true);
+    let check = check_repository(&checkout, "Sovra-AI/SovraHarness").unwrap();
+    assert_eq!(check.left_out, [] as [String; 0]);
+    let package = &check.package;
+    assert_eq!(package.id, "io.github.sovra-ai.sovraharness");
+    assert!(
+        package
+            .description
+            .starts_with("Helpers for working on Sovra itself")
+    );
+    assert_eq!(package.services, []);
+    let names: Vec<_> = package.skills.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "thank-you-note",
+            "add-a-sovra-feature",
+            "change-sovra-screens",
+            "finish-a-sovra-change",
+            "fix-a-sovra-bug",
+            "make-a-sovra-plugin",
+        ],
+        "the template's example skill comes along; skills/ holds this repository's own"
+    );
+    let plugin_maker = &package.skills[5];
+    assert_eq!(
+        plugin_maker.resources.keys().collect::<Vec<_>>(),
+        ["plugin-rules.md"]
+    );
+    for skill in package.skills(true) {
+        assert!(
+            skill
+                .friendly_card_copy()
+                .example_display
+                .starts_with("Example: “"),
+            "{} shows its author's example on the Skills page",
+            skill.title
+        );
+    }
 }
 
 #[test]

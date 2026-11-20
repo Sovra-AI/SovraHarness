@@ -45,6 +45,30 @@ It applies the same rules and the same code as **Add from GitHub** to the folder
 can be added, or when anything would be left out, and names each item.
 It lists the skills and suggested connections that would be added.
 
+## This repository as a plugin
+
+SovraHarness is itself a plugin, laid out like the template. Adding
+`Sovra-AI/SovraHarness` from GitHub gives its
+[date tools](#this-repository-is-a-code-plugin) and six skills, switched off:
+
+| Skill | What it helps with |
+| --- | --- |
+| `add-a-sovra-feature` | A new command, helper, tool or connection, from `sovra-core` to the screen, including its Skills page entry |
+| `change-sovra-screens` | Screen changes that follow the styling and responsive-layout rules |
+| `fix-a-sovra-bug` | Reproduce, find the layer, write the failing test first, then fix |
+| `finish-a-sovra-change` | `cargo xtask ci`, a check in the app, the changelog and a gitmoji commit |
+| `make-a-sovra-plugin` | Making a plugin from the template, with the import rules as a file it can read |
+| `thank-you-note` | The template's example skill, which comes from `examples/plugin-template` |
+
+The first five live in [`skills/`](../skills) and point to `AGENTS.md` and these
+guides instead of copying them, so they are meant for a SovraHarness checkout.
+`.claude-plugin/plugin.json` gives the description; `.claude-plugin/marketplace.json`
+lets Claude Code install the same skills with
+`/plugin install sovra-harness --marketplace Sovra-AI/SovraHarness` (Claude Code reads
+only `skills/`, so it has five). A `sovra-skills` test runs the repository check on
+this checkout without its `target` and worktree folders, and fails if any skill
+would be left out.
+
 ## Plugins with code
 
 A plugin can bring **tools**: small programs a helper calls to get an exact
@@ -83,8 +107,8 @@ connected services, the same way as tools from **Connections**.
 SovraHarness itself is the first one: paste `Sovra-AI/SovraHarness` into **Add
 from GitHub** to get its date tools (count the days between two dates, find the
 weekday of a date, and find the date some days before or after another). They
-need no internet. The plugin also brings the plugin template's example
-`thank-you-note` skill, because every `SKILL.md` in a repository is added.
+need no internet. The same plugin brings its skills too; see
+[This repository as a plugin](#this-repository-as-a-plugin).
 
 Its source is [`examples/code-plugin`](../examples/code-plugin), a small Rust
 crate. `cargo xtask plugin-wasm` rebuilds the root `plugin.wasm` from it, and
@@ -162,6 +186,7 @@ complete module in Rust, built for `wasm32-unknown-unknown`. The read-only
 `check_repository` example also lists a repository's tools and what its code can
 reach, and refuses a module Sovra would not run.
 
+||||||| parent of 59686dd (✨ feat(plugins): make SovraHarness itself a Sovra and Claude Code plugin)
 ## Add from GitHub
 
 Open **Plugins** (in the menu on the left), paste a repository address into **Add from GitHub**,
