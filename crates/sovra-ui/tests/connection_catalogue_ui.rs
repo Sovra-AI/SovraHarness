@@ -1,5 +1,8 @@
 //! The Connections tab: the real shell, the real catalogue, both themes.
 
+#[path = "support/nav.rs"]
+mod nav;
+
 use std::collections::BTreeMap;
 
 use gpui_kit::component::{Root, Theme, ThemeMode};
@@ -96,7 +99,7 @@ fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppCo
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             Theme::change(mode, Some(window), cx);
             window.render_frame(cx);
-            window.click("nav-connections", cx);
+            nav::click_in_sidebar(window, "nav-connections", cx);
             window.render_frame(cx);
             assert!(window.find("connections-page").visible());
             assert!(window.find("connections-refresh").visible());
@@ -185,7 +188,7 @@ fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppCo
             window.find("connection-status-telegram").label(),
             Some(after.card(CatalogueKind::Telegram).phase.label())
         );
-        window.click("nav-settings", cx);
+        nav::click_in_sidebar(window, "nav-settings", cx);
         window.render_frame(cx);
         assert!(window.find("sovra-settings-view").visible());
         assert!(window.find("settings-appearance").visible());
@@ -261,7 +264,7 @@ fn connections_nav_counts_every_linked_kind(cx: &mut TestAppContext) {
     settle(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             Theme::change(mode, Some(window), cx);

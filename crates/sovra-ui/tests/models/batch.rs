@@ -22,7 +22,7 @@ fn batch_models_are_hidden_from_chat_and_disabled_in_details(cx: &mut TestAppCon
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window.click("models-browse-all", cx);
         let view = shell.read(cx).models();
         assert_eq!(view.read(cx).visible_models().len(), 1);

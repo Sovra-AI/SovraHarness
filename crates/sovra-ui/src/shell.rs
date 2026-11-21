@@ -40,6 +40,8 @@ pub struct Shell {
     history_compact: bool,
     history_overlay_open: bool,
     inspector_docked: bool,
+    /// The window is short for its text size: the composer leaves out its tips.
+    pub(crate) short_window: bool,
     code_panel_open: bool,
     pub(crate) composer_input: Entity<TextareaState>,
     /// Once a draft has been started, don't restart its introductory animation.
@@ -865,6 +867,7 @@ impl Shell {
             history_compact: Self::sidebar_rail(window),
             history_overlay_open: false,
             inspector_docked: design::WidthClass::of_window(window).fits_side_pane(),
+            short_window: design::is_short_window(window),
             code_panel_open: true,
             composer_input,
             started_chat_drafts: std::collections::HashSet::new(),
@@ -1963,6 +1966,7 @@ impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let compact = Self::sidebar_rail(window);
         self.inspector_docked = design::WidthClass::of_window(window).fits_side_pane();
+        self.short_window = design::is_short_window(window);
         if self.history_compact != compact {
             self.history_compact = compact;
             self.history_overlay_open = false;

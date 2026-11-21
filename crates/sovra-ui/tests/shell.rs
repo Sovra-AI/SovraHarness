@@ -1,5 +1,8 @@
 //! Headless UI tests: real views in a GPUI test window, runtime replaced by loopback channels.
 
+#[path = "support/nav.rs"]
+mod nav;
+
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, TestAppContext, px, size};
@@ -309,13 +312,13 @@ fn main_chat_login_schedules_and_agui_surfaces_work_end_to_end(cx: &mut TestAppC
             window.find("nav-skills").bounds().origin.y
                 < window.find("sidebar-group-ai-setup").bounds().origin.y
         );
-        window.click("nav-skills", cx);
+        nav::click_in_sidebar(window, "nav-skills", cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Skills);
         assert!(window.find("skill-search").visible());
 
         // Switch to Schedules tab -> empty invite, then create one and run it.
-        window.click("nav-schedules", cx);
+        nav::click_in_sidebar(window, "nav-schedules", cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Schedules);
         assert!(window.find("sovra-schedules-view").visible());
@@ -833,7 +836,7 @@ fn chat_history_rail_and_schedules_placeholder_work_end_to_end(cx: &mut TestAppC
         window.render_frame(cx);
 
         // Pin the top thread and verify it stays accessible.
-        window.click(("chat-thread-pin", 0usize), cx);
+        nav::click_in_sidebar(window, ("chat-thread-pin", 0usize), cx);
         window.render_frame(cx);
         assert!(shell.read(cx).workspace().active_thread().unwrap().pinned);
 
@@ -1344,7 +1347,7 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
                 .is_none(),
             "Schedules tab has no count badge when the list is empty"
         );
-        window.click("nav-schedules", cx);
+        nav::click_in_sidebar(window, "nav-schedules", cx);
         window.render_frame(cx);
         window.click("schedule-empty-create-btn", cx);
         window.render_frame(cx);
@@ -1365,7 +1368,7 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
     );
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-chat", cx);
+        nav::click_in_sidebar(window, "nav-chat", cx);
         window.render_frame(cx);
         assert!(
             window
@@ -1450,7 +1453,7 @@ fn unified_single_sidebar_and_ai_title_generation_work_end_to_end(cx: &mut TestA
             Some("Open conversation Rust Zero-Copy HTTP/3 Parser")
         );
         // Also verify history stays visible in the unified sidebar when switching to another tab (e.g. Models)
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window.render_frame(cx);
         assert!(window.find("chat-history-rail").visible());
         assert_eq!(
@@ -1581,8 +1584,23 @@ fn file_setup_flow(
         window.click("attachment-choose-model", cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Models);
+        // A short window scrolls the page; bring the first choice fully into view as
+        // a person would before choosing it.
+        let page = window.find("sovra-models-view").bounds();
+        for _ in 0..20 {
+            let choose = window.find(("model-use-row", 0usize)).bounds();
+            if choose.bottom() <= page.bottom() {
+                break;
+            }
+            window.scroll(
+                "sovra-models-view",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-40.))),
+                cx,
+            );
+            window.render_frame(cx);
+        }
         let choose = window.find(("model-use-row", 0usize)).bounds();
-        assert!(choose.top() >= px(0.) && choose.bottom() <= dimensions.height);
+        assert!(choose.top() >= page.top() && choose.bottom() <= page.bottom());
         window.click(("model-use-row", 0usize), cx);
     })
     .expect("file setup test fixture succeeds");
@@ -1762,7 +1780,7 @@ fn whatsapp_personal_qr_pairing_and_message_bridge_work_end_to_end(cx: &mut Test
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Connections);
         assert!(window.find("connections-page").visible());
@@ -1917,7 +1935,7 @@ fn telegram_bot_connects_with_a_token_and_shows_the_link_code(cx: &mut TestAppCo
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         assert_eq!(shell.read(cx).workspace().active_tab, NavTab::Connections);
         reveal(window, "connection-action-telegram", cx);

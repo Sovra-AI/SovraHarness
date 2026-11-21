@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- **Small windows on Mac and Windows keep room for the conversation.** At large
+  text sizes in a small window, the keyboard tips under the message box make way
+  so the conversation stays readable, and the tips never run past the edges of
+  the message box. The Models page scrolls as a whole when it is short, so the
+  first model's **Use** button is never hidden under the status bar.
 - **GitHub checks run every test again.** The same-room code tests need the
   local network, which GitHub's macOS 15 machines block, so they failed there on
   every run and stopped the remaining tests. They now run on a Linux machine

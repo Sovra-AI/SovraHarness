@@ -1555,6 +1555,10 @@ impl ModelsView {
             .size_full()
             .min_w_0()
             .min_h_0()
+            // The catalog keeps room for its controls and one row. In a short window
+            // the header and that much may not both fit, so the page scrolls instead
+            // of letting the row run under the status bar where it cannot be clicked.
+            .overflow_y_scroll()
             .p(if narrow {
                 t.space.small
             } else {
@@ -1632,7 +1636,7 @@ impl ModelsView {
         }
         let mut body = h_flex()
             .flex_1()
-            .min_h_0()
+            .min_h(t.layout.catalog_min_height)
             .min_w_0()
             .gap(t.space.medium)
             .child(self.catalog(cx));

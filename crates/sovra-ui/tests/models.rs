@@ -1,5 +1,8 @@
 //! Model-library interactions exercise native controls, real layout and runtime messages.
 
+#[path = "support/nav.rs"]
+mod nav;
+
 use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::{
@@ -107,7 +110,7 @@ fn search_filters_favorites_and_non_chat_details(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window.click("models-browse-all", cx);
         assert!(window.find("sovra-models-view").visible());
         // Only models that can chat are listed until the user asks for other types.
@@ -203,7 +206,7 @@ fn setup_starts_with_one_connection_action_and_no_catalog_controls(cx: &mut Test
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         assert!(window.find("models-setup-home").visible());
         assert!(window.find("models-home-connect").visible());
         assert!(window.try_find("models-search").is_none());
@@ -247,7 +250,7 @@ fn choosing_a_model_waits_for_confirmation_then_goes_straight_to_chat(cx: &mut T
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         let choose = ("models-home-rec-btn", 0usize);
         assert_eq!(window.find(choose).label(), Some("Use this model"));
         window.click(choose, cx);
@@ -354,7 +357,7 @@ fn changing_the_selected_model_starts_on_its_card(cx: &mut TestAppContext) {
     let chosen_key = cx
         .update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("nav-models", cx);
+            nav::click_in_sidebar(window, "nav-models", cx);
             let shown = window
                 .within("models-home-active")
                 .find("models-home-active-name")
@@ -559,7 +562,7 @@ fn searching_the_change_list_keeps_the_matching_model(cx: &mut TestAppContext) {
     let query = "step";
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window
             .within("models-home-active")
             .click("models-home-change", cx);
@@ -707,7 +710,7 @@ fn selected_model_change_control_stays_inside_the_window(cx: &mut TestAppContext
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("nav-models", cx);
+            nav::click_in_sidebar(window, "nav-models", cx);
             scroll_change_control_into_window(window, width, height, cx);
             let change = window
                 .within("models-home-active")
@@ -849,7 +852,7 @@ fn selected_model_choice_facts_stay_inside_the_window(cx: &mut TestAppContext) {
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("nav-models", cx);
+            nav::click_in_sidebar(window, "nav-models", cx);
             window
                 .within("models-home-active")
                 .click("models-home-change", cx);
@@ -901,7 +904,7 @@ fn assert_setup_fits_minimum_window(cx: &mut TestAppContext, mode: ThemeMode) {
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         let home = window.find("models-setup-home").bounds();
         let connect = window.find("models-home-connect");
         assert!(
@@ -946,7 +949,7 @@ fn selected_custom_connection_setup_asks_for_its_own_key(cx: &mut TestAppContext
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         assert!(window.find("models-home-add-key").visible());
         assert!(window.try_find("models-home-connect").is_none());
         window.click("models-home-add-key", cx);
@@ -1027,7 +1030,7 @@ fn next_setup_actions_fit_minimum_window_in_both_themes(cx: &mut TestAppContext)
             cx.run_until_parked();
             cx.update_window(window.into(), |_, window, cx| {
                 window.render_frame(cx);
-                window.click("nav-models", cx);
+                nav::click_in_sidebar(window, "nav-models", cx);
                 let home = window.find("models-setup-home").bounds();
                 let button = window.find(action.clone());
                 assert!(button.visible(), "next action must be visible: {button:?}");
@@ -1066,7 +1069,7 @@ fn assert_large_catalog_layout(cx: &mut TestAppContext, width: f32, height: f32,
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window.click("models-browse-all", cx);
         assert_eq!(
             shell.read(cx).models().read(cx).visible_models().len(),
@@ -1132,7 +1135,7 @@ fn minimum_window_filters_keep_apply_action_visible(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window.click("models-browse-all", cx);
         window.click("models-toggle-filters", cx);
         assert!(window.find("models-apply-filters").visible());
@@ -1175,7 +1178,7 @@ fn ollama_installed_models_and_download_panel_fit_minimum_window(cx: &mut TestAp
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window.click("models-browse-all", cx);
         window.click(("model-scope", 2usize), cx);
         assert!(window.find(("model-row", 0usize)).visible());
@@ -1194,7 +1197,7 @@ fn connection_preset_and_save_acknowledgement_preserve_draft(cx: &mut TestAppCon
     let (window, _) = open_shell(cx, client, 1280., 2400.);
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         window.click("connection-action-compatible", cx);
         window.click(("connection-preset", 3usize), cx);
@@ -1296,7 +1299,7 @@ fn settings_saves_openrouter_key_through_secure_connection_protocol(cx: &mut Tes
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         assert!(window.find("connections-page").visible());
         window.click("connection-action-online-ai", cx);
@@ -1344,7 +1347,7 @@ fn saved_openrouter_key_stays_visible_and_can_be_tested_replaced_and_removed(
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.click("connection-action-online-ai", cx);
         window.click("connection-key", cx);
         window.input("test-key", cx);
@@ -1487,7 +1490,7 @@ fn existing_system_key_can_continue_without_creating_or_saving_another_key(
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.click("connection-action-online-ai", cx);
         window.render_frame(cx);
         assert!(window.try_find("openrouter-open-browser").is_none());
@@ -1572,7 +1575,7 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-settings", cx);
+        nav::click_in_sidebar(window, "nav-settings", cx);
         window.render_frame(cx);
         assert!(window.find("settings-appearance").visible());
         assert!(
@@ -1581,7 +1584,7 @@ fn settings_keeps_advanced_and_technical_options_out_of_the_way(cx: &mut TestApp
         );
         assert!(window.try_find("connection-url").is_none());
         assert!(window.find("settings-open-connections").visible());
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         assert!(
             window.try_find("connection-url").is_none(),
@@ -1629,7 +1632,7 @@ fn appearance_choice_is_saved_and_restored(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         assert!(!cx.theme().is_dark(), "saved Light choice applies on load");
         window.render_frame(cx);
-        window.click("nav-settings", cx);
+        nav::click_in_sidebar(window, "nav-settings", cx);
         window.render_frame(cx);
         window.click("settings-theme-dark", cx);
         assert!(cx.theme().is_dark());
@@ -1760,7 +1763,7 @@ fn default_chrome_is_english_and_choosing_another_language_updates_labels(cx: &m
     cx.run_until_parked();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-settings", cx);
+        nav::click_in_sidebar(window, "nav-settings", cx);
         window.render_frame(cx);
         assert_eq!(
             window.find("nav-settings").label(),
@@ -1960,7 +1963,7 @@ fn default_chrome_is_english_and_choosing_another_language_updates_labels(cx: &m
             window.find("chat-new-btn").label(),
             Some(chrome(&UiLanguage::english(), ChromeKey::NavNewChatHint))
         );
-        window.click("nav-chat", cx);
+        nav::click_in_sidebar(window, "nav-chat", cx);
         window.render_frame(cx);
         let name = shell
             .read(cx)
@@ -2054,7 +2057,7 @@ fn setup_with_saved_key_only_shows_step_two_and_curated_recommendations(cx: &mut
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-models", cx);
+        nav::click_in_sidebar(window, "nav-models", cx);
         window.render_frame(cx);
 
         // Step 1 connection action must be hidden when key is already connected!
@@ -2136,7 +2139,7 @@ fn saving_a_key_during_setup_continues_to_the_next_step(cx: &mut TestAppContext)
         cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("nav-models", cx);
+            nav::click_in_sidebar(window, "nav-models", cx);
             window.click(
                 if chosen {
                     "models-home-add-key"

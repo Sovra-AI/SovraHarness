@@ -2,7 +2,9 @@
 
 use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
+use gpui_kit::{
+    AppContext as _, Entity, ScrollDelta, TestAppContext, WindowHandle, point, px, size,
+};
 use sovra_core::artifacts::{
     Artifact, ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactKind, ArtifactSource,
 };
@@ -301,6 +303,20 @@ fn mentions_route_to_the_team_and_agui_events_show_each_member(cx: &mut TestAppC
             .iter()
             .position(|m| m.id == "r-team")
             .expect("team card message");
+        // The chat keeps the newest text in view; a short window (or the title bar
+        // Sovra draws on macOS and Windows) puts the card's first line above it, so
+        // scroll up to it as a person would.
+        for _ in 0..20 {
+            if window.find(("team-activity-status", card * 10)).visible() {
+                break;
+            }
+            window.scroll(
+                "chat-scroll-area",
+                ScrollDelta::Pixels(point(px(0.), px(40.))),
+                cx,
+            );
+            window.render_frame(cx);
+        }
         let status = window.find(("team-activity-status", card * 10));
         assert!(status.visible(), "{status:?}");
         assert!(window.find("chat-composer-input").visible());
