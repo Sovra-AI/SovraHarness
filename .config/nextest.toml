@@ -7,3 +7,14 @@ mesh-network = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'package(sovra-mesh) | (package(sovra-app) & (binary(two_computers) | binary(training_grid)))'
 test-group = 'mesh-network'
+
+# Same-room codes find computers by multicast on the local network. GitHub's macOS 15
+# runners block that for every process the runner starts (Apple's Local Network
+# privacy, which a runner cannot be granted), so these tests fail there whatever the
+# code does. CI runs everything else on macOS with `--profile macos-ci` and these on
+# Linux with `--profile nearby`; locally both run as usual.
+[profile.macos-ci]
+default-filter = 'not test(/same_room_join_by_code|showing_a_code_is_found_on_the_same_network/)'
+
+[profile.nearby]
+default-filter = 'test(/same_room_join_by_code|showing_a_code_is_found_on_the_same_network/)'

@@ -3,6 +3,7 @@
 # Layout (GitHub Free private-repo minutes; macOS is 10× Linux):
 #   lint     Ubuntu — fmt, layering, styles, docs, deny, shear, clippy
 #   test     macOS  — nextest, including headless GPUI UI tests
+#   nearby   Ubuntu — same-room code tests (macOS 15 runners block local multicast)
 #   compile  Windows — cargo check so the shipped OS still builds
 #   changelog PR-only — CHANGELOG.md must change (label skip-changelog to skip)
 #   CI       aggregator — the single status to require once GitHub Team is on
@@ -78,7 +79,29 @@ jobs:
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-nextest@0.9.149
-      - run: cargo nextest run --workspace --locked --no-tests pass
+      # Same-room code tests run in the nearby job: macOS 15 blocks the runner's
+      # local-network multicast (.config/nextest.toml says why).
+      - run: cargo nextest run --workspace --locked --no-tests pass --profile macos-ci
+
+  nearby:
+    name: Nearby (Linux)
+    # The same-room code tests need local-network multicast, which Linux runners allow.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - run: ./scripts/install-linux-deps.sh
+      - run: rustup show
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-nextest@0.9.149
+      - run: cargo nextest run --locked --package sovra-app --package sovra-mesh --profile nearby
 
   compile:
     name: Compile (${{ matrix.os }})
@@ -123,7 +146,7 @@ jobs:
   CI:
     name: CI
     if: always() && !cancelled()
-    needs: [lint, test, compile, changelog]
+    needs: [lint, test, nearby, compile, changelog]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -131,10 +154,12 @@ jobs:
         run: |
           echo "lint=${{ needs.lint.result }}"
           echo "test=${{ needs.test.result }}"
+          echo "nearby=${{ needs.nearby.result }}"
           echo "compile=${{ needs.compile.result }}"
           echo "changelog=${{ needs.changelog.result }}"
           test "${{ needs.lint.result }}" = success
           test "${{ needs.test.result }}" = success
+          test "${{ needs.nearby.result }}" = success
           test "${{ needs.compile.result }}" = success
           case "${{ needs.changelog.result }}" in
             success|skipped) ;;

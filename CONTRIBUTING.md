@@ -99,6 +99,7 @@ plain-English title, description, and example prompt.
 | ----------- | ------------- | --------------------------------------------------- |
 | Lint        | Ubuntu        | fmt, layering, styles, docs, deny, shear, clippy    |
 | Test        | macOS         | `cargo nextest` including headless GPUI UI tests    |
+| Nearby      | Ubuntu        | Same-room code tests (macOS 15 runners block local multicast) |
 | Compile     | Windows       | `cargo check --workspace --locked --all-targets`    |
 | Changelog   | Ubuntu        | `CHANGELOG.md` changed (pull requests only)         |
 | **CI**      | Ubuntu        | Aggregator — required check for branch protection |

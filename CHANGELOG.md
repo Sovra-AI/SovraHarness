@@ -14,6 +14,10 @@ package version.
 
 ## [Unreleased]
 
+- **GitHub checks run every test again.** The same-room code tests need the
+  local network, which GitHub's macOS 15 machines block, so they failed there on
+  every run and stopped the remaining tests. They now run on a Linux machine
+  (`--profile nearby`) and the macOS run skips only them (`--profile macos-ci`).
 - **Plugins can bring tools that run their own code, in a sealed box.** A GitHub
   repository with `sovra-plugin.json` and a `plugin.wasm` adds tools that helpers
   call for exact answers. The code cannot see your files or programs, reaches
