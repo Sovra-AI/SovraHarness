@@ -36,7 +36,9 @@ Chat choices exclude batch-only models. If an older saved choice ends in
 Every new chat shows an animated reminder to type `/help` to browse all skills,
 even before you connect an AI. That shortcut is drawn as a book icon in a pill.
 It stops when you start a draft; reduced-motion settings show the complete
-reminder without animation.
+reminder without animation. Pick a skill from the **Skills** page or the chat
+shortcut menu to put its name and icon in your draft. Add your request and
+press **Send** to use it.
 
 > **License:** Source on `main` is available under Sovra's Sustainable Use License.
 > This is fair-code: source-available, and not an OSI open-source license.

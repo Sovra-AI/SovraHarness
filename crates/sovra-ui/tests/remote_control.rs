@@ -184,6 +184,14 @@ fn remote_control_skill_starts_without_a_model(cx: &mut TestAppContext) {
         window.input("/remote-control", cx);
         window.press("enter", cx);
         window.render_frame(cx);
+        assert!(window.find("composer-skill-pill").visible());
+        assert!(window.try_find("remote-control-section").is_none());
+    })
+    .unwrap();
+    cx.simulate_keystrokes(window.into(), "enter");
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
         assert!(window.find("remote-control-section").visible());
     })
     .unwrap();

@@ -7,10 +7,11 @@ Neither an imported skill nor a model's request grants access to new files or to
 ## Find and use a skill
 
 1. Open **Skills** and search or browse the capability cards.
-2. Choose **Open now** for a workspace action, or **Try in chat** / **Try the example**
-   to prepare a draft. Review the draft before sending.
-3. You can also type `/` in the composer to search shortcuts and choose one with
-   the keyboard. Missing arguments produce a usage hint.
+2. Choose **Try in chat** to add the skill to your draft as a pill with its name and icon.
+   **Try the example** also fills in a sample request. Edit the request, then press **Send**
+   to run the skill or open its workspace action.
+3. You can also type `/` in the composer. Choose a shortcut with Tab or Enter, or type its
+   full name and a space. Missing arguments produce a usage hint.
 
 An explicit shortcut selects a procedure before model execution. Some actions,
 such as opening a page, do not need a model call. Model procedures keep your

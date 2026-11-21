@@ -134,7 +134,7 @@ fn assert_example_inside(window: &mut Window, skill: &Skill, where_: &str) -> Bo
     let action = window.find(("skill-use", index));
     let action_label = action.label().unwrap_or_default();
     assert!(
-        action_label.contains("Try in chat") || action_label.contains("Open now"),
+        action_label.contains("Try in chat"),
         "missing card action at {where_}: {action_label}"
     );
     assert!(
@@ -169,4 +169,38 @@ fn card_index(window: &Window, skill: &Skill) -> usize {
             })
         })
         .unwrap_or_else(|| panic!("missing card {}", copy.friendly_title))
+}
+
+#[gpui_kit::test]
+fn selected_skill_pill_fits_the_composer_at_every_test_size(cx: &mut TestAppContext) {
+    let (client, _, _events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        let mut shell = None;
+        let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(0, window, cx));
+            shell = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell.unwrap();
+        cx.update_window(window.into(), |_, window, cx| {
+            design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            for mode in [ThemeMode::Dark, ThemeMode::Light] {
+                Theme::change(mode, Some(window), cx);
+                shell.update(cx, |shell, cx| {
+                    shell.fill_composer_draft("/training ", window, cx);
+                });
+                window.render_frame(cx);
+                let pill = window.find("composer-skill-pill").bounds();
+                let input = window.find("chat-composer-input").bounds();
+                assert!(pill.size.width > px(0.) && pill.size.height > px(0.));
+                assert!(
+                    pill.left() >= input.left() && pill.right() <= input.right() + px(1.),
+                    "{mode:?} at {scale}%: {pill:?} in {input:?}"
+                );
+                assert!(pill.top() >= input.top() && pill.bottom() <= input.bottom() + px(1.));
+            }
+        })
+        .unwrap();
+    }
 }

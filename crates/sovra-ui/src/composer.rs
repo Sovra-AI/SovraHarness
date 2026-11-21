@@ -32,6 +32,15 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
     let has_draft = !composer_input.read(cx).value().trim().is_empty() || has_files;
     let can_send = has_draft && files_ready && !(has_files && state.is_generating);
     let generating = state.is_generating;
+    let draft = composer_input.read(cx).value();
+    let selected_skill =
+        crate::widgets::skill_pill::leading_skill(&shell.skills, &draft).map(|(skill, range)| {
+            (
+                range,
+                skill.title.clone(),
+                crate::skill_library::skill_icon(skill),
+            )
+        });
     let mut bar = h_flex()
         .id("sovra-composer-bar")
         .w_full()
@@ -249,6 +258,28 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
                     .py(t.space.compact)
                     .child(
                         Textarea::new(composer_input)
+                            .token(move |token, _, cx| {
+                                let Some((_, title, icon)) = selected_skill
+                                    .as_ref()
+                                    .filter(|(range, _, _)| *range == token.range())
+                                else {
+                                    return div()
+                                        .child(token.token().text().clone())
+                                        .into_any_element();
+                                };
+                                let mut pill = crate::widgets::skill_pill::pill(
+                                    "composer-skill-pill",
+                                    title,
+                                    *icon,
+                                    cx,
+                                )
+                                .h(token.line_height())
+                                .max_w(token.available_width());
+                                if token.is_selected() {
+                                    pill = pill.bg(cx.theme().selection);
+                                }
+                                pill.into_any_element()
+                            })
                             .aria_label(design::chrome(cx, ChromeKey::ChatComposerA11y))
                             .appearance(false)
                             .bordered(false),
@@ -444,7 +475,7 @@ mod tests {
                 window.render_frame(cx);
                 assert!(window.find("chat-welcome-help-hint").visible());
                 shell.update(cx, |shell, cx| {
-                    shell.fill_composer_draft("/help", window, cx);
+                    shell.fill_composer_draft("/help ", window, cx);
                 });
                 window.render_frame(cx);
             })

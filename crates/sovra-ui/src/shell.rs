@@ -159,7 +159,7 @@ impl Shell {
                             .started_chat_drafts
                             .insert(shell.state.session_id.clone());
                     }
-                    shell.skill_menu = crate::skill_menu::MenuState::default();
+                    shell.composer_changed(window, cx);
                     cx.notify();
                 }
                 InputEvent::Focus | InputEvent::Blur => {
@@ -1332,8 +1332,7 @@ impl Shell {
             let ids = files.iter().map(|file| file.id.clone()).collect();
             if self.state.submit_file_prompt(&prompt, files) {
                 self.state.file_drafts.remove(&self.state.session_id);
-                self.composer_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.clear_composer(window, cx);
                 self.chat.follow_latest();
                 let _ = cx.global::<RuntimeClient>().0.send(Command::RunWithFiles {
                     context: Some(sovra_core::ConversationContext::before_current_turn(
@@ -1352,9 +1351,7 @@ impl Shell {
         if text.trim().is_empty() {
             return;
         }
-        self.composer_input.update(cx, |input, cx| {
-            input.set_value("", window, cx);
-        });
+        self.clear_composer(window, cx);
         self.send_prompt_text(&text, window, cx);
     }
 
@@ -1475,6 +1472,12 @@ impl Shell {
         });
     }
 
+    fn clear_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.skill_menu = crate::skill_menu::MenuState::default();
+        self.composer_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    }
+
     pub fn fill_composer_draft(
         &mut self,
         draft: &str,
@@ -1488,6 +1491,7 @@ impl Shell {
             input.replace_all(owned, window, cx);
             input.set_selected_range(end..end, cx);
         });
+        self.annotate_skill(window, cx);
         self.refresh(cx);
     }
 
@@ -1511,9 +1515,7 @@ impl Shell {
         // Core may reuse an empty thread; New chat still starts a fresh introduction.
         self.started_chat_drafts.remove(&self.state.session_id);
         self.persist_thread(&previous, cx);
-        self.composer_input.update(cx, |input, cx| {
-            input.set_value("", window, cx);
-        });
+        self.clear_composer(window, cx);
         self.refresh(cx);
     }
 

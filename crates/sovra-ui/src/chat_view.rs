@@ -497,9 +497,7 @@ fn render_transcript(chat: &ChatPresentation, cx: &mut Context<Shell>) -> impl I
         .child(
             list(
                 chat.list.clone(),
-                cx.processor(|shell, index, _, cx| {
-                    render_row(&shell.state, &shell.chat, index, cx).into_any_element()
-                }),
+                cx.processor(|shell, index, _, cx| render_row(shell, index, cx).into_any_element()),
             )
             .size_full(),
         )
@@ -771,19 +769,15 @@ fn render_first_step(
     )
 }
 
-fn render_row(
-    state: &WorkspaceState,
-    chat: &ChatPresentation,
-    index: usize,
-    cx: &mut Context<Shell>,
-) -> impl IntoElement + use<> {
+fn render_row(shell: &Shell, index: usize, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let Shell { state, chat, .. } = shell;
     // Messages are 1.375rem apart; segments of one reply continue at paragraph spacing.
     let t = design::tokens(cx);
     let (message_gap, paragraph_gap) = (t.chat.message_padding, t.space.medium);
     let (row, top, bottom) = match chat.rows.get(index).copied() {
         Some(Row::Message { message, segment }) => match state.messages.get(message) {
             Some(msg) if msg.role == MessageRole::User => (
-                render_user_message(state, msg, message, cx).into_any_element(),
+                render_user_message(shell, msg, message, cx).into_any_element(),
                 message_gap,
                 message_gap,
             ),
@@ -856,7 +850,7 @@ fn render_row(
 }
 
 fn render_user_message(
-    state: &WorkspaceState,
+    shell: &Shell,
     msg: &ChatMessage,
     index: usize,
     cx: &Context<Shell>,
@@ -864,6 +858,12 @@ fn render_user_message(
     let t = design::tokens(cx);
     let chat = &t.chat;
     let copy_text = msg.text.clone();
+    let shortcut = crate::widgets::skill_pill::leading_skill(&shell.skills, &msg.text);
+    let body = shortcut.as_ref().map_or(msg.text.as_str(), |(_, range)| {
+        msg.text[range.end..]
+            .strip_prefix(char::is_whitespace)
+            .unwrap_or_default()
+    });
     h_flex()
         .id(("user-msg", index))
         .w_full()
@@ -922,11 +922,23 @@ fn render_user_message(
                         // Phones and screen readers read the conversation through these.
                         .role(Role::Comment)
                         .aria_label(msg.text.clone())
-                        .child(
-                            TextView::markdown(("user-text-md", index), msg.text.clone())
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap(t.space.compact)
+                        .children(shortcut.map(|(skill, _)| {
+                            crate::widgets::skill_pill::pill(
+                                ("message-skill-pill", index),
+                                &skill.title,
+                                crate::skill_library::skill_icon(skill),
+                                cx,
+                            )
+                        }))
+                        .children((!body.is_empty()).then(|| {
+                            TextView::markdown(("user-text-md", index), body.to_owned())
                                 .selectable(true)
-                                .scrollable(false),
-                        ),
+                                .scrollable(false)
+                        })),
                 ),
         )
         .child(
@@ -939,7 +951,7 @@ fn render_user_message(
                 .rounded_full()
                 .bg(t.nav_active_background)
                 .sovra_text(TextRole::Caption, cx)
-                .child(state.user.initials.clone()),
+                .child(shell.state.user.initials.clone()),
         )
 }
 

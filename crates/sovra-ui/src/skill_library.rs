@@ -718,7 +718,7 @@ fn group_key(skill: &Skill) -> &'static str {
         .map_or(OTHER, |group| group.key)
 }
 
-fn skill_icon(skill: &Skill) -> IconName {
+pub(crate) fn skill_icon(skill: &Skill) -> IconName {
     match skill.name.as_str() {
         "files" | "read-files" | "document-reader" | "document-author" | "documentation" => {
             IconName::FileText
@@ -1191,17 +1191,19 @@ fn card(
     let t = design::tokens(cx);
     let name = skill.name.clone();
     let run_name = name.clone();
+    let example_name = name.clone();
     let toggle_name = name.clone();
     let delete_name = name.clone();
     let confirm_name = name.clone();
     let editing = skill.clone();
     let enabled = skill.enabled;
-    let is_action = matches!(skill.kind, SkillKind::Action(_));
-    let kind = skill.kind.clone();
     let copy = skill.friendly_card_copy();
-    let sample_draft = copy.sample_draft.clone();
-    let use_draft = format!("/{run_name} ");
-    let show_example = sample_draft != use_draft;
+    let example_arguments = copy
+        .sample_draft
+        .split_once(char::is_whitespace)
+        .map_or("", |(_, args)| args)
+        .to_owned();
+    let show_example = !example_arguments.trim().is_empty();
     let mut visible = format!(
         "{}\n{}\n{}",
         copy.friendly_title, copy.summary, copy.example_display
@@ -1210,7 +1212,7 @@ fn card(
         visible.push_str("\nOff");
     }
 
-    let primary_cta_label = if is_action { "Open now" } else { "Try in chat" };
+    let primary_cta_label = "Try in chat";
     let primary_accessible_label = format!("{primary_cta_label}: {}", copy.friendly_title);
 
     let mut card = v_flex()
@@ -1290,25 +1292,15 @@ fn card(
         .child(
             design::primary_button(("skill-use", index), primary_cta_label, cx)
                 .small()
-                .icon(if is_action {
-                    IconName::ArrowRight
-                } else {
-                    IconName::MessageCircle
-                })
+                .icon(IconName::MessageCircle)
                 .disabled(!enabled)
                 .accessibility_label(primary_accessible_label)
                 .on_click(cx.listener(move |shell, _, window, cx| {
-                    match kind {
-                        SkillKind::Action(action) => {
-                            // Opening a page must not replace an unfinished chat draft.
-                            let draft = shell.composer_input.read(cx).value().to_string();
-                            shell.run_skill_action(action, &draft, window, cx);
-                        }
-                        SkillKind::Procedure => {
-                            shell.select_tab(NavTab::Chat, cx);
-                            shell.fill_composer_draft(&use_draft, window, cx);
-                        }
-                    }
+                    let draft = shell.composer_input.read(cx).value();
+                    let arguments =
+                        crate::widgets::skill_pill::leading_skill(&shell.skills, &draft)
+                            .map_or(draft.as_ref(), |(_, range)| draft[range.end..].trim_start());
+                    shell.stage_skill(&run_name, arguments, window, cx);
                 })),
         )
         .children(show_example.then(|| {
@@ -1317,8 +1309,7 @@ fn card(
                 .ghost()
                 .disabled(!enabled)
                 .on_click(cx.listener(move |shell, _, window, cx| {
-                    shell.select_tab(NavTab::Chat, cx);
-                    shell.fill_composer_draft(&sample_draft, window, cx);
+                    shell.stage_skill(&example_name, &example_arguments, window, cx);
                 }))
         }));
 

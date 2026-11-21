@@ -21,6 +21,9 @@ package version.
   azure/login, rust-cache, install-action). Replaces Dependabot PRs #4, #5, #6, #8
   and #12, which were failing against an older `main`.
 
+- **Skill pills in chat.** Pick any skill to add its name and icon to your draft.
+  Press Send to use it. Messages sent with a skill show its pill in the conversation.
+
 - **SovraHarness is a plugin.** Add `Sovra-AI/SovraHarness` from **Plugins → Add
   from GitHub**, or install `sovra-harness` in Claude Code, for skills that help
   add a feature, change a screen, fix a bug, finish a change, and make your own

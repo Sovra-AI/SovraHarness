@@ -1,7 +1,9 @@
 //! Native slash suggestions. Text editing stays with the GPUI input; only popup
 //! navigation keys are captured while suggestions are visible.
 
-use gpui_kit::component::{Selectable as _, button::ButtonVariants as _, v_flex};
+use gpui_kit::component::{
+    Selectable as _, button::ButtonVariants as _, input::InlineToken, v_flex,
+};
 use gpui_kit::{
     Context, Focusable as _, InteractiveElement as _, IntoElement, KeyDownEvent,
     ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
@@ -19,6 +21,8 @@ pub(crate) struct MenuState {
     pub(crate) dismissed: bool,
     pub(crate) notice: Option<String>,
     scroll: ScrollHandle,
+    // Undo can remove the annotation without changing its underlying shortcut text.
+    annotated_draft: Option<gpui_kit::SharedString>,
 }
 
 impl Shell {
@@ -27,7 +31,12 @@ impl Shell {
             return None;
         }
         let input = self.composer_input.read(cx);
-        if !input.selected_range().is_empty() {
+        if !input.selected_range().is_empty()
+            || input
+                .tokens()
+                .iter()
+                .any(|span| span.range().contains(&input.cursor().saturating_sub(1)))
+        {
             return None;
         }
         let text = input.value();
@@ -55,25 +64,76 @@ impl Shell {
     }
 
     pub(crate) fn choose_skill(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(skill) = self.skills.find(name).cloned() else {
-            return;
-        };
-        let text = self.composer_input.read(cx).value().to_string();
+        let text = self.composer_input.read(cx).value();
         let arguments = text
             .trim_start()
-            .find(char::is_whitespace)
-            .map_or("", |index| text.trim_start()[index..].trim_start());
-        match skill.kind {
-            SkillKind::Action(action) => self.run_skill_action(action, arguments, window, cx),
-            SkillKind::Procedure => {
-                self.state.team_mode = false;
-                self.fill_composer_draft(&format!("/{} {arguments}", skill.name), window, cx);
-                self.composer_input
-                    .read(cx)
-                    .focus_handle(cx)
-                    .focus(window, cx);
-            }
+            .split_once(char::is_whitespace)
+            .map_or("", |(_, args)| args.trim_start());
+        self.stage_skill(name, arguments, window, cx);
+    }
+
+    pub(crate) fn stage_skill(
+        &mut self,
+        name: &str,
+        arguments: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(skill) = self.skills.find(name).filter(|skill| skill.enabled) else {
+            return;
+        };
+        if skill.kind == SkillKind::Procedure {
+            self.state.team_mode = false;
         }
+        let draft = format!("/{} {arguments}", skill.name);
+        self.select_tab(NavTab::Chat, cx);
+        self.fill_composer_draft(&draft, window, cx);
+        self.composer_input
+            .read(cx)
+            .focus_handle(cx)
+            .focus(window, cx);
+    }
+
+    pub(crate) fn annotate_skill(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.composer_input.read(cx);
+        let text = input.value();
+        if self.skill_menu.annotated_draft.as_ref() == Some(&text) {
+            return;
+        }
+        self.skill_menu.annotated_draft = None;
+        let Some((skill, range)) = crate::widgets::skill_pill::leading_skill(&self.skills, &text)
+        else {
+            return;
+        };
+        if input.tokens().iter().any(|span| span.range() == range) {
+            self.skill_menu.annotated_draft = Some(text);
+            return;
+        }
+        // Leave an unfinished name editable until a separator or a selection commits it.
+        if !skill.enabled || range.end == text.len() {
+            return;
+        }
+        let token = InlineToken::new(skill.name.clone(), text[range.clone()].to_owned());
+        let selection = input.selected_range();
+        if self.composer_input.update(cx, |input, cx| {
+            let applied = input
+                .replace_range_with_token(range, token, window, cx)
+                .is_ok();
+            if applied {
+                input.set_selected_range(selection, cx);
+            }
+            applied
+        }) {
+            self.skill_menu.annotated_draft = Some(text);
+        }
+    }
+
+    pub(crate) fn composer_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.skill_menu = MenuState {
+            annotated_draft: self.skill_menu.annotated_draft.take(),
+            ..MenuState::default()
+        };
+        self.annotate_skill(window, cx);
     }
 
     pub(crate) fn run_skill_action(
@@ -210,11 +270,13 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> Option<impl Into
                     .selected(index == selected)
                     .w_full()
                     .justify_start()
-                    .child(design::slash_pill(
-                        gpui_kit::SharedString::from(format!("skill-menu-slash-pill-{index}")),
+                    .child(crate::widgets::skill_pill::pill(
+                        ("menu-skill-pill", index),
+                        &skill.title,
+                        crate::skill_library::skill_icon(&skill),
                         cx,
                     ))
-                    .child(format!("{} · {}", skill.name, skill.title))
+                    .child(format!("/{}", skill.name))
                     .accessibility_label(format!(
                         "/{}. {} {}",
                         skill.name, skill.description, skill.argument_hint
@@ -285,6 +347,9 @@ mod tests {
         .unwrap();
         cx.simulate_keystrokes(window.into(), "enter");
         cx.update_window(window.into(), |_, window, cx| {
+            assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            assert!(window.find("composer-skill-pill").visible());
+            window.click("composer-send-btn", cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Models);
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Chat, cx));
             draft(&shell, "/unknown something", window, cx);
@@ -310,6 +375,156 @@ mod tests {
                 Command::RunPrompt { .. } | Command::RunWithFiles { .. }
             ))
         );
+    }
+
+    #[gpui_kit::test]
+    fn every_catalogue_skill_can_be_staged_without_running_it(cx: &mut TestAppContext) {
+        let (client, _, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let (shell, window) = open(cx, size(px(1280.), px(820.)));
+        cx.update_window(window.into(), |_, window, cx| {
+            let mut skills = sovra_core::skills::builtin_skills();
+            let mut plugin = personal_skill();
+            plugin.name = "plugin-garden".into();
+            plugin.title = "A plugin for the garden".into();
+            plugin.metadata.insert(
+                sovra_core::plugins::PLUGIN_METADATA_KEY.into(),
+                "garden".into(),
+            );
+            skills.extend([personal_skill(), plugin]);
+            shell.update(cx, |shell, _| {
+                shell.skills = sovra_core::skills::SkillCatalog::new(skills.clone()).unwrap();
+            });
+            for skill in skills.iter().filter(|skill| skill.enabled) {
+                shell.update(cx, |shell, cx| {
+                    shell.stage_skill(&skill.name, "my request", window, cx);
+                });
+                window.render_frame(cx);
+                let input = shell.read(cx).composer_input.read(cx);
+                assert_eq!(
+                    input.value().as_ref(),
+                    format!("/{} my request", skill.name)
+                );
+                assert_eq!(input.tokens().len(), 1);
+                assert_eq!(input.tokens()[0].token().id().as_ref(), skill.name);
+                assert_eq!(
+                    window.find("composer-skill-pill").label(),
+                    Some(format!("Skill: {}", skill.title).as_str())
+                );
+                assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            }
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn typed_skill_alias_is_a_pill_in_the_draft_and_sent_message(cx: &mut TestAppContext) {
+        let (client, commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let (shell, window) = open(cx, size(px(1280.), px(820.)));
+        let mut custom = personal_skill();
+        custom.aliases.push("soup".into());
+        let request = "/SoUp café **menu**
+for two";
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.skills = sovra_core::skills::SkillCatalog::new(vec![custom]).unwrap();
+                shell.fill_composer_draft("", window, cx);
+                shell
+                    .composer_input
+                    .read(cx)
+                    .focus_handle(cx)
+                    .focus(window, cx);
+            });
+            window.input(request, cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let input = shell.read(cx).composer_input.read(cx);
+            assert_eq!(input.cursor(), request.len());
+            assert_eq!(input.tokens()[0].range(), 0..5);
+            assert_eq!(
+                window.find("composer-skill-pill").label(),
+                Some("Skill: Sunday soup")
+            );
+            window.click("composer-send-btn", cx);
+            window.render_frame(cx);
+            assert_eq!(
+                window.find(("message-skill-pill", 0usize)).label(),
+                Some("Skill: Sunday soup")
+            );
+            assert_eq!(window.find(("user-text", 0usize)).label(), Some(request));
+            window.click(("copy-user-message", 0usize), cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some(request)
+            );
+            assert!(window.try_find("composer-skill-pill").is_none());
+            for literal in [
+                "/soup/menu",
+                "https://example.com/soup",
+                "mention /soup",
+                "/missing test",
+            ] {
+                draft(&shell, literal, window, cx);
+                assert!(
+                    window.try_find("composer-skill-pill").is_none(),
+                    "{literal}"
+                );
+            }
+        })
+        .unwrap();
+        assert!(
+            std::iter::from_fn(|| commands.try_recv().ok())
+                .any(|cmd| matches!(cmd, Command::RunPrompt {prompt, ..} if prompt == request))
+        );
+    }
+
+    #[gpui_kit::test]
+    fn backspace_removes_a_skill_as_one_unit_and_undo_restores_it(cx: &mut TestAppContext) {
+        let (client, _, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let (shell, window) = open(cx, size(px(1280.), px(820.)));
+        cx.update_window(window.into(), |_, window, cx| {
+            draft(&shell, "/table keep these words", window, cx);
+            shell
+                .read(cx)
+                .composer_input
+                .clone()
+                .update(cx, |input, cx| input.set_selected_range(6..6, cx));
+            window.press("backspace", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                " keep these words"
+            );
+            assert!(window.try_find("composer-skill-pill").is_none());
+            window.press(
+                if cfg!(target_os = "macos") {
+                    "cmd-z"
+                } else {
+                    "ctrl-z"
+                },
+                cx,
+            );
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                "/table keep these words"
+            );
+            assert!(window.find("composer-skill-pill").visible());
+        })
+        .unwrap();
     }
 
     #[gpui_kit::test]
@@ -382,7 +597,7 @@ mod tests {
         let (shell, window) = open(cx, size(px(1280.), px(820.)));
         cx.update_window(window.into(), |_, window, cx| {
             draft(&shell, "/", window, cx);
-            assert!(window.find("skill-menu-slash-pill-0").visible());
+            assert!(window.find(("menu-skill-pill", 0usize)).visible());
             let row = window
                 .find(("skill-command", 0usize))
                 .label()
@@ -552,6 +767,10 @@ mod tests {
                 shell.read(cx).composer_input.read(cx).value().as_ref(),
                 copy.sample_draft
             );
+            assert_eq!(
+                window.find("composer-skill-pill").label(),
+                Some(format!("Skill: {}", web.title).as_str())
+            );
 
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
             window.render_frame(cx);
@@ -560,7 +779,7 @@ mod tests {
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
             assert_eq!(
                 shell.read(cx).composer_input.read(cx).value().as_ref(),
-                format!("/{} ", web.name)
+                copy.sample_draft
             );
 
             shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
@@ -580,6 +799,14 @@ mod tests {
                 shell.fill_composer_draft("Keep my unfinished question", window, cx);
             });
             click_visible(window, ("skill-use", service_index), cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            assert!(window.find("composer-skill-pill").visible());
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                "/connect-service Keep my unfinished question"
+            );
+            window.click("composer-send-btn", cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Connections);
             assert_eq!(
