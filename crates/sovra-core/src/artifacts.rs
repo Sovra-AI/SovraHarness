@@ -989,7 +989,7 @@ impl ArtifactLibrary {
     }
 
     pub fn filtered(&self, filter: &ArtifactFilter) -> Vec<&Artifact> {
-        let query = filter.query.trim().to_lowercase();
+        let query = crate::text_search::Needle::new(&filter.query);
         let mut found: Vec<_> = self
             .artifacts
             .iter()
@@ -1003,16 +1003,16 @@ impl ArtifactLibrary {
             .filter(|a| filter.kind.is_none_or(|kind| a.kind == kind))
             .filter(|a| {
                 query.is_empty()
-                    || a.collection.to_lowercase().contains(&query)
-                    || a.title.to_lowercase().contains(&query)
-                    || a.content.to_lowercase().contains(&query)
-                    || a.source.author.to_lowercase().contains(&query)
+                    || query.found_in(&a.collection)
+                    || query.found_in(&a.title)
+                    || query.found_in(&a.content)
+                    || query.found_in(&a.source.author)
             })
             .collect();
         found.sort_by(|a, b| {
             match filter.sort {
                 ArtifactSort::Recent => b.updated_at.cmp(&a.updated_at),
-                ArtifactSort::Name => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
+                ArtifactSort::Name => crate::text_search::cmp_ignore_case(&a.title, &b.title),
                 ArtifactSort::Oldest => a.created_at.cmp(&b.created_at),
             }
             .then(a.id.cmp(&b.id))

@@ -359,16 +359,11 @@ impl ChatThread {
         if !self.is_active() || !self.kind.matches_filter(filter) {
             return false;
         }
-        let q = query.trim().to_lowercase();
-        if q.is_empty() {
-            return true;
-        }
-        self.title.to_lowercase().contains(&q)
-            || self.last_message_preview.to_lowercase().contains(&q)
-            || self
-                .messages
-                .iter()
-                .any(|m| m.text.to_lowercase().contains(&q))
+        let needle = crate::text_search::Needle::new(query);
+        needle.is_empty()
+            || needle.found_in(&self.title)
+            || needle.found_in(&self.last_message_preview)
+            || self.messages.iter().any(|m| needle.found_in(&m.text))
     }
 
     /// Updates `title` (if still a placeholder on first user message), `last_message_preview`,

@@ -21,6 +21,7 @@ async, Velopack for installers and update feeds (in-app update checks are not wi
 | Docs links + mermaid    | `cargo xtask check-docs`    |
 | One crate's tests       | `cargo nextest run -p <crate>` (or `cargo test -p <crate>`) |
 | Install dev tools       | `cargo xtask setup`         |
+| Speed benchmarks        | `cargo bench -p sovra-core --bench search` (before/after any optimisation; `docs/performance.md`) |
 | Release build + package | `cargo xtask dist`          |
 
 **Definition of done:** `cargo xtask ci` passes. Never report a task complete without running it;

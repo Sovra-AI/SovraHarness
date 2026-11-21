@@ -195,8 +195,8 @@ const GROUPS_INTRO: &str = "WhatsApp groups you are in. Sovra does not answer gr
 /// because only one person is ever expanded and the list is paged.
 fn render_people(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let book = shell.workspace().connections.people.clone();
-    let groups = shell.workspace().connections.groups.clone();
+    let book = &shell.workspace().connections.people;
+    let groups = &shell.workspace().connections.groups;
     let query = shell.people_search_input.read(cx).value().trim().to_owned();
     let matches = book.search(&query);
     let total = book.people.len();
@@ -262,7 +262,7 @@ fn render_people(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
                 .p(t.space.compact)
                 .gap(t.space.hair);
             for (index, person) in matches.iter().take(shown).enumerate() {
-                rows = rows.child(render_person(shell, person, index, &book, cx));
+                rows = rows.child(render_person(shell, person, index, book, cx));
             }
             page = page.child(rows);
             let more = matches.len() - shown;

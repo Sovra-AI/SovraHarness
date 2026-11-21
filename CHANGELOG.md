@@ -14,6 +14,14 @@ package version.
 
 ## [Unreleased]
 
+- **Searching is faster.** Typing in the Models, chat history, Artifacts and People
+  searches no longer copies every model description, conversation and document
+  for each keystroke, and the Models page builds its filter choices without
+  looking every model up again. Measured on 2,000 models, 120 chats and 300
+  documents, each search is 8 to 24 times faster and now takes well under a
+  millisecond. The Artifacts and People pages also stop copying their whole
+  library on every redraw. New: `cargo bench -p sovra-core --bench search` and
+  [Performance](docs/performance.md).
 - **Small windows on Mac and Windows keep room for the conversation.** At large
   text sizes in a small window, the keyboard tips under the message box make way
   so the conversation stays readable, and the tips never run past the edges of
