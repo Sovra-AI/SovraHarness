@@ -1,5 +1,8 @@
 //! Knowledge tab: the explanation is on screen, and the chat transcript is not.
 
+#[path = "support/nav.rs"]
+mod nav;
+
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, TestAppContext, px, size};
@@ -16,7 +19,7 @@ fn knowledge_opens_to_personal_details_and_keeps_files_and_help_reachable(cx: &m
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
-        window.click("nav-knowledge", cx);
+        nav::click_in_sidebar(window, "nav-knowledge", cx);
         window.render_frame(cx);
         assert!(window.try_find("file-index-panel").is_none());
         assert!(window.find("conversation-memory-status").visible());
@@ -207,7 +210,7 @@ fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-knowledge", cx);
+        nav::click_in_sidebar(window, "nav-knowledge", cx);
         window.render_frame(cx);
         window.click("knowledge-help", cx);
         window.render_frame(cx);

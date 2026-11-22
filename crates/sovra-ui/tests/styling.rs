@@ -1,5 +1,8 @@
 //! Check the design contract where failures affect readability or real UI behaviour.
 
+#[path = "support/nav.rs"]
+mod nav;
+
 #[path = "styling/agent_progress.rs"]
 mod agent_progress;
 #[path = "styling/artifact_library.rs"]
@@ -8,6 +11,8 @@ mod artifact_library;
 mod artifact_source;
 #[path = "styling/code_panel.rs"]
 mod code_panel;
+#[path = "styling/composer_hint.rs"]
+mod composer_hint;
 #[path = "styling/connection_feedback.rs"]
 mod connection_feedback;
 #[path = "styling/decisions.rs"]
@@ -58,27 +63,6 @@ use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Hsla, Rgba, TestAppContext, px, size};
 use sovra_runtime::Client;
 use sovra_ui::{Shell, design};
-
-/// Clicks a sidebar tab. In small windows the icon rail scrolls, so first bring the
-/// icon fully into view, as a person would.
-fn click_nav(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, id: &'static str) {
-    if let Some(rail) = window.try_find("chat-history-rail-collapsed") {
-        for _ in 0..40 {
-            let (rail, icon) = (rail.bounds(), window.find(id).bounds());
-            if icon.top() >= rail.top() && icon.bottom() <= rail.bottom() {
-                break;
-            }
-            let dy = if icon.top() < rail.top() { 40. } else { -40. };
-            window.scroll(
-                "chat-history-rail-collapsed",
-                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(dy))),
-                cx,
-            );
-            window.render_frame(cx);
-        }
-    }
-    window.click(id, cx);
-}
 
 fn contrast(a: Hsla, b: Hsla) -> f32 {
     let luminance = |color: Hsla| {
@@ -211,7 +195,7 @@ fn appearance_lives_in_settings_at_minimum_and_default_window_sizes(cx: &mut Tes
             // The title bar stays empty: no product name, no appearance switch.
             assert!(window.try_find("toggle-appearance").is_none());
             assert!(window.try_find("title-logo").is_none());
-            click_nav(window, cx, "nav-settings");
+            nav::click_in_sidebar(window, "nav-settings", cx);
             window.render_frame(cx);
             for id in ["settings-theme-light", "settings-theme-dark"] {
                 let button = window.find(id);
@@ -309,7 +293,7 @@ fn my_ais_actions_are_keyboard_operable(cx: &mut TestAppContext) {
             ("open-models-catalog-btn", NavTab::Models),
         ] {
             window.render_frame(cx);
-            window.click("nav-my-ais", cx);
+            nav::click_in_sidebar(window, "nav-my-ais", cx);
             window.render_frame(cx);
             for _ in 0..50 {
                 window.press("tab", cx);
@@ -341,7 +325,7 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
     });
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        click_nav(window, cx, "nav-schedules");
+        nav::click_in_sidebar(window, "nav-schedules", cx);
         window.render_frame(cx);
         window.click("schedule-create-toggle-btn", cx);
         window.render_frame(cx);
@@ -402,7 +386,7 @@ fn workspace_pages_and_actions_fit_compact_windows(cx: &mut TestAppContext) {
                 ("nav-groups", "sovra-groups-view"),
                 ("nav-models", "models-setup-home"),
             ] {
-                click_nav(window, cx, tab);
+                nav::click_in_sidebar(window, tab, cx);
                 window.render_frame(cx);
                 let bounds = window.find(page).bounds();
                 assert!(
@@ -636,7 +620,7 @@ fn wide_windows_keep_a_centred_readable_column(cx: &mut TestAppContext) {
             (left - right).abs() < px(80.),
             "column is centred: {left:?} vs {right:?}"
         );
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         let connections = window.find("connections-page").bounds();
         assert!(
@@ -673,7 +657,7 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
             ("nav-groups", "sovra-groups-view"),
             ("nav-models", "models-setup-home"),
         ] {
-            click_nav(window, cx, tab);
+            nav::click_in_sidebar(window, tab, cx);
             window.render_frame(cx);
             let bounds = window.find(page).bounds();
             assert!(
@@ -681,7 +665,7 @@ fn workspace_pages_fit_at_double_interface_size(cx: &mut TestAppContext) {
                 "{page} overflows horizontally at 200%: {bounds:?}"
             );
         }
-        click_nav(window, cx, "nav-settings");
+        nav::click_in_sidebar(window, "nav-settings", cx);
         window.render_frame(cx);
         let larger = window.find("settings-text-larger");
         assert!(larger.bounds().right() <= dimensions.width);

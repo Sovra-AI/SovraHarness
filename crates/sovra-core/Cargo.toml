@@ -17,7 +17,12 @@ thiserror = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+divan = { workspace = true }
 jsonschema = { workspace = true }
+
+[[bench]]
+name = "search"
+harness = false
 
 [lints]
 workspace = true

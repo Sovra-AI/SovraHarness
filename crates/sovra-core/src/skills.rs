@@ -481,7 +481,9 @@ fn score(skill: &Skill, query: &str) -> Option<u8> {
         Some(3)
     } else if skill.name.contains(query) || title.contains(query) {
         Some(4)
-    } else if query.len() >= 3 && skill.description.to_lowercase().contains(query) {
+    } else if query.len() >= 3
+        && crate::text_search::Needle::new(query).found_in(&skill.description)
+    {
         Some(5)
     } else {
         None

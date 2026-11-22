@@ -114,6 +114,9 @@ pub struct LayoutTokens {
     /// Borders and dividers stay one logical pixel at every interface scale.
     pub hairline: Pixels,
     pub catalog_row_height: Rems,
+    /// The model catalog's two rows of controls plus one model row: a short window
+    /// scrolls the Models page before the list gets less than this.
+    pub catalog_min_height: Rems,
     pub detail_width: Rems,
     pub filter_width: Rems,
     /// Forms and settings; prose uses the narrower `chat.column_width`.
@@ -369,6 +372,7 @@ pub fn tokens(cx: &App) -> SovraTokens {
         layout: LayoutTokens {
             hairline: px(1.),
             catalog_row_height: rem(116.),
+            catalog_min_height: rem(204.),
             detail_width: rem(360.),
             filter_width: rem(160.),
             reading_width: rem(768.),

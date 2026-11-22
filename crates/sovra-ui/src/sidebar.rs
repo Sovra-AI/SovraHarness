@@ -83,6 +83,7 @@ pub(crate) fn render_sidebar(
                 .child(
                     div()
                         .id("sidebar-nav-scroll")
+                        .test_support()
                         .w_full()
                         .min_h_0()
                         .flex_shrink(1.0)

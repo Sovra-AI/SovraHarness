@@ -69,6 +69,7 @@ sets that flag. Keep test data and credentials outside the checkout. See
 | `cargo xtask check-styles` | Native styling boundaries |
 | `cargo xtask fix` | Apply formatting and Clippy fixes; review the diff afterward |
 | `cargo nextest run -p <crate>` | Test one crate |
+| `cargo bench -p sovra-core --bench search` | Time the search hot paths; see [Performance](performance.md) |
 
 For UI behavior changes, inspect and exercise the native app using Development
 MCP as required by [AGENTS.md](../AGENTS.md). Headless tests complement that check.

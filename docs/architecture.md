@@ -127,7 +127,9 @@ platform builds; a local pass does not replace target-platform verification.
 - UI tests use headless GPUI and loopback events.
 - Live native verification uses [Development MCP](development-mcp.md).
 - Optional model and performance evaluations are documented separately in
-  [Memory evaluation](agent-memory.md) and [Retrieval benchmarks](knowledge-benchmark.md).
+  [Memory evaluation](agent-memory.md) and [Retrieval benchmarks](knowledge-benchmark.md);
+  speed benchmarks, profiling and the rules that keep render paths fast are in
+  [Performance](performance.md).
 
 License and advisory exceptions remain in [deny.toml](../deny.toml), with
 version-specific [license evidence](dependency-licenses.md). These policies are

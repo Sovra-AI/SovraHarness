@@ -1,5 +1,8 @@
 //! The connect screen sends commands and only shows what the runtime reports.
 
+#[path = "support/nav.rs"]
+mod nav;
+
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{App, AppContext as _, ScrollDelta, TestAppContext, Window, point, px, size};
@@ -79,7 +82,7 @@ fn connect_screen_sends_commands_and_shows_sign_in_then_connected(cx: &mut TestA
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click("nav-connections", cx);
+        nav::click_in_sidebar(window, "nav-connections", cx);
         window.render_frame(cx);
         reveal(window, "connection-action-web-address", cx);
         window.click("connection-action-web-address", cx);

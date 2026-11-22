@@ -7,7 +7,7 @@ use gpui_kit::component::{
     input::Textarea, v_flex,
 };
 use gpui_kit::{
-    Animation, AnimationExt as _, Context, InteractiveElement as _, IntoElement,
+    Animation, AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement,
     ParentElement as _, Role, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
     div,
 };
@@ -265,34 +265,63 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
             }))
             .child(send),
         )
-        .child(h_flex().w_full().justify_center().child(
-            if state.messages.is_empty()
-                && !generating
-                && !has_files
-                && composer_input.read(cx).value().is_empty()
-                && !shell.started_chat_drafts.contains(&state.session_id)
-            {
-                render_help_hint(&state.session_id, cx).into_any_element()
-            } else {
-                let hint = if has_files && generating {
-                    design::chrome(cx, ChromeKey::ChatHintFilesGenerating)
-                } else if has_files {
-                    design::chrome(cx, ChromeKey::ChatHintFiles)
-                } else if generating {
-                    design::chrome(cx, ChromeKey::ChatHintGenerating)
-                } else {
-                    design::chrome(cx, ChromeKey::ChatHintIdle)
-                };
-                div()
-                    .id("composer-hint")
-                    .test_support()
-                    .aria_label(hint)
-                    .sovra_text(TextRole::Caption, cx)
-                    .text_color(cx.theme().muted_foreground)
-                    .child(design::text_with_slash_pills("composer", hint, cx))
-                    .into_any_element()
-            },
-        ))
+        .children(render_hint(shell, has_files, cx))
+}
+
+/// The line under the message box. An empty chat always shows how to get help.
+/// Once the conversation shows anything, tips are secondary: a window short for its
+/// text size leaves them out so the conversation keeps room to read. Notes about
+/// attached files always stay.
+fn render_hint(shell: &Shell, has_files: bool, cx: &Context<Shell>) -> Option<AnyElement> {
+    let state = &shell.state;
+    let generating = state.is_generating;
+    let row = h_flex().w_full().justify_center();
+    let conversation = !state.messages.is_empty()
+        || state
+            .connections
+            .outbound_messages
+            .iter()
+            .any(|message| message.session_id == state.session_id)
+        || state.terminal.calls_for(&state.session_id).next().is_some();
+    if shell.short_window && conversation && !has_files {
+        return None;
+    }
+    if state.messages.is_empty()
+        && !generating
+        && !has_files
+        && shell.composer_input.read(cx).value().is_empty()
+        && !shell.started_chat_drafts.contains(&state.session_id)
+    {
+        return Some(
+            row.child(render_help_hint(&state.session_id, cx))
+                .into_any_element(),
+        );
+    }
+    let hint = if has_files && generating {
+        design::chrome(cx, ChromeKey::ChatHintFilesGenerating)
+    } else if has_files {
+        design::chrome(cx, ChromeKey::ChatHintFiles)
+    } else if generating {
+        design::chrome(cx, ChromeKey::ChatHintGenerating)
+    } else {
+        design::chrome(cx, ChromeKey::ChatHintIdle)
+    };
+    Some(
+        row.child(
+            div()
+                .id("composer-hint")
+                .test_support()
+                // Wrap inside the column; without a width limit the hint keeps its
+                // one-line width and spills past both edges at large text sizes.
+                .min_w_0()
+                .max_w_full()
+                .aria_label(hint)
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(cx.theme().muted_foreground)
+                .child(design::text_with_slash_pills("composer", hint, cx)),
+        )
+        .into_any_element(),
+    )
 }
 
 fn render_help_hint(session_id: &str, cx: &Context<Shell>) -> impl IntoElement + use<> {

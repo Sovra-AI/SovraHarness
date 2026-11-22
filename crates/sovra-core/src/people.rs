@@ -82,21 +82,14 @@ impl Person {
     /// saved number or address, or an app name. Digits match a number however it
     /// was written, so "07398 923" and "+44 7398923" both find +447398923102.
     pub fn matches(&self, query: &str) -> bool {
-        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        let words: Vec<_> = query
+            .split_whitespace()
+            .map(crate::text_search::Needle::new)
+            .collect();
         if words.is_empty() {
             return true;
         }
-        let name = self.title().to_lowercase();
-        let texts: Vec<String> = self
-            .handles
-            .iter()
-            .flat_map(|handle| {
-                [
-                    handle.label.to_lowercase(),
-                    handle.reach.label().to_lowercase(),
-                ]
-            })
-            .collect();
+        let name = self.title();
         let numbers: Vec<String> = self
             .handles
             .iter()
@@ -111,11 +104,14 @@ impl Person {
                 number.contains(&query_digits) || (!trimmed.is_empty() && number.contains(trimmed))
             });
         }
-        words.iter().all(|word| {
-            name.contains(word.as_str())
-                || texts.iter().any(|text| text.contains(word.as_str()))
+        let words_typed = query.split_whitespace();
+        words.iter().zip(words_typed).all(|(word, typed)| {
+            word.found_in(&name)
+                || self.handles.iter().any(|handle| {
+                    word.found_in(&handle.label) || word.found_in(handle.reach.label())
+                })
                 || {
-                    let digits = digits_only(word);
+                    let digits = digits_only(typed);
                     digits.len() >= 3 && numbers.iter().any(|number| number.contains(&digits))
                 }
         })

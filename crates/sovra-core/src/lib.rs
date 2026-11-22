@@ -47,6 +47,7 @@ mod status;
 pub mod swarm;
 pub mod teams;
 pub mod terminal;
+pub mod text_search;
 mod tool_calls;
 pub mod training;
 mod web_search;

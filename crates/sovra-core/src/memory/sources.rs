@@ -137,9 +137,17 @@ impl MemorySourceEvidence {
                 terms
                     .iter()
                     .any(|term| {
-                        source.content[offset..]
-                            .get(..term.len())
-                            .is_some_and(|text| text.to_lowercase() == *term)
+                        let text = &source.content.as_bytes()[offset..];
+                        // Terms are lowercase. An ASCII one compares bytes in place
+                        // instead of lowercasing a copy at every offset.
+                        if term.is_ascii() {
+                            text.get(..term.len())
+                                .is_some_and(|text| text.eq_ignore_ascii_case(term.as_bytes()))
+                        } else {
+                            source.content[offset..]
+                                .get(..term.len())
+                                .is_some_and(|text| text.to_lowercase() == *term)
+                        }
                     })
                     .then_some(offset)
             })

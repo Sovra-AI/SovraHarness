@@ -239,6 +239,7 @@ Radii are pixels (GPUI buttons take `Pixels`) multiplied by the live root. Only
 | Container, not device | Only the shell (the window root) reads the window. Nested views use `design::width_probe`, a `canvas` that measures the parent's bounds in prepaint and notifies only when the class changes. This is Zed's centre-pane measurement pattern. | [Apple HIG: Layout](https://developer.apple.com/design/human-interface-guidelines/layout), [MDN: container queries](https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Containment/Container_queries) |
 | Pane order | Below Large, the Knowledge inspector undocks; the model detail pane undocks when the models pane itself is below Expanded. Below Expanded, the sidebar becomes an icon rail with an overlay. The user's explicit collapse still wins. | [Apple HIG: Sidebars](https://developer.apple.com/design/human-interface-guidelines/sidebars), [Material canonical layouts](https://developer.android.com/develop/ui/compose/layouts/adaptive/canonical-layouts), [Windows responsive techniques](https://learn.microsoft.com/en-us/windows/apps/design/layout/responsive-design) |
 | Large monitors | Chat prose is capped at `chat.column_width` (46rem, ≈80 characters of reading text) and centred. Forms use `reading_width` (48rem), card pages `page_width` (67.5rem). There are no full-bleed paragraphs. | [WCAG 1.4.8 Visual presentation](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html), [Practical Typography: line length](https://practicaltypography.com/line-length.html) |
+| Short windows | The minimum window at 200% text is only 13rem tall, and on macOS and Windows Sovra's own title bar takes another 34px. `design::is_short_window` (under 20rem, read by the shell) leaves out the keyboard tips under the message box once a conversation shows anything, so the conversation keeps room; an empty chat still shows how to get help, and notes about attached files stay. Pages whose lists keep a minimum height (the model catalog's `layout.catalog_min_height`) scroll as a whole rather than letting rows run under the status bar. | [Apple HIG: Accessibility (200% text)](https://developer.apple.com/design/human-interface-guidelines/accessibility) |
 | Window | First launch uses 1280×820, clamped to 90% of the display's visible area (dock and taskbar excluded) and centred. The minimum is 640×420. | [Apple: Designing for macOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-macos) |
 
 ### Patterns
@@ -273,6 +274,10 @@ A missing size is a new semantic token in `design/tokens.rs`, never a literal in
 
 - every workspace page at the minimum window, and again at 200% text size;
 - a 2560×1440 window, where the chat column stays capped and centred;
+- the sidebar's lists scrolled into view before a click (`tests/support/nav.rs`),
+  because they scroll at small sizes and under the title bar Sovra draws on macOS
+  and Windows. Headless tests on Linux draw no title bar, so the macOS CI run is
+  where that layout is checked;
 - zoom collapsing the sidebar to a rail and surviving a light/dark switch;
 - unit tests for the width classes and the window fitting.
 

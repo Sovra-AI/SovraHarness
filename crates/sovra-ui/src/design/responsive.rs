@@ -31,6 +31,18 @@ pub enum WidthClass {
     ExtraLarge,
 }
 
+/// Windows shorter than this many rems are short for their text size: the minimum
+/// window (420px) is 26 rems at 100% text but only 13 at 200%.
+const SHORT_WINDOW_REMS: f32 = 20.;
+
+/// Whether the whole window is short for its text size. Only the shell decides from
+/// this; it then leaves out secondary lines such as keyboard tips, so the
+/// conversation keeps room to read at large text sizes in a small window.
+#[must_use]
+pub fn is_short_window(window: &Window) -> bool {
+    window.viewport_size().height / window.rem_size() < SHORT_WINDOW_REMS
+}
+
 impl WidthClass {
     /// Upper bounds in rems (16px reference) for every class but the last.
     const BOUNDS: [(f32, Self); 4] = [

@@ -1228,10 +1228,39 @@ impl ModelsState {
     }
 
     pub fn filtered(&self, filter: &ModelFilter) -> Vec<ModelKey> {
+        self.filtered_models(filter)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect()
+    }
+
+    /// The models `filter` keeps, in display order, with their details, so callers
+    /// need not look each one up again.
+    pub fn filtered_models(&self, filter: &ModelFilter) -> Vec<(ModelKey, &ModelInfo)> {
+        let mut matches = self.unsorted_matches(filter);
+        matches.sort_by(|(ka, a), (kb, b)| {
+            let order = match filter.sort {
+                ModelSort::Name => crate::text_search::cmp_ignore_case(&a.name, &b.name),
+                ModelSort::Newest => b.created.cmp(&a.created),
+                ModelSort::Context => b.context_length.cmp(&a.context_length),
+                ModelSort::InputPrice => {
+                    compare_price(a.token_price("prompt"), b.token_price("prompt"))
+                }
+                ModelSort::OutputPrice => {
+                    compare_price(a.token_price("completion"), b.token_price("completion"))
+                }
+            };
+            order.then_with(|| ka.cmp(kb))
+        });
+        matches
+    }
+
+    /// The models `filter` keeps, in catalog order.
+    fn unsorted_matches(&self, filter: &ModelFilter) -> Vec<(ModelKey, &ModelInfo)> {
         let words: Vec<_> = filter
             .search
             .split_whitespace()
-            .map(str::to_lowercase)
+            .map(crate::text_search::Needle::new)
             .collect();
         let mut matches = Vec::new();
         for connection in &self.connections {
@@ -1258,18 +1287,28 @@ impl ModelsState {
                 continue;
             };
             for model in &catalog.snapshot.models {
+                // A word never holds a space, so matching each field alone finds what
+                // searching the fields joined by spaces would.
+                let fields = [
+                    model.id.as_str(),
+                    &model.name,
+                    &model.author,
+                    &model.description,
+                    &connection.name,
+                ];
+                if !words
+                    .iter()
+                    .all(|word| fields.iter().any(|field| word.found_in(field)))
+                {
+                    continue;
+                }
                 let key = model.key(&connection.id);
                 if filter.scope == CatalogScope::Favorites
                     && !self.preferences.favorites.contains(&key)
                 {
                     continue;
                 }
-                let searchable = format!(
-                    "{} {} {} {} {}",
-                    model.id, model.name, model.author, model.description, connection.name
-                )
-                .to_lowercase();
-                if !words.iter().all(|word| searchable.contains(word))
+                if filter.author.as_ref().is_some_and(|a| &model.author != a)
                     || filter.author.as_ref().is_some_and(|a| &model.author != a)
                     || filter.kind.is_some_and(|kind| model.kind() != kind)
                     || filter
@@ -1301,30 +1340,17 @@ impl ModelsState {
                 matches.push((key, model));
             }
         }
-        matches.sort_by(|(ka, a), (kb, b)| {
-            let order = match filter.sort {
-                ModelSort::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                ModelSort::Newest => b.created.cmp(&a.created),
-                ModelSort::Context => b.context_length.cmp(&a.context_length),
-                ModelSort::InputPrice => {
-                    compare_price(a.token_price("prompt"), b.token_price("prompt"))
-                }
-                ModelSort::OutputPrice => {
-                    compare_price(a.token_price("completion"), b.token_price("completion"))
-                }
-            };
-            order.then_with(|| ka.cmp(kb))
-        });
-        matches.into_iter().map(|(key, _)| key).collect()
+        matches
     }
 
     pub fn facets(&self, scope: CatalogScope) -> CatalogFacets {
         let mut facets = CatalogFacets::default();
-        for key in self.filtered(&ModelFilter {
+        // The sets order themselves, so the matches need no sorting or lookup.
+        for (_, model) in self.unsorted_matches(&ModelFilter {
             scope,
             ..ModelFilter::default()
         }) {
-            if let Some(model) = self.model(&key) {
+            {
                 if !model.author.is_empty() {
                     facets.authors.insert(model.author.clone());
                 }

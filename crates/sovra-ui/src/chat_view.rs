@@ -1269,7 +1269,7 @@ fn render_assistant_segment(
             body.id(("assistant-answer", index))
                 .test_support()
                 .role(Role::Article)
-                .aria_label(sovra_core::hide_memory_citation_tokens(&msg.text))
+                .aria_label(sovra_core::hide_memory_citation_tokens(&msg.text).into_owned())
                 .into_any_element()
         } else {
             body.id(("assistant-segment", index * 100_000 + segment))
@@ -1302,7 +1302,7 @@ fn render_assistant_segment(
                     &citations, index, cx,
                 ));
             }
-            let copy_text = sovra_core::hide_memory_citation_tokens(&msg.text);
+            let copy_text = sovra_core::hide_memory_citation_tokens(&msg.text).into_owned();
             let saved = state
                 .artifacts
                 .artifacts

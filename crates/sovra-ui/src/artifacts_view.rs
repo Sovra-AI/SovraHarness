@@ -631,11 +631,26 @@ impl ArtifactsView {
         cx.notify();
     }
 
-    fn library(&self, cx: &Context<Self>) -> sovra_core::artifacts::ArtifactLibrary {
-        self.shell
-            .upgrade()
-            .map(|shell| shell.read(cx).workspace().artifacts.clone())
-            .unwrap_or_default()
+    /// Reads the shell's library in place. Copying all of it (every artifact's
+    /// contents) on each redraw cost more than the drawing; callers copy only
+    /// what they show.
+    fn with_library<T>(
+        &self,
+        cx: &Context<Self>,
+        read: impl FnOnce(&sovra_core::artifacts::ArtifactLibrary) -> T,
+    ) -> Option<T> {
+        let shell = self.shell.upgrade()?;
+        Some(read(&shell.read(cx).workspace().artifacts))
+    }
+
+    fn build_status(&self, id: &str, cx: &Context<Self>) -> Option<String> {
+        self.with_library(cx, |library| library.builds.get(id).cloned())
+            .flatten()
+    }
+
+    fn deployment(&self, id: &str, cx: &Context<Self>) -> Option<String> {
+        self.with_library(cx, |library| library.deployments.get(id).cloned())
+            .flatten()
     }
 
     fn send(command: ArtifactCommand, cx: &mut Context<Self>) {
@@ -781,14 +796,24 @@ impl ArtifactsView {
 impl Render for ArtifactsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = design::tokens(cx);
-        let library = self.library(cx);
+        let (open, notice) = self
+            .with_library(cx, |library| {
+                (
+                    self.open.as_ref().and_then(|id| library.get(id)).cloned(),
+                    library.notice.clone(),
+                )
+            })
+            .unwrap_or_default();
         let shared = self.open_shared.and_then(|id| self.shared(&id, cx));
-        let body = match (self.open.as_ref().and_then(|id| library.get(id)), shared) {
-            (Some(artifact), _) => self.detail(artifact, cx).into_any_element(),
+        let body = match (open, shared) {
+            (Some(artifact), _) => self.detail(&artifact, cx).into_any_element(),
             (None, Some((artifact, may_withdraw))) => self
                 .shared_detail(&artifact, may_withdraw, cx)
                 .into_any_element(),
-            (None, None) => self.list(&library, cx).into_any_element(),
+            (None, None) => {
+                let data = self.list_data(cx);
+                self.list(data, cx).into_any_element()
+            }
         };
         v_flex()
             .id("sovra-artifacts-view")
@@ -805,7 +830,7 @@ impl Render for ArtifactsView {
                     .max_w(t.layout.page_width)
                     .mx_auto()
                     .gap(t.space.large)
-                    .children(library.notice.clone().map(|notice| {
+                    .children(notice.map(|notice| {
                         div()
                             .id("artifacts-notice")
                             .test_support()
@@ -818,13 +843,17 @@ impl Render for ArtifactsView {
     }
 }
 
+/// What the library list shows, copied out of the shell in one read.
+#[derive(Default)]
+struct ListData {
+    shown: Vec<Artifact>,
+    collections: std::collections::BTreeMap<String, usize>,
+    kind_counts: Vec<(ArtifactKind, usize)>,
+    total: usize,
+}
+
 impl ArtifactsView {
-    fn list(
-        &self,
-        library: &sovra_core::artifacts::ArtifactLibrary,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        let t = design::tokens(cx);
+    fn list_data(&self, cx: &Context<Self>) -> ListData {
         let filter = ArtifactFilter {
             kind: self.filter.kind,
             collection: self.filter.collection.clone(),
@@ -832,7 +861,23 @@ impl ArtifactsView {
             sort: self.filter.sort,
             query: self.search.read(cx).value().to_string(),
         };
-        let shown: Vec<Artifact> = library.filtered(&filter).into_iter().cloned().collect();
+        self.with_library(cx, |library| ListData {
+            shown: library.filtered(&filter).into_iter().cloned().collect(),
+            collections: library.collections(),
+            kind_counts: library.kind_counts(),
+            total: library.artifacts.len(),
+        })
+        .unwrap_or_default()
+    }
+
+    fn list(&self, data: ListData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let ListData {
+            shown,
+            collections,
+            kind_counts,
+            total,
+        } = data;
         let page_count = shown.len().div_ceil(24).max(1);
         let page = self.page.min(page_count - 1);
         let mut folders = h_flex()
@@ -861,7 +906,7 @@ impl ArtifactsView {
                         cx.notify();
                     })),
             );
-        for (index, (folder, count)) in library.collections().into_iter().enumerate() {
+        for (index, (folder, count)) in collections.into_iter().enumerate() {
             let label = if folder.is_empty() {
                 "Unfiled"
             } else {
@@ -930,20 +975,16 @@ impl ArtifactsView {
             .flex_wrap()
             .gap(t.space.compact)
             .child(
-                design::button(
-                    "artifact-kind-all",
-                    format!("All ({})", library.artifacts.len()),
-                    cx,
-                )
-                .small()
-                .selected(self.filter.kind.is_none())
-                .on_click(cx.listener(|view, _, _, cx| {
-                    view.filter.kind = None;
-                    view.page = 0;
-                    cx.notify();
-                })),
+                design::button("artifact-kind-all", format!("All ({total})"), cx)
+                    .small()
+                    .selected(self.filter.kind.is_none())
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.filter.kind = None;
+                        view.page = 0;
+                        cx.notify();
+                    })),
             );
-        for (kind, count) in library.kind_counts() {
+        for (kind, count) in kind_counts {
             let index = KINDS
                 .iter()
                 .position(|info| info.kind == kind)
@@ -968,7 +1009,7 @@ impl ArtifactsView {
             .group_glance(cx)
             .filter(|glance| !glance.cards.is_empty())
             .map(|glance| shared_section(&glance, now, cx));
-        let content = if library.artifacts.is_empty() {
+        let content = if total == 0 {
             empty_state(cx).into_any_element()
         } else if shown.is_empty() {
             v_flex()
@@ -1021,16 +1062,16 @@ impl ArtifactsView {
                 "Everything you and your AI made and kept — letters, lists, tables, code, diagrams and more. Open one to read it, copy it or save it to your computer.",
                 cx,
             ))
-            .children((!library.artifacts.is_empty()).then(||
+            .children((total > 0).then(||
                 div()
                     .w_full()
                     .max_w(t.layout.reading_width)
                     .child(Input::new(&self.search).id("artifact-search").aria_label("Search your saved work"))
             ))
             .children(shared_section)
-            .children((!library.artifacts.is_empty()).then_some(folders))
-            .children((!library.artifacts.is_empty()).then_some(chips))
-            .children((library.artifacts.len() > 1).then_some(sorting))
+            .children((total > 0).then_some(folders))
+            .children((total > 0).then_some(chips))
+            .children((total > 1).then_some(sorting))
             .children((page_count > 1).then_some(paging))
             .child(content)
     }
@@ -1085,7 +1126,7 @@ impl ArtifactsView {
             let project_id = artifact.id.clone();
             actions = actions.child(
                 design::primary_button("artifact-build-project", "Build and open", cx)
-                    .disabled(self.library(cx).builds.contains_key(&artifact.id))
+                    .disabled(self.build_status(&artifact.id, cx).is_some())
                     .on_click(cx.listener(move |view, _, _, cx| {
                         if let Some(shell) = view.shell.upgrade() {
                             let session_id = shell.read(cx).state.session_id.clone();
@@ -1119,9 +1160,8 @@ impl ArtifactsView {
             );
         }
         if info.opens_in_browser
-            && let Some(url) = self.library(cx).deployments.get(&artifact.id)
+            && let Some(url) = self.deployment(&artifact.id, cx)
         {
-            let url = url.clone();
             let stop_id = artifact.id.clone();
             actions = actions
                 .child(
@@ -1500,10 +1540,7 @@ impl ArtifactsView {
             )
             .when(!self.editing, |detail| detail.child(actions))
             .children(
-                self.library(cx)
-                    .builds
-                    .get(&artifact.id)
-                    .cloned()
+                self.build_status(&artifact.id, cx)
                     .map(|message| div().child(message)),
             )
             .children(self.share_feedback(share_status, cx))

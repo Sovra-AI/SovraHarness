@@ -19,7 +19,8 @@ use sovra_core::models::{ChromeKey, UiLanguage};
 
 pub use paragraph::paragraph;
 pub use responsive::{
-    WidthClass, initial_window_bounds, interface_scale, set_interface_scale, width_probe,
+    WidthClass, initial_window_bounds, interface_scale, is_short_window, set_interface_scale,
+    width_probe,
 };
 pub use styles::{
     FitsPane, SovraStyled, Surface, TextRole, button, markdown_style, page_header, primary_button,

@@ -100,8 +100,16 @@ pub fn memory_citation_refs(text: &str) -> Vec<MemoryCitationRef> {
 ///
 /// Incomplete trailing prefixes are omitted so hashes never flash while streaming.
 /// Already-kept characters are never rewritten as the source grows, so Markdown
-/// can be fed the result incrementally.
-pub fn hide_memory_citation_tokens(text: &str) -> String {
+/// can be fed the result incrementally. Text without tokens (most replies) is
+/// returned as it is, without a copy: the chat checks every reply on each redraw.
+pub fn hide_memory_citation_tokens(text: &str) -> std::borrow::Cow<'_, str> {
+    if next_prefix(text).is_none() {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(strip_citation_tokens(text))
+}
+
+fn strip_citation_tokens(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut search_from = 0;
     while let Some((rel, kind)) = next_prefix(&text[search_from..]) {
@@ -255,7 +263,7 @@ mod tests {
         let growing = format!("Tea. [memory:fact:{long}]");
         let first = hide_memory_citation_tokens(&growing[..growing.len() - 1]);
         let full = hide_memory_citation_tokens(&growing);
-        assert!(full.starts_with(&first), "{first} -> {full}");
+        assert!(full.starts_with(first.as_ref()), "{first} -> {full}");
         assert_eq!(full, "Tea. ");
     }
 

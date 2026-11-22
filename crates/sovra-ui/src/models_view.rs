@@ -532,18 +532,23 @@ impl ModelsView {
     }
 
     pub(crate) fn rebuild_rows(&mut self) {
-        self.rows = self.state.filtered(&self.filter);
-        if let Some(purpose) = self.choosing_purpose {
-            self.rows.retain(|key| {
-                self.state.model(key).is_some_and(|model| {
+        let purpose = self.choosing_purpose;
+        let rows = self
+            .state
+            .filtered_models(&self.filter)
+            .into_iter()
+            .filter(|(key, model)| {
+                purpose.is_none_or(|purpose| {
                     self.state
                         .connections
                         .iter()
                         .find(|connection| connection.id == key.connection_id)
                         .is_some_and(|connection| purpose.accepts(model, connection.kind))
                 })
-            });
-        }
+            })
+            .map(|(key, _)| key)
+            .collect();
+        self.rows = rows;
     }
 
     pub fn open_for_purpose(
@@ -1555,6 +1560,10 @@ impl ModelsView {
             .size_full()
             .min_w_0()
             .min_h_0()
+            // The catalog keeps room for its controls and one row. In a short window
+            // the header and that much may not both fit, so the page scrolls instead
+            // of letting the row run under the status bar where it cannot be clicked.
+            .overflow_y_scroll()
             .p(if narrow {
                 t.space.small
             } else {
@@ -1632,7 +1641,7 @@ impl ModelsView {
         }
         let mut body = h_flex()
             .flex_1()
-            .min_h_0()
+            .min_h(t.layout.catalog_min_height)
             .min_w_0()
             .gap(t.space.medium)
             .child(self.catalog(cx));
