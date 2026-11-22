@@ -123,6 +123,12 @@ has the first run, group steps, every setting, privacy details and limits.
   [Decision records](docs/decisions.md) for the local-account approval boundary.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
   Connection setup and permissions depend on the service.
+- **Official plugins in one click:** **Plugins → Made by Sovra** lists the plugins the
+  Sovra team publishes, with what each one does. **Install** adds it and turns it on;
+  **Try it in chat** starts it. The first is **Computer pool**
+  ([Sovra-AI/sovra-compute-pool](https://github.com/Sovra-AI/sovra-compute-pool)):
+  join your Linux computers into one pool and run big jobs, such as AI training, on
+  their processors and graphics cards.
 - **Download plugins:** open **Plugins** (in the menu on the left) and paste a GitHub repository
   address to add its `SKILL.md` skills and tools, or browse a GitHub Pages catalog. A plugin's
   tools run their own code in a sealed box that sees nothing on your computer and reaches only

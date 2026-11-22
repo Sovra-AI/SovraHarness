@@ -21,6 +21,14 @@ package version.
   azure/login, rust-cache, install-action). Replaces Dependabot PRs #4, #5, #6, #8
   and #12, which were failing against an older `main`.
 
+- **Official plugins, installed with one click.** **Plugins** now opens with
+  **Made by Sovra**: plugins the Sovra team publishes, each with what it does and
+  what it needs. **Install** adds the plugin and turns it on in one step (or just
+  turns it on if it is already here); **Try it in chat** then starts it. The first
+  is **Computer pool** (`Sovra-AI/sovra-compute-pool`), which joins your Linux
+  computers into one pool for big jobs such as AI training. Only plugins on Sovra's
+  own list can take this path, and Sovra still asks before running anything.
+
 - **Skill pills in chat.** Pick any skill to add its name and icon to your draft.
   Press Send to use it. Messages sent with a skill show its pill in the conversation.
 

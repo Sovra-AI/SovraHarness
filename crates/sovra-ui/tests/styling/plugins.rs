@@ -665,3 +665,121 @@ fn a_code_plugin_turns_on_only_after_its_access_is_shown_and_allowed(cx: &mut Te
             .unwrap();
     }
 }
+
+/// The official plugin as it is once installed, with its starter skill.
+fn official_plugin(enabled: bool) -> (InstalledPlugin, sovra_core::plugins::PluginPackage) {
+    let official = &sovra_core::plugins::OFFICIAL_PLUGINS[0];
+    let snapshot = sovra_core::plugins::RepositorySnapshot {
+        repository: official.github(),
+        commit: "0123456789abcdef0123456789abcdef01234567".into(),
+        description: Some(official.summary.into()),
+        skills: vec![
+            sovra_core::plugins::repository_skill(
+                official.starter_skill.into(),
+                official.starter_skill,
+                "Start a pool of computers.",
+                "Ask which computer should lead the pool.".into(),
+            )
+            .expect("valid skill"),
+        ],
+        manifests: Vec::new(),
+        module: None,
+        left_out: Vec::new(),
+    };
+    let (entry, bytes, pin) = snapshot.package().expect("package");
+    let package = entry.verify_package(&bytes).expect("verified package");
+    let plugin = InstalledPlugin {
+        entry,
+        catalog_url: snapshot.repository.web_url(),
+        enabled,
+        github: Some(pin),
+    };
+    (plugin, package)
+}
+
+#[gpui_kit::test]
+fn an_official_plugin_installs_with_one_click_then_offers_to_try_it(cx: &mut TestAppContext) {
+    let official = &sovra_core::plugins::OFFICIAL_PLUGINS[0];
+    for sizing in SIZES {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(sizing.2),
+                    cx,
+                );
+            });
+            let mut shell = None;
+            let window = cx.open_window(size(px(sizing.0), px(sizing.1)), |window, cx| {
+                let view = cx.new(|cx| Shell::new(0, window, cx));
+                view.update(cx, |shell, cx| {
+                    shell.select_tab(sovra_core::NavTab::Plugins, cx);
+                });
+                shell = Some(view.clone());
+                Root::new(view, window, cx)
+            });
+            let shell = shell.expect("shell view");
+            while commands.try_recv().is_ok() {}
+            cx.update_window(window.into(), |_, window, cx| {
+                // What it does is on the page before anything is installed.
+                window.render_frame(cx);
+                assert!(window.try_find(("plugin-official-card", 0usize)).is_some());
+                assert!(window.try_find(("plugin-official-try", 0usize)).is_none());
+                reveal(window, ("plugin-official-install", 0usize), cx);
+                window.click(("plugin-official-install", 0usize), cx);
+            })
+            .unwrap();
+            let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+            assert!(
+                matches!(sent.as_slice(), [Command::Plugins(PluginCommand::InstallOfficial { id })] if *id == official.id()),
+                "one click sends exactly one install: {sent:?}"
+            );
+
+            let (plugin, package) = official_plugin(true);
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Loaded(PluginLibrary {
+                    catalog_url: None,
+                    installed: vec![plugin],
+                })))
+                .unwrap();
+            events
+                .send_blocking(Event::Skills(sovra_core::skills::SkillEvent::Loaded {
+                    skills: package.skills(true),
+                    issues: Vec::new(),
+                }))
+                .unwrap();
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Added {
+                    id: official.id(),
+                    package,
+                    left_out: Vec::new(),
+                    enabled: true,
+                }))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                assert!(
+                    window
+                        .try_find(("plugin-official-install", 0usize))
+                        .is_none()
+                );
+                reveal(window, "plugin-notice", cx);
+                // It is also listed with the plugins you have, under its everyday name.
+                assert!(window.try_find(("plugin-card", 0usize)).is_some());
+                reveal(window, ("plugin-official-try", 0usize), cx);
+                window.click(("plugin-official-try", 0usize), cx);
+                assert_eq!(
+                    shell.read(cx).workspace().active_tab,
+                    sovra_core::NavTab::Chat,
+                    "Try it in chat opens the chat with its starter request"
+                );
+                window.remove_window();
+            })
+            .unwrap();
+        }
+    }
+}

@@ -36,7 +36,7 @@ impl Skill {
             "team" => "Ask your whole AI team together",
             "artifacts" => "Open your saved work library",
             "decisions" => "Keep a company decision and its reasons",
-            "plugins" => "Add skills and tools from GitHub or a catalog",
+            "plugins" => "Add ready-made plugins and tools",
             "connections" => "Link the things Sovra can use",
             "groups" => "Share with your family or team",
             "share-artifact" => "Share a document or list with your group",
@@ -165,7 +165,7 @@ impl Skill {
                 "Opens your saved documents, checklists, tables, code and website projects. Use folders, favorites, search and sorting to find your work.".to_owned(),
                 "/artifacts ".to_owned(),
             ),
-            "plugins" => ("Open Plugins, paste a GitHub address like github.com/owner/skills, and add its helpers.".into(), "/plugins".into()),
+            "plugins" => ("Open Plugins and choose Install on Computer pool to join your computers into one, or paste a GitHub address to add someone else's helpers.".into(), "/plugins".into()),
             "connections" => (
                 "Opens Connections, where you link an AI, WhatsApp, Telegram, Google, or a service from a web address."
                     .to_owned(),
@@ -486,8 +486,8 @@ pub fn builtin_skills() -> Vec<Skill> {
         ),
         action(
             "plugins",
-            "Add skills and tools from GitHub or a catalog",
-            "Paste a GitHub address or a catalog you trust to add new helpers and tools, see what a plugin's code can reach before you allow it, check what changed before updating, and remove the ones you no longer want.",
+            "Add ready-made plugins and tools",
+            "Install Sovra's own plugins, such as Computer pool, with one click. Or paste a GitHub address or a catalog you trust to add new helpers and tools, see what a plugin's code can reach before you allow it, check what changed before updating, and remove the ones you no longer want.",
             SkillAction::Plugins,
             &[],
         ),

@@ -6,7 +6,7 @@ use std::{sync::Arc, time::Duration};
 use sovra_core::plugins::{
     GitHubHosts, GitHubPin, GitHubRepository, InstalledPlugin, MAX_CATALOG_BYTES, MAX_PLUGIN_BYTES,
     PluginCatalog, PluginChanges, PluginCommand, PluginEntry, PluginEvent, PluginLibrary,
-    PluginStore, check_download_url, check_replacement,
+    PluginStore, check_download_url, check_replacement, require_official, turns_on_at_install,
 };
 use sovra_core::skills::{SkillCatalog, SkillError, SkillListing, SkillStore};
 
@@ -186,6 +186,40 @@ struct Download {
     requires_approval: bool,
 }
 
+/// Turns a one-click official install into the command that carries it out: adding
+/// the repository like **Add from GitHub** when the plugin is not here yet, otherwise
+/// only turning it on. The flag says a fresh add is saved switched on.
+async fn resolve_official(
+    command: PluginCommand,
+    store: &Arc<dyn PluginStore>,
+) -> Result<(PluginCommand, bool), SkillError> {
+    let PluginCommand::InstallOfficial { id } = command else {
+        return Ok((command, false));
+    };
+    let official = require_official(&id)?;
+    let installed = {
+        let store = store.clone();
+        tokio::task::spawn_blocking(move || {
+            store
+                .load()
+                .map(|library| library.installed.iter().any(|plugin| plugin.entry.id == id))
+        })
+        .await
+        .map_err(|_| SkillError("The plugin storage worker stopped. Try again.".into()))??
+    };
+    let command = if installed {
+        PluginCommand::SetEnabled {
+            id: official.id(),
+            enabled: true,
+        }
+    } else {
+        PluginCommand::AddFromGitHub {
+            address: official.repository.to_owned(),
+        }
+    };
+    Ok((command, true))
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "one serialized match over every plugin command keeps download and persistence ordering visible"
@@ -196,6 +230,7 @@ pub(crate) async fn handle(
     skills: Option<Arc<dyn SkillStore>>,
     session: &mut PluginSession,
 ) -> Result<(PluginLibrary, Option<PluginEvent>), SkillError> {
+    let (command, enable_on_add) = resolve_official(command, &store).await?;
     let mut discovered = None;
     let mut downloaded = None;
     let root = match &command {
@@ -214,7 +249,8 @@ pub(crate) async fn handle(
         | PluginCommand::AddFromGitHub { .. }
         | PluginCommand::CheckForUpdate { .. }
         | PluginCommand::ApplyUpdate { .. }
-        | PluginCommand::Remove { .. } => String::new(),
+        | PluginCommand::Remove { .. }
+        | PluginCommand::InstallOfficial { .. } => String::new(),
     };
     match &command {
         PluginCommand::Browse { .. } | PluginCommand::NextPage | PluginCommand::PreviousPage => {
@@ -234,7 +270,8 @@ pub(crate) async fn handle(
                 | PluginCommand::AddFromGitHub { .. }
                 | PluginCommand::CheckForUpdate { .. }
                 | PluginCommand::ApplyUpdate { .. }
-                | PluginCommand::Remove { .. } => unreachable!("catalog commands only"),
+                | PluginCommand::Remove { .. }
+                | PluginCommand::InstallOfficial { .. } => unreachable!("catalog commands only"),
             };
             if matches!(&command, PluginCommand::Browse { .. }) {
                 session.catalog = None;
@@ -294,6 +331,7 @@ pub(crate) async fn handle(
                 id: entry.id.clone(),
                 package: entry.verify_package(&bytes)?,
                 left_out,
+                enabled: enable_on_add && turns_on_at_install(&entry),
             });
             downloaded = Some(Download {
                 entry,
@@ -377,6 +415,9 @@ pub(crate) async fn handle(
         | PluginCommand::AllowCode { .. }
         | PluginCommand::Inspect { .. }
         | PluginCommand::Remove { .. } => {}
+        PluginCommand::InstallOfficial { .. } => {
+            unreachable!("resolve_official replaced it with an add or a turn-on")
+        }
     }
     let adding = matches!(&command, PluginCommand::AddFromGitHub { .. });
     let updating = matches!(&command, PluginCommand::ApplyUpdate { .. });
@@ -391,7 +432,8 @@ pub(crate) async fn handle(
         | PluginCommand::AllowCode { .. }
         | PluginCommand::AddFromGitHub { .. }
         | PluginCommand::CheckForUpdate { .. }
-        | PluginCommand::ApplyUpdate { .. } => None,
+        | PluginCommand::ApplyUpdate { .. }
+        | PluginCommand::InstallOfficial { .. } => None,
     };
     // Installs, updates and removals can leave a package file nothing refers to.
     let packages_change = removing.is_some() || downloaded.is_some();
@@ -411,10 +453,11 @@ pub(crate) async fn handle(
                     github,
                     requires_approval,
                 } = downloaded.expect("installs download and verify their package first");
+                let switched_on = adding && enable_on_add && turns_on_at_install(&entry);
                 let mut plugin = InstalledPlugin {
                     entry,
                     catalog_url,
-                    enabled: false,
+                    enabled: switched_on,
                     github,
                 };
                 if let Some(existing) = library
@@ -473,6 +516,9 @@ pub(crate) async fn handle(
             PluginCommand::NextPage
             | PluginCommand::PreviousPage
             | PluginCommand::CheckForUpdate { .. } => return Ok((library, details)),
+            PluginCommand::InstallOfficial { .. } => {
+                unreachable!("resolve_official replaced it with an add or a turn-on")
+            }
         }
         library.validate()?;
         let admission = required_plugin

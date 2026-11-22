@@ -10,6 +10,7 @@ use crate::skills::{EXAMPLE_METADATA_KEY, Skill, SkillCatalog, SkillError, Skill
 
 mod code;
 mod github;
+mod official;
 pub use code::{
     CODE_API_VERSION, CODE_MANIFEST_PATH, CODE_MODULE_PATH, CodeChanges, CodeFetch, CodeFetchReply,
     CodeHost, CodeManifest, LoadedCode, MAX_FETCH_BODY_BYTES, MAX_FETCH_REPLY_BYTES,
@@ -23,6 +24,9 @@ pub use github::{
     PluginChanges, RepositoryPlan, RepositorySnapshot, SkillPlan, check_replacement,
     files_left_out, nothing_to_add, plan_repository, repository_skill, skill_label, valid_commit,
     valid_resource_path,
+};
+pub use official::{
+    OFFICIAL_PLUGINS, OfficialPlugin, official_plugin, require_official, turns_on_at_install,
 };
 
 pub const MAX_CATALOG_BYTES: usize = 256 * 1024;
@@ -201,6 +205,11 @@ pub enum PluginCommand {
     Remove {
         id: String,
     },
+    /// One click for an official plugin: adds it from GitHub if it is not here yet and
+    /// turns it on. Refused for any ID not in `OFFICIAL_PLUGINS`.
+    InstallOfficial {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,10 +224,12 @@ pub enum PluginEvent {
         package: PluginPackage,
     },
     /// `left_out` names skills the repository has that could not be added, and why.
+    /// `enabled` is set when the plugin was turned on in the same step (official plugins).
     Added {
         id: String,
         package: PluginPackage,
         left_out: Vec<String>,
+        enabled: bool,
     },
     UpdateReady {
         id: String,
@@ -281,6 +292,7 @@ impl PluginState {
                 id,
                 package,
                 left_out,
+                enabled,
             } => {
                 self.details = Some((id.clone(), package.clone()));
                 self.busy = false;
@@ -297,10 +309,17 @@ impl PluginState {
                         format!("{} and {}", plural(skills, "skill"), plural(tools, "tool"))
                     }
                 };
-                self.notice = format!(
-                    "Added {} with {contents}. It stays off until you choose Turn on.{skipped}",
-                    package.title,
-                );
+                let title =
+                    official_plugin(id).map_or(package.title.as_str(), |plugin| plugin.title);
+                self.notice = if *enabled {
+                    format!(
+                        "{title} is installed and on. Its {contents} are ready in chat and on the Skills page.{skipped}"
+                    )
+                } else {
+                    format!(
+                        "Added {title} with {contents}. It stays off until you choose Turn on.{skipped}"
+                    )
+                };
             }
             PluginEvent::UpdateReady { id, changes } => {
                 self.update = Some((id.clone(), changes.clone()));

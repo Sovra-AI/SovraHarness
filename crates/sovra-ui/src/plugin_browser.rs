@@ -19,8 +19,9 @@ use gpui_kit::{
 use sovra_core::{
     Command,
     plugins::{
-        CODE_API_VERSION, InstalledPlugin, PLUGIN_TEMPLATE, PluginChanges, PluginCommand,
-        PluginEntry, PluginEvent, PluginPackage, PluginState,
+        CODE_API_VERSION, InstalledPlugin, OFFICIAL_PLUGINS, OfficialPlugin, PLUGIN_TEMPLATE,
+        PluginChanges, PluginCommand, PluginEntry, PluginEvent, PluginPackage, PluginState,
+        official_plugin,
     },
 };
 
@@ -45,6 +46,8 @@ pub(crate) struct PluginBrowser {
     /// The code plugin whose **Turn on** was pressed; it turns on only after the
     /// person has seen what its code can reach and allowed it.
     confirm_code: Option<String>,
+    /// The official plugin whose **Install** is running, so only its button says so.
+    installing: Option<String>,
     /// The page column's width, so the two ways of adding sit side by side only
     /// when both fit.
     width_class: design::WidthClass,
@@ -75,6 +78,7 @@ impl PluginBrowser {
             installed_page: 0,
             confirm_remove: None,
             confirm_code: None,
+            installing: None,
             width_class: design::WidthClass::Compact,
             _search: subscription,
         }
@@ -88,6 +92,20 @@ impl Shell {
         }
         self.plugins.confirm_remove = None;
         self.plugins.confirm_code = None;
+        self.plugins.installing = match &command {
+            PluginCommand::InstallOfficial { id } => Some(id.clone()),
+            PluginCommand::Browse { .. }
+            | PluginCommand::Install { .. }
+            | PluginCommand::NextPage
+            | PluginCommand::PreviousPage
+            | PluginCommand::Inspect { .. }
+            | PluginCommand::SetEnabled { .. }
+            | PluginCommand::AddFromGitHub { .. }
+            | PluginCommand::CheckForUpdate { .. }
+            | PluginCommand::ApplyUpdate { .. }
+            | PluginCommand::Remove { .. }
+            | PluginCommand::AllowCode { .. } => None,
+        };
         if matches!(&command, PluginCommand::Browse { .. }) {
             self.plugins.state.catalog = None;
         }
@@ -139,10 +157,11 @@ pub(crate) fn page(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement +
                 }))
                 .child(design::page_header(
                     "Plugins",
-                    "A plugin adds ready-made skills or tools to Sovra, and can suggest online services to connect. A plugin's own code runs only in a sealed box, and a new plugin stays off until you turn it on.",
+                    "A plugin adds ready-made skills or tools to Sovra, and can suggest online services to connect. A plugin's own code runs only in a sealed box, and Sovra asks before it does anything on your computer. Plugins you add yourself stay off until you turn them on.",
                     cx,
                 ))
                 .children(notice(&shell.plugins.state, cx))
+                .child(official_section(shell, cx))
                 .child(installed_section(shell, cx))
                 .child(add_section(shell, cx))
                 .children(catalog_section(shell, cx)),
@@ -249,9 +268,207 @@ fn card(cx: &Context<Shell>) -> Div {
 fn source(plugin: &InstalledPlugin) -> String {
     plugin.github.as_ref().map_or_else(
         || format!("From a catalog · version {}", plugin.entry.version),
-        // The title is already the repository's name.
-        |pin| format!("From GitHub · version {}", pin.short_commit()),
+        |pin| {
+            if official_plugin(&plugin.entry.id).is_some() {
+                format!("Made by Sovra · version {}", pin.short_commit())
+            } else {
+                // The title is already the repository's name.
+                format!("From GitHub · version {}", pin.short_commit())
+            }
+        },
     )
+}
+
+/// The name a plugin goes by: an official plugin's everyday name, else its own title.
+fn display_title(plugin: &InstalledPlugin) -> String {
+    official_plugin(&plugin.entry.id).map_or_else(
+        || plugin.entry.title.clone(),
+        |official| official.title.into(),
+    )
+}
+
+/// The picture on an official plugin's card.
+fn official_icon(plugin: &OfficialPlugin) -> IconName {
+    match plugin.repository {
+        "Sovra-AI/sovra-compute-pool" => IconName::Cpu,
+        _ => IconName::Puzzle,
+    }
+}
+
+/// Plugins Sovra makes and keeps working, each installed and turned on with one click.
+fn official_section(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let mut section = v_flex()
+        .id("plugin-official")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.medium)
+        .child(heading(
+            "Made by Sovra",
+            None,
+            "Ready-made plugins from the Sovra team. One click installs everything and turns it on.",
+            cx,
+        ));
+    for (index, plugin) in OFFICIAL_PLUGINS.iter().enumerate() {
+        section = section.child(official_card(index, plugin, &shell.plugins, cx));
+    }
+    section
+}
+
+fn official_card(
+    index: usize,
+    plugin: &'static OfficialPlugin,
+    browser: &PluginBrowser,
+    cx: &mut Context<Shell>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let state = &browser.state;
+    let busy = state.busy;
+    let id = plugin.id();
+    let installed = state
+        .library
+        .installed
+        .iter()
+        .find(|installed| installed.entry.id == id);
+    let enabled = installed.is_some_and(|installed| installed.enabled);
+    let installing = busy && browser.installing.as_deref() == Some(id.as_str());
+    let title = plugin.title;
+
+    let status = match (installed.is_some(), enabled) {
+        (true, true) => Some(pill("Installed · On", t.tiles.categories[2], cx)),
+        (true, false) => Some(pill("Installed · Off", t.tiles.neutral, cx)),
+        (false, _) => None,
+    };
+    let mut does = v_flex().w_full().min_w_0().gap(t.space.compact).child(
+        div()
+            .sovra_text(TextRole::Caption, cx)
+            .text_color(t.text_secondary)
+            .child("What it does"),
+    );
+    for line in plugin.does {
+        does = does.child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_start()
+                .gap(t.space.small)
+                .child(
+                    Icon::new(IconName::Check)
+                        .flex_shrink_0()
+                        .size(t.layout.icon_small)
+                        .text_color(t.tiles.categories[2].foreground),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .whitespace_normal()
+                        .sovra_text(TextRole::Body, cx)
+                        .child(*line),
+                ),
+        );
+    }
+
+    let main = if enabled {
+        let command = plugin.starter_command();
+        design::primary_button(("plugin-official-try", index), "Try it in chat", cx)
+            .icon(IconName::MessageCircle)
+            .accessibility_label(format!("Try {title} in chat"))
+            .disabled(busy)
+            .on_click(cx.listener(move |shell, _, window, cx| {
+                shell.stage_skill(&command, plugin.starter_prompt, window, cx);
+            }))
+    } else {
+        let (label, icon) = match (installing, installed.is_some()) {
+            (true, _) => ("Installing…", IconName::LoaderCircle),
+            (false, true) => ("Turn on", IconName::Play),
+            (false, false) => ("Install", IconName::Download),
+        };
+        let install_id = id.clone();
+        design::primary_button(("plugin-official-install", index), label, cx)
+            .icon(icon)
+            .accessibility_label(format!("{label} {title}"))
+            .disabled(busy)
+            .on_click(cx.listener(move |shell, _, _, cx| {
+                shell.plugin_command(
+                    PluginCommand::InstallOfficial {
+                        id: install_id.clone(),
+                    },
+                    cx,
+                );
+            }))
+    };
+    let web = plugin.github().web_url();
+    let actions = h_flex()
+        .w_full()
+        .min_w_0()
+        .flex_wrap()
+        .items_center()
+        .gap(t.space.small)
+        .pt(t.space.compact)
+        .child(main)
+        .child(
+            design::button(("plugin-official-learn", index), "Learn more", cx)
+                .ghost()
+                .icon(IconName::ExternalLink)
+                .accessibility_label(format!("Learn more about {title} on its web page"))
+                .on_click(move |_, _, cx| cx.open_url(&web)),
+        );
+
+    card(cx)
+        .id(("plugin-official-card", index))
+        .test_support()
+        .aria_label(format!(
+            "{title}, made by Sovra, {}. {}",
+            match (installed.is_some(), enabled) {
+                (true, true) => "installed and on",
+                (true, false) => "installed and off",
+                (false, _) => "not installed",
+            },
+            plugin.summary
+        ))
+        .hover(|style| style.border_color(t.material_border_strong))
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .items_center()
+                .gap(t.space.small)
+                .child(tile(official_icon(plugin), t.tiles.categories[4], cx))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .whitespace_normal()
+                        .sovra_text(TextRole::SectionTitle, cx)
+                        .child(title),
+                )
+                .child(pill("Made by Sovra", t.tiles.categories[1], cx))
+                .children(status),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .max_w(t.layout.reading_width)
+                .whitespace_normal()
+                .sovra_text(TextRole::Body, cx)
+                .child(plugin.summary),
+        )
+        .child(does)
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .max_w(t.layout.reading_width)
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(plugin.needs),
+        )
+        .child(actions)
 }
 
 fn matches(entry: &PluginEntry, query: &str) -> bool {
@@ -402,7 +619,7 @@ fn plugin_card(
     let t = design::tokens(cx);
     let state = &browser.state;
     let busy = state.busy;
-    let title = plugin.entry.title.clone();
+    let title = display_title(plugin);
     let enabled = plugin.enabled;
     let id = plugin.entry.id.clone();
     let confirming = browser.confirm_remove.as_deref() == Some(id.as_str());

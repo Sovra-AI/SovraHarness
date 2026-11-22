@@ -289,3 +289,44 @@ fn code_is_only_switched_on_for_the_package_the_person_saw() {
     assert!(!library.installed[1].enabled, "switching off never asks");
     assert!(library.set_enabled("gone", false).is_err());
 }
+
+#[test]
+fn a_one_click_official_install_says_it_is_ready_not_that_it_is_off() {
+    let official = &OFFICIAL_PLUGINS[0];
+    let package = PluginPackage {
+        schema_version: 1,
+        title: official.repository.into(),
+        description: official.summary.into(),
+        api_version: 1,
+        id: official.id(),
+        version: GITHUB_PLUGIN_VERSION.into(),
+        skills: Vec::new(),
+        services: Vec::new(),
+        code: None,
+    };
+    let added = |id: String, enabled| PluginEvent::Added {
+        id,
+        package: package.clone(),
+        left_out: Vec::new(),
+        enabled,
+    };
+    let mut state = PluginState::default();
+    state.apply(&added(official.id(), true));
+    assert!(
+        state
+            .notice
+            .starts_with(&format!("{} is installed and on.", official.title)),
+        "{}",
+        state.notice
+    );
+    assert!(!state.problem);
+    state.apply(&added(official.id(), false));
+    assert!(state.notice.contains("stays off"), "{}", state.notice);
+    assert!(
+        state
+            .notice
+            .starts_with(&format!("Added {} with", official.title)),
+        "official plugins go by their everyday name: {}",
+        state.notice
+    );
+}

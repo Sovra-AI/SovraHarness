@@ -16,12 +16,54 @@ GitHub plugins, and **Remove**). **What's included**, an update's list of
 changes, and the remove warning open inside that plugin's card. A search box
 appears once there are more than three plugins or a catalog is loaded.
 
+**Made by Sovra** comes first: the official plugins, each as a card saying what
+it does, what it needs, and an **Install** button. See
+[Official plugins](#official-plugins).
+
 With no plugins yet, the page offers **Add the example plugin**, which adds the
 [plugin template](https://github.com/Sovra-AI/sovra-plugin-template) from GitHub
 (switched off, like any other). **Add a plugin** has a card for each way in,
 **From GitHub** and **From a catalog**, side by side when the page is wide
 enough, and **Open the plugin template** for making your own. Messages about
 the last action appear at the top of the page; problems are shown as warnings.
+
+## Official plugins
+
+Official plugins are made and kept working by the Sovra team. The list lives in
+[`sovra-core/src/plugins/official.rs`](../crates/sovra-core/src/plugins/official.rs):
+each entry names a public `Sovra-AI` repository and the plain-language copy its
+card shows (an everyday title, a summary, what it does, what it needs) and the
+starter skill and request for **Try it in chat**. A core test keeps that copy
+short and free of jargon.
+
+| Plugin | Repository | What it does |
+| --- | --- | --- |
+| Computer pool | [Sovra-AI/sovra-compute-pool](https://github.com/Sovra-AI/sovra-compute-pool) | Joins your Linux computers into one pool and runs big jobs, such as AI training, across their processors, memory and graphics cards |
+
+**Install** sends `PluginCommand::InstallOfficial`. The runtime refuses any ID
+that is not on the list, so this path can never be pointed at another address.
+If the plugin is not here yet, it is added exactly as **Add from GitHub** would add
+it (same checks, same limits, pinned to the newest commit) and saved switched on
+in the same step, so its skills are ready at once. If it is already here, it is
+only turned on; nothing is downloaded. The card then says **Installed · On** and
+offers **Try it in chat**, which opens chat with the starter skill and an
+example request. It also appears under **Your plugins** with its everyday name,
+where **Turn off**, **Check for update** and **Remove** work as for any plugin.
+
+Turning on at install is the only difference from other GitHub plugins, and it
+never applies to code: an official plugin that brings
+[code](#plugins-with-code) is added switched off like any other, and its card's
+**Turn on** shows what the code can reach before **Allow and turn on**
+(`turns_on_at_install` in core). Official
+plugins are still instructions: they get no extra tools or permissions, and
+when one asks Sovra to run something on the computer (Computer pool installs
+and starts its program, for example), the normal
+[terminal approval card](terminal.md) asks first.
+
+To add an official plugin, publish it under `Sovra-AI` so that
+`check_repository` passes with nothing left out, add an entry to
+`OFFICIAL_PLUGINS` (and its icon in `plugin_browser::official_icon`), and add it
+to the table above.
 
 ## Start from the template
 

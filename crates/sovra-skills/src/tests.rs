@@ -477,7 +477,9 @@ fn this_repository_is_added_as_a_code_plugin_with_its_date_tools() {
     let package = &check.package;
     assert_eq!(package.api_version, sovra_core::plugins::CODE_API_VERSION);
     assert!(
-        package.description.ends_with("In Sovra it also adds exact date tools."),
+        package
+            .description
+            .ends_with("In Sovra it also adds exact date tools."),
         "plugin.json describes the skills and the tools together"
     );
     let code = package.code.as_ref().expect("the repository brings code");

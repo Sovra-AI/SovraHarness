@@ -471,8 +471,17 @@ fn skill_file(name: &str, body: &str) -> Vec<u8> {
 }
 
 fn github_commit(routes: &mut BTreeMap<String, Vec<u8>>, commit: &str, skills: &[(&str, &str)]) {
+    github_commit_in(routes, "owner/skills", commit, skills);
+}
+
+fn github_commit_in(
+    routes: &mut BTreeMap<String, Vec<u8>>,
+    repository: &str,
+    commit: &str,
+    skills: &[(&str, &str)],
+) {
     routes.insert(
-        "/api/repos/owner/skills/commits/main".into(),
+        format!("/api/repos/{repository}/commits/main"),
         commit.as_bytes().to_vec(),
     );
     // A skill whose name does not match its folder is left out, never fatal, and so
@@ -483,28 +492,28 @@ fn github_commit(routes: &mut BTreeMap<String, Vec<u8>>, commit: &str, skills: &
         serde_json::json!({"path": "skills/template/SKILL.md", "type": "blob"}),
     ];
     routes.insert(
-        format!("/raw/owner/skills/{commit}/skills/template/SKILL.md"),
+        format!("/raw/{repository}/{commit}/skills/template/SKILL.md"),
         skill_file("template-skill", "Replace me."),
     );
     for (name, body) in skills {
         tree.push(serde_json::json!({"path": format!("skills/{name}/SKILL.md"), "type": "blob"}));
         tree.push(serde_json::json!({"path": format!("skills/{name}/guide.md"), "type": "blob", "size": 20}));
         routes.insert(
-            format!("/raw/owner/skills/{commit}/skills/{name}/guide.md"),
+            format!("/raw/{repository}/{commit}/skills/{name}/guide.md"),
             format!("Guide for {name}.").into_bytes(),
         );
         routes.insert(
-            format!("/raw/owner/skills/{commit}/skills/{name}/SKILL.md"),
+            format!("/raw/{repository}/{commit}/skills/{name}/SKILL.md"),
             skill_file(name, body),
         );
     }
     routes.insert(
-        format!("/api/repos/owner/skills/git/trees/{commit}?recursive=1"),
+        format!("/api/repos/{repository}/git/trees/{commit}?recursive=1"),
         serde_json::to_vec(&serde_json::json!({"tree": tree, "truncated": false}))
             .expect("tree json"),
     );
     routes.insert(
-        format!("/raw/owner/skills/{commit}/.mcp.json"),
+        format!("/raw/{repository}/{commit}/.mcp.json"),
         br#"{"mcpServers":{"docs":{"url":"https://docs.example/mcp"},"local":{"command":"npx"}}}"#
             .to_vec(),
     );
@@ -552,29 +561,17 @@ fn serve_github(
 #[tokio::test]
 async fn github_repository_adds_switched_off_then_updates_only_after_review() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let root = format!("http://{}", listener.local_addr().unwrap());
     let mut initial = BTreeMap::from([(
         "/api/repos/owner/skills".to_owned(),
         br#"{"default_branch":"main","description":"Writing helpers","private":false}"#.to_vec(),
     )]);
     github_commit(&mut initial, FIRST, &[("notes", "Take tidy notes.")]);
     let routes = Arc::new(Mutex::new(initial));
+    let root = format!("http://{}", listener.local_addr().unwrap());
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     serve_github(listener, routes.clone(), requests.clone());
     let store = Arc::new(Store::default());
-    let client = sovra_runtime::start_with_services(
-        "plugin-github-test",
-        AgentConfig::default(),
-        RuntimeServices {
-            plugins: Some(store.clone()),
-            plugin_hosts: sovra_core::plugins::GitHubHosts {
-                api: format!("{root}/api"),
-                raw: format!("{root}/raw"),
-            },
-            ..RuntimeServices::default()
-        },
-    )
-    .unwrap();
+    let client = github_client(store.clone(), &root);
     until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
     let send = |command| client.send(Command::Plugins(command)).unwrap();
 
@@ -589,6 +586,7 @@ async fn github_repository_adds_switched_off_then_updates_only_after_review() {
         id,
         package,
         left_out,
+        enabled: false,
     })) = added.last()
     else {
         panic!("expected the repository to be added: {added:?}");
@@ -961,4 +959,92 @@ async fn a_code_plugin_is_added_off_runs_when_on_and_asks_again_for_new_addresse
         "turned on again, it loads with the internet it now lists"
     );
     client.send(Command::Shutdown).unwrap();
+}
+
+fn github_client(store: Arc<Store>, root: &str) -> Client {
+    sovra_runtime::start_with_services(
+        "plugin-github-test",
+        AgentConfig::default(),
+        RuntimeServices {
+            plugins: Some(store),
+            plugin_hosts: sovra_core::plugins::GitHubHosts {
+                api: format!("{root}/api"),
+                raw: format!("{root}/raw"),
+            },
+            ..RuntimeServices::default()
+        },
+    )
+    .expect("runtime starts")
+}
+
+#[tokio::test]
+async fn official_plugin_installs_switched_on_in_one_step() {
+    let official = &sovra_core::plugins::OFFICIAL_PLUGINS[0];
+    let repository = official.repository;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut initial = BTreeMap::from([(
+        format!("/api/repos/{repository}"),
+        br#"{"default_branch":"main","description":"Pool computers","private":false}"#.to_vec(),
+    )]);
+    github_commit_in(
+        &mut initial,
+        repository,
+        FIRST,
+        &[(official.starter_skill, "Start the pool.")],
+    );
+    let root = format!("http://{}", listener.local_addr().unwrap());
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    serve_github(listener, Arc::new(Mutex::new(initial)), requests.clone());
+    let store = Arc::new(Store::default());
+    let client = github_client(store.clone(), &root);
+    until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    let send = |command| client.send(Command::Plugins(command)).unwrap();
+    let id = official.id();
+
+    send(PluginCommand::InstallOfficial { id: id.clone() });
+    let installed = until(&client, |event| {
+        matches!(event, PluginEvent::Added { .. } | PluginEvent::Error(_))
+    })
+    .await;
+    assert!(
+        matches!(installed.last(), Some(Event::Plugins(PluginEvent::Added { id: added, enabled: true, .. })) if *added == id),
+        "{installed:?}"
+    );
+    assert!(
+        contains_plugin_skill(&installed),
+        "one click leaves its skills ready to use"
+    );
+    let saved = store.load().unwrap().installed.remove(0);
+    assert!(saved.enabled);
+    assert_eq!(saved.github.as_ref().unwrap().commit, FIRST);
+
+    send(PluginCommand::SetEnabled {
+        id: id.clone(),
+        enabled: false,
+    });
+    until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await;
+    requests.lock().unwrap().clear();
+    send(PluginCommand::InstallOfficial { id: id.clone() });
+    assert!(contains_plugin_skill(
+        &until(&client, |event| matches!(event, PluginEvent::Loaded(_))).await
+    ));
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "an official plugin that is already here is only turned on, not downloaded again"
+    );
+    assert_eq!(store.load().unwrap().installed.len(), 1);
+    assert!(store.load().unwrap().installed[0].enabled);
+
+    send(PluginCommand::InstallOfficial {
+        id: "io.github.owner.skills".into(),
+    });
+    let refused = until(&client, |event| matches!(event, PluginEvent::Error(_))).await;
+    assert!(
+        matches!(refused.last(), Some(Event::Plugins(PluginEvent::Error(text))) if text.contains("not one of Sovra's official plugins")),
+        "{refused:?}"
+    );
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "the one-click path never reads a repository outside the official list"
+    );
 }
