@@ -5,11 +5,20 @@ use std::sync::Arc;
 
 use async_channel::Sender;
 use sovra_adk::{AdkHarness, TeamTurn};
-use sovra_core::teams::{self, TeamCommand, TeamEvent, TeamMember, TranscriptLine};
+use sovra_core::teams::{self, TeamCommand, TeamEvent, TeamMember, TeamRoom, TranscriptLine};
 use sovra_core::{AgUiEvent, Event, MemoryStore};
 use tokio::sync::Mutex;
 
 use crate::ActiveRun;
+
+/// One team turn the command loop is ready to start.
+pub(crate) struct TeamRunRequest {
+    pub session_id: String,
+    pub prompt: String,
+    pub history: Vec<TranscriptLine>,
+    pub room: TeamRoom,
+    pub timeout: Option<std::time::Duration>,
+}
 
 #[derive(Clone)]
 pub(crate) struct TeamRuntime {
@@ -108,11 +117,15 @@ impl TeamRuntime {
         &self,
         handle: &tokio::runtime::Handle,
         harness: AdkHarness,
-        session_id: String,
-        prompt: String,
-        history: Vec<TranscriptLine>,
-        timeout: Option<std::time::Duration>,
+        request: TeamRunRequest,
     ) -> ActiveRun {
+        let TeamRunRequest {
+            session_id,
+            prompt,
+            history,
+            room,
+            timeout,
+        } = request;
         let runtime = self.clone();
         let slot = Arc::new(std::sync::RwLock::new(Some(harness.clone())));
         let interactive = crate::model_priority::interactive();
@@ -129,6 +142,7 @@ impl TeamRuntime {
                 prompt,
                 history,
                 members,
+                room,
             };
             match timeout {
                 // A long team turn is fine while members keep replying; stop only

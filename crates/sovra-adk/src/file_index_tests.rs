@@ -656,12 +656,14 @@ async fn team_member_reads_granted_knowledge_and_streams_cited_evidence() {
         .into_iter()
         .find(|member| !member.conductor)
         .unwrap();
+    let helper_id = member.id.clone();
     let turn = crate::TeamTurn {
         session_id: "team-knowledge".into(),
         run_id: "knowledge-turn".into(),
         prompt: "Find the orchid budget in my project notes.".into(),
         history: vec![],
         members: vec![member],
+        room: sovra_core::teams::TeamRoom::direct(helper_id),
     };
     let (events, received) = async_channel::unbounded();
     harness.run_team(&turn, &events).await;

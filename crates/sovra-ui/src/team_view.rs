@@ -15,20 +15,22 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
-    WeakEntity, Window, div,
+    AnyElement, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
+    TestSupportExt as _, WeakEntity, Window, div,
 };
 use sovra_core::Command;
-use sovra_core::teams::{TeamCommand, TeamMember, helper_templates, member_id_for};
+use sovra_core::teams::{TeamCommand, TeamMember, TeamRoom, helper_templates, member_id_for};
 
 use crate::RuntimeClient;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
-/// "Ask my team" (or one member, by `@handle`): the shell switches to chat.
+/// Opens chat for this team. A room is its own conversation. A member only
+/// pre-fills `@handle`. Neither means "ask every helper in this chat".
 pub(crate) struct AskTeam {
     pub(crate) member: Option<String>,
+    pub(crate) room: Option<TeamRoom>,
 }
 
 pub(crate) struct TeamView {
@@ -37,6 +39,9 @@ pub(crate) struct TeamView {
     editing: Option<TeamMember>,
     adding: bool,
     error: Option<String>,
+    /// Helpers chosen for the next group chat. The lead joins on their own.
+    picked: Vec<String>,
+    group_hint: Option<String>,
     name: Entity<InputState>,
     icon: Entity<InputState>,
     role: Entity<InputState>,
@@ -60,6 +65,8 @@ impl TeamView {
             editing: None,
             adding: false,
             error: None,
+            picked: Vec::new(),
+            group_hint: None,
             name: input("e.g. Grace", window, cx),
             icon: input("One emoji, e.g. 🌻", window, cx),
             role: input("e.g. Garden expert", window, cx),
@@ -162,7 +169,7 @@ impl Render for TeamView {
             .max_w(t.layout.page_width)
             .mx_auto()
             .gap(t.space.large)
-            .child(Self::header(cx))
+            .child(self.header(cx))
             .child(how_it_works(cx));
         if let Some(member) = &self.editing {
             page = page.child(self.form(member, cx));
@@ -174,12 +181,15 @@ impl Render for TeamView {
                 .w_full()
                 .flex_wrap()
                 .gap(t.space.medium)
-                .children(
-                    members
-                        .iter()
-                        .enumerate()
-                        .map(|(index, member)| member_card(member, index, can_share, cx)),
-                ),
+                .children(members.iter().enumerate().map(|(index, member)| {
+                    member_card(
+                        member,
+                        index,
+                        can_share,
+                        self.picked.iter().any(|id| id == &member.id),
+                        cx,
+                    )
+                })),
         );
         page = page.child(self.add_section(&members, cx));
         v_flex()
@@ -195,29 +205,66 @@ impl Render for TeamView {
 }
 
 impl TeamView {
-    fn header(cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = design::tokens(cx);
-        h_flex()
+        let intro = "A group of AI helpers, each good at something different. A question can ask one helper or several, and the same helper can answer two parts at once.";
+        v_flex()
             .w_full()
-            .flex_wrap()
-            .items_center()
-            .justify_between()
             .gap(t.space.small)
             .child(
-                design::page_header(
-                    "Your team",
-                    "A group of AI helpers, each good at something different. Ask them together and they talk it through, then Alex sums up what to do.",
-                    cx,
-                )
-                .flex_1()
-                .min_w_0(),
+                h_flex()
+                    .w_full()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap(t.space.small)
+                    .child(
+                        design::page_header("Your team", intro, cx)
+                            .id("team-page-intro")
+                            .test_support()
+                            .aria_label(intro)
+                            .flex_1()
+                            .min_w_0(),
+                    )
+                    .child(
+                        design::button("team-start-group", "Start a group chat", cx)
+                            .flex_shrink_0()
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                if view.picked.len() < 2 {
+                                    view.group_hint = Some("Pick at least two helpers.".into());
+                                    cx.notify();
+                                    return;
+                                }
+                                let room = TeamRoom::group(view.picked.clone());
+                                view.picked.clear();
+                                view.group_hint = None;
+                                cx.emit(AskTeam {
+                                    member: None,
+                                    room: Some(room),
+                                });
+                            })),
+                    )
+                    .child(
+                        design::primary_button("team-ask", "Ask my team", cx)
+                            .flex_shrink_0()
+                            .accessibility_label("Ask my team a question in Chat")
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(AskTeam {
+                                    member: None,
+                                    room: None,
+                                });
+                            })),
+                    ),
             )
-            .child(
-                design::primary_button("team-ask", "Ask my team", cx)
-                    .flex_shrink_0()
-                    .accessibility_label("Ask my team a question in Chat")
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(AskTeam { member: None }))),
-            )
+            .children(self.group_hint.clone().map(|hint| {
+                div()
+                    .id("team-group-hint")
+                    .test_support()
+                    .aria_label(hint.clone())
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(cx.theme().danger)
+                    .child(hint)
+            }))
     }
 
     fn form(&self, member: &TeamMember, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -455,14 +502,22 @@ fn how_it_works(cx: &mut Context<TeamView>) -> impl IntoElement + use<> {
             )
             .child(div().min_w_0().sovra_text(TextRole::Body, cx).child(text))
     };
+    let steps = [
+        ("1", "Pick one helper, or a few for a group."),
+        ("2", "A question can ask one helper or several."),
+        (
+            "3",
+            "Ask everyone when you want the whole group. Alex sums up.",
+        ),
+    ];
     h_flex()
         .id("team-how-it-works")
+        .test_support()
+        .aria_label(steps.map(|(_, text)| text).join(" "))
         .w_full()
         .flex_wrap()
         .gap(t.space.small)
-        .child(step("1", "Ask a question in your own words.", cx))
-        .child(step("2", "The right helpers share their view.", cx))
-        .child(step("3", "Alex sums up and suggests next steps.", cx))
+        .children(steps.map(|(n, text)| step(n, text, cx)))
 }
 
 fn card_shell(
@@ -518,6 +573,7 @@ fn member_card(
     member: &TeamMember,
     index: usize,
     can_share: bool,
+    picked: bool,
     cx: &mut Context<TeamView>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
@@ -546,6 +602,8 @@ fn member_card(
     let toggled = member.clone();
     let edited = member.clone();
     let asked = member.id.clone();
+    let chat_id = member.id.clone();
+    let pick_id = member.id.clone();
     let remove = (!member.builtin).then(|| {
         let id = member.id.clone();
         design::button(("team-member-remove", index), "Remove", cx)
@@ -557,6 +615,7 @@ fn member_card(
     });
     card_shell(("team-member", index), cx)
         .test_support()
+        .aria_label(format!("{}, {}", member.name, member.role))
         .opacity(if member.active {
             1.
         } else {
@@ -588,6 +647,44 @@ fn member_card(
                 .flex_wrap()
                 .gap(t.space.compact)
                 .children(member.active.then(|| {
+                    let chat_with = chat_id.clone();
+                    design::button(
+                        ("team-member-chat", index),
+                        format!("Chat with {}", member.name),
+                        cx,
+                    )
+                    .small()
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.emit(AskTeam {
+                            member: None,
+                            room: Some(TeamRoom::direct(chat_with.clone())),
+                        });
+                    }))
+                }))
+                .children((member.active && !member.conductor).then(|| {
+                    let id = pick_id.clone();
+                    design::button(
+                        ("team-member-pick", index),
+                        if picked {
+                            "In this group"
+                        } else {
+                            "Add to group"
+                        },
+                        cx,
+                    )
+                    .small()
+                    .selected(picked)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        if view.picked.iter().any(|picked| picked == &id) {
+                            view.picked.retain(|picked| picked != &id);
+                        } else {
+                            view.picked.push(id.clone());
+                        }
+                        view.group_hint = None;
+                        cx.notify();
+                    }))
+                }))
+                .children(member.active.then(|| {
                     design::button(
                         ("team-member-ask", index),
                         format!("Ask {}", member.name),
@@ -597,6 +694,7 @@ fn member_card(
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.emit(AskTeam {
                             member: Some(asked.clone()),
+                            room: None,
                         });
                     }))
                 }))
@@ -613,30 +711,41 @@ fn member_card(
         )
 }
 
-/// In the chat box: one button switches between Sovra alone and the whole team.
+/// In the chat box: opens a new helper chat and leaves this conversation alone.
+/// When helpers are already in this chat, the same button returns it to Sovra.
 pub(crate) fn composer_team_button(
     shell: &Shell,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    let team = shell.state.team_mode;
+    let team = shell.state.room.is_team_chat();
     let button = design::round_icon_button("composer-team-mode", t.chat.send_size)
         .icon(gpui_kit::component::Icon::new(
             gpui_kit::assets::IconName::Users,
         ))
         .selected(team)
         .accessibility_label(if team {
-            "My team is answering. Click so only Sovra answers"
+            "Helpers are in this chat. Click so only Sovra answers"
         } else {
-            "Ask my team instead of Sovra"
+            "Start a new chat with my helpers"
         })
         .tooltip(if team {
-            "Your team answers · click for Sovra only"
+            "Helpers answer this chat · click for Sovra only"
         } else {
-            "Ask my team"
+            "New chat with my helpers"
         })
-        .on_click(cx.listener(|shell, _, _, cx| {
-            shell.state.team_mode = !shell.state.team_mode;
+        .on_click(cx.listener(|shell, _, window, cx| {
+            if shell.state.room.is_team_chat() {
+                shell.state.set_room(TeamRoom::ordinary());
+            } else {
+                shell.state.open_distinct_room(TeamRoom::all_helpers());
+                shell.select_tab(sovra_core::NavTab::Chat, cx);
+            }
+            shell
+                .composer_input
+                .read(cx)
+                .focus_handle(cx)
+                .focus(window, cx);
             shell.refresh(cx);
         }));
     if team {
@@ -657,17 +766,25 @@ pub(crate) fn composer_team_note(shell: &Shell, cx: &mut Context<Shell>) -> Opti
             crate::agui_widgets::render_docked_team_board(&activity, cx).into_any_element(),
         );
     }
-    if !shell.state.team_mode {
-        return None;
-    }
+    let blurb = sovra_core::teams::room_blurb(&shell.state.room, &shell.state.team.members)?;
     let t = design::tokens(cx);
-    let helpers = shell.state.team.active().filter(|m| !m.conductor).count();
+    let ask_everyone = shell.state.room.is_group().then(|| {
+        Switch::new("composer-ask-everyone")
+            .checked(shell.state.room.ask_everyone())
+            .label("Ask everyone")
+            .on_click(cx.listener(|shell, checked: &bool, _, cx| {
+                shell.state.set_ask_everyone(*checked);
+                shell.refresh(cx);
+            }))
+    });
     Some(
         h_flex()
             .id("composer-team-note")
             .test_support()
+            .aria_label(blurb.clone())
             .w_full()
             .min_w_0()
+            .flex_wrap()
             .items_center()
             .justify_between()
             .gap(t.space.compact)
@@ -677,15 +794,15 @@ pub(crate) fn composer_team_note(shell: &Shell, cx: &mut Context<Shell>) -> Opti
                     .min_w_0()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
-                    .text_ellipsis()
-                    .child(format!("Your team ({helpers} helpers) will answer")),
+                    .child(blurb),
             )
+            .children(ask_everyone)
             .child(
                 design::button("composer-team-off", "Ask Sovra only", cx)
                     .xsmall()
                     .ghost()
                     .on_click(cx.listener(|shell, _, _, cx| {
-                        shell.state.team_mode = false;
+                        shell.state.set_room(TeamRoom::ordinary());
                         shell.refresh(cx);
                     })),
             )

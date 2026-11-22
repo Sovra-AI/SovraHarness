@@ -21,24 +21,389 @@ fn default_team_has_one_conductor_and_unique_handles() {
     assert_eq!(builtin_member("theo"), None);
 }
 
+fn group() -> TeamRoom {
+    TeamRoom::all_helpers()
+}
+
+fn speakers(prompt: &str, members: &[TeamMember]) -> Vec<String> {
+    route_speakers(prompt, members, &group(), &[])
+}
+
+fn non_leads(members: &[TeamMember]) -> Vec<String> {
+    members
+        .iter()
+        .filter(|member| member.active && !member.conductor)
+        .map(|member| member.id.clone())
+        .collect()
+}
+
 #[test]
-fn mentions_then_names_then_everyone_then_expertise_choose_speakers() {
+fn a_question_picks_as_few_or_as_many_helpers_as_it_needs() {
     let members = team();
+    let rooms = [TeamRoom::ordinary(), group()];
+    for room in &rooms {
+        assert_eq!(
+            route_speakers("I can't sleep and feel stress", &members, room, &[]),
+            ["sam"],
+            "{room:?}"
+        );
+        // A stronger writing match beats the stray garden word.
+        assert_eq!(
+            route_speakers("Write a letter about the garden", &members, room, &[]),
+            ["jamie"],
+            "{room:?}"
+        );
+        assert_eq!(
+            route_speakers("Plan my garden", &members, room, &[]),
+            ["morgan", "robin", "alex"],
+            "{room:?}"
+        );
+        assert_eq!(
+            route_speakers(
+                "Research the history of tea. Research the science of coffee.",
+                &members,
+                room,
+                &[]
+            ),
+            ["priya", "priya"],
+            "{room:?}"
+        );
+        let many = route_speakers(
+            "Research the history of tea. Research the science of coffee. I can't sleep and I feel stress. Write a letter. Plan the budget. Pack for the trip. Check this contract for a scam.",
+            &members,
+            room,
+            &[],
+        );
+        assert_eq!(
+            many,
+            [
+                "priya", "priya", "sam", "jamie", "morgan", "robin", "kai", "alex",
+            ],
+            "{room:?}"
+        );
+        assert!(!many.iter().any(|id| id == "noor"), "{many:?}");
+        let hello = route_speakers("hello", &members, room, &[]);
+        assert_eq!(hello.len(), 1, "{hello:?}");
+        assert_ne!(hello, ["alex"]);
+    }
+}
+
+#[test]
+fn route_speakers_follows_sovra_srx_precedence() {
+    let members = team();
+    let leads_and = |mut ids: Vec<&str>| {
+        ids.push("alex");
+        ids.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
     assert_eq!(
-        first_round_speakers("@jamie can you help with a letter", &members),
+        speakers("@jamie can you help with a letter", &members),
         ["jamie"]
     );
+    assert_eq!(speakers("@alex what is next", &members), ["alex"]);
     assert_eq!(
-        first_round_speakers("What do Priya and Kai think?", &members),
-        ["priya", "kai"]
+        speakers("What do Priya and Kai think?", &members),
+        leads_and(vec!["priya", "kai"])
     );
-    let everyone = first_round_speakers("What does everyone think?", &members);
-    assert_eq!(everyone.len(), members.len() - 1, "all but the Conductor");
-    assert!(!everyone.contains(&"alex".to_owned()));
-    let health = first_round_speakers("I can't sleep and feel stress", &members);
-    assert_eq!(health.first().map(String::as_str), Some("sam"));
-    assert!((2..=3).contains(&health.len()));
-    assert_eq!(first_round_speakers("hello", &members).len(), 2);
+    assert_eq!(
+        speakers("Kai and Priya, your thoughts", &members),
+        leads_and(vec!["kai", "priya"])
+    );
+    assert_eq!(speakers("Alex and Morgan", &members), ["morgan"]);
+    assert_eq!(speakers("Morgan, what do you think?", &members), ["morgan"]);
+    assert_eq!(speakers("I can't sleep and feel stress", &members), ["sam"]);
+    assert_eq!(speakers("hello", &members), ["morgan"]);
+    // A short question still asks one helper. The Skills example is several
+    // jobs, so it asks every helper those jobs need, including Priya twice.
+    assert_eq!(
+        route_speakers("hello", &members, &TeamRoom::ordinary(), &[]),
+        ["morgan"]
+    );
+    let example = crate::skills::builtin_skills()
+        .into_iter()
+        .find(|skill| skill.name == "team")
+        .expect("team skill")
+        .friendly_card_copy()
+        .sample_draft;
+    let asked = strip_team_command(&example).expect("the skills example asks the team");
+    let many = [
+        "priya", "priya", "sam", "jamie", "morgan", "robin", "kai", "alex",
+    ];
+    assert_eq!(
+        route_speakers(asked, &members, &TeamRoom::ordinary(), &[]),
+        many
+    );
+    assert_eq!(route_speakers(asked, &members, &group(), &[]), many);
+    assert_eq!(
+        route_speakers(
+            "Write a letter. Write a card. Research the history of tea.",
+            &members,
+            &TeamRoom::group(["jamie"]),
+            &[]
+        ),
+        ["jamie", "jamie"]
+    );
+    assert_eq!(
+        route_speakers("@jamie write a card", &members, &TeamRoom::ordinary(), &[]),
+        ["jamie"]
+    );
+
+    let everyone = non_leads(&members);
+    let with_lead = leads_and(everyone.iter().map(String::as_str).collect());
+    for phrase in [
+        "team",
+        "everyone",
+        "everybody",
+        "all of you",
+        "all   of    you",
+        "all three",
+        "all four",
+        "y'all",
+        "yall",
+        "the group",
+        "the room",
+        "who wants",
+        "who thinks",
+        "debate",
+        "debates",
+        "debated",
+        "debate this",
+        "round-table",
+        "round table",
+        "roundtable",
+        "all hands",
+        "What does the team think?",
+    ] {
+        assert_eq!(speakers(phrase, &members), with_lead, "{phrase}");
+    }
+    for phrase in [
+        "steam",
+        "teammate",
+        "debating the menu",
+        "all of your ideas",
+    ] {
+        let chosen = speakers(phrase, &members);
+        assert_eq!(chosen.len(), 1, "{phrase} -> {chosen:?}");
+        assert_ne!(chosen, ["alex"], "{phrase}");
+    }
+
+    let mut quiet = members.clone();
+    for member in &mut quiet {
+        if member.id == "sam" {
+            member.active = false;
+        }
+    }
+    assert!(!speakers("@sam please", &quiet).contains(&"sam".into()));
+    assert_eq!(
+        speakers("I can't sleep and feel stress", &quiet),
+        ["morgan"]
+    );
+
+    assert_eq!(
+        route_speakers("everyone @sam", &members, &TeamRoom::direct("jamie"), &[]),
+        ["jamie"]
+    );
+    let mut off = members.clone();
+    off.iter_mut()
+        .find(|member| member.id == "jamie")
+        .expect("jamie")
+        .active = false;
+    assert_eq!(
+        route_speakers("hello", &off, &TeamRoom::direct("jamie"), &[]),
+        Vec::<String>::new()
+    );
+
+    let asked = TeamRoom::all_helpers().with_ask_everyone(true);
+    assert_eq!(route_speakers("hello", &members, &asked, &[]), with_lead);
+    let chosen = TeamRoom::group(["priya", "morgan"]);
+    assert_eq!(
+        route_speakers(
+            "what does everyone think about sleep",
+            &members,
+            &chosen,
+            &[]
+        ),
+        ["morgan", "priya", "alex"]
+    );
+    assert_eq!(route_speakers("hello", &members, &chosen, &[]), ["morgan"]);
+    // Two specialities in one question ask both helpers. Who spoke last does
+    // not drop a match; that wait only applies when nobody matches.
+    assert_eq!(
+        route_speakers("Plan my garden", &members, &group(), &[]),
+        ["morgan", "robin", "alex"]
+    );
+    let morgan_spoke = vec![TranscriptLine {
+        source: None,
+        speaker: "Morgan".into(),
+        text: "An earlier plan".into(),
+    }];
+    assert_eq!(
+        route_speakers("Plan my garden", &members, &group(), &morgan_spoke),
+        ["morgan", "robin", "alex"]
+    );
+    assert_eq!(
+        route_speakers("hello", &members, &group(), &morgan_spoke),
+        ["priya"]
+    );
+    let both_spoke = vec![
+        TranscriptLine {
+            source: None,
+            speaker: "morgan".into(),
+            text: "First".into(),
+        },
+        TranscriptLine {
+            source: None,
+            speaker: "Priya".into(),
+            text: "Later".into(),
+        },
+    ];
+    assert_eq!(
+        route_speakers("hello", &members, &group(), &both_spoke),
+        ["jamie"]
+    );
+    let all_spoke: Vec<TranscriptLine> = members
+        .iter()
+        .filter(|member| !member.conductor)
+        .map(|member| TranscriptLine {
+            source: None,
+            speaker: member.name.clone(),
+            text: "Said something".into(),
+        })
+        .collect();
+    assert_eq!(
+        route_speakers("hello", &members, &group(), &all_spoke),
+        ["morgan"]
+    );
+}
+
+#[test]
+fn continue_hands_back_closes_a_repeating_or_thin_round() {
+    let fresh = |confidence: Option<f64>| {
+        let tail = match confidence {
+            Some(value) => format!(
+                "[[CONDUCTOR: {{\"verdict\":\"CONTINUE\",\"next_speakers\":[\"morgan\"],\"confidence\":{value}}}]]"
+            ),
+            None => {
+                "[[CONDUCTOR: {\"verdict\":\"CONTINUE\",\"next_speakers\":[\"morgan\"]}]]".into()
+            }
+        };
+        parse_conductor_reply(&format!("Still going. {tail}")).1
+    };
+    let different = vec![round_signature("alpha beta gamma")];
+    let other = vec![round_signature("delta epsilon zeta")];
+    assert!(continue_hands_back(
+        2,
+        &fresh(Some(0.649)),
+        &different,
+        &other
+    ));
+    assert!(!continue_hands_back(
+        2,
+        &fresh(Some(0.65)),
+        &different,
+        &other
+    ));
+    assert!(!continue_hands_back(
+        1,
+        &fresh(Some(0.1)),
+        &different,
+        &other
+    ));
+    let omitted = fresh(None);
+    assert_eq!(omitted.confidence, Confidence::FULL);
+    assert!(!continue_hands_back(2, &omitted, &different, &other));
+    let (_, broken) = parse_conductor_reply(
+        "x [[CONDUCTOR: {\"verdict\":\"CONTINUE\",\"confidence\":\"high\"}]]",
+    );
+    assert_eq!(broken.verdict, Verdict::YieldToUser);
+
+    let same = round_signature("one two three");
+    assert!(continue_hands_back(
+        2,
+        &fresh(Some(0.9)),
+        std::slice::from_ref(&same),
+        std::slice::from_ref(&same)
+    ));
+    assert!(!continue_hands_back(
+        2,
+        &fresh(Some(0.9)),
+        &different,
+        &other
+    ));
+
+    let shared: Vec<String> = (0..10).map(|index| format!("w{index}")).collect();
+    let mut extended = shared.clone();
+    extended.push("n1".into());
+    extended.push("n2".into());
+    let extra = vec![round_signature("x y z")];
+    let mut previous = vec![round_signature(&shared.join(" "))];
+    previous.extend(extra);
+    let current = vec![round_signature(&extended.join(" "))];
+    assert!(
+        !continue_hands_back(2, &fresh(Some(0.9)), &previous, &current),
+        "exactly a fifth new, and overlap under 0.8, stays open"
+    );
+
+    let ten: Vec<String> = (0..10).map(|index| format!("w{index}")).collect();
+    let mut twelve = ten.clone();
+    twelve.push("n1".into());
+    twelve.push("n2".into());
+    assert!(
+        continue_hands_back(
+            2,
+            &fresh(Some(0.9)),
+            &[round_signature(&ten.join(" "))],
+            &[round_signature(&twelve.join(" "))],
+        ),
+        "overlap of 0.8 hands back even when exactly a fifth of the wording is new"
+    );
+
+    let long: Vec<String> = (0..15).map(|index| format!("w{index}")).collect();
+    let short = long[..10].join(" ");
+    assert!(continue_hands_back(
+        2,
+        &fresh(Some(0.9)),
+        &[round_signature(&long.join(" "))],
+        &[round_signature(&short)],
+    ));
+}
+
+#[test]
+fn two_copies_of_one_helper_finish_on_their_own_rows() {
+    let members = team();
+    let mut activity = TeamActivity::new(1, &members, &["priya".into(), "priya".into()]);
+    assert_eq!(activity.speakers.len(), 2);
+    activity.start_together(&["priya".into(), "priya".into()]);
+    assert_eq!(activity.speaking_count(), 2);
+    activity.set_doing("priya", "First part");
+    activity.set_doing("priya", "Second part");
+    let doing: Vec<_> = activity
+        .speakers
+        .iter()
+        .map(|row| row.doing.as_deref())
+        .collect();
+    assert_eq!(doing, [Some("First part"), Some("Second part")]);
+    activity.set("priya", SpeakerState::Done);
+    assert_eq!(activity.speaking_count(), 1);
+    activity.set("priya", SpeakerState::Done);
+    assert_eq!(activity.speaking_count(), 0);
+    assert!(
+        activity
+            .speakers
+            .iter()
+            .all(|row| row.state == SpeakerState::Done)
+    );
+    activity.queue(&members, &["priya".into()]);
+    assert_eq!(activity.speakers.len(), 2);
+    assert_eq!(
+        activity
+            .speakers
+            .iter()
+            .filter(|row| row.state == SpeakerState::Waiting)
+            .count(),
+        1
+    );
+    activity.start_together(&["priya".into()]);
+    assert_eq!(activity.speaking_count(), 1);
 }
 
 #[test]
@@ -50,7 +415,7 @@ fn mentions_ignore_longer_handles_and_inactive_members() {
         m.active = m.id != "sam";
     }
     assert!(!mentions_member("Ask @sam please", &members));
-    assert_ne!(first_round_speakers("@sam sleep", &members), ["sam"]);
+    assert_ne!(speakers("@sam sleep", &members), ["sam"]);
 }
 
 #[test]
@@ -59,8 +424,14 @@ fn team_command_and_conductor_rules() {
     assert_eq!(strip_team_command("/teamwork"), None);
     let members = team();
     assert!(conductor_for(&members, &["sam".into()]).is_none());
+    assert!(conductor_for(&members, &["sam".into(), "kai".into()]).is_none());
     assert_eq!(
-        conductor_for(&members, &["sam".into(), "kai".into()]).map(|m| m.id.as_str()),
+        conductor_for(&members, &["sam".into(), "kai".into(), "alex".into()])
+            .map(|m| m.id.as_str()),
+        Some("alex")
+    );
+    assert_eq!(
+        conductor_for(&members, &["alex".into()]).map(|m| m.id.as_str()),
         Some("alex")
     );
 }
@@ -85,6 +456,7 @@ fn conductor_tail_is_parsed_and_hidden() {
     let none = ConductorDecision {
         verdict: Verdict::Continue,
         next_speakers: vec![],
+        confidence: Confidence::FULL,
     };
     assert_eq!(
         next_round_speakers(&none, &members, &["a".into(), "b".into(), "c".into()]),
@@ -121,6 +493,37 @@ fn visible_stream_never_shows_a_pass_or_the_tail() {
     let mut unicode = VisibleStream::default();
     let shown = unicode.push("Café ☕") + &unicode.finish();
     assert_eq!(shown, "Café ☕");
+}
+
+#[test]
+fn a_later_round_stays_with_the_helpers_in_that_chat() {
+    let members = team();
+    let room = TeamRoom::group(["morgan", "priya"]);
+    let chat: Vec<TeamMember> = chat_members(&members, &room).into_iter().cloned().collect();
+    let ids: Vec<&str> = chat.iter().map(|member| member.id.as_str()).collect();
+    assert_eq!(ids, ["alex", "morgan", "priya"]);
+    let decision = ConductorDecision {
+        verdict: Verdict::Continue,
+        next_speakers: vec!["sam".into(), "@kai".into()],
+        confidence: Confidence::FULL,
+    };
+    let next = next_round_speakers(
+        &decision,
+        &chat,
+        &["morgan".into(), "priya".into(), "alex".into()],
+    );
+    assert_eq!(next, ["morgan", "priya"]);
+    let lead = chat.iter().find(|member| member.conductor).expect("lead");
+    let told = member_instruction(lead, &chat, true, "Ann");
+    assert!(told.contains("@morgan"), "{told}");
+    assert!(told.contains("@priya"), "{told}");
+    assert!(!told.contains("@sam"), "{told}");
+    assert!(!told.contains("@kai"), "{told}");
+    let direct: Vec<&str> = chat_members(&members, &TeamRoom::direct("sam"))
+        .iter()
+        .map(|member| member.id.as_str())
+        .collect();
+    assert_eq!(direct, ["sam"]);
 }
 
 #[test]
@@ -163,6 +566,8 @@ fn roster_and_activity_track_changes() {
     let mut activity = TeamActivity::new(1, &members, &["sam".into(), "kai".into()]);
     activity.set("sam", SpeakerState::Speaking);
     assert_eq!(activity.status, "Sam is answering…");
+    activity.set("kai", SpeakerState::Passed);
+    assert_eq!(activity.status, "Kai: Nothing to add · 1 still answering");
     activity.set("sam", SpeakerState::Done);
     activity.finish("Your team is done");
     assert!(activity.finished);

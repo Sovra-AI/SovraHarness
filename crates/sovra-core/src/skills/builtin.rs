@@ -33,7 +33,7 @@ impl Skill {
             "agents" => "How Sovra picks the best helper",
             "development" => "Test Sovra while developing",
             "settings" => "Appearance, text size & settings",
-            "team" => "Ask your whole AI team together",
+            "team" => "Chat with one helper or a chosen group",
             "artifacts" => "Open your saved work library",
             "decisions" => "Keep a company decision and its reasons",
             "plugins" => "Add ready-made plugins and tools",
@@ -154,8 +154,8 @@ impl Skill {
                 "/settings ".to_owned(),
             ),
             "team" => (
-                "Switches chat so your whole team of AI helpers answers together.".to_owned(),
-                "/team ".to_owned(),
+                "Research tea and coffee, sort out sleep, write a letter, plan a budget, pack for a trip, and check a contract. A question can ask one helper or several, and the same helper can answer two parts at once.".to_owned(),
+                "/team Research the history of tea. Research the science of coffee. I can't sleep and I feel stress. Write a letter. Plan the budget. Pack for the trip. Check this contract for a scam.".to_owned(),
             ),
             "decisions" => (
                 "Record why we chose a supplier, the quoted evidence, who accepted it and when to review it.".to_owned(),
@@ -465,8 +465,8 @@ pub fn builtin_skills() -> Vec<Skill> {
         ),
         action(
             "team",
-            "Ask your team",
-            "Switch this conversation to team mode and prepare your request.",
+            "Chat with one helper or a chosen group",
+            "Opens a new chat with your helpers and leaves this conversation as it is. A question can ask one helper or several, and the same helper can answer two parts at once. Ask everyone when you want the whole group.",
             SkillAction::TeamChat,
             &["ask-team"],
         ),

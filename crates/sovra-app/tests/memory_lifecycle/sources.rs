@@ -469,6 +469,7 @@ fn team_reply_evidence_keeps_member_and_run_identity_across_restart() {
             session_id: "attributed-team".into(),
             prompt: "@priya Say a fictional greeting.".into(),
             context: ConversationContext::default(),
+            room: sovra_core::teams::TeamRoom::all_helpers(),
         }));
         let Event::AgUi {
             event: sovra_core::AgUiEvent::RunFinished { run_id },
@@ -568,6 +569,7 @@ fn pausing_then_resuming_during_a_reply_does_not_revive_its_capture() {
                 session_id: session.into(),
                 prompt: "@priya Say a fictional greeting.".into(),
                 context: ConversationContext::default(),
+                room: sovra_core::teams::TeamRoom::all_helpers(),
             })
         } else {
             Command::RunPrompt {
@@ -628,7 +630,6 @@ fn replies_completed_in_other_conversations_survive_real_runtime_and_disk_reopen
         let mut workspace =
             sovra_core::WorkspaceState::new_at(namespace, sovra_core::Timestamp(100));
         let original = workspace.session_id.clone();
-        workspace.team_mode = team;
         let prompt = if team {
             "@priya Give a fictional greeting."
         } else {
@@ -708,7 +709,6 @@ fn linked_helper_recall_survives_restart_and_ancestor_withdrawal_removes_only_it
         let fixture = assistant_fixture();
         let mut driver = fixture.start();
         let mut workspace = sovra_core::WorkspaceState::new_at(89, sovra_core::Timestamp(100));
-        workspace.team_mode = team;
         let prompt = if team {
             "@priya Say hello."
         } else {

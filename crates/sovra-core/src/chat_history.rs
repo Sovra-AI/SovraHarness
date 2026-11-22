@@ -302,6 +302,9 @@ pub struct ChatThread {
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
     pub deleted_at: Option<Timestamp>,
+    /// Who answers in this chat. Missing on older saved chats, which stay ordinary.
+    #[serde(default)]
+    pub room: crate::teams::TeamRoom,
 }
 
 impl ChatThread {
@@ -318,6 +321,7 @@ impl ChatThread {
             last_message_preview: String::new(),
             messages: Vec::new(),
             deleted_at: None,
+            room: crate::teams::TeamRoom::ordinary(),
         }
     }
 
@@ -339,6 +343,7 @@ impl ChatThread {
             last_message_preview: String::new(),
             messages: Vec::new(),
             deleted_at: None,
+            room: crate::teams::TeamRoom::ordinary(),
         }
     }
 
@@ -352,6 +357,7 @@ impl ChatThread {
         self.messages.is_empty()
             && (self.title == NEW_CHAT_TITLE || self.title.trim().is_empty())
             && self.kind == ConversationKind::Chat
+            && self.room.is_ordinary()
     }
 
     /// Returns true if the thread matches the active bucket (`Chats` vs `Scheduled`) and search query.

@@ -3,7 +3,7 @@
 //! `SUBAGENT_STARTED`, `TEXT_MESSAGE_*`, `SUBAGENT_FINISHED`, `RUN_FINISHED`).
 //! The rules — who speaks, passes, verdicts — are pure in `sovra_core::teams`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use adk_agent::LlmAgentBuilder;
@@ -13,8 +13,8 @@ use adk_session::{CreateRequest, InMemorySessionService, SessionService};
 use async_channel::Sender;
 use futures::StreamExt as _;
 use sovra_core::teams::{
-    self, MAX_REPLIES_PER_TURN, MAX_ROUNDS, SpeakerState, TeamActivity, TeamMember, TranscriptLine,
-    Verdict, VisibleStream,
+    self, MAX_REPLIES_PER_TURN, MAX_ROUNDS, SpeakerState, TeamActivity, TeamMember, TeamRoom,
+    TranscriptLine, Verdict, VisibleStream,
 };
 use sovra_core::{AgUiEvent, Event, LiveActivity, Speaker, SubagentOutcome};
 
@@ -29,6 +29,21 @@ pub struct TeamTurn {
     pub prompt: String,
     pub history: Vec<TranscriptLine>,
     pub members: Vec<TeamMember>,
+    /// Helpers in this chat. Routing never looks outside it.
+    pub room: TeamRoom,
+}
+
+fn signatures_of(replies: &[Reply]) -> Vec<BTreeSet<String>> {
+    replies
+        .iter()
+        .filter_map(|reply| match reply {
+            Reply::Spoke(text) => {
+                let signature = teams::round_signature(text);
+                (!signature.is_empty()).then_some(signature)
+            }
+            Reply::Passed | Reply::Failed => None,
+        })
+        .collect()
 }
 
 /// How one member's reply ended.
@@ -54,6 +69,8 @@ struct TeamRunState<'a> {
     history: Vec<TranscriptLine>,
     replies: usize,
     activity_id: String,
+    /// Switched-on helpers in this chat, including the lead when they moderate.
+    chat: Vec<TeamMember>,
 }
 
 impl AdkHarness {
@@ -63,7 +80,8 @@ impl AdkHarness {
     /// as it stood when the round began, and their replies stream at the same time.
     /// The Conductor then reads every reply and decides whether another round helps.
     pub async fn run_team(&self, turn: &TeamTurn, events: &Sender<Event>) {
-        let speakers = teams::first_round_speakers(&turn.prompt, &turn.members);
+        let speakers =
+            teams::route_speakers(&turn.prompt, &turn.members, &turn.room, &turn.history);
         let conductor = teams::conductor_for(&turn.members, &speakers).cloned();
         // Older callers included the current user line in history. Keep it only
         // in the explicit current-request section, where history limits cannot clip it.
@@ -75,6 +93,11 @@ impl AdkHarness {
         }) {
             history.pop();
         }
+        let chat: Vec<TeamMember> = teams::chat_members(&turn.members, &turn.room)
+            .into_iter()
+            .cloned()
+            .collect();
+        let chat_ids: HashSet<String> = chat.iter().map(|member| member.id.clone()).collect();
         let mut state = TeamRunState {
             harness: self,
             turn,
@@ -83,6 +106,7 @@ impl AdkHarness {
             history,
             replies: 0,
             activity_id: format!("{}-team", turn.run_id),
+            chat,
         };
         if let Some(lead) = &conductor {
             state
@@ -110,11 +134,17 @@ impl AdkHarness {
         let mut speakers = speakers;
         let mut spoke_any = false;
         let mut closing = "Your team is done";
+        let mut previous_round: Vec<BTreeSet<String>> = Vec::new();
         for round in 1..=MAX_ROUNDS {
             state.activity_mut().round = round;
             let members: Vec<&TeamMember> = speakers
                 .iter()
-                .filter_map(|id| turn.members.iter().find(|m| m.id == *id))
+                .filter(|id| chat_ids.contains(id.as_str()))
+                .filter_map(|id| {
+                    turn.members
+                        .iter()
+                        .find(|member| member.id == *id && !member.conductor)
+                })
                 .collect();
             let Some(replies) = state.speak_together(&members, round, moderated).await else {
                 return;
@@ -123,26 +153,47 @@ impl AdkHarness {
             let Some(lead) = &conductor else {
                 break;
             };
+            // The lead already spoke in this list only when they are not the
+            // conductor flag; speaking them again here would double the reply.
+            let lead_only = [lead];
             let Some(reply) = state
-                .speak_together(&[lead], round, true)
+                .speak_together(&lead_only, round, true)
                 .await
                 .and_then(|mut replies| replies.pop())
             else {
                 return;
             };
-            let decision = match reply {
+            let (lead_text, decision) = match reply {
                 Reply::Spoke(text) => {
                     spoke_any = true;
-                    teams::parse_conductor_reply(&text).1
+                    let parsed = teams::parse_conductor_reply(&text);
+                    (Some(text), parsed.1)
                 }
                 Reply::Passed | Reply::Failed => break,
             };
+            let mut current_round = signatures_of(&replies);
+            if let Some(text) = lead_text.as_deref() {
+                let signature = teams::round_signature(text);
+                if !signature.is_empty() {
+                    current_round.push(signature);
+                }
+            }
             match decision.verdict {
                 Verdict::Continue if round < MAX_ROUNDS && state.replies < MAX_REPLIES_PER_TURN => {
-                    speakers = teams::next_round_speakers(&decision, &turn.members, &speakers);
+                    // A repeating or thin continue is a hand-back, so the next
+                    // member round does not start. Round 1 is allowed to go on.
+                    if teams::continue_hands_back(round, &decision, &previous_round, &current_round)
+                    {
+                        break;
+                    }
+                    previous_round = current_round;
+                    // Later rounds stay inside this chat. Naming someone else
+                    // does not bring them in; the lead still only moderates.
+                    speakers = teams::next_round_speakers(&decision, &state.chat, &speakers);
+                    let chat = state.chat.clone();
                     let activity = state.activity_mut();
-                    activity.queue(&turn.members, &speakers);
-                    activity.queue(&turn.members, std::slice::from_ref(&lead.id));
+                    activity.queue(&chat, &speakers);
+                    activity.queue(&chat, std::slice::from_ref(&lead.id));
                 }
                 Verdict::AskUser => {
                     closing = "Your team has a question for you";
@@ -299,8 +350,7 @@ impl TeamRunState<'_> {
         moderated: bool,
     ) -> Option<Reply> {
         let member = slot.member;
-        let instruction =
-            teams::member_instruction(member, &self.turn.members, moderated, "the user");
+        let instruction = teams::member_instruction(member, &self.chat, moderated, "the user");
         let prompt = teams::member_prompt(history, &self.turn.prompt, round, member.conductor);
         let mut visible = VisibleStream::default();
         let outcome = self
@@ -502,7 +552,7 @@ mod tests {
     use std::sync::Arc;
 
     use adk_core::{Content, Llm, LlmRequest, LlmResponse, LlmResponseStream};
-    use sovra_core::teams::{SpeakerState, default_team};
+    use sovra_core::teams::{SpeakerState, TeamRoom, default_team};
     use sovra_core::{AgUiEvent, AgentConfig, Event, SubagentOutcome};
 
     use super::TeamTurn;
@@ -548,10 +598,23 @@ mod tests {
     }
 
     fn run(prompt: &str) -> Vec<AgUiEvent> {
+        run_with(
+            prompt,
+            default_team(),
+            TeamRoom::all_helpers(),
+            Arc::new(TeamLlm),
+        )
+    }
+
+    fn run_with(
+        prompt: &str,
+        members: Vec<sovra_core::teams::TeamMember>,
+        room: TeamRoom,
+        llm: Arc<dyn Llm>,
+    ) -> Vec<AgUiEvent> {
         futures::executor::block_on(async {
-            let harness =
-                AdkHarness::with_llm_and_tools(&AgentConfig::default(), Arc::new(TeamLlm), vec![])
-                    .expect("harness");
+            let harness = AdkHarness::with_llm_and_tools(&AgentConfig::default(), llm, vec![])
+                .expect("harness");
             let (tx, rx) = async_channel::unbounded();
             let turn = TeamTurn {
                 session_id: "chat".into(),
@@ -562,7 +625,8 @@ mod tests {
                     speaker: "User".into(),
                     text: prompt.into(),
                 }],
-                members: default_team(),
+                members,
+                room,
             };
             harness.run_team(&turn, &tx).await;
             drop(tx);
@@ -680,6 +744,251 @@ mod tests {
             })
             .collect();
         assert_eq!(started, ["jamie"]);
+        assert!(matches!(events.last(), Some(AgUiEvent::RunFinished { .. })));
+    }
+
+    #[test]
+    fn a_complex_question_asks_many_helpers_and_one_helper_twice() {
+        let example = sovra_core::skills::builtin_skills()
+            .into_iter()
+            .find(|skill| skill.name == "team")
+            .expect("team skill")
+            .friendly_card_copy()
+            .sample_draft;
+        let prompt = sovra_core::teams::strip_team_command(&example)
+            .expect("the skills example asks the team");
+        let events = run_with(
+            prompt,
+            default_team(),
+            TeamRoom::ordinary(),
+            Arc::new(TeamLlm),
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AgUiEvent::RunError { .. })),
+            "{events:?}"
+        );
+        let first_finish = events
+            .iter()
+            .position(|event| matches!(event, AgUiEvent::SubagentFinished { .. }))
+            .expect("helpers finish");
+        let side_by_side = started_names(&events[..first_finish]);
+        assert_eq!(
+            side_by_side,
+            ["priya", "priya", "sam", "jamie", "morgan", "robin", "kai"],
+            "the jobs answer together, with Priya on two of them"
+        );
+        let priya_runs: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                AgUiEvent::SubagentStarted {
+                    name,
+                    subagent_run_id,
+                    ..
+                } if name == "priya" => Some(subagent_run_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(priya_runs.len(), 2);
+        assert_ne!(priya_runs[0], priya_runs[1]);
+        let two_priyas = events.iter().any(|event| {
+            matches!(event, AgUiEvent::ActivitySnapshot {
+                activity: sovra_core::LiveActivity::Team(card), ..
+            } if card.speakers.iter().filter(|row| {
+                row.member_id == "priya" && row.state == SpeakerState::Speaking
+            }).count() == 2)
+        });
+        assert!(two_priyas, "both of Priya's jobs show as answering");
+        let named_pass = events.iter().any(|event| {
+            matches!(event, AgUiEvent::ActivitySnapshot {
+                activity: sovra_core::LiveActivity::Team(card), ..
+            } if card.status.contains("Kai: Nothing to add"))
+        });
+        assert!(named_pass, "a pass is shown by name as nothing to add");
+        assert_eq!(
+            started_names(&events),
+            [
+                "priya", "priya", "sam", "jamie", "morgan", "robin", "kai", "alex"
+            ]
+        );
+        let visible: String = events
+            .iter()
+            .filter_map(|event| match event {
+                AgUiEvent::TextMessageContent { delta, .. } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(!visible.contains("<pass"), "{visible}");
+        assert!(!visible.contains("[[CONDUCTOR:"), "{visible}");
+        assert!(matches!(events.last(), Some(AgUiEvent::RunFinished { .. })));
+    }
+
+    #[test]
+    fn an_ordinary_group_question_asks_one_helper_and_not_the_lead() {
+        let events = run("hello");
+        let started = started_names(&events);
+        assert_eq!(started, ["morgan"]);
+        assert!(matches!(events.last(), Some(AgUiEvent::RunFinished { .. })));
+    }
+
+    /// Same sentence every time, and a continue that names Morgan again.
+    struct RepeatingLlm;
+
+    #[async_trait::async_trait]
+    impl Llm for RepeatingLlm {
+        fn name(&self) -> &'static str {
+            "team-repeat"
+        }
+
+        async fn generate_content(
+            &self,
+            request: LlmRequest,
+            _stream: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            let seen = format!("{request:?}");
+            let text = if seen.contains("MODERATOR PROTOCOL") {
+                "Same summary for the room. [[CONDUCTOR: {\"verdict\":\"CONTINUE\",\"next_speakers\":[\"morgan\"],\"confidence\":0.9}]]"
+            } else {
+                "The garden needs water every morning."
+            };
+            let responses = vec![Ok(LlmResponse {
+                content: Some(Content::new("model").with_text(text)),
+                partial: true,
+                ..LlmResponse::default()
+            })];
+            Ok(Box::pin(futures::stream::iter(responses)))
+        }
+    }
+
+    fn started_names(events: &[AgUiEvent]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                AgUiEvent::SubagentStarted { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_repeating_continue_finishes_the_round_and_does_not_start_another() {
+        let keep = ["morgan", "priya", "sam", "alex"];
+        let members = default_team()
+            .into_iter()
+            .filter(|member| keep.contains(&member.id.as_str()))
+            .collect();
+        let events = run_with(
+            "What does everyone think?",
+            members,
+            TeamRoom::all_helpers(),
+            Arc::new(RepeatingLlm),
+        );
+        let started = started_names(&events);
+        let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+        for name in started {
+            *counts.entry(name).or_default() += 1;
+        }
+        assert_eq!(counts.get("morgan").copied(), Some(2));
+        assert!(counts.contains_key("alex"));
+        assert!(
+            counts.values().all(|count| *count < 3),
+            "a third member round must not start: {counts:?}"
+        );
+        let visible: String = events
+            .iter()
+            .filter_map(|event| match event {
+                AgUiEvent::TextMessageContent { delta, .. } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(!visible.contains("<pass"), "{visible}");
+        assert!(!visible.contains("[[CONDUCTOR:"), "{visible}");
+        assert!(matches!(events.last(), Some(AgUiEvent::RunFinished { .. })));
+    }
+
+    /// Continues by naming Sam, who is on the roster but not in this chat.
+    struct OutsiderLlm {
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Llm for OutsiderLlm {
+        fn name(&self) -> &'static str {
+            "team-outsider"
+        }
+
+        async fn generate_content(
+            &self,
+            request: LlmRequest,
+            _stream: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            let seen = format!("{request:?}");
+            self.seen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(seen.clone());
+            let text = if seen.contains("MODERATOR PROTOCOL") {
+                "Here is a fresh summary for the room. [[CONDUCTOR: {\"verdict\":\"CONTINUE\",\"next_speakers\":[\"sam\"],\"confidence\":0.9}]]"
+            } else {
+                "The garden needs water every morning."
+            };
+            let responses = vec![Ok(LlmResponse {
+                content: Some(Content::new("model").with_text(text)),
+                partial: true,
+                ..LlmResponse::default()
+            })];
+            Ok(Box::pin(futures::stream::iter(responses)))
+        }
+    }
+
+    #[test]
+    fn a_chosen_group_continue_does_not_call_someone_outside_it() {
+        let llm = Arc::new(OutsiderLlm {
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let events = run_with(
+            "What does everyone think?",
+            default_team(),
+            TeamRoom::group(["morgan", "priya"]),
+            llm.clone(),
+        );
+        let started = started_names(&events);
+        assert!(
+            !started.contains(&"sam"),
+            "Sam is not in this chat: {started:?}"
+        );
+        assert_eq!(
+            started.iter().filter(|name| **name == "morgan").count(),
+            2,
+            "the continue must start another round inside the chat: {started:?}"
+        );
+        assert_eq!(
+            started.iter().filter(|name| **name == "priya").count(),
+            2,
+            "{started:?}"
+        );
+        assert!(started.contains(&"alex"), "{started:?}");
+        assert!(
+            started
+                .iter()
+                .all(|name| matches!(*name, "morgan" | "priya" | "alex")),
+            "{started:?}"
+        );
+        let seen = llm
+            .seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let moderator: Vec<&String> = seen
+            .iter()
+            .filter(|text| text.contains("MODERATOR PROTOCOL"))
+            .collect();
+        assert!(!moderator.is_empty(), "the lead moderated the turn");
+        for text in moderator {
+            assert!(text.contains("@morgan"), "{text}");
+            assert!(text.contains("@priya"), "{text}");
+            assert!(!text.contains("@sam"), "{text}");
+        }
         assert!(matches!(events.last(), Some(AgUiEvent::RunFinished { .. })));
     }
 }

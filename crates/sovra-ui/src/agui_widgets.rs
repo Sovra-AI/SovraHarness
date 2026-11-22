@@ -18,6 +18,23 @@ use sovra_core::{AgUiWidget, BuildStep, BuildStepState, ClarifyChip};
 use crate::design::{self, FitsPane as _, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
+/// Agents write Markdown everywhere, so text they put in a card renders the same
+/// way as the reply above it instead of showing raw `**` and list markers.
+/// It inherits the caller's text role and grows with its card rather than scrolling.
+pub(crate) fn agent_markdown(
+    id: impl Into<gpui_kit::ElementId>,
+    text: &str,
+) -> gpui_kit::component::text::TextView {
+    gpui_kit::component::text::TextView::markdown(id, text.to_owned())
+        .selectable(true)
+        .scrollable(false)
+}
+
+/// Screen readers should hear the words, not the Markdown punctuation around them.
+pub(crate) fn spoken_markdown(text: &str) -> String {
+    text.replace(['*', '`'], "")
+}
+
 pub(crate) fn render_agui_widget(
     widget: &AgUiWidget,
     index: usize,
@@ -432,7 +449,7 @@ fn dock_lane(
 ) -> impl IntoElement + use<> {
     use sovra_core::teams::SpeakerState;
     let t = design::tokens(cx);
-    let chips = members.iter().map(|row| {
+    let chips = members.iter().enumerate().map(|(index, row)| {
         let state = match row.state {
             SpeakerState::Waiting => "waiting",
             SpeakerState::Speaking => "answering",
@@ -441,11 +458,20 @@ fn dock_lane(
             SpeakerState::Failed => "couldn't answer",
         };
         let detail = row.doing.as_deref().unwrap_or(state);
+        // One helper can answer two jobs at once, so the second chip needs
+        // its own id. A single chip keeps the id the live-board test looks up.
+        let repeated = members
+            .iter()
+            .filter(|other| other.member_id == row.member_id)
+            .count()
+            > 1;
+        let chip_id = if repeated {
+            format!("team-dock-{lane_id}-{index}-{}", row.member_id)
+        } else {
+            format!("team-dock-{lane_id}-{}", row.member_id)
+        };
         h_flex()
-            .id(gpui_kit::SharedString::from(format!(
-                "team-dock-{lane_id}-{}",
-                row.member_id
-            )))
+            .id(gpui_kit::SharedString::from(chip_id))
             .test_support()
             .aria_label(gpui_kit::SharedString::from(format!(
                 "{}: {detail}",
@@ -521,7 +547,8 @@ fn team_lane(
     );
     let cards: Vec<gpui_kit::AnyElement> = members
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(index, row)| {
             let (state, colour) = match row.state {
                 SpeakerState::Waiting => ("Waiting", muted),
                 SpeakerState::Speaking => ("Answering…", primary),
@@ -529,51 +556,55 @@ fn team_lane(
                 SpeakerState::Passed => ("Nothing to add", muted),
                 SpeakerState::Failed => ("Couldn't answer", danger),
             };
-            let mut card = kanban_card(
-                gpui_kit::SharedString::from(format!(
-                    "team-member-{lane_id}-{board}-{}",
-                    row.member_id
-                )),
-                cx,
-            )
-            .aria_label(gpui_kit::SharedString::from(format!(
-                "{}, {}: {state}",
-                row.name, row.role
-            )))
-            .child(
-                h_flex()
-                    .gap(t.space.compact)
-                    .items_center()
-                    .min_w_0()
-                    .child(crate::chat_view::member_avatar(
-                        &row.icon,
-                        t.layout.icon_medium,
-                        cx,
-                    ))
-                    .child(
-                        v_flex()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .sovra_text(TextRole::Caption, cx)
-                                    .text_ellipsis()
-                                    .child(row.name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .sovra_text(TextRole::Caption, cx)
-                                    .text_color(t.text_secondary)
-                                    .text_ellipsis()
-                                    .child(row.role.clone()),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .sovra_text(TextRole::Caption, cx)
-                    .text_color(colour)
-                    .child(state),
-            );
+            let repeated = members
+                .iter()
+                .filter(|other| other.member_id == row.member_id)
+                .count()
+                > 1;
+            let card_id = if repeated {
+                format!("team-member-{lane_id}-{board}-{index}-{}", row.member_id)
+            } else {
+                format!("team-member-{lane_id}-{board}-{}", row.member_id)
+            };
+            let mut card = kanban_card(gpui_kit::SharedString::from(card_id), cx)
+                .aria_label(gpui_kit::SharedString::from(format!(
+                    "{}, {}: {state}",
+                    row.name, row.role
+                )))
+                .child(
+                    h_flex()
+                        .gap(t.space.compact)
+                        .items_center()
+                        .min_w_0()
+                        .child(crate::chat_view::member_avatar(
+                            &row.icon,
+                            t.layout.icon_medium,
+                            cx,
+                        ))
+                        .child(
+                            v_flex()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .sovra_text(TextRole::Caption, cx)
+                                        .text_ellipsis()
+                                        .child(row.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .sovra_text(TextRole::Caption, cx)
+                                        .text_color(t.text_secondary)
+                                        .text_ellipsis()
+                                        .child(row.role.clone()),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(colour)
+                        .child(state),
+                );
             if let Some(doing) = &row.doing {
                 card = card.child(
                     div()
@@ -657,11 +688,12 @@ pub(crate) fn render_memory_recall_card(
             } else {
                 item.preview.clone()
             };
+            let spoken = spoken_markdown(&title);
             let open_label = format!("Open saved source {}", number + 1);
             h_flex()
                 .id(("memory-recall-row", message_index * 10 + number))
                 .test_support()
-                .aria_label(title.clone())
+                .aria_label(spoken.clone())
                 .w_full()
                 .min_w_0()
                 .flex_wrap()
@@ -677,11 +709,16 @@ pub(crate) fn render_memory_recall_card(
                     div()
                         .id(("memory-recall-preview", message_index * 10 + number))
                         .test_support()
-                        .aria_label(title.clone())
+                        .aria_label(spoken)
                         .flex_1()
                         .min_w_0()
                         .sovra_text(TextRole::Caption, cx)
-                        .child(title),
+                        .child(agent_markdown(
+                            gpui_kit::SharedString::from(format!(
+                                "memory-recall-text-{message_index}-{number}"
+                            )),
+                            &title,
+                        )),
                 )
                 .child(
                     design::button(
@@ -940,7 +977,10 @@ fn render_clarify_chips(
             div()
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
-                .child(question.to_owned()),
+                .child(agent_markdown(
+                    ("agui-clarify-question", widget_idx),
+                    question,
+                )),
         )
         .child(
             h_flex()
@@ -996,6 +1036,9 @@ fn render_surface_card(
             div()
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
-                .child(summary.to_owned()),
+                .child(agent_markdown(
+                    gpui_kit::SharedString::from(format!("agui-surface-summary-{surface_id}")),
+                    summary,
+                )),
         )
 }

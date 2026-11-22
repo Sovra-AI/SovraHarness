@@ -846,7 +846,7 @@ impl Shell {
             &team_view,
             window,
             |shell, _, ask: &crate::team_view::AskTeam, window, cx| {
-                shell.ask_team(ask.member.as_deref(), window, cx);
+                shell.ask_team(ask, window, cx);
             },
         );
         Self {
@@ -1039,17 +1039,23 @@ impl Shell {
             .update(cx, |view, cx| view.start(draft, window, cx));
     }
 
-    /// "Ask my team" goes to Chat in team mode; "Ask Priya" pre-fills `@priya`.
+    /// Opens a separate chat for one helper, a chosen group, or every helper.
+    /// "Ask Priya" only pre-fills `@priya` and leaves the room alone.
     pub(crate) fn ask_team(
         &mut self,
-        member: Option<&str>,
+        ask: &crate::team_view::AskTeam,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.select_tab(NavTab::Chat, cx);
-        match member {
-            Some(id) => self.fill_composer_draft(&format!("@{id} "), window, cx),
-            None => self.state.team_mode = true,
+        if let Some(room) = &ask.room {
+            self.state.open_distinct_room(room.clone());
+        } else if let Some(id) = &ask.member {
+            self.fill_composer_draft(&format!("@{id} "), window, cx);
+        } else {
+            // A new helper chat. The conversation already open keeps its transcript.
+            self.state
+                .open_distinct_room(sovra_core::teams::TeamRoom::all_helpers());
         }
         self.composer_input
             .read(cx)
@@ -1293,8 +1299,8 @@ impl Shell {
                     return;
                 }
                 // An explicit procedure uses the skill-aware orchestrator even
-                // when the preceding conversation was in team mode.
-                self.state.team_mode = false;
+                // when this chat was with helpers.
+                self.state.set_room(sovra_core::teams::TeamRoom::ordinary());
             }
             Ok(None) => {}
             Err(error) => {

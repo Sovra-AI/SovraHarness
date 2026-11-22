@@ -205,6 +205,7 @@ fn indexed_knowledge_reaches_delegates_and_teams_and_revoked_grants_stop_reads()
             session_id: session.into(),
             prompt: prompt.clone(),
             context: ConversationContext::default(),
+            room: sovra_core::teams::TeamRoom::all_helpers(),
         }));
         let result = driver.wait(|event| matches!(event, Event::AgUi { session_id, event: sovra_core::AgUiEvent::RunFinished { .. } | sovra_core::AgUiEvent::RunError { .. } } if session_id == session));
         assert!(

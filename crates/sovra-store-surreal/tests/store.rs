@@ -863,6 +863,7 @@ async fn chat_threads_save_list_and_soft_delete() {
     thread1
         .messages
         .push(sovra_core::ChatMessage::user("m1", "Hello", "Just now"));
+    thread1.room = sovra_core::teams::TeamRoom::group(["priya", "morgan"]).with_ask_everyone(true);
     thread1.refresh_summary(Timestamp(2_000));
 
     let mut thread2 = sovra_core::ChatThread::new_scheduled(
@@ -900,6 +901,8 @@ async fn chat_threads_save_list_and_soft_delete() {
     assert_eq!(listed[0].kind, sovra_core::ConversationKind::Scheduled);
     assert_eq!(listed[1].id, "chat-1");
     assert_eq!(listed[1].messages.len(), 1);
+    assert_eq!(listed[1].room, thread1.room);
+    assert!(listed[0].room.is_ordinary());
 
     store
         .delete_chat_thread("chat-1", Timestamp(5_000))

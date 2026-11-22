@@ -83,7 +83,7 @@ impl Shell {
             return;
         };
         if skill.kind == SkillKind::Procedure {
-            self.state.team_mode = false;
+            self.state.set_room(sovra_core::teams::TeamRoom::ordinary());
         }
         let draft = format!("/{} {arguments}", skill.name);
         self.select_tab(NavTab::Chat, cx);
@@ -161,7 +161,14 @@ impl Shell {
             SkillAction::Knowledge => self.select_tab(NavTab::Knowledge, cx),
             SkillAction::Schedules => self.select_tab(NavTab::Schedules, cx),
             SkillAction::Agents => self.select_tab(NavTab::MyAis, cx),
-            SkillAction::TeamChat => self.ask_team(None, window, cx),
+            SkillAction::TeamChat => self.ask_team(
+                &crate::team_view::AskTeam {
+                    member: None,
+                    room: None,
+                },
+                window,
+                cx,
+            ),
             SkillAction::Artifacts => self.select_tab(NavTab::Artifacts, cx),
             SkillAction::Decisions => self.open_decisions(cx),
             SkillAction::Connections => self.select_tab(NavTab::Connections, cx),
@@ -571,7 +578,8 @@ for two";
         cx.update_window(window.into(), |_, window, cx| {
             draft(&shell, "/team compare two plans", window, cx);
             shell.update(cx, |shell, cx| shell.submit_composer(window, cx));
-            assert!(shell.read(cx).state.team_mode);
+            let room = &shell.read(cx).state.room;
+            assert!(room.is_group() && !room.ask_everyone());
             assert_eq!(
                 shell.read(cx).composer_input.read(cx).value().as_ref(),
                 "compare two plans"
@@ -579,7 +587,7 @@ for two";
             shell.update(cx, |shell, cx| shell.submit_composer(window, cx));
             draft(&shell, "/tab", window, cx);
             window.click(("skill-command", 0usize), cx);
-            assert!(!shell.read(cx).state.team_mode);
+            assert!(shell.read(cx).state.room.is_ordinary());
             assert_eq!(
                 shell.read(cx).composer_input.read(cx).value().as_ref(),
                 "/table "

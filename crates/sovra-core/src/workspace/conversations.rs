@@ -11,7 +11,7 @@ pub(super) struct ConversationRun {
     messages: Vec<ChatMessage>,
     queued: Vec<String>,
     generating: bool,
-    team_mode: bool,
+    room: crate::teams::TeamRoom,
     speakers: BTreeMap<String, Speaker>,
     awaiting_setup: Option<(String, String)>,
 }
@@ -21,7 +21,7 @@ impl ConversationRun {
         std::mem::swap(&mut self.messages, &mut workspace.messages);
         std::mem::swap(&mut self.queued, &mut workspace.queued_prompts);
         std::mem::swap(&mut self.generating, &mut workspace.is_generating);
-        std::mem::swap(&mut self.team_mode, &mut workspace.team_mode);
+        std::mem::swap(&mut self.room, &mut workspace.room);
         std::mem::swap(&mut self.speakers, &mut workspace.team_subagents);
         std::mem::swap(
             &mut self.awaiting_setup,
@@ -35,10 +35,7 @@ impl ConversationRun {
             self.messages.clear();
             self.speakers.clear();
         }
-        self.generating
-            || !self.queued.is_empty()
-            || self.awaiting_setup.is_some()
-            || self.team_mode
+        self.generating || !self.queued.is_empty() || self.awaiting_setup.is_some()
     }
 }
 
@@ -95,12 +92,17 @@ impl WorkspaceState {
     }
 
     pub(super) fn focus_conversation(&mut self, thread: &ChatThread) {
+        let parked = self.background_conversations.contains_key(&thread.id);
         let mut run = self
             .background_conversations
             .remove(&thread.id)
             .unwrap_or_default();
         if run.messages.is_empty() {
             run.messages.clone_from(&thread.messages);
+        }
+        // A parked run already holds the room for a turn that is still going.
+        if !parked {
+            run.room.clone_from(&thread.room);
         }
         run.swap(self);
         self.session_id.clone_from(&thread.id);
@@ -116,12 +118,16 @@ impl WorkspaceState {
                 .threads
                 .iter()
                 .find(|thread| thread.id == session && thread.is_active())?;
+            let parked = self.background_conversations.contains_key(session);
             let mut run = self
                 .background_conversations
                 .remove(session)
                 .unwrap_or_default();
             if run.messages.is_empty() {
                 run.messages.clone_from(&thread.messages);
+            }
+            if !parked {
+                run.room.clone_from(&thread.room);
             }
             let visible = std::mem::replace(&mut self.session_id, session.to_owned());
             run.swap(self);
@@ -148,6 +154,7 @@ impl WorkspaceState {
                 session_id: self.session_id.clone(),
                 prompt: prompt.to_owned(),
                 context: crate::ConversationContext::before_current_turn(&self.messages),
+                room: self.room.clone(),
             });
         }
         let context = Some(crate::ConversationContext::before_current_turn(

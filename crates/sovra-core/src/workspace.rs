@@ -472,8 +472,8 @@ pub struct WorkspaceState {
     pub microsoft: crate::microsoft::MicrosoftConnection,
     /// Terminal commands, approvals and saved rules, folded from [`Event::Terminal`].
     pub terminal: crate::terminal::TerminalState,
-    /// The composer sends prompts to the whole team instead of Sovra alone.
-    pub team_mode: bool,
+    /// Who answers in the open chat. Each conversation keeps its own.
+    pub room: crate::teams::TeamRoom,
     pub development: crate::development::DevelopmentState,
     pub remote_control: crate::remote_control::RemoteState,
     /// AG-UI `subagentRunId` → the member it belongs to, for attributing messages.
@@ -555,7 +555,7 @@ impl WorkspaceState {
             github: crate::github::GitHubConnection::default(),
             microsoft: crate::microsoft::MicrosoftConnection::default(),
             terminal: crate::terminal::TerminalState::default(),
-            team_mode: false,
+            room: crate::teams::TeamRoom::ordinary(),
             development: crate::development::DevelopmentState::default(),
             remote_control: crate::remote_control::RemoteState::default(),
             team_subagents: std::collections::BTreeMap::new(),
@@ -738,16 +738,85 @@ impl WorkspaceState {
 
     fn sync_active_thread(&mut self) {
         if let Some(thread) = self.threads.iter_mut().find(|t| t.id == self.session_id) {
+            thread.room.clone_from(&self.room);
             if thread.messages != self.messages {
                 thread.messages.clone_from(&self.messages);
                 thread.refresh_summary(thread.updated_at.max(self.observed_at));
             }
         } else {
             let mut thread = ChatThread::new(self.session_id.clone(), self.observed_at);
+            thread.room.clone_from(&self.room);
             thread.messages.clone_from(&self.messages);
             thread.refresh_summary(self.observed_at);
             self.threads.push(thread);
         }
+    }
+
+    /// Sets who answers this chat, and names an empty untitled chat after that room.
+    pub fn set_room(&mut self, room: crate::teams::TeamRoom) {
+        let previous = std::mem::replace(&mut self.room, room);
+        self.retitle_empty_thread(&previous);
+        self.sync_active_thread();
+    }
+
+    /// Turns ask-everyone on or off for the open group. Other chats are unchanged.
+    pub fn set_ask_everyone(&mut self, ask: bool) {
+        if self.room.is_group() {
+            let room = self.room.clone().with_ask_everyone(ask);
+            self.set_room(room);
+        }
+    }
+
+    fn retitle_empty_thread(&mut self, previous: &crate::teams::TeamRoom) {
+        let previous_title = crate::teams::room_title(previous, &self.team.members);
+        let next_title = crate::teams::room_title(&self.room, &self.team.members)
+            .unwrap_or_else(|| NEW_CHAT_TITLE.to_owned());
+        let session = self.session_id.clone();
+        let renamed = self.user_renamed_threads.contains(&session);
+        if let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == session) {
+            if !thread.messages.is_empty() || renamed {
+                return;
+            }
+            let placeholder = thread.title == NEW_CHAT_TITLE
+                || thread.title.trim().is_empty()
+                || previous_title.as_deref() == Some(thread.title.as_str());
+            if placeholder {
+                thread.title = next_title;
+            }
+        }
+    }
+
+    /// Opens `room` as its own chat.
+    ///
+    /// The open empty untitled ordinary draft becomes that chat, so the first
+    /// press does not leave two blanks. Every other start appends a new
+    /// conversation. An older chat with the same helpers stays where it is.
+    pub fn open_distinct_room(&mut self, room: crate::teams::TeamRoom) -> ChatThread {
+        let adopt = self.active_thread().is_some_and(|thread| {
+            thread.messages.is_empty()
+                && thread.room.is_ordinary()
+                && (thread.title == NEW_CHAT_TITLE || thread.title.trim().is_empty())
+        });
+        if !adopt {
+            self.open_another_chat();
+        }
+        self.set_room(room);
+        self.active_thread()
+            .cloned()
+            .expect("opening a chat leaves one selected")
+    }
+
+    /// A new chat that is never an existing draft. A one-helper chat must stay put.
+    fn open_another_chat(&mut self) -> ChatThread {
+        self.sync_active_thread();
+        self.park_conversation();
+        self.history_filter = ChatHistoryFilter::Chats;
+        self.active_tab = NavTab::Chat;
+        self.renaming_thread_id = None;
+        let thread = ChatThread::new(self.fresh_thread_id(), self.observed_at);
+        self.threads.push(thread.clone());
+        self.focus_conversation(&thread);
+        thread
     }
 
     /// Starts a fresh chat conversation thread (or focuses an existing empty draft).
@@ -1268,6 +1337,7 @@ impl WorkspaceState {
                     && !active.messages.is_empty()
                 {
                     self.messages.clone_from(&active.messages);
+                    self.room.clone_from(&active.room);
                 }
                 None
             }
@@ -1571,13 +1641,15 @@ impl WorkspaceState {
         }
     }
 
-    /// Whether `prompt` goes to the team: team mode, `/team …` or an `@member`.
-    /// Returns the prompt to send without the `/team` command.
+    /// Whether `prompt` goes to the helpers in this chat.
+    ///
+    /// A group or one-helper chat always does. An ordinary chat does only for
+    /// `/team` or an `@handle`. A plain name stays with Sovra.
     pub fn team_prompt<'a>(&self, prompt: &'a str) -> Option<&'a str> {
         if let Some(rest) = crate::teams::strip_team_command(prompt) {
             return Some(rest);
         }
-        (self.team_mode || crate::teams::mentions_member(prompt, &self.team.members))
+        (self.room.is_team_chat() || crate::teams::mentions_member(prompt, &self.team.members))
             .then_some(prompt)
     }
 
@@ -2634,6 +2706,196 @@ mod tests {
                 &crate::models::UiLanguage::default(),
             ),
             "Sovra"
+        );
+    }
+
+    #[test]
+    fn each_chat_keeps_its_helpers_across_switches_and_reopen() {
+        use crate::teams::{TeamEvent, TeamRoom, default_team, route_speakers};
+
+        let mut state = WorkspaceState::new_at(7, Timestamp(1_000));
+        state.team.apply(&TeamEvent::Loaded {
+            members: default_team(),
+        });
+        let ordinary = state.session_id.clone();
+        state.submit_prompt("Just chatting with Sovra");
+        state.observe_time(Timestamp(2_000));
+        let sam = state.open_distinct_room(TeamRoom::direct("sam"));
+        assert_eq!(sam.title, "Chat with Sam");
+        assert_eq!(sam.room, TeamRoom::direct("sam"));
+        assert_ne!(sam.id, ordinary);
+        state.observe_time(Timestamp(3_000));
+        let group = state.open_distinct_room(TeamRoom::group(["priya", "morgan"]));
+        assert_eq!(group.title, "Morgan and Priya");
+        assert!(!group.room.ask_everyone());
+        state.set_ask_everyone(true);
+        assert!(state.room.ask_everyone());
+        let asked = route_speakers("hello", &state.team.members, &state.room, &[]);
+        assert_eq!(asked, ["morgan", "priya", "alex"]);
+        state.set_ask_everyone(false);
+        assert_eq!(
+            route_speakers("hello", &state.team.members, &state.room, &[]),
+            ["morgan"]
+        );
+        assert!(state.select_thread(&sam.id));
+        assert_eq!(state.room, TeamRoom::direct("sam"));
+        assert!(state.select_thread(&ordinary));
+        assert!(state.room.is_ordinary());
+        assert!(state.team_prompt("Priya, hello").is_none());
+        assert_eq!(state.team_prompt("@priya hello"), Some("@priya hello"));
+        assert!(state.select_thread(&group.id));
+        assert!(!state.room.ask_everyone());
+        state.set_ask_everyone(true);
+
+        let saved = state.threads.clone();
+        let mut reopened = WorkspaceState::new_at(8, Timestamp(4_000));
+        reopened.apply_event(&Event::ChatHistoryLoaded { threads: saved });
+        assert!(reopened.select_thread(&sam.id));
+        assert_eq!(reopened.room, TeamRoom::direct("sam"));
+        assert!(reopened.select_thread(&group.id));
+        assert!(reopened.room.ask_everyone());
+        assert_eq!(
+            reopened.active_thread().expect("group").title,
+            "Morgan and Priya"
+        );
+        assert!(reopened.select_thread(&ordinary));
+        assert!(reopened.room.is_ordinary());
+        assert_eq!(
+            reopened
+                .messages
+                .first()
+                .map(|message| message.text.as_str()),
+            Some("Just chatting with Sovra")
+        );
+    }
+
+    #[test]
+    fn each_helpers_start_opens_another_chat() {
+        use crate::teams::{TeamEvent, TeamRoom, default_team};
+
+        let mut state = WorkspaceState::new_at(9, Timestamp(5_000));
+        state.team.apply(&TeamEvent::Loaded {
+            members: default_team(),
+        });
+        let ordinary = state.session_id.clone();
+        state.submit_prompt("Just chatting with Sovra");
+        let original_text: Vec<String> = state
+            .messages
+            .iter()
+            .map(|message| message.text.clone())
+            .collect();
+
+        let first = state.open_distinct_room(TeamRoom::all_helpers());
+        assert_ne!(first.id, ordinary);
+        assert_eq!(first.room, TeamRoom::all_helpers());
+        assert!(!first.room.ask_everyone());
+        assert!(state.select_thread(&ordinary));
+        assert!(state.room.is_ordinary());
+        let second = state.open_distinct_room(TeamRoom::all_helpers());
+        assert_ne!(second.id, first.id);
+        assert_ne!(second.id, ordinary);
+        assert_eq!(second.room, TeamRoom::all_helpers());
+        assert!(!second.room.ask_everyone());
+        assert_thread_text(&state, &ordinary, &original_text);
+        assert!(
+            state
+                .threads
+                .iter()
+                .find(|thread| thread.id == ordinary)
+                .expect("the chat that already had a message")
+                .room
+                .is_ordinary()
+        );
+
+        assert!(state.select_thread(&ordinary));
+        let sam_first = state.open_distinct_room(TeamRoom::direct("sam"));
+        assert_eq!(sam_first.messages.len(), 0);
+        assert_eq!(sam_first.room, TeamRoom::direct("sam"));
+        assert!(state.select_thread(&ordinary));
+        let sam_second = state.open_distinct_room(TeamRoom::direct("sam"));
+        assert_ne!(sam_second.id, sam_first.id);
+        assert_eq!(sam_second.room, TeamRoom::direct("sam"));
+        let kept_sam = state
+            .threads
+            .iter()
+            .find(|thread| thread.id == sam_first.id)
+            .expect("the first chat with Sam");
+        assert_eq!(kept_sam.messages.len(), 0);
+        assert_eq!(kept_sam.room, TeamRoom::direct("sam"));
+        assert_thread_text(&state, &ordinary, &original_text);
+
+        assert!(state.select_thread(&ordinary));
+        let group_first = state.open_distinct_room(TeamRoom::group(["priya", "morgan"]));
+        state.submit_prompt("Plan the garden");
+        assert!(state.select_thread(&ordinary));
+        let group_second = state.open_distinct_room(TeamRoom::group(["priya", "morgan"]));
+        assert_ne!(group_second.id, group_first.id);
+        assert_eq!(group_first.room, TeamRoom::group(["priya", "morgan"]));
+        assert_eq!(group_second.room, TeamRoom::group(["priya", "morgan"]));
+        assert!(!group_first.room.ask_everyone());
+        assert!(!group_second.room.ask_everyone());
+        let kept_group = state
+            .threads
+            .iter()
+            .find(|thread| thread.id == group_first.id)
+            .expect("the first chosen group");
+        assert_eq!(kept_group.room, TeamRoom::group(["priya", "morgan"]));
+        assert!(
+            kept_group
+                .messages
+                .iter()
+                .any(|message| message.text == "Plan the garden")
+        );
+        assert_thread_text(&state, &ordinary, &original_text);
+
+        let mut blank = WorkspaceState::new_at(11, Timestamp(9_000));
+        blank.team.apply(&TeamEvent::Loaded {
+            members: default_team(),
+        });
+        let draft = blank.session_id.clone();
+        assert_eq!(blank.messages.len(), 0);
+        assert!(blank.room.is_ordinary());
+        assert_eq!(
+            blank.active_thread().expect("the open draft").title,
+            NEW_CHAT_TITLE
+        );
+        let adopted = blank.open_distinct_room(TeamRoom::all_helpers());
+        assert_eq!(adopted.id, draft);
+        assert_eq!(adopted.room, TeamRoom::all_helpers());
+        assert!(!adopted.room.ask_everyone());
+        assert_eq!(adopted.messages.len(), 0);
+        blank.start_new_chat();
+        let later_ordinary = blank.session_id.clone();
+        assert_ne!(later_ordinary, draft);
+        blank.submit_prompt("A different chat");
+        let later = blank.open_distinct_room(TeamRoom::all_helpers());
+        assert_ne!(later.id, draft);
+        assert_ne!(later.id, later_ordinary);
+        assert_eq!(later.room, TeamRoom::all_helpers());
+        assert!(!later.room.ask_everyone());
+        assert_ne!(blank.session_id, draft);
+        let still = blank
+            .threads
+            .iter()
+            .find(|thread| thread.id == draft)
+            .expect("the adopted draft");
+        assert_eq!(still.room, TeamRoom::all_helpers());
+        assert_eq!(still.messages.len(), 0);
+    }
+
+    fn assert_thread_text(state: &WorkspaceState, id: &str, text: &[String]) {
+        let thread = state
+            .threads
+            .iter()
+            .find(|thread| thread.id == id)
+            .expect("conversation");
+        assert_eq!(
+            thread
+                .messages
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            text.iter().map(String::as_str).collect::<Vec<_>>()
         );
     }
 }

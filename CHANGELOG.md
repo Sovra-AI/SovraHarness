@@ -29,8 +29,22 @@ package version.
   computers into one pool for big jobs such as AI training. Only plugins on Sovra's
   own list can take this path, and Sovra still asks before running anything.
 
+- **Formatted text in chat cards.** The Saved details card, quick-reply questions
+  and other cards a helper adds now show bold text, lists and links like the
+  reply above them, instead of raw `**` marks.
+
 - **Skill pills in chat.** Pick any skill to add its name and icon to your draft.
   Press Send to use it. Messages sent with a skill show its pill in the conversation.
+
+- Team chats can be with Sovra, one helper, or a chosen group. A question can
+  ask one helper or several, and the same helper can answer two parts at the
+  same time. A stray word does not pull in an extra helper when someone else
+  is the stronger match. Ask everyone when you want the whole group. The lead
+  joins when several helpers speak, and stops when the round repeats, adds
+  little, or they are unsure. A later round stays with the helpers in that
+  chat. The helpers button, Chat with one helper, a chosen group, and Ask my
+  team each open a new chat, even when one with those helpers already exists,
+  and leave the conversation you were in alone.
 
 - **SovraHarness is a plugin.** Add `Sovra-AI/SovraHarness` from **Plugins → Add
   from GitHub**, or install `sovra-harness` in Claude Code, for skills that help

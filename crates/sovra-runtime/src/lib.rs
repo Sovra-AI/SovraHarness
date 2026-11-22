@@ -707,6 +707,7 @@ async fn serve(
                     session_id,
                     prompt,
                     context,
+                    ..
                 }) if connections.private_access(session_id) => {
                     worker
                         .record_user(session_id, prompt, context.current())
@@ -784,6 +785,7 @@ async fn serve(
                 session_id,
                 prompt,
                 context,
+                room,
             }) => {
                 let selected = match models.as_ref() {
                     Some(models) => match models.execution.read().await.clone() {
@@ -881,10 +883,13 @@ async fn serve(
                 let run = team.with_events(output).spawn_run(
                     &handle,
                     base,
-                    session_id.clone(),
-                    prompt,
-                    context.team_history(),
-                    timeout,
+                    teams::TeamRunRequest {
+                        session_id: session_id.clone(),
+                        prompt,
+                        history: context.team_history(),
+                        room,
+                        timeout,
+                    },
                 );
                 runs.insert(session_id, run);
             }

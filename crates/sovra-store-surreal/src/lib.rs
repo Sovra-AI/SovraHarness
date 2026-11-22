@@ -784,6 +784,7 @@ impl MemoryStore for SurrealStore {
     async fn save_chat_thread(&self, thread: &ChatThread) -> Result<(), MemoryError> {
         let messages_json = serde_json::to_string(&thread.messages)
             .map_err(|e| MemoryError::Backend(format!("serialize chat messages: {e}")))?;
+        let room_json = sovra_core::teams::room_to_json(&thread.room);
         let record_id = RecordId::new("chat_thread", entity_key(&thread.id));
         let row = ChatThreadRow {
             session_id: thread.id.clone(),
@@ -799,6 +800,7 @@ impl MemoryStore for SurrealStore {
             last_message_preview: thread.last_message_preview.clone(),
             messages_json,
             deleted_at: thread.deleted_at.map(Timestamp::millis),
+            room_json,
         };
         self.query(
             "UPSERT $record CONTENT $data;",
@@ -812,7 +814,7 @@ impl MemoryStore for SurrealStore {
         let rows: Vec<ChatThreadRow> = self
             .query(
                 "SELECT session_id, title, kind, schedule_id, pinned, created_at, updated_at, \
-                 last_message_preview, messages_json, deleted_at FROM chat_thread \
+                 last_message_preview, messages_json, deleted_at, room_json FROM chat_thread \
                  WHERE deleted_at IS NONE ORDER BY updated_at DESC LIMIT $limit;",
                 ("limit", i64::try_from(limit).unwrap_or(i64::MAX)),
             )
@@ -1044,6 +1046,7 @@ struct ChatThreadRow {
     last_message_preview: String,
     messages_json: String,
     deleted_at: Option<i64>,
+    room_json: Option<String>,
 }
 
 impl ChatThreadRow {
@@ -1065,6 +1068,7 @@ impl ChatThreadRow {
             last_message_preview: self.last_message_preview,
             messages,
             deleted_at: self.deleted_at.map(Timestamp),
+            room: sovra_core::teams::room_from_json(self.room_json.as_deref()),
         })
     }
 }

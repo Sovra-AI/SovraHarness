@@ -10,6 +10,12 @@ use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
+mod route;
+pub use route::{
+    Confidence, TeamRoom, chat_members, continue_hands_back, room_blurb, room_from_json,
+    room_title, room_to_json, round_signature, route_speakers,
+};
+
 /// Rounds a moderated team discussion may take before it must hand back to the user.
 /// `SovraSRX` allows 6; a desktop app on the user's own key keeps answers quick and cheap.
 pub const MAX_ROUNDS: u8 = 3;
@@ -19,8 +25,6 @@ pub const MAX_REPLIES_PER_TURN: usize = 8;
 pub const PASS_TOKEN: &str = "<pass/>";
 /// Marker that opens the Conductor's machine-readable verdict tail.
 pub const CONDUCTOR_TAIL: &str = "[[CONDUCTOR:";
-/// Members that speak when the user asks the whole team without naming anyone.
-const DEFAULT_SPEAKERS: usize = 3;
 
 /// One helper on the user's team.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +84,8 @@ pub enum TeamCommand {
         session_id: String,
         prompt: String,
         context: crate::ConversationContext,
+        /// Helpers in this chat. An ordinary room still honours `@handle`s.
+        room: TeamRoom,
     },
 }
 
@@ -393,82 +399,14 @@ fn has_mention(prompt: &str, id: &str) -> bool {
     })
 }
 
-fn has_word(haystack: &str, word: &str) -> bool {
-    haystack.match_indices(word).any(|(at, _)| {
-        let before = haystack[..at].chars().next_back();
-        let after = haystack[at + word.len()..].chars().next();
-        before.is_none_or(|c| !c.is_alphanumeric()) && after.is_none_or(|c| !c.is_alphanumeric())
-    })
-}
-
-/// Words that ask for everyone (`router.py::TEAM_TRIGGER_WORDS`).
-const EVERYONE_WORDS: [&str; 7] = [
-    "everyone",
-    "all of you",
-    "whole team",
-    "the team",
-    "round-table",
-    "round table",
-    "debate",
-];
-
-/// Who answers the first round, in speaking order (`router.py` priority order):
-/// `@mentions`, then names, then "everyone" words, then the members whose
-/// expertise best matches the prompt. The Conductor is handled separately.
-pub fn first_round_speakers(prompt: &str, members: &[TeamMember]) -> Vec<String> {
-    let lower = prompt.to_lowercase();
-    let candidates: Vec<&TeamMember> = members
-        .iter()
-        .filter(|m| m.active && !m.conductor)
-        .collect();
-    let named: Vec<String> = candidates
-        .iter()
-        .filter(|m| has_mention(prompt, &m.id))
-        .map(|m| m.id.clone())
-        .collect();
-    if !named.is_empty() {
-        return named;
-    }
-    let by_name: Vec<String> = candidates
-        .iter()
-        .filter(|m| has_word(&lower, &m.name.to_lowercase()))
-        .map(|m| m.id.clone())
-        .collect();
-    if !by_name.is_empty() {
-        return by_name;
-    }
-    if EVERYONE_WORDS.iter().any(|w| lower.contains(w)) {
-        return candidates.iter().map(|m| m.id.clone()).collect();
-    }
-    let mut scored: Vec<(usize, usize, &TeamMember)> = candidates
-        .iter()
-        .enumerate()
-        .map(|(order, m)| {
-            let score = m
-                .expertise
-                .iter()
-                .chain(std::iter::once(&m.role))
-                .filter(|topic| has_word(&lower, &topic.to_lowercase()))
-                .count();
-            (score, order, *m)
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    // Asking the team means a discussion: at least two voices, at most three.
-    let relevant = scored.iter().filter(|(score, ..)| *score > 0).count();
-    scored
-        .into_iter()
-        .take(relevant.clamp(2, DEFAULT_SPEAKERS))
-        .map(|(.., m)| m.id.clone())
-        .collect()
-}
-
-/// The roster's Conductor, when one is active and the turn has several speakers
-/// to moderate (`router.py`: a moderated chat is a group that includes the lead).
+/// The roster's lead, when that lead is already one of the speakers.
+///
+/// A one-helper turn does not grow a moderator. The router adds the lead only
+/// when several helpers were asked, or when the user addressed the lead.
 pub fn conductor_for<'a>(members: &'a [TeamMember], speakers: &[String]) -> Option<&'a TeamMember> {
-    (speakers.len() >= 2)
-        .then(|| members.iter().find(|m| m.active && m.conductor))
-        .flatten()
+    members.iter().find(|member| {
+        member.active && member.conductor && speakers.iter().any(|id| id == &member.id)
+    })
 }
 
 /// What the Conductor decided at the end of a round.
@@ -489,6 +427,19 @@ pub struct ConductorDecision {
     pub verdict: Verdict,
     #[serde(default)]
     pub next_speakers: Vec<String>,
+    /// How sure the lead is that another round would help. Omitted means sure.
+    #[serde(default = "Confidence::full")]
+    pub confidence: Confidence,
+}
+
+#[derive(Deserialize)]
+struct RawDecision {
+    verdict: Verdict,
+    #[serde(default)]
+    next_speakers: Vec<String>,
+    /// A non-number fails the whole tail, which ends the turn.
+    #[serde(default)]
+    confidence: Option<f64>,
 }
 
 /// Splits a Conductor reply into the text the user sees and its decision. A
@@ -497,6 +448,7 @@ pub fn parse_conductor_reply(reply: &str) -> (String, ConductorDecision) {
     let close = ConductorDecision {
         verdict: Verdict::YieldToUser,
         next_speakers: Vec::new(),
+        confidence: Confidence::FULL,
     };
     let Some(at) = reply.find(CONDUCTOR_TAIL) else {
         return (reply.trim().to_owned(), close);
@@ -506,7 +458,14 @@ pub fn parse_conductor_reply(reply: &str) -> (String, ConductorDecision) {
         .trim()
         .trim_end_matches(']')
         .trim();
-    let decision = serde_json::from_str(json).unwrap_or(close);
+    let decision =
+        serde_json::from_str::<RawDecision>(json).map_or(close, |raw| ConductorDecision {
+            verdict: raw.verdict,
+            next_speakers: raw.next_speakers,
+            confidence: raw
+                .confidence
+                .map_or(Confidence::FULL, Confidence::from_unit),
+        });
     (visible, decision)
 }
 
@@ -592,8 +551,9 @@ pub fn member_instruction(
              - If the team is done, write a short summary for {user_name} (at most 120 words): \
              the recommendation and the next steps.\n\
              - If you need one fact from {user_name}, ask exactly one short question.\n\
-             Then end your reply with this line and nothing after it:\n\
-             {CONDUCTOR_TAIL} {{\"verdict\":\"CONTINUE|YIELD_TO_USER|ASK_USER\",\"next_speakers\":[\"handle\"]}}]]"
+             Then end your reply with this line and nothing after it. confidence is how sure you \
+             are, from 0 to 1, that another round would help. Leave it out when you are sure.\n\
+             {CONDUCTOR_TAIL} {{\"verdict\":\"CONTINUE|YIELD_TO_USER|ASK_USER\",\"next_speakers\":[\"handle\"],\"confidence\":0.9}}]]"
         );
     }
     out
@@ -750,62 +710,96 @@ impl TeamActivity {
         activity
     }
 
-    /// Adds speakers that are not yet on the card, waiting.
+    /// Adds one waiting row per speaker slot.
+    ///
+    /// The same helper can hold two slots when two jobs need them. A later
+    /// round reuses a row that is already there before it adds another.
     pub fn queue(&mut self, members: &[TeamMember], speakers: &[String]) {
+        let mut claimed = vec![false; self.speakers.len()];
         for id in speakers {
-            if let Some(m) = members.iter().find(|m| m.id == *id) {
-                if let Some(row) = self.speakers.iter_mut().find(|row| row.member_id == *id) {
-                    row.state = SpeakerState::Waiting;
-                    row.doing = None;
-                } else {
-                    self.speakers.push(SpeakerProgress {
-                        member_id: m.id.clone(),
-                        name: m.name.clone(),
-                        icon: m.icon.clone(),
-                        role: m.role.clone(),
-                        state: SpeakerState::Waiting,
-                        doing: None,
-                        steps: 0,
-                    });
-                }
+            let Some(member) = members.iter().find(|member| member.id == *id) else {
+                continue;
+            };
+            if let Some(index) = self
+                .speakers
+                .iter()
+                .enumerate()
+                .find(|(index, row)| row.member_id == *id && !claimed[*index])
+                .map(|(index, _)| index)
+            {
+                claimed[index] = true;
+                self.speakers[index].state = SpeakerState::Waiting;
+                self.speakers[index].doing = None;
+            } else {
+                self.speakers.push(SpeakerProgress {
+                    member_id: member.id.clone(),
+                    name: member.name.clone(),
+                    icon: member.icon.clone(),
+                    role: member.role.clone(),
+                    state: SpeakerState::Waiting,
+                    doing: None,
+                    steps: 0,
+                });
+                claimed.push(true);
             }
         }
     }
 
     pub fn set(&mut self, member_id: &str, state: SpeakerState) {
-        if let Some(row) = self
+        let prefer = match state {
+            SpeakerState::Done | SpeakerState::Passed | SpeakerState::Failed => {
+                SpeakerState::Speaking
+            }
+            SpeakerState::Speaking | SpeakerState::Waiting => SpeakerState::Waiting,
+        };
+        let Some(index) = self
             .speakers
-            .iter_mut()
-            .find(|row| row.member_id == member_id)
-        {
-            row.state = state;
-            if state != SpeakerState::Speaking {
-                row.doing = None;
-            }
-            let status = match state {
-                SpeakerState::Speaking => format!("{} is answering…", row.name),
-                SpeakerState::Passed => format!("{} had nothing to add", row.name),
-                SpeakerState::Failed => format!("{} couldn't answer", row.name),
-                SpeakerState::Done => format!("{} is done", row.name),
-                SpeakerState::Waiting => self.status.clone(),
-            };
-            self.status = status;
-            let still = self.speaking_count();
-            if state != SpeakerState::Speaking && still > 0 {
-                let _ = write!(self.status, " · {still} still answering");
-            }
+            .iter()
+            .position(|row| row.member_id == member_id && row.state == prefer)
+            .or_else(|| {
+                self.speakers
+                    .iter()
+                    .position(|row| row.member_id == member_id)
+            })
+        else {
+            return;
+        };
+        let name = self.speakers[index].name.clone();
+        self.speakers[index].state = state;
+        if state != SpeakerState::Speaking {
+            self.speakers[index].doing = None;
+        }
+        self.status = match state {
+            SpeakerState::Speaking => format!("{name} is answering…"),
+            SpeakerState::Passed => format!("{name}: Nothing to add"),
+            SpeakerState::Failed => format!("{name} couldn't answer"),
+            SpeakerState::Done => format!("{name} is done"),
+            SpeakerState::Waiting => self.status.clone(),
+        };
+        let still = self.speaking_count();
+        if state != SpeakerState::Speaking && still > 0 {
+            let _ = write!(self.status, " · {still} still answering");
         }
     }
 
     /// Starts several members at once: they all answer side by side this round.
+    ///
+    /// One id listed twice starts two rows, and a finished copy of that helper
+    /// stays finished.
     pub fn start_together(&mut self, member_ids: &[String]) {
+        let mut pending = member_ids.to_vec();
         let mut names = Vec::new();
         for row in &mut self.speakers {
-            if member_ids.contains(&row.member_id) {
-                row.state = SpeakerState::Speaking;
-                row.doing = None;
-                names.push(row.name.clone());
+            let Some(at) = pending.iter().position(|id| id == &row.member_id) else {
+                continue;
+            };
+            if !matches!(row.state, SpeakerState::Waiting | SpeakerState::Speaking) {
+                continue;
             }
+            pending.remove(at);
+            row.state = SpeakerState::Speaking;
+            row.doing = None;
+            names.push(row.name.clone());
         }
         self.status = match names.as_slice() {
             [] => self.status.clone(),
@@ -819,13 +813,27 @@ impl TeamActivity {
 
     /// Records a member's latest tool step on its kanban card.
     pub fn set_doing(&mut self, member_id: &str, doing: impl Into<String>) {
-        if let Some(row) = self
+        let index = self
             .speakers
-            .iter_mut()
-            .find(|row| row.member_id == member_id)
-        {
-            row.doing = Some(doing.into());
-            row.steps = row.steps.saturating_add(1);
+            .iter()
+            .position(|row| {
+                row.member_id == member_id
+                    && row.state == SpeakerState::Speaking
+                    && row.doing.is_none()
+            })
+            .or_else(|| {
+                self.speakers.iter().position(|row| {
+                    row.member_id == member_id && row.state == SpeakerState::Speaking
+                })
+            })
+            .or_else(|| {
+                self.speakers
+                    .iter()
+                    .position(|row| row.member_id == member_id)
+            });
+        if let Some(index) = index {
+            self.speakers[index].doing = Some(doing.into());
+            self.speakers[index].steps = self.speakers[index].steps.saturating_add(1);
         }
     }
 

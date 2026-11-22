@@ -1188,6 +1188,7 @@ async fn ordinary_and_team_turns_can_plan_historical_memory_queries_over_real_ht
             session_id: "past-team".into(),
             prompt: "What tea did I prefer on June 1, 2020, as known on December 1, 2020?".into(),
             context: sovra_core::ConversationContext::default(),
+            room: sovra_core::teams::TeamRoom::all_helpers(),
         }))
         .unwrap();
     event(&client, |event| matches!(event, Event::AgUi { session_id, event: sovra_core::AgUiEvent::RunFinished { .. } } if session_id == "past-team")).await;
@@ -1325,6 +1326,7 @@ async fn ordinary_and_team_turns_receive_cited_cross_conversation_evidence() {
             session_id: "new-team".into(),
             prompt: "Recommend tea for me".into(),
             context: sovra_core::ConversationContext::default(),
+            room: sovra_core::teams::TeamRoom::all_helpers(),
         }))
         .unwrap();
     event(&client, |event| matches!(event, Event::AgUi { session_id, event: sovra_core::AgUiEvent::RunFinished { .. } } if session_id == "new-team")).await;

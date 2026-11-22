@@ -42,16 +42,22 @@ fn render_component(component: &UiComponent, path: &str, cx: &mut Context<Shell>
             .collect()
     };
     match component {
-        UiComponent::Text { text, heading } => div()
-            .sovra_text(
-                if *heading {
-                    TextRole::SectionTitle
-                } else {
-                    TextRole::Body
-                },
-                cx,
-            )
+        UiComponent::Text {
+            text,
+            heading: true,
+        } => div()
+            .sovra_text(TextRole::SectionTitle, cx)
             .child(text.clone())
+            .into_any_element(),
+        UiComponent::Text {
+            text,
+            heading: false,
+        } => div()
+            .sovra_text(TextRole::Body, cx)
+            .child(crate::agui_widgets::agent_markdown(
+                gpui_kit::SharedString::from(format!("native-text-{path}")),
+                text,
+            ))
             .into_any_element(),
         UiComponent::Card {
             title,
@@ -69,7 +75,10 @@ fn render_component(component: &UiComponent, path: &str, cx: &mut Context<Shell>
             .children((!description.is_empty()).then(|| {
                 div()
                     .text_color(t.text_secondary)
-                    .child(description.clone())
+                    .child(crate::agui_widgets::agent_markdown(
+                        gpui_kit::SharedString::from(format!("native-card-description-{path}")),
+                        description,
+                    ))
             }))
             .children(children(items, cx))
             .into_any_element(),

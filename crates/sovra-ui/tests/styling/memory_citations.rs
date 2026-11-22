@@ -363,7 +363,7 @@ fn recall_listing_uses_cards_and_hides_hash_tokens(cx: &mut TestAppContext) {
     let mint_id = "memory_7fd3744a12b4969536e48da78e98170ba326edea02467a94156dd6dbd46c8d7f";
     let reply_text = format!(
         "Here's what I can see so far. It's not a complete picture, and some details may be missing.\n\
-         Where you live: You've mentioned living in Dubai with your girlfriend [memory:fact:{live_id}].\n\
+         Where you live: You've mentioned living in **Dubai** with your girlfriend [memory:fact:{live_id}].\n\
          Food you enjoy: You like mint sauce [memory:fact:{mint_id}].\n\
          You can review and correct what I've saved in Knowledge."
     );
@@ -419,6 +419,8 @@ fn recall_listing_uses_cards_and_hides_hash_tokens(cx: &mut TestAppContext) {
         let dubai_row = window.find(("memory-recall-preview", 0usize));
         let dubai = dubai_row.label().unwrap_or_default();
         assert!(dubai.contains("Dubai"), "{dubai}");
+        // Rows render the agent's Markdown; nobody should hear or see raw `**`.
+        assert!(!dubai.contains("**"), "{dubai}");
         if let Some(answer) = window.find(("assistant-answer", 0usize)).label() {
             assert!(
                 !answer.contains("memory:fact:") && !answer.contains("source:episode:"),

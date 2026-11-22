@@ -15,17 +15,28 @@ and are designed for someone with no technical experience.
 
 ## Ask a team and save work
 
-1. Open **Team**, choose the helpers you want, and use **Ask my team**.
-2. Review the team-mode indicator above the composer, then send your question.
-   **Ask Sovra only** returns to an ordinary chat.
-3. Watch the **Waiting / Working / Done** board as replies arrive. Use Stop to
-   interrupt a run.
+1. Open **Team**, or press the helpers button in the chat box. That opens a
+   new chat and leaves the one you were in alone. **Chat with** one helper, or
+   pick a few and **Start a group chat**. **Ask my team** opens a new chat with
+   every switched-on helper. Ask everyone stays off until you turn it on.
+2. A question can ask one helper or several. The same helper can answer two
+   parts at the same time. A stray word does not pull in an extra helper when
+   someone else is the stronger match. Turn on **Ask everyone** when you want
+   the whole group to answer. **Ask Sovra only** returns to a normal chat.
+   Each chat keeps its own helpers. A later round only calls helpers who are
+   already in that chat.
+3. When several helpers speak, Alex joins. Alex stops if the next round repeats
+   the last one, adds little, or they are unsure. Watch the **Waiting / Working /
+   Done** board. A helper with nothing to add is named on their card. Use Stop
+   to interrupt a run.
 4. Choose **Save** on a reply or code block to keep it in Artifacts.
 
 Helpers use the model selected in Models. Members selected for a round work in
-parallel, then the Conductor decides whether another round is needed. Core rules
-bound rounds and reply counts. A member can pass without showing protocol text.
-Team replies retain their authorship; see [team memory](memory-capture-and-recall.md#one-team-turn).
+parallel, then Alex decides whether another round is needed. From the second
+round, a continue that repeats the previous round, adds little new wording, or
+is unsure hands the chat back. A turn stays within three rounds and eight
+replies. A helper can pass without showing protocol text. Team replies retain
+their authorship; see [team memory](memory-capture-and-recall.md#one-team-turn).
 
 In **Artifacts**, use folders, favorites, search, and sorting to find saved work.
 Editing keeps versions. Back and Cancel ask before discarding unsaved edits;

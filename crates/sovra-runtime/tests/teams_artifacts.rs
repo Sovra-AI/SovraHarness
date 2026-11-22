@@ -91,6 +91,7 @@ fn a_team_turn_without_an_ai_explains_how_to_connect_one() {
             session_id: "chat".into(),
             prompt: "What does everyone think?".into(),
             context: sovra_core::ConversationContext::default(),
+            room: sovra_core::teams::TeamRoom::all_helpers(),
         }))
         .unwrap();
     loop {
