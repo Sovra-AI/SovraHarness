@@ -209,6 +209,106 @@ mod tests {
         }
     }
 
+    /// Does its work through a tool, then ends the turn without a word, as some
+    /// models do; it only explains itself when asked for the wrap-up.
+    #[derive(Default)]
+    struct SilentWorker {
+        calls: Mutex<usize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Llm for SilentWorker {
+        fn name(&self) -> &'static str {
+            "silent-worker-test"
+        }
+        async fn generate_content(
+            &self,
+            request: LlmRequest,
+            _: bool,
+        ) -> adk_core::Result<LlmResponseStream> {
+            *self.calls.lock().unwrap() += 1;
+            let last = request
+                .contents
+                .last()
+                .map(|content| format!("{content:?}"));
+            let asked_to_wrap_up = last
+                .as_deref()
+                .is_some_and(|text| text.contains("did not tell me anything"));
+            let worked = request
+                .contents
+                .iter()
+                .flat_map(|c| &c.parts)
+                .any(|part| matches!(part, Part::FunctionResponse { .. }));
+            let part = if asked_to_wrap_up {
+                Part::Text {
+                    text: "Your plan is ready. Next, ask me to add a shopping list.".into(),
+                }
+            } else if worked {
+                Part::Text {
+                    text: String::new(),
+                }
+            } else {
+                Part::FunctionCall {
+                    name: "load_skill".into(),
+                    args: json!({"name":"meal-plan"}),
+                    id: Some("work".into()),
+                    thought_signature: None,
+                }
+            };
+            let response = LlmResponse {
+                content: Some(Content {
+                    role: "model".into(),
+                    parts: vec![part],
+                }),
+                finish_reason: Some(FinishReason::Stop),
+                partial: false,
+                turn_complete: true,
+                ..LlmResponse::default()
+            };
+            Ok(Box::pin(futures::stream::once(async move { Ok(response) })))
+        }
+    }
+
+    /// Regression: a pool setup ran its commands and ended with no reply, leaving the
+    /// person with tool cards and no idea what to do next.
+    #[test]
+    fn a_turn_that_works_in_silence_still_ends_with_what_happened_and_what_next() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let model = Arc::new(SilentWorker::default());
+                let harness = crate::AdkHarness::with_llm_and_tools(
+                    &crate::AgentConfig::default(),
+                    model.clone(),
+                    Vec::new(),
+                )
+                .unwrap()
+                .with_skill_catalog(catalog_with_meal_plan())
+                .unwrap();
+                let (events, received) = async_channel::unbounded();
+                harness
+                    .run_prompt("silent", "Plan dinners for next week", &events)
+                    .await;
+                let mut reply = String::new();
+                let mut completed = 0;
+                while let Ok(event) = received.try_recv() {
+                    match event {
+                        sovra_core::Event::AgentChunk { text, .. } => reply.push_str(&text),
+                        sovra_core::Event::AgentCompleted { .. } => completed += 1,
+                        _ => {}
+                    }
+                }
+                assert_eq!(
+                    reply,
+                    "Your plan is ready. Next, ask me to add a shopping list."
+                );
+                assert_eq!(completed, 1, "the wrap-up belongs to the same reply");
+                assert_eq!(*model.calls.lock().unwrap(), 3, "asked once, not in a loop");
+            });
+    }
+
     fn catalog_with_meal_plan() -> Arc<SkillCatalog> {
         let mut skill = SkillCatalog::default().find("table").unwrap().clone();
         skill.name = "meal-plan".into();

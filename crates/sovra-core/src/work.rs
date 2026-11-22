@@ -49,6 +49,40 @@ pub const REPEATED_CALL_MESSAGE: &str = "You already made this exact call severa
 /// Shown to the person when a turn hits [`PARENT_MAX_STEPS`].
 pub const STEP_LIMIT_MESSAGE: &str = "I stopped after many steps so this wouldn't run on forever (and use up your AI credit). Ask me to carry on, or narrow the question, and I'll pick it up from here.";
 
+/// Asked of the model, once, when a turn did work but ended without a word to the
+/// person, so they are never left reading tool cards with no idea what happened.
+pub const WRAP_UP_PROMPT: &str = "You finished working but did not tell me anything. Do not call any tools now. In plain, friendly words, say in two or three sentences what you did and whether it worked, then list the next things I can do or ask you, one short line each.";
+
+/// Follows one turn to tell whether it ended with something said to the person after
+/// its last tool step. Text written before the tools ran does not count: the person
+/// needs to hear how the work went.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClosingReply {
+    used_tools: bool,
+    spoke_after_tools: bool,
+}
+
+impl ClosingReply {
+    /// A tool was called or answered.
+    pub fn tool_step(&mut self) {
+        self.used_tools = true;
+        self.spoke_after_tools = false;
+    }
+
+    /// The model wrote reply text.
+    pub fn text(&mut self, text: &str) {
+        if !text.trim().is_empty() {
+            self.spoke_after_tools = true;
+        }
+    }
+
+    /// True when the turn used tools and then stopped without telling the person
+    /// anything, so it should be asked for [`WRAP_UP_PROMPT`].
+    pub fn needs_wrap_up(&self) -> bool {
+        self.used_tools && !self.spoke_after_tools
+    }
+}
+
 /// True when an agent error is the loop's step cap rather than a real failure.
 pub fn is_step_limit_error(message: &str) -> bool {
     message.contains("Max iterations")
@@ -607,6 +641,32 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_turn_that_works_in_silence_is_asked_to_wrap_up() {
+        let mut quiet = ClosingReply::default();
+        assert!(
+            !quiet.needs_wrap_up(),
+            "a plain answer with no tools needs nothing more"
+        );
+        quiet.text("I'll set up the pool now.");
+        quiet.tool_step();
+        quiet.tool_step();
+        assert!(
+            quiet.needs_wrap_up(),
+            "words before the tools don't say how they went"
+        );
+        quiet.text("  \n");
+        assert!(quiet.needs_wrap_up(), "whitespace is not a reply");
+        quiet.text("The pool is running. Next: add another computer.");
+        assert!(!quiet.needs_wrap_up());
+        quiet.tool_step();
+        assert!(
+            quiet.needs_wrap_up(),
+            "a later tool step needs its own closing words"
+        );
+        assert!(WRAP_UP_PROMPT.contains("Do not call any tools"));
+    }
 
     fn call<'a>(id: &'a str, tool: &'a str, args: &'a Value, at_ms: u64) -> StepCall<'a> {
         StepCall {

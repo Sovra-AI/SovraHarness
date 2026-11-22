@@ -21,10 +21,22 @@ pub struct OfficialPlugin {
     pub does: &'static [&'static str],
     /// What the person needs before it is useful, in plain words.
     pub needs: &'static str,
-    /// The skill that **Try it in chat** starts, by its `SKILL.md` name.
-    pub starter_skill: &'static str,
-    /// The request **Try it in chat** puts in the message box.
-    pub starter_prompt: &'static str,
+    /// What it is not, when people could mix it up with something Sovra already has.
+    pub good_to_know: &'static str,
+    /// What the person can do once it is on, as buttons. The first one is the
+    /// starting point, offered as **Try it in chat**.
+    pub actions: &'static [OfficialAction],
+}
+
+/// One thing to do with an official plugin, started in chat with one click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OfficialAction {
+    /// The button's words.
+    pub label: &'static str,
+    /// The skill it starts, by its `SKILL.md` name.
+    pub skill: &'static str,
+    /// The request it puts in the message box, ready to send.
+    pub prompt: &'static str,
 }
 
 /// Every official plugin, in the order the Plugins page shows them.
@@ -39,8 +51,29 @@ pub const OFFICIAL_PLUGINS: &[OfficialPlugin] = &[OfficialPlugin {
         "Shows what each computer in the pool is doing, and helps when something goes wrong",
     ],
     needs: "Works with Linux computers on your network or over the internet. Sovra asks before it installs or runs anything on a computer.",
-    starter_skill: "set-up-a-computer-pool",
-    starter_prompt: "Set up a computer pool on this computer so I can add my other computers to it.",
+    good_to_know: "This is separate from the Training page. Training teaches Sovra's own small models with your group; the pool runs programs you choose, such as your own training scripts, on your computers.",
+    actions: &[
+        OfficialAction {
+            label: "Set up the pool",
+            skill: "set-up-a-computer-pool",
+            prompt: "Set up a computer pool on this computer so I can add my other computers to it.",
+        },
+        OfficialAction {
+            label: "Add another computer",
+            skill: "add-a-computer-to-the-pool",
+            prompt: "Help me add another of my computers to my computer pool.",
+        },
+        OfficialAction {
+            label: "Run a job",
+            skill: "run-a-job-on-the-pool",
+            prompt: "Help me run a program on my computer pool and bring the results back.",
+        },
+        OfficialAction {
+            label: "Check on the pool",
+            skill: "check-on-the-pool",
+            prompt: "How is my computer pool doing? Which computers are in it and what are they busy with?",
+        },
+    ],
 }];
 
 impl OfficialPlugin {
@@ -54,9 +87,14 @@ impl OfficialPlugin {
         self.github().plugin_id()
     }
 
-    /// The chat command of the skill **Try it in chat** starts.
-    pub fn starter_command(&self) -> String {
-        format!("{}{}", skill_command_prefix(&self.id()), self.starter_skill)
+    /// The starting point, offered as **Try it in chat**.
+    pub fn starter(&self) -> &'static OfficialAction {
+        &self.actions[0]
+    }
+
+    /// The chat command of an action's skill.
+    pub fn command(&self, action: &OfficialAction) -> String {
+        format!("{}{}", skill_command_prefix(&self.id()), action.skill)
     }
 }
 
@@ -131,17 +169,33 @@ mod tests {
                 plugin.needs.ends_with('.') && plugin.needs.len() <= 200,
                 "{name} needs"
             );
-            assert!(valid_name(plugin.starter_skill), "{name} starter skill");
-            assert!(!plugin.starter_prompt.is_empty() && plugin.starter_prompt.len() <= 200);
+            assert!(plugin.good_to_know.ends_with('.') && plugin.good_to_know.len() <= 240);
+            assert!(
+                (1..=4).contains(&plugin.actions.len()),
+                "{name} offers 1–4 actions"
+            );
+            let mut skills = BTreeSet::new();
+            for action in plugin.actions {
+                assert!(valid_name(action.skill), "{name}: {}", action.skill);
+                assert!(skills.insert(action.skill), "{name}: one button per skill");
+                assert!(!action.label.is_empty() && action.label.len() <= 24);
+                assert!(!action.prompt.is_empty() && action.prompt.len() <= 200);
+            }
             for jargon in ["agent", "persona", "repository", "CLI", "API", "cluster"] {
                 let copy = [
                     plugin.title,
                     plugin.summary,
                     plugin.needs,
-                    plugin.starter_prompt,
+                    plugin.good_to_know,
                 ]
                 .into_iter()
-                .chain(plugin.does.iter().copied());
+                .chain(plugin.does.iter().copied())
+                .chain(
+                    plugin
+                        .actions
+                        .iter()
+                        .flat_map(|action| [action.label, action.prompt]),
+                );
                 for text in copy {
                     assert!(
                         !text.contains(jargon),
@@ -171,10 +225,10 @@ mod tests {
     fn only_official_ids_pass_the_one_click_check() {
         let pool = &OFFICIAL_PLUGINS[0];
         assert_eq!(pool.id(), "io.github.sovra-ai.sovra-compute-pool");
+        let starter = pool.command(pool.starter());
         assert!(
-            pool.starter_command()
-                .starts_with(&skill_command_prefix(&pool.id()))
-                && pool.starter_command().ends_with(pool.starter_skill)
+            starter.starts_with(&skill_command_prefix(&pool.id()))
+                && starter.ends_with("set-up-a-computer-pool")
         );
         assert_eq!(require_official(&pool.id()).ok(), Some(pool));
         for other in [

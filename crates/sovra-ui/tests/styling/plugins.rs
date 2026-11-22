@@ -675,8 +675,8 @@ fn official_plugin(enabled: bool) -> (InstalledPlugin, sovra_core::plugins::Plug
         description: Some(official.summary.into()),
         skills: vec![
             sovra_core::plugins::repository_skill(
-                official.starter_skill.into(),
-                official.starter_skill,
+                official.starter().skill.into(),
+                official.starter().skill,
                 "Start a pool of computers.",
                 "Ask which computer should lead the pool.".into(),
             )
@@ -727,6 +727,12 @@ fn an_official_plugin_installs_with_one_click_then_offers_to_try_it(cx: &mut Tes
                 window.render_frame(cx);
                 assert!(window.try_find(("plugin-official-card", 0usize)).is_some());
                 assert!(window.try_find(("plugin-official-try", 0usize)).is_none());
+                assert!(
+                    window
+                        .try_find(("plugin-official-action", 1usize))
+                        .is_none(),
+                    "next steps appear once it is on"
+                );
                 reveal(window, ("plugin-official-install", 0usize), cx);
                 window.click(("plugin-official-install", 0usize), cx);
             })
@@ -770,6 +776,10 @@ fn an_official_plugin_installs_with_one_click_then_offers_to_try_it(cx: &mut Tes
                 reveal(window, "plugin-notice", cx);
                 // It is also listed with the plugins you have, under its everyday name.
                 assert!(window.try_find(("plugin-card", 0usize)).is_some());
+                for step in 1..official.actions.len() {
+                    // Every next step stays reachable, wrapping at narrow sizes.
+                    reveal(window, ("plugin-official-action", step), cx);
+                }
                 reveal(window, ("plugin-official-try", 0usize), cx);
                 window.click(("plugin-official-try", 0usize), cx);
                 assert_eq!(

@@ -32,9 +32,10 @@ the last action appear at the top of the page; problems are shown as warnings.
 Official plugins are made and kept working by the Sovra team. The list lives in
 [`sovra-core/src/plugins/official.rs`](../crates/sovra-core/src/plugins/official.rs):
 each entry names a public `Sovra-AI` repository and the plain-language copy its
-card shows (an everyday title, a summary, what it does, what it needs) and the
-starter skill and request for **Try it in chat**. A core test keeps that copy
-short and free of jargon.
+card shows (an everyday title, a summary, what it does, what it needs, and what
+it is not) and its **next steps**: up to four buttons, each starting one of its
+skills in chat with a ready request. A core test keeps that copy short and free
+of jargon.
 
 | Plugin | Repository | What it does |
 | --- | --- | --- |
@@ -46,8 +47,12 @@ If the plugin is not here yet, it is added exactly as **Add from GitHub** would 
 it (same checks, same limits, pinned to the newest commit) and saved switched on
 in the same step, so its skills are ready at once. If it is already here, it is
 only turned on; nothing is downloaded. The card then says **Installed · On** and
-offers **Try it in chat**, which opens chat with the starter skill and an
-example request. It also appears under **Your plugins** with its everyday name,
+lists **What you can do next**. For Computer pool these are **Set up the pool**,
+**Add another computer**, **Run a job** and **Check on the pool**. Each one opens
+chat with that skill and a request ready to send, so there is always an obvious
+next step after setup. The card also says that the pool is separate from the
+**Training** page: Training teaches Sovra's own small models with your group, and
+the pool runs programs you choose on your computers. It also appears under **Your plugins** with its everyday name,
 where **Turn off**, **Check for update** and **Remove** work as for any plugin.
 
 Turning on at install is the only difference from other GitHub plugins, and it

@@ -26,7 +26,8 @@ pub use github::{
     valid_resource_path,
 };
 pub use official::{
-    OFFICIAL_PLUGINS, OfficialPlugin, official_plugin, require_official, turns_on_at_install,
+    OFFICIAL_PLUGINS, OfficialAction, OfficialPlugin, official_plugin, require_official,
+    turns_on_at_install,
 };
 
 pub const MAX_CATALOG_BYTES: usize = 256 * 1024;

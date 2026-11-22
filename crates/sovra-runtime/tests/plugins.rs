@@ -990,7 +990,7 @@ async fn official_plugin_installs_switched_on_in_one_step() {
         &mut initial,
         repository,
         FIRST,
-        &[(official.starter_skill, "Start the pool.")],
+        &[(official.starter().skill, "Start the pool.")],
     );
     let root = format!("http://{}", listener.local_addr().unwrap());
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));

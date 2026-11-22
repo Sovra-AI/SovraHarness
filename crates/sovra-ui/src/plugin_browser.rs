@@ -33,6 +33,8 @@ use crate::{
 };
 
 const INSTALLED_PAGE_SIZE: usize = 20;
+/// Room for each official plugin's action buttons in one ID range.
+const OFFICIAL_ACTION_SLOTS: usize = 8;
 
 pub(crate) struct PluginBrowser {
     scroll: gpui_kit::ScrollHandle,
@@ -370,15 +372,45 @@ fn official_card(
         );
     }
 
-    let main = if enabled {
-        let command = plugin.starter_command();
-        design::primary_button(("plugin-official-try", index), "Try it in chat", cx)
-            .icon(IconName::MessageCircle)
-            .accessibility_label(format!("Try {title} in chat"))
-            .disabled(busy)
-            .on_click(cx.listener(move |shell, _, window, cx| {
-                shell.stage_skill(&command, plugin.starter_prompt, window, cx);
-            }))
+    let web = plugin.github().web_url();
+    let learn = design::button(("plugin-official-learn", index), "Learn more", cx)
+        .ghost()
+        .icon(IconName::ExternalLink)
+        .accessibility_label(format!("Learn more about {title} on its web page"))
+        .on_click(move |_, _, cx| cx.open_url(&web));
+    let mut actions = h_flex()
+        .w_full()
+        .min_w_0()
+        .flex_wrap()
+        .items_center()
+        .gap(t.space.small);
+    if enabled {
+        // Each button starts one of its skills in chat with a ready request, so the
+        // person always has an obvious next step once it is set up.
+        for (step, action) in plugin.actions.iter().enumerate() {
+            let command = plugin.command(action);
+            let button = if step == 0 {
+                design::primary_button(("plugin-official-try", index), action.label, cx)
+                    .icon(IconName::MessageCircle)
+            } else {
+                design::button(
+                    (
+                        "plugin-official-action",
+                        index * OFFICIAL_ACTION_SLOTS + step,
+                    ),
+                    action.label,
+                    cx,
+                )
+            };
+            actions = actions.child(
+                button
+                    .accessibility_label(format!("{}: start it in chat", action.label))
+                    .disabled(busy)
+                    .on_click(cx.listener(move |shell, _, window, cx| {
+                        shell.stage_skill(&command, action.prompt, window, cx);
+                    })),
+            );
+        }
     } else {
         let (label, icon) = match (installing, installed.is_some()) {
             (true, _) => ("Installing…", IconName::LoaderCircle),
@@ -386,35 +418,33 @@ fn official_card(
             (false, false) => ("Install", IconName::Download),
         };
         let install_id = id.clone();
-        design::primary_button(("plugin-official-install", index), label, cx)
-            .icon(icon)
-            .accessibility_label(format!("{label} {title}"))
-            .disabled(busy)
-            .on_click(cx.listener(move |shell, _, _, cx| {
-                shell.plugin_command(
-                    PluginCommand::InstallOfficial {
-                        id: install_id.clone(),
-                    },
-                    cx,
-                );
-            }))
-    };
-    let web = plugin.github().web_url();
-    let actions = h_flex()
+        actions = actions.child(
+            design::primary_button(("plugin-official-install", index), label, cx)
+                .icon(icon)
+                .accessibility_label(format!("{label} {title}"))
+                .disabled(busy)
+                .on_click(cx.listener(move |shell, _, _, cx| {
+                    shell.plugin_command(
+                        PluginCommand::InstallOfficial {
+                            id: install_id.clone(),
+                        },
+                        cx,
+                    );
+                })),
+        );
+    }
+    let actions = v_flex()
         .w_full()
         .min_w_0()
-        .flex_wrap()
-        .items_center()
-        .gap(t.space.small)
+        .gap(t.space.compact)
         .pt(t.space.compact)
-        .child(main)
-        .child(
-            design::button(("plugin-official-learn", index), "Learn more", cx)
-                .ghost()
-                .icon(IconName::ExternalLink)
-                .accessibility_label(format!("Learn more about {title} on its web page"))
-                .on_click(move |_, _, cx| cx.open_url(&web)),
-        );
+        .children(enabled.then(|| {
+            div()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child("What you can do next")
+        }))
+        .child(actions.child(learn));
 
     card(cx)
         .id(("plugin-official-card", index))
@@ -467,6 +497,16 @@ fn official_card(
                 .sovra_text(TextRole::Caption, cx)
                 .text_color(t.text_secondary)
                 .child(plugin.needs),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .max_w(t.layout.reading_width)
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(plugin.good_to_know),
         )
         .child(actions)
 }

@@ -43,6 +43,7 @@ every team member and every deep-research helper:
 | Circuit breaker | 3 consecutive failures | A broken connection should not consume every remaining step. The model is told the tool is switched off, so it can adapt. |
 | Repeat guard (`RepeatGuard`) | 3 identical calls per invocation | The most common runaway loop is the same call with the same arguments. The fourth identical call is refused with a message telling the model to use the earlier result or change course. Argument key order does not matter. |
 | Step-limit message | `STEP_LIMIT_MESSAGE` | Hitting the cap is not a crash. The person is told plainly that Sovra stopped to save their credit, and how to continue. |
+| Closing words (`ClosingReply`) | one follow-up, no tools | Some models finish a turn of tool calls without saying anything, leaving only tool cards. When a turn used tools and wrote nothing after them, Sovra asks once (`WRAP_UP_PROMPT`) for what happened and what to do next, in the same reply. |
 | Tool timeouts | terminal approval + command | A call that waits for the person's approval gets enough time. Other tools use ADK's default timeout. |
 | Cancellation | **Stop** → `Runner::interrupt` | Stopping drops running and queued helper work (`concurrency_tests`). |
 

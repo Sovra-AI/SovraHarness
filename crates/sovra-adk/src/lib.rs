@@ -852,13 +852,20 @@ impl AdkHarness {
             started,
             Arc::clone(&self.tool_titles),
         );
+        let mut closing = sovra_core::work::ClosingReply::default();
         while let Some(item) = stream.next().await {
             match item {
                 Ok(adk_event) => {
                     if work.observe(&adk_event) && !work.send(session_id, events).await {
                         return;
                     }
+                    if has_tool_step(&adk_event) {
+                        closing.tool_step();
+                    }
                     let delta = deltas.push(&adk_event);
+                    if let (_, Some(text)) = extract_output(&delta) {
+                        closing.text(&text);
+                    }
                     code_activity.push(session_id, &delta, events).await;
                     if !forward_adk_event(session_id, &delta, &mut response_model, started, events)
                         .await
@@ -890,6 +897,13 @@ impl AdkHarness {
                 }
             }
         }
+        if closing.needs_wrap_up()
+            && !self
+                .wrap_up(session_id, &mut response_model, started, events)
+                .await
+        {
+            return;
+        }
         if !work.is_empty() {
             work.finish(true);
             work.send(session_id, events).await;
@@ -904,6 +918,42 @@ impl AdkHarness {
                 session_id: session_id.to_owned(),
             })
             .await;
+    }
+
+    /// Asks the model once for the closing words a silent turn left out (what it did,
+    /// and what the person can do next) and streams them into the same reply. A
+    /// failure here only loses the summary; the work itself already finished.
+    async fn wrap_up(
+        &self,
+        session_id: &str,
+        response_model: &mut Option<ResponseModel>,
+        started: std::time::Instant,
+        events: &Sender<Event>,
+    ) -> bool {
+        let content = Content::new("user").with_text(sovra_core::work::WRAP_UP_PROMPT);
+        let mut stream = match self
+            .runner
+            .run_str(DEFAULT_USER_ID, session_id, content)
+            .await
+        {
+            Ok(stream) => stream,
+            Err(err) => {
+                tracing::warn!(%session_id, message = %self.safe_error(&err), "wrap-up request failed");
+                return true;
+            }
+        };
+        let mut deltas = EventTextDeltas::default();
+        while let Some(item) = stream.next().await {
+            let Ok(adk_event) = item else {
+                tracing::warn!(%session_id, "wrap-up stream ended early");
+                break;
+            };
+            let delta = deltas.push(&adk_event);
+            if !forward_adk_event(session_id, &delta, response_model, started, events).await {
+                return false;
+            }
+        }
+        true
     }
 
     /// Generates a short (3–6 word) conversation title using an isolated one-shot session
@@ -1034,6 +1084,18 @@ fn rejected_key_message(provider: &str) -> String {
 }
 
 /// Splits model output into (reasoning, answer) text; either may be absent.
+/// True when the event calls a tool or carries a tool's answer.
+fn has_tool_step(event: &adk_core::Event) -> bool {
+    event.llm_response.content.as_ref().is_some_and(|content| {
+        content.parts.iter().any(|part| {
+            matches!(
+                part,
+                Part::FunctionCall { .. } | Part::FunctionResponse { .. }
+            )
+        })
+    })
+}
+
 fn extract_output(event: &adk_core::Event) -> (Option<String>, Option<String>) {
     let Some(content) = event.llm_response.content.as_ref() else {
         return (None, None);
