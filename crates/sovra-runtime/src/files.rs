@@ -324,6 +324,8 @@ async fn run(
         &relayed,
         &job.events,
         timeout,
+        // Reading attached files runs no commands, so it never waits on an approval.
+        || false,
     )
     .await
     .map_err(|_| {

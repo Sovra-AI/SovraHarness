@@ -150,9 +150,12 @@ impl TeamRuntime {
                 Some(quiet) => {
                     let (relay, relayed) = crate::quiet_deadline::relay();
                     let run = harness.run_team(&turn, &relay);
-                    if crate::quiet_deadline::forward(run, &relayed, &runtime.events, quiet)
-                        .await
-                        .is_err()
+                    // Team members have no terminal, so nobody is ever waiting on an approval card.
+                    if crate::quiet_deadline::forward(run, &relayed, &runtime.events, quiet, || {
+                        false
+                    })
+                    .await
+                    .is_err()
                     {
                         let _ = runtime
                             .events

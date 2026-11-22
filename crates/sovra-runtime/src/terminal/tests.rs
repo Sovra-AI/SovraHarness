@@ -497,3 +497,25 @@ async fn no_configuration_means_no_terminal() {
     assert!(runtime.access().is_none());
     runtime.handle(TerminalCommand::SetEnabled(true));
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_chat_with_an_open_card_counts_as_waiting_on_the_person() {
+    let fixture = fixture("watch").await;
+    let watch = fixture.runtime.approval_watch();
+    assert!(!watch.waiting_on_person("chat-1"));
+    let task = fixture.spawn("touch watched.txt", 10);
+    let card = fixture.awaiting().await;
+    assert!(watch.waiting_on_person("chat-1"));
+    assert!(
+        !watch.waiting_on_person("chat-2"),
+        "another chat's card does not hold this one open"
+    );
+    fixture.decide(&card, TerminalDecision::AllowOnce);
+    outcome(task).await;
+    assert!(
+        !watch.waiting_on_person("chat-1"),
+        "answered cards stop counting"
+    );
+    assert!(!ApprovalWatch::default().waiting_on_person("chat-1"));
+}

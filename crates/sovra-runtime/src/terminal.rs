@@ -63,7 +63,7 @@ struct Shared {
     search_path: Option<OsString>,
     policy: Mutex<TerminalPolicy>,
     /// Approval cards waiting for an answer, by call id.
-    waiting: Mutex<HashMap<String, oneshot::Sender<TerminalDecision>>>,
+    waiting: Mutex<HashMap<String, Waiting>>,
     /// Stop buttons for running commands, by call id.
     running: Mutex<HashMap<String, oneshot::Sender<()>>>,
     events: Sender<Event>,
@@ -73,6 +73,29 @@ struct Shared {
     saving: tokio::sync::Mutex<()>,
     /// Owned tasks (approval wait that must outlive a dropped tool future).
     handle: tokio::runtime::Handle,
+}
+
+/// One approval card and the chat it belongs to.
+#[derive(Debug)]
+struct Waiting {
+    session_id: String,
+    answer: oneshot::Sender<TerminalDecision>,
+}
+
+/// Tells a chat turn whether it is waiting for the person to answer a terminal
+/// approval card. Time spent waiting for the person is not the AI going quiet.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ApprovalWatch(Option<Arc<Shared>>);
+
+impl ApprovalWatch {
+    /// True while `session_id` has an approval card nobody has answered yet.
+    pub(crate) fn waiting_on_person(&self, session_id: &str) -> bool {
+        self.0.as_ref().is_some_and(|shared| {
+            lock(&shared.waiting)
+                .values()
+                .any(|waiting| waiting.session_id == session_id)
+        })
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -157,21 +180,26 @@ impl TerminalRuntime {
             .map(|shared| Arc::new(Access(Arc::clone(shared))) as Arc<dyn TerminalAccess>)
     }
 
+    /// A handle chat turns use to tell waiting for the person from the AI going quiet.
+    pub(crate) fn approval_watch(&self) -> ApprovalWatch {
+        ApprovalWatch(self.shared.clone())
+    }
+
     pub(crate) fn handle(&self, command: TerminalCommand) {
         let Some(shared) = &self.shared else {
             return;
         };
         match command {
             TerminalCommand::Decide { call_id, decision } => {
-                if let Some(answer) = lock(&shared.waiting).remove(&call_id) {
-                    let _ = answer.send(decision);
+                if let Some(waiting) = lock(&shared.waiting).remove(&call_id) {
+                    let _ = waiting.answer.send(decision);
                 }
             }
             TerminalCommand::Stop { call_id } => {
                 if let Some(stop) = lock(&shared.running).remove(&call_id) {
                     let _ = stop.send(());
-                } else if let Some(answer) = lock(&shared.waiting).remove(&call_id) {
-                    let _ = answer.send(TerminalDecision::Deny);
+                } else if let Some(waiting) = lock(&shared.waiting).remove(&call_id) {
+                    let _ = waiting.answer.send(TerminalDecision::Deny);
                 }
             }
             TerminalCommand::RemoveRule(rule) => {
@@ -190,8 +218,8 @@ impl TerminalRuntime {
                 if !enabled {
                     // Switching off revokes access now: pending cards are declined and
                     // running commands stopped.
-                    for (_, answer) in lock(&shared.waiting).drain() {
-                        let _ = answer.send(TerminalDecision::Deny);
+                    for (_, waiting) in lock(&shared.waiting).drain() {
+                        let _ = waiting.answer.send(TerminalDecision::Deny);
                     }
                     for (_, stop) in lock(&shared.running).drain() {
                         let _ = stop.send(());
@@ -468,7 +496,13 @@ async fn execute_owned(
 ) -> Option<TerminalOutcome> {
     if needs_approval {
         let (answer, decision) = oneshot::channel();
-        lock(&shared.waiting).insert(call.call_id.clone(), answer);
+        lock(&shared.waiting).insert(
+            call.call_id.clone(),
+            Waiting {
+                session_id: call.session_id.clone(),
+                answer,
+            },
+        );
         shared.emit(TerminalEvent::Call(call.clone()));
         let mut guard = WaitGuard {
             shared: Arc::clone(&shared),

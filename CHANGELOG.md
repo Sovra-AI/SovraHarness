@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- **Taking your time to approve a command no longer ends the chat.** While Sovra
+  waited for you to choose **Allow once** on a command card, the wait counted as
+  the AI going quiet, so a slow answer ended the turn with "The AI stopped
+  responding". Time spent waiting for your decision no longer counts.
+
 - **Dependency refresh and a security fix.** `url` 2.5.9 fixes RUSTSEC-2026-0592
   (a crash on deeply nested `blob:` addresses). Also updates `serde-saphyr` 2.1.1,
   `scraper` 0.29, `resvg` 0.49, `flate2` 1.1.11, `notify` 8.2.2 and the pinned

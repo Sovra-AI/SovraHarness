@@ -26,12 +26,15 @@ pub(crate) fn relay() -> (Sender<Event>, Receiver<Event>) {
 }
 
 /// Runs `run`, passing everything it sends through `relayed` on to `events` in
-/// order. Fails with [`Stalled`] once `quiet` passes without a single event.
+/// order. Fails with [`Stalled`] once `quiet` passes without a single event,
+/// unless `waiting_on_person` says the turn is waiting for the person (an approval
+/// card): their time to decide is not the AI going quiet.
 pub(crate) async fn forward<T>(
     run: impl Future<Output = T>,
     relayed: &Receiver<Event>,
     events: &Sender<Event>,
     quiet: Duration,
+    waiting_on_person: impl Fn() -> bool,
 ) -> Result<T, Stalled> {
     let mut run = std::pin::pin!(run);
     let mut deadline = Instant::now() + quiet;
@@ -54,7 +57,12 @@ pub(crate) async fn forward<T>(
                 }
                 return Ok(output);
             }
-            () = tokio::time::sleep_until(deadline) => return Err(Stalled),
+            () = tokio::time::sleep_until(deadline) => {
+                if !waiting_on_person() {
+                    return Err(Stalled);
+                }
+                deadline = Instant::now() + quiet;
+            }
         }
     }
 }
@@ -85,7 +93,10 @@ mod tests {
             }
             "answer"
         };
-        assert_eq!(forward(run, &relayed, &events, QUIET).await, Ok("answer"));
+        assert_eq!(
+            forward(run, &relayed, &events, QUIET, || false).await,
+            Ok("answer")
+        );
         assert!(started.elapsed() > QUIET * 5);
         let texts: Vec<_> = std::iter::from_fn(|| seen.try_recv().ok()).collect();
         assert_eq!(
@@ -93,6 +104,41 @@ mod tests {
             (0..7)
                 .map(|step| chunk(&step.to_string()))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// Regression: a pool check was cut off with "The AI stopped responding" while its
+    /// approval card was still waiting for the person to choose Allow once.
+    #[tokio::test(start_paused = true)]
+    async fn waiting_for_the_person_to_approve_is_not_going_quiet() {
+        let (relay, relayed) = relay();
+        let (events, _seen) = async_channel::unbounded();
+        let deciding = std::sync::atomic::AtomicBool::new(true);
+        let started = Instant::now();
+        let run = async {
+            relay.send(chunk("asking to run a command")).await.unwrap();
+            // The person takes three timeouts to decide, then the turn goes on.
+            tokio::time::sleep(QUIET * 3).await;
+            deciding.store(false, std::sync::atomic::Ordering::Relaxed);
+            relay.send(chunk("ran it")).await.unwrap();
+            "answer"
+        };
+        let waiting = || deciding.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            forward(run, &relayed, &events, QUIET, waiting).await,
+            Ok("answer")
+        );
+        assert_eq!(started.elapsed(), QUIET * 3);
+
+        // Once nobody is being asked, silence is still stopped as before.
+        let (quiet_relay, quiet_relayed) = super::relay();
+        let run = async {
+            quiet_relay.send(chunk("thinking")).await.unwrap();
+            std::future::pending::<()>().await;
+        };
+        assert_eq!(
+            forward(run, &quiet_relayed, &events, QUIET, || false).await,
+            Err(Stalled)
         );
     }
 
@@ -107,7 +153,10 @@ mod tests {
             relay.send(chunk("still going")).await.unwrap();
             std::future::pending::<()>().await;
         };
-        assert_eq!(forward(run, &relayed, &events, QUIET).await, Err(Stalled));
+        assert_eq!(
+            forward(run, &relayed, &events, QUIET, || false).await,
+            Err(Stalled)
+        );
         // Measured from the last progress, not from the start of the turn.
         assert_eq!(started.elapsed(), Duration::from_secs(70));
         assert_eq!(seen.len(), 2);
@@ -122,7 +171,9 @@ mod tests {
                 relay.send(chunk(&index.to_string())).await.unwrap();
             }
         };
-        forward(run, &relayed, &events, QUIET).await.unwrap();
+        forward(run, &relayed, &events, QUIET, || false)
+            .await
+            .unwrap();
         let texts: Vec<_> = std::iter::from_fn(|| seen.try_recv().ok()).collect();
         assert_eq!(
             texts,
@@ -140,6 +191,9 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(59)).await;
             1
         };
-        assert_eq!(forward(run, &relayed, &events, QUIET).await, Ok(1));
+        assert_eq!(
+            forward(run, &relayed, &events, QUIET, || false).await,
+            Ok(1)
+        );
     }
 }

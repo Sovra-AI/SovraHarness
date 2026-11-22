@@ -1199,6 +1199,7 @@ async fn serve(
                             code: Arc::clone(&code_tools),
                             handle: handle.clone(),
                         }),
+                        approvals: terminal.approval_watch(),
                         memory_reader: if private_access {
                             inputs.reader(groups.knowledge.wrap(recalling::reader(
                                 memory.as_ref(),
@@ -1383,6 +1384,7 @@ struct PromptJob {
     messaging: Option<Arc<dyn sovra_core::communications::MessagingAccess>>,
     remote_tools: Vec<sovra_core::mcp::ToolOffer>,
     remote_caller: Arc<plugins::code::ToolRouter>,
+    approvals: terminal::ApprovalWatch,
 }
 
 fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
@@ -1405,7 +1407,12 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         messaging,
         remote_tools,
         remote_caller,
+        approvals,
     } = job;
+    let asking = {
+        let session_id = session_id.clone();
+        move || approvals.waiting_on_person(&session_id)
+    };
     let slot = Arc::new(std::sync::RwLock::new(harness.clone()));
     let harness_slot = Arc::clone(&slot);
     let interactive = model_priority::interactive();
@@ -1537,7 +1544,7 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
             if let Some(timeout) = timeout {
                 let (relay, relayed) = quiet_deadline::relay();
                 let run = adk.run_deep_research(&turn, &relay);
-                if quiet_deadline::forward(run, &relayed, &events, timeout).await.is_err() {
+                if quiet_deadline::forward(run, &relayed, &events, timeout, &asking).await.is_err() {
                     adk.interrupt(&session_id);
                     let _ = events
                         .send(Event::AgUi {
@@ -1556,7 +1563,7 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         if let Some(timeout) = timeout {
             let (relay, relayed) = quiet_deadline::relay();
             let run = adk.run_prompt(&session_id, &prompt, &relay);
-            if quiet_deadline::forward(run, &relayed, &events, timeout).await.is_err() {
+            if quiet_deadline::forward(run, &relayed, &events, timeout, &asking).await.is_err() {
                 adk.interrupt(&session_id);
                 let _ = events
                     .send(Event::AgentError {

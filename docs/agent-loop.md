@@ -45,6 +45,7 @@ every team member and every deep-research helper:
 | Step-limit message | `STEP_LIMIT_MESSAGE` | Hitting the cap is not a crash. The person is told plainly that Sovra stopped to save their credit, and how to continue. |
 | Closing words (`ClosingReply`) | one follow-up, no tools | Some models finish a turn of tool calls without saying anything, leaving only tool cards. When a turn used tools and wrote nothing after them, Sovra asks once (`WRAP_UP_PROMPT`) for what happened and what to do next, in the same reply. |
 | Tool timeouts | terminal approval + command | A call that waits for the person's approval gets enough time. Other tools use ADK's default timeout. |
+| Quiet deadline | connection timeout, paused while asking | A turn is stopped only after it shows no progress for the whole connection timeout (`quiet_deadline`). While one of its terminal approval cards is waiting (`ApprovalWatch`), the clock does not run: the person deciding is not the AI going quiet. |
 | Cancellation | **Stop** → `Runner::interrupt` | Stopping drops running and queued helper work (`concurrency_tests`). |
 
 Tool errors are returned to the model as observations (ADK `{"error": …}`),
