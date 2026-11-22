@@ -14,6 +14,13 @@ package version.
 
 ## [Unreleased]
 
+- **Dependency refresh and a security fix.** `url` 2.5.9 fixes RUSTSEC-2026-0592
+  (a crash on deeply nested `blob:` addresses). Also updates `serde-saphyr` 2.1.1,
+  `scraper` 0.29, `resvg` 0.49, `flate2` 1.1.11, `notify` 8.2.2 and the pinned
+  GitHub Actions (checkout v7.0.1, upload/download-artifact, setup-dotnet,
+  azure/login, rust-cache, install-action). Replaces Dependabot PRs #4, #5, #6, #8
+  and #12, which were failing against an older `main`.
+
 - **Searching is faster.** Typing in the Models, chat history, Artifacts and People
   searches no longer copies every model description, conversation and document
   for each keystroke, and the Models page builds its filter choices without
