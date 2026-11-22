@@ -134,8 +134,9 @@ has the first run, group steps, every setting, privacy details and limits.
   tools run their own code in a sealed box that sees nothing on your computer and reaches only
   the internet addresses it lists, and only after you choose **Allow and turn on**. This
   repository is one: add `Sovra-AI/SovraHarness` for exact date sums. Turn
-  plugins on or off, review what changed before taking an update, and remove
-  ones you no longer want. To make your own, start from the open-source
+  plugins on or off and review updates. Choose **Remove** to read or copy a
+  cleanup guide, review connections, or get help undoing setup on other computers
+  before confirming removal. To make your own, start from the open-source
   [plugin template](https://github.com/Sovra-AI/sovra-plugin-template). See [Plugins](docs/plugins.md) for
   the package contract, editor schema, read-only catalog check, and publisher.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a

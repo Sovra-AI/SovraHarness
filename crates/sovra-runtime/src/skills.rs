@@ -48,6 +48,7 @@ impl SkillsRuntime {
             let mut session = crate::plugins::PluginSession::new(hosts);
             while let Ok(command) = receiver.recv().await {
                 let plugin_command = matches!(&command, LibraryCommand::Plugin(_));
+                let refresh = matches!(&command, LibraryCommand::Skill(SkillCommand::Refresh));
                 let saved = match &command {
                     LibraryCommand::Skill(SkillCommand::Save(skill)) => Some(skill.clone()),
                     LibraryCommand::Skill(_) | LibraryCommand::Plugin(_) => None,
@@ -108,6 +109,14 @@ impl SkillsRuntime {
                                     &library,
                                     plugins,
                                     engine.as_deref(),
+                                ));
+                            }
+                            if refresh
+                                && let Some(store) = &plugins
+                                && let Err(error) = store.remove_unused(&library)
+                            {
+                                listing.issues.push(format!(
+                                    "Could not clean up unused plugin packages: {error}"
                                 ));
                             }
                             Ok::<_, SkillError>((listing, library))

@@ -31,6 +31,11 @@ package version.
   cards. When a turn used tools and said nothing afterwards, Sovra now asks once
   for a short summary of what happened and what you can do next, in the same reply.
 
+- Removing a plugin now opens an offline cleanup guide. You can copy it, review
+  connections or draft a guided cleanup chat before confirming removal. Publishers
+  can include teardown instructions for their services and other computers.
+  Sovra reports incomplete package-file cleanup and retries it on startup.
+
 - **Official plugins, installed with one click.** **Plugins** now opens with
   **Made by Sovra**: plugins the Sovra team publishes, each with what it does and
   what it needs. **Install** adds the plugin and turns it on in one step (or just

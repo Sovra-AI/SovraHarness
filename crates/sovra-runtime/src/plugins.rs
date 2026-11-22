@@ -527,12 +527,18 @@ pub(crate) async fn handle(
         listing(skills.as_deref(), &library, Some(store.as_ref()), admission)?;
         store.save(&library)?;
         if packages_change {
-            // The saved index is already correct; a file left behind only costs space
-            // and is retried after the next change, so this never fails the command.
+            // Always publish the committed index, even if deleting package bytes fails.
             match store.remove_unused(&library) {
                 Ok(0) => {}
                 Ok(removed) => tracing::debug!(removed, "deleted unused plugin packages"),
-                Err(error) => tracing::warn!(%error, "could not delete unused plugin packages"),
+                Err(error) => {
+                    tracing::warn!(%error, "could not delete unused plugin packages");
+                    if let Some(PluginEvent::Removed { title, .. }) = &details {
+                        details = Some(PluginEvent::Error(format!(
+                            "Removed {title} from Sovra, but some unused package files could not be deleted. Reopen Sovra to retry cleanup. {error}"
+                        )));
+                    }
+                }
             }
         }
         Ok((library, details))

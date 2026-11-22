@@ -35,6 +35,7 @@ use crate::{
 const INSTALLED_PAGE_SIZE: usize = 20;
 /// Room for each official plugin's action buttons in one ID range.
 const OFFICIAL_ACTION_SLOTS: usize = 8;
+mod cleanup;
 
 pub(crate) struct PluginBrowser {
     scroll: gpui_kit::ScrollHandle,
@@ -572,7 +573,7 @@ fn installed_section(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .take(INSTALLED_PAGE_SIZE)
         .enumerate()
     {
-        section = section.child(plugin_card(index, plugin, browser, cx));
+        section = section.child(plugin_card(index, plugin, shell, cx));
     }
     if last_page > 0 {
         section = section.child(
@@ -653,9 +654,10 @@ fn empty_state(busy: bool, cx: &mut Context<Shell>) -> impl IntoElement + use<> 
 fn plugin_card(
     index: usize,
     plugin: &InstalledPlugin,
-    browser: &PluginBrowser,
+    shell: &Shell,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
+    let browser = &shell.plugins;
     let t = design::tokens(cx);
     let state = &browser.state;
     let busy = state.busy;
@@ -784,6 +786,14 @@ fn plugin_card(
                 cx,
             );
         } else {
+            if !open {
+                shell.plugin_command(
+                    PluginCommand::Inspect {
+                        id: remove_id.clone(),
+                    },
+                    cx,
+                );
+            }
             shell.plugins.confirm_remove = Some(remove_id.clone());
             cx.notify();
         }
@@ -797,7 +807,7 @@ fn plugin_card(
         .gap(t.space.small)
         .pt(t.space.compact)
         .child(toggle)
-        .child(details_button);
+        .children((!confirming).then_some(details_button));
     if plugin.github.is_some() {
         let update_id = id.clone();
         actions = actions.child(
@@ -882,11 +892,10 @@ fn plugin_card(
                 .whitespace_normal()
                 .sovra_text(TextRole::Caption, cx)
                 .child(
-                    "This takes its skills off this computer. Connections you set up from it stay in Connections. You can add it again later.",
+                    "Removing deletes the plugin and its skills on this computer. Review any changes you made with it before you confirm.",
                 ),
-        );
-    }
-    if approving {
+        ).child(cleanup::review(index, plugin, details, shell, cx));
+    } else if approving {
         card = card.child(approval(
             index,
             &id,

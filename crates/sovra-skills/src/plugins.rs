@@ -90,8 +90,13 @@ impl PluginStore for LocalPluginStore {
             };
             // Only regular files shaped like a package are candidates; a link or folder
             // with that name was not written by this store.
-            let regular = item.file_type().is_ok_and(|kind| kind.is_file());
-            if regular && PluginLibrary::is_package_file(&name) && !keep.contains(&name) {
+            if PluginLibrary::is_package_file(&name)
+                && !keep.contains(&name)
+                && item
+                    .file_type()
+                    .map_err(|error| io_error(&error))?
+                    .is_file()
+            {
                 fs::remove_file(item.path()).map_err(|error| io_error(&error))?;
                 removed += 1;
             }

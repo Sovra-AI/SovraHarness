@@ -312,16 +312,30 @@ Limits:
 
 ## Remove a plugin
 
-Choose **Remove** on an installed plugin, then **Click again to remove**. A
-plugin that is switched on is switched off and removed in the same step: its
-skills leave the Skills page and new chats at once. A chat already using one of
-its skills finishes with the copy it started with, as with **Turn off**.
+Choose **Remove** to review cleanup while the plugin is still installed.
+This works offline and with the plugin switched off. The review shows the
+installed version's cleanup instructions, if supplied, and the connections
+it suggested. Open **Connections** to remove a service you actually configured.
+**Copy guide** keeps the instructions available after removal or on another
+computer. **Guide me in chat** prepares an editable request for you to send.
 
-Removing deletes the plugin's stored copy from this computer, so nothing of it
-is left behind. Connections you set up from its suggestions are yours and stay
-in **Connections**; stop them there. An update you checked but did not take is
-dropped too. To use the plugin again, add it from GitHub or download it from its
-catalog again; it comes back switched off, at the newest version.
+If you used the plugin to set something up, check each computer involved.
+For example, stopping a Computer Pool worker on one machine leaves the other
+workers running. Save any job results first. If the publisher did not provide
+a guide, Sovra shows general steps you can use with your setup history.
+
+Choose **Click again to remove** to delete the local package, withdraw its
+skills from future turns and discard its pending update. A turn already in
+progress can finish with its original skill snapshot. Removing the package
+does not execute the guide. You choose which external changes to undo.
+If Sovra cannot delete unused package files it reports the problem and retries
+when you reopen the app. You can add the plugin again later.
+
+**For publishers.** To include a guide, add a normal skill named
+`uninstall-plugin` to a catalog package or a GitHub plugin. Put the complete
+teardown steps in its instructions. Name the affected machines, services,
+credentials and data, how to undo each setup option, and how to verify the
+result. The uninstall review displays that text without running commands.
 
 ## Use a catalog
 
@@ -522,7 +536,7 @@ together so page navigation does not mix releases.
 | Activation | Only enabled package contents enter the skill catalog; Sovra's existing 256-skill limit includes built-in and personal skills, and activation fails clearly if that budget is exceeded |
 | Failure isolation | A damaged active package is reported and omitted at startup while installed controls remain available to turn it off |
 | Updates | Explicit, serialized, checksum-verified and identity-bound; there is no rollback UI |
-| Cache collection | After every install, update or removal is saved, package files no installed entry names are deleted. Only regular `<sha256>.json` files are candidates; the index, staging files and anything else in the folder are left alone. A failed deletion is logged and retried after the next change, never failing the command |
+| Cache collection | After install, update or removal, Sovra deletes unreferenced regular `<sha256>.json` files. The index and unrelated files stay in place. Incomplete uninstall cleanup is reported and collection runs again on startup or skill refresh. |
 
 Core owns validation, identity rules, commands/events and the UI reducer.
 `sovra-skills` owns private storage and publisher filesystem IO behind the core

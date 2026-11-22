@@ -366,15 +366,27 @@ fn removing_a_plugin_asks_twice_and_fits_supported_sizes(cx: &mut TestAppContext
                 reveal(window, ("plugin-remove", 0usize), cx);
                 window.click(("plugin-remove", 0usize), cx);
                 window.render_frame(cx);
-                // The first press only explains what removing does.
                 reveal(window, ("plugin-remove-warning", 0usize), cx);
             })
             .unwrap();
             assert!(
-                commands.try_recv().is_err(),
-                "one press must not remove anything"
+                matches!(commands.try_recv(), Ok(Command::Plugins(PluginCommand::Inspect { id: inspected })) if inspected == id)
             );
+            assert!(
+                commands.try_recv().is_err(),
+                "review never changes the installation"
+            );
+            // Even a damaged or missing package must still be removable.
+            events
+                .send_blocking(Event::Plugins(PluginEvent::Error(
+                    "Cannot read package".into(),
+                )))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
             cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, ("plugin-cleanup-chat", 0usize), cx);
                 reveal(window, ("plugin-remove", 0usize), cx);
                 window.click(("plugin-remove", 0usize), cx);
             })
@@ -432,6 +444,56 @@ fn plugins_window(
 }
 
 const SIZES: [(f32, f32, u16); 3] = [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)];
+
+#[gpui_kit::test]
+fn switched_off_plugin_shows_its_own_offline_cleanup_guide_and_connections(
+    cx: &mut TestAppContext,
+) {
+    let (window, commands, events) = plugins_window(cx, SIZES[0], ThemeMode::Dark);
+    let (plugin, mut package) = official_plugin(false);
+    let id = plugin.entry.id.clone();
+    package.skills[0].name = "uninstall-plugin".into();
+    package.skills[0].instructions = "Stop the test worker on each computer.".into();
+    package.services.push(sovra_core::plugins::PluginService {
+        name: "Worker dashboard".into(),
+        address: "https://example.com/mcp".into(),
+    });
+    events
+        .send_blocking(Event::Plugins(PluginEvent::Loaded(PluginLibrary {
+            installed: vec![plugin],
+            catalog_url: None,
+        })))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        reveal(window, ("plugin-remove", 0usize), cx);
+        window.click(("plugin-remove", 0usize), cx);
+    })
+    .unwrap();
+    events
+        .send_blocking(Event::Plugins(PluginEvent::Details { id, package }))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        reveal(window, ("plugin-cleanup-copy", 0usize), cx);
+        window.click(("plugin-cleanup-copy", 0usize), cx);
+        let copied = cx.read_from_clipboard().unwrap().text().unwrap();
+        assert!(copied.contains("Stop the test worker on each computer."));
+        assert!(copied.contains("Worker dashboard (https://example.com/mcp)"));
+        reveal(window, ("plugin-cleanup-chat", 0usize), cx);
+        window.click(("plugin-cleanup-chat", 0usize), cx);
+        window.render_frame(cx);
+        assert!(window.try_find("sovra-plugins-view").is_none());
+        window.remove_window();
+    })
+    .unwrap();
+    assert!(
+        !std::iter::from_fn(|| commands.try_recv().ok()).any(|cmd| matches!(
+            cmd,
+            Command::Plugins(PluginCommand::SetEnabled { .. } | PluginCommand::Remove { .. })
+        ))
+    );
+}
 
 #[gpui_kit::test]
 fn a_first_visit_offers_the_example_plugin_at_supported_sizes(cx: &mut TestAppContext) {

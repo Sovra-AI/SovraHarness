@@ -23,6 +23,7 @@ const PACKAGE: &[u8] =
 struct Store {
     library: Mutex<PluginLibrary>,
     packages: Mutex<BTreeMap<String, Vec<u8>>>,
+    fail_cleanup: Mutex<bool>,
 }
 impl PluginStore for Store {
     fn load(&self) -> Result<PluginLibrary, SkillError> {
@@ -49,6 +50,9 @@ impl PluginStore for Store {
         Ok(())
     }
     fn remove_unused(&self, library: &PluginLibrary) -> Result<usize, SkillError> {
+        if *self.fail_cleanup.lock().expect("cleanup failure setting") {
+            return Err(SkillError("Package is in use.".into()));
+        }
         let keep: Vec<_> = library
             .installed
             .iter()
@@ -108,6 +112,45 @@ async fn until(client: &Client, done: impl Fn(&PluginEvent) -> bool) -> Vec<Even
 
 fn contains_plugin_skill(events: &[Event]) -> bool {
     events.iter().any(|event| matches!(event, Event::Skills(SkillEvent::Loaded { skills, .. }) if skills.iter().any(|skill| skill.metadata.contains_key(sovra_core::plugins::PLUGIN_METADATA_KEY))))
+}
+
+#[tokio::test]
+async fn failed_uninstall_cleanup_retires_skills_and_retries_offline_on_restart() {
+    let store = Arc::new(Store::default());
+    let entry =
+        PluginEntry::for_package("https://example.com/package.json".into(), PACKAGE).unwrap();
+    store.cache(&entry, PACKAGE).unwrap();
+    store
+        .library
+        .lock()
+        .unwrap()
+        .installed
+        .push(sovra_core::plugins::InstalledPlugin {
+            entry: entry.clone(),
+            catalog_url: "https://example.com/catalog.json".into(),
+            enabled: true,
+            github: None,
+        });
+    let client = github_client(store.clone(), "http://127.0.0.1:1");
+    assert!(contains_plugin_skill(
+        &until(&client, |e| matches!(e, PluginEvent::Loaded(_))).await
+    ));
+    *store.fail_cleanup.lock().unwrap() = true;
+    client
+        .send(Command::Plugins(PluginCommand::Remove { id: entry.id }))
+        .unwrap();
+    let events = until(&client, |e| matches!(e, PluginEvent::Error(_))).await;
+    assert!(
+        matches!(events.last(), Some(Event::Plugins(PluginEvent::Error(message))) if message.contains("Reopen Sovra"))
+    );
+    assert!(events.iter().any(|e| matches!(e, Event::Plugins(PluginEvent::Loaded(library)) if library.installed.is_empty())));
+    assert!(!contains_plugin_skill(&events));
+    assert_eq!(store.packages.lock().unwrap().len(), 1);
+    client.send(Command::Shutdown).unwrap();
+    *store.fail_cleanup.lock().unwrap() = false;
+    let reopened = github_client(store.clone(), "http://127.0.0.1:1");
+    until(&reopened, |e| matches!(e, PluginEvent::Loaded(_))).await;
+    assert!(store.packages.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

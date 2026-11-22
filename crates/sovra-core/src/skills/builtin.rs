@@ -487,7 +487,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "plugins",
             "Add ready-made plugins and tools",
-            "Install Sovra's own plugins, such as Computer pool, with one click. Or paste a GitHub address or a catalog you trust to add new helpers and tools, see what a plugin's code can reach before you allow it, check what changed before updating, and remove the ones you no longer want.",
+            "Install Sovra's own plugins, such as Computer pool, with one click, or add helpers and tools from a GitHub address or catalog you trust. See what a plugin's code can reach before you allow it, review updates, turn plugins on or off, and get help cleaning up when you remove one.",
             SkillAction::Plugins,
             &[],
         ),
