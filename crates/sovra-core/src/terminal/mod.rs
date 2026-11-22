@@ -660,6 +660,10 @@ pub struct CallView {
     pub omitted_lines: u64,
     /// The unfinished last line.
     pub partial: String,
+    /// The person's message whose turn ran this command, so the chat shows the card
+    /// in that turn instead of after everything else. `None` when it is not known
+    /// (another conversation was open), and the card then goes at the end.
+    pub after_message: Option<String>,
 }
 
 /// Terminal state folded from [`TerminalEvent`]s for the UI.
@@ -688,6 +692,7 @@ impl TerminalState {
                         lines: VecDeque::new(),
                         omitted_lines: 0,
                         partial: String::new(),
+                        after_message: None,
                     });
                     self.trim();
                 }
@@ -744,6 +749,16 @@ impl TerminalState {
     /// The call at an index from [`Self::calls`].
     pub fn call_at(&self, index: usize) -> Option<&CallView> {
         self.calls.get(index)
+    }
+
+    /// Places a call in the turn of the person's message `message_id`. Only the
+    /// first placement counts, so later status updates never move a card.
+    pub fn anchor(&mut self, call_id: &str, message_id: &str) {
+        if let Some(index) = self.position(call_id) {
+            self.calls[index]
+                .after_message
+                .get_or_insert_with(|| message_id.to_owned());
+        }
     }
 
     /// A call by id.

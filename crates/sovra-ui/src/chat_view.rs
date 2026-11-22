@@ -328,6 +328,14 @@ impl ChatPresentation {
             }
         }
         let mut rows = Vec::with_capacity(self.rows.len() + 1);
+        // Command cards sit in the turn that ran them: right after the person's
+        // message, before the reply that reports on them.
+        let terminal: Vec<_> = state
+            .terminal
+            .calls()
+            .filter(|(_, view)| view.call.session_id == state.session_id)
+            .collect();
+        let mut placed = vec![false; terminal.len()];
         for (index, message) in state.messages.iter().enumerate() {
             let segments = match message.role {
                 MessageRole::User => 1,
@@ -340,6 +348,14 @@ impl ChatPresentation {
                 message: index,
                 segment,
             }));
+            if message.role == MessageRole::User {
+                for (slot, (call, view)) in terminal.iter().enumerate() {
+                    if view.after_message.as_deref() == Some(message.id.as_str()) {
+                        placed[slot] = true;
+                        rows.push(Row::Terminal { index: *call });
+                    }
+                }
+            }
         }
         rows.extend(
             state
@@ -350,12 +366,13 @@ impl ChatPresentation {
                 .filter(|(_, message)| message.session_id == state.session_id)
                 .map(|(index, _)| Row::Outbound { index }),
         );
+        // Cards whose turn is not in this conversation's messages keep the old place.
         rows.extend(
-            state
-                .terminal
-                .calls()
-                .filter(|(_, view)| view.call.session_id == state.session_id)
-                .map(|(index, _)| Row::Terminal { index }),
+            terminal
+                .iter()
+                .zip(&placed)
+                .filter(|(_, placed)| !**placed)
+                .map(|((index, _), _)| Row::Terminal { index: *index }),
         );
         if awaiting_first_output(state) {
             rows.push(Row::Waiting);

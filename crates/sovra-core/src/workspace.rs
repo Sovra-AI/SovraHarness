@@ -1460,6 +1460,18 @@ impl WorkspaceState {
             }
             Event::Terminal(terminal_event) => {
                 self.terminal.apply(terminal_event);
+                // A command belongs to the turn the person started with their latest
+                // message, so the chat shows it there and not below newer replies.
+                if let crate::terminal::TerminalEvent::Call(call) = terminal_event
+                    && call.session_id == self.session_id
+                    && let Some(asked) = self
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|message| message.role == crate::agui::MessageRole::User)
+                {
+                    self.terminal.anchor(&call.call_id, &asked.id);
+                }
                 None
             }
             Event::Mcp(mcp_event) => {
@@ -1822,6 +1834,62 @@ impl WorkspaceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: a pool check's command card showed below the reply that reported
+    /// on it, and an earlier turn's card below a later reply.
+    #[test]
+    fn a_command_card_stays_in_the_turn_that_ran_it() {
+        use crate::terminal::{
+            ApprovalPrompt, CallStatus, Permission, TerminalCall, TerminalEvent,
+        };
+        let mut state = WorkspaceState::new(0);
+        let session = state.session_id.clone();
+        let call = |id: &str, session: &str, status| {
+            Event::Terminal(TerminalEvent::Call(TerminalCall {
+                call_id: id.into(),
+                session_id: session.into(),
+                command: "dist-alloc nodes".into(),
+                description: "Check the pool".into(),
+                working_dir: "/home".into(),
+                status,
+                permission: Permission::Pending,
+                prompt: ApprovalPrompt::default(),
+            }))
+        };
+        let anchor = |state: &WorkspaceState, id: &str| {
+            state
+                .terminal
+                .call(id)
+                .and_then(|view| view.after_message.clone())
+        };
+        state
+            .messages
+            .push(ChatMessage::user("ask-1", "How is my pool?", "now"));
+        state
+            .messages
+            .push(ChatMessage::assistant("reply-1", "", "now", Vec::new()));
+        state.apply_event(&call("first", &session, CallStatus::AwaitingApproval));
+        assert_eq!(anchor(&state, "first").as_deref(), Some("ask-1"));
+
+        state
+            .messages
+            .push(ChatMessage::user("ask-2", "And now?", "now"));
+        state.apply_event(&call("first", &session, CallStatus::Running));
+        assert_eq!(
+            anchor(&state, "first").as_deref(),
+            Some("ask-1"),
+            "a later update never moves the card to a newer turn"
+        );
+        state.apply_event(&call("second", &session, CallStatus::Running));
+        assert_eq!(anchor(&state, "second").as_deref(), Some("ask-2"));
+
+        state.apply_event(&call("elsewhere", "another-chat", CallStatus::Running));
+        assert_eq!(
+            anchor(&state, "elsewhere"),
+            None,
+            "a card from a chat that is not open is not tied to this chat's messages"
+        );
+    }
 
     #[test]
     fn source_activity_does_not_split_or_absorb_the_streamed_reply() {

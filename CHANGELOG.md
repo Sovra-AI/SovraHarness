@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- **Command cards stay in their place in the chat.** A command Sovra ran (for
+  example checking your computer pool) used to appear at the very bottom of the
+  conversation, below the reply that described it and below any later questions.
+  Each card now sits in the turn that ran it, right after your message.
+
 - **Taking your time to approve a command no longer ends the chat.** While Sovra
   waited for you to choose **Allow once** on a command card, the wait counted as
   the AI going quiet, so a slow answer ended the turn with "The AI stopped

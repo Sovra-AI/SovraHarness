@@ -66,6 +66,10 @@ Text allow rules are a convenience, not a sandbox. An approved command runs with
 your OS permissions. Review the full command, working directory, and side effects
 before approving it. Use Settings to remove a saved rule when it is no longer needed.
 
+Each card appears in the conversation right after the message that led to it,
+before Sovra's reply about it, and stays there as later messages arrive
+(`CallView::after_message`, set when the card first appears).
+
 ## Running a command
 
 - **Shell.** On Windows: `pwsh`, else Windows PowerShell, with `-NoProfile

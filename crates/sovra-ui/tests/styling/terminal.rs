@@ -257,3 +257,72 @@ fn terminal_cards_and_settings_work_at_every_size(cx: &mut TestAppContext) {
         }
     }
 }
+
+/// Regression: asking "how is my pool doing" showed the command card below the reply
+/// that reported on it, and a later question's reply above an earlier card.
+#[gpui_kit::test]
+fn a_command_card_stays_in_its_turn_above_later_messages(cx: &mut TestAppContext) {
+    let (client, _commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell = None;
+    let window = cx.open_window(size(px(1600.), px(1400.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell.unwrap();
+    let session = shell.read_with(cx, |s, _| s.workspace().session_id.clone());
+    let turn = |text: &'static str, cx: &mut TestAppContext| {
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.send_prompt_text(text, window, cx));
+        })
+        .unwrap();
+        settle(cx);
+    };
+    let reply = |text: &str, cx: &mut TestAppContext| {
+        for event in [
+            Event::AgentChunk {
+                session_id: session.clone(),
+                text: text.into(),
+            },
+            Event::AgentCompleted {
+                session_id: session.clone(),
+            },
+        ] {
+            events.send_blocking(event).unwrap();
+        }
+        settle(cx);
+    };
+
+    turn("How is my pool doing?", cx);
+    events
+        .send_blocking(Event::Terminal(TerminalEvent::Call(call(
+            &session,
+            CallStatus::Finished {
+                exit_code: Some(0),
+                duration_ms: 400,
+            },
+            Permission::Auto(AutoApproval::ReadOnly),
+        ))))
+        .unwrap();
+    settle(cx);
+    reply("Your pool has one computer and is idle.", cx);
+    turn("And now?", cx);
+    reply("Still idle.", cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let first = window.find(("copy-user-message", 0usize)).bounds();
+        let card = window.find(("terminal-card", 0usize)).bounds();
+        let second = window.find(("copy-user-message", 2usize)).bounds();
+        assert!(
+            card.top() >= first.bottom(),
+            "the card comes after the question that ran it: {first:?} {card:?}"
+        );
+        assert!(
+            card.bottom() <= second.top(),
+            "a later question and its reply stay below the earlier card: {card:?} {second:?}"
+        );
+    })
+    .unwrap();
+}
