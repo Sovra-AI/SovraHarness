@@ -163,3 +163,33 @@ fn artifacts_search(bencher: Bencher) {
     };
     bencher.bench(|| black_box(&library).filtered(black_box(&filter)).len());
 }
+
+/// A small sensor export with mixed units and unordered event times.
+#[divan::bench]
+fn knowledge_sensor_table(bencher: Bencher) {
+    use std::fmt::Write as _;
+    let mut data = String::from("timestamp,value,unit,instrument\n");
+    for i in 0..64 {
+        writeln!(data, "2025-10-{:02},0.5,kg,scale-1", 28 - i % 28).expect("write to string");
+    }
+    bencher.bench(|| {
+        sovra_core::knowledge_analysis::analyze(
+            black_box(&data),
+            &sovra_core::knowledge_analysis::AnalysisOptions::default(),
+        )
+        .expect("sensor fixture")
+    });
+}
+#[divan::bench(args=[16,64])]
+fn knowledge_point_cloud(bencher: Bencher, n: u32) {
+    let points: Vec<_> = (0..n)
+        .map(|i| {
+            let angle = std::f64::consts::TAU * f64::from(i) / f64::from(n);
+            vec![angle.cos(), angle.sin()]
+        })
+        .collect();
+    bencher.bench(|| {
+        sovra_core::knowledge_analysis::topology::persistence(black_box(&points))
+            .expect("finite fixture points")
+    });
+}

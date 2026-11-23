@@ -7,7 +7,7 @@
 //! migration arm in [`super::SurrealStore::open`].
 
 /// Bump when stored data (not just indexes) needs migrating.
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 
 /// Statements that don't depend on configuration.
 pub(crate) const STATIC_SCHEMA: &str = "
@@ -50,6 +50,7 @@ DEFINE TABLE OVERWRITE repeats TYPE RELATION IN fact OUT fact;
 DEFINE ANALYZER OVERWRITE memory_text TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 DEFINE INDEX OVERWRITE fact_text ON fact FIELDS content FULLTEXT ANALYZER memory_text BM25;
 DEFINE INDEX OVERWRITE episode_text ON episode FIELDS content FULLTEXT ANALYZER memory_text BM25;
+DEFINE INDEX IF NOT EXISTS artifact_text ON artifact FIELDS searchable FULLTEXT ANALYZER memory_text BM25;
 ";
 
 /// The HNSW index depends on the configured embedding dimension, so it is rendered.

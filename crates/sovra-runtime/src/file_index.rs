@@ -171,6 +171,8 @@ impl IndexRuntime {
                 tokens.insert(root_id.clone(), Arc::new(AtomicBool::new(false)));
             }
             IndexCommand::List
+            | IndexCommand::ListAnswers { .. }
+            | IndexCommand::SaveAnswer(_)
             | IndexCommand::Report { .. }
             | IndexCommand::Browse { .. }
             | IndexCommand::Preview { .. }
@@ -241,6 +243,12 @@ impl IndexRuntime {
                             })
                         }
                         IndexCommand::List => store.list().map(IndexEvent::Roots),
+                        IndexCommand::SaveAnswer(reference) => {
+                            store.save_answer(&reference).map(IndexEvent::AnswerSaved)
+                        }
+                        IndexCommand::ListAnswers { before } => store
+                            .saved_answers(before)
+                            .map(|page| IndexEvent::SavedAnswers { before, page }),
                         IndexCommand::BrowseKnowledge { request_id, query } => {
                             Ok(IndexEvent::KnowledgeBrowsed {
                                 request_id,
@@ -337,7 +345,24 @@ async fn run_actor(
     .await;
     match roots {
         Ok(Ok(roots)) => {
-            let _ = events.try_send(Event::FileIndex(IndexEvent::Roots(roots.clone())));
+            if events
+                .send(Event::FileIndex(IndexEvent::Roots(roots.clone())))
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let answer_store = store.clone();
+            let answer_page = tokio::task::spawn_blocking(move || answer_store.saved_answers(None))
+                .await
+                .map(|r| r.map(|page| IndexEvent::SavedAnswers { before: None, page }));
+            if events
+                .send(Event::FileIndex(worker_event(answer_page)))
+                .await
+                .is_err()
+            {
+                return;
+            }
             let knowledge_store = store.clone();
             let pending = tokio::task::spawn_blocking(move || {
                 knowledge_store.knowledge().map_or_else(
@@ -473,6 +498,8 @@ fn mutate(
             None
         }
         IndexCommand::List
+        | IndexCommand::ListAnswers { .. }
+        | IndexCommand::SaveAnswer(_)
         | IndexCommand::Report { .. }
         | IndexCommand::Browse { .. }
         | IndexCommand::Preview { .. }
@@ -540,6 +567,8 @@ fn read_failure(command: &IndexCommand, message: String) -> IndexEvent {
             result: Err(IndexError(message)),
         },
         IndexCommand::List
+        | IndexCommand::ListAnswers { .. }
+        | IndexCommand::SaveAnswer(_)
         | IndexCommand::ListKnowledge
         | IndexCommand::ReviewKnowledge { .. }
         | IndexCommand::AddRoot { .. }
@@ -786,12 +815,17 @@ fn report(
     result: Result<Result<IndexEvent, IndexError>, tokio::task::JoinError>,
     events: &Sender<Event>,
 ) {
-    let event = match result {
+    let _ = events.try_send(Event::FileIndex(worker_event(result)));
+}
+
+fn worker_event(
+    result: Result<Result<IndexEvent, IndexError>, tokio::task::JoinError>,
+) -> IndexEvent {
+    match result {
         Ok(Ok(event)) => event,
         Ok(Err(error)) => IndexEvent::Error(error.to_string()),
         Err(_) => IndexEvent::Error(
             "The indexing worker stopped unexpectedly. Refresh the folder to retry.".into(),
         ),
-    };
-    let _ = events.try_send(Event::FileIndex(event));
+    }
 }

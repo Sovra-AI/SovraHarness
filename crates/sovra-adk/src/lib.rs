@@ -17,6 +17,7 @@ mod files;
 mod github;
 mod google;
 mod microsoft;
+mod source_analysis;
 pub use connected_tools::ConnectedTools;
 mod group_work;
 mod memory;

@@ -66,6 +66,9 @@ impl Shell {
             text: (!text.is_empty()).then_some(text),
             before: None,
             entity_id: None,
+            relation: None,
+            direction: sovra_core::file_index::graph::GraphDirection::Either,
+            hops: 1,
             ..self.file_index.state.knowledge_browser.query.clone()
         };
         self.browse_file_knowledge(query, true, cx);
@@ -408,13 +411,17 @@ fn detail(
                 .child(endpoint_label(page, endpoint)),
         );
         if index == 0 {
-            panel = panel.child(div().sovra_text(TextRole::Caption, cx).child(
-                if relation.relation == sovra_core::file_index::graph::RelationKind::GroundedIn {
-                    "Supported by this source"
-                } else {
-                    relation.relation.label()
-                },
-            ));
+            panel = panel.child(
+                div().sovra_text(TextRole::Caption, cx).child(
+                    if relation.relation == sovra_core::file_index::graph::RelationKind::GroundedIn
+                    {
+                        "Supported by this source"
+                    } else {
+                        relation.relation.label()
+                    }
+                    .to_owned(),
+                ),
+            );
         }
         if let GraphEndpoint::Entity(id) = endpoint {
             let id = id.clone();
@@ -442,6 +449,31 @@ fn detail(
                 })),
             );
         }
+    }
+    if let GraphEndpoint::Entity(id) = &relation.subject {
+        let id = id.clone();
+        let predicate = relation.relation.clone();
+        panel = panel.child(
+            design::button(
+                "knowledge-follow-predicate",
+                format!("Follow {} from this subject", predicate.label()),
+                cx,
+            )
+            .self_start()
+            .max_w_full()
+            .on_click(cx.listener(move |shell, _, _, cx| {
+                let query = GraphQuery {
+                    entity_id: Some(id.clone()),
+                    direction: sovra_core::file_index::graph::GraphDirection::Outgoing,
+                    relation: Some(predicate.clone()),
+                    hops: 2,
+                    text: None,
+                    before: None,
+                    ..shell.file_index.state.knowledge_browser.query.clone()
+                };
+                shell.browse_file_knowledge(query, true, cx);
+            })),
+        );
     }
     let mut ids = std::collections::BTreeSet::from_iter(relation.evidence.iter().copied());
     for endpoint in [&relation.subject, &relation.object] {

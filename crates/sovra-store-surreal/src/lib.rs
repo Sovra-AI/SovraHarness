@@ -10,6 +10,7 @@
 //! Fact writes and their provenance/replacement edges commit together. A failed
 //! correction must never leave a new belief beside an unchanged or missing source.
 
+mod artifact_search;
 mod decisions;
 mod facts;
 mod ingestion;
@@ -172,11 +173,13 @@ impl SurrealStore {
                     None
                 }
             }
-            Some(2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | schema::SCHEMA_VERSION) => Some(
-                self.embedding_index()
-                    .await?
-                    .ok_or_else(|| MemoryError::Backend("missing memory index metadata".into()))?,
-            ),
+            Some(2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | schema::SCHEMA_VERSION) => {
+                Some(
+                    self.embedding_index().await?.ok_or_else(|| {
+                        MemoryError::Backend("missing memory index metadata".into())
+                    })?,
+                )
+            }
             Some(other) => {
                 return Err(MemoryError::Backend(format!(
                     "unsupported memory schema {other}; open it with a compatible Sovra version"
@@ -218,13 +221,18 @@ impl SurrealStore {
         } else {
             ""
         };
+        let artifact_migration = if version.is_some_and(|v| v < 14) && has_table("artifact") {
+            "UPDATE artifact SET search_title=(encoding::json::decode(artifact_json)).title, searchable=string::concat((encoding::json::decode(artifact_json)).title,'\\n',(encoding::json::decode(artifact_json)).content) WHERE deleted_at IS NONE;"
+        } else {
+            ""
+        };
         // Version 13 adds the decision table; existing records need no data rewrite.
         // Version 12 separates whole-source revocation from raw wording withdrawn by a fact edit.
         // Existing revocations remain conservative; missing raw_withdrawn_at means none.
         // Version 11 adds optional source/time fields inside serialized chat messages.
         // Serde defaults preserve legacy unknown provenance; no evidence is invented.
         let statements = format!(
-            "BEGIN TRANSACTION;\n{}\n{}\nUPSERT meta:embedding SET model = $model, dimension = $dimension;\nUPSERT meta:remembering SET enabled = enabled ?? true, generation = generation ?? 0, revision = revision ?? 0;\nUPSERT meta:memory_semantic SET generation = generation ?? 0, revision = revision ?? 0;\n{withdrawal_migration}\n{source_migration}\n{attribution_migration}\n{dependency_migration}\nUPSERT meta:memory_facts SET revision = revision ?? 0;\nUPSERT meta:schema SET version = $version;\nCOMMIT TRANSACTION;",
+            "BEGIN TRANSACTION;\n{}\n{}\nUPSERT meta:embedding SET model = $model, dimension = $dimension;\nUPSERT meta:remembering SET enabled = enabled ?? true, generation = generation ?? 0, revision = revision ?? 0;\nUPSERT meta:memory_semantic SET generation = generation ?? 0, revision = revision ?? 0;\n{withdrawal_migration}\n{source_migration}\n{attribution_migration}\n{dependency_migration}\n{artifact_migration}\nUPSERT meta:memory_facts SET revision = revision ?? 0;\nUPSERT meta:schema SET version = $version;\nCOMMIT TRANSACTION;",
             schema::STATIC_SCHEMA,
             schema::hnsw_index(self.config.embedding_dimension),
         );
@@ -421,7 +429,21 @@ impl MemoryStore for SurrealStore {
         query: sovra_core::MemorySearch,
         now: Timestamp,
     ) -> Result<Vec<sovra_core::MemorySourceEvidence>, MemoryError> {
-        self.evidence_sources(query, now).await
+        self.evidence_sources(
+            query,
+            now,
+            sovra_core::knowledge_analysis::Language::English,
+            true,
+        )
+        .await
+    }
+    async fn search_source_language(
+        &self,
+        query: sovra_core::MemorySearch,
+        now: Timestamp,
+        language: sovra_core::knowledge_analysis::Language,
+    ) -> Result<Vec<sovra_core::MemorySourceEvidence>, MemoryError> {
+        self.evidence_sources(query, now, language, false).await
     }
     async fn stop_memory_source(&self, id: &EpisodeId, at: Timestamp) -> Result<(), MemoryError> {
         self.revoke_evidence(id, at).await
@@ -868,6 +890,13 @@ impl MemoryStore for SurrealStore {
         Ok(())
     }
 
+    async fn search_artifact_contents(
+        &self,
+        query: &str,
+        language: sovra_core::knowledge_analysis::Language,
+    ) -> Result<Option<Vec<sovra_core::knowledge_analysis::Excerpt>>, MemoryError> {
+        self.artifact_excerpts(query, language).await.map(Some)
+    }
     async fn list_artifacts(&self) -> Result<Vec<Artifact>, MemoryError> {
         let rows: Vec<ArtifactRow> = self
             .query(
@@ -912,19 +941,22 @@ impl MemoryStore for SurrealStore {
     async fn save_artifact(&self, artifact: &Artifact) -> Result<(), MemoryError> {
         let artifact_json = serde_json::to_string(artifact)
             .map_err(|e| MemoryError::Backend(format!("serialize artifact: {e}")))?;
-        let row = ArtifactRow {
-            artifact_id: artifact.id.clone(),
-            updated_at: artifact.updated_at.millis(),
-            artifact_json,
-            deleted_at: None,
-        };
+        let mut data = surrealdb::types::Object::default();
+        data.insert("artifact_id", artifact.id.clone());
+        data.insert("updated_at", artifact.updated_at.millis());
+        data.insert("artifact_json", artifact_json);
+        data.insert(
+            "searchable",
+            format!("{}\n{}", artifact.title, artifact.content),
+        );
+        data.insert("search_title", artifact.title.clone());
         self.query(
             "UPSERT $record CONTENT $data;",
             (
                 "record",
                 RecordId::new("artifact", entity_key(&artifact.id)),
                 "data",
-                row,
+                data,
             ),
         )
         .await?;
@@ -933,7 +965,7 @@ impl MemoryStore for SurrealStore {
 
     async fn delete_artifact(&self, id: &str, at: Timestamp) -> Result<(), MemoryError> {
         self.query(
-            "UPDATE $record SET deleted_at = $at;",
+            "UPDATE $record SET deleted_at = $at, searchable=NONE, search_title=NONE;",
             (
                 "record",
                 RecordId::new("artifact", entity_key(id)),

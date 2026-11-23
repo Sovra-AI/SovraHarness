@@ -26,7 +26,13 @@ pub(crate) fn shared_knowledge_tools(
         .filter(|tool| {
             tool.is_read_only()
                 && (crate::file_index::TOOL_NAMES.contains(&tool.name())
-                    || matches!(tool.name(), crate::recall::LOOKUP_NAME | "read_attachment"))
+                    || matches!(
+                        tool.name(),
+                        crate::recall::LOOKUP_NAME
+                            | "read_attachment"
+                            | crate::source_analysis::ANALYZE
+                            | crate::source_analysis::SEARCH
+                    ))
         })
         .cloned()
 }

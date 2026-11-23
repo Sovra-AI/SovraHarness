@@ -84,6 +84,13 @@ For progress and classification, see [File understanding](file-ontology.md).
   confidence is not a calibrated truth score. Source access, provenance, and
   revocation remain separate from accepting an interpretation.
 
+Reviewed proposals can introduce a stable domain class or property identifier.
+A property declares the subject and object classes it accepts. Follow a named
+relationship in either direction or use **is a** to follow the category hierarchy.
+The review retains the cited version and rejects incompatible endpoints and
+category cycles. For local analysis across private notes, files, and saved work,
+see [Explore your sources](knowledge.md#explore-your-sources).
+
 Readers use opaque, version-bound references. Refreshing or revoking a source
 invalidates stale current references instead of combining passages from different
 versions. Partial text remains labelled even when every saved part has been read.
@@ -100,12 +107,12 @@ The saved card names three things:
 - **Read on** — the UTC day that version was read. This is not a date written
   in the file, and it is not the time the file was last modified.
 
-A later edit of the file does not replace that saved wording. Search again to
+The folder index keeps the quotation and its citation across restarts. Repeated saves of the same passage keep one card. Search again to
 see the updated text. The card under **Answers you saved** still shows the
 wording, file, lines, and read date from the version you saved.
 
 Saving does not change the file. If you remove the folder, that saved answer
-leaves the screen with it. `/file-history` still only inspects retained
+is deleted with its grant. `/file-history` still only inspects retained
 observations.
 
 ## Meaning search

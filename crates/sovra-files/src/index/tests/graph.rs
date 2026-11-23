@@ -577,3 +577,139 @@ fn malformed_stored_records_surface_errors_instead_of_silent_absence() {
         .unwrap();
     assert!(store.pending().is_err());
 }
+
+#[test]
+fn domain_relationships_reopen_with_their_types_direction_hierarchy_and_evidence() {
+    let fixture = Fixture::new();
+    fixture.write("citrus.txt", "An orange is a citrus fruit. The orchard grows it. It is sold at the market and contains vitamin C.");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let citation = search(&store, "orchard")[0].reference.clone();
+    let mut draft = draft(citation.clone());
+    let class = |name: &str| EntityKind::Domain(name.to_owned().try_into().unwrap());
+    let product = class("food:product");
+    let nutrient = class("food:nutrient");
+    let place = class("commerce:location");
+    let nodes = [
+        ("Orange", product.clone()),
+        ("Citrus", EntityKind::Category),
+        ("Fruit", EntityKind::Category),
+        ("Orchard", EntityKind::Organization),
+        ("Market", place.clone()),
+        ("Vitamin C", nutrient.clone()),
+    ];
+    draft.entities = nodes
+        .into_iter()
+        .map(|(label, kind)| EntityDraft {
+            local_id: label.into(),
+            label: label.into(),
+            kind,
+            evidence: vec![0],
+        })
+        .collect();
+    let property = |id: &str, object| {
+        RelationKind::Property(DomainProperty {
+            id: id.to_owned().try_into().unwrap(),
+            subject: product.clone(),
+            object,
+        })
+    };
+    let grown = property("grown_by", EntityKind::Organization);
+    let sold = property("sold_in", place);
+    let contains = property("contains", nutrient);
+    let edges = [
+        ("Orange", RelationKind::IsA, "Citrus"),
+        ("Citrus", RelationKind::IsA, "Fruit"),
+        ("Orange", grown.clone(), "Orchard"),
+        ("Orange", sold.clone(), "Market"),
+        ("Orange", contains.clone(), "Vitamin C"),
+    ];
+    draft.relations = edges
+        .into_iter()
+        .map(|(subject, relation, object)| RelationDraft {
+            subject: DraftEndpoint::New(subject.into()),
+            object: DraftEndpoint::New(object.into()),
+            statement: format!("{subject} {} {object}", relation.label()),
+            relation,
+            evidence: vec![0],
+            confidence: None,
+            valid_time: None,
+            replaces: None,
+        })
+        .collect();
+    let mut invalid = draft.clone();
+    invalid.relations[2].object = DraftEndpoint::New("Vitamin C".into());
+    invalid
+        .entities
+        .retain(|entity| entity.local_id != "Orchard");
+    assert!(
+        store
+            .propose(&invalid, &origin())
+            .unwrap_err()
+            .0
+            .contains("incompatible entity types")
+    );
+    let request = store.propose(&draft, &origin()).unwrap();
+    store.decide(request.id, true).unwrap();
+    drop(store);
+    let store = fixture.store();
+    invalid.relations[2].relation = property("grown_by", class("food:nutrient"));
+    assert!(
+        store
+            .propose(&invalid, &origin())
+            .unwrap_err()
+            .0
+            .contains("different endpoint classes")
+    );
+    let entities = store.query(&GraphQuery::default()).unwrap().entities;
+    let id = |name: &str| {
+        entities
+            .iter()
+            .find(|e| e.label == name)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let outgoing = GraphQuery {
+        entity_id: Some(id("Orange")),
+        direction: GraphDirection::Outgoing,
+        ..Default::default()
+    };
+    for (relation, expected) in [
+        (grown, "Orchard"),
+        (sold, "Market"),
+        (contains, "Vitamin C"),
+    ] {
+        let page = store
+            .query(&GraphQuery {
+                relation: Some(relation.clone()),
+                ..outgoing.clone()
+            })
+            .unwrap();
+        assert_eq!(page.relations.len(), 1);
+        assert_eq!(
+            page.relations[0].object,
+            GraphEndpoint::Entity(id(expected))
+        );
+        assert_eq!(
+            store.evidence(page.sources[0].id).unwrap().source.reference,
+            citation
+        );
+        let inverse = GraphQuery {
+            entity_id: Some(id(expected)),
+            relation: Some(relation),
+            direction: GraphDirection::Incoming,
+            ..Default::default()
+        };
+        assert_eq!(store.query(&inverse).unwrap().relations, page.relations);
+    }
+    let parents = GraphQuery {
+        relation: Some(RelationKind::IsA),
+        hops: 2,
+        ..outgoing
+    };
+    assert_eq!(store.query(&parents).unwrap().relations.len(), 2);
+    store.remove(&root.id).unwrap();
+    assert!(store.query(&parents).is_err());
+}

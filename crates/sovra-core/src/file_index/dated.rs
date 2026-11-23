@@ -7,7 +7,7 @@
 use super::{IndexError, IndexPassage, PassageRef};
 
 /// The wording, file, line range, and read time captured from one passage.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DatedAnswer {
     reference: PassageRef,
     file: String,
@@ -224,4 +224,10 @@ mod tests {
         let missing = passage("A sentence.", 0, Some(1_700_000_000));
         assert!(DatedAnswer::save(&missing).is_err());
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SavedAnswerPage {
+    pub answers: Vec<DatedAnswer>,
+    pub next_before: Option<u64>,
 }

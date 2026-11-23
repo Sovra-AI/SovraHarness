@@ -8,31 +8,8 @@ pub const MAX_GRAPH_EVIDENCE: usize = 8;
 pub const MAX_GRAPH_ENTITIES: usize = 16;
 pub const MAX_GRAPH_CLAIMS: usize = 24;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EntityKind {
-    Document,
-    Section,
-    Topic,
-    Person,
-    Organization,
-    Project,
-    Task,
-}
-
-impl EntityKind {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Document => "Document",
-            Self::Section => "Section",
-            Self::Topic => "Topic",
-            Self::Person => "Person",
-            Self::Organization => "Organization",
-            Self::Project => "Project",
-            Self::Task => "Task",
-        }
-    }
-}
+mod vocabulary;
+pub use vocabulary::{DomainProperty, EntityKind, GraphDirection, RelationKind, VocabularyId};
 
 fn calendar_time(value: u64) -> Result<(), IndexError> {
     if value > 253_402_300_799 {
@@ -41,54 +18,6 @@ fn calendar_time(value: u64) -> Result<(), IndexError> {
         ));
     }
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RelationKind {
-    GroundedIn,
-    PartOf,
-    About,
-    ForProject,
-    DependsOn,
-    RelatedTo,
-    Revises,
-}
-
-impl RelationKind {
-    /// None is a source-version citation, not a logical entity.
-    pub fn accepts(self, subject: Option<EntityKind>, object: Option<EntityKind>) -> bool {
-        use EntityKind::{Document, Project, Section, Task};
-        match self {
-            Self::GroundedIn => subject.is_some() && object.is_none(),
-            Self::PartOf => matches!(
-                (subject, object),
-                (Some(Section), Some(Document | Section)) | (Some(Task), Some(Project | Task))
-            ),
-            Self::About => matches!(subject, Some(Document | Section)) && object.is_some(),
-            Self::ForProject => {
-                matches!(subject, Some(Document | Section | Task)) && object == Some(Project)
-            }
-            Self::DependsOn => {
-                matches!(subject, Some(Document | Project | Task))
-                    && matches!(object, Some(Document | Project | Task))
-            }
-            Self::RelatedTo => subject.is_some() && object.is_some(),
-            Self::Revises => subject == Some(Document) && object == Some(Document),
-        }
-    }
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::GroundedIn => "grounded in",
-            Self::PartOf => "part of",
-            Self::About => "about",
-            Self::ForProject => "for project",
-            Self::DependsOn => "depends on",
-            Self::RelatedTo => "related to",
-            Self::Revises => "revises",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,7 +128,7 @@ impl GraphDraft {
             bounded_text(&entity.local_id, 80)?;
             bounded_text(&entity.label, 240)?;
             if entities
-                .insert(entity.local_id.as_str(), entity.kind)
+                .insert(entity.local_id.as_str(), &entity.kind)
                 .is_some()
             {
                 return Err(IndexError(
@@ -426,6 +355,9 @@ pub struct GraphQuery {
     pub roots: Vec<String>,
     pub text: Option<String>,
     pub entity_id: Option<String>,
+    /// Match the complete predicate, including domain and range for domain properties.
+    pub relation: Option<RelationKind>,
+    pub direction: GraphDirection,
     pub hops: u8,
     pub limit: usize,
     pub include_stale: bool,
@@ -442,6 +374,8 @@ impl Default for GraphQuery {
             roots: vec![],
             text: None,
             entity_id: None,
+            relation: None,
+            direction: GraphDirection::Either,
             hops: 1,
             limit: 20,
             include_stale: false,
@@ -628,19 +562,19 @@ mod tests {
 
     #[test]
     fn ontology_edges_have_explicit_domains_and_ranges() {
-        assert!(RelationKind::GroundedIn.accepts(Some(EntityKind::Document), None));
-        assert!(!RelationKind::GroundedIn.accepts(None, Some(EntityKind::Document)));
+        assert!(RelationKind::GroundedIn.accepts(Some(&EntityKind::Document), None));
+        assert!(!RelationKind::GroundedIn.accepts(None, Some(&EntityKind::Document)));
         assert!(
-            RelationKind::PartOf.accepts(Some(EntityKind::Section), Some(EntityKind::Document))
+            RelationKind::PartOf.accepts(Some(&EntityKind::Section), Some(&EntityKind::Document))
         );
         assert!(
-            !RelationKind::PartOf.accepts(Some(EntityKind::Document), Some(EntityKind::Section))
+            !RelationKind::PartOf.accepts(Some(&EntityKind::Document), Some(&EntityKind::Section))
         );
         assert!(
-            RelationKind::ForProject.accepts(Some(EntityKind::Task), Some(EntityKind::Project))
+            RelationKind::ForProject.accepts(Some(&EntityKind::Task), Some(&EntityKind::Project))
         );
         assert!(
-            !RelationKind::Revises.accepts(Some(EntityKind::Person), Some(EntityKind::Document))
+            !RelationKind::Revises.accepts(Some(&EntityKind::Person), Some(&EntityKind::Document))
         );
         assert_eq!(RelationKind::PartOf.label(), "part of");
     }

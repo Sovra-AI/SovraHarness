@@ -14,6 +14,16 @@ package version.
 
 ## [Unreleased]
 
+- **Explore connected knowledge.** Search folder passages, your saved statements,
+  and current artifacts together. Inspect typed relationships, category hierarchies,
+  dataset profiles, unit conversions and tolerances, time windows, persistent
+  components and loops, word forms in eight languages, and binary image masks.
+  The evidence map links shared measurements and identifier paths to their exact
+  source lines. Results retain their source wording. Saved folder quotations survive restarts and
+  are deleted when the folder grant is removed. Folder scans reuse prepared SQLite
+  statements. See [Knowledge](docs/knowledge.md#explore-your-sources) and
+  [Performance](docs/performance.md#connected-knowledge).
+
 - **Roadmap is up to date with v0.8.0.** It now says the decision record shipped
   in v0.8.0, links to the latest release instead of naming a version, and records
   the owner's choice that the person running Sovra picks the base model for future

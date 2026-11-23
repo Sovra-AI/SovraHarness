@@ -87,7 +87,7 @@ pub(super) fn propose(
         replaced_relations,
         required_roots: required_roots.into_iter().collect(),
     };
-    validate_kinds(&result)?;
+    validate_kinds(db, &result)?;
     db.execute("INSERT INTO index_knowledge_proposals(fingerprint,state,created,details) VALUES(?1,?2,?3,'')",params![fingerprint,json(&result.state)?,number(created_at)?]).map_err(|e|db_error(&e))?;
     result.id = u64::try_from(db.last_insert_rowid()).map_err(|_| missing())?;
     db.execute(
@@ -102,29 +102,46 @@ pub(super) fn propose(
     Ok(result)
 }
 
-fn kind(
-    proposal: &KnowledgeProposal,
+fn kind<'a>(
+    proposal: &'a KnowledgeProposal,
     endpoint: &DraftEndpoint,
-) -> Result<Option<EntityKind>, IndexError> {
+) -> Result<Option<&'a EntityKind>, IndexError> {
     match endpoint {
         DraftEndpoint::New(id) => proposal
             .draft
             .entities
             .iter()
             .find(|e| e.local_id == *id)
-            .map(|e| Some(e.kind))
+            .map(|e| Some(&e.kind))
             .ok_or_else(missing),
         DraftEndpoint::Entity(id) => proposal
             .existing_entities
             .iter()
             .find(|e| e.id == *id)
-            .map(|e| Some(e.kind))
+            .map(|e| Some(&e.kind))
             .ok_or_else(missing),
         DraftEndpoint::Source(_) => Ok(None),
     }
 }
-fn validate_kinds(proposal: &KnowledgeProposal) -> Result<(), IndexError> {
+fn validate_kinds(db: &Connection, proposal: &KnowledgeProposal) -> Result<(), IndexError> {
+    let mut declared = BTreeMap::new();
     for relation in &proposal.draft.relations {
+        if let RelationKind::Property(property) = &relation.relation {
+            let previous = declared.insert(property.id.as_ref(), property);
+            let conflict = match previous {
+                Some(prior) => prior != property,
+                None => db.query_row(
+                    &format!("SELECT EXISTS(SELECT 1 FROM index_knowledge_relations r WHERE json_extract(r.kind,'$.property.id')=?1 AND r.kind<>?2 AND {GRANTED_RELATION})"),
+                    params![property.id.as_ref(),json(&relation.relation)?], |row| row.get::<_,bool>(0)
+                ).map_err(|e|db_error(&e))?,
+            };
+            if conflict {
+                return Err(IndexError(format!(
+                    "The property {} already declares different endpoint classes. Choose its original classes or a distinct identifier.",
+                    property.id.as_ref()
+                )));
+            }
+        }
         if !relation.relation.accepts(
             kind(proposal, &relation.subject)?,
             kind(proposal, &relation.object)?,
@@ -151,7 +168,7 @@ pub(super) fn decide(
     };
     if approve {
         proposed.draft.validate()?;
-        validate_kinds(&proposed)?;
+        validate_kinds(db, &proposed)?;
         let evidence_ids = evidence_ids(db, id)?;
         for id in &evidence_ids {
             if !evidence(db, *id, &[])?.source.current {
@@ -202,7 +219,7 @@ fn accept(
         let id = format!("entity-{}-{index}", proposal.id);
         let entity = GraphEntity {
             id: id.clone(),
-            kind: source.kind,
+            kind: source.kind.clone(),
             label: source.label.clone(),
             evidence: source
                 .evidence
@@ -241,7 +258,7 @@ fn accept(
         let record = GraphRelation {
             id: format!("relation-{}-{index}", proposal.id),
             subject: resolve(&draft.subject)?,
-            relation: draft.relation,
+            relation: draft.relation.clone(),
             object: resolve(&draft.object)?,
             statement: draft.statement.clone(),
             evidence: draft
@@ -265,17 +282,22 @@ fn accept(
         };
         let subject = entity_id(&record.subject);
         let object = entity_id(&record.object);
-        if record.relation == RelationKind::PartOf {
+        if matches!(record.relation, RelationKind::PartOf | RelationKind::IsA) {
             let cycle_sql = format!(
-                "WITH RECURSIVE parents(id) AS (SELECT ?1 UNION SELECT r.object FROM index_knowledge_relations r JOIN parents p ON r.subject=p.id WHERE r.kind='\"part_of\"' AND r.expired IS NULL AND r.object IS NOT NULL AND {GRANTED_RELATION}) SELECT EXISTS(SELECT 1 FROM parents WHERE id=?2)"
+                "WITH RECURSIVE parents(id) AS (SELECT ?1 UNION SELECT r.object FROM index_knowledge_relations r JOIN parents p ON r.subject=p.id WHERE r.kind=?3 AND r.expired IS NULL AND r.object IS NOT NULL AND {GRANTED_RELATION}) SELECT EXISTS(SELECT 1 FROM parents WHERE id=?2)"
             );
             let cycle: bool = db
-                .query_row(&cycle_sql, params![object, subject], |r| r.get(0))
+                .query_row(
+                    &cycle_sql,
+                    params![object, subject, json(&record.relation)?],
+                    |r| r.get(0),
+                )
                 .map_err(|e| db_error(&e))?;
             if cycle {
-                return Err(IndexError(
-                    "Part-of relationships must not form a cycle.".into(),
-                ));
+                return Err(IndexError(format!(
+                    "The {} hierarchy must not form a cycle.",
+                    record.relation.label()
+                )));
             }
         }
         db.execute("INSERT INTO index_knowledge_relations(id,proposal_id,subject,object,kind,created,details) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![record.id,number(proposal.id)?,subject,object,json(&record.relation)?,number(at)?,json(&record)?]).map_err(|e|db_error(&e))?;

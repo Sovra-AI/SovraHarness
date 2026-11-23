@@ -1,7 +1,7 @@
 # Reviewing what Sovra knows
 
-Open **Knowledge** to inspect saved details and their sources. Its four sections
-are **About you**, **People**, **Files**, and **Guide**. Saved details are
+Open **Knowledge** to inspect saved details and their sources. Its sections
+are **About you**, **People**, **Explore**, **Files**, and **Guide**. Saved details are
 interpretations of earlier statements; read the original wording when a detail
 matters or looks wrong.
 
@@ -21,6 +21,66 @@ Use **Read full original message**, **Read original record**, or **View linked
 details** where offered to move between an interpretation and its evidence.
 The **Saved details** citation card in chat opens the same Knowledge records.
 A citation is a navigation aid, not proof that a reply is correct.
+
+## Explore your sources
+
+The **Evidence map** shows how many excerpts and shared connections the search
+returned. Choose an equivalent measurement or a linked identifier path, then
+select a source to see its original line, date and findings. **All matching
+sources** includes excerpts without a shared connection. **Source list** opens
+the full set of result cards. Equal quantities can come from separate events.
+
+Open **Knowledge → Explore** or use `/explore-knowledge`. Enter a term from your
+sources and choose **Search sources**. For example, if a file says “Juniper weighs
+0.5 kg”, your note says “My Juniper weighed 500 g”, and an artifact contains the
+same reading, search for **Juniper**. The result names the sources that agree.
+**Read source wording** shows the text used for each calculation. You can also
+open the saved artifact, original personal record, or source folder.
+
+Explore queries current folder grants, available private recall, and the current
+versions of saved artifacts on this computer. Calculations run locally when you
+search. A source that cannot answer reports its own status. The Files history
+reader and About you record views remain the places to check earlier readings,
+world-validity dates, corrections, and withdrawn evidence.
+
+| Question | What the result uses |
+| --- | --- |
+| What kind of thing is this and how does it relate? | A table with `subject,predicate,object` gives ordered, named statements. Add `subject_type,object_type` to check a declared property. A shared namespaced ID can connect two sources. Simple English statements receive a **Possible relation from wording** label. Review proposed folder relationships in **Files** before accepting them. |
+| What shape do the samples form? | Two to sixteen numeric coordinate columns named `x`, `y`, `z`, or `dim1` through `dimN`, in a common scale. The first 64 points give connected-component and loop counts at stated Euclidean distances, including the longest loop’s birth and death when present. |
+| What type of dataset fits? | Column names, finite numeric values, dates, units and missing cells provide the evidence. Optional named profiles keep ties visible. An unrecognized table is reported as unknown. |
+| Do the measurements agree? | Decimal readings keep their original units and use compatible base units for comparison. Supply `value,unit,instrument,calibration_date,reference,uncertainty` for context. Add `reference_value,reference_unit,tolerance` for an accuracy check. Tolerance and uncertainty use the reading’s unit. Supported dimensions are mass, length, time, volume, temperature, pressure and ratio. |
+| Which forms match? | Select English, French, German, Spanish, Italian, Portuguese, Dutch or Arabic under **Analysis settings**. Word stems and observed changes explain matches. Folder identifiers such as `SITE-778` retain literal-token retrieval. Black-and-white image masks and plain `P1` bitmap text report foreground, erosion, dilation and inner-boundary pixel counts for a stated square and zero border. |
+| What happened over time? | Dated table rows use event time, including out-of-order readings. Minute, hour and day windows give UTC counts and means per instrument and compatible unit. A date without a time means midnight UTC. |
+| What does each result mean? | Source type, provenance, line numbers, measurement units, and wording are readable in text. Possible interpretations retain their label. A shared numeric value establishes agreement on the quantity alone. |
+
+CSV, TSV and Markdown pipe tables can carry observations. Each analysis takes up
+to 64 KiB and 1,024 rows. Connected CSV and TSV files that fit this budget use the
+whole extracted table, even when a later row matched. Larger files expose the
+matching passage and its line range. Mask image inputs are limited to one million
+pixels (1,048,576), with opaque black as foreground and white or transparent as
+background. SVG uses rendered pixels.
+
+**Analysis settings** also accepts JSON. This example defines a table profile,
+an hourly window, and a property whose object must be a grower.
+
+```json
+{
+  "language": "english",
+  "window_seconds": 3600,
+  "mask_radius": 1,
+  "profiles": [
+    {"name": "Scale readings", "required_columns": ["unit", "value"], "numeric_columns": ["value"]}
+  ],
+  "properties": [
+    {"id": "food:grown_by", "subject": {"domain": "product"}, "object": {"domain": "grower"}}
+  ]
+}
+```
+
+The graph uses stable identifiers, declared relationship ends, and a directed
+category hierarchy. Topology uses a Vietoris–Rips filtration. Unit normalization
+covers a subset of UCUM, and word matching uses language-specific stemmers.
+[W3C RDF Schema](https://www.w3.org/TR/rdf-schema/) · [GUDHI Rips complexes](https://gudhi.inria.fr/python/latest/rips_complex_user.html) · [UCUM](https://ucum.org/ucum) · [Snowball algorithms](https://snowballstem.org/algorithms/) · [OpenCV morphology](https://docs.opencv.org/4.x/d9/d61/tutorial_py_morphological_ops.html)
 
 ## Explore the connections
 
@@ -63,7 +123,7 @@ under **Answers you saved** names the file, the lines, the wording, and the day
 that version was read. That day is the UTC day Sovra read the version. It is
 not a date written in the file, and it is not the file's modified time. A later edit
 of the file does not replace the saved wording. A new search shows the updated
-text. Removing the folder removes that saved answer from the screen. See
+text. Saved cards survive an app restart. Removing the folder also deletes its saved quotations. See
 [Save the wording you read](skills-and-file-knowledge.md#save-the-wording-you-read).
 
 Shared knowledge between computers is managed separately in

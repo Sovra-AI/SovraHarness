@@ -9,6 +9,7 @@ use sovra_core::file_index::{
 use std::sync::Arc;
 pub(super) mod evidence;
 mod graph;
+pub(crate) use graph::property_schema;
 
 #[derive(Clone, Copy)]
 enum Operation {

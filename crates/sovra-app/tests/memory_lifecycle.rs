@@ -146,8 +146,14 @@ impl Fixture {
     }
 
     fn start(&self) -> Driver {
+        self.start_with_index(None)
+    }
+    fn start_with_index(
+        &self,
+        index: Option<Arc<dyn sovra_core::file_index::FileIndex>>,
+    ) -> Driver {
         let config = StoreConfig::on_disk(self.root.join("memory"));
-        let client = sovra_runtime::start_with_models(
+        let client = sovra_runtime::start_with_file_index(
             "memory-composition-test",
             AgentConfig::default(),
             Some(Box::new(move || {
@@ -163,6 +169,9 @@ impl Fixture {
                 repository: self.repository.clone(),
                 providers: vec![Arc::new(CompatibleProvider)],
             }),
+            None,
+            None,
+            index,
         )
         .unwrap();
         let mut driver = Driver::new(client);

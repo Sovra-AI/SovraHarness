@@ -158,6 +158,10 @@ impl Shell {
             SkillAction::NewChat => self.start_new_chat(window, cx),
             SkillAction::Training => self.select_tab(NavTab::Training, cx),
             SkillAction::Models => self.select_tab(NavTab::Models, cx),
+            SkillAction::ExploreKnowledge => {
+                self.select_tab(NavTab::Knowledge, cx);
+                self.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Explore, cx);
+            }
             SkillAction::Knowledge => self.select_tab(NavTab::Knowledge, cx),
             SkillAction::Schedules => self.select_tab(NavTab::Schedules, cx),
             SkillAction::Agents => self.select_tab(NavTab::MyAis, cx),

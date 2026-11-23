@@ -20,6 +20,7 @@ pub enum Command {
     Memory(crate::MemoryCommand),
     Models(crate::models::ModelCommand),
     Files(crate::files::FileCommand),
+    Explore(crate::knowledge_analysis::ExploreRequest),
     FileIndex(crate::file_index::IndexCommand),
     Skills(crate::skills::SkillCommand),
     Plugins(crate::plugins::PluginCommand),
@@ -104,6 +105,10 @@ pub enum Event {
     Memory(crate::MemoryEvent),
     Models(crate::models::ModelEvent),
     FilePrepared(crate::files::FilePrepared),
+    Explored {
+        request_id: u64,
+        result: Result<crate::knowledge_analysis::Exploration, String>,
+    },
     FileIndex(crate::file_index::IndexEvent),
     Skills(crate::skills::SkillEvent),
     Plugins(crate::plugins::PluginEvent),
@@ -202,6 +207,7 @@ impl Event {
             | Self::Auth(_)
             | Self::Memory(_)
             | Self::Models(_)
+            | Self::Explored { .. }
             | Self::FileIndex(_)
             | Self::Skills(_)
             | Self::Plugins(_)

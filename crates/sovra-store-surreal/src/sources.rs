@@ -181,17 +181,33 @@ impl SurrealStore {
         &self,
         query: MemorySearch,
         now: Timestamp,
+        language: sovra_core::knowledge_analysis::Language,
+        include_conversation: bool,
     ) -> Result<Vec<MemorySourceEvidence>, MemoryError> {
         query.validate()?;
-        let terms = query.terms();
+        let identifier =
+            !include_conversation && sovra_core::knowledge_analysis::is_identifier(&query.text);
+        let terms = if identifier {
+            vec![query.text.clone()]
+        } else {
+            query.terms()
+        };
         if terms.is_empty() {
             return Ok(Vec::new());
         }
+        let search_index = if language == sovra_core::knowledge_analysis::Language::English {
+            "episode_text".to_owned()
+        } else {
+            let lang = language.name();
+            let index = format!("episode_stems_{lang}");
+            self.query(&format!("DEFINE ANALYZER IF NOT EXISTS words_{lang} TOKENIZERS blank,class FILTERS lowercase,snowball({lang}); DEFINE INDEX IF NOT EXISTS {index} ON episode FIELDS content FULLTEXT ANALYZER words_{lang} BM25;"),surrealdb::types::Object::default()).await?;
+            index
+        };
         let mut bindings = surrealdb::types::Object::default();
         let mut statements = String::new();
         for (index, term) in terms.iter().enumerate() {
             bindings.insert(format!("term{index}"), term.clone());
-            statements.push_str(&search_statement(index));
+            statements.push_str(&search_statement(index, &search_index));
         }
         bindings.insert("before", query.known_at.unwrap_or(now).millis());
         bindings.insert(
@@ -214,6 +230,18 @@ impl SurrealStore {
             );
         }
         let fused = sovra_core::fuse_memory_sources(legs, 12);
+        if !include_conversation {
+            return Ok(fused
+                .into_iter()
+                .filter(|item| {
+                    !identifier
+                        || sovra_core::knowledge_analysis::contains_identifier(
+                            &item.quote,
+                            &query.text,
+                        )
+                })
+                .collect());
+        }
         let extras = self.same_conversation_turns(&query, &fused, now).await?;
         Ok(sovra_core::attach_conversation_sources(fused, extras, 12))
     }
@@ -425,7 +453,7 @@ fn distinctive_term_length(content: &str, terms: &[String]) -> usize {
         .unwrap_or(0)
 }
 
-fn search_statement(parameter: usize) -> String {
+fn search_statement(parameter: usize, index: &str) -> String {
     // Direct bind parameters let the pinned engine resolve score references.
     // Rank each term separately: common-word questions must not crowd out the
     // distinguishing term before core applies the shared evidence budget.
@@ -439,7 +467,7 @@ fn search_statement(parameter: usize) -> String {
                     WHERE array::len(<-derived_from<-fact[WHERE
                         (expired_at IS NOT NONE AND expired_at <= $before)
                         OR (expired_at IS NONE AND invalid_at IS NOT NONE AND invalid_at <= $valid)]) > 0)) > 0
-            }} ELSE {{ false }} AS support_changed FROM episode
+            }} ELSE {{ false }} AS support_changed FROM episode WITH INDEX {index}
             WHERE (SELECT VALUE enabled FROM ONLY meta:remembering)
             AND permission_scope = 'private' AND revoked_at IS NONE AND raw_withdrawn_at IS NONE
             AND ((origin = 'user_statement' AND kind IN ['user_message', 'note'])
@@ -699,8 +727,10 @@ mod tests {
             .await
             .unwrap();
         for parameter in [0, 1] {
-            let sql =
-                search_statement(parameter).trim_end_matches(';').to_owned() + " EXPLAIN FULL;";
+            let sql = search_statement(parameter, "episode_text")
+                .trim_end_matches(';')
+                .to_owned()
+                + " EXPLAIN FULL;";
             let plan: Vec<surrealdb::types::Value> = store
                 .query(
                     &sql,

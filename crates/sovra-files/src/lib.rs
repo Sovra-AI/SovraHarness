@@ -2,6 +2,7 @@
 //! The composition root supplies a private directory; runtime owns every blocking operation.
 
 mod archives;
+mod binary_mask;
 mod clustering;
 mod database;
 mod detection;
@@ -143,6 +144,13 @@ impl LocalFileStore {
 }
 
 impl FileStore for LocalFileStore {
+    fn binary_mask(
+        &self,
+        mime: &str,
+        bytes: &[u8],
+    ) -> Option<sovra_core::knowledge_analysis::mask::Mask> {
+        binary_mask::decode(mime, bytes)
+    }
     fn read_document(&self, name: &str, bytes: &[u8]) -> Result<FileContent, FileError> {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(FileError("Choose a file of at most 20 MB.".into()));
@@ -286,6 +294,7 @@ fn prepare_indexed_bytes(
 
 struct PreparedFile {
     content: FileContent,
+    mask: Option<sovra_core::knowledge_analysis::mask::Mask>,
     partial: bool,
 }
 
@@ -301,7 +310,11 @@ fn prepared(mut content: FileContent, mut warnings: Vec<String>) -> PreparedFile
         note.push_str("Reading may be incomplete. Check the original before relying on this file. Reader details:\n");
         note.push_str(&warnings.join("\n"));
     }
-    PreparedFile { content, partial }
+    PreparedFile {
+        content,
+        partial,
+        mask: None,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -379,6 +392,7 @@ fn prepare_for(
     } else {
         text::decode_with_limit(bytes, mode.text_bytes())?
     };
+    let mut mask = None;
     let text = if let Some(decoded) = plain {
         if decoded.encoding != "UTF-8" {
             attachment.note = Some(format!(
@@ -396,10 +410,18 @@ fn prepare_for(
         }
         decoded.content.into_owned()
     } else if index_media {
-        // The index stores searchable text, never model media payloads. Avoid
-        // decoding pictures or copying recordings that would be discarded.
-        attachment.note = Some("No searchable text was extracted from this media file. Its filename is searchable. Attach it in chat to use a suitable picture, audio or video model.".into());
-        String::new()
+        mask = binary_mask::decode(&mime, bytes);
+        if let Some(decoded) = &mask {
+            let (width, height) = decoded.dimensions();
+            attachment.note=Some("Computed from rendered pixels in the first image frame. Black pixels are foreground. White and transparent pixels are background.".into());
+            format!(
+                "Binary image mask · {width} × {height} pixels · {} foreground pixels",
+                decoded.foreground()
+            )
+        } else {
+            attachment.note = Some("No searchable text was extracted from this media file. Its filename is searchable. Attach it in chat to use a suitable picture, audio or video model.".into());
+            String::new()
+        }
     } else if mime.starts_with("image/") {
         let decoded = if mime == "image/svg+xml" {
             vector::render(bytes).and_then(|png| normalize_image(&png))
@@ -494,7 +516,7 @@ fn prepare_for(
     }
     attachment.sections = file_sections(&text).len().max(media.len());
     note_recording_duration(&mut attachment, &media);
-    Ok(prepared(
+    let mut output = prepared(
         FileContent {
             raw: None,
             attachment,
@@ -502,7 +524,9 @@ fn prepare_for(
             media,
         },
         warnings,
-    ))
+    );
+    output.mask = mask;
+    Ok(output)
 }
 
 fn note_recording_duration(attachment: &mut Attachment, media: &[MediaPart]) {

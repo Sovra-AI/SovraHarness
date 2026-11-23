@@ -237,6 +237,13 @@ impl std::fmt::Debug for FileContent {
 
 /// Synchronous IO port; runtime calls it only from owned blocking tasks.
 pub trait FileStore: Send + Sync {
+    fn binary_mask(
+        &self,
+        _mime: &str,
+        _bytes: &[u8],
+    ) -> Option<crate::knowledge_analysis::mask::Mask> {
+        None
+    }
     /// Decode a bounded downloaded document without saving it or executing its contents.
     /// The runtime invokes this on a blocking worker, like local attachment preparation.
     fn read_document(&self, _name: &str, _bytes: &[u8]) -> Result<FileContent, FileError> {

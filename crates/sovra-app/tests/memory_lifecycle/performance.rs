@@ -262,3 +262,143 @@ fn copy_directory(from: &std::path::Path, to: &std::path::Path) {
         }
     }
 }
+
+#[test]
+#[ignore = "synthetic connected-source benchmark, optionally retain a fresh SOVRA_EXPLORE_FIXTURE"]
+fn connected_source_query_latency() {
+    use sovra_core::{
+        artifacts::{ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactKind, ArtifactSource},
+        file_index::FileIndex as _,
+        knowledge_analysis::{AnalysisOptions, Citation, ExploreRequest},
+    };
+    let fixture = Fixture::new();
+    let retained = std::env::var_os("SOVRA_EXPLORE_FIXTURE").map(PathBuf::from);
+    if let Some(path) = &retained {
+        std::fs::create_dir(path).expect("fresh fixture destination");
+    }
+    let folder = retained.as_ref().unwrap_or(&fixture.root).join("readings");
+    std::fs::create_dir_all(&folder).unwrap();
+    for n in 0..100 {
+        std::fs::write(
+            folder.join(format!("sample-{n}.txt")),
+            format!("Juniper{n} weighs 0.5 kg."),
+        )
+        .unwrap();
+    }
+    let db = fixture.root.join("file-index");
+    let files = Arc::new(sovra_files::LocalFileIndex::new(db.clone()));
+    let root = files.add_root(&folder).unwrap();
+    files.set_auto_refresh(&root.id, false).unwrap();
+    assert_eq!(
+        files
+            .scan(&root.id, &knowledge::Observer)
+            .unwrap()
+            .progress
+            .indexed,
+        100
+    );
+    let mut driver = fixture.start_with_index(Some(files));
+    for n in 0..100 {
+        driver.review(MemoryAction::Remember(sovra_core::MemoryNote {
+            text: format!("My Juniper{n} weighed 500 g."),
+        }));
+        driver.send(Command::Artifacts(ArtifactCommand::Save(ArtifactDraft {
+            title: format!("Juniper{n} weighing calibration"),
+            kind: ArtifactKind::Table,
+            language: "csv".into(),
+            source: ArtifactSource::default(),
+            content: format!("timestamp,value,unit,instrument\n2026-11-20,500,g,Juniper{n}"),
+        })));
+        driver.wait(|e| matches!(e, Event::Artifacts(ArtifactEvent::Saved(_))));
+    }
+    let mut latency = Vec::new();
+    for id in 0..=20 {
+        let started = Instant::now();
+        driver.send(Command::Explore(ExploreRequest {
+            id,
+            query: format!("Juniper{}", id * 4),
+            options: AnalysisOptions::default(),
+        }));
+        let Event::Explored { result, .. } =
+            driver.wait(|e| matches!(e,Event::Explored{request_id,..} if *request_id==id))
+        else {
+            unreachable!()
+        };
+        let elapsed = started.elapsed().as_micros();
+        let result = result.unwrap();
+        assert_eq!(
+            result.readings.len(),
+            3,
+            "An identifier must exclude similarly named records"
+        );
+        assert!(
+            result
+                .readings
+                .iter()
+                .any(|r| matches!(r.excerpt.citation, Citation::File { .. }))
+        );
+        assert!(
+            result
+                .readings
+                .iter()
+                .any(|r| matches!(r.excerpt.citation, Citation::User { .. }))
+        );
+        assert!(
+            result
+                .readings
+                .iter()
+                .any(|r| matches!(r.excerpt.citation, Citation::Artifact { .. }))
+        );
+        assert!(result.shared.iter().any(|s| s.label.contains("500 g")));
+        if id > 0 {
+            latency.push(elapsed);
+        }
+    }
+    println!(
+        "Connected query in microseconds across 100 files, 100 notes, 100 artifacts: {}",
+        summary(&latency)
+    );
+    let mut common = Vec::new();
+    for id in 100..=120 {
+        let started = Instant::now();
+        driver.send(Command::Explore(ExploreRequest {
+            id,
+            query: "weighing".into(),
+            options: AnalysisOptions::default(),
+        }));
+        let Event::Explored { result, .. } =
+            driver.wait(|e| matches!(e,Event::Explored{request_id,..} if *request_id==id))
+        else {
+            unreachable!()
+        };
+        let elapsed = started.elapsed().as_micros();
+        let readings = result.unwrap().readings;
+        assert!(
+            readings
+                .iter()
+                .any(|r| matches!(r.excerpt.citation, Citation::File { .. }))
+        );
+        assert!(
+            readings
+                .iter()
+                .any(|r| matches!(r.excerpt.citation, Citation::User { .. }))
+        );
+        assert!(
+            readings
+                .iter()
+                .any(|r| matches!(r.excerpt.citation, Citation::Artifact { .. }))
+        );
+        if id > 100 {
+            common.push(elapsed);
+        }
+    }
+    println!(
+        "Common word-form query in microseconds: {}",
+        summary(&common)
+    );
+    driver.close();
+    if let Some(path) = retained {
+        std::fs::rename(db, path.join("file-index")).unwrap();
+        std::fs::rename(fixture.root.join("memory"), path.join("memory")).unwrap();
+    }
+}

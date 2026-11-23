@@ -1,6 +1,7 @@
 //! Persistent, local, read-only folder ingestion. SQLite owns the derived index;
 //! capability directory handles bound source reads to explicitly granted roots.
 
+mod answers;
 mod catalogue;
 mod derived;
 mod graph;
@@ -26,7 +27,19 @@ use sovra_core::file_index::{
     IndexStatus, IndexedRoot, PassageRef, ScanCancellation, ScanObserver,
 };
 
-const SCHEMA_VERSION: i64 = 10;
+/// Batch writers reuse compiled SQL as each file passes through the same few
+/// catalogue, history and chunk updates. Statements return to the connection
+/// cache before the next transaction commits.
+trait BatchWrites {
+    fn execute_cached(&self, sql: &str, args: impl rusqlite::Params) -> rusqlite::Result<usize>;
+}
+impl BatchWrites for Connection {
+    fn execute_cached(&self, sql: &str, args: impl rusqlite::Params) -> rusqlite::Result<usize> {
+        self.prepare_cached(sql)?.execute(args)
+    }
+}
+
+const SCHEMA_VERSION: i64 = 15;
 
 #[derive(Debug)]
 pub struct LocalFileIndex {
@@ -158,6 +171,26 @@ impl LocalFileIndex {
                 tx.execute_batch(include_str!("partial_v10.sql"))
                     .map_err(|e| db_error(&e))?;
             }
+            if current < 11 {
+                tx.execute_batch(include_str!("knowledge_v11.sql"))
+                    .map_err(|e| db_error(&e))?;
+            }
+            if current < 12 {
+                tx.execute_batch(include_str!("word_forms_v12.sql"))
+                    .map_err(|e| db_error(&e))?;
+            }
+            if current < 13 {
+                tx.execute_batch(include_str!("answers_v13.sql"))
+                    .map_err(|e| db_error(&e))?;
+            }
+            if current < 14 {
+                tx.execute_batch(include_str!("mask_v14.sql"))
+                    .map_err(|e| db_error(&e))?;
+            }
+            if current < 15 {
+                tx.execute_batch("CREATE INDEX IF NOT EXISTS knowledge_property_id ON index_knowledge_relations(json_extract(kind,'$.property.id')); PRAGMA user_version=15;")
+                    .map_err(|e| db_error(&e))?;
+            }
             tx.commit().map_err(|e| db_error(&e))?;
         }
         Ok(db)
@@ -165,6 +198,51 @@ impl LocalFileIndex {
 }
 
 impl FileIndex for LocalFileIndex {
+    fn table_wording(&self, reference: &PassageRef) -> Result<Option<String>, IndexError> {
+        let db = self.connect()?;
+        let mut stmt = db.prepare("SELECT c.body FROM index_files f JOIN index_version_chunks vc ON vc.version_id=f.current_version JOIN index_chunks c ON c.id=vc.chunk_id WHERE f.root_id=?1 AND f.id=?2 AND f.current_version=?3 AND f.available=1 ORDER BY vc.ordinal").map_err(|e|db_error(&e))?;
+        let mut rows = stmt
+            .query(params![
+                reference.root_id,
+                reference.file_id,
+                reference.version_id
+            ])
+            .map_err(|e| db_error(&e))?;
+        let mut whole = String::new();
+        while let Some(row) = rows.next().map_err(|e| db_error(&e))? {
+            let text: String = row.get(0).map_err(|e| db_error(&e))?;
+            let body = sovra_core::file_index::passage_wording(&text);
+            if whole.len() + body.len() > sovra_core::knowledge_analysis::MAX_ANALYSIS_BYTES {
+                return Ok(None);
+            }
+            whole.push_str(body);
+        }
+        Ok((!whole.is_empty()).then_some(whole))
+    }
+    fn binary_mask(
+        &self,
+        r: &PassageRef,
+    ) -> Result<Option<sovra_core::knowledge_analysis::mask::Mask>, IndexError> {
+        let db = self.connect()?;
+        let row:Option<(u16,u16,Vec<u8>)>=db.query_row("SELECT m.width,m.height,m.bits FROM index_masks m JOIN index_files f ON f.current_version=m.version_id JOIN index_version_chunks vc ON vc.version_id=m.version_id WHERE f.root_id=?1 AND f.id=?2 AND f.current_version=?3 AND f.available=1 AND vc.ordinal=?4",params![r.root_id,r.file_id,r.version_id,r.ordinal],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(|e|db_error(&e))?;
+        row.map(|(w, h, b)| {
+            sovra_core::knowledge_analysis::mask::Mask::unpack(w.into(), h.into(), &b)
+                .ok_or_else(|| IndexError("The saved binary image is incomplete.".into()))
+        })
+        .transpose()
+    }
+    fn save_answer(
+        &self,
+        reference: &PassageRef,
+    ) -> Result<sovra_core::file_index::DatedAnswer, IndexError> {
+        self.store_answer(reference)
+    }
+    fn saved_answers(
+        &self,
+        before: Option<u64>,
+    ) -> Result<sovra_core::file_index::SavedAnswerPage, IndexError> {
+        self.answer_page(before)
+    }
     fn report(
         &self,
         query: &sovra_core::file_index::NoticeQuery,
@@ -403,6 +481,13 @@ impl FileIndex for LocalFileIndex {
     }
 
     fn search(&self, query: &IndexQuery) -> Result<Vec<IndexPassage>, IndexError> {
+        self.search_language(query, sovra_core::knowledge_analysis::Language::English)
+    }
+    fn search_language(
+        &self,
+        query: &IndexQuery,
+        language: sovra_core::knowledge_analysis::Language,
+    ) -> Result<Vec<IndexPassage>, IndexError> {
         query.validate()?;
         // Literal phrases, never file- or model-provided SQL/FTS operators.
         let terms = sovra_core::file_index::lexical_match(&query.text);
@@ -420,6 +505,28 @@ impl FileIndex for LocalFileIndex {
             .replace('_', "\\_")
             + "%";
         let db = self.connect()?;
+        // Identifiers, paths and explicitly quoted searches keep their literal tokens.
+        let literal = query
+            .text
+            .chars()
+            .any(|c| c.is_numeric() || matches!(c, '-' | '_' | '/' | '.' | '"' | ':' | '\\'));
+        let (table, terms) = if literal {
+            ("index_fts".to_owned(), terms)
+        } else if language != sovra_core::knowledge_analysis::Language::English {
+            let table = matching::language_index(&db, language).map_err(|e| db_error(&e))?;
+            (
+                table,
+                sovra_core::file_index::lexical_match(&language.stem_text(&query.text)),
+            )
+        } else if query
+            .text
+            .chars()
+            .any(|c| c.is_alphabetic() && !c.is_ascii())
+        {
+            ("index_fts".into(), terms)
+        } else {
+            ("index_word_forms".into(), terms)
+        };
         let started = std::time::Instant::now();
         db.progress_handler(
             1000,
@@ -427,7 +534,7 @@ impl FileIndex for LocalFileIndex {
         )
         .map_err(|error| db_error(&error))?;
         let sql = format!(
-            "{PASSAGES} JOIN index_fts ft ON ft.rowid=c.rowid WHERE index_fts MATCH ?1 AND f.available=1 AND f.current_version=v.id AND (?2='[]' OR f.root_id IN (SELECT value FROM json_each(?2))) AND f.path LIKE ?3 ESCAPE '\\' ORDER BY bm25(index_fts),f.root_id,f.path,vc.ordinal LIMIT ?4"
+            "{PASSAGES} JOIN {table} ft ON ft.rowid=c.rowid WHERE {table} MATCH ?1 AND f.available=1 AND f.current_version=v.id AND (?2='[]' OR f.root_id IN (SELECT value FROM json_each(?2))) AND f.path LIKE ?3 ESCAPE '\\' ORDER BY bm25({table}),f.root_id,f.path,vc.ordinal LIMIT ?4"
         );
         let mut stmt = db.prepare(&sql).map_err(|error| db_error(&error))?;
         stmt.query_map(

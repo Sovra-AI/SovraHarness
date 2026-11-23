@@ -69,6 +69,7 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
                     ("knowledge-files", "file-index-panel"),
                     ("knowledge-memories", "conversation-memory-status"),
                     ("knowledge-help", "knowledge-intro"),
+                    ("knowledge-explore", "knowledge-explorer"),
                 ] {
                     window.click(tab, cx);
                     window.render_frame(cx);
@@ -84,7 +85,12 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
                         cx,
                     );
                     window.render_frame(cx);
-                    for id in ["knowledge-files", "knowledge-memories", "knowledge-help"] {
+                    for id in [
+                        "knowledge-files",
+                        "knowledge-memories",
+                        "knowledge-help",
+                        "knowledge-explore",
+                    ] {
                         let control = window.find(id);
                         assert!(control.visible());
                         assert!(

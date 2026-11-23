@@ -445,6 +445,15 @@ pub trait MemoryStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    async fn search_source_language(
+        &self,
+        query: MemorySearch,
+        now: Timestamp,
+        _language: crate::knowledge_analysis::Language,
+    ) -> Result<Vec<MemorySourceEvidence>, MemoryError> {
+        self.search_memory_sources(query, now).await
+    }
+
     /// Explicitly revoke an original source and cancel its pending processing.
     /// Retain its content for review; derived facts must no longer enter recall.
     async fn stop_memory_source(&self, _id: &EpisodeId, _at: Timestamp) -> Result<(), MemoryError> {
@@ -661,6 +670,16 @@ pub trait MemoryStore: Send + Sync {
     /// Non-deleted artifacts, newest first.
     async fn list_artifacts(&self) -> Result<Vec<crate::artifacts::Artifact>, MemoryError> {
         Ok(Vec::new())
+    }
+
+    /// Some adapters maintain current-version full-text postings. An adapter
+    /// returning None uses the runtime's session library.
+    async fn search_artifact_contents(
+        &self,
+        _query: &str,
+        _language: crate::knowledge_analysis::Language,
+    ) -> Result<Option<Vec<crate::knowledge_analysis::Excerpt>>, MemoryError> {
+        Ok(None)
     }
 
     /// Upserts an artifact (its versions travel with it).

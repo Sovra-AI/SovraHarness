@@ -4,6 +4,7 @@
 
 mod hosting;
 mod project;
+mod search;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -27,7 +28,7 @@ pub(crate) struct ArtifactRuntime {
 struct Inner {
     store: Option<Arc<dyn MemoryStore>>,
     /// `None` until first loaded from the store.
-    library: Mutex<Option<BTreeMap<String, Artifact>>>,
+    library: Arc<Mutex<Option<search::Library>>>,
     sequence: AtomicU64,
     websites: Mutex<BTreeMap<String, hosting::Website>>,
     events: Sender<Event>,
@@ -49,7 +50,7 @@ impl ArtifactRuntime {
         Self {
             inner: Arc::new(Inner {
                 store,
-                library: Mutex::new(None),
+                library: Arc::new(Mutex::new(None)),
                 sequence: AtomicU64::new(0),
                 websites: Mutex::new(BTreeMap::new()),
                 events,
@@ -66,6 +67,7 @@ impl ArtifactRuntime {
     pub(crate) fn saver(&self) -> ArtifactSaver {
         let runtime = self.clone();
         let hosting = self.clone();
+        let searching = self.clone();
         ArtifactSaver::from_fn(move |draft| {
             let runtime = runtime.clone();
             async move {
@@ -80,6 +82,11 @@ impl ArtifactRuntime {
                 runtime.save(draft).await
             }
         })
+        .with_analysis(|text,options| async move{
+            tokio::task::spawn_blocking(move ||sovra_core::knowledge_analysis::analyze(&text,&options))
+            .await.map_err(|_|"Analysis was interrupted.".to_owned())?.map_err(str::to_owned)
+        })
+        .with_lookup(move |query,lang|{let runtime=searching.clone();async move{runtime.excerpts(query,lang).await}})
         .with_deployer(move |id, session| {
             let runtime = hosting.clone();
             async move {
@@ -138,14 +145,17 @@ impl ArtifactRuntime {
                 pinned,
             } => {
                 let mut library = self.library().await;
-                match library.as_mut().and_then(|library| library.get_mut(&id)) {
+                match library.as_ref().and_then(|library| library.get(&id)) {
                     Some(existing) => {
                         let mut edited = existing.clone();
                         edited.collection = collection.trim().chars().take(80).collect();
                         edited.pinned = pinned;
                         match self.persist(&edited).await {
                             Ok(()) => {
-                                *existing = edited.clone();
+                                library
+                                    .as_mut()
+                                    .expect("loaded library")
+                                    .put(edited.clone());
                                 ArtifactEvent::Saved(Box::new(edited))
                             }
                             Err(message) => ArtifactEvent::Error(message),
@@ -176,13 +186,16 @@ impl ArtifactRuntime {
             },
             ArtifactCommand::Edit { id, title, content } => {
                 let mut library = self.library().await;
-                match library.as_mut().and_then(|library| library.get_mut(&id)) {
+                match library.as_ref().and_then(|library| library.get(&id)) {
                     Some(existing) => {
                         let mut edited = existing.clone();
                         edited.edit(&title, &content, crate::now());
                         match self.persist(&edited).await {
                             Ok(()) => {
-                                *existing = edited.clone();
+                                library
+                                    .as_mut()
+                                    .expect("loaded library")
+                                    .put(edited.clone());
                                 ArtifactEvent::Saved(Box::new(edited))
                             }
                             Err(message) => ArtifactEvent::Error(message),
@@ -313,8 +326,8 @@ impl ArtifactRuntime {
         self.persist(&artifact).await?;
         self.library()
             .await
-            .get_or_insert_with(BTreeMap::new)
-            .insert(artifact.id.clone(), artifact.clone());
+            .get_or_insert_with(search::Library::default)
+            .put(artifact.clone());
         let _ = self
             .inner
             .events
@@ -339,6 +352,30 @@ impl ArtifactRuntime {
         Ok(())
     }
 
+    pub(crate) async fn excerpts(
+        &self,
+        query: String,
+        language: sovra_core::knowledge_analysis::Language,
+    ) -> Result<Vec<sovra_core::knowledge_analysis::Excerpt>, String> {
+        if let Some(store) = &self.inner.store
+            && let Some(hits) = store
+                .search_artifact_contents(&query, language)
+                .await
+                .map_err(|e| e.to_string())?
+        {
+            return Ok(hits);
+        }
+        let mut library = self.library().await;
+        tokio::task::spawn_blocking(move || {
+            library
+                .as_mut()
+                .expect("loaded library")
+                .excerpts(&query, language)
+        })
+        .await
+        .map_err(|_| "The artifact search was interrupted.".to_owned())
+    }
+
     async fn get(&self, id: &str) -> Option<Artifact> {
         self.library()
             .await
@@ -346,8 +383,8 @@ impl ArtifactRuntime {
             .and_then(|l| l.get(id).cloned())
     }
 
-    async fn library(&self) -> tokio::sync::MutexGuard<'_, Option<BTreeMap<String, Artifact>>> {
-        let mut library = self.inner.library.lock().await;
+    async fn library(&self) -> tokio::sync::OwnedMutexGuard<Option<search::Library>> {
+        let mut library = self.inner.library.clone().lock_owned().await;
         if library.is_none() {
             let loaded = match &self.inner.store {
                 Some(store) => store.list_artifacts().await.unwrap_or_else(|error| {
@@ -356,7 +393,7 @@ impl ArtifactRuntime {
                 }),
                 None => Vec::new(),
             };
-            *library = Some(loaded.into_iter().map(|a| (a.id.clone(), a)).collect());
+            *library = Some(search::Library::loaded(loaded));
         }
         library
     }

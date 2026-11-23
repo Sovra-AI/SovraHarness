@@ -33,6 +33,7 @@ pub enum SkillAction {
     Models,
     Training,
     Knowledge,
+    ExploreKnowledge,
     Schedules,
     Agents,
     TeamChat,

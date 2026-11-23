@@ -5,7 +5,7 @@ use sovra_core::file_index::{FileIndex, IndexedRoot, ScanCancellation, ScanObser
 
 const SOURCE_TEXT: &str = "The orchid greenhouse budget is 420 dollars.";
 
-struct Observer;
+pub(super) struct Observer;
 impl ScanObserver for Observer {
     fn cancellation(&self) -> Option<ScanCancellation> {
         None
@@ -230,4 +230,111 @@ fn indexed_knowledge_reaches_delegates_and_teams_and_revoked_grants_stop_reads()
             .iter()
             .all(|request| !request.body.to_string().contains(SOURCE_TEXT))
     );
+}
+
+#[test]
+fn explorer_combines_three_current_sources_and_respects_edits_and_removal_after_restart() {
+    use sovra_core::{
+        artifacts::{ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactKind, ArtifactSource},
+        file_index::{FileIndex, IndexCommand, IndexEvent, IndexStatus},
+        knowledge_analysis::{AnalysisOptions, Citation, Exploration, ExploreRequest},
+    };
+    fn search(driver: &mut Driver, id: u64) -> Exploration {
+        driver.send(Command::Explore(ExploreRequest {
+            id,
+            query: "Juniper".into(),
+            options: AnalysisOptions::default(),
+        }));
+        let Event::Explored { result, .. } =
+            driver.wait(|e| matches!(e,Event::Explored{request_id,..} if *request_id==id))
+        else {
+            unreachable!()
+        };
+        result.unwrap()
+    }
+    let fixture = Fixture::new();
+    let folder = fixture.root.join("folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("sample.txt"), "Juniper sample weighs 0.5 kg.").unwrap();
+    let store = Arc::new(sovra_files::LocalFileIndex::new(fixture.root.join("index")));
+    let root = store.add_root(&folder).unwrap();
+    store.set_auto_refresh(&root.id, false).unwrap();
+    let mut driver = fixture.start_with_index(Some(store.clone()));
+    driver.send(Command::FileIndex(IndexCommand::Refresh {
+        root_id: root.id.clone(),
+    }));
+    driver.wait(|e|matches!(e,Event::FileIndex(IndexEvent::Progress(r)) if r.status==IndexStatus::Ready && r.progress.indexed==1));
+    let MemoryReviewResult::Changed(note) =
+        driver.review(MemoryAction::Remember(sovra_core::MemoryNote {
+            text: "My Juniper reading was 500 g.".into(),
+        }))
+    else {
+        unreachable!()
+    };
+    driver.send(Command::Artifacts(ArtifactCommand::Save(ArtifactDraft {
+        title: "Juniper calibration".into(),
+        kind: ArtifactKind::Table,
+        language: "csv".into(),
+        source: ArtifactSource::default(),
+        content: "timestamp,value,unit,instrument\n2026-06-01,500,g,Juniper".into(),
+    })));
+    let Event::Artifacts(ArtifactEvent::Saved(item)) =
+        driver.wait(|e| matches!(e, Event::Artifacts(ArtifactEvent::Saved(_))))
+    else {
+        unreachable!()
+    };
+    driver.close();
+    let mut driver = fixture.start_with_index(Some(store));
+    let found = search(&mut driver, 1);
+    assert!(
+        found
+            .readings
+            .iter()
+            .any(|r| matches!(r.excerpt.citation, Citation::File { .. })),
+        "{found:?}"
+    );
+    assert!(
+        found
+            .readings
+            .iter()
+            .any(|r| matches!(r.excerpt.citation, Citation::User { .. })),
+        "{found:?}"
+    );
+    assert!(
+        found
+            .readings
+            .iter()
+            .any(|r| matches!(r.excerpt.citation, Citation::Artifact { .. })),
+        "{found:?}"
+    );
+    assert!(
+        found.shared.iter().any(|s| s.label.contains("500 g")
+            && s.sources.len() == 3
+            && s.sources.iter().any(|line| found.readings[line.reading]
+                .excerpt
+                .title
+                .contains("sample.txt"))
+            && s.sources
+                .iter()
+                .any(
+                    |line| found.readings[line.reading].excerpt.title == "Juniper calibration"
+                        && line.line == 2
+                )),
+        "{found:?}"
+    );
+    driver.send(Command::Artifacts(ArtifactCommand::Edit {
+        id: item.id.clone(),
+        title: "Updated calibration".into(),
+        content: "Oak sample".into(),
+    }));
+    driver.wait(
+        |e| matches!(e,Event::Artifacts(ArtifactEvent::Saved(a)) if a.title=="Updated calibration"),
+    );
+    driver.review(MemoryAction::Remove(note));
+    driver.send(Command::FileIndex(IndexCommand::Remove {
+        root_id: root.id,
+    }));
+    driver.wait(|e| matches!(e,Event::FileIndex(IndexEvent::Roots(roots)) if roots.is_empty()));
+    assert_eq!(search(&mut driver, 2).readings, Vec::new());
+    driver.close();
 }

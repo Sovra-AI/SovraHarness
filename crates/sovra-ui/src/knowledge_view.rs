@@ -25,6 +25,7 @@ use crate::shell::Shell;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum KnowledgeSection {
+    Explore,
     Files,
     #[default]
     Memories,
@@ -68,13 +69,16 @@ pub(crate) fn render_knowledge_view(
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     if shell.memory_view.read(cx).source_only() {
+        let explored = shell.explorer.reading_personal_source;
         return v_flex()
             .id("sovra-memory-source-view").test_support()
             .flex_1().min_w_0().min_h_0().h_full().items_center().overflow_y_scroll()
             .p(t.space.medium)
             .child(v_flex().id("knowledge-column").test_support().w_full().min_w_0().flex_shrink_0().max_w(t.layout.reading_width).mx_auto().gap(t.space.small)
-                .child(design::button("memory-back-chat", "Back to conversation", cx)
-                    .on_click(cx.listener(|shell, _, _, cx| shell.select_tab(sovra_core::NavTab::Chat, cx))))
+                .child(design::button("memory-back-chat", if explored {"Back to Explore"} else {"Back to conversation"}, cx)
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        if explored {shell.select_tab(sovra_core::NavTab::Knowledge,cx);shell.select_knowledge_section(KnowledgeSection::Explore,cx);} else {shell.select_tab(sovra_core::NavTab::Chat,cx);}
+                    })))
                 .child(div().sovra_text(TextRole::Caption, cx).child("The saved record behind this reference. A reference alone does not prove the reply is correct."))
                 .child(shell.memory_view.clone()))
             .into_any_element();
@@ -96,6 +100,7 @@ pub(crate) fn render_knowledge_view(
         .mx_auto()
         .gap(t.space.medium);
     let column = match shell.knowledge_section {
+        KnowledgeSection::Explore => column.child(crate::knowledge_explorer::render(shell, cx)),
         KnowledgeSection::Files => column.child(crate::file_index_view::render(shell, cx)),
         KnowledgeSection::Memories => {
             let column = if shell.memory_view.read(cx).reading_source() {
@@ -129,7 +134,7 @@ pub(crate) fn render_knowledge_view(
         .max_w(measure)
         .mx_auto()
         .flex_wrap()
-        .gap(t.space.small);
+        .gap(t.space.compact);
     for (id, label, section) in [
         (
             "knowledge-memories",
@@ -137,11 +142,14 @@ pub(crate) fn render_knowledge_view(
             KnowledgeSection::Memories,
         ),
         ("knowledge-people", "People", KnowledgeSection::People),
+        ("knowledge-explore", "Explore", KnowledgeSection::Explore),
         ("knowledge-files", "Files", KnowledgeSection::Files),
         ("knowledge-help", "Guide", KnowledgeSection::Help),
     ] {
         navigation = navigation.child(
             design::button(id, label, cx)
+                .small()
+                .px(t.space.compact)
                 .selected(shell.knowledge_section == section)
                 .on_click(
                     cx.listener(move |shell, _, _, cx| shell.select_knowledge_section(section, cx)),

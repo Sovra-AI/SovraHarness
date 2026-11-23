@@ -178,6 +178,12 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
 /// `blake3` is pure hashing like `sha2`: content addresses and Merkle nodes for the swarm audit
 /// ledger (roadmap D5 chose BLAKE3 for shared records). It opens nothing and spawns nothing.
 const CORE_ALLOWED_EXTERNAL: &[&str] = &[
+    // Connected evidence uses the same pure CSV, calendar and Snowball rules in
+    // all three source adapters. None of these parsers reads files or clocks.
+    "csv",
+    "rust-stemmers",
+    "rust_decimal",
+    "time",
     "blake3",
     "serde",
     "serde_json",

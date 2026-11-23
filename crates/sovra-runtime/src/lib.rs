@@ -21,6 +21,7 @@ mod files;
 mod github;
 mod google;
 mod groups;
+mod knowledge_analysis;
 mod local_models;
 mod mcp;
 mod memory_capture;
@@ -519,7 +520,7 @@ async fn serve(
         training::TrainingRuntime::start(training, events.clone(), groups.training(), &handle);
     let terminal = terminal::TerminalRuntime::start(terminal, events.clone(), &handle).await;
     let mut file_index = file_index::IndexRuntime::start(
-        index,
+        index.clone(),
         events.clone(),
         &handle,
         models.as_ref().map(|m| m.repository.clone()),
@@ -624,6 +625,16 @@ async fn serve(
         events.clone(),
         std::env::temp_dir().join("sovra-artifact-views"),
         terminal.project_access(),
+    );
+    let mut explorer = knowledge_analysis::Explorer::new(
+        knowledge_analysis::Sources {
+            media: files.clone(),
+            files: index,
+            memory: memory.clone(),
+            control: memory_control.clone(),
+            artifacts: artifact_library.clone(),
+        },
+        events.clone(),
     );
     let team = teams::TeamRuntime::new(memory.clone(), events.clone());
     connections.attach_store(memory.clone());
@@ -894,6 +905,7 @@ async fn serve(
                 runs.insert(session_id, run);
             }
             Command::Teams(command) => team.handle(&handle, command),
+            Command::Explore(request) => explorer.search(&handle, request),
             Command::Artifacts(command) => artifact_library.handle(&handle, command),
             Command::Connections(command) => connections.handle(command),
             Command::RemoteControl(command) => remote_control.send(command),

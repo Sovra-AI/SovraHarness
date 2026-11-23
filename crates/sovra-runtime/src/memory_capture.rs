@@ -173,6 +173,7 @@ pub(crate) fn tap(
                     | Event::Training(_)
                     | Event::Group(_)
                     | Event::FilePrepared(_)
+                    | Event::Explored { .. }
                     | Event::FileIndex(_)
                     | Event::ChatHistoryLoaded { .. }
                     | Event::Ready { .. }

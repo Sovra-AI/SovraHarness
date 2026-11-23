@@ -27,6 +27,8 @@ type DeployFn = Arc<dyn Fn(String, String) -> DeployFuture + Send + Sync>;
 #[derive(Clone)]
 pub struct ArtifactSaver {
     save: SaveFn,
+    lookup: Option<crate::source_analysis::Lookup>,
+    calculate: Option<crate::source_analysis::Calculate>,
     deploy: Option<DeployFn>,
 }
 
@@ -47,7 +49,38 @@ impl ArtifactSaver {
         Self {
             save: Arc::new(move |draft| Box::pin(save(draft))),
             deploy: None,
+            lookup: None,
+            calculate: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_lookup<F, Fut>(mut self, lookup: F) -> Self
+    where
+        F: Fn(String, sovra_core::knowledge_analysis::Language) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Vec<sovra_core::knowledge_analysis::Excerpt>, String>>
+            + Send
+            + 'static,
+    {
+        self.lookup = Some(Arc::new(move |query, lang| Box::pin(lookup(query, lang))));
+        self
+    }
+
+    #[must_use]
+    pub fn with_analysis<F, Fut>(mut self, calculate: F) -> Self
+    where
+        F: Fn(String, sovra_core::knowledge_analysis::AnalysisOptions) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = Result<sovra_core::knowledge_analysis::SourceAnalysis, String>>
+            + Send
+            + 'static,
+    {
+        self.calculate = Some(Arc::new(move |text, options| {
+            Box::pin(calculate(text, options))
+        }));
+        self
     }
 
     /// Attach runtime-owned local hosting. Arguments are artifact id and chat id.
@@ -77,7 +110,21 @@ impl crate::AdkHarness {
             return Ok(harness);
         }
         let mut tools = self.base_tools.clone();
-        tools.retain(|tool| !matches!(tool.name(), SAVE_ARTIFACT_TOOL_NAME | "deploy_artifact"));
+        tools.retain(|tool| {
+            !matches!(
+                tool.name(),
+                SAVE_ARTIFACT_TOOL_NAME
+                    | "deploy_artifact"
+                    | crate::source_analysis::ANALYZE
+                    | crate::source_analysis::SEARCH
+            )
+        });
+        if let Some(calculate) = &saver.calculate {
+            tools.push(Arc::new(crate::source_analysis::Analyze(calculate.clone())));
+        }
+        if let Some(lookup) = &saver.lookup {
+            tools.push(Arc::new(crate::source_analysis::Search(lookup.clone())));
+        }
         if let Some(deploy) = &saver.deploy {
             tools.push(Arc::new(DeployArtifactTool {
                 deploy: deploy.clone(),

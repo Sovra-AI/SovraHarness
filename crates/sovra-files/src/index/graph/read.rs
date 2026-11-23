@@ -1,4 +1,5 @@
 use super::*;
+use sovra_core::file_index::graph::GraphDirection;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn relation(
@@ -54,6 +55,13 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
     let mut boundary = None;
     let mut inspected = 0;
     let started = std::time::Instant::now();
+
+    let predicate = query.relation.as_ref().map(json).transpose()?;
+    let predicate_filter = if predicate.is_some() {
+        "AND r.kind=?8"
+    } else {
+        "AND ?8 IS NULL"
+    };
     let recorded = query.recorded_at.unwrap_or_else(now);
     'walk: for hop in 0..query.hops {
         let text = if hop == 0 {
@@ -61,11 +69,22 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
         } else {
             ""
         };
+        let adjacent = if frontier.is_empty() {
+            "?3='[]'"
+        } else {
+            match query.direction {
+                GraphDirection::Incoming => "r.object IN (SELECT value FROM json_each(?3))",
+                GraphDirection::Outgoing => "r.subject IN (SELECT value FROM json_each(?3))",
+                GraphDirection::Either => {
+                    "(r.subject IN (SELECT value FROM json_each(?3)) OR r.object IN (SELECT value FROM json_each(?3)))"
+                }
+            }
+        };
         let sql=format!("SELECT r.id,r.created FROM index_knowledge_relations r
             LEFT JOIN index_knowledge_entities s ON s.id=r.subject
             LEFT JOIN index_knowledge_entities o ON o.id=r.object
             WHERE r.created<=?1 AND (?2 OR r.expired IS NULL OR r.expired>?1)
-            AND (?3='[]' OR r.subject IN (SELECT value FROM json_each(?3)) OR r.object IN (SELECT value FROM json_each(?3)))
+            AND {adjacent} {predicate_filter}
             AND (?4='' OR instr(lower(json_extract(r.details,'$.statement')),lower(?4))>0 OR instr(lower(json_extract(s.details,'$.label')),lower(?4))>0 OR instr(lower(json_extract(o.details,'$.label')),lower(?4))>0)
             AND {GRANTED_RELATION}
             AND (?6 IS NULL OR r.created<?6 OR (r.created=?6 AND r.id>?7))
@@ -89,7 +108,8 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
                         .as_ref()
                         .map(|c| number(c.recorded_at))
                         .transpose()?,
-                    query.before.as_ref().map(|c| c.id.as_str())
+                    query.before.as_ref().map(|c| c.id.as_str()),
+                    predicate
                 ],
                 |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
             )
@@ -142,7 +162,13 @@ pub(super) fn query(db: &Connection, query: &GraphQuery) -> Result<GraphPage, In
                         for id in &node.evidence {
                             sources.insert(*id, evidence(db, *id, &query.roots)?.source);
                         }
-                        next.insert(id.clone());
+                        if match query.direction {
+                            GraphDirection::Either => true,
+                            GraphDirection::Outgoing => endpoint == &record.object,
+                            GraphDirection::Incoming => endpoint == &record.subject,
+                        } {
+                            next.insert(id.clone());
+                        }
                         nodes.insert(id.clone(), node);
                     }
                     GraphEndpoint::Source(id) => {

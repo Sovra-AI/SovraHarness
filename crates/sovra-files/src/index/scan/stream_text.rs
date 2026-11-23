@@ -72,7 +72,7 @@ impl Scan<'_> {
             )
             .map_err(|e| db_error(&e))?;
         let tx = self.db.transaction().map_err(|e| db_error(&e))?;
-        tx.execute("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
+        tx.execute_cached("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
             params![file_id, self.root.id, path, physical, version, self.generation]).map_err(|e| db_error(&e))?;
         let note = format!(
             "Complete {} source text indexed in blocks. {}Markup and structured files are searchable as source, without rendering or executing them.",
@@ -89,7 +89,7 @@ impl Scan<'_> {
                 .ok()
                 .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
                 .and_then(|t| i64::try_from(t.as_secs()).ok());
-            tx.execute("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by) VALUES(?1,?2,?3,'text/plain',?4,?5,?6,?7,?8)",
+            tx.execute_cached("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by) VALUES(?1,?2,?3,'text/plain',?4,?5,?6,?7,?8)",
                 params![version, file_id, content_hash, note, i64::try_from(now()).expect("Unix seconds fit i64"), modified, revision, self.activity]).map_err(|e| db_error(&e))?;
             file.seek(SeekFrom::Start(0)).map_err(|e| io_error(&e))?;
             let mut ordinal = 0_i64;
@@ -115,8 +115,8 @@ impl Scan<'_> {
                             carry.as_deref(),
                         );
                         let chunk_id = digest(stored.as_bytes());
-                        tx.execute("INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING", params![chunk_id, stored]).map_err(|e| db_error(&e))?;
-                        tx.execute("INSERT INTO index_version_chunks(version_id,ordinal,chunk_id,start_line,end_line) VALUES(?1,?2,?3,?4,?5)",
+                        tx.execute_cached("INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING", params![chunk_id, stored]).map_err(|e| db_error(&e))?;
+                        tx.execute_cached("INSERT INTO index_version_chunks(version_id,ordinal,chunk_id,start_line,end_line) VALUES(?1,?2,?3,?4,?5)",
                         params![version, ordinal, chunk_id, line.saturating_add(chunk.start_line - 1), line.saturating_add(chunk.end_line - 1)]).map_err(|e| db_error(&e))?;
                         ordinal += 1;
                     }

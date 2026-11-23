@@ -2,6 +2,7 @@
 //! Missing paths mean absence from a completed eligible walk, not proven deletion.
 
 use super::{db_error, digest, now};
+use crate::index::BatchWrites as _;
 use rusqlite::{Connection, OptionalExtension as _, Row, params};
 use sovra_core::file_index::{
     Confidence, EvidenceBasis, EvidenceTier, ExtractionState, FileHistory, FileHistoryQuery,
@@ -9,7 +10,7 @@ use sovra_core::file_index::{
     ObservedPresence, ScanActivity, SourceRepresentation,
 };
 
-pub(super) const EXTRACTOR_REVISION: &str = "extract-v9";
+pub(super) const EXTRACTOR_REVISION: &str = "extract-v10";
 
 pub(super) fn migrate(db: &Connection) -> Result<(), IndexError> {
     db.execute_batch(include_str!("history_v4.sql"))
@@ -55,7 +56,7 @@ pub(super) fn recover(db: &Connection) -> Result<(), IndexError> {
 pub(super) fn observe(db: &Connection, file_id: &str, activity: i64) -> Result<(), IndexError> {
     // Repeated scans update the catalogue's last-seen time without bloating history.
     // Each meaningful transition atomically points at its immutable predecessor.
-    db.execute(
+    db.execute_cached(
         "INSERT INTO index_observations(file_id,scan_id,version_id,path,identity,present,byte_size,modified,created,extraction,note,recorded,observed,origin,replaces)
          SELECT f.id,?2,f.current_version,f.path,f.identity,f.available,f.byte_size,f.modified,f.created,f.extraction,f.detail,?3,f.observed,'scan',o.sequence
          FROM index_files f LEFT JOIN index_observations o ON o.sequence=(SELECT max(sequence) FROM index_observations WHERE file_id=f.id)

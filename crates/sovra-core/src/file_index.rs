@@ -11,7 +11,7 @@ pub use options::{DocumentBudget, ScanOptions};
 mod dated;
 pub mod graph;
 mod knowledge_browser;
-pub use dated::{DatedAnswer, DatedReading};
+pub use dated::{DatedAnswer, DatedReading, SavedAnswerPage};
 pub use knowledge_browser::KnowledgeBrowserState;
 mod history;
 pub mod live;
@@ -154,6 +154,10 @@ pub struct IndexPassage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexCommand {
+    SaveAnswer(PassageRef),
+    ListAnswers {
+        before: Option<u64>,
+    },
     BrowseKnowledge {
         request_id: u64,
         query: graph::GraphQuery,
@@ -216,6 +220,11 @@ pub enum IndexCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexEvent {
+    AnswerSaved(DatedAnswer),
+    SavedAnswers {
+        before: Option<u64>,
+        page: SavedAnswerPage,
+    },
     KnowledgeBrowsed {
         request_id: u64,
         result: Result<graph::GraphPage, IndexError>,
@@ -295,6 +304,7 @@ pub struct IndexState {
     pub passages: Vec<IndexPassage>,
     /// Wording a person saved from a passage. A later search does not replace these.
     pub saved_answers: Vec<DatedAnswer>,
+    pub next_saved_before: Option<u64>,
     pub request_id: u64,
     pub searching: bool,
     pub search_completed: bool,
@@ -369,33 +379,22 @@ impl IndexState {
         self.request_id
     }
 
-    /// Save a passage that is on screen, from a folder that is still connected.
-    /// Saving the same version again keeps the first wording.
-    pub fn save_shown_answer(&mut self, index: usize) -> Result<DatedAnswer, IndexError> {
-        let passage = self
-            .passages
-            .get(index)
-            .filter(|_| self.search_completed)
-            .cloned()
-            .ok_or_else(|| IndexError("Search again, then save the passage you see.".into()))?;
-        if !self
+    fn remember_saved_answer(&mut self, answer: &DatedAnswer, newest: bool) {
+        if self
             .roots
             .iter()
-            .any(|root| root.id == passage.reference.root_id)
+            .any(|root| root.id == answer.reference().root_id)
+            && !self
+                .saved_answers
+                .iter()
+                .any(|a| a.reference() == answer.reference())
         {
-            return Err(IndexError("That folder is no longer connected.".into()));
+            if newest {
+                self.saved_answers.insert(0, answer.clone());
+            } else {
+                self.saved_answers.push(answer.clone());
+            }
         }
-        let saved = DatedAnswer::save(&passage)?;
-        if let Some(existing) = self
-            .saved_answers
-            .iter()
-            .find(|answer| answer.reference() == saved.reference())
-            .cloned()
-        {
-            return Ok(existing);
-        }
-        self.saved_answers.push(saved.clone());
-        Ok(saved)
     }
 
     pub fn apply(&mut self, event: &IndexEvent) {
@@ -405,6 +404,15 @@ impl IndexState {
             }
             IndexEvent::KnowledgeEvidence { request_id, result } => {
                 self.knowledge_browser.finish_evidence(*request_id, result);
+            }
+            IndexEvent::AnswerSaved(answer) => self.remember_saved_answer(answer, true),
+            IndexEvent::SavedAnswers { before, page } => {
+                if before.is_none() || self.next_saved_before == *before {
+                    for answer in &page.answers {
+                        self.remember_saved_answer(answer, false);
+                    }
+                    self.next_saved_before = page.next_before;
+                }
             }
             IndexEvent::FoldersAdded(result) => {
                 self.folder_addition = Some(result.clone());
@@ -560,6 +568,22 @@ pub enum ScanCancellation {
 }
 
 pub trait FileIndex: Send + Sync + std::fmt::Debug {
+    /// Whole extracted table when it fits one analysis, in saved chunk order.
+    fn table_wording(&self, _: &PassageRef) -> Result<Option<String>, IndexError> {
+        Ok(None)
+    }
+    fn binary_mask(
+        &self,
+        _reference: &PassageRef,
+    ) -> Result<Option<crate::knowledge_analysis::mask::Mask>, IndexError> {
+        Ok(None)
+    }
+    fn save_answer(&self, _: &PassageRef) -> Result<DatedAnswer, IndexError> {
+        Err(IndexError("This index cannot save quoted answers.".into()))
+    }
+    fn saved_answers(&self, _: Option<u64>) -> Result<SavedAnswerPage, IndexError> {
+        Ok(SavedAnswerPage::default())
+    }
     fn report(&self, _: &NoticeQuery) -> Result<NoticePage, IndexError> {
         Err(IndexError(
             "Full scan reports are unavailable in this session.".into(),
@@ -594,6 +618,13 @@ pub trait FileIndex: Send + Sync + std::fmt::Debug {
     /// Removes the derived index and its access grant, never source files.
     fn remove(&self, root_id: &str) -> Result<(), IndexError>;
     fn search(&self, query: &IndexQuery) -> Result<Vec<IndexPassage>, IndexError>;
+    fn search_language(
+        &self,
+        query: &IndexQuery,
+        _language: crate::knowledge_analysis::Language,
+    ) -> Result<Vec<IndexPassage>, IndexError> {
+        self.search(query)
+    }
     fn read(&self, reference: &PassageRef) -> Result<IndexPassage, IndexError>;
     fn catalogue(&self, query: &CatalogQuery) -> Result<CatalogPage, IndexError>;
     fn history(&self, query: &FileHistoryQuery) -> Result<FileHistory, IndexError>;
@@ -777,6 +808,16 @@ pub fn contextual_passage(
         let end = body.floor_char_boundary(room.min(body.len()));
         text = prefix;
         text.push_str(&body[..end]);
+    }
+    text
+}
+
+/// Remove the context the index added, preserving all bytes of the source body.
+pub fn passage_wording(text: &str) -> &str {
+    if text.starts_with("Source: ")
+        && let Some((_, body)) = text.split_once("\n\n")
+    {
+        return body;
     }
     text
 }
@@ -1108,11 +1149,9 @@ mod tests {
             request_id,
             passages: vec![passage],
         });
-        let saved = state.save_shown_answer(0).expect("shown passage saves");
-        let again = state
-            .save_shown_answer(0)
-            .expect("saving twice keeps the first");
-        assert_eq!(saved, again);
+        let saved = DatedAnswer::save(&state.passages[0]).unwrap();
+        state.apply(&IndexEvent::AnswerSaved(saved.clone()));
+        state.apply(&IndexEvent::AnswerSaved(saved.clone()));
         assert_eq!(state.saved_answers.len(), 1);
         let request_id = state.begin_search();
         state.apply(&IndexEvent::Results {

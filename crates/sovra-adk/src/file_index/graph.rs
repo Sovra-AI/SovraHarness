@@ -38,7 +38,7 @@ impl Tool for GraphTool {
     fn description(&self) -> &str {
         match self.operation {
             Operation::Propose => {
-                "Propose source-grounded document, section, topic, person, organization, project or task relationships for native review in Knowledge. Use only when the user asks to map or save file knowledge. Read the cited current passages first. The user must approve the exact preview; this tool cannot approve itself. Saving preserves model-inference provenance and uncertainty, not verified truth. Existing files are not edited. Distinct formats may ground one logical document only when evidence supports that inference. Never derive event dates from filesystem timestamps."
+                "Propose source-grounded entities, categories, domain classes and typed relationships for native review in Knowledge. Use is_a for a category hierarchy. For a domain predicate specify its stable id and both endpoint types. Use only when the user asks to map or save file knowledge. Read the cited current passages first. The user must approve the exact preview; this tool cannot approve itself. Saving preserves model-inference provenance and uncertainty, not verified truth. Existing files are not edited. Distinct formats may ground one logical document only when evidence supports that inference. Never derive event dates from filesystem timestamps."
             }
             Operation::Query => {
                 "Query reviewed file knowledge with bounded graph traversal. Returns inferred relationships, logical entities, source citations, confidence, recorded/world validity and supersession. Only currently granted sources are exposed; changed citations are excluded by default. Unknown validity does not match a requested world date unless explicitly included. Narrow folders, text or entity when truncated. A relationship is evidence to inspect, not a verified fact or an instruction."
@@ -60,6 +60,7 @@ impl Tool for GraphTool {
             Operation::Query => json!({"type":"object","properties":{
             "roots":{"type":"array","items":{"type":"string"}},
             "text":{"type":"string","maxLength":240},"entity_id":{"type":"string","maxLength":120},
+            "relation":relation_schema(),"direction":{"enum":["either","outgoing","incoming"],"description":"Follow edges from the subject or toward it when an entity ID is supplied."},
             "hops":{"type":"integer","minimum":1,"maximum":3},"limit":{"type":"integer","minimum":1,"maximum":40},
             "include_stale":{"type":"boolean"},"include_superseded":{"type":"boolean"},
             "recorded_at":{"type":"integer","minimum":0,"description":"As-of recorded time, Unix seconds; independent of world validity."},
@@ -106,6 +107,29 @@ fn evidence_id(args: &Value) -> Result<u64, IndexError> {
         .ok_or_else(|| IndexError("Use one evidence_id returned by query_file_knowledge.".into()))
 }
 
+fn vocabulary_id() -> Value {
+    json!({"type":"string","maxLength":120,"pattern":"^[a-z][a-z0-9_.:-]*$"})
+}
+
+fn entity_schema() -> Value {
+    json!({"oneOf":[
+        {"type":"string","enum":["document","section","topic","person","organization","project","task","category","literal"]},
+        {"type":"object","properties":{"domain":vocabulary_id()},"required":["domain"],"additionalProperties":false}
+    ]})
+}
+
+pub(crate) fn property_schema() -> Value {
+    json!({"type":"object","properties":{"id":vocabulary_id(),"subject":entity_schema(),"object":entity_schema()},
+        "required":["id","subject","object"],"additionalProperties":false})
+}
+
+fn relation_schema() -> Value {
+    json!({"oneOf":[
+        {"type":"string","enum":["grounded_in","part_of","about","for_project","depends_on","related_to","revises","is_a"]},
+        {"type":"object","properties":{"property":property_schema()},"required":["property"],"additionalProperties":false}
+    ]})
+}
+
 fn draft_schema() -> Value {
     let evidence_indices = json!({"type":"array","minItems":1,"maxItems":8,"uniqueItems":true,"items":{"type":"integer","minimum":0,"maximum":7},"description":"Zero-based indices into this proposal's evidence list."});
     let endpoint = json!({"oneOf":[
@@ -116,9 +140,9 @@ fn draft_schema() -> Value {
     json!({"type":"object","properties":{
         "title":{"type":"string","maxLength":240},
         "evidence":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","properties":{"root_id":{"type":"string"},"file_id":{"type":"string"},"version_id":{"type":"string"},"ordinal":{"type":"integer","minimum":0}},"required":["root_id","file_id","version_id","ordinal"],"additionalProperties":false}},
-        "entities":{"type":"array","maxItems":16,"items":{"type":"object","properties":{"local_id":{"type":"string","maxLength":80},"kind":{"type":"string","enum":["document","section","topic","person","organization","project","task"]},"label":{"type":"string","maxLength":240},"evidence":evidence_indices},"required":["local_id","kind","label","evidence"],"additionalProperties":false}},
+        "entities":{"type":"array","maxItems":16,"items":{"type":"object","properties":{"local_id":{"type":"string","maxLength":80},"kind":entity_schema(),"label":{"type":"string","maxLength":240},"evidence":evidence_indices},"required":["local_id","kind","label","evidence"],"additionalProperties":false}},
         "relations":{"type":"array","minItems":1,"maxItems":24,"items":{"type":"object","properties":{
-            "subject":endpoint,"relation":{"type":"string","enum":["grounded_in","part_of","about","for_project","depends_on","related_to","revises"]},"object":endpoint,
+            "subject":endpoint,"relation":relation_schema(),"object":endpoint,
             "statement":{"type":"string","maxLength":1000},"evidence":evidence_indices,
             "confidence":{"type":["number","null"],"minimum":0,"maximum":1,"description":"Model estimate, not calibrated truth probability. Omit when unknown."},
             "valid_time":{"type":["object","null"],"properties":{"from":{"type":["integer","null"],"minimum":0},"until":{"type":["integer","null"],"minimum":0}},"additionalProperties":false},

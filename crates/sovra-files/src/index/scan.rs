@@ -10,6 +10,7 @@
 //! Bounded channels give backpressure: a slow disk or a slow extractor never piles work
 //! up in memory, and open file handles are capped. Cancellation is checked at every stage.
 
+use crate::index::BatchWrites as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering::Relaxed;
@@ -131,7 +132,7 @@ pub(super) fn run(
         if observer.cancelled() {
             return Ok(Completion::Incomplete);
         }
-        tx.execute(
+        tx.execute_cached(
             "UPDATE index_files SET available=0,observed=?2 WHERE id=?1",
             params![id, i64::try_from(now()).expect("Unix seconds fit i64")],
         )
@@ -702,7 +703,7 @@ impl Writer {
             path,
             &physical,
         )?;
-        tx.execute("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,NULL,?5,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=NULL,generation=excluded.generation,available=1",
+        tx.execute_cached("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,NULL,?5,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=NULL,generation=excluded.generation,available=1",
             params![id,self.root_id,path,physical,self.generation]).map_err(|e| db_error(&e))?;
         save_metadata(tx, &id, path, metadata, state, Some(note))?;
         super::history::observe(tx, &id, self.activity)
@@ -764,10 +765,11 @@ impl Writer {
             .ok()
             .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
             .map(|t| t.as_secs());
-        tx.execute("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
+        tx.execute_cached("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
             params![file_id, self.root_id, path, physical, version, self.generation]).map_err(|error| db_error(&error))?;
         let (state, detail, media_type) = if let Some(prepared) = prepared {
             let partial = prepared.partial;
+            let mask = prepared.mask;
             let prepared = prepared.content;
             let state = if prepared.raw.is_some() || prepared.text.trim().is_empty() {
                 ExtractionState::MetadataOnly
@@ -781,8 +783,21 @@ impl Writer {
             } else {
                 prepared.attachment.note
             };
-            tx.execute("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by,partial) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            tx.execute_cached("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by,partial) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                 params![version, file_id, content_hash, prepared.attachment.mime_type, note, i64::try_from(now()).expect("current Unix time fits i64"), modified.and_then(|v| i64::try_from(v).ok()),super::history::EXTRACTOR_REVISION,self.activity,partial]).map_err(|error| db_error(&error))?;
+            if let Some(mask) = mask {
+                let (w, h) = mask.dimensions();
+                tx.execute_cached(
+                    "INSERT INTO index_masks(version_id,width,height,bits) VALUES(?1,?2,?3,?4)",
+                    params![
+                        version,
+                        u16::try_from(w).expect("bounded mask width"),
+                        u16::try_from(h).expect("bounded mask height"),
+                        mask.packed()
+                    ],
+                )
+                .map_err(|e| db_error(&e))?;
+            }
             let source_text =
                 if matches!(state, ExtractionState::Text | ExtractionState::PartialText) {
                     prepared.text.as_str()
@@ -798,12 +813,12 @@ impl Writer {
                     None,
                 );
                 let chunk_id = digest(stored.as_bytes());
-                tx.execute(
+                tx.execute_cached(
                     "INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING",
                     params![chunk_id, stored],
                 )
                 .map_err(|error| db_error(&error))?;
-                tx.execute("INSERT INTO index_version_chunks(version_id,ordinal,chunk_id,start_line,end_line) VALUES(?1,?2,?3,?4,?5)",
+                tx.execute_cached("INSERT INTO index_version_chunks(version_id,ordinal,chunk_id,start_line,end_line) VALUES(?1,?2,?3,?4,?5)",
                     params![version, i64::try_from(ordinal).expect("bounded text chunk count"), chunk_id, chunk.start_line, chunk.end_line]).map_err(|error| db_error(&error))?;
             }
             (state, note, Some(prepared.attachment.mime_type))
@@ -946,7 +961,9 @@ fn file_id(
     // keep separate path entries; ambiguous identities never merge records.
     if !physical.is_empty() {
         let mut query = db
-            .prepare("SELECT id,path FROM index_files WHERE root_id=?1 AND identity=?2 LIMIT 2")
+            .prepare_cached(
+                "SELECT id,path FROM index_files WHERE root_id=?1 AND identity=?2 LIMIT 2",
+            )
             .map_err(|error| db_error(&error))?;
         let candidates = query
             .query_map(params![root_id, physical], |r| {
@@ -991,7 +1008,7 @@ fn save_metadata(
         ExtractionState::MetadataOnly => "metadata_only",
         ExtractionState::Failed => "failed",
     };
-    db.execute("UPDATE index_files SET filename=?2,directory=?3,extension=?4,byte_size=?5,observed=?6,modified=?7,created=?8,extraction=?9,detail=?10 WHERE id=?1",
+    db.execute_cached("UPDATE index_files SET filename=?2,directory=?3,extension=?4,byte_size=?5,observed=?6,modified=?7,created=?8,extraction=?9,detail=?10 WHERE id=?1",
         params![id,name,directory,extension,i64::try_from(metadata.len()).ok(), i64::try_from(now()).expect("Unix time fits i64"),timestamp(metadata.modified()),timestamp(metadata.created()),state,note]).map_err(|e| db_error(&e))?;
     Ok(())
 }

@@ -50,6 +50,7 @@ pub struct Shell {
     pub(crate) skill_menu: crate::skill_menu::MenuState,
     pub(crate) skill_library: crate::skill_library::SkillLibrary,
     pub(crate) plugins: crate::plugin_browser::PluginBrowser,
+    pub(crate) explorer: crate::knowledge_explorer::ExplorerView,
     pub(crate) file_index: crate::file_index_view::FileIndexView,
     pub(crate) memory_view: Entity<crate::memory_view::MemoryView>,
     search_input: Entity<InputState>,
@@ -173,6 +174,7 @@ impl Shell {
             cx.new(|cx| InputState::new(window, cx).placeholder("Search anything..."));
         let skill_library = crate::skill_library::SkillLibrary::new(window, cx);
         let plugins = crate::plugin_browser::PluginBrowser::new(window, cx);
+        let explorer = crate::knowledge_explorer::ExplorerView::new(window, cx);
         let file_index = crate::file_index_view::FileIndexView::new(window, cx);
         let history_search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search chats…"));
@@ -370,6 +372,7 @@ impl Shell {
                     shell.state.observe_time(wall_time());
                     let mut threads_to_persist = std::collections::BTreeSet::new();
                     for event in batch {
+                        shell.explorer.observe(&event);
                         let memory_visible = shell.state.active_tab == NavTab::Knowledge
                             && shell.knowledge_section
                                 == crate::knowledge_view::KnowledgeSection::Memories;
@@ -875,6 +878,7 @@ impl Shell {
             skill_menu: crate::skill_menu::MenuState::default(),
             skill_library,
             plugins,
+            explorer,
             file_index,
             memory_view,
             search_input,
@@ -1083,6 +1087,7 @@ impl Shell {
     }
 
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
+        self.explorer.reading_personal_source = false;
         self.state.select_tab(tab);
         if tab == NavTab::Training {
             let _ = cx.global::<RuntimeClient>().0.send(Command::Training(

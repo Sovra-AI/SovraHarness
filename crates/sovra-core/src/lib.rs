@@ -25,6 +25,7 @@ pub mod github;
 pub mod google;
 pub mod group;
 mod knowledge;
+pub mod knowledge_analysis;
 pub mod mcp;
 mod memory;
 pub mod microsoft;

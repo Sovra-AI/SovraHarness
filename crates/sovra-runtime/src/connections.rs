@@ -1079,6 +1079,7 @@ impl Actor {
             | Event::Auth(_)
             | Event::Memory(_)
             | Event::Models(_)
+            | Event::Explored { .. }
             | Event::FileIndex(_)
             | Event::Skills(_)
             | Event::Plugins(_)

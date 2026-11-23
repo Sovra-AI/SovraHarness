@@ -1425,6 +1425,7 @@ impl WorkspaceState {
             )
             | Event::Skills(_)
             | Event::Plugins(_)
+            | Event::Explored { .. }
             | Event::FileIndex(_)
             | Event::Ready { .. }
             | Event::Pong

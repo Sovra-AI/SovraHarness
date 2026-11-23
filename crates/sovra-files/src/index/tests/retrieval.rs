@@ -223,7 +223,14 @@ fn saved_answer_keeps_the_wording_that_was_read() {
         request_id,
         passages: vec![passage.clone()],
     });
-    let saved = state.save_shown_answer(0).expect("the shown passage saves");
+    let saved = store
+        .save_answer(&state.passages[0].reference)
+        .expect("the shown passage saves");
+    assert_eq!(
+        store.save_answer(&state.passages[0].reference).unwrap(),
+        saved
+    );
+    state.apply(&IndexEvent::AnswerSaved(saved.clone()));
     let reading = saved.reread();
     assert_eq!(reading.file, passage.path);
     assert_eq!(reading.wording, passage.text);
@@ -266,4 +273,181 @@ fn saved_answer_keeps_the_wording_that_was_read() {
         passages: vec![updated],
     });
     assert_eq!(state.saved_answers[0].reread().wording, reading.wording);
+    drop(store);
+    let reopened = fixture.store();
+    let stored = reopened.saved_answers(None).unwrap();
+    assert_eq!(stored.answers, vec![saved]);
+    reopened.remove(&root.id).unwrap();
+    assert_eq!(reopened.saved_answers(None).unwrap().answers, Vec::new());
+}
+
+#[test]
+fn folder_words_expand_inflections_but_identifiers_keep_literal_tokens() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "grove.txt",
+        "An orange contains a nutrient. The serial is QX-DYES-21.",
+    );
+    fixture.write("yard.txt", "Cranes are feeding. The serial is QX-DYE-21.");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    for (term, path) in [
+        ("oranges nutrients", "grove.txt"),
+        ("crane", "yard.txt"),
+        ("QX-DYE-21", "yard.txt"),
+    ] {
+        let hits = search(&store, term);
+        assert_eq!(hits.len(), 1, "{term}");
+        assert_eq!(hits[0].path, path);
+    }
+    let saved = search(&store, "orange")[0].reference.clone();
+    // Simulate an existing v11 installation containing real saved chunks.
+    let db = store.connect().unwrap();
+    db.execute_batch("DROP TRIGGER word_forms_insert; DROP TRIGGER word_forms_delete; DROP TABLE index_word_forms; PRAGMA user_version=11;").unwrap();
+    drop(db);
+    let reopened = fixture.store();
+    assert_eq!(search(&reopened, "oranges")[0].reference, saved);
+    reopened.remove(&root.id).unwrap();
+    assert_eq!(search(&reopened, "oranges"), Vec::new());
+}
+
+#[test]
+fn selected_language_postings_backfill_then_follow_new_files_and_grant_removal() {
+    use sovra_core::knowledge_analysis::Language;
+    let fixture = Fixture::new();
+    let forms = [
+        (Language::English, "orange", "oranges"),
+        (Language::French, "maison", "maisons"),
+        (Language::German, "Garten", "Gärten"),
+        (Language::Spanish, "gato", "gatos"),
+        (Language::Italian, "ragazzo", "ragazzi"),
+        (Language::Portuguese, "livro", "livros"),
+        (Language::Dutch, "appel", "appels"),
+        (Language::Arabic, "كتاب", "الكتاب"),
+    ];
+    for (lang, first, second) in forms {
+        assert_eq!(lang.stem_text(first), lang.stem_text(second), "{lang:?}");
+        fixture.write(&format!("{}.txt", lang.name()), second);
+    }
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    for (language, first, _) in forms {
+        let query = IndexQuery {
+            text: first.into(),
+            roots: vec![root.id.clone()],
+            path_prefix: None,
+            limit: 4,
+        };
+        let found = store.search_language(&query, language).unwrap();
+        assert!(
+            found
+                .iter()
+                .any(|p| p.path == format!("{}.txt", language.name())),
+            "{language:?}: {found:?}"
+        );
+    }
+    fixture.write("additional.txt", "Les nouvelles maisons.");
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let query = IndexQuery {
+        text: "maison".into(),
+        roots: vec![],
+        path_prefix: None,
+        limit: 4,
+    };
+    assert_eq!(
+        fixture
+            .store()
+            .search_language(&query, Language::French)
+            .unwrap()
+            .len(),
+        2
+    );
+    store.remove(&root.id).unwrap();
+    assert_eq!(
+        store.search_language(&query, Language::French).unwrap(),
+        Vec::new()
+    );
+}
+#[test]
+fn actual_mask_pixels_reopen_and_follow_the_source_grant() {
+    use sovra_core::knowledge_analysis::mask::Operation;
+    let fixture = Fixture::new();
+    let raster = image::GrayImage::from_fn(5, 5, |x, y| {
+        image::Luma([if (1..4).contains(&x) && (1..4).contains(&y) {
+            0
+        } else {
+            255
+        }])
+    });
+    raster
+        .save(fixture.source().join("silhouette.png"))
+        .unwrap();
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let hit = search(&store, "silhouette").remove(0);
+    let mask = fixture
+        .store()
+        .binary_mask(&hit.reference)
+        .unwrap()
+        .unwrap();
+    assert_eq!(mask.foreground(), 9);
+    assert_eq!(mask.apply(Operation::Erode, 1).unwrap().foreground(), 1);
+    assert_eq!(mask.apply(Operation::Dilate, 1).unwrap().foreground(), 25);
+    store.remove(&root.id).unwrap();
+    assert!(store.binary_mask(&hit.reference).unwrap().is_none());
+}
+
+#[test]
+fn a_matching_late_table_row_keeps_its_header_and_complete_source_order() {
+    use std::fmt::Write as _;
+    let fixture = Fixture::new();
+    let mut table = String::from("timestamp,value,unit,instrument\n");
+    for i in 0..401 {
+        writeln!(table, "2026-11-23,{i},g,scale{i}").unwrap();
+    }
+    fixture.write("neutral.csv", &table);
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let hit = search(&store, "scale400").remove(0);
+    assert!(hit.reference.ordinal > 0);
+    assert_eq!(
+        store.table_wording(&hit.reference).unwrap().as_deref(),
+        Some(table.as_str())
+    );
+    store.remove(&root.id).unwrap();
+    assert_eq!(store.table_wording(&hit.reference).unwrap(), None);
+}
+
+#[test]
+fn saved_answer_pages_resume_after_newer_saves_without_duplicates() {
+    let fixture = Fixture::new();
+    for i in 0..23 {
+        fixture.write(&format!("quote{i}.txt"), &format!("Reference citation{i}"));
+    }
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    for i in 0..22 {
+        store
+            .save_answer(&search(&store, &format!("citation{i}"))[0].reference)
+            .unwrap();
+    }
+    let first = store.saved_answers(None).unwrap();
+    assert_eq!(first.answers.len(), 20);
+    store
+        .save_answer(&search(&store, "citation22")[0].reference)
+        .unwrap();
+    let next = fixture.store().saved_answers(first.next_before).unwrap();
+    assert_eq!(
+        next.answers
+            .iter()
+            .map(sovra_core::file_index::DatedAnswer::file)
+            .collect::<Vec<_>>(),
+        ["quote1.txt", "quote0.txt"]
+    );
+    assert!(next.next_before.is_none());
 }

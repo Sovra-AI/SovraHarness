@@ -438,6 +438,7 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
         if let Some(note) = &passage.note {
             result = result.child(div().sovra_text(TextRole::Caption, cx).child(note.clone()));
         }
+        let reference = passage.reference.clone();
         let already = state
             .saved_answers
             .iter()
@@ -450,15 +451,13 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
             )
             .disabled(already)
             .on_click(cx.listener(move |shell, _, _, cx| {
-                if let Err(error) = shell.file_index.state.save_shown_answer(index) {
-                    shell.file_index.state.notice = Some(error.to_string());
-                }
+                shell.index_command(IndexCommand::SaveAnswer(reference.clone()), cx);
                 cx.notify();
             })),
         );
         panel = panel.child(result);
     }
-    if !state.saved_answers.is_empty() {
+    if !state.saved_answers.is_empty() || state.next_saved_before.is_some() {
         panel = panel.child(
             div()
                 .sovra_text(TextRole::SectionTitle, cx)
@@ -497,6 +496,20 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
                             .sovra_text(TextRole::Body, cx)
                             .child("A later edit of the file does not replace this wording."),
                     ),
+            );
+        }
+        if let Some(before) = state.next_saved_before {
+            panel = panel.child(
+                design::button("older-saved-answers", "More saved answers", cx).on_click(
+                    cx.listener(move |shell, _, _, cx| {
+                        shell.index_command(
+                            IndexCommand::ListAnswers {
+                                before: Some(before),
+                            },
+                            cx,
+                        );
+                    }),
+                ),
             );
         }
     }
@@ -1180,7 +1193,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn saving_a_folder_answer_shows_the_file_passage_and_read_date(cx: &mut TestAppContext) {
-        let (client, _commands, _events) = Client::loopback();
+        let (client, commands, _events) = Client::loopback();
         cx.update(|cx| crate::init(client, cx));
         let mut shell = None;
         let window = cx.open_window(size(px(1280.), px(1000.)), |window, cx| {
@@ -1222,6 +1235,12 @@ mod tests {
             });
             window.render_frame(cx);
             window.click(("save-dated-answer", 0usize), cx);
+            assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|c| matches!(c, Command::FileIndex(IndexCommand::SaveAnswer(r)) if r.version_id=="version-read")));
+            shell.update(cx, |shell, cx| {
+                let answer=sovra_core::file_index::DatedAnswer::save(&shell.file_index.state.passages[0]).unwrap();
+                shell.file_index.apply(&IndexEvent::AnswerSaved(answer));
+                cx.notify();
+            });
             window.render_frame(cx);
             let words = window
                 .find(("saved-dated-answer", 0usize))

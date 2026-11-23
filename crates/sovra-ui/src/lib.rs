@@ -20,6 +20,7 @@ mod github_card;
 mod google_card;
 mod groups_view;
 mod inspector;
+mod knowledge_explorer;
 mod knowledge_review;
 mod knowledge_view;
 mod login;

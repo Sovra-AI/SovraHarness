@@ -29,6 +29,48 @@ When adding a benchmark:
 - Keep the pure logic in `sovra-core` so it can be benchmarked without a window or
   a runtime.
 
+## Connected knowledge
+
+On one Linux development machine, the existing synthetic folder benchmark produced
+the following timings. The growth stage adds 9,000 short UTF-8 files to an index
+of 1,000. The unchanged scan visits all 10,000. Identifier lookup used twenty
+queries against the complete index. These are local observations subject to
+filesystem cache and other work on the machine.
+
+| Operation | Before | After tuning | Final repeat |
+| --- | ---: | ---: | ---: |
+| Grow the catalogue to 10,000 files | 5.615 s | 4.634 s | 5.208 s |
+| Rescan all 10,000 unchanged files | 3.004 s | 1.845 s | 2.639 s |
+| Identifier search, median | 0.955 ms | 0.976 ms | 1.005 ms |
+| Identifier search, 95th percentile | 1.005 ms | 1.036 ms | 1.134 ms |
+
+The first implementation took 6.325 s to grow the catalogue. Reusing prepared
+statements in the indexing transaction brought this down to 4.634 s. English
+word-form search shares stored source text with the literal-token index. An
+additional language builds its postings on first use. Artifact search uses a
+persistent BM25 index over current wording. [SQLite prepared statements](https://www.sqlite.org/c3ref/stmt.html) · [FTS5 storage and tokenizers](https://www.sqlite.org/fts5.html) · [SurrealDB full-text indexes](https://surrealdb.com/docs/learn/data-models/full-text-search/search-indexes)
+
+A separate development-build test searched 100 local files, 100 personal notes
+and 100 saved tables. Each query checked that all three sources returned the same
+normalized measurement. After one warm-up, 20 different identifier queries took **2.25 ms
+median and 2.77 ms at the 95th percentile**, from the client command to the
+analyzed result event. On the same corpus, a common word-form query matching
+all three collections took **32.9 ms median and 39.8 ms at the 95th percentile**
+over 20 repetitions. Rendering, model inference and first-use language index
+creation are outside that interval.
+
+In the optimized core benchmark, a 64-point ring took 12.19 ms median after
+incremental triangle enumeration, down from 30.47 ms for the first implementation.
+A repeat during workspace verification measured 15.93 ms. The 16-point ring
+measured 34.83–45.22 µs across those runs and the 64-row sensor table measured
+154–183 µs. Larger clouds show the exact point window used. [GUDHI’s Rips filtration](https://gudhi.inria.fr/python/latest/rips_complex_user.html)
+
+```sh
+SOVRA_FILE_BENCH_OUTPUT=/tmp/sovra-file-run.json cargo test -p sovra-files --lib file_capture_and_search_measurements -- --ignored
+cargo test -p sovra-app --test memory_lifecycle connected_source_query_latency -- --ignored --nocapture
+cargo bench -p sovra-core --bench search -- knowledge
+```
+
 ## Profiling
 
 `cargo build --profile profiling` builds a release binary with debug symbols and no
