@@ -429,6 +429,17 @@ impl Shell {
                         }
                         if let sovra_core::Event::FileIndex(event) = &event {
                             shell.file_index.apply(event);
+                            if matches!(
+                                event,
+                                sovra_core::file_index::IndexEvent::KnowledgeReviewed {
+                                    accepted: true,
+                                    ..
+                                }
+                            ) {
+                                let browser = &mut shell.file_index.state.knowledge_browser;
+                                let refresh = browser.browse(browser.query.clone());
+                                shell.index_command(refresh, cx);
+                            }
                         }
                         if let sovra_core::Event::Plugins(event) = &event {
                             shell.plugins.state.apply(event);

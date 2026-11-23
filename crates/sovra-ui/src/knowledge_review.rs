@@ -6,8 +6,8 @@ use crate::{
 };
 use gpui_kit::component::{Disableable as _, h_flex, v_flex};
 use gpui_kit::{
-    Context, InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Styled as _,
-    TestSupportExt as _, div,
+    Context, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, div,
 };
 use sovra_core::file_index::{IndexCommand, IndexState, graph::KnowledgeProposal};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -22,13 +22,53 @@ fn date(value: Option<u64>) -> String {
 
 pub(crate) fn render(state: &IndexState, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    v_flex().id("knowledge-review").test_support().w_full().min_w_0().gap(t.space.small)
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child("Review file knowledge"))
-        .child(div().sovra_text(TextRole::Caption, cx).child("Helpers can propose relationships from indexed sources. Review each relationship and its evidence before saving. Saved inferences remain unverified; your source files stay intact."))
-        .child(design::button("reload-knowledge", "Reload proposals", cx)
-            .disabled(!state.knowledge_reviewing.is_empty())
-            .on_click(cx.listener(|shell, _, _, cx| shell.index_command(IndexCommand::ListKnowledge, cx))))
-        .children(state.knowledge_pending.iter().map(|proposal| card(proposal, state.knowledge_reviewing.contains(&proposal.id), cx)))
+    let mut panel = v_flex()
+        .id("knowledge-review")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.small);
+    if let Some(notice) = &state.knowledge_review_notice {
+        panel = panel.child(
+            div()
+                .id("knowledge-review-status")
+                .test_support()
+                .role(gpui_kit::Role::Status)
+                .aria_label(notice.clone())
+                .sovra_text(TextRole::Body, cx)
+                .child(notice.clone()),
+        );
+    }
+    if !state.knowledge_pending.is_empty() {
+        panel = panel
+            .child(
+                div()
+                    .sovra_text(TextRole::SectionTitle, cx)
+                    .child("Proposed relationships"),
+            )
+            .child(
+                div()
+                    .sovra_text(TextRole::Caption, cx)
+                    .child("Read the source wording before deciding which connections to save."),
+            );
+    }
+    panel
+        .child(
+            design::button("reload-knowledge", "Check for proposals", cx)
+                .self_start()
+                .max_w_full()
+                .disabled(!state.knowledge_reviewing.is_empty())
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    shell.index_command(IndexCommand::ListKnowledge, cx);
+                })),
+        )
+        .children(state.knowledge_pending.iter().map(|proposal| {
+            card(
+                proposal,
+                state.knowledge_reviewing.contains(&proposal.id),
+                cx,
+            )
+        }))
 }
 
 fn card(
@@ -264,9 +304,9 @@ mod tests {
     fn review_requires_click_and_remains_reachable_in_both_themes_and_sizes(
         cx: &mut TestAppContext,
     ) {
-        let (client, commands, events) = Client::loopback();
-        cx.update(|cx| crate::init(client, cx));
         for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| crate::init(client, cx));
             let mut shell = None;
             let window = cx.open_window(size(px(width), px(height)), |window, cx| {
                 let view = cx.new(|cx| Shell::new(0, window, cx));
@@ -356,15 +396,45 @@ mod tests {
                 );
             })
             .unwrap();
-        }
-        // Receipt of an event is never itself permission to save.
-        events
-            .send_blocking(Event::FileIndex(IndexEvent::KnowledgeReviewed {
-                proposal_id: 1,
-                accepted: true,
-            }))
+            let accepted = scale != 200;
+            events
+                .send_blocking(Event::FileIndex(IndexEvent::KnowledgeReviewed {
+                    proposal_id: 1,
+                    accepted,
+                }))
+                .unwrap();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let status = window.find("knowledge-review-status");
+                assert!(
+                    status
+                        .label()
+                        .is_some_and(|label| label.contains(if accepted {
+                            "saved"
+                        } else {
+                            "rejected"
+                        }))
+                );
+                assert!(window.try_find("knowledge-proposal-1").is_none());
+                window.remove_window();
+            })
             .unwrap();
-        cx.run_until_parked();
+            let mut refreshed = false;
+            while let Ok(command) = commands.try_recv() {
+                assert!(!matches!(
+                    command,
+                    Command::FileIndex(IndexCommand::ReviewKnowledge { .. })
+                ));
+                refreshed |= matches!(
+                    command,
+                    Command::FileIndex(IndexCommand::BrowseKnowledge { .. })
+                );
+            }
+            assert_eq!(refreshed, accepted);
+        }
     }
 
     #[test]

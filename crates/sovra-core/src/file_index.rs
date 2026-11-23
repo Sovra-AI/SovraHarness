@@ -315,6 +315,7 @@ pub struct IndexState {
     pub monitors: std::collections::BTreeMap<String, MonitorStatus>,
     pub semantic: Vec<semantic::SemanticStatus>,
     pub knowledge_pending: Vec<graph::KnowledgeProposal>,
+    pub knowledge_review_notice: Option<String>,
     pub knowledge_reviewing: std::collections::BTreeSet<u64>,
     knowledge_reviewed: std::collections::BTreeSet<u64>,
 }
@@ -371,7 +372,12 @@ impl IndexState {
 
     /// A review starts only from a visible proposal and cannot be submitted twice.
     pub fn begin_review(&mut self, id: u64) -> bool {
-        self.knowledge_pending.iter().any(|p| p.id == id) && self.knowledge_reviewing.insert(id)
+        let started = self.knowledge_pending.iter().any(|p| p.id == id)
+            && self.knowledge_reviewing.insert(id);
+        if started {
+            self.knowledge_review_notice = None;
+        }
+        started
     }
 
     pub fn begin_search(&mut self) -> u64 {
@@ -440,7 +446,11 @@ impl IndexState {
                 self.knowledge_pending.retain(|p| p.id != *proposal_id);
                 self.knowledge_reviewing.remove(proposal_id);
                 self.knowledge_reviewed.insert(*proposal_id);
-                self.notice = Some(if *accepted {"Saved the reviewed inferences. Their sources and uncertainty remain attached."} else {"Rejected this knowledge proposal."}.into());
+                self.knowledge_review_notice = Some(if *accepted {
+                    "Relationship proposal saved. Its evidence is available in saved relationships."
+                } else {
+                    "Relationship proposal rejected."
+                }.into());
             }
             IndexEvent::Semantic(status) => self.semantic.clone_from(status),
             IndexEvent::SearchNotice {
@@ -520,6 +530,9 @@ impl IndexState {
                 }
             }
             IndexEvent::Error(message) => {
+                if !self.knowledge_reviewing.is_empty() {
+                    self.knowledge_review_notice = Some(message.clone());
+                }
                 self.knowledge_reviewing.clear();
                 self.notice = Some(message.clone());
                 self.searching = false;

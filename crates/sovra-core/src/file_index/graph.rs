@@ -544,6 +544,7 @@ mod tests {
         assert!(state.begin_review(1));
         assert!(!state.begin_review(1));
         state.apply(&IndexEvent::Error("retry".into()));
+        assert_eq!(state.knowledge_review_notice.as_deref(), Some("retry"));
         assert!(state.begin_review(1));
         state.apply(&IndexEvent::KnowledgeReviewed {
             proposal_id: 1,
@@ -551,12 +552,19 @@ mod tests {
         });
         state.apply(&IndexEvent::KnowledgePending(vec![proposal.clone()]));
         assert_eq!(state.knowledge_pending, Vec::<KnowledgeProposal>::new());
+        assert!(
+            state
+                .knowledge_review_notice
+                .as_deref()
+                .is_some_and(|message| message.contains("saved"))
+        );
         let mut other = proposal;
         other.id = 2;
         state.apply(&IndexEvent::KnowledgePending(vec![other]));
         assert!(state.begin_review(2));
         state.apply(&IndexEvent::Roots(vec![]));
         assert_eq!(state.knowledge_pending, Vec::<KnowledgeProposal>::new());
+        assert!(state.knowledge_review_notice.is_none());
         assert!(state.knowledge_reviewing.is_empty());
     }
 

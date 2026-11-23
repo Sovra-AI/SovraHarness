@@ -18,6 +18,7 @@ package version.
   the top. Expand folders, relationships, personal details, and people together.
   The overview shows folder activity and pending relationship reviews. Choose
   a relationship type to find its saved examples and follow them to the source.
+  Saving a proposal updates the results and shows a confirmation in place.
 
 - **Be in several groups, and share from chat.** A computer can now be in more
   than one group: **Your groups** at the top of Groups switches between them,

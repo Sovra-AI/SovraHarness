@@ -276,10 +276,7 @@ pub(crate) fn render_knowledge_view(
                 KnowledgeSection::Files => block.child(crate::file_index_view::render(shell, cx)),
                 KnowledgeSection::Relationships => block
                     .child(vocabulary::render(shell, cx))
-                    .children(
-                        (!shell.file_index.state.knowledge_pending.is_empty())
-                            .then(|| crate::knowledge_review::render(&shell.file_index.state, cx)),
-                    )
+                    .child(crate::knowledge_review::render(&shell.file_index.state, cx))
                     .child(crate::file_index_view::knowledge::render(shell, cx)),
                 KnowledgeSection::Memories => {
                     if shell.explorer.reading_personal_source {
