@@ -71,6 +71,51 @@ cargo test -p sovra-app --test memory_lifecycle connected_source_query_latency -
 cargo bench -p sovra-core --bench search -- knowledge
 ```
 
+## Folder indexing
+
+The on-disk benchmark calls the same folder scan as the app. It times discovery,
+file reads, text extraction, SQLite and full-text indexing, history, and completion.
+It checks source citations, replacement, renaming, deletion and search after reopening.
+File creation and verification are outside the timer. To select a disk, set
+`TMPDIR` to an existing directory on that filesystem.
+
+```sh
+SOVRA_SCAN_BENCH_FILES=10000 cargo test -p sovra-files --lib \
+  --config 'profile.test.package.sovra-files.opt-level=3' \
+  --config 'profile.test.package.sovra-core.opt-level=3' \
+  end_to_end_folder_indexing -- --ignored --nocapture
+```
+
+Set the count to 200000 for the larger run. For native file-change notifications,
+run the same command with `native_watch_registration_measurements` as the test
+name. Each invocation measures five registrations on 221 directories with
+20,000 files.
+
+Five alternating runs per build on a Ryzen 7 3700X with an ext4 NVMe disk gave
+the following median wall times. The baseline was `f02d3a8`. Both builds used
+the same Rust profiles and generated fresh synthetic folders. The OS could cache
+their newly written files, and a separate development app was indexing in the
+background.
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| First scan of 10,000 short text files | 4.616 s | 3.195 s |
+| All 10,000 files unchanged | 1.240 s | 0.434 s |
+| 1% edited, one rename, one deletion and one addition | 1.270 s | 0.466 s |
+| Eight 20,000-line documents | 1.616 s | 0.583 s |
+| Two 95,000-line streamed documents | 0.755 s | 0.644 s |
+| Recheck those two streamed documents | 26.2 ms | 6.4 ms |
+| 40 three-page PDFs, 40 presentations and 40 CSVs | 44.8 ms | 35.0 ms |
+| Register native watches across 20,000 files (15 registrations per build) | 58.3 ms | 24.9 ms |
+
+The writer now confirms unchanged versions against the live row, retains the
+original change history and uses fewer statements for each new file. Both normal
+and streamed passage extraction find headings in source order. The scan writer
+can use up to 32 MiB of SQLite page cache on demand and groups small records into
+larger transactions. FTS5 builds index segments per transaction, so batching small
+writes reduces index merging work. Files whose modification second overlaps
+their last observation still get a content check. [SQLite FTS5](https://www.sqlite.org/fts5.html#the_automerge_configuration_option) · [SQLite page cache](https://www.sqlite.org/pragma.html#pragma_cache_size) · [Git timestamp checks](https://git-scm.com/docs/racy-git)
+
 ## Profiling
 
 `cargo build --profile profiling` builds a release binary with debug symbols and no

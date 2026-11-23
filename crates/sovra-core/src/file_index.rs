@@ -791,7 +791,73 @@ pub fn contextual_passage(
     body: &str,
     carried_section: Option<&str>,
 ) -> String {
-    let section = section_before(source, start_line).or_else(|| carried_section.map(str::to_owned));
+    PassageContext::new(path, source, carried_section).passage(start_line, body)
+}
+
+/// Builds source prefixes in line order without re-reading earlier source text
+/// for every chunk. A streamed block can inherit the preceding block's section.
+#[derive(Debug)]
+pub struct PassageContext<'a> {
+    source: &'a str,
+    lines: std::str::Lines<'a>,
+    next_line: u32,
+    heading: Option<&'a str>,
+    nearby: Option<&'a str>,
+    inherited: Option<&'a str>,
+    path: &'a str,
+}
+
+impl<'a> PassageContext<'a> {
+    pub fn new(path: &'a str, source: &'a str, inherited: Option<&'a str>) -> Self {
+        Self {
+            source,
+            lines: source.lines(),
+            next_line: 1,
+            heading: None,
+            nearby: None,
+            inherited,
+            path,
+        }
+    }
+
+    fn advance(&mut self, line: u32) {
+        if line < self.next_line {
+            self.lines = self.source.lines();
+            self.next_line = 1;
+            self.heading = None;
+            self.nearby = None;
+        }
+        while self.next_line < line {
+            let Some(text) = self.lines.next() else { break };
+            self.next_line += 1;
+            let trimmed = text.trim();
+            if let Some(title) = markdown_heading(trimmed) {
+                self.heading = Some(title);
+            } else if self.heading.is_none()
+                && !trimmed.is_empty()
+                && trimmed.chars().take(121).count() <= 120
+            {
+                self.nearby = Some(trimmed);
+            }
+        }
+    }
+
+    pub fn passage(&mut self, start_line: u32, body: &str) -> String {
+        self.advance(start_line);
+        format_passage(
+            self.path,
+            self.heading.or(self.nearby).or(self.inherited),
+            body,
+        )
+    }
+
+    pub fn last_section(mut self) -> Option<&'a str> {
+        self.advance(u32::MAX);
+        self.heading.or(self.nearby)
+    }
+}
+
+fn format_passage(path: &str, section: Option<&str>, body: &str) -> String {
     let mut prefix = format!("Source: {}\n", clamp_chars(path, 180));
     if let Some(section) = section {
         let section = clamp_chars(section.trim(), 160);
@@ -827,28 +893,9 @@ pub fn passage_wording(text: &str) -> &str {
 
 /// Last heading (or nearby line) in a block, carried into the next streamed block.
 pub fn carried_section(source: &str) -> Option<String> {
-    section_before(source, u32::MAX)
-}
-
-fn section_before(source: &str, start_line: u32) -> Option<String> {
-    let before = usize::try_from(start_line.saturating_sub(1)).unwrap_or(usize::MAX);
-    let mut heading = None;
-    let mut nearby = None;
-    for (index, line) in source.lines().enumerate() {
-        if index >= before {
-            break;
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(title) = markdown_heading(trimmed) {
-            heading = Some(title.to_owned());
-        } else if trimmed.chars().count() <= 120 {
-            nearby = Some(trimmed.to_owned());
-        }
-    }
-    heading.or(nearby)
+    PassageContext::new("", source, None)
+        .last_section()
+        .map(str::to_owned)
 }
 
 fn markdown_heading(line: &str) -> Option<&str> {
@@ -1048,6 +1095,42 @@ mod tests {
             assert!(excluded_name(name));
         }
         assert!(!excluded_name("project-notes"));
+    }
+
+    #[test]
+    fn incremental_passage_context_keeps_citation_text_across_chunks_and_blocks() {
+        let source = "nearby line
+
+# First heading
+other line
+## 二番目
+Body
+";
+        let mut context = PassageContext::new("folder/note.txt", source, Some("Previous block"));
+        for (line, expected) in [
+            (1, "Previous block"),
+            (2, "nearby line"),
+            (2, "nearby line"),
+            (4, "First heading"),
+            (5, "First heading"),
+            (6, "二番目"),
+            (3, "nearby line"),
+        ] {
+            assert_eq!(
+                context.passage(line, "exact words"),
+                format!(
+                    "Source: folder/note.txt
+Section: {expected}
+
+exact words"
+                )
+            );
+        }
+        assert_eq!(context.last_section(), Some("二番目"));
+        assert_eq!(
+            PassageContext::new("x", "", Some("fallback")).last_section(),
+            None
+        );
     }
 
     #[test]

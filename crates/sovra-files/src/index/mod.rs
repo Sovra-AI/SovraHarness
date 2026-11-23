@@ -39,6 +39,17 @@ impl BatchWrites for Connection {
     }
 }
 
+/// The count and notification walks need only a type hint. Some filesystems
+/// omit it from directory entries, so fall back to no-follow entry metadata.
+fn entry_type(entry: &cap_std::fs::DirEntry) -> std::io::Result<cap_std::fs::FileType> {
+    let kind = entry.file_type()?;
+    if kind.is_file() || kind.is_dir() || kind.is_symlink() {
+        Ok(kind)
+    } else {
+        entry.metadata().map(|metadata| metadata.file_type())
+    }
+}
+
 const SCHEMA_VERSION: i64 = 15;
 
 #[derive(Debug)]

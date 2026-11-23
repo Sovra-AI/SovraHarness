@@ -265,7 +265,7 @@ fn cancellation_during_document_decoding_preserves_the_previous_version() {
     }
 }
 
-fn document(pages: usize, text: impl Fn(usize) -> String) -> Vec<u8> {
+pub(super) fn document(pages: usize, text: impl Fn(usize) -> String) -> Vec<u8> {
     document_with_padding(pages, text, 0)
 }
 

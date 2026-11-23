@@ -46,6 +46,8 @@ pub(super) enum Completion {
 /// report shows always matches the counts on screen, and a cancelled scan keeps nearly
 /// everything it finished.
 const BATCH_FILES: usize = 32;
+const LARGE_SCAN_BATCH: usize = 256;
+const BATCH_SOURCE_BYTES: u64 = 256 * 1024;
 /// A quiet stretch (one slow file, or the walk still counting) still refreshes ~10×/s.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 /// Persist the folder's progress (for crash recovery) at most once a second.
@@ -80,6 +82,10 @@ fn run_observed(
     observer: &activity::Live<'_>,
     activity: i64,
 ) -> Result<Completion, IndexError> {
+    // Keep the hot B-trees of the catalogue and both text indexes in the
+    // single writer's cache. The limit is per connection and allocated on demand.
+    db.pragma_update(None, "cache_size", -32_768_i64)
+        .map_err(|e| db_error(&e))?;
     let dir = Dir::open_ambient_dir(&root.path, cap_std::ambient_authority())
         .map_err(|e| io_error(&e))?;
     let expected: String = db
@@ -197,11 +203,18 @@ pub(super) enum Outcome {
     Stream(Job),
 }
 
+struct KnownVersion {
+    file_id: String,
+    version: String,
+    mime: String,
+}
+
 pub(super) struct ReadFile {
     name: String,
     path: String,
     metadata: Metadata,
     content_hash: String,
+    previous: Option<KnownVersion>,
     /// `None` when a matching saved version made extraction unnecessary.
     prepared: Option<crate::PreparedFile>,
     /// Source bytes, kept only when extraction was skipped (see [`Writer::read`]).
@@ -311,6 +324,16 @@ impl Scan<'_> {
             generation: self.generation,
             budget: self.root.scan_options.documents,
             database: self.database.clone(),
+            // With an empty catalogue every reader must extract. The writer still
+            // resolves identities and versions inside its transaction.
+            has_previous_files: self
+                .db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM index_files WHERE root_id=?1)",
+                    [&self.root.id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| db_error(&e))?,
         };
         let counter_dir = dir.try_clone().ok();
         let count_excluded = self.excluded.clone();
@@ -394,16 +417,23 @@ impl Scan<'_> {
             last_progress: Instant::now(),
             last_save: Instant::now(),
         };
-        let mut batch: Vec<Outcome> = Vec::with_capacity(BATCH_FILES);
+        let mut batch: Vec<Outcome> = Vec::with_capacity(LARGE_SCAN_BATCH);
+        let mut batch_bytes = 0u64;
         loop {
             let finished = match outcomes.recv_timeout(PROGRESS_INTERVAL) {
                 Ok(Outcome::Stream(job)) => {
                     // Streaming writes its own transaction: settle the batch first.
                     self.commit(&mut batch)?;
+                    batch_bytes = 0;
                     self.stream(job, shared)?;
                     false
                 }
                 Ok(outcome) => {
+                    if let Outcome::Read(read) = &outcome
+                        && read.previous.is_none()
+                    {
+                        batch_bytes = batch_bytes.saturating_add(read.metadata.len());
+                    }
                     batch.push(outcome);
                     false
                 }
@@ -411,13 +441,20 @@ impl Scan<'_> {
                 Err(RecvTimeoutError::Disconnected) => true,
             };
             let stopped = shared.stopped();
+            let batch_limit = if self.root.progress.handled >= 512 {
+                LARGE_SCAN_BATCH
+            } else {
+                BATCH_FILES
+            };
             if finished
                 || stopped
-                || batch.len() >= BATCH_FILES
+                || batch.len() >= batch_limit
+                || batch_bytes >= BATCH_SOURCE_BYTES
                 || clock.last_progress.elapsed() >= PROGRESS_INTERVAL
             {
                 // Finished work is kept even when the scan is cancelled.
                 self.commit(&mut batch)?;
+                batch_bytes = 0;
                 self.flush_notices()?;
                 if finished || stopped {
                     return Ok(());
@@ -487,7 +524,12 @@ impl Scan<'_> {
                     Outcome::Read(read) => &read.path,
                     Outcome::Stream(job) => &job.path,
                 };
-                let _work = self.observer.working(0, ScanPhase::Saving, Some(path));
+                let phase = if matches!(&outcome, Outcome::Read(read) if read.previous.is_some()) {
+                    ScanPhase::Checking
+                } else {
+                    ScanPhase::Saving
+                };
+                let _work = self.observer.working(0, phase, Some(path));
                 writer.apply(&tx, root, notices, outcome)?;
             }
             let _commit = self.observer.working(0, ScanPhase::Saving, None);
@@ -599,6 +641,7 @@ impl Scan<'_> {
             path: path.to_owned(),
             metadata: before.clone(),
             content_hash: digest(&bytes),
+            previous: None,
             prepared: Some(prepare(path, name, &bytes, budget, Some(self.observer))?),
             bytes: None,
             _reservation: None,
@@ -729,10 +772,50 @@ impl<'a> Writer<'a> {
             path,
             &physical,
         )?;
-        tx.execute_cached("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,NULL,?5,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=NULL,generation=excluded.generation,available=1",
-            params![id,self.root_id,path,physical,self.generation]).map_err(|e| db_error(&e))?;
-        save_metadata(tx, &id, path, metadata, state, Some(note))?;
+        CatalogFile {
+            id: &id,
+            path,
+            identity: &physical,
+            metadata,
+        }
+        .save(tx, &self.root_id, self.generation, None, state, Some(note))?;
         super::history::observe(tx, &id, self.activity)
+    }
+
+    /// A rename in this batch can move a row after the reader checked it.
+    /// Confirm the exact identity and version under the writer's transaction.
+    fn confirm_version(
+        &self,
+        tx: &Connection,
+        previous: &KnownVersion,
+        path: &str,
+        physical: &str,
+    ) -> Result<Option<(ExtractionState, Option<String>)>, IndexError> {
+        let mut update = tx.prepare_cached(
+            "UPDATE index_files SET generation=?1, observed=?2
+             WHERE id=?3 AND root_id=?4 AND path=?5 AND identity=?6 AND current_version=?7 AND available=1
+             RETURNING extraction,detail"
+        ).map_err(|e| db_error(&e))?;
+        update
+            .query_row(
+                params![
+                    self.generation,
+                    i64::try_from(now()).expect("Unix time fits i64"),
+                    previous.file_id,
+                    self.root_id,
+                    path,
+                    physical,
+                    previous.version
+                ],
+                |row| {
+                    Ok((
+                        super::catalogue::extraction_state(&row.get::<_, String>(0)?)?,
+                        row.get(1)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| db_error(&e))
     }
 
     /// Save a read file; returns its media type for classification. The writer's view
@@ -750,12 +833,21 @@ impl<'a> Writer<'a> {
             path,
             metadata: before,
             content_hash,
+            previous,
             prepared,
             bytes,
             _reservation,
         } = read;
         let budget = root.scan_options.documents;
         let physical = identity(&before);
+        if let Some(previous) = previous
+            && let Some((state, detail)) = self.confirm_version(tx, &previous, &path, &physical)?
+        {
+            super::history::observe(tx, &previous.file_id, self.activity)?;
+            extraction_notice(root, notices, &path, state, detail.as_deref());
+            root.progress.reused += 1;
+            return Ok(Some(previous.mime));
+        }
         let file_id = file_id(
             tx,
             &self.root_id,
@@ -766,11 +858,8 @@ impl<'a> Writer<'a> {
         )?;
         let version = version_id(budget, &file_id, &content_hash);
         let known: bool = tx
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM index_versions WHERE id=?1)",
-                [&version],
-                |r| r.get(0),
-            )
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM index_versions WHERE id=?1)")
+            .and_then(|mut statement| statement.query_row([&version], |r| r.get(0)))
             .map_err(|error| db_error(&error))?;
         let prepared = match (known, prepared) {
             (true, _) => None,
@@ -791,8 +880,12 @@ impl<'a> Writer<'a> {
             .ok()
             .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
             .map(|t| t.as_secs());
-        tx.execute_cached("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
-            params![file_id, self.root_id, path, physical, version, self.generation]).map_err(|error| db_error(&error))?;
+        let entry = CatalogFile {
+            id: &file_id,
+            path: &path,
+            identity: &physical,
+            metadata: &before,
+        };
         let (state, detail, media_type) = if let Some(prepared) = prepared {
             let partial = prepared.partial;
             let mask = prepared.mask;
@@ -809,6 +902,14 @@ impl<'a> Writer<'a> {
             } else {
                 prepared.attachment.note
             };
+            entry.save(
+                tx,
+                &self.root_id,
+                self.generation,
+                Some(&version),
+                state,
+                note.as_deref(),
+            )?;
             tx.execute_cached("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by,partial) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                 params![version, file_id, content_hash, prepared.attachment.mime_type, note, i64::try_from(now()).expect("current Unix time fits i64"), modified.and_then(|v| i64::try_from(v).ok()),super::history::EXTRACTOR_REVISION,self.activity,partial]).map_err(|error| db_error(&error))?;
             if let Some(mask) = mask {
@@ -830,15 +931,10 @@ impl<'a> Writer<'a> {
                 } else {
                     ""
                 };
+            let mut context = sovra_core::file_index::PassageContext::new(&path, source_text, None);
             for (ordinal, chunk) in chunks(source_text).into_iter().enumerate() {
                 self.live.saving_passage(ordinal as u64 + 1);
-                let stored = sovra_core::file_index::contextual_passage(
-                    &path,
-                    source_text,
-                    chunk.start_line,
-                    chunk.body,
-                    None,
-                );
+                let stored = context.passage(chunk.start_line, chunk.body);
                 let chunk_id = digest(stored.as_bytes());
                 tx.execute_cached(
                     "INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING",
@@ -851,42 +947,25 @@ impl<'a> Writer<'a> {
             (state, note, Some(prepared.attachment.mime_type))
         } else {
             let (has_text, note, partial, mime): (bool, Option<String>, bool, Option<String>) = tx.query_row("SELECT EXISTS(SELECT 1 FROM index_version_chunks WHERE version_id=?1),note,partial,mime FROM index_versions WHERE id=?1", [&version], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(|e| db_error(&e))?;
-            (
-                if has_text && partial {
-                    ExtractionState::PartialText
-                } else if has_text {
-                    ExtractionState::Text
-                } else {
-                    ExtractionState::MetadataOnly
-                },
-                note,
-                mime,
-            )
+            let state = if has_text && partial {
+                ExtractionState::PartialText
+            } else if has_text {
+                ExtractionState::Text
+            } else {
+                ExtractionState::MetadataOnly
+            };
+            entry.save(
+                tx,
+                &self.root_id,
+                self.generation,
+                Some(&version),
+                state,
+                note.as_deref(),
+            )?;
+            (state, note, mime)
         };
-        save_metadata(tx, &file_id, &path, &before, state, detail.as_deref())?;
         super::history::observe(tx, &file_id, self.activity)?;
-        if state == ExtractionState::MetadataOnly {
-            note(
-                root,
-                notices,
-                NoticeKind::Unreadable,
-                &path,
-                detail
-                    .as_deref()
-                    .unwrap_or("No searchable text was extracted."),
-            );
-        }
-        if state == ExtractionState::PartialText {
-            note(
-                root,
-                notices,
-                NoticeKind::Partial,
-                &path,
-                detail
-                    .as_deref()
-                    .unwrap_or("Some content could not be read. Check the original file."),
-            );
-        }
+        extraction_notice(root, notices, &path, state, detail.as_deref());
         if known {
             root.progress.reused += 1;
         } else {
@@ -915,6 +994,33 @@ fn prepare(
         )
     })?
     .map_err(|e| IndexError(e.to_string()))
+}
+
+fn extraction_notice(
+    root: &mut IndexedRoot,
+    notices: &mut Vec<super::report::PendingNotice>,
+    path: &str,
+    state: ExtractionState,
+    detail: Option<&str>,
+) {
+    if state == ExtractionState::MetadataOnly {
+        note(
+            root,
+            notices,
+            NoticeKind::Unreadable,
+            path,
+            detail.unwrap_or("No searchable text was extracted."),
+        );
+    }
+    if state == ExtractionState::PartialText {
+        note(
+            root,
+            notices,
+            NoticeKind::Partial,
+            path,
+            detail.unwrap_or("Some content could not be read. Check the original file."),
+        );
+    }
 }
 
 fn note(
@@ -974,11 +1080,8 @@ fn file_id(
     physical: &str,
 ) -> Result<String, IndexError> {
     if let Some(id) = db
-        .query_row(
-            "SELECT id FROM index_files WHERE root_id=?1 AND path=?2",
-            params![root_id, path],
-            |r| r.get::<_, String>(0),
-        )
+        .prepare_cached("SELECT id FROM index_files WHERE root_id=?1 AND path=?2")
+        .and_then(|mut stmt| stmt.query_row(params![root_id, path], |r| r.get::<_, String>(0)))
         .optional()
         .map_err(|error| db_error(&error))?
     {
@@ -1015,29 +1118,70 @@ fn file_id(
     ))
 }
 
-fn save_metadata(
-    db: &Connection,
-    id: &str,
-    path: &str,
-    metadata: &Metadata,
-    state: ExtractionState,
-    note: Option<&str>,
-) -> Result<(), IndexError> {
-    let (name, directory, extension) = super::catalogue::path_parts(path);
-    let timestamp = |time: std::io::Result<cap_std::time::SystemTime>| {
-        time.ok()
-            .and_then(|time| time.into_std().duration_since(std::time::UNIX_EPOCH).ok())
-            .and_then(|duration| i64::try_from(duration.as_secs()).ok())
-    };
-    let state = match state {
-        ExtractionState::Text => "text",
-        ExtractionState::PartialText => "partial_text",
-        ExtractionState::MetadataOnly => "metadata_only",
-        ExtractionState::Failed => "failed",
-    };
-    db.execute_cached("UPDATE index_files SET filename=?2,directory=?3,extension=?4,byte_size=?5,observed=?6,modified=?7,created=?8,extraction=?9,detail=?10 WHERE id=?1",
-        params![id,name,directory,extension,i64::try_from(metadata.len()).ok(), i64::try_from(now()).expect("Unix time fits i64"),timestamp(metadata.modified()),timestamp(metadata.created()),state,note]).map_err(|e| db_error(&e))?;
-    Ok(())
+struct CatalogFile<'a> {
+    id: &'a str,
+    path: &'a str,
+    identity: &'a str,
+    metadata: &'a Metadata,
+}
+
+impl CatalogFile<'_> {
+    /// Insert the complete catalogue row before storing a new version. Both
+    /// the initial entry and an update maintain the secondary indexes once.
+    fn save(
+        &self,
+        db: &Connection,
+        root_id: &str,
+        generation: i64,
+        version: Option<&str>,
+        state: ExtractionState,
+        note: Option<&str>,
+    ) -> Result<(), IndexError> {
+        let (name, directory, extension) = super::catalogue::path_parts(self.path);
+        let metadata = self.metadata;
+        let timestamp = |time: std::io::Result<cap_std::time::SystemTime>| {
+            time.ok()
+                .and_then(|time| time.into_std().duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|duration| i64::try_from(duration.as_secs()).ok())
+        };
+        let state = match state {
+            ExtractionState::Text => "text",
+            ExtractionState::PartialText => "partial_text",
+            ExtractionState::MetadataOnly => "metadata_only",
+            ExtractionState::Failed => "failed",
+        };
+        db.execute_cached(
+            "INSERT INTO index_files(
+                id,root_id,path,identity,current_version,generation,available,filename,directory,
+                extension,byte_size,observed,modified,created,extraction,detail
+             ) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+             ON CONFLICT(id) DO UPDATE SET
+                path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,
+                generation=excluded.generation,available=1,filename=excluded.filename,
+                directory=excluded.directory,extension=excluded.extension,byte_size=excluded.byte_size,
+                observed=excluded.observed,modified=excluded.modified,created=excluded.created,
+                extraction=excluded.extraction,detail=excluded.detail",
+            params![
+                self.id,
+                root_id,
+                self.path,
+                self.identity,
+                version,
+                generation,
+                name,
+                directory,
+                extension,
+                i64::try_from(metadata.len()).ok(),
+                i64::try_from(now()).expect("Unix time fits i64"),
+                timestamp(metadata.modified()),
+                timestamp(metadata.created()),
+                state,
+                note,
+            ],
+        )
+        .map_err(|e| db_error(&e))?;
+        Ok(())
+    }
 }
 
 pub(super) fn identity(metadata: &Metadata) -> String {

@@ -9,6 +9,12 @@ mod legacy;
 mod unicode;
 use unicode::{Decoder, Encoding};
 
+pub(super) const REVISION: &str = "stream-text-v4";
+
+pub(super) fn version_id(file_id: &str, content_hash: &str) -> String {
+    digest(format!("{REVISION}\0{file_id}\0{content_hash}").as_bytes())
+}
+
 const BUFFER_BYTES: usize = 64 * 1024;
 const PREFIX_BYTES: usize = 4096;
 
@@ -61,8 +67,7 @@ impl Scan<'_> {
         let content_hash = &source.digest;
         let physical = identity(before);
         let file_id = self.file_id(path, &physical)?;
-        let revision = "stream-text-v4";
-        let version = digest(format!("{revision}\0{file_id}\0{content_hash}").as_bytes());
+        let version = version_id(&file_id, content_hash);
         let known: bool = self
             .db
             .query_row(
@@ -73,8 +78,6 @@ impl Scan<'_> {
             .map_err(|e| db_error(&e))?;
         let _saving = self.observer.working(0, ScanPhase::Saving, Some(path));
         let tx = self.db.transaction().map_err(|e| db_error(&e))?;
-        tx.execute_cached("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
-            params![file_id, self.root.id, path, physical, version, self.generation]).map_err(|e| db_error(&e))?;
         let note = format!(
             "Complete {} source text indexed in blocks. {}Markup and structured files are searchable as source, without rendering or executing them.",
             source.encoding.label(),
@@ -84,6 +87,20 @@ impl Scan<'_> {
                 ""
             }
         );
+        CatalogFile {
+            id: &file_id,
+            path,
+            identity: &physical,
+            metadata: before,
+        }
+        .save(
+            &tx,
+            &self.root.id,
+            self.generation,
+            Some(&version),
+            ExtractionState::Text,
+            Some(&note),
+        )?;
         if !known {
             let modified = before
                 .modified()
@@ -91,7 +108,7 @@ impl Scan<'_> {
                 .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
                 .and_then(|t| i64::try_from(t.as_secs()).ok());
             tx.execute_cached("INSERT INTO index_versions(id,file_id,digest,mime,note,observed,modified,extractor_revision,generated_by) VALUES(?1,?2,?3,'text/plain',?4,?5,?6,?7,?8)",
-                params![version, file_id, content_hash, note, i64::try_from(now()).expect("Unix seconds fit i64"), modified, revision, self.activity]).map_err(|e| db_error(&e))?;
+                params![version, file_id, content_hash, note, i64::try_from(now()).expect("Unix seconds fit i64"), modified, REVISION, self.activity]).map_err(|e| db_error(&e))?;
             file.seek(SeekFrom::Start(0)).map_err(|e| io_error(&e))?;
             let mut ordinal = 0_i64;
             let mut line = 1_u32;
@@ -107,23 +124,19 @@ impl Scan<'_> {
                 self.observer,
                 legacy,
                 |text| {
+                    let mut context =
+                        sovra_core::file_index::PassageContext::new(path, text, carry.as_deref());
                     for chunk in chunks(text) {
                         self.observer.saving_passage(ordinal.cast_unsigned() + 1);
-                        let stored = sovra_core::file_index::contextual_passage(
-                            path,
-                            text,
-                            chunk.start_line,
-                            chunk.body,
-                            carry.as_deref(),
-                        );
+                        let stored = context.passage(chunk.start_line, chunk.body);
                         let chunk_id = digest(stored.as_bytes());
                         tx.execute_cached("INSERT INTO index_chunks(id,body) VALUES(?1,?2) ON CONFLICT(id) DO NOTHING", params![chunk_id, stored]).map_err(|e| db_error(&e))?;
                         tx.execute_cached("INSERT INTO index_version_chunks(version_id,ordinal,chunk_id,start_line,end_line) VALUES(?1,?2,?3,?4,?5)",
                         params![version, ordinal, chunk_id, line.saturating_add(chunk.start_line - 1), line.saturating_add(chunk.end_line - 1)]).map_err(|e| db_error(&e))?;
                         ordinal += 1;
                     }
-                    if let Some(section) = sovra_core::file_index::carried_section(text) {
-                        carry = Some(section);
+                    if let Some(section) = context.last_section() {
+                        carry = Some(section.to_owned());
                     }
                     line = line.saturating_add(
                         u32::try_from(text.bytes().filter(|b| *b == b'\n').count())
@@ -146,14 +159,6 @@ impl Scan<'_> {
         if self.observer.cancelled() {
             return Ok(true);
         }
-        save_metadata(
-            &tx,
-            &file_id,
-            path,
-            before,
-            ExtractionState::Text,
-            Some(&note),
-        )?;
         super::super::history::observe(&tx, &file_id, self.activity)?;
         tx.commit().map_err(|e| db_error(&e))?;
         if known {

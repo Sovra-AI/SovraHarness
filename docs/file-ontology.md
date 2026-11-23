@@ -47,7 +47,7 @@ constants and dependency licenses when extending the taxonomy.
 
 The Files page shows the active folder above the search controls. During a scan, the
 current relative path and stage distinguish reading a file from saving it to
-the index. Large files also show the passage being saved. The most recently processed file is labelled separately when the
+the index. The display distinguishes checking a saved file, reading its contents, extracting searchable text, and saving passages. Large files also show the passage being saved. The most recently processed file is labelled separately when the
 scanner has no active path to report. Processed files include reused, skipped
 and failed files. After ten seconds without a new progress signal, the panel
 shows how long that has been and hides the time estimate. Folders queued for
@@ -70,7 +70,7 @@ folders after each scan.
 ```
 walker (1 thread) ──bounded jobs (2×readers)──▶ readers (N threads) ──bounded outcomes──▶ writer (SQLite)
   finds + opens files                           read, hash, extract                      batched transactions,
-  counts "discovered"                           skip known versions                      progress every 32 files / 100 ms
+  counts "discovered"                           skip known versions                      bounded batches and live progress
 ```
 
 - **An early count.** A listing-only pass (no files opened) finds the total while reading is
@@ -85,8 +85,10 @@ walker (1 thread) ──bounded jobs (2×readers)──▶ readers (N threads) �
   extracted text) travels with each result until the writer has saved it, so readers, the
   channel and the batch share one 512 MiB budget. Output growth never waits (readers waiting on
   each other could deadlock); it may overdraw the budget briefly, which holds back new files.
-- **One writer.** SQLite has one writer at a time; batching 32 results per transaction with a
-  per-file `SAVEPOINT` keeps failures isolated. Notices are flushed before each progress event,
+- **One writer.** The first 512 files are saved in batches of up to 32. Subsequent batches
+  can hold up to 256 results. The writer also flushes when the batch reaches 256 KiB of
+  newly processed source data or the progress timer reaches 100 ms. Each file has a
+  SQLite savepoint so a damaged file cannot roll back its neighbours. Notices are flushed before each progress event,
   so the Scan report always matches the counts on screen.
 - **Large text files** (≥ ⅓ of the attachment limit, sniffed from their first 8 KiB) go to the
   existing streaming reader on the writer thread, which writes as it reads. Large PDFs, office

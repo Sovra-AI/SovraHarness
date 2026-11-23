@@ -168,6 +168,48 @@ fn unchanged_files_are_confirmed_without_reading_them_again() {
 }
 
 #[test]
+fn unchanged_streamed_text_is_reused_with_its_original_citation() {
+    let fixture = Fixture::new();
+    let name = "large.txt";
+    fixture.write(
+        name,
+        &format!(
+            "{}\nStreameduniquemarker",
+            "long line of text\n".repeat(90_000)
+        ),
+    );
+    let path = fixture.source().join(name);
+    set_modified(&path, 3_600);
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    let first = store.scan(&root.id, &Observer::default()).unwrap();
+    assert!(first.progress.bytes_read > std::fs::metadata(&path).unwrap().len());
+    let hit = search(&store, "Streameduniquemarker").remove(0);
+
+    let mut options = root.scan_options;
+    options.documents = sovra_core::file_index::DocumentBudget::Large;
+    store.set_scan_options(&root.id, options).unwrap();
+    let again = store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!((again.progress.reused, again.progress.bytes_read), (1, 0));
+    assert_eq!(store.read(&hit.reference).unwrap(), hit);
+
+    // An old streaming revision cannot take the metadata shortcut.
+    store
+        .connect()
+        .unwrap()
+        .execute("UPDATE index_versions SET extractor_revision='legacy'", [])
+        .unwrap();
+    assert!(
+        store
+            .scan(&root.id, &Observer::default())
+            .unwrap()
+            .progress
+            .bytes_read
+            > 0
+    );
+}
+
+#[test]
 fn files_modified_in_the_same_second_as_the_last_scan_are_never_skipped() {
     // Reproduce an observation in the file's modification second explicitly: a
     // wall-clock age below one second can still straddle two timestamp seconds.

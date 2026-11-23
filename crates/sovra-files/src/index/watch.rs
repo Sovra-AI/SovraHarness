@@ -110,8 +110,10 @@ fn register(
         {
             continue;
         }
-        let metadata = dir.symlink_metadata(name).map_err(|e| io_error(&e))?;
-        if metadata.is_dir() && !metadata.is_symlink() {
+        if super::entry_type(&entry)
+            .map_err(|e| io_error(&e))?
+            .is_dir()
+        {
             let child = dir.open_dir_nofollow(name).map_err(|e| io_error(&e))?;
             register(watcher, &child, &child_path, excluded, depth + 1, budget)?;
         }

@@ -233,17 +233,17 @@ pub(super) fn count(dir: Dir, options: ScanOptions, excluded: Option<&Path>, sha
         if exclusion(&path, name, options, excluded).is_some() {
             continue;
         }
-        let Ok(metadata) = dir.symlink_metadata(name) else {
+        let Ok(kind) = super::super::entry_type(&entry) else {
             continue;
         };
-        if metadata.is_dir() && !metadata.is_symlink() {
+        if kind.is_dir() {
             if let Ok((entries, child)) = dir
                 .open_dir_nofollow(name)
                 .and_then(|child| child.entries().map(|entries| (entries, child)))
             {
                 stack.push((entries, child, path));
             }
-        } else if metadata.is_file() {
+        } else if kind.is_file() {
             shared.counted.fetch_add(1, Relaxed);
         }
     }

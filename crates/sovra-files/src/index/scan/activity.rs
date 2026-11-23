@@ -21,11 +21,23 @@ struct Work {
     passage: Option<u64>,
 }
 
-struct Clear<'a>(&'a Mutex<Vec<Option<Work>>>, usize);
+pub(super) struct ActiveFile<'a> {
+    live: &'a Live<'a>,
+    slot: usize,
+}
 
-impl Drop for Clear<'_> {
+impl ActiveFile<'_> {
+    pub(super) fn phase(&self, phase: ScanPhase) {
+        if let Some(work) = &mut lock(&self.live.slots)[self.slot] {
+            work.phase = phase;
+            self.live.revision.fetch_add(1, Relaxed);
+        }
+    }
+}
+
+impl Drop for ActiveFile<'_> {
     fn drop(&mut self) {
-        lock(self.0)[self.1] = None;
+        lock(&self.live.slots)[self.slot] = None;
     }
 }
 
@@ -88,7 +100,7 @@ impl<'a> Live<'a> {
         slot: usize,
         phase: ScanPhase,
         path: Option<&str>,
-    ) -> impl Drop + use<'_> {
+    ) -> ActiveFile<'_> {
         lock(&self.slots)[slot] = Some(Work {
             phase,
             path: path.map(str::to_owned),
@@ -96,7 +108,7 @@ impl<'a> Live<'a> {
             passage: None,
         });
         self.revision.fetch_add(1, Relaxed);
-        Clear(&self.slots, slot)
+        ActiveFile { live: self, slot }
     }
 
     pub(super) fn saving_passage(&self, number: u64) {

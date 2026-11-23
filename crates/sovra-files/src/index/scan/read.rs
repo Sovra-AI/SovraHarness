@@ -32,6 +32,7 @@ pub(super) struct ReadContext {
     pub generation: i64,
     pub budget: DocumentBudget,
     pub database: std::path::PathBuf,
+    pub has_previous_files: bool,
 }
 
 const POLL: Duration = Duration::from_millis(100);
@@ -47,7 +48,10 @@ pub(super) fn work(
 ) {
     // Without a reader connection every file is simply extracted; correctness is kept by
     // the writer, which re-checks before saving.
-    let db = open_reader(&context.database).ok();
+    let db = context
+        .has_previous_files
+        .then(|| open_reader(&context.database).ok())
+        .flatten();
     loop {
         if shared.stopped() {
             return;
@@ -61,8 +65,8 @@ pub(super) fn work(
             }
         };
         let outcome = {
-            let _work = live.working(slot, super::ScanPhase::Reading, Some(&job.path));
-            read(context, shared, db.as_ref(), job)
+            let work = live.working(slot, super::ScanPhase::Reading, Some(&job.path));
+            read(context, shared, db.as_ref(), job, &work)
         };
         if let Some(outcome) = outcome
             && out.send(outcome).is_err()
@@ -87,13 +91,17 @@ fn read(
     shared: &Shared<'_>,
     db: Option<&Connection>,
     job: Job,
+    work: &super::activity::ActiveFile<'_>,
 ) -> Option<Outcome> {
-    if let Some(digest) = db.and_then(|db| unchanged(context, db, &job.path, &job.metadata)) {
+    if let Some((digest, previous)) =
+        db.and_then(|db| unchanged(context, db, &job.path, &job.metadata))
+    {
         return Some(Outcome::Read(Box::new(ReadFile {
             name: job.name,
             path: job.path,
             metadata: job.metadata,
             content_hash: digest,
+            previous: Some(previous),
             prepared: None,
             bytes: None,
             _reservation: None,
@@ -125,7 +133,7 @@ fn read(
     }
     let path = job.path.clone();
     let metadata = job.metadata.clone();
-    match read_and_prepare(context, shared, db, job) {
+    match read_and_prepare(context, shared, db, job, work) {
         Ok(read) => read.map(|read| Outcome::Read(Box::new(read))),
         // Cancellation is not a failed read: keep the previous version.
         Err(_) if shared.stopped() => None,
@@ -152,35 +160,52 @@ fn unchanged(
     db: &Connection,
     path: &str,
     before: &Metadata,
-) -> Option<String> {
+) -> Option<(String, super::KnownVersion)> {
     let modified = before
         .modified()
         .ok()
         .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
         .and_then(|t| i64::try_from(t.as_secs()).ok())?;
     let size = i64::try_from(before.len()).ok()?;
-    let (file_id, version, digest): (String, String, String) = db
-        .query_row(
-            "SELECT f.id, f.current_version, v.digest FROM index_files f
+    let (file_id, version, digest, mime, revision): (String, String, String, String, String) = db
+        .prepare_cached(
+            "SELECT f.id, f.current_version, v.digest, v.mime, v.extractor_revision FROM index_files f
              JOIN index_versions v ON v.id = f.current_version
              WHERE f.root_id=?1 AND f.path=?2 AND f.identity=?3 AND f.available=1
                AND f.byte_size=?4 AND f.modified=?5 AND f.observed>?5
-               AND f.extraction<>'failed' AND v.extractor_revision=?6",
+               AND f.extraction<>'failed'",
+        )
+        .ok()?
+        .query_row(
             params![
                 context.root_id,
                 path,
                 identity(before),
                 size,
-                modified,
-                crate::index::history::EXTRACTOR_REVISION
+                modified
             ],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .optional()
         .ok()
         .flatten()?;
-    // A changed document budget yields a different version: read it again.
-    (super::version_id(context.budget, &file_id, &digest) == version).then_some(digest)
+    // Attachment decoders depend on the folder budget. Streamed text has its
+    // own revision and indexes the whole source for every document budget.
+    let expected = match revision.as_str() {
+        crate::index::history::EXTRACTOR_REVISION => {
+            super::version_id(context.budget, &file_id, &digest)
+        }
+        super::stream_text::REVISION => super::stream_text::version_id(&file_id, &digest),
+        _ => return None,
+    };
+    (expected == version).then_some((
+        digest,
+        super::KnownVersion {
+            file_id,
+            version,
+            mime,
+        },
+    ))
 }
 
 /// Lets extractors notice a writer failure as well as the person pressing Stop, so a
@@ -226,6 +251,7 @@ fn read_and_prepare(
     shared: &Shared<'_>,
     db: Option<&Connection>,
     job: Job,
+    work: &super::activity::ActiveFile<'_>,
 ) -> Result<Option<ReadFile>, IndexError> {
     let Job {
         mut file,
@@ -278,11 +304,13 @@ fn read_and_prepare(
     });
     let known = match (db, &file_id) {
         (Some(db), Some(file_id)) => db
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM index_versions WHERE id=?1)",
-                [super::version_id(context.budget, file_id, &content_hash)],
-                |r| r.get(0),
-            )
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM index_versions WHERE id=?1)")
+            .and_then(|mut statement| {
+                statement.query_row(
+                    [super::version_id(context.budget, file_id, &content_hash)],
+                    |r| r.get(0),
+                )
+            })
             .unwrap_or(false),
         _ => false,
     };
@@ -292,6 +320,7 @@ fn read_and_prepare(
     let prepared = if known {
         None
     } else {
+        work.phase(super::ScanPhase::Extracting);
         let label = file_id.as_deref().unwrap_or(&path);
         Some(super::prepare(
             label,
@@ -315,6 +344,7 @@ fn read_and_prepare(
         path,
         metadata: before,
         content_hash,
+        previous: None,
         // Only kept when extraction was skipped, so the writer can extract after all if
         // its authoritative view disagrees that this version is already saved.
         bytes: prepared.is_none().then_some(bytes),

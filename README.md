@@ -112,7 +112,8 @@ has the first run, group steps, every setting, privacy details and limits.
 - **Chat with helpers:** choose a model, discover capabilities on the Skills
   page, and follow the live work log as helpers work together.
 - **Work with your knowledge:** attach files, index local folders, recall saved
-  details, see which file is being read or saved, and compare results with saved artifacts in **Knowledge → Explore**. Follow the evidence map to
+  details, and follow each file as Sovra checks it for changes, extracts text, or saves
+  passages. Compare results with saved artifacts in **Knowledge → Explore**. Follow the evidence map to
   the underlying wording for relationships, measurements, and changes over time.
 - **Save your work:** organize versioned documents, code, and other artifacts
   into folders and favorites. Preview saved websites in your browser.

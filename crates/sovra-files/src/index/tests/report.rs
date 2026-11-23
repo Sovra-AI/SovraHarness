@@ -13,6 +13,39 @@ fn query(root_id: &str) -> NoticeQuery {
 }
 
 #[test]
+fn unchanged_binary_keeps_its_report_without_duplicating_history() {
+    let fixture = Fixture::new();
+    let path = fixture.source().join("record.bin");
+    std::fs::write(&path, b"fragment\0\xff\x01").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000))
+        .unwrap();
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    let first = store.scan(&root.id, &Observer::default()).unwrap();
+    let report = store.report(&query(&root.id)).unwrap();
+    assert_eq!(report.total, 1);
+    assert_eq!(report.notices[0].kind, NoticeKind::Unreadable);
+
+    let again = store.scan(&root.id, &Observer::default()).unwrap();
+    assert_eq!((again.progress.reused, again.progress.bytes_read), (1, 0));
+    assert_eq!(again.progress.kinds, first.progress.kinds);
+    let latest = store.report(&query(&root.id)).unwrap();
+    assert_eq!(latest.total, 1);
+    assert_eq!(latest.notices[0].message, report.notices[0].message);
+    assert_eq!(latest.notices[0].path, "record.bin");
+    let history: i64 = store
+        .connect()
+        .unwrap()
+        .query_row("SELECT count(*) FROM index_observations", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(history, 1);
+}
+
+#[test]
 fn report_filters_ignore_unicode_casing_and_normalization_by_default() {
     let fixture = Fixture::new();
     // Keep two fixtures even on case/normalization-insensitive volumes.

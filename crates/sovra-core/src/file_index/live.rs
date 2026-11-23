@@ -63,7 +63,9 @@ impl RateEstimator {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanPhase {
     Discovering,
+    Checking,
     Reading,
+    Extracting,
     Saving,
     CheckingRemoved,
 }
@@ -109,6 +111,8 @@ impl ScanPicture {
         let remaining = progress.discovered.saturating_sub(progress.handled);
         let activity = progress.activity.as_ref();
         let headline = match activity.map(|a| a.phase) {
+            Some(ScanPhase::Checking) => "Checking for changes",
+            Some(ScanPhase::Extracting) => "Extracting searchable text",
             Some(ScanPhase::Reading) => "Reading file contents",
             Some(ScanPhase::Saving) => "Saving files to the search index",
             Some(ScanPhase::CheckingRemoved) => "Checking for removed files",
@@ -301,6 +305,26 @@ mod tests {
         assert!(picture.quiet.as_deref().unwrap().contains("32s"));
         assert!(picture.throughput.contains("1m 5s elapsed"));
         assert_eq!(picture.time_left, None);
+    }
+
+    #[test]
+    fn scan_headline_names_the_work_in_progress() {
+        let mut p = progress();
+        for (phase, label) in [
+            (ScanPhase::Checking, "Checking for changes"),
+            (ScanPhase::Reading, "Reading file contents"),
+            (ScanPhase::Extracting, "Extracting searchable text"),
+        ] {
+            p.activity = Some(ScanActivity {
+                phase,
+                path: Some("notes/agenda.pdf".into()),
+                seconds_without_change: 0,
+                passage: None,
+            });
+            let picture = ScanPicture::of(&p);
+            assert_eq!(picture.headline, label);
+            assert_eq!(picture.now_reading.as_deref(), Some("notes/agenda.pdf"));
+        }
     }
 
     #[test]

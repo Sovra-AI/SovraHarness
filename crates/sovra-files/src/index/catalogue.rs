@@ -168,15 +168,18 @@ fn coverage(db: &Connection, roots: &[String]) -> Result<Vec<CatalogCoverage>, I
     Ok(result)
 }
 
+pub(super) fn extraction_state(state: &str) -> rusqlite::Result<ExtractionState> {
+    match state {
+        "text" => Ok(ExtractionState::Text),
+        "partial_text" => Ok(ExtractionState::PartialText),
+        "metadata_only" => Ok(ExtractionState::MetadataOnly),
+        "failed" => Ok(ExtractionState::Failed),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+
 fn entry(row: &Row<'_>) -> rusqlite::Result<CatalogEntry> {
-    let state: String = row.get(10)?;
-    let extraction = match state.as_str() {
-        "text" => ExtractionState::Text,
-        "partial_text" => ExtractionState::PartialText,
-        "metadata_only" => ExtractionState::MetadataOnly,
-        "failed" => ExtractionState::Failed,
-        _ => return Err(rusqlite::Error::InvalidQuery),
-    };
+    let extraction = extraction_state(&row.get::<_, String>(10)?)?;
     let root_id: String = row.get(0)?;
     let file_id: String = row.get(2)?;
     let version: Option<String> = row.get(12)?;
