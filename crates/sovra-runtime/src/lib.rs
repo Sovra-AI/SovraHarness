@@ -920,7 +920,13 @@ async fn serve(
             Command::Teams(command) => team.handle(&handle, command),
             Command::Explore(request) => explorer.search(&handle, request),
             Command::Artifacts(command) => artifact_library.handle(&handle, command),
-            Command::Connections(command) => connections.handle(command),
+            Command::Connections(command) => {
+                // "Check links" asks every linked service, storage places included.
+                if matches!(command, sovra_core::connections::ConnectionCommand::Refresh) {
+                    storage.send(sovra_core::storage::StorageCommand::Load);
+                }
+                connections.handle(command);
+            }
             Command::RemoteControl(command) => remote_control.send(command),
             Command::Development(command) => {
                 if let Some(worker) = &development {

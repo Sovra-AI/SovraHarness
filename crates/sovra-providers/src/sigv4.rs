@@ -271,9 +271,12 @@ mod tests {
         );
         // An empty value and a slash are still encoded.
         assert_eq!(
-            canonical_query(&[("list-type", "2"), ("delimiter", "/"), ("continuation-token", "")]),
+            canonical_query(&[
+                ("list-type", "2"),
+                ("delimiter", "/"),
+                ("continuation-token", "")
+            ]),
             "continuation-token=&delimiter=%2F&list-type=2"
         );
     }
-
 }

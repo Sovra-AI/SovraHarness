@@ -530,7 +530,10 @@ impl Worker {
                 .await;
             return;
         }
-        let secret = match self.secret_for_save(&place, secret, existing.as_ref()).await {
+        let secret = match self
+            .secret_for_save(&place, secret, existing.as_ref())
+            .await
+        {
             Ok(secret) => secret,
             Err(message) => {
                 self.emit(StorageEvent::SaveRefused(message)).await;

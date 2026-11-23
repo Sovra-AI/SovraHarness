@@ -218,7 +218,6 @@ fn a_place_is_kept_only_after_the_service_says_yes_and_survives_a_restart() {
         panic!("the list follows a save: {event:?}");
     };
 
-
     assert_eq!(places.len(), 1);
     let saved = places[0].place.clone();
     assert!(places[0].has_secret);
@@ -292,6 +291,24 @@ fn a_place_is_kept_only_after_the_service_says_yes_and_survives_a_restart() {
             }
         ),
         "checked again on start"
+    );
+
+    // "Check links" on the Connections page checks storage places too.
+    client
+        .send(Command::Connections(
+            sovra_core::connections::ConnectionCommand::Refresh,
+        ))
+        .unwrap();
+    assert!(matches!(next(&client), StorageEvent::Places(_)));
+    assert!(
+        matches!(
+            next(&client),
+            StorageEvent::Status {
+                status: PlaceStatus::Works,
+                ..
+            }
+        ),
+        "checked again by Check links"
     );
 
     send(&client, StorageCommand::Remove { id: saved.id });

@@ -230,9 +230,7 @@ impl StorageConnector for HttpStorage {
             None => self.store.delete(&entry),
         }
         .map_err(|_| {
-            StorageError::Failed(
-                "The storage sign-in could not be saved in the keychain.".into(),
-            )
+            StorageError::Failed("The storage sign-in could not be saved in the keychain.".into())
         })
     }
 
@@ -290,9 +288,11 @@ impl StorageConnector for HttpStorage {
 
 /// The text of an answer, at most [`MAX_LISTING_BYTES`].
 pub(crate) async fn listing_text(response: reqwest::Response) -> Result<String, StorageError> {
-    let bytes = read_capped(response, MAX_LISTING_BYTES).await.map_err(|_| {
-        StorageError::Failed("The storage service sent a listing too large to read.".into())
-    })?;
+    let bytes = read_capped(response, MAX_LISTING_BYTES)
+        .await
+        .map_err(|_| {
+            StorageError::Failed("The storage service sent a listing too large to read.".into())
+        })?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 

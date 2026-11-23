@@ -98,7 +98,11 @@ fn storage_flow_fits_minimum_wide_and_large_text_in_both_themes(cx: &mut TestApp
 
             cx.update_window(window.into(), |_, window, cx| {
                 for kind in sovra_core::CatalogueKind::ALL {
-                    reveal(window, gpui_kit::SharedString::from(format!("connection-action-{}", kind.slug())), cx);
+                    reveal(
+                        window,
+                        gpui_kit::SharedString::from(format!("connection-action-{}", kind.slug())),
+                        cx,
+                    );
                 }
                 reveal(window, "connections-summary", cx);
                 reveal(window, "connection-action-storage", cx);
@@ -113,7 +117,11 @@ fn storage_flow_fits_minimum_wide_and_large_text_in_both_themes(cx: &mut TestApp
                 window.render_frame(cx);
                 assert!(window.try_find("storage-choose-service").is_some());
                 for slug in ["cloudflare-r2", "azure-blob", "nextcloud", "other-webdav"] {
-                    reveal(window, gpui_kit::SharedString::from(format!("storage-service-{slug}")), cx);
+                    reveal(
+                        window,
+                        gpui_kit::SharedString::from(format!("storage-service-{slug}")),
+                        cx,
+                    );
                 }
                 reveal(window, "storage-service-amazon-s3", cx);
                 window.click("storage-service-amazon-s3", cx);
@@ -193,7 +201,10 @@ fn storage_flow_fits_minimum_wide_and_large_text_in_both_themes(cx: &mut TestApp
                 assert!(window.try_find("storage-form").is_none(), "form closed");
                 reveal(window, "storage-notice", cx);
                 reveal(window, ("storage-place-status", 0usize), cx);
-                assert_eq!(window.find(("storage-place-status", 0usize)).label(), Some("Working"));
+                assert_eq!(
+                    window.find(("storage-place-status", 0usize)).label(),
+                    Some("Working")
+                );
                 reveal(window, ("storage-browse", 0usize), cx);
                 window.click(("storage-browse", 0usize), cx);
             })

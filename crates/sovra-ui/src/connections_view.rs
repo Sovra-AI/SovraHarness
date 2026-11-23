@@ -12,9 +12,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, Context, Hsla, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
-    Window, canvas, div, fill, point, size,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, StatefulInteractiveElement as _, Styled as _,
+    TestSupportExt as _, Window, canvas, div, fill, point, size,
 };
 use sovra_core::Command;
 use sovra_core::connection_catalogue::{
@@ -1090,7 +1090,9 @@ impl ModelsView {
             CatalogueGroup::Tools => 4,
         }];
         let mut tile = v_flex()
-            .id(gpui_kit::SharedString::from(format!("connection-card-{slug}")))
+            .id(gpui_kit::SharedString::from(format!(
+                "connection-card-{slug}"
+            )))
             .test_support()
             .size_full()
             .min_w_0()
@@ -1168,13 +1170,17 @@ impl ModelsView {
         // Keeps every card's button on the same line within a row.
         .child(div().flex_1())
         .child(
-            h_flex().w_full().min_w_0().justify_end().child(
-                action
-                    .flex_shrink_0()
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.open_catalogue_kind(kind, window, cx);
-                    })),
-            ),
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .justify_end()
+                .child(
+                    action
+                        .flex_shrink_0()
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            view.open_catalogue_kind(kind, window, cx);
+                        })),
+                ),
         )
         .into_any_element()
     }
