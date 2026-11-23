@@ -90,7 +90,7 @@ unicode-bidi = "0.3.18"
 file-format = { version = "0.29.0", features = ["reader-cfb", "reader-mp4", "reader-ebml", "reader-xml"] }
 sha2 = "0.11.1"
 # Offline validation of the published plugin schemas in core's contract tests.
-jsonschema = { version = "0.47.0", default-features = false }
+jsonschema = { version = "0.61.2", default-features = false }
 # Benchmarks only (`cargo bench`); see docs/performance.md.
 divan = { version = "0.1.21", default-features = false }
 # Content addresses for the sovereign-swarm audit ledger and shared records (roadmap D5).
