@@ -47,6 +47,44 @@ impl Computer {
     }
 
     fn configured(name: &str, key: u8, facts: &[&str], training: bool, fresh: bool) -> Self {
+        Self::open(
+            name,
+            [key; 32],
+            facts,
+            training,
+            fresh,
+            sovra_mesh::Reach::LocalOnly,
+        )
+    }
+
+    /// A computer that can never be reached directly: everything it sends and
+    /// receives crosses a relay on the internet. Its key is new each run, so two
+    /// runs at once never look like one computer to the relay.
+    fn far_away(name: &str) -> Self {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut key = [0u8; 32];
+        for (index, chunk) in key.chunks_mut(8).enumerate() {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (
+                std::time::SystemTime::now(),
+                std::process::id(),
+                name,
+                index,
+            )
+                .hash(&mut hasher);
+            chunk.copy_from_slice(&hasher.finish().to_le_bytes());
+        }
+        Self::open(name, key, &[], false, true, sovra_mesh::Reach::RelayOnly)
+    }
+
+    fn open(
+        name: &str,
+        key: [u8; 32],
+        facts: &[&str],
+        training: bool,
+        fresh: bool,
+        reach: sovra_mesh::Reach,
+    ) -> Self {
         let facts: Vec<String> = facts.iter().map(|fact| (*fact).to_owned()).collect();
         let memory: Option<sovra_runtime::MemoryFactory> = (!facts.is_empty()).then(|| {
             Box::new(move || {
@@ -84,7 +122,7 @@ impl Computer {
                 groups: Some(GroupServices {
                     transport: Box::new(move || {
                         Box::pin(async move {
-                            sovra_mesh::Mesh::bind([key; 32], sovra_mesh::Reach::LocalOnly)
+                            sovra_mesh::Mesh::bind(key, reach)
                                 .await
                                 .map(|mesh| {
                                     Arc::new(mesh) as Arc<dyn sovra_core::group::GroupTransport>
@@ -421,4 +459,103 @@ async fn two_computers_in_the_same_room_join_by_code_and_matching_pictures() {
         .roster("Dad in the group by code", |state| state.people.len() == 2)
         .await;
     assert_eq!(joined.name, "Family");
+}
+
+/// Two computers that can never connect directly, as in two homes whose routers
+/// block everything else: the invite, the join and every share cross n0's relays
+/// on the real internet. Needs the internet, so it runs only when asked:
+/// `cargo test -p sovra-app --test two_computers far_apart -- --ignored`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the internet: talks through n0's public relays"]
+async fn two_computers_far_apart_form_a_group_and_share_through_a_relay() {
+    let mum = Computer::far_away("far-mum");
+    let dad = Computer::far_away("far-dad");
+
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Mum's laptop".into(),
+    });
+    mum.roster("the new group", |state| state.name == "Family")
+        .await;
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum
+        .wait("an invite link", |event| match event {
+            GroupEvent::InviteReady { link, .. } => Some(link),
+            _ => None,
+        })
+        .await;
+    let read = sovra_core::group::JoinLink::parse(&link, sovra_core::Timestamp(0))
+        .expect("a link Sovra made");
+    assert!(
+        read.relay.is_some(),
+        "a link made straight after starting still says how to reach Mum from afar"
+    );
+    assert!(read.addrs.is_empty(), "no direct address to fall back on");
+
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Dad's desktop".into(),
+    });
+    dad.roster("Dad in the group", |state| state.people.len() == 2)
+        .await;
+
+    // A note one way, and a document far bigger than a note the other way.
+    dad.send(GroupCommand::Share {
+        text: "The boiler service is booked for 12 March".into(),
+        about: vec!["boiler".into()],
+        with: None,
+    });
+    mum.wait("Dad's detail on Mum's laptop", |event| match event {
+        GroupEvent::Knowledge(details) if details.iter().any(|d| d.text.contains("12 March")) => {
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+    let letter = "A long letter to the family.\n".repeat(15_000);
+    mum.send(GroupCommand::ShareArtifact {
+        title: "Family letter".into(),
+        kind: ArtifactKind::Checklist,
+        language: String::new(),
+        content: letter.clone(),
+        new_version_of: None,
+        local_id: "art-letter".into(),
+        with: None,
+    });
+    let received = dad
+        .artifacts("Mum's letter on Dad's desktop", |artifacts| {
+            artifacts.iter().any(|a| a.title == "Family letter")
+        })
+        .await;
+    assert_eq!(
+        received
+            .iter()
+            .find(|a| a.title == "Family letter")
+            .map(|a| a.content.len()),
+        Some(letter.len()),
+        "the whole document arrived"
+    );
+
+    // Both screens can say the connection is relayed.
+    for (computer, who) in [(&mum, "Mum"), (&dad, "Dad")] {
+        computer.send(GroupCommand::CheckNow);
+        computer
+            .wait(&format!("{who}'s relayed route"), |event| match event {
+                GroupEvent::Network(network)
+                    if network.reach == sovra_core::group::Reachability::Anywhere
+                        && network
+                            .routes
+                            .values()
+                            .any(|route| *route == sovra_core::group::Route::Relayed) =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .await;
+    }
 }

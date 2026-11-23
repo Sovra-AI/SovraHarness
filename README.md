@@ -143,7 +143,10 @@ has the first run, group steps, every setting, privacy details and limits.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
   scheduled search note to a WhatsApp group.
 - **Share with a group:** share selected knowledge, artifacts, helpers, and
-  schedules across computers, with a signed history of sharing activity.
+  schedules across computers, with a signed history of sharing activity. The
+  computers can be on different networks or in different countries: an invite
+  link works from anywhere for seven days, and the Groups page shows who is
+  online and how each computer is connected.
 
 The interface includes a guided tour, a language picker, Arabic right-to-left
 layout, and adjustable text size. See the [getting started guide](docs/getting-started.md)

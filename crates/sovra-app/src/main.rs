@@ -403,13 +403,16 @@ fn device_key(credentials: &dyn sovra_providers::CredentialStore, entry: &str) -
 }
 
 /// Groups: the device key, where the group record lives, and how far the network
-/// reaches (`SOVRA_GROUP_REACH=local` keeps it to direct, same-network connections).
+/// reaches (`SOVRA_GROUP_REACH=local` keeps it to direct, same-network connections;
+/// `relay` forces every packet through a relay).
 fn group_services(data_dir: &std::path::Path) -> Option<sovra_runtime::GroupServices> {
     let secret = device_key(credential_store(data_dir).as_ref(), GROUP_DEVICE_KEY)?;
-    let reach = if std::env::var_os("SOVRA_GROUP_REACH").is_some_and(|value| value == "local") {
-        sovra_mesh::Reach::LocalOnly
-    } else {
-        sovra_mesh::Reach::Internet
+    // `relay` sends everything through a relay, to check a group still works on a
+    // network that blocks direct connections. Anything else reaches the internet.
+    let reach = match std::env::var_os("SOVRA_GROUP_REACH") {
+        Some(value) if value == "local" => sovra_mesh::Reach::LocalOnly,
+        Some(value) if value == "relay" => sovra_mesh::Reach::RelayOnly,
+        Some(_) | None => sovra_mesh::Reach::Internet,
     };
     Some(sovra_runtime::GroupServices {
         transport: Box::new(move || {

@@ -48,6 +48,24 @@ pub enum LinkError {
     Expired,
 }
 
+impl LinkError {
+    /// What to tell the person who pasted the link, and what to do next.
+    pub const fn advice(self) -> &'static str {
+        match self {
+            Self::NotALink => {
+                "That doesn't look like an invite link. It starts with sovra://join/. Copy the whole link from their message and paste it again."
+            }
+            Self::TooLong | Self::Damaged => {
+                "Part of that link is missing or changed. Copy the whole link from their message and paste it again, or ask them for a new one."
+            }
+            Self::NewerVersion => {
+                "That link was made by a newer Sovra. Update Sovra on this computer, then paste it again."
+            }
+            Self::Expired => "That link has run out. Ask them to make a new one.",
+        }
+    }
+}
+
 impl JoinLink {
     #[expect(
         clippy::too_many_arguments,
@@ -103,6 +121,63 @@ impl JoinLink {
             return Err(LinkError::Expired);
         }
         Ok(link)
+    }
+}
+
+/// What a pasted link says before anyone presses Join: which group, who sent it,
+/// who this computer will be, and how long the link still works.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitePreview {
+    pub group_name: String,
+    pub inviter_name: String,
+    /// The name the joining person gets; `None` when the link adds another computer
+    /// for the person who made it.
+    pub joining_as: Option<String>,
+    pub expires_at: Timestamp,
+}
+
+impl InvitePreview {
+    /// Reads a pasted link for the Join page. `None` while the box is empty.
+    pub fn of(text: &str, now: Timestamp) -> Option<Result<Self, LinkError>> {
+        if text.trim().is_empty() {
+            return None;
+        }
+        Some(JoinLink::parse(text, now).map(|link| Self {
+            group_name: link.group_name,
+            inviter_name: link.inviter_name,
+            joining_as: match link.kind {
+                InviteKind::OwnDevice => None,
+                InviteKind::Person { name, .. } => Some(name),
+            },
+            expires_at: link.expires_at,
+        }))
+    }
+
+    /// One sentence saying what pressing Join will do.
+    pub fn sentence(&self, now: Timestamp) -> String {
+        let group = quoted(&self.group_name, "a group");
+        let from = if self.inviter_name.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" from {}", self.inviter_name.trim())
+        };
+        let who = match &self.joining_as {
+            None => " It adds this computer as another of theirs.".to_owned(),
+            Some(name) if name.trim().is_empty() => String::new(),
+            Some(name) => format!(" You'll join as {}.", name.trim()),
+        };
+        format!(
+            "This is an invite to {group}{from}.{who} It works for {} more.",
+            super::pairing::time_left_label(self.expires_at, now)
+        )
+    }
+}
+
+fn quoted(name: &str, fallback: &str) -> String {
+    if name.trim().is_empty() {
+        fallback.to_owned()
+    } else {
+        format!("“{}”", name.trim())
     }
 }
 
@@ -200,6 +275,35 @@ mod tests {
         assert_eq!(
             JoinLink::parse(&future.encode(), Timestamp(0)),
             Err(LinkError::NewerVersion)
+        );
+    }
+
+    #[test]
+    fn a_pasted_link_says_what_joining_will_do_before_anyone_joins() {
+        assert_eq!(InvitePreview::of("   ", Timestamp(0)), None);
+        assert_eq!(
+            InvitePreview::of("hello", Timestamp(0)),
+            Some(Err(LinkError::NotALink))
+        );
+        let own = InvitePreview::of(&link().encode(), Timestamp(0))
+            .expect("not empty")
+            .expect("valid");
+        assert_eq!(
+            own.sentence(Timestamp(0)),
+            "This is an invite to “Family” from Mum's laptop. It adds this computer as another of theirs. It works for about 10 minutes more."
+        );
+        let mut person = link();
+        person.kind = InviteKind::Person {
+            name: "Grandad".into(),
+            role: crate::group::Role::Member,
+        };
+        person.expires_at = Timestamp(3 * 24 * 60 * 60 * 1000);
+        let preview = InvitePreview::of(&person.encode(), Timestamp(0))
+            .expect("not empty")
+            .expect("valid");
+        assert_eq!(
+            preview.sentence(Timestamp(0)),
+            "This is an invite to “Family” from Mum's laptop. You'll join as Grandad. It works for 3 days more."
         );
     }
 

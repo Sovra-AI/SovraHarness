@@ -33,6 +33,7 @@ impl RemoteMesh {
         let builder = match reach {
             Reach::LocalOnly => Endpoint::builder(presets::Minimal),
             Reach::Internet => Endpoint::builder(presets::N0),
+            Reach::RelayOnly => Endpoint::builder(presets::N0).clear_ip_transports(),
         };
         let endpoint = builder
             .secret_key(SecretKey::from_bytes(&secret))
@@ -50,7 +51,7 @@ impl RemoteMesh {
             .map_err(|error| MeshError::Bind(error.to_string()))?;
         // The QR is encoded straight after bind. Without this wait it holds only LAN
         // addresses, and a phone off that network depends on address lookup alone.
-        if matches!(reach, Reach::Internet) {
+        if matches!(reach, Reach::Internet | Reach::RelayOnly) {
             let _ = n0_future::time::timeout(RELAY_WAIT, endpoint.online()).await;
         }
         Ok(Self { endpoint })

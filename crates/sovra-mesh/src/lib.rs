@@ -3,6 +3,9 @@
 //! Owns this computer's device key (an Ed25519 secret that never leaves the
 //! adapter), dials other computers by their public key over QUIC with hole punching
 //! and an encrypted relay fallback, and carries [`PeerRequest`]s one per stream.
+//! One connection per computer stays open and is reused: across the internet the
+//! first packets travel through a relay while a direct way is found, so a fresh
+//! connection per message would keep every message on the slow road.
 //! It decides nothing: every rule (who may join, sync or push, how history folds)
 //! lives in `sovra_core::group`, and every task runs on the spawner the runtime
 //! hands in, so the runtime owns cancellation. This crate never names `tokio`.
@@ -19,7 +22,8 @@ use iroh::endpoint::presets;
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayUrl, SecretKey, TransportAddr};
 use sovra_core::group::{
     DeviceId, GroupTransport, MAX_PEER_MESSAGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler,
-    PeerRequest, PeerResponse, Signature, SignatureVerifier, Spawn, TransportError,
+    PeerRequest, PeerResponse, Reachability, Route, Signature, SignatureVerifier, Spawn,
+    TransportError,
 };
 
 pub use remote::RemoteMesh;
@@ -35,6 +39,47 @@ pub enum Reach {
     /// home routers. Development uses n0's public relays (not for production; see
     /// roadmap decision D4).
     Internet,
+    /// Like [`Self::Internet`], but never a direct connection: every packet goes
+    /// through a relay, as on a network that blocks everything else. For checking
+    /// that a group still works on such a network; slower, so not for daily use.
+    RelayOnly,
+}
+
+/// How long a computer may take to get onto the internet after starting before
+/// it is called offline instead of "getting connected".
+const CONNECTING_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// One open connection per computer, reused for every request to it.
+type Pool = Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, iroh::endpoint::Connection>>>;
+
+/// Closes and forgets a computer's pooled connection unless the request on it
+/// finished. A request the runtime gave up on (dropped mid-way) lands here too,
+/// so a connection that went quiet is never handed out again.
+struct Evict<'a> {
+    pool: &'a Pool,
+    device: DeviceId,
+    connection: &'a iroh::endpoint::Connection,
+    keep: bool,
+}
+
+impl Drop for Evict<'_> {
+    fn drop(&mut self) {
+        if self.keep {
+            return;
+        }
+        let mut pool = self
+            .pool
+            .lock()
+            .expect("connection pool lock is never poisoned");
+        if pool
+            .get(&self.device)
+            .is_some_and(|pooled| pooled.stable_id() == self.connection.stable_id())
+        {
+            pool.remove(&self.device);
+        }
+        drop(pool);
+        self.connection.close(0u32.into(), b"gave up");
+    }
 }
 
 /// Why the mesh could not start.
@@ -77,6 +122,10 @@ pub struct Mesh {
     /// Joined topics and their senders.
     topics:
         Arc<std::sync::Mutex<std::collections::BTreeMap<[u8; 32], iroh_gossip::api::GossipSender>>>,
+    /// Open connections to other computers, reused request after request.
+    pool: Pool,
+    reach: Reach,
+    started: std::time::Instant,
 }
 
 /// One computer heard on this network.
@@ -98,6 +147,7 @@ impl Mesh {
         let builder = match reach {
             Reach::LocalOnly => Endpoint::builder(presets::Minimal),
             Reach::Internet => Endpoint::builder(presets::N0),
+            Reach::RelayOnly => Endpoint::builder(presets::N0).clear_ip_transports(),
         };
         let endpoint = builder
             .secret_key(secret.clone())
@@ -132,7 +182,61 @@ impl Mesh {
             gossip,
             known,
             topics: Arc::default(),
+            pool: Arc::default(),
+            reach,
+            started: std::time::Instant::now(),
         })
+    }
+
+    /// The open connection to `to`, or a new one. A pooled connection that has
+    /// closed since (the other computer went away) is replaced.
+    async fn connection(
+        &self,
+        to: &PeerAddress,
+    ) -> Result<iroh::endpoint::Connection, TransportError> {
+        let pooled = self
+            .pool
+            .lock()
+            .expect("connection pool lock is never poisoned")
+            .get(&to.device)
+            .cloned();
+        if let Some(connection) = pooled
+            && connection.close_reason().is_none()
+        {
+            return Ok(connection);
+        }
+        let connection = self
+            .endpoint
+            .connect(Self::target(to)?, PEER_ALPN)
+            .await
+            .map_err(|error| TransportError::Unreachable(error.to_string()))?;
+        // Two requests may have dialled at once; the last one in is kept and the
+        // other closes once its request is done and it is dropped.
+        self.pool
+            .lock()
+            .expect("connection pool lock is never poisoned")
+            .insert(to.device, connection.clone());
+        Ok(connection)
+    }
+
+    /// One request and its answer on its own stream of `connection`.
+    async fn exchange(
+        connection: &iroh::endpoint::Connection,
+        request: &PeerRequest,
+    ) -> Result<PeerResponse, TransportError> {
+        fn unreachable(error: impl std::fmt::Display) -> TransportError {
+            TransportError::Unreachable(error.to_string())
+        }
+        let (mut send, mut recv) = connection.open_bi().await.map_err(unreachable)?;
+        send.write_all(&encode(request))
+            .await
+            .map_err(unreachable)?;
+        send.finish().map_err(unreachable)?;
+        let bytes = recv
+            .read_to_end(MAX_PEER_MESSAGE_BYTES)
+            .await
+            .map_err(|error| TransportError::Protocol(error.to_string()))?;
+        decode(&bytes)
     }
 
     /// The public key for a device secret, without binding anything.
@@ -402,29 +506,101 @@ impl GroupTransport for Mesh {
         if self.endpoint.is_closed() {
             return Err(TransportError::Closed);
         }
-        let connection = self
+        // A pooled connection can die between two requests before this side has
+        // noticed; one fresh connection settles whether the other computer is
+        // really gone.
+        let mut last = TransportError::Unreachable("no connection".into());
+        for attempt in 0..2 {
+            let reused = self
+                .pool
+                .lock()
+                .expect("connection pool lock is never poisoned")
+                .get(&to.device)
+                .is_some_and(|pooled| pooled.close_reason().is_none());
+            let connection = self.connection(to).await?;
+            let mut guard = Evict {
+                pool: &self.pool,
+                device: to.device,
+                connection: &connection,
+                keep: false,
+            };
+            match Self::exchange(&connection, &request).await {
+                Ok(response) => {
+                    guard.keep = true;
+                    return Ok(response);
+                }
+                Err(error) => {
+                    drop(guard);
+                    last = error;
+                    if !reused || attempt > 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        Err(last)
+    }
+
+    fn reachability(&self) -> Reachability {
+        use iroh::Watcher as _;
+        if matches!(self.reach, Reach::LocalOnly) {
+            return Reachability::SameNetworkOnly;
+        }
+        if self
             .endpoint
-            .connect(Self::target(to)?, PEER_ALPN)
-            .await
-            .map_err(|error| TransportError::Unreachable(error.to_string()))?;
-        let (mut send, mut recv) = connection
-            .open_bi()
-            .await
-            .map_err(|error| TransportError::Unreachable(error.to_string()))?;
-        send.write_all(&encode(&request))
-            .await
-            .map_err(|error| TransportError::Unreachable(error.to_string()))?;
-        send.finish()
-            .map_err(|error| TransportError::Unreachable(error.to_string()))?;
-        let bytes = recv
-            .read_to_end(MAX_PEER_MESSAGE_BYTES)
-            .await
-            .map_err(|error| TransportError::Protocol(error.to_string()))?;
-        connection.close(0u32.into(), b"done");
-        decode(&bytes)
+            .home_relay_status()
+            .get()
+            .iter()
+            .any(iroh::endpoint::RelayStatus::is_connected)
+        {
+            Reachability::Anywhere
+        } else if self.started.elapsed() < CONNECTING_GRACE {
+            Reachability::Connecting
+        } else {
+            Reachability::Offline
+        }
+    }
+
+    async fn wait_until_reachable(&self, wait_ms: u64) {
+        if matches!(self.reach, Reach::LocalOnly) {
+            return;
+        }
+        let _ = n0_future::time::timeout(
+            std::time::Duration::from_millis(wait_ms),
+            self.endpoint.online(),
+        )
+        .await;
+    }
+
+    fn route_to(&self, device: &DeviceId) -> Option<Route> {
+        let connection = self
+            .pool
+            .lock()
+            .expect("connection pool lock is never poisoned")
+            .get(device)
+            .cloned()?;
+        if connection.close_reason().is_some() {
+            return None;
+        }
+        let paths = connection.paths();
+        let selected = paths.iter().find(iroh::endpoint::Path::is_selected)?;
+        Some(if selected.is_relay() {
+            Route::Relayed
+        } else {
+            Route::Direct
+        })
     }
 
     async fn close(&self) {
+        let open = std::mem::take(
+            &mut *self
+                .pool
+                .lock()
+                .expect("connection pool lock is never poisoned"),
+        );
+        for connection in open.into_values() {
+            connection.close(0u32.into(), b"done");
+        }
         self.endpoint.close().await;
     }
 }

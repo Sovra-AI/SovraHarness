@@ -249,6 +249,68 @@ pub struct PeerAddress {
     pub addrs: Vec<String>,
 }
 
+/// How far this computer's group connection reaches right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reachability {
+    /// Still finding its way onto the internet after starting.
+    #[default]
+    Connecting,
+    /// Computers in the group can find this one from anywhere on the internet.
+    Anywhere,
+    /// Started for the same network only: no relays and no lookups.
+    SameNetworkOnly,
+    /// Meant to reach the internet, but it cannot right now.
+    Offline,
+}
+
+impl Reachability {
+    /// A short heading for the Groups page.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Connecting => "Getting connected…",
+            Self::Anywhere => "Works anywhere with internet",
+            Self::SameNetworkOnly => "Same network only",
+            Self::Offline => "No internet right now",
+        }
+    }
+
+    /// One plain sentence: what this means for the person.
+    pub const fn detail(self) -> &'static str {
+        match self {
+            Self::Connecting => {
+                "Sovra is finding its way onto the internet. This takes a few seconds."
+            }
+            Self::Anywhere => {
+                "People in your group can be at home, at work or in another country. Their computers find this one over the internet."
+            }
+            Self::SameNetworkOnly => {
+                "This computer was started in same-network mode, so it only reaches computers on the same Wi-Fi or office network."
+            }
+            Self::Offline => {
+                "Sovra keeps trying on its own. Anything you share is saved here and sent as soon as the internet is back."
+            }
+        }
+    }
+}
+
+/// How messages travel between this computer and another one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// Straight between the two computers.
+    Direct,
+    /// Passed along, still locked, by a relay because no straight way was found.
+    Relayed,
+}
+
+impl Route {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Direct => "direct connection",
+            Self::Relayed => "connected through a relay (still private, a little slower)",
+        }
+    }
+}
+
 /// Why a request could not be delivered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TransportError {
@@ -303,6 +365,18 @@ pub trait GroupTransport: Send + Sync {
     async fn nearby_pairing(&self, hint: u8, listen_ms: u64) -> Vec<PeerAddress>;
     /// How others can reach this computer right now (for join links).
     fn address(&self) -> PeerAddress;
+    /// How far this computer reaches right now. Transports with nothing to wait
+    /// for (tests) are always reachable.
+    fn reachability(&self) -> Reachability {
+        Reachability::Anywhere
+    }
+    /// Waits, for at most `wait_ms`, until [`Self::address`] is one a computer
+    /// far away can use, so a link made straight after starting still works.
+    async fn wait_until_reachable(&self, _wait_ms: u64) {}
+    /// How messages to `device` travel right now, when a connection to it is open.
+    fn route_to(&self, _device: &DeviceId) -> Option<Route> {
+        None
+    }
     /// Accepts connections and hands each request to `handler`, until [`Self::close`].
     /// Each connection runs on `spawn`.
     async fn serve(&self, handler: Arc<dyn PeerHandler>, spawn: Spawn);
@@ -326,6 +400,11 @@ pub struct GroupRecord {
     pub knowledge: Vec<KnowledgeOp>,
     /// Last known way to reach each computer, learned from links and sync.
     pub addresses: Vec<PeerAddress>,
+    /// Invites this computer made that have not expired, so a link sent to
+    /// someone far away still works after this computer restarts. The file is
+    /// owner-only; a cancelled or expired invite is removed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invites: Vec<super::pairing::SavedInvite>,
     /// Whether this computer answers and asks the group's memories (both off at first).
     #[serde(default)]
     pub federated: super::federated::FederatedSettings,

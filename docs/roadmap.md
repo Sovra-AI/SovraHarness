@@ -34,6 +34,8 @@ From [Groups](groups.md).
 
 - **Viewer and Contributor on the screen.** The membership fold already refuses additions from a Viewer. No control sets either role.
 - **Correct a shared detail from the screen.** `GroupCommand::Correct` and the dispute fold exist. The screen has no correction button, and Share does not set `replaces` or `valid_at`.
+- **Join while the inviting computer is off.** Only the computer that made an invite can admit its holder, so it has to be on when they join. The joining computer keeps trying; no other group computer can answer for it.
+- **Relays Sovra runs.** Groups across the internet use n0's public relays and lookup service. There is no setting for a relay of your own, and no test across two separate networks: the relay-only tests run both computers on one machine.
 - **Say when the group key cannot be stored.** The words for a missing keychain exist on `GroupProblem::NoKeychain` and are not emitted. The screen stays on "Getting your group ready…".
 
 ## Training

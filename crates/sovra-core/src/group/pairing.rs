@@ -12,8 +12,10 @@ use super::membership::Role;
 use super::sas::ShortAuthString;
 use crate::Timestamp;
 
-/// A QR code or link stays usable for ten minutes, once.
-pub const INVITE_LIFETIME_MS: i64 = 10 * 60 * 1000;
+/// A QR code or link stays usable for seven days, once. Long enough to send to
+/// someone far away who still has to install Sovra and find a quiet moment; the
+/// person who made it can cancel it sooner (see [`InviteBook::cancel`]).
+pub const INVITE_LIFETIME_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// A same-room six-digit code stays open for two minutes and allows one guess.
 pub const SHORT_CODE_LIFETIME_MS: i64 = 2 * 60 * 1000;
 
@@ -78,6 +80,78 @@ pub enum RedeemError {
     AlreadyUsed,
 }
 
+/// Names one invite without giving away its secret (the secret's hash).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct InviteId(pub [u8; 32]);
+
+impl InviteId {
+    pub fn of(invite: &Invite) -> Self {
+        Self(Sha256::digest(invite.secret).into())
+    }
+}
+
+/// An invite as it is kept between restarts, so a link sent yesterday still works
+/// after the inviting computer was switched off overnight.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedInvite {
+    pub invite: Invite,
+    pub used: bool,
+}
+
+/// An invite nobody has used yet, as the Invite page lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingInvite {
+    pub id: InviteId,
+    pub kind: InviteKind,
+    pub expires_at: Timestamp,
+}
+
+impl PendingInvite {
+    /// Who the invite is waiting for, in plain words.
+    pub fn who(&self) -> String {
+        match &self.kind {
+            InviteKind::OwnDevice => "Another of your computers".to_owned(),
+            InviteKind::Person { name, role } => {
+                let name = if name.trim().is_empty() {
+                    "Someone new"
+                } else {
+                    name.trim()
+                };
+                if role.manages() {
+                    format!("{name} (as an admin)")
+                } else {
+                    name.to_owned()
+                }
+            }
+        }
+    }
+}
+
+/// "6 days", "about 3 hours", "about 5 minutes": how long something still works.
+pub fn time_left_label(expires_at: Timestamp, now: Timestamp) -> String {
+    const MINUTE: i64 = 60_000;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+    let left = expires_at.millis().saturating_sub(now.millis()).max(0);
+    let plural = |count: i64, unit: &str| {
+        if count == 1 {
+            format!("{count} {unit}")
+        } else {
+            format!("{count} {unit}s")
+        }
+    };
+    if left >= 2 * DAY {
+        plural((left + DAY / 2) / DAY, "day")
+    } else if left >= 2 * HOUR {
+        format!("about {}", plural((left + HOUR / 2) / HOUR, "hour"))
+    } else {
+        format!(
+            "about {}",
+            plural(((left + MINUTE - 1) / MINUTE).max(1), "minute")
+        )
+    }
+}
+
 /// Invites this computer has issued, each usable once before it expires.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InviteBook {
@@ -86,8 +160,62 @@ pub struct InviteBook {
 
 impl InviteBook {
     pub fn issue(&mut self, invite: Invite) {
-        let key: [u8; 32] = Sha256::digest(invite.secret).into();
-        self.invites.insert(key, (invite, false));
+        self.invites
+            .insert(InviteId::of(&invite).0, (invite, false));
+    }
+
+    /// The book as it was saved, without anything that has expired since.
+    pub fn restore(saved: Vec<SavedInvite>, now: Timestamp) -> Self {
+        let mut book = Self::default();
+        for SavedInvite { invite, used } in saved {
+            if now < invite.expires_at {
+                book.invites.insert(InviteId::of(&invite).0, (invite, used));
+            }
+        }
+        book
+    }
+
+    /// What to keep between restarts: every invite that has not expired. Used ones
+    /// stay until then so a second try is told "already used", not "unknown".
+    pub fn saved(&self, now: Timestamp) -> Vec<SavedInvite> {
+        self.invites
+            .values()
+            .filter(|(invite, _)| now < invite.expires_at)
+            .map(|(invite, used)| SavedInvite {
+                invite: invite.clone(),
+                used: *used,
+            })
+            .collect()
+    }
+
+    /// Invites still waiting for someone, the one that runs out first at the top.
+    pub fn pending(&self, now: Timestamp) -> Vec<PendingInvite> {
+        let mut pending: Vec<PendingInvite> = self
+            .invites
+            .iter()
+            .filter(|(_, (invite, used))| !*used && now < invite.expires_at)
+            .map(|(id, (invite, _))| PendingInvite {
+                id: InviteId(*id),
+                kind: invite.kind.clone(),
+                expires_at: invite.expires_at,
+            })
+            .collect();
+        pending.sort_by_key(|invite| (invite.expires_at, invite.id));
+        pending
+    }
+
+    /// A waiting invite, to show its link again.
+    pub fn waiting(&self, id: &InviteId, now: Timestamp) -> Option<&Invite> {
+        self.invites
+            .get(&id.0)
+            .filter(|(invite, used)| !*used && now < invite.expires_at)
+            .map(|(invite, _)| invite)
+    }
+
+    /// Cancels an invite so its link stops working at once. Returns whether there
+    /// was one to cancel.
+    pub fn cancel(&mut self, id: &InviteId) -> bool {
+        self.invites.remove(&id.0).is_some()
     }
 
     /// Finds the invite a joiner proved it holds and burns it. The proof is compared
@@ -228,9 +356,11 @@ impl PairingStage {
                     reason: PairingFailure::Expired,
                 }
             }
-            (Self::Idle | Self::ShowingInvite { .. }, PairingStep::PeerConnected) => {
-                Self::Connecting
-            }
+            // A new attempt starts from wherever the last one ended.
+            (
+                Self::Idle | Self::ShowingInvite { .. } | Self::Failed { .. } | Self::Joined { .. },
+                PairingStep::PeerConnected,
+            ) => Self::Connecting,
             (Self::Connecting, PairingStep::CodeReady(code)) => Self::ConfirmCode {
                 code,
                 here: None,

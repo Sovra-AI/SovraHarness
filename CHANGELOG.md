@@ -14,6 +14,22 @@ package version.
 
 ## [Unreleased]
 
+- **Groups work across the internet, and say so.** An invite link now works
+  from anywhere for seven days instead of ten minutes, survives a restart of
+  the computer that made it, and can be copied again or cancelled under
+  **Invites waiting to be used**. Pasting a link shows which group it is for,
+  who sent it and how long it still works. If the inviting computer is switched
+  off, the joining one says **Still trying to reach them**, keeps trying, and
+  joins by itself when it answers. The Groups page shows whether this computer
+  **works anywhere with internet**, how many other computers are online, when
+  it last caught up, and has **Check now**; **People** shows each computer as
+  online with a direct or relayed connection, or when it was last seen.
+  Computers keep one connection open to each other and reuse it, so relayed
+  connections can become direct and large shares no longer time out after
+  fifteen seconds. A computer's address is only accepted from that computer.
+  `SOVRA_GROUP_REACH=relay` checks a group on a network that blocks direct
+  connections.
+
 - The Files page shows the active folder first, explains which folder is holding
   the queue, and reports the current path, indexing stage, elapsed time and
   processed counts during long reads and saves. Automatic scans rotate among

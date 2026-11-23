@@ -460,3 +460,206 @@ async fn group_members_hear_each_others_broadcasts_over_iroh_gossip() {
     while a_server.join_next().await.is_some() {}
     while b_server.join_next().await.is_some() {}
 }
+
+// ---- groups across the internet --------------------------------------------
+
+/// Answers a sync once `ready` is set; until then it never answers, like a computer
+/// whose connection went quiet.
+struct Sleepy {
+    ready: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl PeerHandler for Sleepy {
+    async fn handle(&self, _from: DeviceId, _request: PeerRequest) -> PeerResponse {
+        if !self.ready.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        PeerResponse::Accepted
+    }
+}
+
+fn sync_request(mesh: &Mesh) -> PeerRequest {
+    PeerRequest::Sync {
+        group: GroupId([9; 32]),
+        membership: BTreeSet::new(),
+        knowledge: BTreeSet::new(),
+        from: mesh.address(),
+    }
+}
+
+fn pooled(mesh: &Mesh, device: &DeviceId) -> Option<usize> {
+    mesh.pool
+        .lock()
+        .expect("not poisoned")
+        .get(device)
+        .map(iroh::endpoint::Connection::stable_id)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn requests_reuse_one_connection_and_a_restarted_computer_is_dialled_again() {
+    let a = Mesh::bind([21; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([22; 32], Reach::LocalOnly).await.expect("binds");
+    assert_eq!(a.reachability(), Reachability::SameNetworkOnly);
+    assert_eq!(a.route_to(&b.this_device()), None, "nothing open yet");
+    let recorder = Arc::new(Recorder {
+        seen_from: std::sync::Mutex::new(Vec::new()),
+        calls: AtomicUsize::new(0),
+    });
+    let mut server = serve(&b, recorder.clone());
+
+    a.request(&b.address(), sync_request(&a))
+        .await
+        .expect("delivered");
+    let first = pooled(&a, &b.this_device()).expect("the connection is kept");
+    a.request(&b.address(), sync_request(&a))
+        .await
+        .expect("delivered");
+    assert_eq!(
+        pooled(&a, &b.this_device()),
+        Some(first),
+        "the second request travels on the same connection"
+    );
+    assert_eq!(a.route_to(&b.this_device()), Some(Route::Direct));
+
+    // The other computer is switched off and on again (same key, new port).
+    b.close().await;
+    while server.join_next().await.is_some() {}
+    let b = Mesh::bind([22; 32], Reach::LocalOnly).await.expect("binds");
+    let mut server = serve(&b, recorder.clone());
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        a.request(&b.address(), sync_request(&a)),
+    )
+    .await
+    .expect("answers in time")
+    .expect("a fresh connection replaces the dead one");
+    assert_ne!(pooled(&a, &b.this_device()), Some(first));
+    assert_eq!(recorder.calls.load(Ordering::SeqCst), 3);
+
+    a.close().await;
+    assert_eq!(
+        pooled(&a, &b.this_device()),
+        None,
+        "closing empties the pool"
+    );
+    b.close().await;
+    while server.join_next().await.is_some() {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_request_that_is_given_up_on_never_leaves_a_stuck_connection_behind() {
+    let a = Mesh::bind([23; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([24; 32], Reach::LocalOnly).await.expect("binds");
+    let sleepy = Arc::new(Sleepy {
+        ready: std::sync::atomic::AtomicBool::new(false),
+    });
+    let mut server = serve(&b, sleepy.clone());
+
+    // The runtime's time limit drops the request while it waits for an answer.
+    let gave_up = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        a.request(&b.address(), sync_request(&a)),
+    )
+    .await;
+    assert!(gave_up.is_err(), "no answer came");
+    assert_eq!(
+        pooled(&a, &b.this_device()),
+        None,
+        "the quiet connection is not kept for the next request"
+    );
+
+    sleepy.ready.store(true, Ordering::SeqCst);
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        a.request(&b.address(), sync_request(&a)),
+    )
+    .await
+    .expect("answers in time")
+    .expect("delivered on a new connection");
+    assert_eq!(response, PeerResponse::Accepted);
+
+    a.close().await;
+    b.close().await;
+    while server.join_next().await.is_some() {}
+}
+
+fn random_key() -> [u8; 32] {
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).expect("the OS has randomness");
+    key
+}
+
+/// Two computers that can never connect directly: every packet crosses n0's relays
+/// on the real internet, as between two homes whose routers block everything else.
+/// Run with `cargo test -p sovra-mesh far_apart -- --ignored`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the internet: talks through n0's public relays"]
+async fn two_computers_far_apart_reach_each_other_through_a_relay() {
+    const ONLINE_MS: u64 = 20_000;
+    let a = Mesh::bind(random_key(), Reach::RelayOnly)
+        .await
+        .expect("binds");
+    let b = Mesh::bind(random_key(), Reach::RelayOnly)
+        .await
+        .expect("binds");
+    a.wait_until_reachable(ONLINE_MS).await;
+    b.wait_until_reachable(ONLINE_MS).await;
+    assert_eq!(a.reachability(), Reachability::Anywhere);
+    assert_eq!(b.reachability(), Reachability::Anywhere);
+    let recorder = Arc::new(Recorder {
+        seen_from: std::sync::Mutex::new(Vec::new()),
+        calls: AtomicUsize::new(0),
+    });
+    let mut server = serve(&b, recorder.clone());
+
+    // As an invite link carries it: the key and the relay, no usable direct address.
+    let address = b.address();
+    assert!(
+        address.relay.is_some(),
+        "a reachable computer names its relay"
+    );
+    assert!(
+        address.addrs.is_empty(),
+        "a relay-only computer offers no direct address"
+    );
+    let started = std::time::Instant::now();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        a.request(&address, sync_request(&a)),
+    )
+    .await
+    .expect("answers in time")
+    .expect("delivered through the relay");
+    let first = started.elapsed();
+    assert_eq!(a.route_to(&b.this_device()), Some(Route::Relayed));
+    let started = std::time::Instant::now();
+    a.request(&address, sync_request(&a))
+        .await
+        .expect("delivered again");
+    tracing::info!(?first, again = ?started.elapsed(), "relayed round trips");
+
+    // As a saved group member is dialled after its relay changed: by key alone.
+    let c = Mesh::bind(random_key(), Reach::RelayOnly)
+        .await
+        .expect("binds");
+    c.wait_until_reachable(ONLINE_MS).await;
+    let by_key = PeerAddress {
+        device: b.this_device(),
+        relay: None,
+        addrs: Vec::new(),
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        c.request(&by_key, sync_request(&c)),
+    )
+    .await
+    .expect("answers in time")
+    .expect("found by key and delivered through the relay");
+    assert_eq!(recorder.calls.load(Ordering::SeqCst), 3);
+
+    a.close().await;
+    c.close().await;
+    b.close().await;
+    while server.join_next().await.is_some() {}
+}

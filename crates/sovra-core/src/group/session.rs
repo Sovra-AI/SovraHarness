@@ -7,10 +7,12 @@ use super::fold::GroupState;
 use super::keys::{DeviceId, OpHash, PersonId};
 use super::knowledge::SharedDetail;
 use super::membership::Role;
-use super::pairing::{InviteKind, PairingStage, PairingStep};
+use super::pairing::{InviteId, InviteKind, PairingStage, PairingStep, PendingInvite};
 use super::shared_artifact::SharedArtifact;
+use super::wire::{Reachability, Route};
 use crate::Timestamp;
 use crate::artifacts::ArtifactKind;
+use sha2::Digest as _;
 
 /// A request from the UI about groups.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +51,16 @@ pub enum GroupCommand {
         matches: bool,
     },
     CancelPairing,
+    /// Show the link of an invite that is still waiting, again (and copy it).
+    ShowInvite {
+        id: InviteId,
+    },
+    /// Stop a waiting invite's link from working.
+    CancelInvite {
+        id: InviteId,
+    },
+    /// "Check now": catch up with the other computers straight away.
+    CheckNow,
     Rename {
         name: String,
     },
@@ -216,11 +228,77 @@ pub enum GroupEvent {
         question: String,
         answers: Vec<GroupAnswer>,
     },
+    /// How this computer is connected: its reach and the way to each computer.
+    Network(GroupNetwork),
+    /// Invites made here that nobody has used yet.
+    Invites(Vec<PendingInvite>),
+    /// Joining by link: the inviting computer has not answered yet and this one
+    /// keeps trying. `None` once it stops.
+    JoinWaiting(Option<JoinWaiting>),
     /// This computer was removed from, or left, its group.
     LeftGroup,
     Problem(GroupProblem),
     /// This computer's audit history: what it shared and gave out, re-checked.
     Audit(crate::swarm::audit::AuditSummary),
+}
+
+/// How this computer is connected to its group right now.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GroupNetwork {
+    pub reach: Reachability,
+    /// How messages reach each computer this one has an open connection to.
+    pub routes: std::collections::BTreeMap<DeviceId, Route>,
+    /// When this computer last finished catching up with the others.
+    pub checked_at: Option<Timestamp>,
+    /// Catching up right now.
+    pub checking: bool,
+}
+
+impl GroupNetwork {
+    /// "Last checked a moment ago." for the Groups page.
+    pub fn checked_label(&self, now: Timestamp) -> String {
+        if self.checking {
+            return "Checking now…".to_owned();
+        }
+        let Some(at) = self.checked_at else {
+            return "Not checked yet.".to_owned();
+        };
+        let minutes = now.0.saturating_sub(at.0).max(0) / 60_000;
+        match minutes {
+            0 => "Last checked a moment ago.".to_owned(),
+            1 => "Last checked a minute ago.".to_owned(),
+            minutes if minutes < 60 => format!("Last checked {minutes} minutes ago."),
+            _ => "Last checked over an hour ago.".to_owned(),
+        }
+    }
+}
+
+/// Joining by link while the inviting computer is not answering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinWaiting {
+    pub group_name: String,
+    pub inviter_name: String,
+    /// How many times this computer has tried so far.
+    pub tries: u32,
+}
+
+impl JoinWaiting {
+    /// What to tell the person while this computer keeps trying.
+    pub fn message(&self) -> String {
+        let who = if self.inviter_name.trim().is_empty() {
+            "the person who invited you".to_owned()
+        } else {
+            self.inviter_name.trim().to_owned()
+        };
+        let group = if self.group_name.trim().is_empty() {
+            "the group".to_owned()
+        } else {
+            format!("“{}”", self.group_name.trim())
+        };
+        format!(
+            "Waiting for {who}'s computer to answer. Ask {who} to switch it on and open Sovra. You'll join {group} by itself as soon as it answers, so you can leave this open."
+        )
+    }
 }
 
 /// One row of the roster screen.
@@ -241,6 +319,29 @@ pub struct ComputerRow {
     pub is_this_computer: bool,
     /// When this computer last heard from it (`None`: not since it started).
     pub last_seen: Option<Timestamp>,
+    /// How messages reach it right now, when known.
+    pub route: Option<Route>,
+}
+
+impl ComputerRow {
+    pub fn is_online(&self, now: Timestamp) -> bool {
+        self.last_seen
+            .is_some_and(|seen| now.0.saturating_sub(seen.0) < ONLINE_WINDOW_MS)
+    }
+
+    /// "Online now · direct connection", or when it was last seen and that it
+    /// will catch up.
+    pub fn status(&self, now: Timestamp) -> String {
+        let presence = presence_label(self.last_seen, now);
+        if self.is_online(now) {
+            match self.route {
+                Some(route) => format!("{presence} · {}", route.label()),
+                None => presence,
+            }
+        } else {
+            format!("{presence} · it will catch up when it's back online")
+        }
+    }
 }
 
 /// A computer counts as online if it was heard from within this long (three sync
@@ -317,6 +418,15 @@ pub struct GroupsView {
     pub training_help: bool,
     /// This computer's audit history. Kept when leaving a group: history is never lost.
     pub audit: crate::swarm::audit::AuditSummary,
+    /// How this computer is connected.
+    pub network: GroupNetwork,
+    /// Invites made here that nobody has used yet, soonest to run out first.
+    pub pending_invites: Vec<PendingInvite>,
+    /// Joining by link and still waiting for the inviting computer.
+    pub join_waiting: Option<JoinWaiting>,
+    /// Good news worth saying once: this computer just joined, or someone else
+    /// did. Stays until the person dismisses it or newer news replaces it.
+    pub notice: Option<String>,
 }
 
 impl Default for GroupsView {
@@ -341,6 +451,10 @@ impl Default for GroupsView {
             recent_work: Vec::new(),
             training_help: false,
             audit: crate::swarm::audit::AuditSummary::default(),
+            network: GroupNetwork::default(),
+            pending_invites: Vec::new(),
+            join_waiting: None,
+            notice: None,
         }
     }
 }
@@ -353,6 +467,15 @@ impl GroupsView {
                 this_computer,
                 group,
             } => {
+                // The join just finished: say so, the page has changed under them.
+                if let (None, Some(joined), PairingStage::Joined { .. }) =
+                    (&self.group, &group, &self.pairing)
+                {
+                    self.notice = Some(format!(
+                        "🎉 You're in. This computer is now part of “{}”.",
+                        joined.name
+                    ));
+                }
                 self.this_computer = Some(this_computer);
                 self.group = group;
                 self.loaded = true;
@@ -365,6 +488,9 @@ impl GroupsView {
                 if removed {
                     self.leave();
                 } else {
+                    if let Some(news) = self.arrivals(&state) {
+                        self.notice = Some(news);
+                    }
                     self.group = Some(state);
                 }
             }
@@ -394,6 +520,7 @@ impl GroupsView {
                 if finished {
                     self.invite = None;
                     self.short_code = None;
+                    self.join_waiting = None;
                 }
             }
             GroupEvent::Knowledge(details) => self.knowledge = details,
@@ -410,6 +537,26 @@ impl GroupsView {
                 self.recent_work = recent;
             }
             GroupEvent::TrainingHelp(on) => self.training_help = on,
+            GroupEvent::Network(network) => self.network = network,
+            GroupEvent::Invites(invites) => {
+                // A link still on screen whose invite was used or cancelled would
+                // only mislead: take it down with its invite.
+                let gone = self.invite.as_ref().is_some_and(|(link, _)| {
+                    super::link::JoinLink::parse(link, Timestamp(i64::MIN)).is_ok_and(|link| {
+                        let id = InviteId(sha2::Sha256::digest(link.secret).into());
+                        !invites.iter().any(|invite| invite.id == id)
+                    })
+                });
+                if gone {
+                    self.invite = None;
+                    self.invite_qr.clear();
+                    if matches!(self.pairing, PairingStage::ShowingInvite { .. }) {
+                        self.pairing = PairingStage::Idle;
+                    }
+                }
+                self.pending_invites = invites;
+            }
+            GroupEvent::JoinWaiting(waiting) => self.join_waiting = waiting,
             GroupEvent::LeftGroup => self.leave(),
             GroupEvent::Problem(problem) => self.problem = Some(problem),
             GroupEvent::Audit(summary) => self.audit = summary,
@@ -428,6 +575,80 @@ impl GroupsView {
         self.invite = None;
         self.short_code = None;
         self.pairing = PairingStage::Idle;
+        self.pending_invites.clear();
+        self.join_waiting = None;
+        self.notice = None;
+        self.network.routes.clear();
+        self.network.checked_at = None;
+    }
+
+    /// Who is in `next` that was not in the group a moment ago, as one sentence.
+    /// `None` when nobody new arrived, or this computer was not in a group yet.
+    fn arrivals(&self, next: &GroupState) -> Option<String> {
+        let before = self.group.as_ref()?;
+        let known = |device: &DeviceId| {
+            before
+                .people
+                .values()
+                .any(|member| member.devices.contains_key(device))
+        };
+        let news: Vec<String> = next
+            .people
+            .values()
+            .flat_map(|member| {
+                let new_person = !before.people.contains_key(&member.person);
+                member
+                    .devices
+                    .iter()
+                    .filter(|(device, _)| !known(device) && Some(**device) != self.this_computer)
+                    .map(move |(_, entry)| {
+                        if new_person {
+                            format!("{} joined the group on “{}”", member.name, entry.name)
+                        } else {
+                            format!(
+                                "“{}” was added as another of {}'s computers",
+                                entry.name, member.name
+                            )
+                        }
+                    })
+            })
+            .collect();
+        (!news.is_empty()).then(|| format!("🎉 {}.", news.join(", and ")))
+    }
+
+    /// Other computers in the group: how many are online now, and how many there are.
+    pub fn others_online(&self, now: Timestamp) -> (usize, usize) {
+        let others: Vec<ComputerRow> = self
+            .rows()
+            .into_iter()
+            .flat_map(|row| row.computers)
+            .filter(|computer| !computer.is_this_computer)
+            .collect();
+        (
+            others.iter().filter(|c| c.is_online(now)).count(),
+            others.len(),
+        )
+    }
+
+    /// One line under the group's name: who is reachable right now.
+    pub fn connection_summary(&self, now: Timestamp) -> String {
+        let (online, total) = self.others_online(now);
+        match (self.network.reach, total) {
+            (Reachability::Offline, _) => {
+                "This computer is offline. Your group will catch up when the internet is back."
+                    .to_owned()
+            }
+            (_, 0) => "No other computers yet. Invite someone to get going.".to_owned(),
+            (_, 1) if online == 1 => "The other computer is online now.".to_owned(),
+            (_, 1) => {
+                "The other computer isn't online now. It will catch up when it is.".to_owned()
+            }
+            (_, total) if online == total => format!("All {total} other computers are online now."),
+            (_, total) if online == 0 => format!(
+                "None of the {total} other computers are online now. They will catch up when they are."
+            ),
+            (_, total) => format!("{online} of the {total} other computers are online now."),
+        }
     }
 
     /// This computer's person in the group, if any.
@@ -530,6 +751,7 @@ impl GroupsView {
                         fingerprint: device.fingerprint(),
                         is_this_computer: Some(*device) == me,
                         last_seen: self.last_seen.get(device).copied(),
+                        route: self.network.routes.get(device).copied(),
                     })
                     .collect(),
             })

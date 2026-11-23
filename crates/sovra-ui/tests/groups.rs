@@ -1635,3 +1635,402 @@ fn changes_to_a_private_artifact_confirm_in_the_original_audience(cx: &mut TestA
     })
     .expect("window open");
 }
+
+// ---- groups across the internet --------------------------------------------
+
+fn right_now() -> Timestamp {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("the clock is after 1970")
+        .as_millis();
+    Timestamp(i64::try_from(millis).expect("fits"))
+}
+
+/// A real link from Mum inviting Dad, good for three days.
+fn dads_link() -> String {
+    sovra_core::group::JoinLink::new(
+        family().group,
+        "Family".into(),
+        MUM,
+        "Mum".into(),
+        sovra_core::group::InviteKind::Person {
+            name: "Dad".into(),
+            role: Role::Member,
+        },
+        [5; 16],
+        Timestamp(right_now().0 + 3 * 24 * 60 * 60 * 1000),
+        Some("https://relay.example".into()),
+        Vec::new(),
+    )
+    .encode()
+}
+
+fn waiting_for_mum() -> sovra_core::group::JoinWaiting {
+    sovra_core::group::JoinWaiting {
+        group_name: "Family".into(),
+        inviter_name: "Mum".into(),
+        tries: 2,
+    }
+}
+
+fn offline() -> GroupEvent {
+    GroupEvent::Network(sovra_core::group::GroupNetwork {
+        reach: sovra_core::group::Reachability::Offline,
+        ..sovra_core::group::GroupNetwork::default()
+    })
+}
+
+#[gpui_kit::test]
+fn a_link_that_is_not_an_invite_says_so_before_anyone_presses_join(cx: &mut TestAppContext) {
+    let (window, shell, _commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: DAD,
+            group: None,
+        },
+    );
+    group_event(&events, offline());
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        window.click("groups-choose-join", cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("groups-join-preview").is_none(),
+            "nothing to say about an empty box"
+        );
+        assert!(
+            window.find("groups-join-reach").visible(),
+            "a computer with no internet says so where joining happens"
+        );
+        window.click("groups-join-link", cx);
+        window.input("https://example.com/not-an-invite", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("groups-join-preview").label(),
+            Some(sovra_core::group::LinkError::NotALink.advice())
+        );
+        assert_eq!(window.find("groups-join-button").disabled(), Some(true));
+    })
+    .expect("window open");
+}
+
+#[gpui_kit::test]
+fn a_pasted_link_is_explained_and_joining_keeps_trying_until_stopped(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: DAD,
+            group: None,
+        },
+    );
+    settle(cx);
+    drain(&commands);
+    let link = dads_link();
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        window.click("groups-choose-join", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("groups-join-reach").is_none());
+        window.click("groups-join-link", cx);
+        window.input(&link, cx);
+        window.render_frame(cx);
+        let said = window
+            .find("groups-join-preview")
+            .label()
+            .expect("the link is explained")
+            .to_owned();
+        assert!(
+            said.starts_with("This is an invite to “Family” from Mum. You'll join as Dad."),
+            "{said}"
+        );
+        assert_ne!(window.find("groups-join-button").disabled(), Some(true));
+        window.click("groups-join-button", cx);
+    })
+    .expect("window open");
+    assert!(drain(&commands).iter().any(|command| matches!(
+        command,
+        Command::Group(GroupCommand::Join { link: sent, .. }) if *sent == link
+    )));
+
+    // Mum's computer is switched off: the page says so and keeps trying.
+    group_event(
+        &events,
+        GroupEvent::Pairing(sovra_core::group::PairingStep::PeerConnected),
+    );
+    group_event(&events, GroupEvent::JoinWaiting(Some(waiting_for_mum())));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("groups-join-waiting").label(),
+            Some(waiting_for_mum().message().as_str())
+        );
+        assert_eq!(
+            window.find("groups-join-button").disabled(),
+            Some(true),
+            "one join at a time"
+        );
+        press(window, cx, "groups-join-stop");
+    })
+    .expect("window open");
+    assert!(drain(&commands).contains(&Command::Group(GroupCommand::CancelPairing)));
+    group_event(
+        &events,
+        GroupEvent::Pairing(sovra_core::group::PairingStep::Cancel),
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("groups-join-waiting").is_none());
+        assert_ne!(window.find("groups-join-button").disabled(), Some(true));
+    })
+    .expect("window open");
+}
+
+fn grans_invite() -> sovra_core::group::PendingInvite {
+    sovra_core::group::PendingInvite {
+        id: sovra_core::group::InviteId([6; 32]),
+        kind: sovra_core::group::InviteKind::Person {
+            name: "Gran".into(),
+            role: Role::Member,
+        },
+        expires_at: Timestamp(right_now().0 + 3 * 24 * 60 * 60 * 1000),
+    }
+}
+
+fn connected(checking: bool) -> GroupEvent {
+    GroupEvent::Network(sovra_core::group::GroupNetwork {
+        reach: sovra_core::group::Reachability::Anywhere,
+        routes: std::collections::BTreeMap::from([(DAD, sovra_core::group::Route::Direct)]),
+        checked_at: Some(right_now()),
+        checking,
+    })
+}
+
+#[gpui_kit::test]
+fn the_group_says_how_it_is_connected_and_lists_invites_still_waiting(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(
+        &events,
+        GroupEvent::Presence(std::collections::BTreeMap::from([(DAD, right_now())])),
+    );
+    group_event(&events, connected(false));
+    group_event(&events, GroupEvent::Invites(vec![grans_invite()]));
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("groups-connection").label(),
+            Some("Works anywhere with internet. The other computer is online now.")
+        );
+        window.click("groups-check-now", cx);
+        page(window, cx, "people");
+        assert_eq!(
+            window.find(("groups-computer", 100usize)).label(),
+            Some("💻 Dad's desktop · Online now · direct connection")
+        );
+        page(window, cx, "invite");
+        assert_eq!(
+            window.find(("groups-pending-invite", 0usize)).label(),
+            Some("Gran · works for 3 days more")
+        );
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("keep me".into()));
+        window.click(("groups-pending-invite-show", 0usize), cx);
+    })
+    .expect("window open");
+    let sent = drain(&commands);
+    assert!(sent.contains(&Command::Group(GroupCommand::CheckNow)));
+    assert!(sent.contains(&Command::Group(GroupCommand::ShowInvite {
+        id: grans_invite().id
+    })));
+
+    // The link comes back and is copied, because the person asked for it.
+    group_event(
+        &events,
+        GroupEvent::InviteReady {
+            link: "sovra://join/grans".into(),
+            expires_at: grans_invite().expires_at,
+            qr: Vec::new(),
+        },
+    );
+    group_event(&events, connected(true));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("sovra://join/grans".into())
+        );
+        assert_eq!(
+            window.find("groups-check-now").disabled(),
+            Some(true),
+            "no second check while one is running"
+        );
+        window.click(("groups-pending-invite-cancel", 0usize), cx);
+    })
+    .expect("window open");
+    assert!(
+        drain(&commands).contains(&Command::Group(GroupCommand::CancelInvite {
+            id: grans_invite().id
+        }))
+    );
+    group_event(&events, GroupEvent::Invites(Vec::new()));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("groups-pending-invites").is_none());
+    })
+    .expect("window open");
+}
+
+#[gpui_kit::test]
+fn joining_and_connection_status_fit_the_minimum_window_a_wide_window_and_double_text(
+    cx: &mut TestAppContext,
+) {
+    fn inside_column(window: &gpui_kit::Window, ids: &[&'static str], what: &str) {
+        let column = window.find("groups-column").bounds();
+        for id in ids {
+            let bounds = window.find(*id).bounds();
+            assert!(
+                bounds.size.width <= column.size.width + px(1.),
+                "{what}: {id} is wider than the groups column"
+            );
+            assert!(
+                bounds.origin.x >= column.origin.x - px(1.),
+                "{what}: {id} starts outside the groups column"
+            );
+        }
+    }
+    for mode in [ThemeMode::Dark, ThemeMode::Light] {
+        for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+            let what = format!("{width}x{height}@{scale}");
+            // Joining from far away.
+            let (window, shell, _commands, events) = open(cx, width, height);
+            group_event(
+                &events,
+                GroupEvent::Loaded {
+                    this_computer: DAD,
+                    group: None,
+                },
+            );
+            group_event(&events, offline());
+            settle(cx);
+            cx.update(|cx| {
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            });
+            let link = dads_link();
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+                window.render_frame(cx);
+                press(window, cx, "groups-choose-join");
+                press(window, cx, "groups-join-link");
+                window.input(&link, cx);
+                window.render_frame(cx);
+            })
+            .expect("window open");
+            group_event(
+                &events,
+                GroupEvent::Pairing(sovra_core::group::PairingStep::PeerConnected),
+            );
+            group_event(&events, GroupEvent::JoinWaiting(Some(waiting_for_mum())));
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                inside_column(
+                    window,
+                    &[
+                        "groups-join-form",
+                        "groups-join-preview",
+                        "groups-join-reach",
+                        "groups-join-waiting",
+                        "groups-join-stop",
+                    ],
+                    &what,
+                );
+            })
+            .expect("window open");
+
+            // Inside a group.
+            let (window, shell, _commands, events) = open(cx, width, height);
+            group_event(
+                &events,
+                GroupEvent::Loaded {
+                    this_computer: MUM,
+                    group: Some(family()),
+                },
+            );
+            group_event(&events, connected(false));
+            group_event(&events, GroupEvent::Invites(vec![grans_invite()]));
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+                window.render_frame(cx);
+                inside_column(
+                    window,
+                    &[
+                        "groups-connection",
+                        "groups-check-now",
+                        "groups-connection-summary",
+                    ],
+                    &what,
+                );
+                page(window, cx, "people");
+                inside_column(window, &["groups-roster"], &what);
+                page(window, cx, "invite");
+                inside_column(
+                    window,
+                    &["groups-pending-invites", "groups-invite-warning"],
+                    &what,
+                );
+            })
+            .expect("window open");
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn someone_joining_is_announced_once_and_can_be_dismissed(cx: &mut TestAppContext) {
+    let (window, shell, _commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(just_mum()),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        assert!(window.try_find("groups-notice").is_none());
+    })
+    .expect("window open");
+    group_event(&events, GroupEvent::Changed(family()));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("groups-notice").label(),
+            Some("🎉 Dad joined the group on “Dad's desktop”.")
+        );
+        window.click("groups-notice-dismiss", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("groups-notice").is_none());
+    })
+    .expect("window open");
+}

@@ -16,7 +16,7 @@ and Models. Environment changes require restarting the app.
 | `SOVRA_GOOGLE_CLIENT_ID`, `SOVRA_GOOGLE_CLIENT_SECRET` | Desktop OAuth client fallback: saved Settings client, then startup environment, then build-time values. See [Google](google.md). |
 | `SOVRA_SEARXNG_URL` | Optional additional web-search source. Omitting it does not disable other web search. |
 | `SOVRA_MEMORY_EXTRACTION_SLOTS` | Background memory-extraction capacity; parsed at startup. See [memory limits](memory-capture-and-recall.md#limits-in-force). |
-| `SOVRA_GROUP_REACH=local` | Direct group networking without Internet discovery/relays. Other values select Internet reach. |
+| `SOVRA_GROUP_REACH=local` | Direct group networking without Internet discovery/relays. `relay` sends all group traffic through a relay and never connects directly, to check that a group still works on a network that blocks direct connections; it is slower. Other values, including unset, select Internet reach. |
 | `SOVRA_REMOTE_REACH=local` | Direct phone-control networking without Internet discovery/relays. Other values select Internet reach. This does not enable phone control. |
 | `RUST_LOG` | Tracing filter for app logs. |
 | `RUST_BACKTRACE` | Rust backtraces; the dev launcher defaults it to `1` if unset. |

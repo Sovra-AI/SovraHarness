@@ -2651,3 +2651,237 @@ async fn a_dropped_training_helper_does_not_change_the_saved_run() {
 
 #[path = "groups/training_together.rs"]
 mod training_together;
+
+// ---- groups across the internet --------------------------------------------
+
+impl Computer {
+    async fn invites(
+        &self,
+        pred: impl Fn(&[sovra_core::group::PendingInvite]) -> bool,
+    ) -> Vec<sovra_core::group::PendingInvite> {
+        self.wait(|event| match event {
+            GroupEvent::Invites(invites) if pred(&invites) => Some(invites),
+            _ => None,
+        })
+        .await
+    }
+
+    async fn problem(&self) -> sovra_core::group::GroupProblem {
+        self.wait(|event| match event {
+            GroupEvent::Problem(problem) => Some(problem),
+            _ => None,
+        })
+        .await
+    }
+}
+
+fn invite(name: &str) -> GroupCommand {
+    GroupCommand::InvitePerson {
+        name: name.into(),
+        role: Role::Member,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_link_sent_far_away_works_after_a_restart_and_stops_when_cancelled() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 81).await;
+    mum.send(invite("Dad"));
+    let link = mum.link().await;
+    let waiting = mum.invites(|invites| invites.len() == 1).await;
+    assert_eq!(waiting[0].who(), "Dad");
+    assert_eq!(
+        mum.store.0.lock().expect("not poisoned").invites.len(),
+        1,
+        "an unused invite is saved"
+    );
+
+    // Mum's computer is switched off overnight. Dad uses yesterday's link.
+    let store = mum.store.clone();
+    drop(mum);
+    let mum = Computer::restart(&net, 81, store);
+    mum.send(GroupCommand::Load);
+    mum.invites(|invites| invites.len() == 1).await;
+    let dad = Computer::start(&net, 82);
+    dad.send(GroupCommand::Join {
+        link: link.clone(),
+        computer_name: "Desktop".into(),
+    });
+    dad.roster(|state| state.people.len() == 2).await;
+    mum.invites(<[_]>::is_empty).await;
+
+    // The link for an invite that is still waiting can be shown again, and a
+    // cancelled invite lets nobody in.
+    mum.send(invite("Gran"));
+    let first = mum.link().await;
+    let waiting = mum.invites(|invites| invites.len() == 1).await;
+    mum.send(GroupCommand::ShowInvite { id: waiting[0].id });
+    assert_eq!(mum.link().await, first, "the same invite, shown again");
+    mum.send(GroupCommand::CancelInvite { id: waiting[0].id });
+    mum.invites(<[_]>::is_empty).await;
+    assert!(
+        mum.store
+            .0
+            .lock()
+            .expect("not poisoned")
+            .invites
+            .iter()
+            .all(|saved| saved.used),
+        "a cancelled invite is not kept"
+    );
+    let gran = Computer::start(&net, 83);
+    gran.send(GroupCommand::Join {
+        link: first,
+        computer_name: "Tablet".into(),
+    });
+    assert_eq!(
+        gran.problem().await,
+        sovra_core::group::GroupProblem::BadInvite
+    );
+    mum.send(GroupCommand::ShowInvite { id: waiting[0].id });
+    assert!(matches!(
+        mum.problem().await,
+        sovra_core::group::GroupProblem::Other(_)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn joining_keeps_trying_until_the_inviting_computer_is_back_and_can_be_stopped() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 84).await;
+    mum.send(invite("Dad"));
+    let dads_link = mum.link().await;
+    mum.send(invite("Gran"));
+    let grans_link = mum
+        .wait(|event| match event {
+            GroupEvent::InviteReady { link, .. } if link != dads_link => Some(link),
+            _ => None,
+        })
+        .await;
+
+    // Mum's computer is switched off when the others paste their links.
+    net.off.lock().expect("not poisoned").insert(mum.device);
+    let dad = Computer::start(&net, 85);
+    let gran = Computer::start(&net, 86);
+    for (computer, link) in [(&dad, dads_link), (&gran, grans_link)] {
+        computer.send(GroupCommand::Join {
+            link,
+            computer_name: "Far away".into(),
+        });
+        let waiting = computer
+            .wait(|event| match event {
+                GroupEvent::JoinWaiting(Some(waiting)) => Some(waiting),
+                _ => None,
+            })
+            .await;
+        assert_eq!(waiting.inviter_name, "Mum");
+        assert_eq!(waiting.group_name, "Family");
+        assert_eq!(waiting.tries, 1);
+    }
+
+    // Gran changes her mind; Dad leaves his computer trying.
+    gran.send(GroupCommand::CancelPairing);
+    gran.wait(|event| {
+        matches!(
+            event,
+            GroupEvent::Pairing(sovra_core::group::PairingStep::Cancel)
+        )
+        .then_some(())
+    })
+    .await;
+
+    // Mum switches her computer on: Dad joins by himself, Gran does not.
+    net.off.lock().expect("not poisoned").remove(&mum.device);
+    dad.roster(|state| state.people.len() == 2).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        gran.store.0.lock().expect("not poisoned").group,
+        None,
+        "a stopped join never joins later"
+    );
+    assert_eq!(
+        mum.invites(|invites| invites.len() == 1).await[0].who(),
+        "Gran",
+        "the invite nobody used is still waiting"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_computer_cannot_say_where_another_computer_is_found() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 87).await;
+    mum.send(invite("Dad"));
+    let link = mum.link().await;
+    let dad = Computer::start(&net, 88);
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Desktop".into(),
+    });
+    let family = dad.roster(|state| state.people.len() == 2).await;
+
+    let handler = net
+        .handlers
+        .lock()
+        .expect("not poisoned")
+        .get(&mum.device)
+        .cloned()
+        .expect("mum listening");
+    for (device, relay) in [
+        (DeviceId([99; 32]), "https://elsewhere.example"),
+        (dad.device, "https://dads-relay.example"),
+    ] {
+        let response = handler
+            .handle(
+                dad.device,
+                PeerRequest::Sync {
+                    group: family.group,
+                    membership: BTreeSet::new(),
+                    knowledge: BTreeSet::new(),
+                    from: PeerAddress {
+                        device,
+                        relay: Some(relay.into()),
+                        addrs: Vec::new(),
+                    },
+                },
+            )
+            .await;
+        assert!(matches!(response, PeerResponse::Synced { .. }));
+    }
+    // The next save shows what Mum's computer kept.
+    mum.send(GroupCommand::Share {
+        text: "The bins go out on Tuesday".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    mum.knowledge(|details| has(details, "The bins go out on Tuesday"))
+        .await;
+    // Dad's own word about himself is kept (his next catch-up may refresh it);
+    // his word about anyone else never is.
+    let kept = mum.store.0.lock().expect("not poisoned").addresses.clone();
+    assert_eq!(
+        kept.iter()
+            .map(|address| address.device)
+            .collect::<Vec<_>>(),
+        [dad.device]
+    );
+    assert!(
+        kept.iter()
+            .all(|address| address.relay.as_deref() != Some("https://elsewhere.example"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_screen_hears_how_this_computer_is_connected_and_check_now_catches_up() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 89).await;
+    mum.send(GroupCommand::CheckNow);
+    let network = mum
+        .wait(|event| match event {
+            GroupEvent::Network(network) if network.checked_at.is_some() => Some(network),
+            _ => None,
+        })
+        .await;
+    assert_eq!(network.reach, sovra_core::group::Reachability::Anywhere);
+    assert!(!network.checking);
+    assert!(network.routes.is_empty());
+}

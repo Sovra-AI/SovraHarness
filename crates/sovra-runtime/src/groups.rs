@@ -22,13 +22,13 @@ use sovra_core::group::{
     federated_items, fold_space, lanes_of, log_ask, sealed_aad, spaces_of,
 };
 use sovra_core::group::{
-    DeviceId, GroupCommand, GroupEvent, GroupId, GroupProblem, GroupRecord, GroupState, GroupStore,
-    GroupTransport, Invite, InviteBook, InviteKind, JoinLink, KnowledgeBody, KnowledgeOp,
-    KnowledgeRejection, KnowledgeView, LinkError, MAX_REPLY_KNOWLEDGE_BYTES, MembershipBody,
-    MembershipOp, PairingFailure, PairingStep, PeerAddress, PeerHandler, PeerRequest, PeerResponse,
-    PersonId, RedeemError, Refusal, Rejection, SharedArtifact, SharedDetail, SignatureVerifier,
-    Spawn, UnsignedOp, admits_request, check_artifact, check_share, fold, invite_proof,
-    join_transcript, within_budget,
+    DeviceId, GroupCommand, GroupEvent, GroupId, GroupNetwork, GroupProblem, GroupRecord,
+    GroupState, GroupStore, GroupTransport, Invite, InviteBook, InviteId, InviteKind, JoinLink,
+    JoinWaiting, KnowledgeBody, KnowledgeOp, KnowledgeRejection, KnowledgeView, LinkError,
+    MAX_REPLY_KNOWLEDGE_BYTES, MembershipBody, MembershipOp, PairingFailure, PairingStep,
+    PeerAddress, PeerHandler, PeerRequest, PeerResponse, PersonId, RedeemError, Refusal, Rejection,
+    SharedArtifact, SharedDetail, SignatureVerifier, Spawn, UnsignedOp, admits_request,
+    check_artifact, check_share, fold, invite_proof, join_transcript, within_budget,
 };
 use sovra_core::group::{
     SHORT_CODE_LIFETIME_MS, ShortCodeWindow, code_hint, code_transcript, format_code,
@@ -74,6 +74,30 @@ impl std::fmt::Debug for GroupServices {
 const SYNC_EVERY: Duration = Duration::from_secs(20);
 /// A request to another computer gives up after this long.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Catching up may carry megabytes of shared documents through a relay, which is
+/// slow; it gets longer before it is given up on and started again from nothing.
+const SYNC_TIMEOUT: Duration = Duration::from_secs(90);
+/// How long making a link waits for this computer to be reachable from far away,
+/// so a link made straight after starting carries more than same-network addresses.
+const REACHABLE_WAIT_MS: u64 = 3_000;
+/// How long the first catch-up after starting waits for the internet.
+const STARTUP_REACH_WAIT_MS: u64 = 5_000;
+/// How often this computer looks at whether it can still be reached.
+const REACH_WATCH_EVERY: Duration = Duration::from_secs(3);
+/// Joining by link says "still trying" once an answer has taken this long. A
+/// computer that is switched off is only given up on after about half a minute,
+/// which is too long to leave someone looking at "Connecting…".
+const JOIN_PATIENCE: Duration = Duration::from_secs(5);
+/// How often a waiting join looks at whether it was stopped.
+const JOIN_STOP_POLL: Duration = Duration::from_millis(250);
+/// Joining by link keeps trying while the inviting computer does not answer:
+/// these waits between tries, then the last one again and again.
+const JOIN_RETRY_WAITS: [Duration; 4] = [
+    Duration::from_secs(3),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(20),
+];
 /// Most catch-up rounds with one computer per sync; each round carries up to
 /// `MAX_REPLY_KNOWLEDGE_BYTES`, so this bounds one sync at a few hundred megabytes.
 const MAX_SYNC_ROUNDS: usize = 32;
@@ -372,9 +396,36 @@ impl GroupRuntime {
             }));
             let syncing = groups.clone();
             spawn(Box::pin(async move {
+                // Straight after starting, this computer is not on the internet
+                // yet; a first catch-up before then would miss everyone far away
+                // and wait a whole round to try again.
+                syncing
+                    .transport
+                    .wait_until_reachable(STARTUP_REACH_WAIT_MS)
+                    .await;
                 loop {
                     syncing.sync_all().await;
                     tokio::time::sleep(SYNC_EVERY).await;
+                }
+            }));
+            let watching = groups.clone();
+            spawn(Box::pin(async move {
+                // Losing or regaining the internet shows on the screen within
+                // seconds, and coming back online catches up at once instead of
+                // at the next round.
+                let mut last = watching.transport.reachability();
+                loop {
+                    tokio::time::sleep(REACH_WATCH_EVERY).await;
+                    let reach = watching.transport.reachability();
+                    if reach == last {
+                        continue;
+                    }
+                    last = reach;
+                    if reach == sovra_core::group::Reachability::Anywhere {
+                        watching.sync_all().await;
+                    } else {
+                        watching.publish_network(false).await;
+                    }
                 }
             }));
             while let Ok(command) = receiver.recv().await {
@@ -689,6 +740,11 @@ struct Inner {
     pending_pair: Option<PendingPair>,
     /// A same-room join this computer started, waiting for its person's answer.
     joining: Option<CodeJoin>,
+    /// Counts joins by link and their cancellations: a waiting join stops as soon
+    /// as this is no longer the number it started with.
+    join_run: u64,
+    /// When this computer last finished catching up with the others.
+    checked_at: Option<Timestamp>,
     /// This computer's signed audit history, rebuilt from `record.audit` at start.
     audit: AuditLedger,
     /// Whether every saved entry verified. If not, nothing more is appended, so a
@@ -795,6 +851,8 @@ impl Groups {
                 view: KnowledgeView::default(),
                 pairs: std::collections::BTreeMap::new(),
                 invites: InviteBook::default(),
+                join_run: 0,
+                checked_at: None,
                 asks: Vec::new(),
                 limiter: AskLimiter::default(),
                 quiet_until: std::collections::BTreeMap::new(),
@@ -816,6 +874,9 @@ impl Groups {
         };
         {
             let mut inner = groups.inner.lock().await;
+            // Links made before the last restart still work until they expire.
+            inner.invites = InviteBook::restore(std::mem::take(&mut inner.record.invites), now());
+            Self::keep_invites(&mut inner);
             groups.refold(&mut inner).await;
         }
         groups.publish_loaded().await;
@@ -1218,6 +1279,38 @@ impl Groups {
         self.emit(GroupEvent::TrainingHelp(training_help)).await;
         self.publish_work().await;
         self.publish_audit().await;
+        self.publish_invites().await;
+        self.publish_network(false).await;
+    }
+
+    /// Copies the invites worth keeping into the record, ready to be saved.
+    fn keep_invites(inner: &mut Inner) {
+        inner.record.invites = inner.invites.saved(now());
+    }
+
+    async fn publish_invites(&self) {
+        let pending = self.inner.lock().await.invites.pending(now());
+        self.emit(GroupEvent::Invites(pending)).await;
+    }
+
+    /// Tells the screen how this computer is connected: its reach, and the way
+    /// messages travel to each computer it has an open connection to.
+    async fn publish_network(&self, checking: bool) {
+        let (peers, checked_at) = {
+            let inner = self.inner.lock().await;
+            (self.peers(&inner), inner.checked_at)
+        };
+        let routes = peers
+            .iter()
+            .filter_map(|peer| Some((peer.device, self.transport.route_to(&peer.device)?)))
+            .collect();
+        self.emit(GroupEvent::Network(GroupNetwork {
+            reach: self.transport.reachability(),
+            routes,
+            checked_at,
+            checking,
+        }))
+        .await;
     }
 
     /// "Help the group train": whether this computer may lend its processor to
@@ -1412,6 +1505,16 @@ impl Groups {
         record.addresses.push(address);
     }
 
+    /// Keeps the address a computer gave for itself. An address naming any other
+    /// computer is dropped: nobody may say where someone else lives.
+    fn remember_own(record: &mut GroupRecord, from: DeviceId, address: PeerAddress) {
+        if address.device == from {
+            Self::remember(record, address);
+        } else {
+            tracing::debug!(peer = %from.fingerprint(), "ignored an address for another computer");
+        }
+    }
+
     /// Other computers currently in the roster, with the best known address.
     fn peers(&self, inner: &Inner) -> Vec<PeerAddress> {
         let me = self.me();
@@ -1480,7 +1583,7 @@ impl Groups {
                     membership,
                     knowledge,
                 };
-                if let Err(error) = groups.ask(&peer, request).await {
+                if let Err(error) = groups.ask_within(&peer, request, SYNC_TIMEOUT).await {
                     tracing::debug!(%error, peer = %peer.device.fingerprint(), "push not delivered; sync will retry");
                 }
             }));
@@ -1562,7 +1665,7 @@ impl Groups {
             .as_ref()
             .is_some_and(|roster| !roster.admits(&self.me()));
         if removed {
-            Self::forget_group(&mut inner.record);
+            Self::forget_group(&mut inner);
             self.refold(&mut inner).await;
         }
         self.persist(&inner).await;
@@ -1577,22 +1680,30 @@ impl Groups {
         true
     }
 
-    fn forget_group(record: &mut GroupRecord) {
+    fn forget_group(inner: &mut Inner) {
+        let record = &mut inner.record;
         record.group = None;
         record.membership.clear();
         record.knowledge.clear();
         record.addresses.clear();
+        // Invites to a group this computer is no longer in admit nobody.
+        record.invites.clear();
+        inner.invites = InviteBook::default();
     }
 
     /// Asks every other computer what this one missed, and sends what they missed.
     async fn sync_all(self: &Arc<Self>) {
-        let (peers, group) = {
+        let found = {
             let inner = self.inner.lock().await;
-            let Some(group) = inner.record.group else {
-                return;
-            };
-            (self.peers(&inner), group)
+            inner.record.group.map(|group| (self.peers(&inner), group))
         };
+        let Some((peers, group)) = found else {
+            // Not in a group yet: the Join page still says whether this computer
+            // is on the internet.
+            self.publish_network(false).await;
+            return;
+        };
+        self.publish_network(true).await;
         // Keep the group's broadcast topic joined with everyone known, and remind it
         // where this computer's history stands so witnesses can vouch for it.
         let handler: Arc<dyn GossipHandler> = Arc::new(GroupHandler(self.clone()));
@@ -1605,16 +1716,21 @@ impl Groups {
             )
             .await;
         self.announce_checkpoint().await;
-        for peer in peers {
+        // Every computer at once: across the internet one that is switched off
+        // takes seconds to give up on, and the others should not wait behind it.
+        futures::future::join_all(peers.iter().map(|peer| async move {
             // A large history arrives over several rounds; stop once a round brings
             // nothing new.
             for _ in 0..MAX_SYNC_ROUNDS {
-                if !self.sync_round(&peer).await {
+                if !self.sync_round(peer).await {
                     break;
                 }
             }
-        }
+        }))
+        .await;
+        self.inner.lock().await.checked_at = Some(now());
         self.publish_presence().await;
+        self.publish_network(false).await;
     }
 
     /// One exchange with `peer`. Returns whether it brought anything new.
@@ -1736,7 +1852,7 @@ impl Groups {
         peer: &PeerAddress,
         request: PeerRequest,
     ) -> bool {
-        match self.ask(peer, request).await {
+        match self.ask_within(peer, request, SYNC_TIMEOUT).await {
             Ok(PeerResponse::Synced {
                 membership: theirs,
                 knowledge: their_knowledge,
@@ -1803,9 +1919,24 @@ impl Groups {
                 link,
                 computer_name,
             } => {
-                self.join(&link, computer_name).await;
-                // A join hands over as much history as fits in one message; fetch the
-                // rest (and meet the other computers) straight away.
+                // The inviting computer may be far away and switched off: joining
+                // keeps trying on its own task so Cancel is heard meanwhile.
+                let run = {
+                    let mut inner = self.inner.lock().await;
+                    inner.join_run = inner.join_run.wrapping_add(1);
+                    inner.join_run
+                };
+                let groups = self.clone();
+                (self.spawn)(Box::pin(async move {
+                    groups.join(&link, computer_name, run).await;
+                    // A join hands over as much history as fits in one message; fetch
+                    // the rest (and meet the other computers) straight away.
+                    groups.sync_all().await;
+                }));
+            }
+            GroupCommand::ShowInvite { id } => self.show_invite(id).await,
+            GroupCommand::CancelInvite { id } => self.cancel_invite(id).await,
+            GroupCommand::CheckNow => {
                 let groups = self.clone();
                 (self.spawn)(Box::pin(async move { groups.sync_all().await }));
             }
@@ -1822,6 +1953,11 @@ impl Groups {
             }
             GroupCommand::ConfirmCode { matches } => self.confirm_code(matches).await,
             GroupCommand::CancelPairing => {
+                {
+                    // Stops a join by link that is still waiting for an answer.
+                    let mut inner = self.inner.lock().await;
+                    inner.join_run = inner.join_run.wrapping_add(1);
+                }
                 self.emit(GroupEvent::Pairing(PairingStep::Cancel)).await;
             }
             GroupCommand::Rename { name } => self.membership(MembershipBody::Rename { name }).await,
@@ -2420,6 +2556,8 @@ impl Groups {
             membership: vec![op],
             knowledge: Vec::new(),
             addresses: Vec::new(),
+            // A new group starts with no invites out.
+            invites: Vec::new(),
             federated: inner.record.federated,
             work: inner.record.work,
             // Read by nothing; kept so an older record's value is not lost.
@@ -2430,6 +2568,7 @@ impl Groups {
             peer_audit: std::mem::take(&mut inner.record.peer_audit),
             audit_witnesses: std::mem::take(&mut inner.record.audit_witnesses),
         };
+        inner.invites = InviteBook::default();
         self.refold(&mut inner).await;
         self.persist(&inner).await;
         drop(inner);
@@ -2467,9 +2606,23 @@ impl Groups {
         };
         let at = now();
         inner.invites.prune(at);
-        let invite = Invite::new(roster.group, kind.clone(), secret, at);
-        let expires_at = invite.expires_at;
-        inner.invites.issue(invite);
+        let invite = Invite::new(roster.group, kind, secret, at);
+        inner.invites.issue(invite.clone());
+        Self::keep_invites(&mut inner);
+        self.persist(&inner).await;
+        drop(inner);
+        self.show_link(&roster, &invite).await;
+        self.publish_invites().await;
+    }
+
+    /// Shows an invite's link and QR code. The link is written afresh each time
+    /// so it carries where this computer can be reached now, not where it was
+    /// when the invite was made.
+    async fn show_link(&self, roster: &GroupState, invite: &Invite) {
+        // Straight after starting, this computer only knows its same-network
+        // addresses; a moment's wait lets the link work from far away too.
+        self.transport.wait_until_reachable(REACHABLE_WAIT_MS).await;
+        let me = self.me();
         let address = self.transport.address();
         let link = JoinLink::new(
             roster.group,
@@ -2479,14 +2632,13 @@ impl Groups {
                 .owner_of(&me)
                 .map(|member| member.name.clone())
                 .unwrap_or_default(),
-            kind,
-            secret,
-            expires_at,
+            invite.kind.clone(),
+            invite.secret,
+            invite.expires_at,
             address.relay,
             address.addrs,
         )
         .encode();
-        drop(inner);
         let qr = self
             .qr
             .as_ref()
@@ -2494,10 +2646,42 @@ impl Groups {
             .unwrap_or_default();
         self.emit(GroupEvent::InviteReady {
             link,
-            expires_at,
+            expires_at: invite.expires_at,
             qr,
         })
         .await;
+    }
+
+    /// "Show the link again" for an invite that is still waiting.
+    async fn show_invite(&self, id: InviteId) {
+        let found = {
+            let inner = self.inner.lock().await;
+            inner
+                .roster
+                .clone()
+                .zip(inner.invites.waiting(&id, now()).cloned())
+        };
+        if let Some((roster, invite)) = found {
+            self.show_link(&roster, &invite).await;
+        } else {
+            self.emit(GroupEvent::Problem(GroupProblem::Other(
+                "That invite isn't waiting any more. Make a new one.".into(),
+            )))
+            .await;
+            self.publish_invites().await;
+        }
+    }
+
+    /// Stops a waiting invite's link from working, here and after a restart.
+    async fn cancel_invite(&self, id: InviteId) {
+        {
+            let mut inner = self.inner.lock().await;
+            if inner.invites.cancel(&id) {
+                Self::keep_invites(&mut inner);
+                self.persist(&inner).await;
+            }
+        }
+        self.publish_invites().await;
     }
 
     /// Takes the history a group handed this computer and becomes a member.
@@ -2522,7 +2706,7 @@ impl Groups {
             .and_then(|roster| roster.owner_of(&me))
             .map(|member| (member.person, member.name.clone()));
         let Some((person, name)) = member else {
-            Self::forget_group(&mut inner.record);
+            Self::forget_group(&mut inner);
             self.refold(&mut inner).await;
             drop(inner);
             self.emit(GroupEvent::Pairing(PairingStep::Failed(
@@ -2546,7 +2730,28 @@ impl Groups {
         self.publish_loaded().await;
     }
 
-    async fn join(&self, link: &str, computer_name: String) {
+    /// Whether join number `run` is still the one this computer is on.
+    async fn still_joining(&self, run: u64) -> bool {
+        self.inner.lock().await.join_run == run
+    }
+
+    /// Returns once join number `run` was stopped or replaced.
+    async fn join_stopped(&self, run: u64) {
+        while self.still_joining(run).await {
+            tokio::time::sleep(JOIN_STOP_POLL).await;
+        }
+    }
+
+    async fn say_waiting(&self, link: &JoinLink, tries: u32) {
+        self.emit(GroupEvent::JoinWaiting(Some(JoinWaiting {
+            group_name: link.group_name.clone(),
+            inviter_name: link.inviter_name.clone(),
+            tries,
+        })))
+        .await;
+    }
+
+    async fn join(&self, link: &str, computer_name: String, run: u64) {
         let link = match JoinLink::parse(link, now()) {
             Ok(link) => link,
             Err(error) => {
@@ -2587,50 +2792,101 @@ impl Groups {
         };
         self.emit(GroupEvent::Pairing(PairingStep::PeerConnected))
             .await;
-        let request = PeerRequest::Join {
-            group: link.group,
-            proof: invite_proof(
-                &link.secret,
-                &join_transcript(&link.inviter, &me, &link.group),
-            ),
-            person: PersonId(person),
-            person_name,
-            computer_name: computer_name.clone(),
-            from: self.transport.address(),
-        };
-        match self.ask(&inviter, request).await {
-            Ok(PeerResponse::Joined {
-                membership,
-                knowledge,
-            }) => {
-                self.finish_join(link.group, inviter, membership, knowledge, computer_name)
-                    .await;
+        // The inviting computer learns where to find this one from the request.
+        self.transport.wait_until_reachable(REACHABLE_WAIT_MS).await;
+        let mut tries: u32 = 0;
+        loop {
+            if !self.still_joining(run).await {
+                // Cancelled (the screen already heard) or replaced by a newer join.
+                return;
             }
-            Ok(PeerResponse::Refused { reason }) => {
+            if now() >= link.expires_at {
                 self.emit(GroupEvent::Pairing(PairingStep::Failed(
-                    PairingFailure::Refused,
+                    PairingFailure::Expired,
                 )))
                 .await;
-                self.emit(GroupEvent::Problem(refusal_problem(reason)))
+                self.emit(GroupEvent::Problem(GroupProblem::InviteExpired))
                     .await;
+                return;
             }
-            Ok(other) => {
-                tracing::debug!(?other, "unexpected join answer");
-                self.emit(GroupEvent::Pairing(PairingStep::Failed(
-                    PairingFailure::Refused,
-                )))
-                .await;
-                self.emit(GroupEvent::Problem(GroupProblem::BadInvite))
+            let request = PeerRequest::Join {
+                group: link.group,
+                proof: invite_proof(
+                    &link.secret,
+                    &join_transcript(&link.inviter, &me, &link.group),
+                ),
+                person: PersonId(person),
+                person_name: person_name.clone(),
+                computer_name: computer_name.clone(),
+                from: self.transport.address(),
+            };
+            // One request, watched three ways: its answer, the moment it has
+            // taken long enough to say so, and the person pressing Stop.
+            let answer = {
+                let ask = self.ask_within(&inviter, request, SYNC_TIMEOUT);
+                let stopped = self.join_stopped(run);
+                tokio::pin!(ask, stopped);
+                let early = tokio::select! {
+                    answer = &mut ask => Some(answer),
+                    () = &mut stopped => return,
+                    () = tokio::time::sleep(JOIN_PATIENCE) => None,
+                };
+                if let Some(answer) = early {
+                    answer
+                } else {
+                    self.say_waiting(&link, tries.saturating_add(1)).await;
+                    tokio::select! {
+                        answer = &mut ask => answer,
+                        () = &mut stopped => return,
+                    }
+                }
+            };
+            match answer {
+                Ok(PeerResponse::Joined {
+                    membership,
+                    knowledge,
+                }) => {
+                    self.finish_join(link.group, inviter, membership, knowledge, computer_name)
+                        .await;
+                    return;
+                }
+                Ok(PeerResponse::Refused { reason }) => {
+                    self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                        PairingFailure::Refused,
+                    )))
                     .await;
-            }
-            Err(error) => {
-                tracing::info!(%error, "join request not delivered");
-                self.emit(GroupEvent::Pairing(PairingStep::Failed(
-                    PairingFailure::Unreachable,
-                )))
-                .await;
-                self.emit(GroupEvent::Problem(GroupProblem::Unreachable))
+                    self.emit(GroupEvent::Problem(refusal_problem(reason)))
+                        .await;
+                    return;
+                }
+                Ok(other) => {
+                    tracing::debug!(?other, "unexpected join answer");
+                    self.emit(GroupEvent::Pairing(PairingStep::Failed(
+                        PairingFailure::Refused,
+                    )))
                     .await;
+                    self.emit(GroupEvent::Problem(GroupProblem::BadInvite))
+                        .await;
+                    return;
+                }
+                Err(error) => {
+                    // Not there yet: switched off, asleep, or still starting. The
+                    // link stays good for days, so keep trying until it answers.
+                    tracing::info!(%error, tries, "join request not delivered; trying again");
+                    if !self.still_joining(run).await {
+                        return;
+                    }
+                    let wait = JOIN_RETRY_WAITS[usize::try_from(tries)
+                        .map_or(JOIN_RETRY_WAITS.len() - 1, |index| {
+                            index.min(JOIN_RETRY_WAITS.len() - 1)
+                        })];
+                    tries = tries.saturating_add(1);
+                    self.say_waiting(&link, tries).await;
+                    tokio::select! {
+                        () = tokio::time::sleep(wait) => {}
+                        () = self.join_stopped(run) => return,
+                    }
+                }
             }
         }
     }
@@ -2672,7 +2928,7 @@ impl Groups {
             .as_ref()
             .is_some_and(|roster| !roster.admits(&self.me()));
         if left {
-            Self::forget_group(&mut inner.record);
+            Self::forget_group(&mut inner);
             self.refold(&mut inner).await;
         }
         self.persist(&inner).await;
@@ -2870,16 +3126,21 @@ impl Groups {
                 };
             }
         };
-        self.admit_kind(
-            inner,
-            from,
-            group,
-            invite.kind,
-            person,
-            computer_name,
-            address,
-        )
-        .await
+        // The invite is spent: keep that across a restart too.
+        Self::keep_invites(&mut inner);
+        let response = self
+            .admit_kind(
+                inner,
+                from,
+                group,
+                invite.kind,
+                person,
+                computer_name,
+                address,
+            )
+            .await;
+        self.publish_invites().await;
+        response
     }
 
     /// Signs a new computer's addition (and its person's, for a person invite), hands
@@ -2946,7 +3207,7 @@ impl Groups {
             added.push(op);
         }
         inner.record.membership.extend(added.iter().cloned());
-        Self::remember(&mut inner.record, address);
+        Self::remember_own(&mut inner.record, from, address);
         self.refold(&mut inner).await;
         // The newcomer can read the history of every space it belongs to: hand it
         // every key held here for those spaces.
@@ -3083,7 +3344,7 @@ impl Groups {
                 ..
             } => {
                 let mut inner = self.inner.lock().await;
-                Self::remember(&mut inner.record, address);
+                Self::remember_own(&mut inner.record, from, address);
                 let mine_membership: BTreeSet<_> = inner
                     .record
                     .membership

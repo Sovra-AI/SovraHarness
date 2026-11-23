@@ -15,17 +15,54 @@ automatically.
 1. Open **Groups**. A computer can belong to one group at a time.
 2. Choose **Start a new group**, then enter the group name, your name, and the
    name of this computer. Alternatively choose **Join a group** and paste an
-   invitation link or enter the same-room code.
-3. Keep the inviting computer online until joining finishes. Same-room pairing
-   asks both people to compare the pictures and digits, then confirm they match.
+   invitation link or enter the same-room code. A pasted link says which group
+   it is for, who sent it and how long it still works before you press
+   **Join the group**.
+3. The inviting computer must be switched on with Sovra open at the moment the
+   other one joins. If it is not, the joining computer shows **Still trying to
+   reach them**, tries again every few seconds until the link runs out, and
+   joins by itself when the inviting computer answers. **Stop trying** ends it.
+   Same-room pairing asks both people to compare the pictures and digits, then
+   confirm they match.
 4. Use the **Getting started** list to invite someone, share a note, and make a
    second admin if appropriate.
 
 An admin can create an invitation link under **Invite someone**. It is copied
-for sharing privately and also shown as a QR code. Links are single-use and
-expire after ten minutes. Same-room codes allow one attempt within two minutes.
+for sharing privately and also shown as a QR code. The person can be anywhere
+with an internet connection. Links are single-use and expire after seven days.
+**Invites waiting to be used** lists every link nobody has used yet, with
+**Copy link again** and **Cancel invite**; cancelling stops the link at once.
+Unused invites are kept across restarts of the inviting computer. Same-room
+codes allow one attempt within two minutes and are not kept.
 **Add another of my own computers** associates another computer with your identity.
-Restarting the inviting app invalidates outstanding invitations.
+
+A link is a key to your group for whoever holds it, until it is used,
+cancelled or seven days old. Send it privately, and cancel it if it went to
+the wrong person. Everyone who joins appears under **People**.
+
+## Across the internet
+
+Group computers do not need to be on the same network. Under the group's name
+the page shows how this computer is connected:
+
+| Words on the screen | Meaning |
+| --- | --- |
+| **Works anywhere with internet** | Other computers can find this one from any network. |
+| **Getting connected…** | Sovra started less than about twenty seconds ago and is still reaching its relay. |
+| **No internet right now** | The relay cannot be reached. Sovra keeps trying. Shares are saved and sent later. |
+| **Same network only** | Sovra was started with `SOVRA_GROUP_REACH=local`. |
+
+The same card says how many of the other computers are online, when this
+computer last caught up, and has **Check now**. Under **People** each computer
+shows **Online now** with **direct connection** or **connected through a relay
+(still private, a little slower)**, or when it was last seen. A computer that
+is away catches up when it is next online; nothing needs to be sent again.
+
+Computers first reach each other through a relay and move to a direct
+connection when their routers allow it. Some networks never allow it, and
+those stay on the relay. Either way the traffic is encrypted between the two
+computers; a relay passes it along and cannot read it. Each computer keeps one
+connection open to every other online computer and reuses it.
 
 ## Share work
 
@@ -97,8 +134,8 @@ startup.
 | --- | --- | --- |
 | Device secret | Credential entry `group-device-key`, 32 raw bytes stored as hex | Groups are not started. Release builds use the OS keychain. A debug build launched with `SOVRA_DEV=1` (`cargo xtask dev`) uses `dev-credentials/` in app data, owner-only on Unix. |
 | Group record | `<app data>/groups/group.json` | A missing file is an empty record. A corrupt file is logged and the app starts with no group. |
-| Outstanding invites | Memory of the running app only | Restarting the inviting app burns every invite that was still on screen. The pasted link then fails as unknown. |
-| Reach | `SOVRA_GROUP_REACH` | `local` is direct connections only. Any other value, including unset, is Internet reach. Read at launch. See [configuration](configuration.md). |
+| Outstanding invites | `invites` in `<app data>/groups/group.json`, each with its 128-bit secret, until used, cancelled or expired | The file is owner-only on Unix. Anyone who can read it can use an unused invite. Leaving the group removes them. Same-room codes stay in memory only. |
+| Reach | `SOVRA_GROUP_REACH` | `local` is direct connections only. `relay` never connects directly. Any other value, including unset, is Internet reach. Read at launch. See [configuration](configuration.md). |
 
 App data paths are in [configuration](configuration.md). On Linux the usual
 root is `$XDG_DATA_HOME/sovraharness` or `~/.local/share/sovraharness`.
@@ -115,7 +152,8 @@ the secret never sits in that JSON file.
 
 The record (`GroupRecord`) holds this computer's person id and names, the
 group id, the full membership log, the full knowledge log, and the last
-address learned for each peer. Invites are not in it.
+address learned for each peer, and the invites nobody has used yet. A computer's
+address is only accepted from that computer itself.
 
 If the credential store cannot keep the device key, or the network endpoint
 cannot bind, the Groups worker accepts **Load** and ignores it. The screen
@@ -189,16 +227,26 @@ endpoint with ALPN `sovra/group/1`.
 | --- | --- | --- |
 | Internet | Default. Any `SOVRA_GROUP_REACH` other than `local`, including unset. | iroh preset `N0`: discovery and n0's public relays. Encrypted traffic may pass through a relay. This is a development reach, not a production relay commitment. |
 | Local only | `SOVRA_GROUP_REACH=local` before each participating app starts. | iroh preset `Minimal`: direct connections, no relays, no address lookup. |
+| Relay only | `SOVRA_GROUP_REACH=relay`. | Internet reach with the IP transports removed, so every packet crosses a relay. For checking a group on a network that blocks direct connections. |
 
-The endpoint's current relay URL and IP addresses are what a new link
-embeds. Hole punching and relay fallback are iroh's, on the Internet preset.
+The endpoint's current relay URL and IP addresses are what a link embeds.
+Making or re-copying a link waits up to three seconds for the relay first, so a
+link made straight after launch is not same-network only; the joining computer
+also looks the inviter up by key. Requests to one computer share one pooled
+QUIC connection, which is what lets a relayed connection move to a direct
+path. A request the runtime gives up on closes that connection, and the next
+request dials again. Catching up runs with every computer at once and allows
+90 seconds per exchange. Hole punching and relay fallback are iroh's, on the
+Internet preset.
 There is no Sovra server in the path, and there is no promise that packets
 stay on the local network unless every participant was launched with `local`.
 
 ## Limits of this foundation
 
-Shipped today: one group per computer, signed membership, one-time ten-minute
-links with QR codes, same-room codes with the picture check, peer sync and
+Shipped today: one group per computer, signed membership, one-time seven-day
+links with QR codes that survive a restart and can be cancelled, joining that
+keeps trying until the inviting computer answers, connection status per
+computer, same-room codes with the picture check, peer sync and
 push in rounds, encrypted spaces with key rotation, two-person spaces, shared
 details, memories, artifacts, helpers, skills and schedules, agreement,
 withdraw, erase, helper recall of usable details and artifacts with
@@ -235,6 +283,7 @@ the removal, their own group file is cleared.
 | Sealing, nearby (mDNS) discovery | `crates/sovra-mesh/src/cipher.rs`, `crates/sovra-mesh/src/lib.rs` |
 | Handing a turn to the group, answering without tools | `crates/sovra-adk/src/group_work.rs` |
 | Two real runtimes over iroh (pairing by link and code, sharing, asking) | `crates/sovra-app/tests/two_computers.rs` |
+| The same over n0's relays with no direct path | `two_computers_far_apart…` in that file, `#[ignore]`: needs the internet |
 | Helper instructions when group evidence is attached | `crates/sovra-adk/src/recall.rs` |
 | Evidence caps | `crates/sovra-core/src/memory/recall.rs` (`GroupEvidence`, six items) |
 

@@ -47,7 +47,7 @@ pub const BENEFITS: [Benefit; 4] = [
 /// How a group comes together, in order.
 pub const HOW_IT_WORKS: [&str; 3] = [
     "One person starts the group on their computer.",
-    "They invite everyone else: with a link sent by email or message, or, when you're sitting together, with six numbers on the screen.",
+    "They invite everyone else, wherever they are: with a link sent by email or message, or, when you're sitting together, with six numbers on the screen.",
     "Each person chooses what to share. Nothing is shared until you press Share.",
 ];
 
@@ -160,8 +160,9 @@ impl GroupPage {
             ],
             Self::Invite => &[
                 "Type their name and press Create invite link. The link is copied for you.",
-                "Paste it into an email or a message and send it to them. (Right-click and choose Paste, or press Ctrl and V.)",
+                "Paste it into an email or a message and send it to them. (Right-click and choose Paste, or press Ctrl and V.) They can be anywhere: the link works over the internet for 7 days.",
                 "They need Sovra on their computer. Once it is installed, they open Groups, choose Join a group, and paste the link.",
+                "Have Sovra open on this computer when they join. If it's switched off, their computer keeps trying and joins as soon as yours is back.",
                 "Sitting next to them? Press They're sitting next to me instead, and read out the six numbers.",
             ],
             Self::Notes => &[

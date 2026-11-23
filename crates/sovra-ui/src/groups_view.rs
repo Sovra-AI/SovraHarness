@@ -16,13 +16,13 @@ use gpui_kit::{
     IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
     TestSupportExt as _, Window, div, prelude::FluentBuilder as _,
 };
-use sovra_core::Command;
 use sovra_core::group::{
     BENEFITS, DetailStatus, FederatedSettings, GroupCommand, GroupEvent, GroupPage, HOW_IT_WORKS,
-    InviteKind, PRIVACY_PROMISE, PairingStage, Role, SharedDetail, WHAT_IS_A_GROUP,
-    removal_warning,
+    InviteKind, InvitePreview, PRIVACY_PROMISE, PairingStage, Reachability, Role, SharedDetail,
+    WHAT_IS_A_GROUP, removal_warning, time_left_label,
 };
 use sovra_core::models::ChromeKey;
+use sovra_core::{Command, Timestamp};
 
 use crate::RuntimeClient;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
@@ -47,6 +47,8 @@ pub(crate) struct GroupsForm {
     your_name: Entity<InputState>,
     computer_name: Entity<InputState>,
     join_link: Entity<InputState>,
+    /// Redraws as the link is pasted, so the page can say what it is an invite to.
+    _link_changes: gpui_kit::Subscription,
     invite_name: Entity<InputState>,
     share: Entity<InputState>,
     _share_changes: gpui_kit::Subscription,
@@ -118,11 +120,19 @@ impl GroupsForm {
                 cx.notify();
             }
         });
+        let join_link = input("Paste the link that starts with sovra://join", window, cx);
+        let link_changes =
+            cx.subscribe_in(&join_link, window, |_, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            });
         Self {
             group_name: input("For example: Family", window, cx),
             your_name: input("For example: Mum", window, cx),
             computer_name: input("For example: Mum's laptop", window, cx),
-            join_link: input("Paste the link that starts with sovra://join", window, cx),
+            join_link,
+            _link_changes: link_changes,
             invite_name: input("For example: Grandad", window, cx),
             share,
             _share_changes: share_changes,
@@ -151,6 +161,18 @@ fn value(input: &Entity<InputState>, cx: &Context<ModelsView>) -> String {
 
 fn send(command: GroupCommand, cx: &mut Context<ModelsView>) {
     let _ = cx.global::<RuntimeClient>().0.send(Command::Group(command));
+}
+
+/// A small coloured dot beside words that say the same thing ("Online now"), so
+/// the colour is a quick glance and never the only signal.
+fn status_dot(color: gpui_kit::Hsla, cx: &gpui_kit::App) -> gpui_kit::Div {
+    let t = design::tokens(cx);
+    div()
+        .w(t.graph.timeline_dot)
+        .h(t.graph.timeline_dot)
+        .flex_shrink_0()
+        .rounded(t.radius.pill)
+        .bg(color)
 }
 
 fn status_label(detail: &SharedDetail) -> Option<&'static str> {
@@ -382,6 +404,34 @@ impl ModelsView {
             return body
                 .child(caption("Getting your group ready…", cx))
                 .into_any_element();
+        }
+        if let Some(notice) = &view.notice {
+            body = body.child(
+                h_flex()
+                    .id("groups-notice")
+                    .role(gpui_kit::Role::Status)
+                    .aria_label(notice.clone())
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(t.space.small)
+                    .p(t.space.compact)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .border_1()
+                    .border_color(cx.theme().success)
+                    .child(words(notice.clone(), cx).flex_1().min_w_0())
+                    .child(
+                        design::button("groups-notice-dismiss", "OK", cx)
+                            .small()
+                            .accessibility_label("Hide this message")
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.groups.notice = None;
+                                cx.notify();
+                            })),
+                    ),
+            );
         }
         if let Some(check) = self.render_picture_check(cx) {
             body = body.child(check);
@@ -647,7 +697,13 @@ impl ModelsView {
         let t = design::tokens(cx);
         let form = &self.groups_form;
         let by_code = form.setup == Setup::JoinCode;
-        let joining = matches!(self.groups.pairing, PairingStage::Connecting);
+        let waiting = self.groups.join_waiting.clone();
+        let joining = matches!(self.groups.pairing, PairingStage::Connecting) || waiting.is_some();
+        let now = Timestamp(now_millis());
+        let preview = (!by_code)
+            .then(|| InvitePreview::of(&value(&form.join_link, cx), now))
+            .flatten();
+        let link_is_bad = matches!(preview, Some(Err(_)));
         let way = |id: &'static str, label: &'static str, setup: Setup, cx: &mut Context<Self>| {
             design::button(id, label, cx)
                 .small()
@@ -677,7 +733,7 @@ impl ModelsView {
                     .gap(t.space.small)
                     .child(way(
                         "groups-join-way-link",
-                        "They sent me a link",
+                        "They sent me a link (works from anywhere)",
                         Setup::JoinLink,
                         cx,
                     ))
@@ -697,14 +753,65 @@ impl ModelsView {
                 cx,
             ))
         } else {
-            join.child(field(
+            let link = field(
                 "groups-join-link",
                 "1. Paste the invite link",
                 &form.join_link,
-                "Copy the whole link from their message or email, then paste it here.",
+                "Copy the whole link from their message or email, then paste it here. It works from anywhere with internet.",
                 cx,
-            ))
+            );
+            // Say what the link is before anyone presses Join.
+            join.child(match &preview {
+                None => link,
+                Some(Ok(invite)) => link.child(
+                    div()
+                        .id("groups-join-preview")
+                        .role(gpui_kit::Role::Status)
+                        .aria_label(invite.sentence(now))
+                        .test_support()
+                        .w_full()
+                        .whitespace_normal()
+                        .p(t.space.compact)
+                        .sovra_surface(Surface::Subtle, cx)
+                        .sovra_text(TextRole::Body, cx)
+                        .child(format!("✅ {}", invite.sentence(now))),
+                ),
+                Some(Err(error)) => link.child(
+                    div()
+                        .id("groups-join-preview")
+                        .role(gpui_kit::Role::Status)
+                        .aria_label(error.advice())
+                        .test_support()
+                        .w_full()
+                        .whitespace_normal()
+                        .p(t.space.compact)
+                        .sovra_surface(Surface::Subtle, cx)
+                        .sovra_text(TextRole::Body, cx)
+                        .text_color(cx.theme().danger)
+                        .child(error.advice()),
+                ),
+            })
         };
+        let reach = self.groups.network.reach;
+        if matches!(reach, Reachability::Offline | Reachability::SameNetworkOnly) {
+            join = join.child(
+                h_flex()
+                    .id("groups-join-reach")
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .gap(t.space.small)
+                    .p(t.space.compact)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .child(status_dot(cx.theme().warning, cx))
+                    .child(
+                        words(format!("{}. {}", reach.title(), reach.detail()), cx)
+                            .flex_1()
+                            .min_w_0(),
+                    ),
+            );
+        }
         join.child(field(
             "groups-join-computer-name",
             "2. What do you call this computer?",
@@ -728,20 +835,61 @@ impl ModelsView {
                             send(command, cx);
                         }))
                 } else {
-                    design::primary_button("groups-join-button", "Join the group", cx).on_click(
-                        cx.listener(|view, _, _, cx| {
+                    design::primary_button("groups-join-button", "Join the group", cx)
+                        .disabled(joining || link_is_bad)
+                        .on_click(cx.listener(|view, _, _, cx| {
                             let form = &view.groups_form;
                             let command = GroupCommand::Join {
                                 link: value(&form.join_link, cx),
                                 computer_name: value(&form.computer_name, cx),
                             };
                             send(command, cx);
-                        }),
-                    )
+                        }))
                 })
                 .child(Self::back_to_choose(cx))
-                .children(joining.then(|| caption("Connecting to the other computer…", cx))),
+                .children(
+                    (joining && waiting.is_none())
+                        .then(|| caption("Connecting to the other computer…", cx)),
+                ),
         )
+        .children(waiting.map(|waiting| {
+            // Far-away computers are often switched off: say so, keep trying, and
+            // let the person stop.
+            v_flex()
+                .id("groups-join-waiting")
+                .role(gpui_kit::Role::Status)
+                .aria_label(waiting.message())
+                .test_support()
+                .w_full()
+                .gap(t.space.small)
+                .p(t.space.medium)
+                .sovra_surface(Surface::Subtle, cx)
+                .border_1()
+                .border_color(cx.theme().primary)
+                .child(heading("⏳ Still trying to reach them", cx))
+                .child(words(waiting.message(), cx))
+                .child(caption(
+                    format!(
+                        "Tried {} so far. Sovra tries again every few seconds.",
+                        if waiting.tries == 1 {
+                            "once".to_owned()
+                        } else {
+                            format!("{} times", waiting.tries)
+                        }
+                    ),
+                    cx,
+                ))
+                .child(
+                    h_flex().child(
+                        design::button("groups-join-stop", "Stop trying", cx)
+                            .small()
+                            .accessibility_label("Stop trying to join the group")
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                send(GroupCommand::CancelPairing, cx);
+                            })),
+                    ),
+                )
+        }))
         .child(words(
             "No invite yet? Ask the person who started the group to open Groups, choose Invite someone, and send you a link.",
             cx,
@@ -868,6 +1016,7 @@ impl ModelsView {
                     )),
             )
             .child(words(you, cx))
+            .child(self.render_connection(cx))
             .child(
                 h_flex().child(
                     design::button(
@@ -885,6 +1034,78 @@ impl ModelsView {
                         cx.notify();
                     })),
                 ),
+            )
+            .into_any_element()
+    }
+
+    /// How this computer is connected: whether it works from anywhere, who is
+    /// online now, when it last caught up, and "Check now".
+    fn render_connection(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = design::tokens(cx);
+        let network = &self.groups.network;
+        let now = Timestamp(now_millis());
+        let summary = self.groups.connection_summary(now);
+        let color = match network.reach {
+            Reachability::Anywhere => cx.theme().success,
+            Reachability::Connecting => t.text_secondary,
+            Reachability::SameNetworkOnly => cx.theme().warning,
+            Reachability::Offline => cx.theme().danger,
+        };
+        v_flex()
+            .id("groups-connection")
+            .role(gpui_kit::Role::Status)
+            .aria_label(format!("{}. {summary}", network.reach.title()))
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.compact)
+            .p(t.space.compact)
+            .sovra_surface(Surface::Subtle, cx)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(t.space.small)
+                    .child(status_dot(color, cx))
+                    .child(
+                        heading(network.reach.title(), cx)
+                            .id("groups-reach")
+                            .test_support()
+                            .flex_1()
+                            .min_w_0(),
+                    )
+                    .child(
+                        design::button(
+                            "groups-check-now",
+                            if network.checking {
+                                "Checking…"
+                            } else {
+                                "Check now"
+                            },
+                            cx,
+                        )
+                        .small()
+                        .accessibility_label("Check for anything new from your group now")
+                        .disabled(network.checking)
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            send(GroupCommand::CheckNow, cx);
+                        })),
+                    ),
+            )
+            .child(
+                words(summary, cx)
+                    .id("groups-connection-summary")
+                    .test_support(),
+            )
+            .child(
+                caption(
+                    format!("{} {}", network.reach.detail(), network.checked_label(now)),
+                    cx,
+                )
+                .w_full()
+                .whitespace_normal(),
             )
             .into_any_element()
     }
@@ -1175,26 +1396,32 @@ impl ModelsView {
                         for (slot, computer) in row.computers.iter().enumerate() {
                             let device = computer.device;
                             let key = format!("computer:{}", device.to_hex());
+                            let now = Timestamp(now_millis());
                             let label = if computer.is_this_computer {
                                 format!("💻 {} (this computer)", computer.name)
                             } else {
-                                format!(
-                                    "💻 {} · {}",
-                                    computer.name,
-                                    sovra_core::group::presence_label(
-                                        computer.last_seen,
-                                        sovra_core::Timestamp(now_millis())
-                                    )
-                                )
+                                format!("💻 {} · {}", computer.name, computer.status(now))
                             };
+                            let online = computer.is_this_computer || computer.is_online(now);
                             let name = computer.name.clone();
                             let mut line = h_flex()
+                                .id(("groups-computer", index * 100 + slot))
+                                .aria_label(label.clone())
+                                .test_support()
                                 .w_full()
                                 .min_w_0()
                                 .flex_wrap()
                                 .items_center()
                                 .gap(t.space.small)
-                                .child(caption(label, cx).flex_1().min_w_0().truncate());
+                                .child(status_dot(
+                                    if online {
+                                        cx.theme().success
+                                    } else {
+                                        t.text_secondary
+                                    },
+                                    cx,
+                                ))
+                                .child(caption(label, cx).flex_1().min_w_0().whitespace_normal());
                             if (manage || mine) && !computer.is_this_computer {
                                 if confirm.as_deref() == Some(key.as_str()) {
                                     line = line
@@ -1361,7 +1588,7 @@ impl ModelsView {
         if let Some((link, expires_at)) = self.groups.invite.clone() {
             let mono = cx.theme().mono_font_family.clone();
             let remaining = (expires_at.millis() - now_millis()).max(0);
-            let minutes = (remaining + 59_999) / 60_000;
+            let left = time_left_label(expires_at, Timestamp(now_millis()));
             let mut card = v_flex()
                 .id("groups-invite-card")
                 .test_support()
@@ -1383,14 +1610,14 @@ impl ModelsView {
                 .child(numbered(
                     "groups-invite-steps",
                     &[
-                        "Paste the link into an email or a message and send it. (Right-click and choose Paste, or press Ctrl and V.)",
+                        "Paste the link into an email or a message and send it. (Right-click and choose Paste, or press Ctrl and V.) They can be anywhere: the link works over the internet.",
                         "They need Sovra on their computer. Then they open Groups, choose Join a group, and paste the link.",
-                        "Keep Sovra open on this computer until they've joined.",
+                        "Have Sovra open on this computer when they join. If it's switched off, their computer keeps trying and joins as soon as yours is back.",
                     ],
                     cx,
                 ))
                 .child(words(
-                    format!("The link works once and stops working in about {minutes} minutes."),
+                    format!("The link works once, for {left} more. You can cancel it below at any time."),
                     cx,
                 ))
                 .child(
@@ -1435,6 +1662,9 @@ impl ModelsView {
                     )));
             }
             invites = invites.child(card);
+        }
+        if !self.groups.pending_invites.is_empty() {
+            invites = invites.child(self.render_pending_invites(cx));
         }
         if manage {
             invites = invites.child(
@@ -1506,8 +1736,7 @@ impl ModelsView {
                             .p(t.space.compact)
                             .sovra_surface(Surface::Matte, cx)
                             .sovra_text(TextRole::Body, cx)
-                            .text_color(cx.theme().warning)
-                            .child("⚠️ Important: leave this computer switched on with Sovra open, and ask them to use the link within 10 minutes. If it stops working, just make a new one."),
+                            .child("💡 Good to know: the link works once, for 7 days, from anywhere with internet. Send it privately: whoever has it can join."),
                     ),
             );
             invites = invites.child(
@@ -1618,6 +1847,90 @@ impl ModelsView {
                         ),
                 ),
         )
+    }
+
+    /// Invites nobody has used yet: who each is for, how long it still works,
+    /// its link again, and a way to stop it.
+    fn render_pending_invites(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = design::tokens(cx);
+        let now = Timestamp(now_millis());
+        v_flex()
+            .id("groups-pending-invites")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.small)
+            .p(t.space.compact)
+            .sovra_surface(Surface::Subtle, cx)
+            .child(heading("Invites waiting to be used", cx))
+            .child(words(
+                "These links still work. Each one lets one computer in, then stops.",
+                cx,
+            ))
+            .children(
+                self.groups
+                    .pending_invites
+                    .iter()
+                    .enumerate()
+                    .map(|(index, invite)| {
+                        let id = invite.id;
+                        let who = invite.who();
+                        let line = format!(
+                            "{who} · works for {} more",
+                            time_left_label(invite.expires_at, now)
+                        );
+                        h_flex()
+                            .id(("groups-pending-invite", index))
+                            .aria_label(line.clone())
+                            .test_support()
+                            .w_full()
+                            .min_w_0()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(t.space.small)
+                            .child(
+                                caption(format!("✉️ {line}"), cx)
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal(),
+                            )
+                            .child(
+                                design::button(
+                                    ("groups-pending-invite-show", index),
+                                    "Copy link again",
+                                    cx,
+                                )
+                                .small()
+                                .accessibility_label(format!(
+                                    "Copy the invite link for {who} again"
+                                ))
+                                .disabled(self.groups_form.copy_pending)
+                                .on_click(cx.listener(
+                                    move |view, _, _, cx| {
+                                        view.create_and_copy_invite(
+                                            GroupCommand::ShowInvite { id },
+                                            cx,
+                                        );
+                                    },
+                                )),
+                            )
+                            .child(
+                                design::button(
+                                    ("groups-pending-invite-cancel", index),
+                                    "Cancel invite",
+                                    cx,
+                                )
+                                .small()
+                                .ghost()
+                                .accessibility_label(format!("Cancel the invite for {who}"))
+                                .on_click(cx.listener(
+                                    move |_, _, _, cx| {
+                                        send(GroupCommand::CancelInvite { id }, cx);
+                                    },
+                                )),
+                            )
+                    }),
+            )
     }
 
     fn note_draft(&self, cx: &Context<Self>) -> NoteDraft {

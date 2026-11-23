@@ -2298,3 +2298,273 @@ fn benchmark_group_history() {
         assert!(view.pending.is_empty());
     }
 }
+
+// ---- groups across the internet --------------------------------------------
+
+#[test]
+fn an_invite_lasts_a_week_survives_a_restart_and_can_be_cancelled() {
+    const DAY: i64 = 24 * 60 * 60 * 1000;
+    let group = Log::family().group;
+    let now = Timestamp(1_000);
+    let grandad = Invite::new(
+        group,
+        InviteKind::Person {
+            name: "Grandad".into(),
+            role: Role::Member,
+        },
+        [1; 16],
+        now,
+    );
+    let laptop = Invite::new(group, InviteKind::OwnDevice, [2; 16], Timestamp(2_000));
+    assert_eq!(grandad.expires_at, Timestamp(1_000 + 7 * DAY));
+
+    let mut book = InviteBook::default();
+    book.issue(grandad.clone());
+    book.issue(laptop.clone());
+    let waiting: Vec<String> = book.pending(now).iter().map(PendingInvite::who).collect();
+    assert_eq!(waiting, ["Grandad", "Another of your computers"]);
+
+    // Switched off overnight: the link sent yesterday still works the next day.
+    let next_day = Timestamp(now.millis() + DAY);
+    let mut book = InviteBook::restore(book.saved(next_day), next_day);
+    assert_eq!(book.pending(next_day).len(), 2);
+    assert_eq!(
+        book.redeem(&grandad.proof(b"t"), b"t", next_day),
+        Ok(grandad.clone())
+    );
+    // A used invite is remembered as used until it would have expired anyway.
+    let mut book = InviteBook::restore(book.saved(next_day), next_day);
+    assert_eq!(
+        book.redeem(&grandad.proof(b"t"), b"t", next_day),
+        Err(RedeemError::AlreadyUsed)
+    );
+    assert_eq!(book.pending(next_day).len(), 1);
+
+    // Cancelling stops the link at once.
+    let id = InviteId::of(&laptop);
+    assert_eq!(book.waiting(&id, next_day), Some(&laptop));
+    assert!(book.cancel(&id));
+    assert!(!book.cancel(&id));
+    assert_eq!(
+        book.redeem(&laptop.proof(b"t"), b"t", next_day),
+        Err(RedeemError::Unknown)
+    );
+
+    // Nothing expired is kept or restored.
+    let late = Timestamp(now.millis() + 8 * DAY);
+    assert_eq!(book.saved(late), Vec::new());
+    let mut stale = InviteBook::default();
+    stale.issue(grandad);
+    assert_eq!(
+        InviteBook::restore(stale.saved(now), late).pending(late),
+        []
+    );
+}
+
+#[test]
+fn time_left_is_said_in_days_hours_or_minutes() {
+    const MINUTE: i64 = 60_000;
+    let now = Timestamp(0);
+    let left = |ms: i64| time_left_label(Timestamp(ms), now);
+    assert_eq!(left(7 * 24 * 60 * MINUTE), "7 days");
+    assert_eq!(left(47 * 60 * MINUTE), "about 47 hours");
+    assert_eq!(left(3 * 60 * MINUTE), "about 3 hours");
+    assert_eq!(left(119 * MINUTE), "about 119 minutes");
+    assert_eq!(left(MINUTE), "about 1 minute");
+    assert_eq!(left(1), "about 1 minute");
+    assert_eq!(left(-5), "about 1 minute");
+}
+
+#[test]
+fn the_view_says_who_is_online_and_how_each_computer_is_connected() {
+    let log = family_of_three();
+    let now = Timestamp(10 * 60_000);
+    let mut view = GroupsView::default();
+    view.apply(GroupEvent::Loaded {
+        this_computer: device(1),
+        group: Some(log.state()),
+    });
+    assert_eq!(
+        view.connection_summary(now),
+        "None of the 2 other computers are online now. They will catch up when they are."
+    );
+    view.apply(GroupEvent::Presence(std::collections::BTreeMap::from([
+        (device(2), Timestamp(now.0 - 5_000)),
+        (device(3), Timestamp(now.0 - 5 * 60_000)),
+    ])));
+    view.apply(GroupEvent::Network(GroupNetwork {
+        reach: Reachability::Anywhere,
+        routes: std::collections::BTreeMap::from([(device(2), Route::Relayed)]),
+        checked_at: Some(now),
+        checking: false,
+    }));
+    assert_eq!(view.others_online(now), (1, 2));
+    assert_eq!(
+        view.connection_summary(now),
+        "1 of the 2 other computers are online now."
+    );
+    let status = |n: u8| -> String {
+        view.rows()
+            .into_iter()
+            .flat_map(|row| row.computers)
+            .find(|computer| computer.device == device(n))
+            .expect("in the roster")
+            .status(now)
+    };
+    assert_eq!(
+        status(2),
+        "Online now · connected through a relay (still private, a little slower)"
+    );
+    assert_eq!(
+        status(3),
+        "Seen 5 min ago · it will catch up when it's back online"
+    );
+
+    view.apply(GroupEvent::Presence(std::collections::BTreeMap::from([
+        (device(2), now),
+        (device(3), now),
+    ])));
+    assert_eq!(
+        view.connection_summary(now),
+        "All 2 other computers are online now."
+    );
+    view.apply(GroupEvent::Network(GroupNetwork {
+        reach: Reachability::Offline,
+        ..GroupNetwork::default()
+    }));
+    assert!(
+        view.connection_summary(now)
+            .starts_with("This computer is offline.")
+    );
+    for reach in [
+        Reachability::Connecting,
+        Reachability::Anywhere,
+        Reachability::SameNetworkOnly,
+        Reachability::Offline,
+    ] {
+        assert_ne!(reach.title(), "");
+        assert!(reach.detail().ends_with('.'), "{reach:?}");
+    }
+}
+
+#[test]
+fn a_used_or_cancelled_invite_takes_its_link_off_the_screen_and_waiting_is_explained() {
+    let log = Log::family();
+    let invite = Invite::new(log.group, InviteKind::OwnDevice, [4; 16], Timestamp(0));
+    let link = JoinLink::new(
+        log.group,
+        "Family".into(),
+        device(1),
+        "Mum".into(),
+        InviteKind::OwnDevice,
+        invite.secret,
+        invite.expires_at,
+        None,
+        Vec::new(),
+    )
+    .encode();
+    let pending = PendingInvite {
+        id: InviteId::of(&invite),
+        kind: invite.kind.clone(),
+        expires_at: invite.expires_at,
+    };
+    let mut view = GroupsView::default();
+    view.apply(GroupEvent::Loaded {
+        this_computer: device(1),
+        group: Some(log.state()),
+    });
+    view.apply(GroupEvent::InviteReady {
+        link: link.clone(),
+        expires_at: invite.expires_at,
+        qr: vec![vec![true]],
+    });
+    view.apply(GroupEvent::Invites(vec![pending]));
+    assert_eq!(view.invite.as_ref().map(|(text, _)| text), Some(&link));
+    assert_eq!(view.pending_invites.len(), 1);
+
+    view.apply(GroupEvent::Invites(Vec::new()));
+    assert_eq!(view.invite, None);
+    assert_eq!(view.invite_qr, Vec::<Vec<bool>>::new());
+    assert_eq!(view.pairing, PairingStage::Idle);
+
+    let waiting = JoinWaiting {
+        group_name: "Family".into(),
+        inviter_name: "Mum".into(),
+        tries: 2,
+    };
+    assert_eq!(
+        waiting.message(),
+        "Waiting for Mum's computer to answer. Ask Mum to switch it on and open Sovra. You'll join “Family” by itself as soon as it answers, so you can leave this open."
+    );
+    let mut joining = GroupsView::default();
+    joining.apply(GroupEvent::Pairing(PairingStep::PeerConnected));
+    joining.apply(GroupEvent::JoinWaiting(Some(waiting)));
+    assert!(joining.join_waiting.is_some());
+    joining.apply(GroupEvent::Pairing(PairingStep::Cancel));
+    assert_eq!(joining.join_waiting, None);
+}
+
+#[test]
+fn joining_and_new_arrivals_are_said_once_in_plain_words() {
+    let mut log = Log::family();
+    let alone = log.state();
+    log.add(2, Role::Member, 2_000);
+    let with_dad = log.state();
+    log.push(
+        device(1),
+        3_000,
+        MembershipBody::AddDevice {
+            person: person(1),
+            device: device(9),
+            name: "Mum's tablet".into(),
+        },
+    );
+    let with_tablet = log.state();
+
+    // Mum's screen hears that Dad arrived, then that her own tablet did.
+    let mut mum = GroupsView::default();
+    mum.apply(GroupEvent::Loaded {
+        this_computer: device(1),
+        group: Some(alone),
+    });
+    assert_eq!(mum.notice, None, "opening the app is not news");
+    mum.apply(GroupEvent::Changed(with_dad.clone()));
+    assert_eq!(
+        mum.notice.as_deref(),
+        Some("🎉 Person 2 joined the group on “Computer 2”.")
+    );
+    mum.apply(GroupEvent::Changed(with_dad.clone()));
+    mum.apply(GroupEvent::Changed(with_tablet));
+    assert_eq!(
+        mum.notice.as_deref(),
+        Some("🎉 “Mum's tablet” was added as another of Mum's computers.")
+    );
+
+    // Dad's screen says he is in, and does not announce him to himself.
+    let mut dad = GroupsView::default();
+    dad.apply(GroupEvent::Loaded {
+        this_computer: device(2),
+        group: None,
+    });
+    dad.apply(GroupEvent::Pairing(PairingStep::PeerConnected));
+    dad.apply(GroupEvent::Pairing(PairingStep::SkipCode));
+    dad.apply(GroupEvent::Pairing(PairingStep::Admitted {
+        group: with_dad.group,
+    }));
+    dad.apply(GroupEvent::Loaded {
+        this_computer: device(2),
+        group: Some(with_dad.clone()),
+    });
+    assert_eq!(
+        dad.notice.as_deref(),
+        Some("🎉 You're in. This computer is now part of “Family”.")
+    );
+    dad.apply(GroupEvent::Changed(with_dad));
+    assert!(
+        dad.notice
+            .as_deref()
+            .is_some_and(|n| n.contains("You're in"))
+    );
+    dad.apply(GroupEvent::LeftGroup);
+    assert_eq!(dad.notice, None);
+}
