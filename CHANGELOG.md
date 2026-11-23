@@ -17,7 +17,8 @@ package version.
 - **Folder indexing is faster.** Initial scans write fewer database records per file,
   repeat scans can confirm unchanged files, including large text files, without rereading
   their contents, and long documents find each passage’s heading in a single pass.
-  The live card shows when Sovra is checking a file for changes or extracting its text. See the [folder benchmarks](docs/performance.md#folder-indexing).
+  The live card shows when Sovra is checking a file for changes or extracting its text.
+  The final elapsed time includes the last file and the check for removed files. See the [folder benchmarks](docs/performance.md#folder-indexing).
 
 - **Groups work across the internet, and say so.** An invite link now works
   from anywhere for seven days instead of ten minutes, survives a restart of

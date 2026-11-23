@@ -94,6 +94,37 @@ fn progress_events_arrive_during_the_scan_and_never_go_backwards() {
     assert_eq!((last.0, last.1, last.2), (200, 200, true));
 }
 
+#[test]
+fn completed_scan_keeps_the_time_spent_finishing_its_last_file() {
+    struct LastFile(AtomicBool);
+    impl ScanObserver for LastFile {
+        fn cancellation(&self) -> Option<ScanCancellation> {
+            None
+        }
+        fn progress(&self, root: &IndexedRoot) {
+            if root.status == IndexStatus::Scanning
+                && root.progress.handled == 1
+                && !self.0.swap(true, Ordering::Relaxed)
+            {
+                let (_hold, wait) = std::sync::mpsc::channel::<()>();
+                let _ = wait.recv_timeout(Duration::from_millis(25));
+            }
+        }
+    }
+    let fixture = Fixture::new();
+    fixture.write("file.txt", "Finished reading");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    let observer = LastFile(AtomicBool::new(false));
+    let done = store.scan(&root.id, &observer).unwrap();
+    assert!(observer.0.load(Ordering::Relaxed));
+    assert!(done.progress.elapsed_ms >= 25);
+    assert_eq!(
+        store.list().unwrap()[0].progress.elapsed_ms,
+        done.progress.elapsed_ms
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_rename_and_a_new_hard_link_in_one_scan_keep_both_files() {

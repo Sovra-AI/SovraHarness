@@ -370,8 +370,11 @@ impl FileIndex for LocalFileIndex {
         let activity = history::begin(&tx, root_id)?;
         report::begin(&tx, root_id, activity)?;
         tx.commit().map_err(|e| db_error(&e))?;
+        let started = std::time::Instant::now();
         observer.progress(&root);
         let result = scan::run(&mut db, &mut root, &self.directory, observer, activity);
+        // One slow final file may finish between progress samples.
+        root.progress.elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         match (observer.cancellation(), result) {
             (Some(ScanCancellation::Requested), _) => {
                 root.status = IndexStatus::Cancelled;
