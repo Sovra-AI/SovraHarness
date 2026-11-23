@@ -235,7 +235,7 @@ mod tests {
             let shell = cx.new(|cx| {
                 let mut shell = Shell::new(0, window, cx);
                 shell.select_tab(NavTab::Knowledge, cx);
-                shell.explorer.waiting = true;
+                shell.explorer.pending_request = Some(0);
                 shell.explorer.observe(&Event::Explored {
                     request_id: 0,
                     result: Ok(report),
@@ -245,8 +245,8 @@ mod tests {
             Root::new(shell, window, cx)
         });
         cx.update_window(window.into(), |_, window, cx| {
-            window.click("knowledge-explore", cx);
             window.render_frame(cx);
+            assert!(window.find("explore-query").visible());
             assert_eq!(
                 window.find("explore-map-count").label(),
                 Some("This search returned 3 excerpts and 1 shared connection.")
@@ -270,6 +270,12 @@ mod tests {
             for i in 0..3usize {
                 assert!(window.try_find(("explore-source", i)).is_some());
             }
+            window.click("knowledge-overview", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("explore-map-count").is_none());
+            window.click("explore-show-results", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("explore-source", 2usize)).is_some());
         })
         .unwrap();
     }

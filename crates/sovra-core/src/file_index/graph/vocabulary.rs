@@ -56,6 +56,19 @@ pub enum EntityKind {
 }
 
 impl EntityKind {
+    /// Standard vocabulary shared by the graph and its browser.
+    pub const BUILT_INS: &[Self] = &[
+        Self::Document,
+        Self::Section,
+        Self::Topic,
+        Self::Person,
+        Self::Organization,
+        Self::Project,
+        Self::Task,
+        Self::Category,
+        Self::Literal,
+    ];
+
     pub fn matches_source_class(&self, class: &str) -> bool {
         self.label().eq_ignore_ascii_case(class)
             || (*self == Self::Literal && class.eq_ignore_ascii_case("literal"))
@@ -102,6 +115,18 @@ pub enum RelationKind {
 }
 
 impl RelationKind {
+    /// Standard vocabulary shared by the graph and its browser.
+    pub const BUILT_INS: &[Self] = &[
+        Self::GroundedIn,
+        Self::PartOf,
+        Self::About,
+        Self::ForProject,
+        Self::DependsOn,
+        Self::RelatedTo,
+        Self::Revises,
+        Self::IsA,
+    ];
+
     pub fn accepts(&self, subject: Option<&EntityKind>, object: Option<&EntityKind>) -> bool {
         use EntityKind::{Category, Document, Project, Section, Task};
         match self {

@@ -1,4 +1,4 @@
-//! Knowledge tab: saved memory controls, file knowledge, and an illustrative explanation.
+//! A single source-search and evidence page with independently expandable collections.
 //!
 //! The picture comes from [`sovra_core::memory_explanation`]. Drawing it does
 //! not open a memory store or do any other IO.
@@ -23,29 +23,132 @@ use crate::RuntimeClient;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+mod vocabulary;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum KnowledgeSection {
     Explore,
     Files,
-    #[default]
+    Relationships,
     Memories,
     People,
     Help,
 }
 
+impl KnowledgeSection {
+    // These are direct children of the page's one scroll container. Deep links
+    // can land on a section even when an earlier section has grown or closed.
+    const ORDER: [Self; 6] = [
+        Self::Explore,
+        Self::Files,
+        Self::Relationships,
+        Self::Memories,
+        Self::People,
+        Self::Help,
+    ];
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Explore => "Search your knowledge",
+            Self::Files => "Files",
+            Self::Relationships => "Relationships & taxonomy",
+            Self::Memories => "About you",
+            Self::People => "People",
+            Self::Help => "Guide",
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Explore => "knowledge-explore",
+            Self::Files => "knowledge-files",
+            Self::Relationships => "knowledge-relationships",
+            Self::Memories => "knowledge-memories",
+            Self::People => "knowledge-people",
+            Self::Help => "knowledge-help",
+        }
+    }
+
+    fn icon(self) -> IconName {
+        match self {
+            Self::Explore => IconName::Search,
+            Self::Files => IconName::FolderOpen,
+            Self::Relationships => IconName::Workflow,
+            Self::Memories => IconName::Brain,
+            Self::People => IconName::Users,
+            Self::Help => IconName::BookOpen,
+        }
+    }
+
+    fn summary(self, shell: &Shell) -> String {
+        let state = &shell.file_index.state;
+        match self {
+            Self::Files => {
+                if let Some(root) = state
+                    .roots
+                    .iter()
+                    .find(|r| r.status == sovra_core::file_index::IndexStatus::Scanning)
+                {
+                    let progress = sovra_core::file_index::live::ScanPicture::of(&root.progress);
+                    format!(
+                        "{} · {} · {}",
+                        root.path.display(),
+                        progress.headline,
+                        progress.count_line
+                    )
+                } else {
+                    state.capture_summary()
+                }
+            }
+            Self::Relationships if !state.knowledge_pending.is_empty() => {
+                format!("{} awaiting review", state.knowledge_pending.len())
+            }
+            Self::Relationships => {
+                "Saved connections, relationship types and file categories".into()
+            }
+            Self::Memories => format!(
+                "Conversation memory · {}",
+                shell.workspace().memory_status.label()
+            ),
+            Self::People => {
+                let count = shell.workspace().connections.people.people.len();
+                format!("{count} {}", plural(count, "person", "people"))
+            }
+            Self::Help => "How details are saved, sourced and corrected".into(),
+            Self::Explore => String::new(),
+        }
+    }
+}
+
 impl Shell {
+    pub(crate) fn scroll_to_knowledge(&self, section: KnowledgeSection) {
+        self.knowledge_scroll
+            .scroll_to_top_of_item(section as usize);
+    }
+
     pub(crate) fn select_knowledge_section(
         &mut self,
         section: KnowledgeSection,
         cx: &mut Context<Self>,
     ) {
-        self.knowledge_section = section;
+        self.knowledge_open.insert(section);
         if section == KnowledgeSection::Memories {
             self.memory_view
                 .update(cx, |view, cx| view.refresh_captured(true, cx));
         }
-        self.knowledge_scroll.set_offset(gpui_kit::Point::default());
+        if section == KnowledgeSection::Relationships {
+            self.load_saved_relationships(cx);
+        }
+        self.scroll_to_knowledge(section);
         cx.notify();
+    }
+
+    fn toggle_knowledge_section(&mut self, section: KnowledgeSection, cx: &mut Context<Self>) {
+        if self.knowledge_open.remove(&section) {
+            cx.notify();
+        } else {
+            self.select_knowledge_section(section, cx);
+        }
     }
 
     /// Opens Knowledge on the people list. Tests use this when the sidebar rail covers the tab.
@@ -68,93 +171,153 @@ pub(crate) fn render_knowledge_view(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
-    if shell.memory_view.read(cx).source_only() {
-        let explored = shell.explorer.reading_personal_source;
+    if shell.memory_view.read(cx).source_only() && !shell.explorer.reading_personal_source {
         return v_flex()
             .id("sovra-memory-source-view").test_support()
             .flex_1().min_w_0().min_h_0().h_full().items_center().overflow_y_scroll()
             .p(t.space.medium)
             .child(v_flex().id("knowledge-column").test_support().w_full().min_w_0().flex_shrink_0().max_w(t.layout.reading_width).mx_auto().gap(t.space.small)
-                .child(design::button("memory-back-chat", if explored {"Back to Explore"} else {"Back to conversation"}, cx)
+                .child(design::button("memory-back-chat", "Back to conversation", cx)
                     .on_click(cx.listener(move |shell, _, _, cx| {
-                        if explored {shell.select_tab(sovra_core::NavTab::Knowledge,cx);shell.select_knowledge_section(KnowledgeSection::Explore,cx);} else {shell.select_tab(sovra_core::NavTab::Chat,cx);}
+                        shell.select_tab(sovra_core::NavTab::Chat,cx);
                     })))
                 .child(div().sovra_text(TextRole::Caption, cx).child("The saved record behind this reference. A reference alone does not prove the reply is correct."))
                 .child(shell.memory_view.clone()))
             .into_any_element();
     }
-    // The memory section is a card page with a map, so it gets the wider page measure;
-    // the other sections are prose and forms.
-    let measure = if shell.knowledge_section == KnowledgeSection::Memories {
-        t.layout.page_width
-    } else {
-        t.layout.reading_width
-    };
-    let column = v_flex()
-        .id("knowledge-column")
+    let mut page = v_flex()
+        .id("sovra-knowledge-view")
         .test_support()
-        .flex_shrink_0()
-        .w_full()
+        .flex_1()
         .min_w_0()
-        .max_w(measure)
-        .mx_auto()
-        .gap(t.space.medium);
-    let column = match shell.knowledge_section {
-        KnowledgeSection::Explore => column.child(crate::knowledge_explorer::render(shell, cx)),
-        KnowledgeSection::Files => column.child(crate::file_index_view::render(shell, cx)),
-        KnowledgeSection::Memories => {
-            let column = if shell.memory_view.read(cx).reading_source() {
-                column
-            } else {
-                column.child(render_memory_status(shell, cx))
+        .min_h_0()
+        .w_full()
+        .items_center()
+        .overflow_y_scroll()
+        .track_scroll(&shell.knowledge_scroll)
+        .px(t.space.medium)
+        .pb(t.space.medium);
+
+    for section in KnowledgeSection::ORDER {
+        let open = shell.knowledge_open.contains(&section);
+        let width = if section == KnowledgeSection::Memories && open {
+            t.layout.page_width
+        } else {
+            t.layout.reading_width
+        };
+        let block = v_flex()
+            .w_full()
+            .max_w(width)
+            .min_w_0()
+            .flex_shrink_0()
+            .gap(t.space.small)
+            .py(t.space.small);
+        if section == KnowledgeSection::Explore {
+            page = page.child(
+                block
+                    .id("knowledge-column")
+                    .test_support()
+                    .child(crate::knowledge_explorer::render(shell, cx)),
+            );
+            continue;
+        }
+        let summary = section.summary(shell);
+        let icon = if open {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        };
+        let header = design::button(section.id(), "", cx)
+            .ghost()
+            .accessibility_label(format!("{}. {summary}", section.title()))
+            .selected(open)
+            .w_full()
+            .h_auto()
+            .py(t.space.small)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(t.space.medium)
+                    .child(Icon::new(section.icon()).text_color(t.text_secondary))
+                    .child(
+                        v_flex()
+                            .min_w_0()
+                            .flex_1()
+                            .items_start()
+                            .child(
+                                div()
+                                    .sovra_text(TextRole::SectionTitle, cx)
+                                    .child(section.title()),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .max_w_full()
+                                    .whitespace_normal()
+                                    .sovra_text(TextRole::Caption, cx)
+                                    .text_color(t.text_secondary)
+                                    .child(summary),
+                            ),
+                    )
+                    .child(Icon::new(icon).small().text_color(t.text_secondary)),
+            )
+            .on_click(
+                cx.listener(move |shell, _, _, cx| shell.toggle_knowledge_section(section, cx)),
+            );
+        let mut block = block
+            .id(("knowledge-collection", section as usize))
+            .test_support()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(header);
+        if open {
+            block = match section {
+                KnowledgeSection::Files => block.child(crate::file_index_view::render(shell, cx)),
+                KnowledgeSection::Relationships => block
+                    .child(vocabulary::render(shell, cx))
+                    .children(
+                        (!shell.file_index.state.knowledge_pending.is_empty())
+                            .then(|| crate::knowledge_review::render(&shell.file_index.state, cx)),
+                    )
+                    .child(crate::file_index_view::knowledge::render(shell, cx)),
+                KnowledgeSection::Memories => {
+                    if shell.explorer.reading_personal_source {
+                        block = block.child(
+                            design::button("explore-back-results", "Back to search results", cx)
+                                .self_start()
+                                .on_click(cx.listener(|shell, _, _, cx| {
+                                    shell.explorer.reading_personal_source = false;
+                                    shell
+                                        .memory_view
+                                        .update(cx, crate::memory_view::MemoryView::load);
+                                    shell.select_knowledge_section(KnowledgeSection::Explore, cx);
+                                })),
+                        );
+                    }
+                    if !shell.memory_view.read(cx).reading_source() {
+                        block = block.child(render_memory_status(shell, cx));
+                    }
+                    block.child(shell.memory_view.clone())
+                }
+                KnowledgeSection::People => block.child(render_people(shell, cx)),
+                KnowledgeSection::Help => {
+                    let story = memory_explanation();
+                    block = block
+                        .child(render_intro(&story, cx))
+                        .child(render_story(&story, cx))
+                        .child(render_about(&story, cx))
+                        .child(render_search(&story, cx))
+                        .child(render_times_toggle(shell.knowledge_times_open, cx));
+                    if shell.knowledge_times_open {
+                        block = block.child(render_times(&story, cx));
+                    }
+                    block
+                }
+                KnowledgeSection::Explore => unreachable!("Search is always on the page"),
             };
-            column.child(shell.memory_view.clone())
         }
-        KnowledgeSection::People => column.child(render_people(shell, cx)),
-        KnowledgeSection::Help => {
-            let story = memory_explanation();
-            let column = column
-                .child(render_intro(&story, cx))
-                .child(render_story(&story, cx))
-                .child(render_about(&story, cx))
-                .child(render_search(&story, cx))
-                .child(render_times_toggle(shell.knowledge_times_open, cx));
-            if shell.knowledge_times_open {
-                column.child(render_times(&story, cx))
-            } else {
-                column
-            }
-        }
-    };
-    let mut navigation = h_flex()
-        .id("knowledge-navigation")
-        .test_support()
-        .w_full()
-        .min_w_0()
-        .max_w(measure)
-        .mx_auto()
-        .flex_wrap()
-        .gap(t.space.compact);
-    for (id, label, section) in [
-        (
-            "knowledge-memories",
-            "About you",
-            KnowledgeSection::Memories,
-        ),
-        ("knowledge-people", "People", KnowledgeSection::People),
-        ("knowledge-explore", "Explore", KnowledgeSection::Explore),
-        ("knowledge-files", "Files", KnowledgeSection::Files),
-        ("knowledge-help", "Guide", KnowledgeSection::Help),
-    ] {
-        navigation = navigation.child(
-            design::button(id, label, cx)
-                .small()
-                .px(t.space.compact)
-                .selected(shell.knowledge_section == section)
-                .on_click(
-                    cx.listener(move |shell, _, _, cx| shell.select_knowledge_section(section, cx)),
-                ),
-        );
+        page = page.child(block);
     }
     v_flex()
         .id("knowledge-page")
@@ -164,30 +327,33 @@ pub(crate) fn render_knowledge_view(
         .min_h_0()
         .h_full()
         .child(
-            v_flex()
+            h_flex()
                 .w_full()
-                .flex_shrink_0()
-                .items_center()
+                .justify_center()
                 .px(t.space.medium)
                 .py(t.space.small)
-                .child(navigation),
+                .child(
+                    h_flex()
+                        .w_full()
+                        .max_w(t.layout.reading_width)
+                        .min_w_0()
+                        .justify_between()
+                        .flex_wrap()
+                        .child(div().sovra_text(TextRole::PageTitle, cx).child("Knowledge"))
+                        .child(
+                            design::button("knowledge-overview", "Overview", cx)
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(|shell, _, _, cx| {
+                                    shell.knowledge_open.clear();
+                                    shell.explorer.fold_results();
+                                    shell.scroll_to_knowledge(KnowledgeSection::Explore);
+                                    cx.notify();
+                                })),
+                        ),
+                ),
         )
-        .child(
-            v_flex()
-                .id("sovra-knowledge-view")
-                .test_support()
-                .flex_1()
-                .min_w_0()
-                .min_h_0()
-                .w_full()
-                .items_center()
-                .overflow_y_scroll()
-                .track_scroll(&shell.knowledge_scroll)
-                .px(t.space.medium)
-                .pt(t.space.small)
-                .pb(t.space.medium)
-                .child(column),
-        )
+        .child(page)
         .into_any_element()
 }
 

@@ -72,7 +72,8 @@ pub struct Shell {
     /// Enter in the password box uses the same sign-in as the button.
     _login_password_events: Subscription,
     pub(crate) knowledge_times_open: bool,
-    pub(crate) knowledge_section: crate::knowledge_view::KnowledgeSection,
+    pub(crate) knowledge_open: std::collections::BTreeSet<crate::knowledge_view::KnowledgeSection>,
+    pub(crate) knowledge_vocabulary_open: bool,
     pub(crate) knowledge_scroll: gpui_kit::ScrollHandle,
     pub(crate) people_message_input: Entity<InputState>,
     pub(crate) people_email_input: Entity<InputState>,
@@ -379,8 +380,9 @@ impl Shell {
                     for event in batch {
                         shell.explorer.observe(&event);
                         let memory_visible = shell.state.active_tab == NavTab::Knowledge
-                            && shell.knowledge_section
-                                == crate::knowledge_view::KnowledgeSection::Memories;
+                            && shell
+                                .knowledge_open
+                                .contains(&crate::knowledge_view::KnowledgeSection::Memories);
                         if let sovra_core::Event::Memory(sovra_core::MemoryEvent::Processed(job)) =
                             &event
                         {
@@ -420,9 +422,9 @@ impl Shell {
                                 reset_scroll
                             });
                             if reset_scroll && memory_visible {
-                                shell
-                                    .knowledge_scroll
-                                    .set_offset(gpui_kit::Point::default());
+                                shell.scroll_to_knowledge(
+                                    crate::knowledge_view::KnowledgeSection::Memories,
+                                );
                             }
                         }
                         if let sovra_core::Event::FileIndex(event) = &event {
@@ -906,7 +908,8 @@ impl Shell {
             login_password_input,
             _login_password_events: login_password_events,
             knowledge_times_open: false,
-            knowledge_section: crate::knowledge_view::KnowledgeSection::default(),
+            knowledge_open: std::collections::BTreeSet::new(),
+            knowledge_vocabulary_open: false,
             knowledge_scroll: gpui_kit::ScrollHandle::new(),
             people_message_input,
             people_email_input,
@@ -1078,6 +1081,7 @@ impl Shell {
 
     pub fn open_memory_source(&mut self, action: sovra_core::MemoryAction, cx: &mut Context<Self>) {
         self.select_tab(NavTab::Knowledge, cx);
+        self.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Memories, cx);
         self.memory_view
             .update(cx, |view, cx| view.open_source(action, cx));
     }

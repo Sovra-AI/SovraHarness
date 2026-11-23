@@ -113,8 +113,10 @@ has the first run, group steps, every setting, privacy details and limits.
   page, and follow the live work log as helpers work together.
 - **Work with your knowledge:** attach files, index local folders, recall saved
   details, and follow each file as Sovra checks it for changes, extracts text, or saves
-  passages. Compare results with saved artifacts in **Knowledge → Explore**. Follow the evidence map to
-  the underlying wording for relationships, measurements, and changes over time.
+  passages. Search files, personal details, and saved artifacts together at the top of
+  **Knowledge**. Follow a result to its original wording, or expand **Relationships &
+  taxonomy** to review proposed connections, browse saved ones, and inspect the types
+  and file categories. Files, personal details, and people open on the same page.
 - **Save your work:** organize versioned documents, code, and other artifacts
   into folders and favorites. Preview saved websites in your browser.
 - **Keep company decisions:** record reasons, quoted evidence, review dates and

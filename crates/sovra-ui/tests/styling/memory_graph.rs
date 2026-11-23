@@ -172,6 +172,9 @@ fn memory_graph_is_readable_at_every_size(cx: &mut TestAppContext) {
             );
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, "knowledge-memories", cx);
+                window.click("knowledge-memories", cx);
+                window.render_frame(cx);
                 reveal(window, "memory-graph-empty", cx);
                 let empty = window.find("memory-graph-empty");
                 assert!(empty.label().unwrap().contains("Nothing is saved yet"));

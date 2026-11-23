@@ -1,5 +1,7 @@
 //! Knowledge tab: the explanation is on screen, and the chat transcript is not.
 
+#[path = "support/knowledge.rs"]
+mod knowledge;
 #[path = "support/nav.rs"]
 mod nav;
 
@@ -11,30 +13,70 @@ use sovra_runtime::Client;
 use sovra_ui::Shell;
 
 #[gpui_kit::test]
-fn knowledge_opens_to_personal_details_and_keeps_files_and_help_reachable(cx: &mut TestAppContext) {
-    let (client, _commands, _events) = Client::loopback();
+fn knowledge_keeps_search_collections_and_their_evidence_on_one_page(cx: &mut TestAppContext) {
+    let (client, commands, _events) = Client::loopback();
     cx.update(|cx| sovra_ui::init(client, cx));
     let window = cx.open_window(size(px(1280.), px(820.)), |window, cx| {
         let shell = cx.new(|cx| Shell::new(0, window, cx));
         Root::new(shell, window, cx)
     });
     cx.update_window(window.into(), |_, window, cx| {
+        use sovra_core::file_index::{IndexCommand, graph::RelationKind};
         nav::click_in_sidebar(window, "nav-knowledge", cx);
         window.render_frame(cx);
+        assert!(window.find("explore-query").visible());
+        for id in [
+            "knowledge-files",
+            "knowledge-relationships",
+            "knowledge-memories",
+            "knowledge-people",
+            "knowledge-help",
+        ] {
+            assert!(window.try_find(id).is_some());
+        }
         assert!(window.try_find("file-index-panel").is_none());
-        assert!(window.find("conversation-memory-status").visible());
-        window.click("knowledge-memories", cx);
+        for id in [
+            "knowledge-files",
+            "knowledge-relationships",
+            "knowledge-taxonomy",
+        ] {
+            knowledge::reveal(window, id, cx);
+            window.click(id, cx);
+        }
         window.render_frame(cx);
-        assert!(window.find("memory-browser").visible());
+        for id in [
+            "explore-query",
+            "file-index-panel",
+            "knowledge-entity-types",
+            "knowledge-file-types",
+            "knowledge-life-areas",
+            "knowledge-saved-browser",
+        ] {
+            assert!(window.try_find(id).is_some(), "{id} stays on the page");
+        }
+        let depends_on = ("knowledge-predicate", 4usize);
+        knowledge::reveal(window, depends_on, cx);
+        window.click(depends_on, cx);
+        window.render_frame(cx);
+        let filter = window.find("knowledge-current-predicate");
+        assert!(
+            filter
+                .label()
+                .is_some_and(|label| label.contains("depends on"))
+        );
+        let sent = std::iter::from_fn(|| commands.try_recv().ok());
+        assert!(
+            sent.filter_map(|command| match command {
+                sovra_core::Command::FileIndex(IndexCommand::BrowseKnowledge { query, .. }) =>
+                    query.relation,
+                _ => None,
+            })
+            .any(|kind| kind == RelationKind::DependsOn)
+        );
+        window.click("knowledge-overview", cx);
+        window.render_frame(cx);
+        assert!(window.find("explore-query").visible());
         assert!(window.try_find("file-index-panel").is_none());
-        window.click("knowledge-help", cx);
-        window.render_frame(cx);
-        assert!(window.find("knowledge-intro").visible());
-        assert!(window.try_find("memory-browser").is_none());
-        window.click("knowledge-files", cx);
-        window.render_frame(cx);
-        assert!(window.find("index-folder").visible());
-        assert!(window.try_find("knowledge-intro").is_none());
     })
     .unwrap();
 }
@@ -44,10 +86,9 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
     cx: &mut TestAppContext,
 ) {
     use gpui_kit::component::{Theme, ThemeMode};
-    use gpui_kit::{ScrollDelta, point};
     use sovra_core::models::InterfaceScale;
     for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
-        let (client, _commands, _events) = Client::loopback();
+        let (client, _, _) = Client::loopback();
         cx.update(|cx| {
             sovra_ui::init(client, cx);
             sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
@@ -61,54 +102,28 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
             Root::new(shell, window, cx)
         });
         cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
             for mode in [ThemeMode::Dark, ThemeMode::Light] {
                 Theme::change(mode, Some(window), cx);
-                window.render_frame(cx);
-                for (tab, content) in [
-                    ("knowledge-files", "file-index-panel"),
+                for (section, content) in [
+                    ("knowledge-files", "index-folder"),
+                    ("knowledge-relationships", "knowledge-taxonomy"),
                     ("knowledge-memories", "conversation-memory-status"),
+                    ("knowledge-people", "people-empty"),
                     ("knowledge-help", "knowledge-intro"),
-                    ("knowledge-explore", "knowledge-explorer"),
                 ] {
-                    window.click(tab, cx);
-                    window.render_frame(cx);
+                    knowledge::reveal(window, section, cx);
+                    window.click(section, cx);
+                    knowledge::reveal(window, content, cx);
                     let bounds = window.find(content).bounds();
                     assert!(
                         bounds.left() >= px(0.) && bounds.right() <= px(width),
-                        "{content}@{scale}: {bounds:?}"
+                        "{content} at {scale}%: {bounds:?}"
                     );
-                    assert!(window.find(content).visible());
-                    window.scroll(
-                        "sovra-knowledge-view",
-                        ScrollDelta::Pixels(point(px(0.), px(-2000.))),
-                        cx,
-                    );
+                    assert!(window.find("knowledge-overview").visible());
+                    window.click("knowledge-overview", cx);
                     window.render_frame(cx);
-                    for id in [
-                        "knowledge-files",
-                        "knowledge-memories",
-                        "knowledge-help",
-                        "knowledge-explore",
-                    ] {
-                        let control = window.find(id);
-                        assert!(control.visible());
-                        assert!(
-                            control.bounds().left() >= px(0.)
-                                && control.bounds().right() <= px(width)
-                        );
-                        assert!(control.bounds().bottom() < px(height));
-                    }
+                    assert!(window.find("explore-query").visible());
                 }
-                window.click("knowledge-files", cx);
-                window.render_frame(cx);
-                let add = window.find("index-folder");
-                assert!(add.visible());
-                assert!(
-                    add.bounds().bottom() <= px(height),
-                    "Add a folder at {scale}%: {:?}",
-                    add.bounds()
-                );
             }
         })
         .unwrap();
@@ -170,6 +185,7 @@ fn memory_search_consent_discloses_destination_and_fits_each_layout(cx: &mut Tes
             cx.run_until_parked();
             cx.update_window(window.into(), |_, window, cx| {
                 window.render_frame(cx);
+                knowledge::reveal(window, "knowledge-memories", cx);
                 window.click("knowledge-memories", cx);
                 window.render_frame(cx);
                 for id in [gpui_kit::ElementId::from("memory-choose-semantic"), ("memory-enable-semantic", 0usize).into()] {
@@ -218,6 +234,7 @@ fn knowledge_tab_shows_the_memory_story_not_the_chat(cx: &mut TestAppContext) {
         window.render_frame(cx);
         nav::click_in_sidebar(window, "nav-knowledge", cx);
         window.render_frame(cx);
+        knowledge::reveal(window, "knowledge-help", cx);
         window.click("knowledge-help", cx);
         window.render_frame(cx);
 
@@ -350,7 +367,10 @@ fn semantic_folder_choice_discloses_the_destination_and_fits_each_layout(cx: &mu
                     ScrollDelta::Pixels(point(px(0.), px(5000.))),
                     cx,
                 );
-                window.click("knowledge-files", cx);
+                if window.try_find("file-index-panel").is_none() {
+                    knowledge::reveal(window, "knowledge-files", cx);
+                    window.click("knowledge-files", cx);
+                }
                 window.render_frame(cx);
                 let choices = if window.try_find("choose-semantic-folder").is_some() {
                     vec!["choose-semantic-folder"]
@@ -455,7 +475,11 @@ fn live_memory_status_and_service_disclosure_fit_all_layouts(cx: &mut TestAppCon
                 cx.update_window(window.into(), |_, window, cx| {
                     shell.update(cx, |shell, cx| shell.select_tab(NavTab::Knowledge, cx));
                     window.render_frame(cx);
-                    window.click("knowledge-memories", cx);
+                    if window.try_find("conversation-memory-status").is_none() {
+                        knowledge::reveal(window, "knowledge-memories", cx);
+                        window.click("knowledge-memories", cx);
+                    }
+                    knowledge::reveal(window, "conversation-memory-status", cx);
                     window.render_frame(cx);
                     let card = window.find("conversation-memory-status");
                     assert!(card.visible());

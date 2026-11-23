@@ -131,8 +131,16 @@ fn personal_knowledge_saves_retries_and_preserves_drafts_at_every_size(cx: &mut 
             respond(&events, load.request_id, MemoryReviewResult::Page(page(1)));
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, "knowledge-memories", cx);
+                window.click("knowledge-memories", cx);
                 window.render_frame(cx);
-                assert_eq!(window.find("knowledge-memories").label(), Some("About you"));
+                window.render_frame(cx);
+                assert!(
+                    window
+                        .find("knowledge-memories")
+                        .label()
+                        .is_some_and(|label| label.starts_with("About you."))
+                );
                 assert!(window.try_find("file-index-panel").is_none());
                 for (id, label) in [
                     ("memory-total-current", "3 Saved details"),

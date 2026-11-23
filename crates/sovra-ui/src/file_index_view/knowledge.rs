@@ -7,7 +7,6 @@ use sovra_core::file_index::{
 };
 
 pub(super) struct KnowledgeView {
-    pub(super) active: bool,
     search: Entity<InputState>,
     _search: gpui_kit::Subscription,
     selected: Option<String>,
@@ -28,7 +27,6 @@ impl KnowledgeView {
                 }
             });
         Self {
-            active: false,
             search,
             _search: subscription,
             selected: None,
@@ -38,7 +36,12 @@ impl KnowledgeView {
 }
 
 impl Shell {
-    fn browse_file_knowledge(&mut self, query: GraphQuery, remember: bool, cx: &mut Context<Self>) {
+    pub(crate) fn browse_file_knowledge(
+        &mut self,
+        query: GraphQuery,
+        remember: bool,
+        cx: &mut Context<Self>,
+    ) {
         if remember {
             let trail = &mut self.file_index.knowledge.trail;
             if trail.len() == 32 {
@@ -46,11 +49,31 @@ impl Shell {
             }
             trail.push(self.file_index.state.knowledge_browser.query.clone());
         }
-        self.file_index.knowledge.active = true;
         self.file_index.knowledge.selected = None;
         let command = self.file_index.state.knowledge_browser.browse(query);
         self.index_command(command, cx);
-        self.knowledge_scroll.set_offset(gpui_kit::Point::default());
+        self.scroll_to_knowledge(crate::knowledge_view::KnowledgeSection::Relationships);
+    }
+
+    pub(crate) fn filter_by_relationship_type(
+        &mut self,
+        relation: sovra_core::file_index::graph::RelationKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_index
+            .knowledge
+            .search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        let previous = &self.file_index.state.knowledge_browser.query;
+        let query = GraphQuery {
+            relation: Some(relation),
+            include_stale: previous.include_stale,
+            include_superseded: previous.include_superseded,
+            ..Default::default()
+        };
+        self.knowledge_vocabulary_open = false;
+        self.browse_file_knowledge(query, true, cx);
     }
 
     fn search_file_knowledge(&mut self, cx: &mut Context<Self>) {
@@ -75,32 +98,21 @@ impl Shell {
     }
 }
 
-pub(super) fn entry(cx: &mut Context<Shell>) -> impl IntoElement + use<> {
-    design::button("knowledge-browse-saved", "Browse saved relationships", cx)
-        .max_w_full()
-        .on_click(cx.listener(|shell, _, window, cx| {
-            shell.file_index.knowledge.trail.clear();
-            shell
-                .file_index
-                .knowledge
-                .search
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            shell.browse_file_knowledge(GraphQuery::default(), false, cx);
-        }))
+impl Shell {
+    pub(crate) fn load_saved_relationships(&mut self, cx: &mut Context<Self>) {
+        let state = &self.file_index.state.knowledge_browser;
+        if state.page.is_none() && !state.loading {
+            self.browse_file_knowledge(GraphQuery::default(), false, cx);
+        }
+    }
 }
 
-pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let state = &shell.file_index.state.knowledge_browser;
     let mut panel = v_flex().id("knowledge-saved-browser").test_support().w_full().min_w_0().gap(t.space.medium)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Saved file relationships"))
-        .child(div().sovra_text(TextRole::Body, cx).child("Connections reviewed and saved from your files, with their sources and uncertainty. Open a relationship to check the original wording or follow a person or project."))
-        .child(design::button("knowledge-back-files", "Back to files", cx).self_start().max_w_full()
-            .on_click(cx.listener(|shell, _, _, cx| {
-                shell.file_index.knowledge.active = false;
-                shell.file_index.state.knowledge_browser.close_evidence();
-                shell.knowledge_scroll.set_offset(gpui_kit::Point::default()); cx.notify();
-            })));
+        .child(div().sovra_text(TextRole::Body, cx).child("Connections reviewed and saved from your files, with their sources and uncertainty. Open a relationship to check the original wording or follow a person or project."));
     if state.evidence_id.is_some() {
         return panel.child(evidence(shell, cx)).into_any_element();
     }
@@ -110,6 +122,17 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             .find(|r| Some(&r.id) == shell.file_index.knowledge.selected.as_ref())
     }) {
         return panel.child(detail(shell, relation, cx)).into_any_element();
+    }
+    if let Some(relation) = &state.query.relation {
+        let label = format!("Showing relationships of type “{}”", relation.label());
+        panel = panel.child(
+            div()
+                .id("knowledge-current-predicate")
+                .test_support()
+                .aria_label(label.clone())
+                .sovra_text(TextRole::Body, cx)
+                .child(label),
+        );
     }
     panel = panel
         .child(
@@ -243,7 +266,7 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             let message = if page.next.is_some() {
                 "No matching relationships in this batch. Continue to more relationships or narrow the search."
             } else {
-                "No saved relationships match this view. Try another search, or review a helper's proposed file connections on the Files page."
+                "No saved relationships match this view. Try another search, or review a helper's proposed file connections in Relationships & taxonomy."
             };
             panel = panel.child(
                 div()
@@ -291,9 +314,9 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                             .max_w_full()
                             .on_click(cx.listener(move |shell, _, _, cx| {
                                 shell.file_index.knowledge.selected = Some(id.clone());
-                                shell
-                                    .knowledge_scroll
-                                    .set_offset(gpui_kit::Point::default());
+                                shell.scroll_to_knowledge(
+                                    crate::knowledge_view::KnowledgeSection::Relationships,
+                                );
                                 cx.notify();
                             })),
                     ),
@@ -347,9 +370,9 @@ fn detail(
                 .max_w_full()
                 .on_click(cx.listener(|shell, _, _, cx| {
                     shell.file_index.knowledge.selected = None;
-                    shell
-                        .knowledge_scroll
-                        .set_offset(gpui_kit::Point::default());
+                    shell.scroll_to_knowledge(
+                        crate::knowledge_view::KnowledgeSection::Relationships,
+                    );
                     cx.notify();
                 })),
         )
@@ -520,9 +543,9 @@ fn detail(
                             shell.file_index.state.knowledge_browser.read_evidence(id)
                         {
                             shell.index_command(command, cx);
-                            shell
-                                .knowledge_scroll
-                                .set_offset(gpui_kit::Point::default());
+                            shell.scroll_to_knowledge(
+                                crate::knowledge_view::KnowledgeSection::Relationships,
+                            );
                         }
                     })),
                 );
@@ -540,9 +563,7 @@ fn evidence(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> 
             .max_w_full()
             .on_click(cx.listener(|shell, _, _, cx| {
                 shell.file_index.state.knowledge_browser.close_evidence();
-                shell
-                    .knowledge_scroll
-                    .set_offset(gpui_kit::Point::default());
+                shell.scroll_to_knowledge(crate::knowledge_view::KnowledgeSection::Relationships);
                 cx.notify();
             })),
     );

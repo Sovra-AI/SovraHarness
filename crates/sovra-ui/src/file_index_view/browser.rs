@@ -49,9 +49,7 @@ pub(super) fn close(shell: &mut Shell) {
     shell.file_index.browser.open = false;
     shell.file_index.browser.selected = None;
     shell.file_index.state.browser.invalidate();
-    shell
-        .knowledge_scroll
-        .set_offset(gpui_kit::Point::default());
+    shell.scroll_to_knowledge(crate::knowledge_view::KnowledgeSection::Files);
 }
 
 impl Shell {
@@ -578,10 +576,10 @@ mod tests {
                 window.try_find("index-preview-next").is_some(),
                 "Saved text must be navigable beyond its first part"
             );
-            window.click("knowledge-memories", cx);
+            click(window, cx, "knowledge-files");
             window.render_frame(cx);
             assert!(window.try_find("index-inventory").is_none());
-            window.click("knowledge-files", cx);
+            click(window, cx, "knowledge-files");
             window.render_frame(cx);
             assert_eq!(
                 shell

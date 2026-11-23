@@ -161,19 +161,14 @@ fn knowledge_sections_follow_the_pane(cx: &mut TestAppContext) {
                     let page = window.find("sovra-knowledge-view").bounds();
                     inside_window(page, window_px, "knowledge");
                     assert!(page.top() >= px(0.) && page.bottom() <= px(height));
-                    for id in [
-                        "knowledge-memories",
-                        "knowledge-people",
-                        "knowledge-files",
-                        "knowledge-help",
-                    ] {
-                        inside_window(window.find(id).bounds(), window_px, id);
-                    }
+                    reveal(window, "sovra-knowledge-view", "knowledge-memories", cx);
+                    window.click("knowledge-memories", cx);
+                    frames(window, cx);
                     let tokens = design::tokens(cx);
                     let rem = window.rem_size();
                     let page_cap = tokens.layout.page_width.to_pixels(rem);
                     let reading_cap = tokens.layout.reading_width.to_pixels(rem);
-                    let column = window.find("knowledge-column").bounds();
+                    let column = window.find(("knowledge-collection", 3usize)).bounds();
                     assert!(
                         column.size.width <= page_cap + px(2.),
                         "memories column wider than the page cap: {column:?} > {page_cap:?}"
@@ -235,9 +230,10 @@ fn knowledge_sections_follow_the_pane(cx: &mut TestAppContext) {
                         assert!((rem - px(32.)).abs() < px(0.5));
                     }
 
+                    reveal(window, "sovra-knowledge-view", "knowledge-people", cx);
                     window.click("knowledge-people", cx);
                     frames(window, cx);
-                    let people = window.find("knowledge-column").bounds();
+                    let people = window.find(("knowledge-collection", 4usize)).bounds();
                     assert!(people.size.width <= reading_cap + px(2.));
                     assert_centred(
                         people,
@@ -253,16 +249,18 @@ fn knowledge_sections_follow_the_pane(cx: &mut TestAppContext) {
                         "people empty note",
                     );
 
+                    reveal(window, "sovra-knowledge-view", "knowledge-files", cx);
                     window.click("knowledge-files", cx);
                     frames(window, cx);
-                    let files = window.find("knowledge-column").bounds();
+                    let files = window.find(("knowledge-collection", 1usize)).bounds();
                     assert!(files.size.width <= reading_cap + px(2.));
                     assert_centred(files, window.find("sovra-knowledge-view").bounds(), "files");
                     reveal(window, "sovra-knowledge-view", "index-folder", cx);
 
+                    reveal(window, "sovra-knowledge-view", "knowledge-help", cx);
                     window.click("knowledge-help", cx);
                     frames(window, cx);
-                    let guide = window.find("knowledge-column").bounds();
+                    let guide = window.find(("knowledge-collection", 5usize)).bounds();
                     assert!(guide.size.width <= reading_cap + px(2.));
                     assert_centred(guide, window.find("sovra-knowledge-view").bounds(), "guide");
                     reveal(window, "sovra-knowledge-view", "knowledge-times-toggle", cx);

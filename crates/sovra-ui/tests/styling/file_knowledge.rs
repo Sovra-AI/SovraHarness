@@ -104,10 +104,8 @@ fn saved_file_relationships_search_page_follow_subjects_and_read_evidence_at_eve
             });
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
-                window.click("knowledge-files", cx);
-                window.render_frame(cx);
-                reveal(window, "knowledge-browse-saved", cx);
-                window.click("knowledge-browse-saved", cx);
+                reveal(window, "knowledge-relationships", cx);
+                window.click("knowledge-relationships", cx);
             })
             .unwrap();
             let browse = request(&commands);
@@ -297,11 +295,8 @@ fn saved_file_relationships_search_page_follow_subjects_and_read_evidence_at_eve
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
                 reveal(window, "knowledge-saved-empty", cx);
-                reveal(window, "knowledge-back-files", cx);
-                window.click("knowledge-back-files", cx);
-                window.render_frame(cx);
-                reveal(window, "knowledge-browse-saved", cx);
-                window.click("knowledge-browse-saved", cx);
+                reveal(window, "knowledge-saved-reset", cx);
+                window.click("knowledge-saved-reset", cx);
             })
             .unwrap();
             events

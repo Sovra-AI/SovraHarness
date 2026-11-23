@@ -296,7 +296,7 @@ mod tests {
                         .apply(&IndexEvent::KnowledgePending(vec![proposal()]));
                     shell.select_tab(NavTab::Knowledge, cx);
                     shell.select_knowledge_section(
-                        crate::knowledge_view::KnowledgeSection::Files,
+                        crate::knowledge_view::KnowledgeSection::Relationships,
                         cx,
                     );
                 });

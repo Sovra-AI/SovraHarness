@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- **Knowledge opens on one page.** Search files, saved details, and artifacts at
+  the top. Expand folders, relationships, personal details, and people together.
+  The overview shows folder activity and pending relationship reviews. Choose
+  a relationship type to find its saved examples and follow them to the source.
+
 - **Be in several groups, and share from chat.** A computer can now be in more
   than one group: **Your groups** at the top of Groups switches between them,
   and **＋ Start or join another group** adds one without leaving any. Each

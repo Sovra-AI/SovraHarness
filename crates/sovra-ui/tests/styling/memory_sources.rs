@@ -83,6 +83,8 @@ fn original_source_browser_search_history_and_links_fit_every_layout(cx: &mut Te
             );
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, "knowledge-memories", cx);
+                window.click("knowledge-memories", cx);
                 reveal(window, "memory-browse-sources", cx);
                 window.click("memory-browse-sources", cx);
             })
@@ -279,6 +281,8 @@ fn named_team_source_is_readable_at_minimum_wide_and_double_size(cx: &mut TestAp
         );
         settle(cx);
         cx.update_window(window.into(), |_, window, cx| {
+            reveal(window, "knowledge-memories", cx);
+            window.click("knowledge-memories", cx);
             reveal(window, "memory-browse-sources", cx);
             window.click("memory-browse-sources", cx);
         })

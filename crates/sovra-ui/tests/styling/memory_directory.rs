@@ -53,6 +53,9 @@ fn subject_directory_search_paging_and_selection_fit_every_layout(cx: &mut TestA
             );
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, "knowledge-memories", cx);
+                window.click("knowledge-memories", cx);
+                window.render_frame(cx);
                 reveal(window, "memory-browse-subjects", cx);
                 window.click("memory-browse-subjects", cx);
             })

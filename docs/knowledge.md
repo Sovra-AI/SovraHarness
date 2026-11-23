@@ -1,9 +1,12 @@
 # Reviewing what Sovra knows
 
-Open **Knowledge** to inspect saved details and their sources. Its sections
-are **About you**, **People**, **Explore**, **Files**, and **Guide**. Saved details are
-interpretations of earlier statements; read the original wording when a detail
-matters or looks wrong.
+Open **Knowledge** and use **Search your knowledge** to find wording across
+files, saved personal details, and artifacts. Below search, **Files** shows
+folder activity, **Relationships & taxonomy** holds reviewed evidence and its
+vocabulary, **About you** opens saved personal details, and **People** lists
+contacts. **Guide** explains how Sovra remembers. Expand the sections you need
+together. **Overview** folds them and returns to search. You can reopen the
+last search results there.
 
 ## About you
 
@@ -30,7 +33,7 @@ select a source to see its original line, date and findings. **All matching
 sources** includes excerpts without a shared connection. **Source list** opens
 the full set of result cards. Equal quantities can come from separate events.
 
-Open **Knowledge → Explore** or use `/explore-knowledge`. Enter a term from your
+Open **Knowledge** or use `/explore-knowledge`. Enter a term from your
 sources and choose **Search sources**. For example, if a file says “Juniper weighs
 0.5 kg”, your note says “My Juniper weighed 500 g”, and an artifact contains the
 same reading, search for **Juniper**. The result names the sources that agree.
@@ -45,7 +48,7 @@ world-validity dates, corrections, and withdrawn evidence.
 
 | Question | What the result uses |
 | --- | --- |
-| What kind of thing is this and how does it relate? | A table with `subject,predicate,object` gives ordered, named statements. Add `subject_type,object_type` to check a declared property. A shared namespaced ID can connect two sources. Simple English statements receive a **Possible relation from wording** label. Review proposed folder relationships in **Files** before accepting them. |
+| What kind of thing is this and how does it relate? | A table with `subject,predicate,object` gives ordered, named statements. Add `subject_type,object_type` to check a declared property. A shared namespaced ID can connect two sources. Simple English statements receive a **Possible relation from wording** label. Review proposed folder relationships in **Relationships & taxonomy** before accepting them. |
 | What shape do the samples form? | Two to sixteen numeric coordinate columns named `x`, `y`, `z`, or `dim1` through `dimN`, in a common scale. The first 64 points give connected-component and loop counts at stated Euclidean distances, including the longest loop’s birth and death when present. |
 | What type of dataset fits? | Column names, finite numeric values, dates, units and missing cells provide the evidence. Optional named profiles keep ties visible. An unrecognized table is reported as unknown. |
 | Do the measurements agree? | Decimal readings keep their original units and use compatible base units for comparison. Supply `value,unit,instrument,calibration_date,reference,uncertainty` for context. Add `reference_value,reference_unit,tolerance` for an accuracy check. Tolerance and uncertainty use the reading’s unit. Supported dimensions are mass, length, time, volume, temperature, pressure and ratio. |
@@ -84,7 +87,14 @@ covers a subset of UCUM, and word matching uses language-specific stemmers.
 
 ## Explore the connections
 
-The native map shows saved details and their connections. Select a label to
+Under **Relationships & taxonomy**, open **Relationship types & file categories**
+to see the standard relationships, subject types, file kinds, and areas of life.
+Custom types in the current results show the subject and object types they connect.
+Choose a relationship such as **depends on** or **is a** to filter saved
+connections. **Read relationship** opens its subjects, source wording, and
+recorded dates. Proposed connections appear here for review.
+
+Under **About you**, the native map shows saved personal details and their connections. Select a label to
 inspect its story, or filter the kinds of connections displayed. **Focus on these
 connections** narrows the view to the selected detail and its direct connections;
 **Show all** restores the overview. **Read as a list** provides a text alternative.

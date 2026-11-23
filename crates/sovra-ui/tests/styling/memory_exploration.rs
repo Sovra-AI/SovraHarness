@@ -81,6 +81,9 @@ fn connected_knowledge_is_readable_navigable_and_filterable_at_every_size(cx: &m
             );
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
+                reveal(window, "knowledge-memories", cx);
+                window.click("knowledge-memories", cx);
+                window.render_frame(cx);
                 reveal(window, ("memory-card-text", 0usize), cx);
                 assert_eq!(
                     window.find(("memory-card-text", 0usize)).label(),

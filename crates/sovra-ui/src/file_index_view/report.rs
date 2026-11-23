@@ -47,9 +47,7 @@ pub(super) fn active_root(shell: &Shell) -> Option<&str> {
 pub(super) fn close(shell: &mut Shell) {
     shell.file_index.report.root = None;
     shell.file_index.state.report.invalidate();
-    shell
-        .knowledge_scroll
-        .set_offset(gpui_kit::Point::default());
+    shell.scroll_to_knowledge(crate::knowledge_view::KnowledgeSection::Files);
 }
 
 impl Shell {

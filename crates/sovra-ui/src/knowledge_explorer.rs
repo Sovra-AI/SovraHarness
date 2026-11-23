@@ -26,10 +26,11 @@ pub(crate) struct ExplorerView {
     settings: Entity<InputState>,
     _enter: gpui_kit::Subscription,
     advanced: bool,
+    results_folded: bool,
     language: Language,
     window_seconds: u32,
     sequence: u64,
-    waiting: bool,
+    pending_request: Option<u64>,
     notice: String,
     result: Option<Exploration>,
     opened: Option<usize>,
@@ -39,8 +40,7 @@ pub(crate) struct ExplorerView {
 impl ExplorerView {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         let query = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Find a name, a measurement or words in a source…")
+            InputState::new(window, cx).placeholder("Search files, saved details and artifacts…")
         });
         let settings = cx.new(|cx| {
             InputState::new(window, cx)
@@ -56,10 +56,11 @@ impl ExplorerView {
             settings,
             _enter: enter,
             advanced: false,
+            results_folded: false,
             language: Language::English,
             window_seconds: 86_400,
             sequence: 0,
-            waiting: false,
+            pending_request: None,
             notice: String::new(),
             result: None,
             opened: None,
@@ -67,10 +68,15 @@ impl ExplorerView {
             reading_personal_source: false,
         }
     }
+    pub(crate) fn fold_results(&mut self) {
+        self.results_folded = true;
+        self.advanced = false;
+    }
+
     pub(crate) fn observe(&mut self, event: &Event) {
         if let Event::Explored { request_id, result } = event {
-            if self.waiting && *request_id == self.sequence {
-                self.waiting = false;
+            if self.pending_request == Some(*request_id) {
+                self.pending_request = None;
                 match result {
                     Ok(report) => {
                         self.notice = if report.readings.is_empty() {
@@ -86,7 +92,7 @@ impl ExplorerView {
             }
             return;
         }
-        if !self.waiting && self.result.is_none() {
+        if self.pending_request.is_none() && self.result.is_none() {
             return;
         }
         let changed = matches!(
@@ -102,7 +108,7 @@ impl ExplorerView {
             self.sequence = self.sequence.wrapping_add(1);
             self.result = None;
             self.opened = None;
-            self.waiting = false;
+            self.pending_request = None;
             self.notice = "Sources changed. Search again for current wording.".into();
         }
     }
@@ -135,7 +141,8 @@ impl Shell {
         let view = &mut self.explorer;
         view.sequence = view.sequence.wrapping_add(1);
         view.result = None;
-        view.waiting = false;
+        view.results_folded = false;
+        view.pending_request = None;
         view.opened = None;
         let options = view.settings.read(cx).value();
         let options = configured_options(view.language, view.window_seconds, &options);
@@ -156,7 +163,7 @@ impl Shell {
         });
         match result {
             Ok(()) => {
-                view.waiting = true;
+                view.pending_request = Some(view.sequence);
                 view.notice = "Searching connected sources…".into();
             }
             Err(message) => view.notice = message,
@@ -167,13 +174,41 @@ impl Shell {
 pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let view = &shell.explorer;
     let t = design::tokens(cx);
-    let mut column=v_flex().id("knowledge-explorer").test_support().w_full().min_w_0().gap(t.space.small)
-        .child(div().sovra_text(TextRole::SectionTitle,cx).child("Explore your sources"))
-        .child(div().sovra_text(TextRole::Body,cx).child("Search connected folders, your saved statements and current artifacts. Each result links the analysis to the wording it used."))
-        .child(Input::new(&view.query).id("explore-query").aria_label("Search connected knowledge"))
-        .child(h_flex().flex_wrap().gap(t.space.small)
-            .child(design::button("explore-submit","Search sources",cx).on_click(cx.listener(|shell,_,_,cx|shell.explore_sources(cx))))
-            .child(design::button("explore-settings","Analysis settings",cx).on_click(cx.listener(|shell,_,_,cx|{shell.explorer.advanced = !shell.explorer.advanced;cx.notify();}))));
+    let mut column = v_flex()
+        .id("knowledge-explorer")
+        .test_support()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.small)
+        .child(
+            div()
+                .id("knowledge-explore")
+                .test_support()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child("Search your knowledge"),
+        )
+        .child(
+            Input::new(&view.query)
+                .id("explore-query")
+                .aria_label("Search connected knowledge"),
+        )
+        .child(
+            h_flex()
+                .flex_wrap()
+                .gap(t.space.small)
+                .child(
+                    design::primary_button("explore-submit", "Search sources", cx)
+                        .on_click(cx.listener(|shell, _, _, cx| shell.explore_sources(cx))),
+                )
+                .child(
+                    design::button("explore-settings", "Analysis settings", cx).on_click(
+                        cx.listener(|shell, _, _, cx| {
+                            shell.explorer.advanced = !shell.explorer.advanced;
+                            cx.notify();
+                        }),
+                    ),
+                ),
+        );
     if view.advanced {
         let mut languages = h_flex().flex_wrap().gap(t.space.compact);
         for (index, language) in [
@@ -231,6 +266,20 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         );
     }
     if let Some(result) = &view.result {
+        if view.results_folded && !result.readings.is_empty() {
+            return column.child(
+                design::button(
+                    "explore-show-results",
+                    format!("Show search results ({})", result.readings.len()),
+                    cx,
+                )
+                .self_start()
+                .on_click(cx.listener(|shell, _, _, cx| {
+                    shell.explorer.results_folded = false;
+                    cx.notify();
+                })),
+            );
+        }
         for (i, note) in result.notices.iter().enumerate() {
             column = column.child(
                 div()

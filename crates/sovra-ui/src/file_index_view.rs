@@ -24,7 +24,7 @@ use crate::{
 };
 
 mod browser;
-mod knowledge;
+pub(crate) mod knowledge;
 mod live;
 mod report;
 mod selection;
@@ -283,9 +283,6 @@ impl Shell {
 }
 
 pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
-    if shell.file_index.knowledge.active {
-        return knowledge::render(shell, cx).into_any_element();
-    }
     let t = design::tokens(cx);
     let state = &shell.file_index.state;
     if browser::is_open(shell) {
@@ -298,9 +295,8 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     let mut panel = v_flex().id("file-index-panel").test_support().min_w_0().w_full().gap(t.space.small)
         .sovra_surface(Surface::Matte, cx).p(t.space.medium)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Your folders"))
-        .child(h_flex().w_full().min_w_0().flex_wrap().gap(t.space.small)
-            .child(design::button("index-folder", "Add folders", cx).max_w_full().on_click(cx.listener(|shell, _, window, cx| shell.choose_index_folder(window, cx))))
-            .child(knowledge::entry(cx)))
+        .child(design::button("index-folder", "Add folders", cx).self_start().max_w_full()
+            .on_click(cx.listener(|shell, _, window, cx| shell.choose_index_folder(window, cx))))
         .child(div().sovra_text(TextRole::Caption, cx).child("Choose one or more folders to search on this computer. Chat sends requested file details and saved passages to your selected AI service. Files stay in their original folders."))
         .children(state.notice.as_ref().map(|notice| div().sovra_text(TextRole::Body, cx).child(notice.clone())))
         .children(selection::render(shell, cx))
@@ -365,9 +361,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             )),
         ));
     }
-    panel
-        .child(crate::knowledge_review::render(state, cx))
-        .into_any_element()
+    panel.into_any_element()
 }
 
 fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
