@@ -80,18 +80,41 @@ The choice is the same one saved in Models and restored when Sovra starts.
 
 ### Thinking levels
 
-**How long your chat AI thinks** sets the thinking level of the chat model:
-**AI decides** (send nothing; the service's default), **No thinking**, **Think a
-little**, **Think**, **Think hard** or **Think deeply**. More thinking gives steadier
-answers to hard questions but is slower and costs more. Sovra translates the level
-for each service:
+The chat box and **My AIs → How long your chat AI thinks** share one saved level:
+**AI decides**, **No thinking**, **Think a little**, **Think**, **Think hard** or
+**Think deeply**. The choice on the chat box is the one My AIs shows. **AI decides**
+sends no thinking setting. More thinking gives steadier answers to hard questions
+but is slower and costs more. Choosing a level does not change the words in the
+message.
+
+While **Choose an AI by how hard the question is** is off, a message uses that
+chat level. While it is on, each difficulty keeps its own AI and its own thinking
+level. The chat box says so, and changing its choice does not replace those.
+
+Sovra translates an explicit level into that service's own parameter, and only a
+value that service accepts:
 
 | Service | What is sent |
 | --- | --- |
-| OpenRouter | `reasoning.effort` (`none` … `max`), only for models whose catalog lists the `reasoning` parameter. Claude models get `minimal` instead of `none`, which OpenRouter rejects for them. |
-| Anthropic | For models whose details list thinking: adaptive thinking with `output_config.effort` on current Claude models; **No thinking** sends the lowest effort, because newer models cannot switch thinking off. Models from before adaptive thinking (Claude 3.7, 4.0, 4.1, 4.5) get a thinking budget of 2K–32K tokens inside their output limit. |
-| Ollama | For models whose details list thinking: `reasoning_effort` (`none`, `low`, `medium`, `high`; **Think deeply** becomes `high`). Other models get nothing, because Ollama refuses thinking settings for them. |
-| Other compatible servers | `reasoning_effort` with the same name as the level, including `max`. A server that does not support it may ignore or refuse it; choose **AI decides** for such a server. |
+| OpenRouter | `reasoning.effort` (`none`, `low`, `medium`, `high`, `max`), only when the model lists the `reasoning` parameter. Claude models get `minimal` instead of `none`, which OpenRouter rejects for them. |
+| Anthropic | For current thinking models, adaptive thinking with `output_config.effort`. **No thinking** is the lowest effort (`low`), not a switch-off, because newer models cannot disable thinking. Models from before adaptive thinking (Claude 3.7, 4.0, 4.1, 4.5) get a token budget only for an explicit think, not for **AI decides** or **No thinking**. |
+| Ollama | `reasoning_effort` only when the model lists thinking: `none`, `low`, `medium`, or `high`. **Think deeply** becomes `high`. Other models get nothing. This stays true even when the model id contains `grok`. |
+| Other compatible servers | `reasoning_effort` named `none`, `low`, `medium`, `high`, or `max`. |
+| Grok and xAI, on OpenRouter and on other compatible servers | See the Grok table. The parameter is `reasoning.effort` on OpenRouter (and only when the model lists `reasoning`) and `reasoning_effort` on a compatible server. |
+
+| Grok model | No thinking | Think deeply | Other explicit levels |
+| --- | --- | --- | --- |
+| `grok-3`, `grok-4`, `grok-4-fast-reasoning`, or a multi-agent Grok | nothing is sent | nothing is sent | nothing is sent |
+| `grok-4.3` | `none` | `high` | `low`, `medium`, `high` |
+| `grok-4.5` | `low` | `high` | `low`, `medium`, `high` |
+| `grok-4.6` and later (`grok-4.6` through `grok-4.9`, and `grok-5` and later majors) | `low` | `xhigh` | `low`, `medium`, `high` |
+| Any other id containing `grok` (`grok-3-mini`, `grok-4.20` that is not multi-agent, and anything the guide does not list) | `low` | `high` | `low`, `medium`, `high` |
+
+`grok-3`, `grok-4` and `grok-4-fast-reasoning` reject the field. On a multi-agent
+Grok the same field means how many agents run, not how deeply one thinks, so
+Sovra leaves it unset. `grok-4.5` and later cannot turn thinking off, so **No
+thinking** uses their lowest effort. `xhigh` is only sent where the current xAI
+reasoning guide accepts it. Those names never appear in the picker.
 
 Structured background requests (memory notes, file summaries) never get a thinking
 setting.

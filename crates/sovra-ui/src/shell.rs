@@ -1209,6 +1209,22 @@ impl Shell {
         self.models.clone()
     }
 
+    /// The chat thinking picker My AIs and the composer both show.
+    pub(crate) fn ai_tiers(&self) -> &Entity<crate::ai_tiers_view::AiTiersView> {
+        &self.ai_tiers
+    }
+
+    /// Saves the chat thinking level without changing a difficulty's own model or level.
+    pub(crate) fn choose_chat_thinking(
+        &mut self,
+        level: sovra_core::ai_tiers::ThinkingLevel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_tiers
+            .update(cx, |view, cx| view.choose_chat_thinking(level, window, cx));
+    }
+
     pub fn toggle_knowledge_times(&mut self, cx: &mut Context<Self>) {
         self.knowledge_times_open = !self.knowledge_times_open;
         self.refresh(cx);

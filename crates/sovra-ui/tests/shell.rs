@@ -4,7 +4,7 @@
 mod nav;
 
 use gpui_kit::component::Root;
-use gpui_kit::test::TestWindowExt as _;
+use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::{AppContext as _, TestAppContext, px, size};
 use sovra_core::{AgUiWidget, Command, Event, NavTab, RuntimeStatus, ScreenRoute};
 use sovra_runtime::Client;
@@ -748,6 +748,378 @@ fn my_ais_tier_controls_save_routing_download_laya_and_sort_a_sample(cx: &mut Te
             "My AIs never sends a chat message"
         );
     }
+}
+
+#[gpui_kit::test]
+fn composer_thinking_level_is_saved_shown_in_my_ais_and_left_out_of_the_message(
+    cx: &mut TestAppContext,
+) {
+    use sovra_core::MessageRole;
+    use sovra_core::ai_tiers::{ThinkingLevel, TierChoice, TierRouting};
+    use sovra_core::models::{
+        ModelCommand, ModelConnection, ModelEvent, ModelKey, ModelPreferences, ProviderKind,
+    };
+    use sovra_core::providers::ModelTier;
+
+    let chat = ModelKey {
+        connection_id: "test".into(),
+        model_id: "chat".into(),
+    };
+    let fast = ModelKey {
+        connection_id: "test".into(),
+        model_id: "fast".into(),
+    };
+    let deep = ModelKey {
+        connection_id: "test".into(),
+        model_id: "deep".into(),
+    };
+    let mut routing = TierRouting::default();
+    routing.tiers.insert(
+        ModelTier::Fast,
+        TierChoice {
+            model: Some(fast.clone()),
+            thinking: ThinkingLevel::Off,
+        },
+    );
+    routing.tiers.insert(
+        ModelTier::Standard,
+        TierChoice {
+            model: None,
+            thinking: ThinkingLevel::Medium,
+        },
+    );
+    routing.tiers.insert(
+        ModelTier::Deep,
+        TierChoice {
+            model: Some(deep.clone()),
+            thinking: ThinkingLevel::High,
+        },
+    );
+    let tiers = routing.tiers.clone();
+    let (client, commands, events) = Client::loopback();
+    cx.update(|cx| sovra_ui::init(client, cx));
+    let mut shell_entity = None;
+    let window = cx.open_window(size(px(1100.), px(720.)), |window, cx| {
+        let view = cx.new(|cx| Shell::new(0, window, cx));
+        shell_entity = Some(view.clone());
+        Root::new(view, window, cx)
+    });
+    let shell = shell_entity.unwrap();
+    let mut connection = ModelConnection::new("test", ProviderKind::OpenRouter);
+    connection.has_credential = true;
+    let mut preferences = ModelPreferences {
+        active: Some(chat.clone()),
+        tier_routing: routing,
+        ..Default::default()
+    };
+    events
+        .send_blocking(Event::Models(ModelEvent::Loaded {
+            connections: vec![connection],
+            preferences: preferences.clone(),
+        }))
+        .unwrap();
+    let settle = |cx: &mut TestAppContext| {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+    };
+    settle(cx);
+    let drain = || std::iter::from_fn(|| commands.try_recv().ok()).collect::<Vec<_>>();
+    drain();
+    let session = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    assert!(
+        shell.read_with(cx, |shell, _| shell.workspace().has_active_llm),
+        "a ready chat AI is required before a message is prepared"
+    );
+
+    let echo = |preferences: &mut ModelPreferences, routing: TierRouting| {
+        preferences.tier_routing = routing;
+        events
+            .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
+                preferences.clone(),
+            )))
+            .unwrap();
+    };
+    let finish_turn = |cx: &mut TestAppContext| {
+        events
+            .send_blocking(Event::AgentCompleted {
+                session_id: session.clone(),
+            })
+            .unwrap();
+        settle(cx);
+    };
+
+    for (round, sorting_on) in [(0_u8, false), (1_u8, true)] {
+        if sorting_on {
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::MyAis, cx));
+                window.render_frame(cx);
+                reveal_my_ai_action(window, "tier-routing-switch", cx);
+                window.click("tier-routing-switch", cx);
+            })
+            .unwrap();
+            settle(cx);
+            let sent = drain();
+            let enabled = sent.iter().find_map(|command| match command {
+                Command::Models(ModelCommand::SetTierRouting { routing }) if routing.enabled => {
+                    Some(routing.clone())
+                }
+                _ => None,
+            });
+            let enabled = enabled.expect("turning sorting on saves routing");
+            assert_eq!(enabled.tiers, tiers);
+            assert_eq!(
+                enabled.chat_thinking,
+                preferences.tier_routing.chat_thinking
+            );
+            echo(&mut preferences, enabled);
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Chat, cx));
+                window.render_frame(cx);
+            })
+            .unwrap();
+        }
+
+        for (index, level) in ThinkingLevel::ALL.into_iter().enumerate() {
+            let label = level.label();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                if sorting_on {
+                    assert_eq!(
+                        window.find("composer-thinking-note").label(),
+                        Some("Each difficulty keeps its own thinking level.")
+                    );
+                } else {
+                    assert!(window.try_find("composer-thinking-note").is_none());
+                }
+                reveal_thinking_option(window, index, cx);
+                window.click(("composer-thinking-option", index), cx);
+                window.render_frame(cx);
+                assert_eq!(window.find("composer-thinking").label(), Some(label));
+                for (other, other_level) in ThinkingLevel::ALL.into_iter().enumerate() {
+                    let chip = window.find(("composer-thinking-option", other));
+                    assert_eq!(chip.label(), Some(other_level.label()));
+                    assert_eq!(
+                        chip.checked(),
+                        Some(other == index),
+                        "{label} is the selected thinking level"
+                    );
+                }
+            })
+            .unwrap();
+            let sent = drain();
+            let saved: Vec<_> = sent
+                .iter()
+                .filter_map(|command| match command {
+                    Command::Models(ModelCommand::SetTierRouting { routing }) => {
+                        Some(routing.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                !sent.iter().any(|command| {
+                    matches!(
+                        command,
+                        Command::RunPrompt { .. }
+                            | Command::RunWithFiles { .. }
+                            | Command::Teams(_)
+                    )
+                }),
+                "choosing a thinking level must not send a chat message: {sent:?}"
+            );
+            if let Some(routing) = saved.last() {
+                assert_eq!(routing.chat_thinking, level);
+                assert_eq!(routing.enabled, sorting_on);
+                assert_eq!(routing.tiers, tiers);
+                echo(&mut preferences, routing.clone());
+                settle(cx);
+            } else {
+                assert_eq!(preferences.tier_routing.chat_thinking, level);
+            }
+            let typed = format!("Picnic plan {round}-{index}");
+            assert!(!typed.contains(label));
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let saved = shell
+                    .read(cx)
+                    .models()
+                    .read(cx)
+                    .state()
+                    .preferences
+                    .tier_routing
+                    .clone();
+                assert_eq!(saved.chat_thinking, level);
+                assert_eq!(saved.enabled, sorting_on);
+                assert_eq!(saved.tiers, tiers);
+                if sorting_on {
+                    assert_eq!(
+                        saved.resolve(ModelTier::Fast, Some(&chat)),
+                        Some((fast.clone(), ThinkingLevel::Off))
+                    );
+                    assert_eq!(
+                        saved.resolve(ModelTier::Standard, Some(&chat)),
+                        Some((chat.clone(), ThinkingLevel::Medium))
+                    );
+                    assert_eq!(
+                        saved.resolve(ModelTier::Deep, Some(&chat)),
+                        Some((deep.clone(), ThinkingLevel::High))
+                    );
+                } else {
+                    for tier in ModelTier::ALL {
+                        assert_eq!(
+                            saved.resolve(tier, Some(&chat)),
+                            Some((chat.clone(), level)),
+                            "sorting off prepares {label}"
+                        );
+                    }
+                }
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::MyAis, cx));
+                window.render_frame(cx);
+                reveal_my_ai_action(window, "Chat AI thinking", cx);
+                assert_eq!(window.find("Chat AI thinking").value(), Some(label));
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Chat, cx));
+                window.render_frame(cx);
+                assert_eq!(window.find("composer-thinking").label(), Some(label));
+                shell.update(cx, |shell, cx| {
+                    shell.fill_composer_draft(&typed, window, cx);
+                });
+                window.render_frame(cx);
+                assert_eq!(
+                    window.find_by_label("Message Sovra").value(),
+                    Some(typed.as_str()),
+                    "choosing a thinking level leaves the typed message unchanged"
+                );
+                window.click("composer-send-btn", cx);
+            })
+            .unwrap();
+            let sent = drain();
+            let prompt = sent.iter().find_map(|command| match command {
+                Command::RunPrompt { prompt, .. } => Some(prompt.clone()),
+                _ => None,
+            });
+            assert_eq!(prompt.as_deref(), Some(typed.as_str()), "{sent:?}");
+            cx.update_window(window.into(), |_, _window, cx| {
+                let message = shell
+                    .read(cx)
+                    .workspace()
+                    .messages
+                    .iter()
+                    .find(|message| message.text == typed)
+                    .expect("the typed message is in the chat");
+                assert_eq!(message.role, MessageRole::User);
+                assert_eq!(message.text, typed);
+                assert!(
+                    message.thinking.is_empty(),
+                    "the thinking level stays out of the message"
+                );
+            })
+            .unwrap();
+            finish_turn(cx);
+            drain();
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn composer_thinking_control_stays_inside_small_wide_and_large_text_windows(
+    cx: &mut TestAppContext,
+) {
+    use sovra_core::ai_tiers::ThinkingLevel;
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        let (client, _commands, _events) = Client::loopback();
+        cx.update(|cx| {
+            sovra_ui::init(client, cx);
+            sovra_ui::design::set_interface_scale(
+                sovra_core::models::InterfaceScale::from_percent(scale),
+                cx,
+            );
+        });
+        let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+            Root::new(cx.new(|cx| Shell::new(0, window, cx)), window, cx)
+        });
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let row = window.find("composer-thinking");
+            assert!(row.visible(), "{width}×{height} @{scale}%");
+            let row_bounds = row.bounds();
+            assert!(
+                row_bounds.left() >= px(-1.)
+                    && row_bounds.right() <= px(width) + px(1.)
+                    && row_bounds.bottom() <= px(height) + px(1.),
+                "thinking control leaves the window at {width}×{height} @{scale}%: {row_bounds:?}"
+            );
+            let send = window.find("composer-send-btn").bounds();
+            assert!(
+                send.right() <= px(width) + px(1.) && send.bottom() <= px(height) + px(1.),
+                "send button leaves the window at {width}×{height} @{scale}%: {send:?}"
+            );
+            let input = window.find("chat-composer-input").bounds();
+            assert!(
+                input.left() >= px(-1.)
+                    && input.right() <= px(width) + px(1.)
+                    && input.bottom() <= px(height) + px(1.),
+                "the message box leaves the window at {width}×{height} @{scale}%: {input:?}"
+            );
+            if scale == 100 {
+                assert!(
+                    input.size.width >= px(160.),
+                    "the message box stays usable at {width}×{height} @{scale}%"
+                );
+            }
+            for (index, level) in ThinkingLevel::ALL.into_iter().enumerate() {
+                reveal_thinking_option(window, index, cx);
+                let option = window.find(("composer-thinking-option", index));
+                assert_eq!(option.label(), Some(level.label()));
+                assert!(option.visible());
+                let bounds = option.bounds();
+                assert!(
+                    bounds.left() >= px(-1.)
+                        && bounds.right() <= px(width) + px(1.)
+                        && bounds.bottom() <= px(height) + px(1.),
+                    "{label} leaves the window at {width}×{height} @{scale}%: {bounds:?}",
+                    label = level.label()
+                );
+            }
+        })
+        .unwrap();
+    }
+}
+
+fn reveal_thinking_option(window: &mut gpui_kit::Window, index: usize, cx: &mut gpui_kit::App) {
+    for _ in 0..12 {
+        window.render_frame(cx);
+        let option = window.find(("composer-thinking-option", index)).bounds();
+        let row = window.find("composer-thinking").bounds();
+        let inside = option.left() >= row.left() - px(1.)
+            && option.right() <= row.right() + px(1.)
+            && option.top() >= row.top() - px(1.)
+            && option.bottom() <= row.bottom() + px(1.);
+        if inside && window.find(("composer-thinking-option", index)).visible() {
+            return;
+        }
+        let delta_x = if option.left() < row.left() {
+            row.left() - option.left()
+        } else if option.right() > row.right() {
+            row.right() - option.right()
+        } else {
+            px(0.)
+        };
+        let delta_y = if option.top() < row.top() {
+            row.top() - option.top()
+        } else if option.bottom() > row.bottom() {
+            row.bottom() - option.bottom()
+        } else {
+            px(0.)
+        };
+        window.scroll(
+            "composer-thinking",
+            gpui_kit::ScrollDelta::Pixels(gpui_kit::point(delta_x, delta_y)),
+            cx,
+        );
+    }
+    panic!("thinking option {index} must be reachable in the composer");
 }
 
 fn reveal_my_ai_action(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {

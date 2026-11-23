@@ -3,14 +3,15 @@
 //! Enter sends, Shift+Enter adds a line, Stop cancels.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, button::ButtonVariants as _, h_flex,
-    input::Textarea, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Selectable as _, Sizable as _,
+    button::ButtonVariants as _, h_flex, input::Textarea, v_flex,
 };
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement,
     ParentElement as _, Role, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
-    div,
+    div, prelude::FluentBuilder as _,
 };
+use sovra_core::ai_tiers::ThinkingLevel;
 use sovra_core::files::AttachmentState;
 use sovra_core::models::ChromeKey;
 
@@ -239,6 +240,7 @@ pub(crate) fn render_composer(shell: &Shell, cx: &mut Context<Shell>) -> impl In
                 )
         }))
         .children(crate::team_view::composer_team_note(shell, cx))
+        .child(render_thinking(shell, cx))
         .child(
             bar.child(
                 design::round_icon_button("composer-add-files", c.send_size)
@@ -416,6 +418,71 @@ fn render_help_hint(session_id: &str, cx: &Context<Shell>) -> impl IntoElement +
                 .child(after.to_string()),
         )
         .into_any_element()
+}
+
+/// The six saved thinking levels, on the message box so My AIs cannot drift.
+///
+/// One scrolling row stays a single control tall. Wrapped rows of these labels
+/// pushed the send button off a small window at 200% text size.
+fn render_thinking(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let current = shell.ai_tiers().read(cx).shown_chat_thinking(cx);
+    let sorting_on = shell
+        .models()
+        .read(cx)
+        .state()
+        .preferences
+        .tier_routing
+        .enabled;
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .flex_shrink_0()
+        .gap(t.space.compact)
+        .child(
+            h_flex()
+                .id("composer-thinking")
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .flex_nowrap()
+                .overflow_x_scroll()
+                .items_center()
+                .gap(t.space.small)
+                .aria_label(current.label())
+                .children(
+                    ThinkingLevel::ALL
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(index, level)| {
+                            design::button(("composer-thinking-option", index), level.label(), cx)
+                                .small()
+                                .flex_shrink_0()
+                                .min_h(t.layout.compact_control_height)
+                                .selected(level == current)
+                                .toggled(level == current)
+                                .accessibility_label(level.label())
+                                .on_click(cx.listener(move |shell, _, window, cx| {
+                                    shell.choose_chat_thinking(level, window, cx);
+                                }))
+                        }),
+                ),
+        )
+        .when(sorting_on, |row| {
+            row.child(
+                div()
+                    .id("composer-thinking-note")
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .whitespace_normal()
+                    .aria_label("Each difficulty keeps its own thinking level.")
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Each difficulty keeps its own thinking level."),
+            )
+        })
 }
 
 #[cfg(test)]

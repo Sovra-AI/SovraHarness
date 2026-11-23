@@ -225,7 +225,7 @@ the [documentation](docs/README.md) for current behavior, and the
 - Local accounts do not provide separate encrypted data stores. Terminal commands
   and local MCP programs run with your OS permissions, without a sandbox.
 - **My AIs** shows your saved chat AI, with **Chat** and **Change AI**, how long it
-  thinks (from **No thinking** to **Think deeply**), and an optional different AI and
+  thinks (from **No thinking** to **Think deeply**, also set from the chat box), and an optional different AI and
   thinking level for simple, medium and complex questions. Messages are sorted by
   built-in quick rules or by Laya, a small sorting AI compiled into the executable
   whose files are downloaded once; no routing service is used. See

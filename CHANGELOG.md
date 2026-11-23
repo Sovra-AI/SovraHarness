@@ -105,6 +105,15 @@ package version.
   models), and `reasoning_effort` for Ollama and compatible servers. Memory and
   file-summary requests never get one.
 
+- **Set thinking from the chat box.** The message box has the same six choices,
+  and the one you pick is the saved chat thinking level, so My AIs shows it too.
+  The words you typed stay as you typed them. While Choose an AI by how hard the
+  question is is on, each difficulty keeps its own AI and thinking level, and the
+  chat box says so. Grok models receive only an effort that model accepts: nothing
+  for grok-3, grok-4, grok-4-fast-reasoning or a multi-agent Grok; `none` and
+  `high` for grok-4.3; `low` and `high` for grok-4.5; `low` and `xhigh` for
+  grok-4.6 and later; and only `low`, `medium` or `high` for any other Grok id.
+
 - **A different AI for simple, medium and complex questions.** Turn on Choose an
   AI by how hard the question is, then pick an AI and thinking level for each
   difficulty (or keep your chat AI). Every message is sorted first, and the

@@ -579,18 +579,22 @@ pub(crate) fn render_chat_column(
         .children(welcome.then(|| render_welcome(state, cx)))
         .child(transcript.clone().cached(area))
         .children(crate::skill_menu::render(shell, cx).map(|menu| {
-            // Keep a real hit target. A flexible chat column would otherwise
-            // shrink this menu to zero height and swallow its clicks.
+            // The menu yields to the message box. A fixed menu plus the thinking
+            // row pushed the box below a short window at large text size. One row
+            // stays clickable; the rest scrolls.
             h_flex()
                 .w_full()
-                .flex_shrink_0()
+                .flex_shrink_1()
+                .min_h(t.layout.compact_control_height)
                 .max_h(t.layout.command_menu_height)
+                .overflow_hidden()
                 .justify_center()
-                .child(column(cx).child(menu))
+                .child(column(cx).min_h_0().h_full().child(menu))
         }))
         .child(
             h_flex()
                 .w_full()
+                .flex_shrink_0()
                 .justify_center()
                 .child(column(cx).child(render_composer(shell, cx))),
         )

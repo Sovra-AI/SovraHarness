@@ -192,6 +192,29 @@ impl AiTiersView {
         view
     }
 
+    /// The level the chat picker is showing. My AIs and the composer share this picker.
+    pub(crate) fn shown_chat_thinking(&self, cx: &gpui_kit::App) -> ThinkingLevel {
+        self.chat_thinking
+            .read(cx)
+            .selected_value()
+            .and_then(|value| thinking_from(value))
+            .unwrap_or(self.routing(cx).chat_thinking)
+    }
+
+    /// Saves one chat thinking level and shows it on the shared picker.
+    pub(crate) fn choose_chat_thinking(
+        &mut self,
+        level: ThinkingLevel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = thinking_value(level);
+        self.chat_thinking.update(cx, |select, cx| {
+            select.set_selected_value(&value, window, cx);
+        });
+        self.update_routing(cx, |routing| routing.chat_thinking = level);
+    }
+
     fn routing(&self, cx: &gpui_kit::App) -> TierRouting {
         self.models
             .read(cx)
