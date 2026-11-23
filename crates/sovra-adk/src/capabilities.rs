@@ -139,6 +139,7 @@ pub(crate) fn is_provider_tool(name: &str) -> bool {
         || crate::communications::TOOL_NAMES.contains(&name)
         || crate::google::TOOL_NAMES.contains(&name)
         || crate::github::TOOL_NAMES.contains(&name)
+        || crate::storage::TOOL_NAMES.contains(&name)
         || crate::schedules::TOOL_NAMES.contains(&name)
 }
 

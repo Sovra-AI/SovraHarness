@@ -43,7 +43,7 @@ impl SpecialistAgentSpec {
 
 /// Returns the full 23-agent `SovraSRX` specialist roster (`create_specialist_agents`).
 pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
-    let specs: [(&str, &str, &str, &str, bool, ModelTier); 23] = [
+    let specs: [(&str, &str, &str, &str, bool, ModelTier); 24] = [
         (
             "OrchestratorAgent",
             "general",
@@ -228,6 +228,14 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             false,
             ModelTier::Deep,
         ),
+        (
+            "StorageAgent",
+            "storage",
+            "Online Storage Specialist",
+            "Your files in linked online storage, once a bucket or file server is added in Connections: Amazon S3, Cloudflare R2, Backblaze, Wasabi, Google Cloud Storage, MinIO, Azure Blob, Nextcloud, ownCloud or another WebDAV server. Finds and reads files and documents there, and saves a new file only when you ask and saving is allowed.",
+            false,
+            ModelTier::Standard,
+        ),
     ];
 
     specs
@@ -264,9 +272,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seeds_all_23_sovra_srx_specialists_and_resolves_dispatchable_keys() {
+    fn seeds_all_24_sovra_srx_specialists_and_resolves_dispatchable_keys() {
         let agents = default_sovra_srx_agents();
-        assert_eq!(agents.len(), 23);
+        assert_eq!(agents.len(), 24);
         assert_eq!(
             specialist_id_for_route_key(&agents, "coding"),
             Some("CodingAgent")

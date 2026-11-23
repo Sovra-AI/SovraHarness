@@ -15005,6 +15005,7 @@ dependencies = [
  "keyring",
  "oauth2",
  "reqwest 0.12.28",
+ "roxmltree 0.21.2",
  "serde",
  "serde_json",
  "sha2 0.11.1",

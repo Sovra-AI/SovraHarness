@@ -171,6 +171,12 @@ fn main() -> anyhow::Result<()> {
             google: Some(Arc::new(google)),
             github: Some(Arc::new(github)),
             microsoft: Some(Arc::new(microsoft)),
+            storage: Some(sovra_runtime::StorageConfig {
+                connector: Arc::new(sovra_providers::HttpStorage::new(credential_store(
+                    &data_dir,
+                ))),
+                directory: data_dir.as_path().join("storage"),
+            }),
             development: Some(development),
             remote_control: remote_services(&data_dir),
             probes: Vec::new(),

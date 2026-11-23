@@ -17,6 +17,7 @@ use crate::google::GoogleState;
 use crate::mcp::{McpPhase, McpService};
 use crate::microsoft::MicrosoftState;
 use crate::models::{CatalogState, ModelConnection, ProviderKind};
+use crate::storage::{PlaceStatus, StorageBook};
 
 /// How many installed links a refresh may probe at once.
 ///
@@ -38,11 +39,12 @@ pub enum CatalogueKind {
     Google,
     GitHub,
     Microsoft,
+    Storage,
     WebAddress,
 }
 
 impl CatalogueKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::OnlineAi,
         Self::LocalAi,
         Self::CompatibleService,
@@ -51,6 +53,7 @@ impl CatalogueKind {
         Self::Google,
         Self::GitHub,
         Self::Microsoft,
+        Self::Storage,
         Self::WebAddress,
     ];
 
@@ -64,8 +67,77 @@ impl CatalogueKind {
             Self::Google => "google",
             Self::GitHub => "github",
             Self::Microsoft => "microsoft",
+            Self::Storage => "storage",
             Self::WebAddress => "web-address",
         }
+    }
+
+    /// The section of the page this kind sits in.
+    pub const fn group(self) -> CatalogueGroup {
+        match self {
+            Self::OnlineAi | Self::LocalAi | Self::CompatibleService => CatalogueGroup::Ai,
+            Self::WhatsApp | Self::Telegram => CatalogueGroup::Chat,
+            Self::Google | Self::GitHub | Self::Microsoft => CatalogueGroup::Accounts,
+            Self::Storage => CatalogueGroup::Storage,
+            Self::WebAddress => CatalogueGroup::Tools,
+        }
+    }
+}
+
+/// A section of the Connections page. Order is the order of the page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CatalogueGroup {
+    Ai,
+    Chat,
+    Accounts,
+    Storage,
+    Tools,
+}
+
+impl CatalogueGroup {
+    pub const ALL: [Self; 5] = [
+        Self::Ai,
+        Self::Chat,
+        Self::Accounts,
+        Self::Storage,
+        Self::Tools,
+    ];
+
+    pub const fn slug(self) -> &'static str {
+        match self {
+            Self::Ai => "ai",
+            Self::Chat => "chat",
+            Self::Accounts => "accounts",
+            Self::Storage => "storage",
+            Self::Tools => "tools",
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Ai => "AI that answers you",
+            Self::Chat => "Chat apps",
+            Self::Accounts => "Your accounts",
+            Self::Storage => "Files and storage",
+            Self::Tools => "Extra tools",
+        }
+    }
+
+    pub const fn sentence(self) -> &'static str {
+        match self {
+            Self::Ai => "Where Sovra's answers come from.",
+            Self::Chat => "Talk to Sovra from your phone.",
+            Self::Accounts => "Let Sovra help with your email, calendar, documents and code.",
+            Self::Storage => "Buckets and file servers Sovra can look through and save to.",
+            Self::Tools => "Add-on tools that give Sovra new skills.",
+        }
+    }
+
+    /// The kinds in this section, in page order.
+    pub fn kinds(self) -> impl Iterator<Item = CatalogueKind> {
+        CatalogueKind::ALL
+            .into_iter()
+            .filter(move |kind| kind.group() == self)
     }
 }
 
@@ -100,7 +172,7 @@ pub struct KindCopy {
 }
 
 /// The closed list. Adding a kind means adding a row here and a variant above.
-pub const KINDS: [KindCopy; 9] = [
+pub const KINDS: [KindCopy; 10] = [
     KindCopy {
         kind: CatalogueKind::OnlineAi,
         title: "An online AI",
@@ -148,6 +220,12 @@ pub const KINDS: [KindCopy; 9] = [
         title: "Microsoft 365",
         sentence: "Connect your own Outlook, OneDrive and other Microsoft services with guided setup.",
         action: "Connect Microsoft 365",
+    },
+    KindCopy {
+        kind: CatalogueKind::Storage,
+        title: "Online storage",
+        sentence: "Link a storage bucket or file server, like Amazon S3, Cloudflare R2, Backblaze, Azure or Nextcloud, so Sovra can find, read and save files there.",
+        action: "Add storage",
     },
     KindCopy {
         kind: CatalogueKind::WebAddress,
@@ -260,6 +338,7 @@ pub struct CatalogueSources<'a> {
     pub google: &'a GoogleState,
     pub github: &'a GitHubState,
     pub microsoft: &'a MicrosoftState,
+    pub storage: &'a StorageBook,
     pub services: &'a [McpService],
     /// A probe result replaces only that kind's derived phase.
     pub probed: &'a BTreeMap<CatalogueKind, LinkPhase>,
@@ -294,6 +373,7 @@ pub fn catalogue_from(sources: &CatalogueSources<'_>) -> ConnectionCatalogue {
         (CatalogueKind::Google, google_phase(sources.google)),
         (CatalogueKind::GitHub, github_phase(sources.github)),
         (CatalogueKind::Microsoft, microsoft_phase(sources.microsoft)),
+        (CatalogueKind::Storage, storage_phase(sources.storage)),
         (CatalogueKind::WebAddress, web_phase(sources.services)),
     ];
     for (kind, phase) in derived {
@@ -393,6 +473,34 @@ pub fn github_phase(state: &GitHubState) -> LinkPhase {
     }
 }
 
+pub fn storage_phase(book: &StorageBook) -> LinkPhase {
+    if book.places.is_empty() {
+        return LinkPhase::NotLinked;
+    }
+    let statuses: Vec<_> = book
+        .places
+        .iter()
+        .map(|view| book.status_of(&view.place.id))
+        .collect();
+    if statuses
+        .iter()
+        .any(|status| matches!(status, PlaceStatus::Problem(_)))
+        || book.places.iter().any(|view| !view.has_secret)
+    {
+        LinkPhase::NeedsYou
+    } else if statuses
+        .iter()
+        .any(|status| matches!(status, PlaceStatus::Checking))
+        && !statuses
+            .iter()
+            .any(|status| matches!(status, PlaceStatus::Works))
+    {
+        LinkPhase::Working
+    } else {
+        LinkPhase::Linked
+    }
+}
+
 pub fn web_phase(services: &[McpService]) -> LinkPhase {
     if services.is_empty() {
         return LinkPhase::NotLinked;
@@ -444,6 +552,54 @@ mod tests {
     use crate::google::GoogleState;
     use crate::models::{CatalogState, ModelConnection, ProviderKind};
 
+    static NO_STORAGE: StorageBook = StorageBook {
+        loaded: false,
+        places: Vec::new(),
+        status: BTreeMap::new(),
+        browsing: None,
+        refused: None,
+        saved: None,
+        notice: None,
+    };
+
+    #[test]
+    fn every_kind_sits_in_one_section_and_sections_are_in_page_order() {
+        let mut seen = Vec::new();
+        for group in CatalogueGroup::ALL {
+            assert!(group.sentence().ends_with('.'));
+            assert!(!first_screen_asks_for_secret(group.title()));
+            assert!(!first_screen_asks_for_secret(group.sentence()));
+            let kinds: Vec<_> = group.kinds().collect();
+            assert!(!kinds.is_empty(), "{group:?} is empty");
+            seen.extend(kinds);
+        }
+        assert_eq!(seen, CatalogueKind::ALL);
+    }
+
+    #[test]
+    fn storage_card_follows_its_places() {
+        use crate::storage::{PlaceView, StoragePlace, StorageService};
+        let mut book = StorageBook::default();
+        assert_eq!(storage_phase(&book), LinkPhase::NotLinked);
+        let place = StoragePlace {
+            id: "place-1".into(),
+            ..StoragePlace::new(StorageService::CloudflareR2)
+        };
+        book.places.push(PlaceView {
+            place,
+            has_secret: true,
+        });
+        assert_eq!(storage_phase(&book), LinkPhase::Linked);
+        book.status.insert("place-1".into(), PlaceStatus::Checking);
+        assert_eq!(storage_phase(&book), LinkPhase::Working);
+        book.status
+            .insert("place-1".into(), PlaceStatus::Problem("keys".into()));
+        assert_eq!(storage_phase(&book), LinkPhase::NeedsYou);
+        book.status.insert("place-1".into(), PlaceStatus::Works);
+        book.places[0].has_secret = false;
+        assert_eq!(storage_phase(&book), LinkPhase::NeedsYou);
+    }
+
     fn sources<'a>(
         connections: &'a [ModelConnection],
         catalogs: &'a BTreeMap<String, CatalogState>,
@@ -461,6 +617,7 @@ mod tests {
             google,
             github: &GitHubState::NotConnected,
             microsoft: &MicrosoftState::NotConnected,
+            storage: &NO_STORAGE,
             services,
             probed,
         }
@@ -537,6 +694,7 @@ mod tests {
                 google: &GoogleState::NotConnected,
                 github: &state,
                 microsoft: &MicrosoftState::NotConnected,
+                storage: &StorageBook::default(),
                 services: &[],
                 probed: &BTreeMap::new(),
             });
@@ -722,6 +880,7 @@ mod tests {
             google: &google,
             github: &GitHubState::NotConnected,
             microsoft: &MicrosoftState::NotConnected,
+            storage: &StorageBook::default(),
             services: &services,
             probed: &BTreeMap::new(),
         });

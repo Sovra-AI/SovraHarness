@@ -36,6 +36,8 @@ pub enum Capability {
     Messaging,
     MicrosoftWorkspace,
     GitHub,
+    /// Buckets and file servers linked on the Connections page.
+    OnlineStorage,
 }
 
 impl Capability {
@@ -54,6 +56,7 @@ impl Capability {
             Self::GoogleWorkspace => "Google account access",
             Self::MicrosoftWorkspace => "Microsoft account access",
             Self::GitHub => "GitHub access",
+            Self::OnlineStorage => "online storage",
         }
     }
 }
@@ -77,6 +80,7 @@ pub fn required_capabilities(specialist_id: &str) -> &'static [Capability] {
         "GoogleWorkspace" => &[Capability::GoogleWorkspace],
         "MicrosoftWorkspace" => &[Capability::MicrosoftWorkspace],
         "GitHubAgent" => &[Capability::GitHub],
+        "StorageAgent" => &[Capability::OnlineStorage],
         _ => &[],
     }
 }
@@ -200,6 +204,7 @@ mod tests {
             Capability::Messaging,
             Capability::MicrosoftWorkspace,
             Capability::GitHub,
+            Capability::OnlineStorage,
         ]
         .into();
         let offered = available_specialists(&roster, &every);
@@ -227,6 +232,7 @@ mod tests {
             Capability::Messaging,
             Capability::MicrosoftWorkspace,
             Capability::GitHub,
+            Capability::OnlineStorage,
         ]
         .into();
         let offered = available_specialists(&roster, &every);

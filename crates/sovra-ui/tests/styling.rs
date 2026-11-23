@@ -49,6 +49,8 @@ mod research_board;
 mod schedules;
 #[path = "styling/skills_example.rs"]
 mod skills_example;
+#[path = "styling/storage.rs"]
+mod storage;
 #[path = "styling/terminal.rs"]
 mod terminal;
 #[path = "styling/training.rs"]

@@ -30,6 +30,25 @@ package version.
   source. Structured relationships and connections inferred from wording retain
   their distinct evidence labels.
 
+- **Link online storage.** **Connections → Online storage** links a storage
+  bucket or file server: Amazon S3, Cloudflare R2, Backblaze B2, Wasabi,
+  DigitalOcean Spaces, Google Cloud Storage, Hetzner, Scaleway, Akamai
+  (Linode), MinIO or any other S3-compatible service; Azure Blob Storage with a
+  shared access signature; and Nextcloud, ownCloud or any WebDAV file server or
+  NAS. Each service's form says where its keys are made and fills in the
+  address from the region. **Check and link** keeps a place only once the
+  service accepts it, and refusals say what to fix. **Browse files** shows
+  each folder. In chat, the new **Online storage helper** lists, finds and
+  reads files there (documents through the document reader), and saves a text
+  file only in places where saving is on, never replacing a file without
+  asking. Secrets stay in the keychain. See [Online storage](docs/online-storage.md).
+
+- **A clearer Connections page.** Links are grouped into AI, chat apps, your
+  accounts, files and storage, and extra tools, in a grid of cards with an
+  icon, a coloured status and a coloured edge for linked and needs-you cards.
+  A summary at the top counts what is linked, what needs you and what is
+  ready to add.
+
 - **Be in several groups, and share from chat.** A computer can now be in more
   than one group: **Your groups** at the top of Groups switches between them,
   and **＋ Start or join another group** adds one without leaving any. Each

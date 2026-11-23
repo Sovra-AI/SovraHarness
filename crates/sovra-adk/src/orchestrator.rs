@@ -542,6 +542,7 @@ mod tests {
             "GoogleWorkspace",
             "TodosAgent",
             "GitHubAgent",
+            "StorageAgent",
             "ExecutionAgent",
         ] {
             assert!(

@@ -52,6 +52,7 @@ From [Training](training.md) and [Swarm internals](swarm.md).
 - **A hard deadline for the document decoder.** The configured decoder timeout is not enforced without Xberg's tokio-runtime feature. Cancellation is cooperative. [Files in chat](files.md).
 - **Plugin versions beyond `major.minor.patch`.** Prerelease and range syntax are not accepted. [Plugins](plugins.md).
 - **Microsoft work this connection does not do.** Live spreadsheet editing, Office automation, Power BI, Dynamics, Azure administration, and Purview. [Microsoft 365](microsoft-365.md).
+- **More online storage.** SFTP, Dropbox and Box sign-in, Azure storage account keys, and saving binary files or files over 5 MB from chat. [Online storage](online-storage.md).
 - **A GitHub Enterprise Server address on the screen.** `sovra_github::Endpoints` supports one in code. The screen does not offer it. [GitHub](github.md).
 
 ## Install and phones

@@ -142,6 +142,7 @@ pub(crate) struct FilePrompt {
     pub(crate) messaging: Option<Arc<dyn sovra_core::communications::MessagingAccess>>,
     pub(crate) google: Option<sovra_adk::GoogleTools>,
     pub(crate) github: Option<sovra_adk::GitHubTools>,
+    pub(crate) storage: Option<sovra_adk::StorageTools>,
     pub(crate) microsoft: Option<sovra_adk::MicrosoftTools>,
     /// Terminal access for private conversations; `None` when off or unavailable.
     pub(crate) terminal: Option<Arc<dyn sovra_core::terminal::TerminalAccess>>,
@@ -295,7 +296,8 @@ async fn run(
             .with_messaging(job.messaging)?
             .with_google(job.google.as_ref())?
             .with_microsoft(job.microsoft.as_ref())?
-            .with_github(job.github.as_ref())?;
+            .with_github(job.github.as_ref())?
+            .with_storage(job.storage.as_ref())?;
         let harness = match job.terminal {
             Some(access) => harness.with_terminal(access)?,
             None => harness,

@@ -64,6 +64,7 @@ accounts, memory or connections.
 | `remote-control-reference/desktop.json` | Public desktop routing hints for the optional `--remote-control-client` developer client. Its separate phone identity is in the credential store. |
 | `terminal/settings.json` | Terminal preferences |
 | `development-control/` | Local development-control state and endpoint descriptor |
+| `storage/places.json` | Linked online storage places, owner-only. Never holds a secret: each place's secret is in the credential store as `storage-secret-<place id>`. See [Online storage](online-storage.md). |
 | `dev-credentials/` | Debug-only plaintext credential store |
 | `logs/` | Daily rolling application logs |
 

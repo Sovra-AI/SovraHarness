@@ -40,6 +40,7 @@ mod secret_vault;
 pub use secret_vault::background_vault;
 mod plugins;
 mod skills;
+mod storage;
 mod terminal;
 pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
@@ -49,6 +50,7 @@ pub use ai_tiers::LayaSetup;
 pub use groups::{GroupServices, QrEncoder, TransportFactory, TransportFuture};
 pub use models::ModelsConfig;
 pub use schedules::{JsonScheduleStore, MemoryScheduleStore};
+pub use storage::StorageConfig;
 pub use training::TrainingConfig;
 
 use std::sync::Arc;
@@ -317,6 +319,7 @@ pub fn start_with_auth(
             signin: google,
             google: None,
             github: None,
+            storage: None,
             microsoft: None,
             development: None,
             remote_control: None,
@@ -355,6 +358,8 @@ pub struct RuntimeServices {
     /// The person's GitHub account (Connections page and agent tools).
     pub github: Option<Arc<dyn sovra_core::github::GitHubConnector>>,
     pub microsoft: Option<Arc<dyn sovra_core::microsoft::MicrosoftConnector>>,
+    /// Online storage places (Connections page and agent tools). `None` hides them.
+    pub storage: Option<StorageConfig>,
     /// Local control follows the build startup policy and remains revocable in Settings.
     pub development: Option<DevelopmentConfig>,
     /// Independently paired phones; always starts disabled.
@@ -478,6 +483,7 @@ async fn serve(
         google,
         github,
         microsoft,
+        storage,
         development,
         remote_control,
         probes,
@@ -517,6 +523,7 @@ async fn serve(
     let github = github::GitHubRuntime::start(github, events.clone(), &handle);
     let microsoft =
         microsoft::MicrosoftRuntime::start(microsoft, files.clone(), events.clone(), &handle);
+    let storage = storage::StorageRuntime::start(storage, files.clone(), events.clone(), &handle);
     let groups = groups::GroupRuntime::start(group_services, events.clone(), &handle);
     let training =
         training::TrainingRuntime::start(training, events.clone(), groups.training(), &handle);
@@ -673,6 +680,7 @@ async fn serve(
     google.send(sovra_core::google::GoogleCommand::Load);
     github.send(sovra_core::github::GitHubCommand::Load);
     microsoft.send(sovra_core::microsoft::MicrosoftCommand::Load);
+    storage.send(sovra_core::storage::StorageCommand::Load);
     let (schedules, events) = schedules::SchedulesRuntime::start(
         schedule_store,
         events,
@@ -782,6 +790,7 @@ async fn serve(
             Command::Plugins(command) => skills.send_plugin(command),
             Command::Google(command) => google.send(command),
             Command::GitHub(command) => github.send(command),
+            Command::Storage(command) => storage.send(command),
             Command::Microsoft(command) => microsoft.send(command),
             Command::Schedule(command) => schedules.send(command),
             Command::Group(command) => {
@@ -870,6 +879,8 @@ async fn serve(
                 let base = base
                     .with_microsoft(microsoft_tools.as_ref())
                     .unwrap_or(base);
+                let storage_tools = storage.tools().await;
+                let base = base.with_storage(storage_tools.as_ref()).unwrap_or(base);
                 let schedule_tools = schedules.tools();
                 let base = base.with_schedules(Some(&schedule_tools)).unwrap_or(base);
                 if let Some(previous) = runs.remove(&session_id) {
@@ -981,6 +992,7 @@ async fn serve(
                         google: google.tools().await,
                         github: github.tools().await,
                         microsoft: microsoft.tools().await,
+                        storage: storage.tools().await,
                         terminal: if connections.private_access(&session_id) {
                             terminal.access()
                         } else {
@@ -1163,6 +1175,11 @@ async fn serve(
                 } else {
                     None
                 };
+                let storage_tools = if private_access {
+                    storage.tools().await
+                } else {
+                    None
+                };
                 let selected = selected.map(|base| {
                     if !private_access {
                         return base;
@@ -1175,6 +1192,7 @@ async fn serve(
                     let base = base
                         .with_microsoft(microsoft_tools.as_ref())
                         .unwrap_or(base);
+                    let base = base.with_storage(storage_tools.as_ref()).unwrap_or(base);
                     let base = match terminal.access() {
                         Some(access) => base.with_terminal(access).unwrap_or(base),
                         None => base,

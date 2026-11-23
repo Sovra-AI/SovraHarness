@@ -32,6 +32,8 @@ pub enum Command {
     /// The GitHub account on the Connections page.
     GitHub(crate::github::GitHubCommand),
     Microsoft(crate::microsoft::MicrosoftCommand),
+    /// Online storage places (S3 buckets, `WebDAV` folders, Azure containers).
+    Storage(crate::storage::StorageCommand),
     Mcp(crate::mcp::McpCommand),
     /// Terminal approvals and settings.
     Terminal(crate::terminal::TerminalCommand),
@@ -118,6 +120,7 @@ pub enum Event {
     Google(crate::google::GoogleEvent),
     GitHub(crate::github::GitHubEvent),
     Microsoft(crate::microsoft::MicrosoftEvent),
+    Storage(crate::storage::StorageEvent),
     Mcp(crate::mcp::McpEvent),
     /// Terminal cards and settings. Not session-scoped: the state is shared and each
     /// call names its own conversation, so cards for background chats are kept too.
@@ -217,6 +220,7 @@ impl Event {
             | Self::Google(_)
             | Self::GitHub(_)
             | Self::Microsoft(_)
+            | Self::Storage(_)
             | Self::Mcp(_)
             | Self::Terminal(_)
             | Self::Schedule(_)

@@ -469,6 +469,8 @@ pub struct WorkspaceState {
     pub google: crate::google::GoogleConnection,
     /// The GitHub account, folded from [`Event::GitHub`].
     pub github: crate::github::GitHubConnection,
+    /// Online storage places on the Connections page.
+    pub storage: crate::storage::StorageBook,
     pub microsoft: crate::microsoft::MicrosoftConnection,
     /// Terminal commands, approvals and saved rules, folded from [`Event::Terminal`].
     pub terminal: crate::terminal::TerminalState,
@@ -553,6 +555,7 @@ impl WorkspaceState {
             connections: crate::connections::ConnectionsState::default(),
             google: crate::google::GoogleConnection::default(),
             github: crate::github::GitHubConnection::default(),
+            storage: crate::storage::StorageBook::default(),
             microsoft: crate::microsoft::MicrosoftConnection::default(),
             terminal: crate::terminal::TerminalState::default(),
             room: crate::teams::TeamRoom::ordinary(),
@@ -1457,6 +1460,10 @@ impl WorkspaceState {
             }
             Event::GitHub(github_event) => {
                 self.github.apply(github_event);
+                None
+            }
+            Event::Storage(event) => {
+                self.storage.apply(event);
                 None
             }
             Event::Terminal(terminal_event) => {

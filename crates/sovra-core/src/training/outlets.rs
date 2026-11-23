@@ -68,51 +68,18 @@ impl BucketSettings {
                 && text.chars().count() <= MAX_BUCKET_TEXT_CHARS
                 && !text.chars().any(|c| c.is_control() || c.is_whitespace())
         };
-        let url = url::Url::parse(&self.endpoint)
-            .ok()
-            .filter(|url| url.host_str().is_some())
-            .ok_or_else(|| {
-                refuse(
-                    "The storage address must be a web address such as https://s3.eu-west-2.amazonaws.com.",
-                )
-            })?;
-        let loopback = match url.host() {
-            Some(url::Host::Domain(name)) => name == "localhost",
-            Some(url::Host::Ipv4(address)) => address.is_loopback(),
-            Some(url::Host::Ipv6(address)) => address.is_loopback(),
-            None => false,
-        };
-        // A key sent over plain http can be read on the way. Only a service on
-        // this computer itself may be reached that way.
-        if !(url.scheme() == "https" || (url.scheme() == "http" && loopback)) {
-            return Err(refuse(
-                "The storage address must start with https://. Only a service on this computer may use http://.",
-            ));
-        }
-        if !plain(&self.endpoint)
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-            || !matches!(url.path(), "" | "/")
-        {
-            return Err(refuse(
-                "The storage address must be only the service's address, with nothing after it.",
-            ));
-        }
+        crate::storage::check_address(
+            &self.endpoint,
+            false,
+            crate::storage::PlainHttp::ThisComputer,
+        )
+        .map_err(refuse)?;
         if !plain(&self.region) {
             return Err(refuse(
                 "Give the storage region, such as us-east-1. Cloudflare R2 uses auto.",
             ));
         }
-        // The rules every such service shares for bucket names.
-        let bucket_ok = (3..=63).contains(&self.bucket.len())
-            && self
-                .bucket
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
-            && self.bucket.starts_with(|c: char| c.is_ascii_alphanumeric())
-            && self.bucket.ends_with(|c: char| c.is_ascii_alphanumeric());
+        let bucket_ok = crate::storage::bucket_name_ok(&self.bucket);
         if !bucket_ok {
             return Err(refuse(
                 "The bucket name must be 3 to 63 lower-case letters, digits, dots or hyphens.",

@@ -721,6 +721,7 @@ pub(crate) fn skill_icon(skill: &Skill) -> IconName {
         "artifacts" | "save-artifact" => IconName::LibraryBig,
         "settings" => IconName::Settings,
         "models" => IconName::Box,
+        "storage" => IconName::Cloud,
         _ => GROUPS
             .iter()
             .find(|group| group.key == group_key(skill))
@@ -746,7 +747,7 @@ pub(crate) fn tile(icon: IconName, tone: design::TileTone, cx: &App) -> impl Int
         )
 }
 
-fn columns(width: design::WidthClass) -> usize {
+pub(crate) fn columns(width: design::WidthClass) -> usize {
     match width {
         design::WidthClass::Compact => 1,
         design::WidthClass::Medium => 2,
@@ -757,7 +758,7 @@ fn columns(width: design::WidthClass) -> usize {
 }
 
 /// Equal-width rows, so a short last row keeps the same card width as the rest.
-fn grid(cells: Vec<AnyElement>, columns: usize, cx: &App) -> impl IntoElement + use<> {
+pub(crate) fn grid(cells: Vec<AnyElement>, columns: usize, cx: &App) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let mut rows = Vec::new();
     let mut cells = cells.into_iter().peekable();

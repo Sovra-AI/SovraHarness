@@ -12,14 +12,14 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement,
+    AnyElement, App, AppContext as _, Bounds, Context, Hsla, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _,
     Window, canvas, div, fill, point, size,
 };
 use sovra_core::Command;
 use sovra_core::connection_catalogue::{
-    CatalogueKind, CatalogueSources, ConnectionCatalogue, KINDS, LinkPhase, catalogue_from,
-    whatsapp_phase,
+    CatalogueCard, CatalogueGroup, CatalogueKind, CatalogueSources, ConnectionCatalogue, KINDS,
+    LinkPhase, catalogue_from, whatsapp_phase,
 };
 use sovra_core::connections::{
     ConnectionCommand, ConnectionsState, TelegramSettings, TelegramStatus, WhatsAppQrTicket,
@@ -844,6 +844,7 @@ impl ModelsView {
             | CatalogueKind::Google
             | CatalogueKind::GitHub
             | CatalogueKind::Microsoft
+            | CatalogueKind::Storage
             | CatalogueKind::WebAddress => {
                 self.connections_page = true;
                 self.settings_open = false;
@@ -884,6 +885,7 @@ impl ModelsView {
             google: &self.google.state,
             github: &self.github.state,
             microsoft: &self.microsoft.state,
+            storage: &self.storage,
             services: &self.services.services,
             probed: &self.connections.probed,
         })
@@ -941,103 +943,240 @@ impl ModelsView {
     fn render_catalogue(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let t = design::tokens(cx);
         let catalogue = self.current_catalogue();
-        let mut rows = Vec::new();
-        for card in catalogue.cards() {
-            let slug = card.kind.slug();
-            let kind = card.kind;
-            let phase = card.phase.label();
-            let color = match card.phase {
-                LinkPhase::Linked => cx.theme().success,
-                LinkPhase::NeedsYou => cx.theme().danger,
-                LinkPhase::NotLinked | LinkPhase::Working => t.text_secondary,
-            };
-            rows.push(
+        let columns = crate::skill_library::columns(self.width_class);
+        let count = |phase: LinkPhase| {
+            catalogue
+                .cards()
+                .iter()
+                .filter(|card| card.phase == phase)
+                .count()
+        };
+        let (linked, needs_you, working) = (
+            count(LinkPhase::Linked),
+            count(LinkPhase::NeedsYou),
+            count(LinkPhase::Working),
+        );
+        let available = catalogue.cards().len() - linked - needs_you - working;
+        let chip = |id: &'static str, icon: IconName, text: String, color: Hsla, cx: &App| {
+            h_flex()
+                .id(id)
+                .test_support()
+                .aria_label(text.clone())
+                .flex_shrink_0()
+                .items_center()
+                .gap(t.space.compact)
+                .px(t.space.small)
+                .py(t.space.hair)
+                .rounded(t.radius.pill)
+                .border_1()
+                .border_color(t.material_border)
+                .bg(t.subtle)
+                .child(Icon::new(icon).size(t.layout.icon_small).text_color(color))
+                .child(div().sovra_text(TextRole::Caption, cx).child(text))
+        };
+        let mut summary = h_flex()
+            .id("connections-summary")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .gap(t.space.small)
+            .child(chip(
+                "connections-summary-linked",
+                IconName::CircleCheck,
+                format!("{linked} linked"),
+                cx.theme().success,
+                cx,
+            ));
+        if needs_you > 0 {
+            summary = summary.child(chip(
+                "connections-summary-needs-you",
+                IconName::CircleAlert,
+                format!("{needs_you} need you"),
+                cx.theme().danger,
+                cx,
+            ));
+        }
+        if working > 0 {
+            summary = summary.child(chip(
+                "connections-summary-working",
+                IconName::LoaderCircle,
+                format!("{working} working on it"),
+                t.text_secondary,
+                cx,
+            ));
+        }
+        summary = summary.child(chip(
+            "connections-summary-available",
+            IconName::Plus,
+            format!("{available} ready to add"),
+            t.text_secondary,
+            cx,
+        ));
+
+        let mut page = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.large)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .flex_wrap()
+                    .items_end()
+                    .justify_between()
+                    .gap(t.space.medium)
+                    .child(div().flex_1().min_w_0().child(design::page_header(
+                        "Connections",
+                        "Link the apps, accounts and storage you already use. Each link is separate, and you can switch any of them off.",
+                        cx,
+                    )))
+                    .child(
+                        design::button("connections-refresh", "Check links", cx)
+                            .icon(IconName::CircleCheck)
+                            .tooltip("Ask every linked service whether it still works")
+                            .flex_shrink_0()
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.send_connection(ConnectionCommand::Refresh, cx);
+                            })),
+                    ),
+            )
+            .child(summary);
+
+        for group in CatalogueGroup::ALL {
+            let cells: Vec<AnyElement> = group
+                .kinds()
+                .map(|kind| Self::render_catalogue_card(catalogue.card(kind), cx))
+                .collect();
+            page = page.child(
                 v_flex()
                     .id(gpui_kit::SharedString::from(format!(
-                        "connection-card-{slug}"
+                        "connections-group-{}",
+                        group.slug()
                     )))
                     .test_support()
                     .w_full()
                     .min_w_0()
-                    .p(t.space.medium)
                     .gap(t.space.small)
-                    .sovra_surface(Surface::Matte, cx)
                     .child(
                         div()
-                            .id(gpui_kit::SharedString::from(format!(
-                                "connection-title-{slug}"
-                            )))
-                            .aria_label(card.title)
-                            .test_support()
+                            .min_w_0()
                             .sovra_text(TextRole::SectionTitle, cx)
-                            .child(card.title),
+                            .child(group.title()),
                     )
-                    .child(
-                        div()
-                            .id(gpui_kit::SharedString::from(format!(
-                                "connection-sentence-{slug}"
-                            )))
-                            .aria_label(card.sentence)
-                            .test_support()
-                            .min_w_0()
-                            .sovra_text(TextRole::Body, cx)
-                            .child(card.sentence),
-                    )
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_between()
-                            .gap(t.space.small)
-                            .child(
-                                div()
-                                    .id(gpui_kit::SharedString::from(format!(
-                                        "connection-status-{slug}"
-                                    )))
-                                    .aria_label(phase)
-                                    .test_support()
-                                    .text_color(color)
-                                    .child(phase),
-                            )
-                            .child(
-                                design::primary_button(
-                                    gpui_kit::SharedString::from(format!(
-                                        "connection-action-{slug}"
-                                    )),
-                                    card.action,
-                                    cx,
-                                )
-                                .flex_shrink_0()
-                                .on_click(cx.listener(
-                                    move |view, _, window, cx| {
-                                        view.open_catalogue_kind(kind, window, cx);
-                                    },
-                                )),
-                            ),
-                    )
-                    .into_any_element(),
+                    .child(caption(group.sentence(), cx))
+                    .child(crate::skill_library::grid(cells, columns, cx)),
             );
         }
-        v_flex()
-            .w_full()
+        page.into_any_element()
+    }
+
+    fn render_catalogue_card(card: &CatalogueCard, cx: &mut Context<Self>) -> AnyElement {
+        let t = design::tokens(cx);
+        let slug = card.kind.slug();
+        let kind = card.kind;
+        let phase = card.phase.label();
+        let (color, status_icon) = match card.phase {
+            LinkPhase::Linked => (cx.theme().success, IconName::CircleCheck),
+            LinkPhase::NeedsYou => (cx.theme().danger, IconName::CircleAlert),
+            LinkPhase::Working => (t.text_secondary, IconName::LoaderCircle),
+            LinkPhase::NotLinked => (t.text_secondary, IconName::Circle),
+        };
+        let tone = t.tiles.categories[match kind.group() {
+            CatalogueGroup::Ai => 0,
+            CatalogueGroup::Chat => 1,
+            CatalogueGroup::Accounts => 2,
+            CatalogueGroup::Storage => 3,
+            CatalogueGroup::Tools => 4,
+        }];
+        let mut tile = v_flex()
+            .id(gpui_kit::SharedString::from(format!("connection-card-{slug}")))
+            .test_support()
+            .size_full()
             .min_w_0()
-            .gap(t.space.medium)
-            .child(design::page_header(
-                "Connections",
-                "Each link is separate. Open one when you want to set it up.",
-                cx,
-            ))
-            .child(
-                design::button("connections-refresh", "Check links", cx).on_click(cx.listener(
-                    |view, _, _, cx| {
-                        view.send_connection(ConnectionCommand::Refresh, cx);
-                    },
-                )),
-            )
-            .children(rows)
-            .into_any_element()
+            .p(t.space.medium)
+            .gap(t.space.small)
+            .sovra_surface(Surface::Matte, cx);
+        // The edge says at a glance which links work and which need a look.
+        tile = match card.phase {
+            LinkPhase::Linked => tile.border_color(cx.theme().success.opacity(0.55)),
+            LinkPhase::NeedsYou => tile.border_color(cx.theme().danger.opacity(0.6)),
+            LinkPhase::NotLinked | LinkPhase::Working => tile,
+        };
+        let action = design::button(
+            gpui_kit::SharedString::from(format!("connection-action-{slug}")),
+            card.action,
+            cx,
+        );
+        let action = match card.phase {
+            LinkPhase::NotLinked | LinkPhase::NeedsYou => action.primary(),
+            LinkPhase::Linked | LinkPhase::Working => action,
+        };
+        tile.child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_start()
+                .gap(t.space.medium)
+                .child(crate::skill_library::tile(kind_icon(kind), tone, cx))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(t.space.hair)
+                        .child(
+                            div()
+                                .id(gpui_kit::SharedString::from(format!(
+                                    "connection-title-{slug}"
+                                )))
+                                .aria_label(card.title)
+                                .test_support()
+                                .min_w_0()
+                                .sovra_text(TextRole::SectionTitle, cx)
+                                .child(card.title),
+                        )
+                        .child(
+                            h_flex()
+                                .id(gpui_kit::SharedString::from(format!(
+                                    "connection-status-{slug}"
+                                )))
+                                .aria_label(phase)
+                                .test_support()
+                                .min_w_0()
+                                .items_center()
+                                .gap(t.space.compact)
+                                .text_color(color)
+                                .child(Icon::new(status_icon).size(t.layout.icon_small))
+                                .child(div().sovra_text(TextRole::Caption, cx).child(phase)),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .id(gpui_kit::SharedString::from(format!(
+                    "connection-sentence-{slug}"
+                )))
+                .aria_label(card.sentence)
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Body, cx)
+                .text_color(t.text_secondary)
+                .child(card.sentence),
+        )
+        // Keeps every card's button on the same line within a row.
+        .child(div().flex_1())
+        .child(
+            h_flex().w_full().min_w_0().justify_end().child(
+                action
+                    .flex_shrink_0()
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.open_catalogue_kind(kind, window, cx);
+                    })),
+            ),
+        )
+        .into_any_element()
     }
 
     fn render_open_connection(
@@ -1064,6 +1203,7 @@ impl ModelsView {
                 || caption("GitHub is not available in this window.", cx).into_any_element(),
                 |card| div().w_full().min_w_0().child(card).into_any_element(),
             ),
+            CatalogueKind::Storage => self.render_storage_section(cx),
             CatalogueKind::WebAddress => self.render_service_connect_section(cx).into_any_element(),
         };
         let feedback = matches!(
@@ -1098,6 +1238,8 @@ impl ModelsView {
                 design::button("connections-back", "All connections", cx).on_click(cx.listener(
                     |view, _, _, cx| {
                         view.open_kind = None;
+                        view.storage_form = None;
+                        view.storage_remove_confirm = None;
                         view.connection_form = None;
                         view.form_subscriptions.clear();
                         view.manual_form = None;
@@ -1143,5 +1285,21 @@ impl ModelsView {
                     })),
             )
             .into_any_element()
+    }
+}
+
+/// The picture on each kind's card.
+fn kind_icon(kind: CatalogueKind) -> IconName {
+    match kind {
+        CatalogueKind::OnlineAi => IconName::Globe,
+        CatalogueKind::LocalAi => IconName::Cpu,
+        CatalogueKind::CompatibleService => IconName::Plug,
+        CatalogueKind::WhatsApp => IconName::MessageCircle,
+        CatalogueKind::Telegram => IconName::Send,
+        CatalogueKind::Google => IconName::Mail,
+        CatalogueKind::GitHub => IconName::Code,
+        CatalogueKind::Microsoft => IconName::Briefcase,
+        CatalogueKind::Storage => IconName::Cloud,
+        CatalogueKind::WebAddress => IconName::Puzzle,
     }
 }

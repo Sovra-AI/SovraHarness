@@ -130,6 +130,11 @@ pub struct ModelsView {
     /// GitHub status for the catalogue. The shell copies each GitHub event here.
     pub(crate) github: sovra_core::github::GitHubConnection,
     pub(crate) microsoft: sovra_core::microsoft::MicrosoftConnection,
+    /// Online storage places. The shell copies each storage event here.
+    pub(crate) storage: sovra_core::storage::StorageBook,
+    pub(crate) storage_form: Option<crate::storage_view::StorageForm>,
+    /// The place whose Unlink was pressed once; a second press unlinks it.
+    pub(crate) storage_remove_confirm: Option<String>,
     pub(crate) connection_form: Option<ConnectionForm>,
     pub(crate) manual_form: Option<ManualModelForm>,
     pub(crate) form_subscriptions: Vec<Subscription>,
@@ -346,6 +351,9 @@ impl ModelsView {
             open_kind: None,
             google: sovra_core::google::GoogleConnection::default(),
             github: sovra_core::github::GitHubConnection::default(),
+            storage: sovra_core::storage::StorageBook::default(),
+            storage_form: None,
+            storage_remove_confirm: None,
             microsoft: sovra_core::microsoft::MicrosoftConnection::default(),
             connection_form: None,
             manual_form: None,

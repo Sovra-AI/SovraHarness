@@ -616,6 +616,13 @@ impl Shell {
                             });
                             shell.microsoft_card.update(cx, |_, cx| cx.notify());
                         }
+                        if let sovra_core::Event::Storage(event) = &event {
+                            shell.models.update(cx, |models, cx| {
+                                models.storage.apply(event);
+                                models.storage_changed();
+                                cx.notify();
+                            });
+                        }
                         // GitHub's page opens with the code already on the clipboard.
                         if let sovra_core::Event::GitHub(event) = &event {
                             if let sovra_core::github::GitHubEvent::OpenSignIn { url, code } = event

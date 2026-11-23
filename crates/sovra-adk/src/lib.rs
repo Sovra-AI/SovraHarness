@@ -30,6 +30,7 @@ mod reply_inputs;
 mod required_delegation;
 mod schedules;
 mod skills;
+mod storage;
 mod sources_footer;
 mod team;
 mod terminal;
@@ -46,6 +47,7 @@ pub use google::GoogleTools;
 pub use group_work::{GroupLlm, HarnessWork, job_from_request};
 pub use microsoft::MicrosoftTools;
 pub use schedules::ScheduleTools;
+pub use storage::StorageTools;
 pub use team::TeamTurn;
 pub use web_search::SearchClient;
 
@@ -124,6 +126,12 @@ fn capability_providers(
             github::ROUTING,
         ),
         (
+            sovra_core::Capability::OnlineStorage,
+            storage::TOOL_NAMES.as_slice(),
+            storage::PROCEDURE,
+            storage::ROUTING,
+        ),
+        (
             sovra_core::Capability::Schedules,
             schedules::TOOL_NAMES.as_slice(),
             schedules::PROCEDURE,
@@ -144,6 +152,7 @@ fn capability_providers(
                 first_tool: match capability {
                     sovra_core::Capability::Messaging => Some("messaging_status"),
                     sovra_core::Capability::Schedules => Some("list_schedules"),
+                    sovra_core::Capability::OnlineStorage => Some("storage_list_places"),
                     _ => None,
                 },
             }));

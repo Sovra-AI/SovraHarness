@@ -45,6 +45,7 @@ mod schedules;
 pub mod secrets;
 pub mod skills;
 pub mod specialists;
+pub mod storage;
 mod status;
 pub mod swarm;
 pub mod teams;

@@ -86,6 +86,7 @@ impl Skill {
             "scheduler" => "Set a repeating task, a timed text, or a morning search note",
             "todos" => "Personal to-do list organizer",
             "github" => "GitHub code & issue helper",
+            "storage" => "Online storage & file server helper",
             _ => &self.title,
         }
         .to_owned();
@@ -340,6 +341,10 @@ impl Skill {
             "github" => sample_pair(
                 "github",
                 "Are there any pull requests on GitHub waiting for my review?",
+            ),
+            "storage" => sample_pair(
+                "storage",
+                "Find last year's tax receipts in my storage bucket and add up the totals",
             ),
             // Skills people add show the example their author wrote. Without one, the
             // card names the skill in words: command names like `/plugin-…` mean

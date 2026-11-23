@@ -38,6 +38,7 @@ impl RuntimeStatus {
             | Event::Google(_)
             | Event::GitHub(_)
             | Event::Microsoft(_)
+            | Event::Storage(_)
             | Event::Schedule(_)
             | Event::Plugins(_)
             | Event::Group(_)

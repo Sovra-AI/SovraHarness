@@ -94,7 +94,9 @@ crates/
   sovra-microsoft Microsoft public-client OAuth and Graph behind core Microsoft ports.
   sovra-github    GitHub device-flow sign-in (or a pasted key) and REST behind the core
                   GitHubConnector port.
-  sovra-providers  HTTP catalogs, connection validation, OS credentials and model metadata.
+  sovra-providers  HTTP catalogs, connection validation, OS credentials, model metadata, and
+                  online storage (S3-language buckets, WebDAV, Azure Blob) behind the core
+                  StorageConnector port.
   sovra-runtime   tokio on a background thread; serves the UI over channels (Client).
   sovra-store-surreal  SurrealDB adapter for MemoryStore. The only crate naming surrealdb.
   sovra-whatsapp  WhatsApp Web client adapter for the core MessagingChannel port. The only

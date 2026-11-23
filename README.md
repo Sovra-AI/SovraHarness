@@ -127,6 +127,10 @@ has the first run, group steps, every setting, privacy details and limits.
   require fresh acceptance. See
   [Decision records](docs/decisions.md) for the local-account approval boundary.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
+- **Link online storage:** add Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, Google Cloud
+  Storage, MinIO and other S3-compatible buckets, Azure Blob containers, or Nextcloud,
+  ownCloud and other WebDAV file servers. Sovra browses, reads and (when you allow it) saves
+  files there. See [Online storage](docs/online-storage.md).
   Connection setup and permissions depend on the service.
 - **Official plugins in one click:** **Plugins → Made by Sovra** lists the plugins the
   Sovra team publishes, with what each one does. **Install** adds it and turns it on;
@@ -318,6 +322,7 @@ permissions and service limits.
 | [Teams and artifacts](docs/teams-and-artifacts.md) | Helpers and saved work |
 | [Schedules](docs/schedules.md) and [Groups](docs/groups.md) | Recurring work and sharing |
 | [Connections](docs/connected-services.md) | MCP tools and service setup |
+| [Online storage](docs/online-storage.md) | Buckets and file servers: services, setup, what Sovra may do, privacy and limits |
 | [Documentation index](docs/README.md) | All guides and technical references |
 
 ## Contributing and support

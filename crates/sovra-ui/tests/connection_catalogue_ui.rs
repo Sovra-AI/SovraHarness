@@ -39,10 +39,21 @@ fn fresh_sources<'a>(
         google,
         github: &sovra_core::github::GitHubState::NotConnected,
         microsoft: &sovra_core::microsoft::MicrosoftState::NotConnected,
+        storage: &NO_STORAGE,
         services,
         probed,
     }
 }
+
+static NO_STORAGE: sovra_core::storage::StorageBook = sovra_core::storage::StorageBook {
+    loaded: false,
+    places: Vec::new(),
+    status: BTreeMap::new(),
+    browsing: None,
+    refused: None,
+    saved: None,
+    notice: None,
+};
 
 #[gpui_kit::test]
 fn connections_lists_every_shipped_kind_and_settings_does_not(cx: &mut TestAppContext) {
