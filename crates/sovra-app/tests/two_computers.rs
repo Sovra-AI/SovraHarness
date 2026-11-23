@@ -618,25 +618,45 @@ impl Computer {
                 .hash(&mut hasher);
             chunk.copy_from_slice(&hasher.finish().to_le_bytes());
         }
-        Self::open(name, key, &[], false, true, sovra_mesh::Reach::Internet)
+        if std::env::var_os("SOVRA_FAR_LOG").is_some() {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter("sovra_mesh=debug,sovra_runtime=debug,iroh=warn")
+                .with_writer(std::io::stderr)
+                .with_ansi(false)
+                .try_init();
+        }
+        // `SOVRA_FAR_REACH=relay` keeps every packet on a relay, for a network
+        // where nothing else gets through.
+        let reach = if std::env::var_os("SOVRA_FAR_REACH").is_some_and(|value| value == "relay") {
+            sovra_mesh::Reach::RelayOnly
+        } else {
+            sovra_mesh::Reach::Internet
+        };
+        Self::open(name, key, &[], false, true, reach)
     }
 
-    /// Watches how this computer reaches the other one for `watch`, pressing
-    /// "Check now" as a person might, and returns every route it saw in order.
+    /// Watches how this computer reaches the other one for `watch` and returns
+    /// every route it saw, in order. It only listens: a relay passes little, and
+    /// asking again and again would crowd out the document being sent.
     async fn routes_seen(&self, watch: Duration) -> Vec<String> {
         let mut seen: Vec<String> = Vec::new();
         let until = tokio::time::Instant::now() + watch;
-        while tokio::time::Instant::now() < until {
-            self.send(GroupCommand::CheckNow);
-            let route = self
-                .try_wait(Duration::from_secs(5), |event| match event {
+        loop {
+            let left = until.saturating_duration_since(tokio::time::Instant::now());
+            if left.is_zero() {
+                return seen;
+            }
+            let Some(route) = self
+                .try_wait(left, |event| match event {
                     GroupEvent::Network(network) if !network.checking => {
                         Some(network.routes.values().next().copied())
                     }
                     _ => None,
                 })
                 .await
-                .flatten();
+            else {
+                return seen;
+            };
             let label = match route {
                 Some(sovra_core::group::Route::Direct) => "direct",
                 Some(sovra_core::group::Route::Relayed) => "relayed",
@@ -646,11 +666,9 @@ impl Computer {
                 seen.push(label.to_owned());
             }
             if label == "direct" {
-                break;
+                return seen;
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
         }
-        seen
     }
 }
 

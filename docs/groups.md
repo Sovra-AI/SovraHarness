@@ -69,8 +69,13 @@ connection open to every other online computer and reuses it.
 
 A relayed connection is slow. Measured on 2026-11-23 through n0's public relay
 with no direct path, a note arrived in under a second and a 435 KB document in
-about ten seconds; the relay passed roughly 46 KB a second. A direct connection
-has no such limit.
+about twelve seconds; the relay passed roughly 46 KB a second and reports that
+it rate-limits. In one run of five the relayed connection dropped under that
+limit and the document arrived after 44 seconds, on the next catch-up. A direct
+connection has no such limit. The same run was repeated between two network
+namespaces on one machine, each leaving through a different home router: same
+times, and the connection stayed relayed because both routers share one public
+address.
 
 ## Share work
 
