@@ -4,25 +4,21 @@ This is the only list of work that is still open. It has no delivery dates.
 Guides describe what this checkout does today. When a guide finds a gap, it
 states that limit and this page is the place that records the work.
 
-A GitHub issue is the detail for one item here, not a second list. The only
-open issue is
-[Keep a company's dated answers, decisions, and separate work](https://github.com/Sovra-AI/SovraHarness/issues/11).
-
 Shipped behavior stays in the [changelog](../CHANGELOG.md) and the guide for
 that feature. A **Limits** section is current behavior. It is copied here only
 when a guide says the piece is not built, not on the screen, not measured, or
 not emitted.
 
-The published download is **v0.8.0**. The package version is 0.8.0.
+The [latest desktop release](https://github.com/Sovra-AI/SovraHarness/releases/latest) has the installers for macOS, Windows and Linux.
 
 ## Company records
 
-Issue **#11**. Two parts are in the product.
+[Issue #11](https://github.com/Sovra-AI/SovraHarness/issues/11) tracks these records. Two parts have shipped.
 
 | Part | Where it stands |
 | --- | --- |
 | Dated answers from the company's files | Shipped in v0.7.0. On Your folders, **Save this answer** keeps the file, the lines, the wording, and the day that version was read. |
-| A decision record | On `main`, not in the v0.7.0 download. **Artifacts → Decisions** and **Record a decision** under a chat reply. A second local account accepts the saved version. |
+| A decision record | Shipped in [v0.8.0](https://github.com/Sovra-AI/SovraHarness/releases/tag/v0.8.0). Open **Artifacts → Decisions** or choose **Record a decision** under a chat reply. A second local account accepts the saved version. |
 | A register of outside parties | Open. One page per vendor, partner, tool, or service, with the same headings every time. |
 | Separate pieces of work, and a check before new work starts | Open. Knowledge stays inside the customer, deal, project, or team. Before new work starts, say whether the company already holds the other side. |
 | A pack that shows the working | Open. One saved pack: which computer, which model, which documents, who accepted the answer, and that the history is still kept. The company chooses the headings. |
@@ -46,7 +42,7 @@ From [Training](training.md) and [Swarm internals](swarm.md).
 
 - **Bring a Large run to the group.** Chunked work transfer is not built, so Large trains on one computer. The group can still receive the finished model with **Share with my group**.
 - **Measure whether extra computers make a run faster.** No speed-up from adding group computers has been measured, and there is no test across separate machines on different networks. Tests run several runtimes in one process.
-- **Import or fine-tune a pretrained model.** The trainer teaches the four built-in starting points only. Tokenizer files and an existing language model cannot be brought in.
+- **Import or fine-tune a pretrained model.** The trainer teaches the four built-in starting points only. Tokenizer files and an existing language model cannot be brought in. Owner decision (2026-11-11): on the future training screen the person running Sovra picks the open base model, with a licence that allows fine-tuning, and Sovra does not choose a default. Which items may train it, such as an "OK to train on" mark per department, is still to be decided. Until that screen exists, no shared model is trained in the app.
 - **Review the unused privacy protocols before any use.** Noise-based privacy and secure aggregation exist as library code and are not applied to desktop training. Swarm internals say that review is required before deployment.
 
 ## Files, plugins, and connections

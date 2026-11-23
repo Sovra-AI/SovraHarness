@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- **Roadmap is up to date with v0.8.0.** It now says the decision record shipped
+  in v0.8.0, links to the latest release instead of naming a version, and records
+  the owner's choice that the person running Sovra picks the base model for future
+  shared training.
+
 - **Command cards stay in their place in the chat.** A command Sovra ran (for
   example checking your computer pool) used to appear at the very bottom of the
   conversation, below the reply that described it and below any later questions.
