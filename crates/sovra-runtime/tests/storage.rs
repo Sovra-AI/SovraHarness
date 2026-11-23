@@ -209,7 +209,7 @@ fn a_place_is_kept_only_after_the_service_says_yes_and_survives_a_restart() {
     send(
         &client,
         StorageCommand::Save {
-            place: place.clone(),
+            place,
             secret: StorageSecret::new("good"),
         },
     );
