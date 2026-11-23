@@ -474,9 +474,24 @@ impl FileIndex for LocalFileIndex {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut db = self.connect()?;
         let tx = db.transaction().map_err(|error| db_error(&error))?;
-        tx.execute("DELETE FROM index_roots WHERE id=?1", [root_id])
+        // A home-directory grant can hold hundreds of thousands of files and
+        // millions of chunks. Per-file catalogue updates and per-chunk search
+        // index deletes make that removal look stuck. Suspend those row
+        // triggers, delete the grant, then rebuild search once. Grant-level
+        // triggers stay so saved quotations, summaries and pending reviews
+        // still follow the folder.
+        let triggers = suspend_row_triggers(&tx)?;
+        tx.execute("DELETE FROM index_files WHERE root_id=?1", [root_id])
             .map_err(|error| db_error(&error))?;
         tx.execute("DELETE FROM index_chunks WHERE NOT EXISTS (SELECT 1 FROM index_version_chunks vc WHERE vc.chunk_id=index_chunks.id)", []).map_err(|error| db_error(&error))?;
+        tx.execute_batch(
+            "INSERT INTO index_fts(index_fts) VALUES('rebuild');
+             INSERT INTO index_word_forms(index_word_forms) VALUES('rebuild');",
+        )
+        .map_err(|error| db_error(&error))?;
+        restore_row_triggers(&tx, &triggers)?;
+        tx.execute("DELETE FROM index_roots WHERE id=?1", [root_id])
+            .map_err(|error| db_error(&error))?;
         tx.commit().map_err(|error| db_error(&error))
     }
 
@@ -625,6 +640,47 @@ fn digest(bytes: &[u8]) -> String {
         encoded
     }
 }
+
+/// Row triggers whose per-record work dominates removal of a large folder.
+/// Names are a fixed allow-list: SQLite cannot bind an identifier.
+const ROW_TRIGGERS: &[&str] = &[
+    "catalogue_delete",
+    "summary_deleted_source",
+    "index_chunks_delete",
+    "word_forms_delete",
+];
+
+fn suspend_row_triggers(tx: &rusqlite::Transaction<'_>) -> Result<Vec<String>, IndexError> {
+    let mut saved = Vec::new();
+    for name in ROW_TRIGGERS {
+        let sql: Option<String> = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
+                [*name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| db_error(&error))?;
+        let Some(sql) = sql else {
+            continue;
+        };
+        tx.execute(&format!("DROP TRIGGER {name}"), [])
+            .map_err(|error| db_error(&error))?;
+        saved.push(sql);
+    }
+    Ok(saved)
+}
+
+fn restore_row_triggers(
+    tx: &rusqlite::Transaction<'_>,
+    triggers: &[String],
+) -> Result<(), IndexError> {
+    for sql in triggers {
+        tx.execute(sql, []).map_err(|error| db_error(&error))?;
+    }
+    Ok(())
+}
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

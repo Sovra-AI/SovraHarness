@@ -59,10 +59,12 @@ passages without a filename in the question. The query's folder grants still
 bound access. External models may receive retrieved passages when answering.
 
 Use **Refresh** to reconcile changes. **Pause** stops automatic updates;
-cancelling a scan also pauses them. Removing a folder revokes indexed retrieval
-and deletes its index without changing the original files. Re-adding a folder
-does not restore old revoked access references. A cancelled or incomplete scan
-does not mark all unvisited files as deleted.
+cancelling a scan also pauses them. **Remove**, then **Remove index**, revokes
+indexed retrieval and deletes that folder's index and saved quotations without
+changing the original files. Sovra says the folder is being removed until it
+leaves the list. Re-adding a folder does not restore old revoked access
+references. A cancelled or incomplete scan does not mark all unvisited files
+as deleted.
 
 Folder settings control document-reading budgets and optional meaning search.
 For supported formats, partial-reading warnings, saved-text navigation, and

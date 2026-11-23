@@ -386,6 +386,94 @@ fn shutting_down_during_a_scan_preserves_automatic_updates_for_reopening() {
     assert_eq!(search(&store, "retained").len(), 1);
 }
 
+#[test]
+fn removing_one_folder_keeps_the_other_and_bumps_the_catalogue_once() {
+    let fixture = Fixture::new();
+    let drop_dir = fixture.0.join("drop");
+    let keep_dir = fixture.0.join("keep");
+    std::fs::create_dir_all(&drop_dir).unwrap();
+    std::fs::create_dir_all(&keep_dir).unwrap();
+    std::fs::write(drop_dir.join("gone.txt"), "sunflower must leave\n").unwrap();
+    std::fs::write(drop_dir.join("also.txt"), "tulip must leave\n").unwrap();
+    std::fs::write(drop_dir.join("third.txt"), "daisy must leave\n").unwrap();
+    std::fs::write(keep_dir.join("stay.txt"), "marigold stays searchable\n").unwrap();
+    let store = fixture.store();
+    let drop_root = store.add_root(&drop_dir).unwrap();
+    let keep_root = store.add_root(&keep_dir).unwrap();
+    store.scan(&drop_root.id, &Observer::default()).unwrap();
+    store.scan(&keep_root.id, &Observer::default()).unwrap();
+    let db = store.connect().unwrap();
+    db.execute(
+        "INSERT INTO index_saved_answers(root_id,file_id,version_id,ordinal,snapshot) VALUES(?1,'file','version',0,'kept quotation')",
+        [&drop_root.id],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO index_knowledge_proposals(fingerprint,state,created,details) VALUES('fp','\"pending\"',1,?1)",
+        [format!(r#"{{"required_roots":["{}"]}}"#, drop_root.id)],
+    )
+    .unwrap();
+    drop(db);
+    let revision = catalogue_revision(&store);
+    store.remove(&drop_root.id).unwrap();
+    assert_eq!(
+        catalogue_revision(&store),
+        revision + 1,
+        "removal bumps the catalogue once, not once per file"
+    );
+    assert_eq!(store.list().unwrap().len(), 1);
+    assert_eq!(store.list().unwrap()[0].id, keep_root.id);
+    assert_eq!(search(&store, "sunflower"), [] as [IndexPassage; 0]);
+    assert_eq!(search(&store, "marigold").len(), 1);
+    assert!(drop_dir.join("gone.txt").exists());
+    let db = store.connect().unwrap();
+    let answers: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM index_saved_answers WHERE root_id=?1",
+            [&drop_root.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(answers, 0, "saved quotations leave with the folder");
+    let state: String = db
+        .query_row(
+            "SELECT state FROM index_knowledge_proposals WHERE fingerprint='fp'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "\"rejected\"");
+    for name in [
+        "catalogue_delete",
+        "summary_deleted_source",
+        "index_chunks_delete",
+        "word_forms_delete",
+        "catalogue_root_delete",
+        "knowledge_revoke_pending",
+    ] {
+        let present: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(present, 1, "{name} must still exist after removal");
+    }
+}
+
+fn catalogue_revision(store: &LocalFileIndex) -> i64 {
+    store
+        .connect()
+        .unwrap()
+        .query_row(
+            "SELECT revision FROM index_state WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
 fn search(store: &LocalFileIndex, text: &str) -> Vec<IndexPassage> {
     store
         .search(&IndexQuery {

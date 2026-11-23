@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- **Removing a Knowledge folder finishes.** Confirming Remove on Knowledge →
+  Files tells you the folder is being removed, then drops that folder's saved
+  index and quotations. The original files stay where they are. A large folder,
+  such as a home directory, no longer sits there as if Remove did nothing.
+
 - **Explore connected knowledge.** Search folder passages, your saved statements,
   and current artifacts together. Inspect typed relationships, category hierarchies,
   dataset profiles, unit conversions and tolerances, time windows, persistent

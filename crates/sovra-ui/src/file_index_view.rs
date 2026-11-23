@@ -39,6 +39,8 @@ pub(crate) struct FileIndexView {
     search: Entity<InputState>,
     _search: gpui_kit::Subscription,
     removing: Option<String>,
+    /// Folder grants whose removal has been confirmed and not yet reported done.
+    pending_removal: std::collections::BTreeSet<String>,
     detailed_roots: std::collections::BTreeSet<String>,
     options: std::collections::BTreeMap<String, sovra_core::file_index::ScanOptions>,
     picker: Option<Task<()>>,
@@ -50,8 +52,14 @@ pub(crate) struct FileIndexView {
 impl FileIndexView {
     pub(crate) fn apply(&mut self, event: &sovra_core::file_index::IndexEvent) {
         self.state.apply(event);
-        if matches!(event, sovra_core::file_index::IndexEvent::FoldersAdded(_)) {
-            self.state.notice = None;
+        match event {
+            sovra_core::file_index::IndexEvent::Roots(roots) => {
+                self.pending_removal
+                    .retain(|id| roots.iter().any(|root| root.id == *id));
+            }
+            sovra_core::file_index::IndexEvent::Error(_) => self.pending_removal.clear(),
+            sovra_core::file_index::IndexEvent::FoldersAdded(_) => self.state.notice = None,
+            _ => {}
         }
         if matches!(event, sovra_core::file_index::IndexEvent::Error(_)) {
             self.options.clear();
@@ -95,6 +103,7 @@ impl FileIndexView {
             search,
             _search: search_subscription,
             removing: None,
+            pending_removal: std::collections::BTreeSet::new(),
             detailed_roots: std::collections::BTreeSet::new(),
             options: std::collections::BTreeMap::new(),
             picker: None,
@@ -302,7 +311,16 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             .min_w_0().sovra_text(TextRole::Body, cx).child(capture_summary)))
         .children((!state.roots.is_empty()).then(|| render_search(shell, cx)))
         .children((!state.roots.is_empty()).then(|| browser::render(shell, cx)))
-        .children(state.roots.iter().map(|root| root_row(root, state.monitors.get(&root.id), state.semantic.iter().find(|s| s.setting.root_id == root.id), shell.file_index.removing.as_deref() == Some(root.id.as_str()), shell.file_index.detailed_roots.contains(&root.id), shell.file_index.options.get(&root.id).copied(), cx)));
+        .children(state.roots.iter().map(|root| {
+            let removal = if shell.file_index.pending_removal.contains(&root.id) {
+                RemovalPrompt::Working
+            } else if shell.file_index.removing.as_deref() == Some(root.id.as_str()) {
+                RemovalPrompt::Confirm
+            } else {
+                RemovalPrompt::None
+            };
+            root_row(root, state.monitors.get(&root.id), state.semantic.iter().find(|s| s.setting.root_id == root.id), &removal, shell.file_index.detailed_roots.contains(&root.id), shell.file_index.options.get(&root.id).copied(), cx)
+        }));
     if let Some(root_id) = shell
         .file_index
         .semantic_root
@@ -516,11 +534,17 @@ fn render_search(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + u
     panel
 }
 
+enum RemovalPrompt {
+    None,
+    Confirm,
+    Working,
+}
+
 fn root_row(
     root: &IndexedRoot,
     monitor: Option<&MonitorStatus>,
     semantic: Option<&sovra_core::file_index::semantic::SemanticStatus>,
-    removing: bool,
+    removal: &RemovalPrompt,
     detailed: bool,
     pending_options: Option<sovra_core::file_index::ScanOptions>,
     cx: &mut Context<Shell>,
@@ -760,23 +784,40 @@ fn root_row(
             })),
         );
     }
-    actions = actions.child(
-        design::button(
-            gpui_kit::SharedString::from(format!("remove-index-{remove_id}")),
-            "Remove",
-            cx,
-        )
-        .on_click(cx.listener(move |shell, _, _, cx| {
-            shell.file_index.removing = Some(remove_id.clone());
-            cx.notify();
-        })),
-    );
+    if matches!(removal, RemovalPrompt::Working) {
+        row = row.child(
+            div()
+                .id(gpui_kit::SharedString::from(format!(
+                    "index-removing-{remove_id}"
+                )))
+                .test_support()
+                .min_w_0()
+                .sovra_text(TextRole::Body, cx)
+                .child("Removing this folder from Knowledge. The original files stay in place."),
+        );
+    } else {
+        actions = actions.child(
+            design::button(
+                gpui_kit::SharedString::from(format!("remove-index-{remove_id}")),
+                "Remove",
+                cx,
+            )
+            .on_click(cx.listener(move |shell, _, _, cx| {
+                shell.file_index.removing = Some(remove_id.clone());
+                cx.notify();
+            })),
+        );
+    }
     row = row.child(actions);
-    if removing {
+    if matches!(removal, RemovalPrompt::Confirm) {
         let id = root.id.clone();
         row = row.child(div().sovra_text(TextRole::Body, cx).child("Remove this folder's saved index and access grant? The original files stay in place. Knowledge review history stays on this device but becomes unavailable, including after re-adding this folder."))
             .child(h_flex().flex_wrap().gap(t.space.small)
-                .child(design::button(gpui_kit::SharedString::from(format!("confirm-remove-index-{id}")), "Remove index", cx).on_click(cx.listener(move |shell, _, _, cx| { shell.file_index.removing = None; shell.index_command(IndexCommand::Remove { root_id: id.clone() }, cx); })))
+                .child(design::button(gpui_kit::SharedString::from(format!("confirm-remove-index-{id}")), "Remove index", cx).on_click(cx.listener(move |shell, _, _, cx| {
+                    shell.file_index.removing = None;
+                    shell.file_index.pending_removal.insert(id.clone());
+                    shell.index_command(IndexCommand::Remove { root_id: id.clone() }, cx);
+                })))
                 .child(design::button(gpui_kit::SharedString::from(format!("keep-index-{}", root.id)), "Keep", cx).on_click(cx.listener(|shell, _, _, cx| { shell.file_index.removing = None; cx.notify(); }))));
     }
     let details_id = root.id.clone();
@@ -1186,9 +1227,25 @@ mod tests {
         );
         cx.update_window(window.into(), |_, window, cx| {
             click_control(window, cx, "confirm-remove-index-chosen");
+            window.render_frame(cx);
+            assert!(
+                window.find("index-removing-chosen").bounds().size.height > px(0.),
+                "confirming removal says the folder is being removed"
+            );
+            assert!(shell.read(cx).file_index.pending_removal.contains("chosen"));
         })
         .unwrap();
         assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command, Command::FileIndex(IndexCommand::Remove { root_id }) if root_id == "chosen")));
+        events
+            .send_blocking(Event::FileIndex(IndexEvent::Roots(vec![])))
+            .unwrap();
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("index-removing-chosen").is_none());
+            assert_eq!(shell.read(cx).file_index.pending_removal.len(), 0);
+        })
+        .unwrap();
     }
 
     #[gpui_kit::test]
