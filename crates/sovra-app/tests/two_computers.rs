@@ -130,9 +130,10 @@ impl Computer {
                                 .map_err(|error| error.to_string())
                         })
                     }),
-                    store: Arc::new(sovra_mesh::FileGroupStore::new(store_dir)),
+                    store: Arc::new(sovra_mesh::FileGroupStore::new(store_dir.clone())),
                     qr: None,
                     helper_model: None,
+                    more: Some(Arc::new(sovra_mesh::FileGroupStores::new(store_dir))),
                 }),
                 ..RuntimeServices::default()
             },

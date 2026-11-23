@@ -460,4 +460,19 @@ pub enum GroupStoreError {
 pub trait GroupStore: Send + Sync {
     async fn load(&self) -> Result<GroupRecord, GroupStoreError>;
     async fn save(&self, record: &GroupRecord) -> Result<(), GroupStoreError>;
+    /// Forgets the record for good, when this computer has left its group and
+    /// the place is not needed again. Stores that cannot remove keep an empty one.
+    async fn remove(&self) -> Result<(), GroupStoreError> {
+        self.save(&GroupRecord::default()).await
+    }
+}
+
+/// Where the records of further groups live: a computer can be in several
+/// groups, each with its own [`GroupStore`]. Implemented by an adapter.
+#[async_trait::async_trait]
+pub trait GroupStores: Send + Sync {
+    /// The stores saved earlier, besides the first one the runtime was given.
+    async fn existing(&self) -> Vec<Arc<dyn GroupStore>>;
+    /// A new, empty place for one more group; `None` when none can be made.
+    fn fresh(&self) -> Option<Arc<dyn GroupStore>>;
 }

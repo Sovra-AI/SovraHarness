@@ -4,7 +4,7 @@
 
 use super::federated::{AskRecord, FederatedSettings, GroupAnswer};
 use super::fold::GroupState;
-use super::keys::{DeviceId, OpHash, PersonId};
+use super::keys::{DeviceId, GroupId, OpHash, PersonId};
 use super::knowledge::SharedDetail;
 use super::membership::Role;
 use super::pairing::{InviteId, InviteKind, PairingStage, PairingStep, PendingInvite};
@@ -61,6 +61,19 @@ pub enum GroupCommand {
     },
     /// "Check now": catch up with the other computers straight away.
     CheckNow,
+    /// Show another of this computer's groups. Every later command is for it.
+    Switch {
+        group: GroupId,
+    },
+    /// Show the start-or-join choice again, to be in one more group. The groups
+    /// this computer is already in carry on in the background.
+    StartAnother,
+    /// Do `command` in `group` without showing that group: sharing from a chat
+    /// into a group that is not the one on screen.
+    In {
+        group: GroupId,
+        command: Box<Self>,
+    },
     Rename {
         name: String,
     },
@@ -228,6 +241,14 @@ pub enum GroupEvent {
         question: String,
         answers: Vec<GroupAnswer>,
     },
+    /// Every group this computer is in, and which one is on screen.
+    Memberships(Vec<GroupSummary>),
+    /// Something this computer shared was saved in `group` and is on its way to
+    /// the others. Said whichever group is on screen.
+    Shared {
+        group: GroupId,
+        group_name: String,
+    },
     /// How this computer is connected: its reach and the way to each computer.
     Network(GroupNetwork),
     /// Invites made here that nobody has used yet.
@@ -240,6 +261,30 @@ pub enum GroupEvent {
     Problem(GroupProblem),
     /// This computer's audit history: what it shared and gave out, re-checked.
     Audit(crate::swarm::audit::AuditSummary),
+}
+
+/// One of this computer's groups, for the list to switch between them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupSummary {
+    pub group: GroupId,
+    pub name: String,
+    pub people: usize,
+    /// Who this computer's person is in that group.
+    pub you: String,
+    /// The group the Groups page is showing.
+    pub shown: bool,
+}
+
+impl GroupSummary {
+    /// "Family · 4 people", for a button.
+    pub fn label(&self) -> String {
+        format!(
+            "{} · {} {}",
+            self.name,
+            self.people,
+            if self.people == 1 { "person" } else { "people" }
+        )
+    }
 }
 
 /// How this computer is connected to its group right now.
@@ -427,6 +472,9 @@ pub struct GroupsView {
     /// Good news worth saying once: this computer just joined, or someone else
     /// did. Stays until the person dismisses it or newer news replaces it.
     pub notice: Option<String>,
+    /// Every group this computer is in, by name. The fields above describe the
+    /// one marked `shown`; with none shown, the page is starting or joining one.
+    pub memberships: Vec<GroupSummary>,
 }
 
 impl Default for GroupsView {
@@ -455,6 +503,7 @@ impl Default for GroupsView {
             pending_invites: Vec::new(),
             join_waiting: None,
             notice: None,
+            memberships: Vec::new(),
         }
     }
 }
@@ -544,6 +593,33 @@ impl GroupsView {
                 self.recent_work = recent;
             }
             GroupEvent::TrainingHelp(on) => self.training_help = on,
+            GroupEvent::Memberships(memberships) => {
+                // Another group came on screen: what was said about the last
+                // one (a link, a problem, an answer) is not about this one.
+                let shown = |list: &[GroupSummary]| {
+                    list.iter().find(|group| group.shown).map(|group| group.group)
+                };
+                // Arriving in a group from the start-or-join page keeps what
+                // that page just said ("You're in").
+                let before = shown(&self.memberships);
+                if before.is_some() && shown(&memberships) != before {
+                    self.invite = None;
+                    self.invite_qr.clear();
+                    self.short_code = None;
+                    self.pairing = PairingStage::Idle;
+                    self.pending_invites.clear();
+                    self.join_waiting = None;
+                    self.answers = None;
+                    self.problem = None;
+                    self.notice = None;
+                    self.last_seen.clear();
+                    self.network.routes.clear();
+                    self.network.checked_at = None;
+                }
+                self.memberships = memberships;
+            }
+            // The chat that shared it says so; the page shows the note itself.
+            GroupEvent::Shared { .. } => {}
             GroupEvent::Network(network) => self.network = network,
             GroupEvent::Invites(invites) => {
                 // A link still on screen whose invite was used or cancelled would

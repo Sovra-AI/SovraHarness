@@ -427,6 +427,10 @@ fn group_services(data_dir: &std::path::Path) -> Option<sovra_runtime::GroupServ
         // The WhatsApp adapter owns the QR library; invite links reuse its encoder.
         qr: Some(Arc::new(sovra_whatsapp::qr_matrix)),
         helper_model: None,
+        // One more file beside `group.json` for each further group.
+        more: Some(Arc::new(sovra_mesh::FileGroupStores::new(
+            data_dir.join("groups"),
+        ))),
     })
 }
 

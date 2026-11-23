@@ -320,12 +320,37 @@ impl GroupStore for MemoryStore {
     }
 }
 
+/// Where a test computer keeps the records of its further groups.
+#[derive(Default)]
+struct MemoryStores(Mutex<Vec<Arc<MemoryStore>>>);
+
+#[async_trait::async_trait]
+impl sovra_core::group::GroupStores for MemoryStores {
+    async fn existing(&self) -> Vec<Arc<dyn GroupStore>> {
+        self.0
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .filter(|store| store.0.lock().expect("not poisoned").group.is_some())
+            .map(|store| store.clone() as Arc<dyn GroupStore>)
+            .collect()
+    }
+
+    fn fresh(&self) -> Option<Arc<dyn GroupStore>> {
+        let store = Arc::new(MemoryStore::default());
+        self.0.lock().expect("not poisoned").push(store.clone());
+        Some(store)
+    }
+}
+
 /// One computer: a full runtime with its events.
 struct Computer {
     device: DeviceId,
     client: Client,
     events: async_channel::Receiver<Event>,
     store: Arc<MemoryStore>,
+    /// The records of its further groups.
+    more: Arc<MemoryStores>,
 }
 
 impl Computer {
@@ -363,6 +388,22 @@ impl Computer {
         store: Arc<MemoryStore>,
         training: Option<TrainingConfig>,
     ) -> Self {
+        Self::open_with(net, n, helper, store, training, Arc::default())
+    }
+
+    /// The same computer switched on again with every group it saved.
+    fn restart_all(net: &Arc<Network>, n: u8, store: Arc<MemoryStore>, more: Arc<MemoryStores>) -> Self {
+        Self::open_with(net, n, None, store, None, more)
+    }
+
+    fn open_with(
+        net: &Arc<Network>,
+        n: u8,
+        helper: Option<Arc<dyn sovra_core::group::WorkModel>>,
+        store: Arc<MemoryStore>,
+        training: Option<TrainingConfig>,
+        more: Arc<MemoryStores>,
+    ) -> Self {
         let device = DeviceId([n; 32]);
         let transport: Arc<dyn GroupTransport> = Arc::new(LoopTransport {
             me: device,
@@ -382,6 +423,7 @@ impl Computer {
                     store: store.clone(),
                     qr: None,
                     helper_model: helper,
+                    more: Some(more.clone()),
                 }),
                 training,
                 ..RuntimeServices::default()
@@ -394,6 +436,7 @@ impl Computer {
             client,
             events,
             store,
+            more,
         }
     }
 
@@ -3036,5 +3079,207 @@ async fn a_document_on_its_way_is_not_sent_again_by_a_catch_up() {
     assert!(
         after > everything,
         "once it has arrived, a catch-up offers the note as usual"
+    );
+}
+
+// ---- several groups on one computer ------------------------------------------
+
+impl Computer {
+    async fn groups(
+        &self,
+        pred: impl Fn(&[sovra_core::group::GroupSummary]) -> bool,
+    ) -> Vec<sovra_core::group::GroupSummary> {
+        self.wait(|event| match event {
+            GroupEvent::Memberships(groups) if pred(&groups) => Some(groups),
+            _ => None,
+        })
+        .await
+    }
+}
+
+fn names(groups: &[sovra_core::group::GroupSummary]) -> Vec<(&str, bool)> {
+    groups
+        .iter()
+        .map(|group| (group.name.as_str(), group.shown))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_computer_can_be_in_several_groups_and_keeps_them_apart() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 101).await;
+    // Dad already runs a group of his own for work.
+    let dad = Computer::start(&net, 102);
+    dad.send(GroupCommand::Create {
+        name: "Work".into(),
+        your_name: "David".into(),
+        computer_name: "Office PC".into(),
+    });
+    let work = dad.roster(|state| state.name == "Work").await.group;
+    assert_eq!(
+        names(&dad.groups(|groups| groups.len() == 1).await),
+        [("Work", true)]
+    );
+
+    // Mum's link adds a second group beside it; nothing has to be left first.
+    mum.send(invite("Dad"));
+    let link = mum.link().await;
+    dad.send(GroupCommand::Join {
+        link: link.clone(),
+        computer_name: "Office PC".into(),
+    });
+    let family = dad.roster(|state| state.name == "Family").await.group;
+    let both = dad
+        .groups(|groups| groups.len() == 2 && groups.iter().any(|g| g.name == "Family" && g.shown))
+        .await;
+    assert_eq!(names(&both), [("Work", false), ("Family", true)]);
+    assert_eq!(both[1].you, "Dad");
+    assert_eq!(both[0].you, "David");
+    // The same link again is refused here, without troubling Mum's computer.
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Office PC".into(),
+    });
+    assert_eq!(
+        dad.problem().await,
+        sovra_core::group::GroupProblem::Other("This computer is already in that group.".into())
+    );
+
+    // A note for the family, and one for work sent without leaving the page.
+    dad.send(GroupCommand::Share {
+        text: "Football practice moved to Thursday".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    mum.knowledge(|details| has(details, "Football practice moved to Thursday"))
+        .await;
+    dad.send(GroupCommand::In {
+        group: work,
+        command: Box::new(GroupCommand::Share {
+            text: "Payroll runs on the 25th".into(),
+            about: Vec::new(),
+            with: None,
+        }),
+    });
+    let told = dad
+        .wait(|event| match event {
+            GroupEvent::Shared { group, group_name } if group == work => Some(group_name),
+            _ => None,
+        })
+        .await;
+    assert_eq!(told, "Work");
+
+    // Each group shows only its own notes, and Mum never hears the work one.
+    dad.send(GroupCommand::Switch { group: work });
+    let at_work = dad
+        .knowledge(|details| has(details, "Payroll runs on the 25th"))
+        .await;
+    assert!(!has(&at_work, "Football practice moved to Thursday"));
+    assert_eq!(
+        names(&dad.groups(|groups| groups.iter().any(|g| g.name == "Work" && g.shown)).await),
+        [("Work", true), ("Family", false)]
+    );
+    // While Work is on screen, the family group still receives what Mum shares.
+    mum.send(GroupCommand::Share {
+        text: "Dinner is at seven".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    mum.knowledge(|details| has(details, "Dinner is at seven")).await;
+    dad.send(GroupCommand::Switch { group: family });
+    let at_home = dad
+        .knowledge(|details| has(details, "Dinner is at seven"))
+        .await;
+    assert!(has(&at_home, "Football practice moved to Thursday"));
+    assert!(!has(&at_home, "Payroll runs on the 25th"));
+    let mums = mum.store.0.lock().expect("not poisoned").clone();
+    assert!(
+        mums.knowledge.iter().all(|op| op.unsigned().group == family),
+        "nothing from Work ever reached Mum's computer"
+    );
+
+    // Switched off and on again: both groups are still there.
+    let (store, more) = (dad.store.clone(), dad.more.clone());
+    drop(dad);
+    let dad = Computer::restart_all(&net, 102, store, more);
+    dad.send(GroupCommand::Load);
+    assert_eq!(dad.groups(|groups| groups.len() == 2).await.len(), 2);
+
+    // Leaving one group leaves the other untouched and puts it on screen.
+    dad.send(GroupCommand::Switch { group: work });
+    dad.roster(|state| state.name == "Work").await;
+    dad.send(GroupCommand::Leave);
+    assert_eq!(
+        names(&dad.groups(|groups| groups.len() == 1).await),
+        [("Family", true)]
+    );
+    dad.send(GroupCommand::Load);
+    dad.roster(|state| state.name == "Family" && state.people.len() == 2)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn starting_another_group_can_be_abandoned_and_a_stranger_to_a_group_is_refused() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 103).await;
+    mum.groups(|groups| groups.len() == 1).await;
+
+    // "Start or join another group" shows the choice again; going back to the
+    // group gives the empty place up.
+    mum.send(GroupCommand::StartAnother);
+    mum.wait(|event| matches!(event, GroupEvent::Loaded { group: None, .. }).then_some(()))
+        .await;
+    assert_eq!(
+        names(&mum.groups(|groups| groups.iter().all(|g| !g.shown)).await),
+        [("Family", false)]
+    );
+    let family = mum.store.0.lock().expect("not poisoned").group.expect("founded");
+    mum.send(GroupCommand::Switch { group: family });
+    mum.roster(|state| state.name == "Family").await;
+    assert_eq!(
+        names(&mum.groups(|groups| groups.iter().any(|g| g.shown)).await),
+        [("Family", true)]
+    );
+    assert!(
+        mum.more
+            .0
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .all(|store| store.0.lock().expect("not poisoned").group.is_none()),
+        "the abandoned place holds no group"
+    );
+
+    // A request about a group this computer is not in is refused at the door.
+    let handler = net
+        .handlers
+        .lock()
+        .expect("not poisoned")
+        .get(&mum.device)
+        .cloned()
+        .expect("mum listening");
+    let response = handler
+        .handle(
+            DeviceId([104; 32]),
+            PeerRequest::Push {
+                group: sovra_core::group::GroupId([9; 32]),
+                membership: Vec::new(),
+                knowledge: Vec::new(),
+            },
+        )
+        .await;
+    assert_eq!(
+        response,
+        PeerResponse::Refused {
+            reason: sovra_core::group::Refusal::WrongGroup
+        }
+    );
+    mum.send(GroupCommand::In {
+        group: sovra_core::group::GroupId([9; 32]),
+        command: Box::new(GroupCommand::CheckNow),
+    });
+    assert_eq!(
+        mum.problem().await,
+        sovra_core::group::GroupProblem::Other("This computer isn't in that group any more.".into())
     );
 }

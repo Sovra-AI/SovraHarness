@@ -62,6 +62,9 @@ pub struct GroupServices {
     /// A fixed AI to answer group members' work with (an always-on helper box, or a
     /// test). `None` answers with whichever AI this computer has selected.
     pub helper_model: Option<Arc<dyn sovra_core::group::WorkModel>>,
+    /// Where further groups are kept, so this computer can be in several.
+    /// `None` keeps it to the one group in `store`.
+    pub more: Option<Arc<dyn sovra_core::group::GroupStores>>,
 }
 
 impl std::fmt::Debug for GroupServices {
@@ -128,8 +131,9 @@ pub(crate) type LocalModel = Arc<
 /// group's computers (federated recall) and to answer them from this computer's memory.
 #[derive(Clone, Default)]
 pub(crate) struct GroupKnowledge(
-    /// One view per space this computer's person is in; the whole group first.
-    Arc<RwLock<Vec<KnowledgeView>>>,
+    /// For each group this computer is in (by its place in the host): one view
+    /// per space its person is in, the whole group first. Helpers read them all.
+    Arc<RwLock<std::collections::BTreeMap<u64, Vec<KnowledgeView>>>>,
     Arc<std::sync::RwLock<Option<LocalMemory>>>,
     Arc<std::sync::RwLock<Option<std::sync::Weak<Groups>>>>,
     Arc<std::sync::RwLock<Option<LocalModel>>>,
@@ -172,7 +176,8 @@ impl GroupKnowledge {
         let (details, artifacts) = {
             let views = self.0.read().await;
             let mut hits: Vec<SharedHit> = views
-                .iter()
+                .values()
+                .flatten()
                 .flat_map(|view| view.search(question, sovra_core::MAX_GROUP_EVIDENCE_ITEMS))
                 .collect();
             hits.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -181,7 +186,8 @@ impl GroupKnowledge {
                     .map(|hit| evidence(&hit.detail))
                     .collect::<Vec<_>>(),
                 views
-                    .iter()
+                    .values()
+                    .flatten()
                     .flat_map(|view| view.search_artifacts(question, ARTIFACT_EVIDENCE_ITEMS))
                     .take(ARTIFACT_EVIDENCE_ITEMS)
                     .map(artifact_evidence)
@@ -321,6 +327,389 @@ fn spawner(
     })
 }
 
+/// Every group this computer is in. Each has its own worker ([`Groups`]) with its
+/// own saved record, people, keys and history; they share one network identity.
+/// The host starts them, hands each incoming request to the group it is about,
+/// and decides which group the Groups page is showing.
+struct Host {
+    shared: Shared,
+    /// Where further groups are kept; `None` keeps this computer to one group.
+    stores: Option<Arc<dyn sovra_core::group::GroupStores>>,
+    next_slot: std::sync::atomic::AtomicU64,
+    state: Mutex<HostState>,
+}
+
+struct HostState {
+    groups: Vec<Arc<Groups>>,
+    /// The place ([`Groups::slot`]) of the group on screen.
+    shown: u64,
+    /// The place kept empty on purpose while its person starts or joins one more
+    /// group. Any other place without a group is given up.
+    setup: Option<u64>,
+}
+
+impl HostState {
+    fn at(&self, slot: u64) -> Option<Arc<Groups>> {
+        self.groups.iter().find(|groups| groups.slot == slot).cloned()
+    }
+}
+
+impl Host {
+    /// Starts a worker for every saved group and shows the first.
+    async fn open(self: &Arc<Self>, first: Arc<dyn GroupStore>) {
+        let mut stores = vec![first];
+        if let Some(more) = &self.stores {
+            stores.extend(more.existing().await);
+        }
+        let mut state = self.state.lock().await;
+        for store in stores {
+            let groups = self.add(&mut state, store).await;
+            if state.groups.len() == 1 {
+                state.shown = groups.slot;
+            }
+        }
+        // Show a place that holds a group, if there is one.
+        let mut shown = state.shown;
+        for groups in &state.groups {
+            if groups.group().await.is_some() {
+                shown = groups.slot;
+                break;
+            }
+        }
+        self.show(&mut state, shown).await;
+        drop(state);
+        self.tidy().await;
+    }
+
+    /// Starts the worker for one saved (or empty) record and its upkeep.
+    async fn add(self: &Arc<Self>, state: &mut HostState, store: Arc<dyn GroupStore>) -> Arc<Groups> {
+        let slot = self
+            .next_slot
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let groups = Arc::new(Groups::open(self.shared.clone(), store, slot).await);
+        state.groups.push(groups.clone());
+        let syncing = groups.clone();
+        (self.shared.spawn)(Box::pin(async move {
+            // Straight after starting, this computer is not on the internet
+            // yet; a first catch-up before then would miss everyone far away
+            // and wait a whole round to try again.
+            syncing
+                .transport
+                .wait_until_reachable(STARTUP_REACH_WAIT_MS)
+                .await;
+            while !syncing.retired.load(std::sync::atomic::Ordering::SeqCst) {
+                syncing.sync_all().await;
+                tokio::time::sleep(SYNC_EVERY).await;
+            }
+        }));
+        let watching = groups.clone();
+        (self.shared.spawn)(Box::pin(async move {
+            // Losing or regaining the internet shows on the screen within
+            // seconds, and coming back online catches up at once instead of
+            // at the next round.
+            let mut last = watching.transport.reachability();
+            while !watching.retired.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::time::sleep(REACH_WATCH_EVERY).await;
+                let reach = watching.transport.reachability();
+                if reach == last {
+                    continue;
+                }
+                last = reach;
+                if reach == sovra_core::group::Reachability::Anywhere {
+                    watching.sync_all().await;
+                } else {
+                    watching.publish_network(false).await;
+                }
+            }
+        }));
+        groups
+    }
+
+    /// Puts the group in place `slot` on the screen and says everything about it.
+    async fn show(&self, state: &mut HostState, slot: u64) {
+        state.shown = slot;
+        for groups in &state.groups {
+            groups
+                .shown
+                .store(groups.slot == slot, std::sync::atomic::Ordering::SeqCst);
+        }
+        // Helpers, training and handed-off work use the group on screen, or the
+        // first one while its person is busy starting another.
+        let mut used = state.at(slot);
+        if let Some(shown) = &used
+            && shown.group().await.is_none()
+        {
+            for groups in &state.groups {
+                if groups.group().await.is_some() {
+                    used = Some(groups.clone());
+                    break;
+                }
+            }
+        }
+        *self
+            .shared
+            .knowledge
+            .2
+            .write()
+            .expect("groups handle lock is never poisoned") = used.as_ref().map(Arc::downgrade);
+        self.memberships(state).await;
+        if let Some(groups) = state.at(slot) {
+            groups.publish_loaded().await;
+            groups.publish_presence().await;
+        }
+    }
+
+    /// Tells the screen which groups this computer is in.
+    async fn memberships(&self, state: &HostState) {
+        let me = self.shared.transport.this_device();
+        let mut list = Vec::new();
+        for groups in &state.groups {
+            let inner = groups.inner.lock().await;
+            let Some(roster) = &inner.roster else {
+                continue;
+            };
+            list.push(sovra_core::group::GroupSummary {
+                group: roster.group,
+                name: roster.name.clone(),
+                people: roster.people.len(),
+                you: roster
+                    .owner_of(&me)
+                    .map(|member| member.name.clone())
+                    .unwrap_or_default(),
+                shown: groups.slot == state.shown,
+            });
+        }
+        let _ = self
+            .shared
+            .events
+            .send(Event::Group(Box::new(GroupEvent::Memberships(list))))
+            .await;
+    }
+
+    /// Gives up places that no longer hold a group (this computer left it or was
+    /// removed), keeps the screen on a group that exists, and refreshes the list.
+    async fn tidy(&self) {
+        let mut state = self.state.lock().await;
+        let mut held = Vec::new();
+        for groups in &state.groups {
+            held.push((groups.slot, groups.group().await.is_some()));
+        }
+        let holds = |slot: u64| held.iter().any(|(at, group)| *at == slot && *group);
+        // The place set aside for one more group has its group now.
+        if state.setup.is_some_and(holds) {
+            state.setup = None;
+        }
+        let first_group = held.iter().find(|(_, group)| *group).map(|(slot, _)| *slot);
+        // An empty place on screen with no group anywhere is where the first
+        // group gets started; with groups elsewhere, show one of those.
+        if !holds(state.shown) && state.setup != Some(state.shown) {
+            match first_group {
+                Some(slot) => self.show(&mut state, slot).await,
+                None => state.setup = Some(state.shown),
+            }
+        }
+        let keep = (state.shown, state.setup);
+        let gone: Vec<Arc<Groups>> = state
+            .groups
+            .iter()
+            .filter(|groups| {
+                !holds(groups.slot) && groups.slot != keep.0 && Some(groups.slot) != keep.1
+            })
+            .cloned()
+            .collect();
+        for groups in gone {
+            groups
+                .retired
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.shared.knowledge.0.write().await.remove(&groups.slot);
+            if let Err(error) = groups.store.remove().await {
+                tracing::warn!(%error, "a left group's record could not be removed");
+            }
+            state.groups.retain(|kept| kept.slot != groups.slot);
+        }
+        self.memberships(&state).await;
+    }
+
+    /// The empty place for starting or joining one more group, made if needed.
+    async fn setup_place(self: &Arc<Self>, state: &mut HostState) -> Option<u64> {
+        for groups in &state.groups {
+            if groups.group().await.is_none() {
+                state.setup = Some(groups.slot);
+                return Some(groups.slot);
+            }
+        }
+        let store = self.stores.as_ref()?.fresh()?;
+        let groups = self.add(state, store).await;
+        state.setup = Some(groups.slot);
+        Some(groups.slot)
+    }
+
+    async fn say(&self, problem: GroupProblem) {
+        let _ = self
+            .shared
+            .events
+            .send(Event::Group(Box::new(GroupEvent::Problem(problem))))
+            .await;
+    }
+
+    async fn command(self: &Arc<Self>, command: GroupCommand) {
+        let mut state = self.state.lock().await;
+        match command {
+            GroupCommand::Switch { group } => {
+                let mut found = None;
+                for groups in &state.groups {
+                    if groups.group().await == Some(group) {
+                        found = Some(groups.slot);
+                    }
+                }
+                match found {
+                    Some(slot) => {
+                        // Leaving the start-or-join page gives its place up.
+                        state.setup = None;
+                        self.show(&mut state, slot).await;
+                        drop(state);
+                        self.tidy().await;
+                    }
+                    None => {
+                        drop(state);
+                        self.say(not_in_that_group()).await;
+                    }
+                }
+            }
+            GroupCommand::StartAnother => match self.setup_place(&mut state).await {
+                Some(slot) => self.show(&mut state, slot).await,
+                None => {
+                    drop(state);
+                    self.say(one_group_only()).await;
+                }
+            },
+            GroupCommand::In { group, command } => {
+                let mut found = None;
+                for groups in &state.groups {
+                    if groups.group().await == Some(group) {
+                        found = Some(groups.clone());
+                    }
+                }
+                drop(state);
+                match found {
+                    Some(groups) => groups.command(*command).await,
+                    None => self.say(not_in_that_group()).await,
+                }
+            }
+            command @ (GroupCommand::Create { .. }
+            | GroupCommand::Join { .. }
+            | GroupCommand::JoinWithCode { .. }) => {
+                // A link to a group this computer is already in would only be
+                // refused by the other side, after spending its one use.
+                if let GroupCommand::Join { link, .. } = &command
+                    && let Ok(link) = JoinLink::parse(link, now())
+                {
+                    for groups in &state.groups {
+                        if groups.group().await == Some(link.group) {
+                            drop(state);
+                            self.say(GroupProblem::Other(
+                                "This computer is already in that group.".into(),
+                            ))
+                            .await;
+                            return;
+                        }
+                    }
+                }
+                // Starting or joining while a group is on screen means one more
+                // group: it gets a place of its own.
+                let shown = state.at(state.shown);
+                let needs_place = match &shown {
+                    Some(groups) => groups.group().await.is_some(),
+                    None => true,
+                };
+                let target = if needs_place {
+                    match self.setup_place(&mut state).await {
+                        Some(slot) => {
+                            self.show(&mut state, slot).await;
+                            state.at(slot)
+                        }
+                        None => {
+                            drop(state);
+                            self.say(one_group_only()).await;
+                            return;
+                        }
+                    }
+                } else {
+                    shown
+                };
+                drop(state);
+                if let Some(groups) = target {
+                    groups.command(command).await;
+                }
+            }
+            command => {
+                let shown = state.at(state.shown);
+                drop(state);
+                if let Some(groups) = shown {
+                    groups.command(command).await;
+                }
+            }
+        }
+    }
+
+    /// The group an incoming request is about.
+    async fn about(&self, request: &PeerRequest) -> Option<Arc<Groups>> {
+        let state = self.state.lock().await;
+        let group = match request {
+            // A same-room code names no group: it belongs to whichever group
+            // here is showing a code or waiting for the pictures to be compared.
+            PeerRequest::JoinByCode { .. } | PeerRequest::ConfirmJoin { .. } => {
+                for groups in &state.groups {
+                    let inner = groups.inner.lock().await;
+                    if inner.short.is_some() || inner.pending_pair.is_some() {
+                        return Some(groups.clone());
+                    }
+                }
+                return state.at(state.shown);
+            }
+            PeerRequest::Join { group, .. }
+            | PeerRequest::Sync { group, .. }
+            | PeerRequest::Push { group, .. }
+            | PeerRequest::Ask { group, .. }
+            | PeerRequest::Work { group, .. }
+            | PeerRequest::WorkNext { group, .. }
+            | PeerRequest::WorkCancel { group, .. }
+            | PeerRequest::AuditSync { group, .. }
+            | PeerRequest::Training { group, .. } => *group,
+        };
+        for groups in &state.groups {
+            if groups.group().await == Some(group) {
+                return Some(groups.clone());
+            }
+        }
+        None
+    }
+}
+
+fn not_in_that_group() -> GroupProblem {
+    GroupProblem::Other("This computer isn't in that group any more.".into())
+}
+
+fn one_group_only() -> GroupProblem {
+    GroupProblem::Other("This computer can only be in one group. Leave it first.".into())
+}
+
+/// Hands each request from another computer to the group it is about.
+struct Router(Arc<Host>);
+
+#[async_trait::async_trait]
+impl PeerHandler for Router {
+    async fn handle(&self, from: DeviceId, request: PeerRequest) -> PeerResponse {
+        match self.0.about(&request).await {
+            Some(groups) => GroupHandler(groups).handle(from, request).await,
+            None => PeerResponse::Refused {
+                reason: Refusal::WrongGroup,
+            },
+        }
+    }
+}
+
+
 impl GroupRuntime {
     pub(crate) fn start(
         services: Option<GroupServices>,
@@ -373,67 +762,44 @@ impl GroupRuntime {
                     return;
                 }
             };
-            let groups = Arc::new(
-                Groups::open(
+            let (changed, changes) = async_channel::bounded::<()>(1);
+            let host = Arc::new(Host {
+                shared: Shared {
                     transport,
-                    services.store,
-                    services.qr,
+                    qr: services.qr,
                     events,
-                    readers.clone(),
-                    spawn.clone(),
-                )
-                .await,
-            );
-            *readers
-                .2
-                .write()
-                .expect("groups handle lock is never poisoned") = Some(Arc::downgrade(&groups));
-            let serving = groups.clone();
+                    knowledge: readers.clone(),
+                    spawn: spawn.clone(),
+                    changed,
+                },
+                stores: services.more,
+                next_slot: std::sync::atomic::AtomicU64::new(0),
+                state: Mutex::new(HostState {
+                    groups: Vec::new(),
+                    shown: 0,
+                    setup: None,
+                }),
+            });
+            host.open(services.store).await;
+            let serving = host.clone();
             spawn(Box::pin(async move {
-                let handler: Arc<dyn PeerHandler> = Arc::new(GroupHandler(serving.clone()));
+                let handler: Arc<dyn PeerHandler> = Arc::new(Router(serving.clone()));
                 serving
+                    .shared
                     .transport
-                    .serve(handler, serving.spawn.clone())
+                    .serve(handler, serving.shared.spawn.clone())
                     .await;
             }));
-            let syncing = groups.clone();
+            let tidying = host.clone();
             spawn(Box::pin(async move {
-                // Straight after starting, this computer is not on the internet
-                // yet; a first catch-up before then would miss everyone far away
-                // and wait a whole round to try again.
-                syncing
-                    .transport
-                    .wait_until_reachable(STARTUP_REACH_WAIT_MS)
-                    .await;
-                loop {
-                    syncing.sync_all().await;
-                    tokio::time::sleep(SYNC_EVERY).await;
-                }
-            }));
-            let watching = groups.clone();
-            spawn(Box::pin(async move {
-                // Losing or regaining the internet shows on the screen within
-                // seconds, and coming back online catches up at once instead of
-                // at the next round.
-                let mut last = watching.transport.reachability();
-                loop {
-                    tokio::time::sleep(REACH_WATCH_EVERY).await;
-                    let reach = watching.transport.reachability();
-                    if reach == last {
-                        continue;
-                    }
-                    last = reach;
-                    if reach == sovra_core::group::Reachability::Anywhere {
-                        watching.sync_all().await;
-                    } else {
-                        watching.publish_network(false).await;
-                    }
+                while changes.recv().await.is_ok() {
+                    tidying.tidy().await;
                 }
             }));
             while let Ok(command) = receiver.recv().await {
-                groups.command(command).await;
+                host.command(command).await;
             }
-            groups.transport.close().await;
+            host.shared.transport.close().await;
         }));
         Self {
             commands,
@@ -802,17 +1168,37 @@ struct Groups {
     knowledge: GroupKnowledge,
     spawn: Spawn,
     inner: Mutex<Inner>,
+    /// This group's place among the groups this computer is in.
+    slot: u64,
+    /// Whether the Groups page is showing this group.
+    shown: std::sync::atomic::AtomicBool,
+    /// Set once this computer has left the group and its place is given up.
+    retired: std::sync::atomic::AtomicBool,
+    /// Tells the host that the list of groups may have changed.
+    changed: Sender<()>,
+}
+
+/// What a group worker shares with the others on this computer.
+#[derive(Clone)]
+struct Shared {
+    transport: Arc<dyn GroupTransport>,
+    qr: Option<QrEncoder>,
+    events: Sender<Event>,
+    knowledge: GroupKnowledge,
+    spawn: Spawn,
+    changed: Sender<()>,
 }
 
 impl Groups {
-    async fn open(
-        transport: Arc<dyn GroupTransport>,
-        store: Arc<dyn GroupStore>,
-        qr: Option<QrEncoder>,
-        events: Sender<Event>,
-        knowledge: GroupKnowledge,
-        spawn: Spawn,
-    ) -> Self {
+    async fn open(shared: Shared, store: Arc<dyn GroupStore>, slot: u64) -> Self {
+        let Shared {
+            transport,
+            qr,
+            events,
+            knowledge,
+            spawn,
+            changed,
+        } = shared;
         let record = match store.load().await {
             Ok(record) => record,
             Err(error) => {
@@ -851,6 +1237,10 @@ impl Groups {
             events,
             knowledge,
             spawn,
+            slot,
+            shown: std::sync::atomic::AtomicBool::new(false),
+            retired: std::sync::atomic::AtomicBool::new(false),
+            changed,
             inner: Mutex::new(Inner {
                 record,
                 roster: None,
@@ -886,7 +1276,6 @@ impl Groups {
             Self::keep_invites(&mut inner);
             groups.refold(&mut inner).await;
         }
-        groups.publish_loaded().await;
         groups
     }
 
@@ -894,8 +1283,35 @@ impl Groups {
         self.transport.this_device()
     }
 
-    async fn emit(&self, event: GroupEvent) {
+    /// The group this worker holds, if it has one yet (or still).
+    async fn group(&self) -> Option<GroupId> {
+        self.inner.lock().await.record.group
+    }
+
+    /// Says `event` to the screen even when another group is showing.
+    async fn tell(&self, event: GroupEvent) {
         let _ = self.events.send(Event::Group(Box::new(event))).await;
+    }
+
+    async fn emit(&self, event: GroupEvent) {
+        // Something that went wrong is said wherever it happened: a share from a
+        // chat into a group that is not on screen must not fail silently.
+        if matches!(event, GroupEvent::Problem(_)) {
+            self.tell(event).await;
+            return;
+        }
+        if matches!(
+            event,
+            GroupEvent::Loaded { .. } | GroupEvent::Changed(_) | GroupEvent::LeftGroup
+        ) {
+            // The list of this computer's groups may read differently now.
+            let _ = self.changed.try_send(());
+        }
+        // Only the group on screen speaks to the screen; the others carry on
+        // quietly and say everything again when they are shown.
+        if self.shown.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = self.events.send(Event::Group(Box::new(event))).await;
+        }
     }
 
     /// Signs `event` with the device key and appends it to this computer's audit
@@ -1065,7 +1481,7 @@ impl Groups {
         }
         let mut all = vec![inner.view.clone()];
         all.extend(inner.pairs.values().cloned());
-        *self.knowledge.0.write().await = all;
+        self.knowledge.0.write().await.insert(self.slot, all);
     }
 
     /// Folds each space, opens any lane keys granted to this computer and any sealed
@@ -1968,6 +2384,9 @@ impl Groups {
                 let groups = self.clone();
                 (self.spawn)(Box::pin(async move { groups.sync_all().await }));
             }
+            // The host answers these: they are about which group, not one group.
+            GroupCommand::Switch { .. } | GroupCommand::StartAnother => {}
+            GroupCommand::In { command, .. } => Box::pin(self.command(*command)).await,
             GroupCommand::ShowShortCode { kind } => self.show_short_code(kind).await,
             GroupCommand::JoinWithCode {
                 code,
@@ -3007,6 +3426,12 @@ impl Groups {
 
     /// Signs a knowledge change, keeps it only if the rules accept it, and sends it.
     async fn knowledge(self: &Arc<Self>, space: Space, body: KnowledgeBody) {
+        let sharing = matches!(
+            body,
+            KnowledgeBody::Share { .. }
+                | KnowledgeBody::ShareArtifact { .. }
+                | KnowledgeBody::ShareTemplate { .. }
+        );
         let checked = match &body {
             KnowledgeBody::Share { text, about, .. } => {
                 check_share(text, about).map_err(|error| error.to_string())
@@ -3152,8 +3577,18 @@ impl Groups {
         if !new_ops.is_empty() {
             self.broadcast(roster.group, peers, &[], &new_ops);
         }
+        let saved = problem.is_none();
         if let Some(problem) = problem {
             self.emit(GroupEvent::Problem(problem)).await;
+        }
+        if sharing && saved {
+            // Said whichever group is on screen: a chat may have shared into
+            // this one from elsewhere and is waiting to hear it worked.
+            self.tell(GroupEvent::Shared {
+                group: roster.group,
+                group_name: roster.name.clone(),
+            })
+            .await;
         }
         self.publish_changed(roster_now, shared).await;
         if audit_changed {
@@ -3905,7 +4340,11 @@ mod tests {
     #[tokio::test]
     async fn a_helpers_recall_carries_shared_group_details_with_who_shared_them() {
         let knowledge = GroupKnowledge::default();
-        *knowledge.0.write().await = vec![view_with_dads_detail()];
+        knowledge
+            .0
+            .write()
+            .await
+            .insert(0, vec![view_with_dads_detail()]);
         let reader = knowledge
             .wrap(Some(Arc::new(Empty)))
             .expect("wraps an existing reader");

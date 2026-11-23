@@ -55,7 +55,8 @@ pub use pairing::{
 };
 pub use sas::{SAS_EMOJI, ShortAuthString, short_auth_string};
 pub use session::{
-    ComputerRow, GroupCommand, GroupEvent, GroupNetwork, GroupProblem, GroupsView, JoinWaiting,
+    ComputerRow, GroupCommand, GroupEvent, GroupNetwork, GroupProblem, GroupSummary, GroupsView,
+    JoinWaiting,
     ONLINE_WINDOW_MS, PersonRow, presence_label, removal_warning, role_label, shareable_text,
     shareable_topics,
 };
@@ -70,7 +71,7 @@ pub use template::{
     Template, TemplateError, check_template,
 };
 pub use wire::{
-    GossipHandler, GroupRecord, GroupStore, GroupStoreError, GroupTransport,
+    GossipHandler, GroupRecord, GroupStore, GroupStoreError, GroupStores, GroupTransport,
     MAX_PEER_MESSAGE_BYTES, MAX_REPLY_KNOWLEDGE_BYTES, PEER_ALPN, PEER_ALPN_DEFLATE, PeerAddress,
     PeerHandler, PeerRequest, PeerResponse, Reachability, Refusal, Route, Spawn, TransportError,
     admits_request, join_transcript, within_budget,

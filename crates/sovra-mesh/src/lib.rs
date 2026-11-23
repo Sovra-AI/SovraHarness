@@ -27,7 +27,7 @@ use sovra_core::group::{
 };
 
 pub use remote::RemoteMesh;
-pub use store::FileGroupStore;
+pub use store::{FileGroupStore, FileGroupStores};
 pub use swarm::{OsRandom, SwarmKeys};
 
 /// How far this computer reaches.

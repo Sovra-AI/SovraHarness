@@ -195,6 +195,57 @@ async fn the_group_record_survives_a_save_and_reload() {
     std::fs::remove_dir_all(dir).expect("cleans up");
 }
 
+#[tokio::test]
+async fn further_groups_each_get_a_file_of_their_own_that_goes_when_the_group_is_left() {
+    use sovra_core::group::GroupStores as _;
+    let dir = std::env::temp_dir().join(format!(
+        "sovra-mesh-stores-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    let first = FileGroupStore::new(&dir);
+    first
+        .save(&GroupRecord {
+            group: Some(GroupId([1; 32])),
+            ..GroupRecord::default()
+        })
+        .await
+        .expect("saves");
+    std::fs::write(dir.join("group-notes.json"), b"{}").expect("writes");
+    let stores = FileGroupStores::new(&dir);
+    assert!(
+        stores.existing().await.is_empty(),
+        "the first group and stray files are not further groups"
+    );
+
+    let work = stores.fresh().expect("a new place");
+    let club = stores.fresh().expect("another");
+    for (store, id) in [(&work, 2), (&club, 3)] {
+        store
+            .save(&GroupRecord {
+                group: Some(GroupId([id; 32])),
+                ..GroupRecord::default()
+            })
+            .await
+            .expect("saves");
+    }
+    let mut found = Vec::new();
+    for store in FileGroupStores::new(&dir).existing().await {
+        found.push(store.load().await.expect("loads").group);
+    }
+    found.sort();
+    assert_eq!(found, [Some(GroupId([2; 32])), Some(GroupId([3; 32]))]);
+
+    work.remove().await.expect("removes");
+    work.remove().await.expect("removing twice is fine");
+    assert_eq!(stores.existing().await.len(), 1);
+    assert_eq!(
+        first.load().await.expect("loads").group,
+        Some(GroupId([1; 32]))
+    );
+    std::fs::remove_dir_all(dir).expect("cleans up");
+}
+
 /// Answers a sync with a full, budget-sized batch of shared artifacts.
 struct BigLibrary(Vec<sovra_core::group::KnowledgeOp>);
 
