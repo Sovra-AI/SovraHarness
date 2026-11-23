@@ -207,3 +207,65 @@ fn saved_file_relationship_review_reopens_evidence_and_revokes_it_through_runtim
     wait(&events, |e| *e == Event::Stopped);
     reader.join().unwrap();
 }
+
+#[test]
+fn adding_a_folder_publishes_source_relationships_without_a_search_or_review() {
+    let fixture = Fixture(std::env::temp_dir().join(format!(
+            "sovra-auto-runtime-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )));
+    let folder = fixture.0.join("Work");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("tasks.txt"),
+        "Planting depends on Preparing beds.\n",
+    )
+    .unwrap();
+    let store = Arc::new(sovra_files::LocalFileIndex::new(fixture.0.join("index")));
+    let client = sovra_runtime::start_with_file_index(
+        "test",
+        AgentConfig::default(),
+        None,
+        None,
+        None,
+        None,
+        Some(store.clone()),
+    )
+    .unwrap();
+    let input = client.events();
+    let (tx, rx) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        while let Ok(event) = input.recv_blocking() {
+            let stop = event == Event::Stopped;
+            if tx.send(event).is_err() || stop {
+                break;
+            }
+        }
+    });
+    client
+        .send(Command::FileIndex(IndexCommand::AddRoots {
+            paths: vec![folder],
+        }))
+        .unwrap();
+    wait(
+        &rx,
+        |event| matches!(event,Event::FileIndex(IndexEvent::Discoveries(Ok(report))) if !report.working && report.predicates==[(RelationKind::DependsOn,1)] && report.examples.iter().any(|e|e.detail.contains("Preparing beds"))),
+    );
+    assert_eq!(
+        store.pending().unwrap().len(),
+        0,
+        "automatic discoveries require no review"
+    );
+    let page = store.query(&GraphQuery::default()).unwrap();
+    assert_eq!(page.relations.len(), 1);
+    assert_eq!(
+        page.relations[0].basis.tier,
+        EvidenceTier::HeuristicExtraction
+    );
+    client.send(Command::Shutdown).unwrap();
+    reader.join().unwrap();
+}

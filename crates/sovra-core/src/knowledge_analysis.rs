@@ -194,7 +194,7 @@ impl AnalysisOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FindingKind {
     Relation,
     Topology,
@@ -242,6 +242,37 @@ pub struct SourceAnalysis {
 }
 
 pub fn analyze(text: &str, options: &AnalysisOptions) -> Result<SourceAnalysis, &'static str> {
+    analyze_with_limits(text, options, AnalysisScope::Preview)
+}
+
+/// Analyze an indexing window, retaining every recognized relationship in that window.
+pub fn analyze_indexed(text: &str) -> Result<SourceAnalysis, &'static str> {
+    analyze_with_limits(
+        text,
+        &AnalysisOptions::default(),
+        AnalysisScope::IndexWindow,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum AnalysisScope {
+    Preview,
+    IndexWindow,
+}
+impl AnalysisScope {
+    const fn limit(self, preview: usize) -> usize {
+        match self {
+            Self::Preview => preview,
+            Self::IndexWindow => usize::MAX,
+        }
+    }
+}
+
+fn analyze_with_limits(
+    text: &str,
+    options: &AnalysisOptions,
+    scope: AnalysisScope,
+) -> Result<SourceAnalysis, &'static str> {
     options.validate()?;
     let end = text.floor_char_boundary(text.len().min(MAX_ANALYSIS_BYTES));
     let end = if end < text.len() {
@@ -256,12 +287,18 @@ pub fn analyze(text: &str, options: &AnalysisOptions) -> Result<SourceAnalysis, 
     if !inspect_mask(slice, options.mask_radius, &mut findings) {
         let table = table::parse(slice);
         if let Some(data) = &table {
-            table::inspect(data, options, &mut findings, &mut quantities);
+            table::inspect(data, options, &mut findings, &mut quantities, scope);
         }
-        statements = relations::inspect(slice, table.as_ref(), &options.properties, &mut findings);
+        statements = relations::inspect(
+            slice,
+            table.as_ref(),
+            &options.properties,
+            &mut findings,
+            scope,
+        );
         findings.extend(statements.iter().map(Statement::finding));
         inspect_words(slice, options.language, &mut findings);
-        inspect_statements(slice, &mut findings, &mut quantities);
+        inspect_statements(slice, &mut findings, &mut quantities, scope);
     }
     if end < text.len() {
         findings.push(Finding {
@@ -375,6 +412,7 @@ fn inspect_statements(
     text: &str,
     findings: &mut Vec<Finding>,
     quantities: &mut Vec<MeasuredQuantity>,
+    scope: AnalysisScope,
 ) {
     let mut measurements = 0;
     let mut dates = 0;
@@ -391,7 +429,7 @@ fn inspect_statements(
         let words: Vec<_> = line.split_whitespace().collect();
         if !line.contains(',') && !line.contains('\t') {
             for pair in words.windows(2) {
-                if measurements >= 8 {
+                if measurements >= scope.limit(8) {
                     break;
                 }
                 if let Some(q) =
@@ -409,7 +447,7 @@ fn inspect_statements(
                 }
             }
         }
-        if dates < 5 {
+        if dates < scope.limit(5) {
             for word in &words {
                 let token = word.trim_matches(['(', ')', '.', ',', ';', '"']);
                 if table::timestamp(token).is_some() {
@@ -418,7 +456,9 @@ fn inspect_statements(
                         FindingKind::Chronology,
                         format!("Date in the source wording · {token}"),
                     );
-                    break;
+                    if matches!(scope, AnalysisScope::Preview) {
+                        break;
+                    }
                 }
             }
         }

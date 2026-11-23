@@ -76,7 +76,7 @@ impl Tool for GraphTool {
         let result=match self.operation {
             Operation::Propose=>match draft(args){
                 Ok(draft)=>self.reader.propose_knowledge(draft,GraphOrigin{session_id:context.session_id().into(),invocation_id:context.invocation_id().into(),agent:context.agent_name().into()}).await.map(|proposal|{
-                    let notice=match proposal.state {ProposalState::Pending=>"Waiting for the user's review in Knowledge. Do not claim these relationships are saved or approved; you can still answer from the cited source passages.",ProposalState::Accepted=>"This same proposal was already reviewed and saved as model inferences.",ProposalState::Rejected=>"This proposal was rejected or its supporting access was revoked. Do not retry it unchanged."};
+                    let notice=match proposal.state {ProposalState::Automatic=>"Extracted automatically from indexed wording.",ProposalState::Pending=>"Waiting for the user's review in Knowledge. Do not claim these relationships are saved or approved; you can still answer from the cited source passages.",ProposalState::Accepted=>"This same proposal was already reviewed and saved as model inferences.",ProposalState::Rejected=>"This proposal was rejected or its supporting access was revoked. Do not retry it unchanged."};
                     json!({"proposal_id":proposal.id,"state":proposal.state,"title":proposal.draft.title,"notice":notice})
                 }),Err(error)=>Err(error)
             },

@@ -30,6 +30,7 @@ mod report;
 mod selection;
 
 pub(crate) struct FileIndexView {
+    pub(crate) discovery_source: Option<sovra_core::file_index::PassageRef>,
     knowledge: knowledge::KnowledgeView,
     browser: browser::BrowserView,
     report: report::ReportView,
@@ -94,6 +95,7 @@ impl FileIndexView {
             },
         );
         Self {
+            discovery_source: None,
             knowledge: knowledge::KnowledgeView::new(window, cx),
             browser: browser::BrowserView::new(window, cx),
             report: report::ReportView::new(window, cx),
@@ -156,6 +158,11 @@ impl Shell {
     }
 
     pub(crate) fn index_command(&mut self, command: IndexCommand, cx: &mut Context<Self>) {
+        let findings_request = if let IndexCommand::BrowseFindings { request_id, .. } = &command {
+            Some(*request_id)
+        } else {
+            None
+        };
         let knowledge_request = match &command {
             IndexCommand::BrowseKnowledge { request_id, .. } => Some((*request_id, false)),
             IndexCommand::KnowledgeEvidence { request_id, .. } => Some((*request_id, true)),
@@ -181,6 +188,14 @@ impl Shell {
             .0
             .send(Command::FileIndex(command))
         {
+            if let Some(request_id) = findings_request {
+                self.file_index
+                    .state
+                    .apply(&sovra_core::file_index::IndexEvent::Findings {
+                        request_id,
+                        result: Err(sovra_core::file_index::IndexError(error.to_string())),
+                    });
+            }
             if let Some((request_id, evidence)) = knowledge_request {
                 let error = sovra_core::file_index::IndexError(error.to_string());
                 self.file_index.state.apply(&if evidence {

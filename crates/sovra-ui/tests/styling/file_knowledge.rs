@@ -312,16 +312,9 @@ fn saved_file_relationships_search_page_follow_subjects_and_read_evidence_at_eve
                 ))
                 .unwrap();
             settle(cx);
-            cx.update_window(window.into(), |_, window, cx| {
-                reveal(window, "knowledge-find-helper", cx);
-                window.click("knowledge-find-helper", cx);
-                window.render_frame(cx);
-                assert!(window.try_find("sovra-skills-view").is_some());
-                assert!(
-                    window.find(("skill-card", 0usize)).label().is_some_and(
-                        |label| label.contains("Connect people & topics in your files")
-                    )
-                );
+            cx.update_window(window.into(), |_, window, _| {
+                assert!(window.try_find("knowledge-saved-empty").is_some());
+                assert!(window.try_find("knowledge-find-helper").is_none());
             })
             .unwrap();
             cx.update_window(window.into(), |_, window, _| window.remove_window())

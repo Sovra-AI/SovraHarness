@@ -2,6 +2,7 @@
 //! capability directory handles bound source reads to explicitly granted roots.
 
 mod answers;
+mod automatic;
 mod catalogue;
 mod derived;
 mod graph;
@@ -50,7 +51,7 @@ fn entry_type(entry: &cap_std::fs::DirEntry) -> std::io::Result<cap_std::fs::Fil
     }
 }
 
-const SCHEMA_VERSION: i64 = 15;
+const SCHEMA_VERSION: i64 = 16;
 
 #[derive(Debug)]
 pub struct LocalFileIndex {
@@ -202,6 +203,10 @@ impl LocalFileIndex {
                 tx.execute_batch("CREATE INDEX IF NOT EXISTS knowledge_property_id ON index_knowledge_relations(json_extract(kind,'$.property.id')); PRAGMA user_version=15;")
                     .map_err(|e| db_error(&e))?;
             }
+            if current < 16 {
+                tx.execute_batch(include_str!("automatic_v16.sql"))
+                    .map_err(|e| db_error(&e))?;
+            }
             tx.commit().map_err(|e| db_error(&e))?;
         }
         Ok(db)
@@ -261,6 +266,9 @@ impl FileIndex for LocalFileIndex {
         report::query(&mut self.connect()?, query)
     }
     fn summaries(&self) -> Option<&dyn sovra_core::file_index::summary::SummaryIndex> {
+        Some(self)
+    }
+    fn automatic(&self) -> Option<&dyn sovra_core::file_index::automatic::AutomaticIndex> {
         Some(self)
     }
     fn knowledge(&self) -> Option<&dyn sovra_core::file_index::graph::FileKnowledge> {

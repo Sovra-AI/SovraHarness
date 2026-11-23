@@ -4,6 +4,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+pub mod automatic;
 pub mod clustering;
 mod options;
 pub use options::{DocumentBudget, ScanOptions};
@@ -161,6 +162,11 @@ pub enum IndexCommand {
     ListAnswers {
         before: Option<u64>,
     },
+    BrowseFindings {
+        request_id: u64,
+        kind: crate::knowledge_analysis::FindingKind,
+        before: Option<i64>,
+    },
     BrowseKnowledge {
         request_id: u64,
         query: graph::GraphQuery,
@@ -223,6 +229,11 @@ pub enum IndexCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexEvent {
+    Findings {
+        request_id: u64,
+        result: Result<automatic::FindingPage, IndexError>,
+    },
+    Discoveries(Result<automatic::DiscoveryOverview, IndexError>),
     AnswerSaved(DatedAnswer),
     SavedAnswers {
         before: Option<u64>,
@@ -299,6 +310,8 @@ pub struct MonitorStatus {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexState {
+    pub finding_browser: automatic::FindingBrowser,
+    pub discoveries: Option<Result<automatic::DiscoveryOverview, IndexError>>,
     pub knowledge_browser: KnowledgeBrowserState,
     pub folder_addition: Option<FolderAddition>,
     pub report: ReportState,
@@ -317,6 +330,7 @@ pub struct IndexState {
     pub knowledge_pending: Vec<graph::KnowledgeProposal>,
     pub knowledge_review_notice: Option<String>,
     pub knowledge_reviewing: std::collections::BTreeSet<u64>,
+    revoked_roots: std::collections::BTreeSet<String>,
     knowledge_reviewed: std::collections::BTreeSet<u64>,
 }
 
@@ -408,6 +422,21 @@ impl IndexState {
 
     pub fn apply(&mut self, event: &IndexEvent) {
         match event {
+            IndexEvent::Findings { request_id, result } => {
+                if self.finding_browser.request_id == *request_id
+                    && self.finding_browser.kind.is_some()
+                {
+                    self.finding_browser.page = Some(result.clone());
+                }
+            }
+            IndexEvent::Discoveries(result) => {
+                if !result
+                    .as_ref()
+                    .is_ok_and(|r| r.roots.iter().any(|id| self.revoked_roots.contains(id)))
+                {
+                    self.discoveries = Some(result.clone());
+                }
+            }
             IndexEvent::KnowledgeBrowsed { request_id, result } => {
                 self.knowledge_browser.finish(*request_id, result);
             }
@@ -462,11 +491,28 @@ impl IndexState {
                 }
             }
             IndexEvent::Roots(roots) => {
+                self.revoked_roots.extend(
+                    self.roots
+                        .iter()
+                        .filter(|old| !roots.iter().any(|r| r.id == old.id))
+                        .map(|r| r.id.clone()),
+                );
+                self.revoked_roots
+                    .retain(|id| !roots.iter().any(|r| &r.id == id));
+                if self
+                    .discoveries
+                    .as_ref()
+                    .and_then(|d| d.as_ref().ok())
+                    .is_some_and(|d| d.roots.iter().any(|id| self.revoked_roots.contains(id)))
+                {
+                    self.discoveries = None;
+                }
                 if self.roots.iter().any(|old| {
                     !roots
                         .iter()
                         .any(|new| new.id == old.id && new.scan_options == old.scan_options)
                 }) {
+                    self.finding_browser.close();
                     self.browser.invalidate();
                     self.knowledge_browser.invalidate();
                     self.report.invalidate();
@@ -609,6 +655,9 @@ pub trait FileIndex: Send + Sync + std::fmt::Debug {
         None
     }
     fn knowledge(&self) -> Option<&dyn graph::FileKnowledge> {
+        None
+    }
+    fn automatic(&self) -> Option<&dyn automatic::AutomaticIndex> {
         None
     }
     fn semantic(&self) -> Option<&dyn semantic::SemanticIndex> {

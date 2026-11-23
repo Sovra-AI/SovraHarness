@@ -1,4 +1,4 @@
-//! The vocabulary beside reviewed evidence. Selecting a predicate uses the saved graph query.
+//! The vocabulary beside indexed and reviewed evidence. Selecting a predicate uses the saved graph query.
 use super::*;
 use sovra_core::file_index::{
     graph::{EntityKind, RelationKind},
@@ -36,10 +36,22 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             .child(
                 div()
                     .sovra_text(TextRole::Body, cx)
-                    .child("Choose a relationship type to see its saved connections."),
+                    .child("Filter connections by relationship type."),
             )
             .child(predicates);
-        let mut custom = Vec::new();
+        let discovered = shell
+            .file_index
+            .state
+            .discoveries
+            .as_ref()
+            .and_then(|r| r.as_ref().ok());
+        let mut custom: Vec<_> = discovered
+            .into_iter()
+            .flat_map(|r| &r.predicates)
+            .map(|(kind, _)| kind)
+            .filter(|kind| matches!(kind, RelationKind::Property(_)))
+            .collect();
+
         if let Some(page) = &browser.page {
             for edge in &page.relations {
                 if matches!(edge.relation, RelationKind::Property(_))
@@ -53,7 +65,7 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             panel = panel.child(
                 div()
                     .sovra_text(TextRole::SectionTitle, cx)
-                    .child("Custom types in these results"),
+                    .child("Custom relationship types"),
             );
             for (index, kind) in custom.into_iter().enumerate() {
                 let RelationKind::Property(property) = kind else {
@@ -82,6 +94,13 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                 "Kinds of subjects",
                 EntityKind::BUILT_INS
                     .iter()
+                    .chain(
+                        discovered
+                            .into_iter()
+                            .flat_map(|r| &r.subjects)
+                            .map(|(kind, _)| kind)
+                            .filter(|kind| matches!(kind, EntityKind::Domain(_))),
+                    )
                     .map(EntityKind::label)
                     .collect::<Vec<_>>(),
             ),

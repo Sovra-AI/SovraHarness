@@ -35,6 +35,13 @@ impl KnowledgeView {
     }
 }
 
+impl FileIndexView {
+    pub(crate) fn can_refresh_relationships(&self) -> bool {
+        self.knowledge.selected.is_none()
+            && self.state.knowledge_browser.evidence_id.is_none()
+            && self.state.knowledge_browser.query.before.is_none()
+    }
+}
 impl Shell {
     pub(crate) fn browse_file_knowledge(
         &mut self,
@@ -101,8 +108,8 @@ impl Shell {
 impl Shell {
     pub(crate) fn load_saved_relationships(&mut self, cx: &mut Context<Self>) {
         let state = &self.file_index.state.knowledge_browser;
-        if state.page.is_none() && !state.loading {
-            self.browse_file_knowledge(GraphQuery::default(), false, cx);
+        if !state.loading && self.file_index.can_refresh_relationships() {
+            self.browse_file_knowledge(state.query.clone(), false, cx);
         }
     }
 }
@@ -112,7 +119,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
     let state = &shell.file_index.state.knowledge_browser;
     let mut panel = v_flex().id("knowledge-saved-browser").test_support().w_full().min_w_0().gap(t.space.medium)
         .child(div().sovra_text(TextRole::SectionTitle, cx).child("Saved file relationships"))
-        .child(div().sovra_text(TextRole::Body, cx).child("Connections reviewed and saved from your files, with their sources and uncertainty. Open a relationship to check the original wording or follow a person or project."));
+        .child(div().sovra_text(TextRole::Body, cx).child("Connections found in indexed wording and saved by helpers. Each one links to its source."));
     if state.evidence_id.is_some() {
         return panel.child(evidence(shell, cx)).into_any_element();
     }
@@ -266,7 +273,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
             let message = if page.next.is_some() {
                 "No matching relationships in this batch. Continue to more relationships or narrow the search."
             } else {
-                "No saved relationships match this view. Try another search, or review a helper's proposed file connections in Relationships & taxonomy."
+                "No connections match this view. Sovra looks for relationships as it indexes your files."
             };
             panel = panel.child(
                 div()
@@ -274,14 +281,6 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     .test_support()
                     .aria_label(message)
                     .child(message),
-            );
-            panel = panel.child(
-                design::button("knowledge-find-helper", "Find a helper for this", cx)
-                    .self_start()
-                    .max_w_full()
-                    .on_click(cx.listener(|shell, _, window, cx| {
-                        shell.show_skill_help("map-files", window, cx);
-                    })),
             );
         }
         for (index, relation) in page.relations.iter().enumerate() {

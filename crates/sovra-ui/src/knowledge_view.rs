@@ -23,6 +23,7 @@ use crate::RuntimeClient;
 use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
+mod discoveries;
 mod vocabulary;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,8 +101,16 @@ impl KnowledgeSection {
                     state.capture_summary()
                 }
             }
-            Self::Relationships if !state.knowledge_pending.is_empty() => {
-                format!("{} awaiting review", state.knowledge_pending.len())
+            Self::Relationships if let Some(Ok(summary)) = &state.discoveries => {
+                let found = summary
+                    .counts
+                    .iter()
+                    .find(|(k, _)| *k == sovra_core::knowledge_analysis::FindingKind::Relation)
+                    .map_or(0, |v| v.1);
+                format!(
+                    "{found} connections found in indexed wording · {} file kinds",
+                    summary.kinds.len()
+                )
             }
             Self::Relationships => {
                 "Saved connections, relationship types and file categories".into()
@@ -217,7 +226,8 @@ pub(crate) fn render_knowledge_view(
                 block
                     .id("knowledge-column")
                     .test_support()
-                    .child(crate::knowledge_explorer::render(shell, cx)),
+                    .child(crate::knowledge_explorer::render(shell, cx))
+                    .children(discoveries::overview(shell, cx)),
             );
             continue;
         }
@@ -275,6 +285,7 @@ pub(crate) fn render_knowledge_view(
             block = match section {
                 KnowledgeSection::Files => block.child(crate::file_index_view::render(shell, cx)),
                 KnowledgeSection::Relationships => block
+                    .children(discoveries::details(shell, cx))
                     .child(vocabulary::render(shell, cx))
                     .child(crate::knowledge_review::render(&shell.file_index.state, cx))
                     .child(crate::file_index_view::knowledge::render(shell, cx)),

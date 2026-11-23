@@ -428,14 +428,38 @@ impl Shell {
                             }
                         }
                         if let sovra_core::Event::FileIndex(event) = &event {
-                            shell.file_index.apply(event);
-                            if matches!(
-                                event,
-                                sovra_core::file_index::IndexEvent::KnowledgeReviewed {
-                                    accepted: true,
-                                    ..
+                            let discoveries_changed = match event {
+                                sovra_core::file_index::IndexEvent::Discoveries(Ok(summary)) => {
+                                    let previous = shell
+                                        .file_index
+                                        .state
+                                        .discoveries
+                                        .as_ref()
+                                        .and_then(|r| r.as_ref().ok());
+                                    !summary.working
+                                        || (!shell.file_index.state.knowledge_browser.loading
+                                            && previous.is_none_or(|old| {
+                                                old.predicates != summary.predicates
+                                            }))
                                 }
-                            ) {
+                                _ => false,
+                            };
+                            let update_graph = discoveries_changed
+                                && shell.state.active_tab == NavTab::Knowledge
+                                && shell.knowledge_open.contains(
+                                    &crate::knowledge_view::KnowledgeSection::Relationships,
+                                )
+                                && shell.file_index.can_refresh_relationships();
+                            shell.file_index.apply(event);
+                            if update_graph
+                                || matches!(
+                                    event,
+                                    sovra_core::file_index::IndexEvent::KnowledgeReviewed {
+                                        accepted: true,
+                                        ..
+                                    }
+                                )
+                            {
                                 let browser = &mut shell.file_index.state.knowledge_browser;
                                 let refresh = browser.browse(browser.query.clone());
                                 shell.index_command(refresh, cx);

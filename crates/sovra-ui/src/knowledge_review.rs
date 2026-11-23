@@ -52,23 +52,13 @@ pub(crate) fn render(state: &IndexState, cx: &mut Context<Shell>) -> impl IntoEl
                     .child("Read the source wording before deciding which connections to save."),
             );
     }
-    panel
-        .child(
-            design::button("reload-knowledge", "Check for proposals", cx)
-                .self_start()
-                .max_w_full()
-                .disabled(!state.knowledge_reviewing.is_empty())
-                .on_click(cx.listener(|shell, _, _, cx| {
-                    shell.index_command(IndexCommand::ListKnowledge, cx);
-                })),
+    panel.children(state.knowledge_pending.iter().map(|proposal| {
+        card(
+            proposal,
+            state.knowledge_reviewing.contains(&proposal.id),
+            cx,
         )
-        .children(state.knowledge_pending.iter().map(|proposal| {
-            card(
-                proposal,
-                state.knowledge_reviewing.contains(&proposal.id),
-                cx,
-            )
-        }))
+    }))
 }
 
 fn card(

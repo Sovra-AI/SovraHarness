@@ -2,7 +2,7 @@
 //! Grant removal nulls evidence links permanently, including across re-grants.
 
 mod read;
-mod write;
+pub(super) mod write;
 
 // Include endpoint identity evidence, not only a relationship's own citations.
 // Shared by traversal and cycle checking so revoked topology is never consulted.
@@ -118,7 +118,7 @@ impl FileKnowledge for LocalFileIndex {
         let mut db = self.connect()?;
         bounded(&mut db)?;
         let tx = db.transaction().map_err(|e| db_error(&e))?;
-        let proposal = write::propose(&tx, draft, origin)?;
+        let proposal = write::propose(&tx, draft, origin, None)?;
         tx.commit().map_err(|e| db_error(&e))?;
         Ok(proposal)
     }

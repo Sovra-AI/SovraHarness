@@ -40,6 +40,7 @@ pub(super) fn inspect(
     table: Option<&super::table::Table>,
     properties: &[crate::file_index::graph::DomainProperty],
     findings: &mut Vec<Finding>,
+    scope: super::AnalysisScope,
 ) -> Vec<Statement> {
     let mut statements = Vec::new();
     if let Some(table) = table {
@@ -67,7 +68,7 @@ pub(super) fn inspect(
                     && (!subject_type.is_some_and(|t| rule.subject.matches_source_class(t))
                         || !object_type.is_some_and(|t| rule.object.matches_source_class(t)))
                 {
-                    if findings.len() < 32 {
+                    if findings.len() < scope.limit(32) {
                         findings.push(Finding{kind:FindingKind::Coverage,from:line,to:line,detail:format!("Excluded {} from named connections. This property requires {} → {}.",&row[p],rule.subject.label(),rule.object.label())});
                     }
                     continue;
@@ -84,7 +85,7 @@ pub(super) fn inspect(
                         .unwrap_or(1),
                     explicit: true,
                 });
-                if statements.len() == 32 {
+                if statements.len() == scope.limit(32) {
                     break;
                 }
             }
@@ -105,6 +106,11 @@ pub(super) fn inspect(
                 (" is a kind of ", "is_a"),
                 (" is a type of ", "is_a"),
                 (" is part of ", "part_of"),
+                (" is a task for ", "for_project"),
+                (" is for project ", "for_project"),
+                (" is related to ", "related_to"),
+                (" is about ", "about"),
+                (" revises ", "revises"),
                 (" is grown by ", "grown_by"),
                 (" is sold in ", "sold_in"),
                 (" depends on ", "depends_on"),
@@ -123,7 +129,8 @@ pub(super) fn inspect(
                 }
                 statements.push(Statement {
                     subject: subject.into(),
-                    subject_type: None,
+                    subject_type: matches!(marker, " is a kind of " | " is a type of ")
+                        .then(|| "category".into()),
                     object_type: None,
                     predicate: predicate.into(),
                     object: object.into(),
@@ -132,7 +139,7 @@ pub(super) fn inspect(
                 });
                 break;
             }
-            if statements.len() == 8 {
+            if statements.len() == scope.limit(8) {
                 return statements;
             }
         }

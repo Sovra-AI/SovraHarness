@@ -86,9 +86,10 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
     cx: &mut TestAppContext,
 ) {
     use gpui_kit::component::{Theme, ThemeMode};
+    use sovra_core::file_index::{IndexEvent, automatic::DiscoveryOverview, ontology::FileKind};
     use sovra_core::models::InterfaceScale;
     for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
-        let (client, _, _) = Client::loopback();
+        let (client, _commands, events) = Client::loopback();
         cx.update(|cx| {
             sovra_ui::init(client, cx);
             sovra_ui::design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
@@ -101,12 +102,29 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
             });
             Root::new(shell, window, cx)
         });
+        events
+            .send_blocking(sovra_core::Event::FileIndex(IndexEvent::Discoveries(Ok(
+                DiscoveryOverview {
+                    kinds: vec![(FileKind::Document, 2)],
+                    counts: vec![(sovra_core::knowledge_analysis::FindingKind::Relation, 5)],
+                    ..Default::default()
+                },
+            ))))
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
         cx.update_window(window.into(), |_, window, cx| {
             for mode in [ThemeMode::Dark, ThemeMode::Light] {
                 Theme::change(mode, Some(window), cx);
+                knowledge::reveal(window, "knowledge-auto-status", cx);
+                assert_eq!(
+                    window.find("knowledge-auto-status").label(),
+                    Some("2 files classified · 5 findings")
+                );
                 for (section, content) in [
                     ("knowledge-files", "index-folder"),
-                    ("knowledge-relationships", "knowledge-taxonomy"),
+                    ("knowledge-relationships", "knowledge-auto-details"),
                     ("knowledge-memories", "conversation-memory-status"),
                     ("knowledge-people", "people-empty"),
                     ("knowledge-help", "knowledge-intro"),

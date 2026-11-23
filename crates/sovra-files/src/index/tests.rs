@@ -1,4 +1,5 @@
 use super::*;
+mod automatic;
 mod catalogue;
 mod documents;
 mod graph;

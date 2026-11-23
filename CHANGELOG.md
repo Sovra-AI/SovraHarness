@@ -20,6 +20,12 @@ package version.
   a relationship type to find its saved examples and follow them to the source.
   Saving a proposal updates the results and shows a confirmation in place.
 
+- **Knowledge classifies indexed files automatically.** File kinds, life areas,
+  subjects, relationships and other findings appear as Sovra processes saved
+  passages. Existing folders catch up on launch. Open a finding to read its
+  source. Structured relationships and connections inferred from wording retain
+  their distinct evidence labels.
+
 - **Be in several groups, and share from chat.** A computer can now be in more
   than one group: **Your groups** at the top of Groups switches between them,
   and **＋ Start or join another group** adds one without leaving any. Each

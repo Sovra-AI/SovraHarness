@@ -48,7 +48,7 @@ world-validity dates, corrections, and withdrawn evidence.
 
 | Question | What the result uses |
 | --- | --- |
-| What kind of thing is this and how does it relate? | A table with `subject,predicate,object` gives ordered, named statements. Add `subject_type,object_type` to check a declared property. A shared namespaced ID can connect two sources. Simple English statements receive a **Possible relation from wording** label. Review proposed folder relationships in **Relationships & taxonomy** before accepting them. |
+| What kind of thing is this and how does it relate? | A table with `subject,predicate,object` gives ordered, named statements. Add `subject_type,object_type` to check a declared property. A shared namespaced ID can connect two sources. Simple English statements receive a **Possible relation from wording** label. Sovra saves compatible source relationships during indexing. |
 | What shape do the samples form? | Two to sixteen numeric coordinate columns named `x`, `y`, `z`, or `dim1` through `dimN`, in a common scale. The first 64 points give connected-component and loop counts at stated Euclidean distances, including the longest loop’s birth and death when present. |
 | What type of dataset fits? | Column names, finite numeric values, dates, units and missing cells provide the evidence. Optional named profiles keep ties visible. An unrecognized table is reported as unknown. |
 | Do the measurements agree? | Decimal readings keep their original units and use compatible base units for comparison. Supply `value,unit,instrument,calibration_date,reference,uncertainty` for context. Add `reference_value,reference_unit,tolerance` for an accuracy check. Tolerance and uncertainty use the reading’s unit. Supported dimensions are mass, length, time, volume, temperature, pressure and ratio. |
@@ -87,12 +87,20 @@ covers a subset of UCUM, and word matching uses language-specific stemmers.
 
 ## Explore the connections
 
-Under **Relationships & taxonomy**, open **Relationship types & file categories**
+**Found in your files** shows the live file and finding counts as Sovra analyzes
+granted folders locally. Previously indexed folders catch up from their saved
+passages. Under **Relationships & taxonomy**, **Automatic classification** lists
+the file kinds, areas of life, subject types, and relationships actually found.
+Measurements, dated observations, table traits, and shape analyses appear when
+the source supports them. Each group shows examples. **Browse all** pages through
+the remaining findings and **Read source** opens the saved passage.
+
+Open **Relationship types & file categories**
 to see the standard relationships, subject types, file kinds, and areas of life.
-Custom types in the current results show the subject and object types they connect.
+Custom relationships found in indexed files show the subject and object types they connect.
 Choose a relationship such as **depends on** or **is a** to filter saved
 connections. **Read relationship** opens its subjects, source wording, and
-recorded dates. Proposed connections appear here for review.
+recorded dates. Separate proposals from a helper can also be reviewed here.
 
 Under **About you**, the native map shows saved personal details and their connections. Select a label to
 inspect its story, or filter the kinds of connections displayed. **Focus on these

@@ -14,6 +14,7 @@ use sovra_core::{
 };
 use tokio::sync::Notify;
 
+mod discovery;
 mod monitor;
 mod semantic;
 
@@ -34,6 +35,7 @@ pub(crate) struct IndexRuntime {
     wake: Arc<Notify>,
     stopped: Arc<AtomicBool>,
     actor: tokio::task::JoinHandle<()>,
+    discovery: Option<tokio::task::JoinHandle<()>>,
     semantic: Option<semantic::Runtime>,
     readers: Vec<tokio::task::JoinHandle<()>>,
     handle: tokio::runtime::Handle,
@@ -53,6 +55,10 @@ impl IndexRuntime {
             .map(|(store, repository)| {
                 semantic::Runtime::start(store.clone(), repository, events.clone(), handle)
             });
+        let discovery = store
+            .as_ref()
+            .filter(|s| s.automatic().is_some())
+            .map(|s| discovery::start(s.clone(), events.clone(), handle));
         let reader = store.as_ref().map(|store| {
             Arc::new(Reader(
                 store.clone(),
@@ -86,6 +92,7 @@ impl IndexRuntime {
             wake,
             stopped,
             actor,
+            discovery,
             semantic,
             readers: vec![],
             handle: handle.clone(),
@@ -177,6 +184,7 @@ impl IndexRuntime {
             | IndexCommand::Browse { .. }
             | IndexCommand::Preview { .. }
             | IndexCommand::Search { .. }
+            | IndexCommand::BrowseFindings { .. }
             | IndexCommand::BrowseKnowledge { .. }
             | IndexCommand::KnowledgeEvidence { .. }
             | IndexCommand::ListKnowledge
@@ -249,6 +257,19 @@ impl IndexRuntime {
                         IndexCommand::ListAnswers { before } => store
                             .saved_answers(before)
                             .map(|page| IndexEvent::SavedAnswers { before, page }),
+                        IndexCommand::BrowseFindings {
+                            request_id,
+                            kind,
+                            before,
+                        } => Ok(IndexEvent::Findings {
+                            request_id,
+                            result: store
+                                .automatic()
+                                .ok_or_else(|| {
+                                    IndexError("Automatic findings are unavailable.".into())
+                                })
+                                .and_then(|index| index.findings(kind, before)),
+                        }),
                         IndexCommand::BrowseKnowledge { request_id, query } => {
                             Ok(IndexEvent::KnowledgeBrowsed {
                                 request_id,
@@ -507,6 +528,7 @@ fn mutate(
         | IndexCommand::SetAutoRefresh { .. }
         | IndexCommand::Search { .. }
         | IndexCommand::ConfigureSemantic { .. }
+        | IndexCommand::BrowseFindings { .. }
         | IndexCommand::BrowseKnowledge { .. }
         | IndexCommand::KnowledgeEvidence { .. }
         | IndexCommand::ListKnowledge
@@ -547,6 +569,10 @@ fn mutate(
 
 fn read_failure(command: &IndexCommand, message: String) -> IndexEvent {
     match command {
+        IndexCommand::BrowseFindings { request_id, .. } => IndexEvent::Findings {
+            request_id: *request_id,
+            result: Err(IndexError(message)),
+        },
         IndexCommand::BrowseKnowledge { request_id, .. } => IndexEvent::KnowledgeBrowsed {
             request_id: *request_id,
             result: Err(IndexError(message)),
@@ -740,6 +766,9 @@ impl Drop for IndexRuntime {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::Relaxed);
         self.actor.abort();
+        if let Some(task) = &self.discovery {
+            task.abort();
+        }
         for task in &self.readers {
             task.abort();
         }

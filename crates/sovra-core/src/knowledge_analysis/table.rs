@@ -105,6 +105,7 @@ pub(super) fn inspect(
     options: &super::AnalysisOptions,
     output: &mut Vec<Finding>,
     quantities: &mut Vec<super::MeasuredQuantity>,
+    scope: super::AnalysisScope,
 ) {
     let window_seconds = options.window_seconds;
     let Table {
@@ -286,7 +287,7 @@ pub(super) fn inspect(
             }
             entry.1 += 1;
         }
-        if output.len() < 32 {
+        if output.len() < scope.limit(32) {
             let mut parts = vec![format!(
                 "{} = {} {}",
                 q.original,
@@ -334,7 +335,8 @@ pub(super) fn inspect(
             quantities.push(super::MeasuredQuantity { quantity: q, line });
         }
     }
-    for ((window, _, unit, series), (sum, count, overflow)) in windows.iter().take(12) {
+    for ((window, _, unit, series), (sum, count, overflow)) in windows.iter().take(scope.limit(12))
+    {
         let mean = if *overflow {
             None
         } else {
