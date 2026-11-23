@@ -43,7 +43,8 @@ package version.
   versions are still understood), catching up moves in smaller rounds, and a
   document already on its way is no longer sent again beside itself: on a
   relay-only connection a 435 KB document now arrives in about ten seconds
-  instead of thirty to sixty.
+  instead of thirty to sixty. Requests from one computer are answered side by
+  side, so a small question no longer waits behind a large document.
 
 - The Files page shows the active folder first, explains which folder is holding
   the queue, and reports the current path, indexing stage, elapsed time and

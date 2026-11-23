@@ -50,35 +50,64 @@ pub enum Reach {
 const CONNECTING_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// One open connection per computer, reused for every request to it.
-type Pool = Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, iroh::endpoint::Connection>>>;
+type Pool = Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, Pooled>>>;
 
-/// Closes and forgets a computer's pooled connection unless the request on it
-/// finished. A request the runtime gave up on (dropped mid-way) lands here too,
-/// so a connection that went quiet is never handed out again.
-struct Evict<'a> {
-    pool: &'a Pool,
-    device: DeviceId,
-    connection: &'a iroh::endpoint::Connection,
-    keep: bool,
+/// A pooled connection and how many requests are travelling on it right now.
+#[derive(Debug, Clone)]
+struct Pooled {
+    connection: iroh::endpoint::Connection,
+    busy: Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl Drop for Evict<'_> {
+/// Counts one request on a pooled connection. When the request ends without an
+/// answer (it failed, or the runtime stopped waiting and dropped it) and nothing
+/// else is travelling on the connection, the connection is closed and forgotten:
+/// a computer that restarted is then dialled afresh at once, not after its old
+/// connection times out. While anything else is on the connection it is left
+/// alone, so a large document is never cut off by a small question beside it
+/// running out of time.
+struct InFlight<'a> {
+    pool: &'a Pool,
+    device: DeviceId,
+    pooled: Pooled,
+    answered: bool,
+}
+
+impl<'a> InFlight<'a> {
+    fn start(pool: &'a Pool, device: DeviceId, pooled: Pooled) -> Self {
+        pooled
+            .busy
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self {
+            pool,
+            device,
+            pooled,
+            answered: false,
+        }
+    }
+}
+
+impl Drop for InFlight<'_> {
     fn drop(&mut self) {
-        if self.keep {
+        let left = self
+            .pooled
+            .busy
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+            .saturating_sub(1);
+        if self.answered || left > 0 {
             return;
         }
         let mut pool = self
             .pool
             .lock()
             .expect("connection pool lock is never poisoned");
-        if pool
-            .get(&self.device)
-            .is_some_and(|pooled| pooled.stable_id() == self.connection.stable_id())
-        {
+        if pool.get(&self.device).is_some_and(|pooled| {
+            pooled.connection.stable_id() == self.pooled.connection.stable_id()
+        }) {
             pool.remove(&self.device);
         }
         drop(pool);
-        self.connection.close(0u32.into(), b"gave up");
+        self.pooled.connection.close(0u32.into(), b"gave up");
     }
 }
 
@@ -193,20 +222,17 @@ impl Mesh {
 
     /// The open connection to `to`, or a new one. A pooled connection that has
     /// closed since (the other computer went away) is replaced.
-    async fn connection(
-        &self,
-        to: &PeerAddress,
-    ) -> Result<iroh::endpoint::Connection, TransportError> {
+    async fn connection(&self, to: &PeerAddress) -> Result<Pooled, TransportError> {
         let pooled = self
             .pool
             .lock()
             .expect("connection pool lock is never poisoned")
             .get(&to.device)
             .cloned();
-        if let Some(connection) = pooled
-            && connection.close_reason().is_none()
+        if let Some(pooled) = pooled
+            && pooled.connection.close_reason().is_none()
         {
-            return Ok(connection);
+            return Ok(pooled);
         }
         let connection = self
             .endpoint
@@ -220,13 +246,17 @@ impl Mesh {
             .map_err(|error| TransportError::Unreachable(error.to_string()))?
             .await
             .map_err(|error| TransportError::Unreachable(error.to_string()))?;
+        let pooled = Pooled {
+            connection,
+            busy: Arc::default(),
+        };
         // Two requests may have dialled at once; the last one in is kept and the
         // other closes once its request is done and it is dropped.
         self.pool
             .lock()
             .expect("connection pool lock is never poisoned")
-            .insert(to.device, connection.clone());
-        Ok(connection)
+            .insert(to.device, pooled.clone());
+        Ok(pooled)
     }
 
     /// One request and its answer on its own stream of `connection`.
@@ -362,11 +392,12 @@ async fn listen_nearby(
     }
 }
 
-/// Serves every stream on one accepted connection until the peer closes it.
+/// Accepts every request on one connection until the other computer closes it.
 async fn serve_connection(
     incoming: iroh::endpoint::Incoming,
     handler: Arc<dyn PeerHandler>,
     gossip: iroh_gossip::net::Gossip,
+    spawn: Spawn,
 ) {
     let connection = match incoming.await {
         Ok(connection) => connection,
@@ -383,25 +414,42 @@ async fn serve_connection(
     }
     let from = DeviceId(*connection.remote_id().as_bytes());
     let deflated = connection.alpn() == PEER_ALPN_DEFLATE;
-    loop {
-        let Ok((mut send, mut recv)) = connection.accept_bi().await else {
-            return;
-        };
-        let response = match recv.read_to_end(MAX_PEER_MESSAGE_BYTES).await {
-            Ok(bytes) => match unframe::<PeerRequest>(&bytes, deflated) {
-                Ok(request) => handler.handle(from, request).await,
-                Err(_) => PeerResponse::Refused {
-                    reason: sovra_core::group::Refusal::Malformed,
-                },
+    // Each request gets its own task: the other computer sends everything on one
+    // connection, and a small question must not wait behind a large document,
+    // nor may one abandoned request end the connection for the rest.
+    while let Ok((send, recv)) = connection.accept_bi().await {
+        spawn(Box::pin(serve_request(
+            send,
+            recv,
+            handler.clone(),
+            from,
+            deflated,
+        )));
+    }
+}
+
+/// Answers one request on its own stream.
+async fn serve_request(
+    mut send: iroh::endpoint::SendStream,
+    mut recv: iroh::endpoint::RecvStream,
+    handler: Arc<dyn PeerHandler>,
+    from: DeviceId,
+    deflated: bool,
+) {
+    let response = match recv.read_to_end(MAX_PEER_MESSAGE_BYTES).await {
+        Ok(bytes) => match unframe::<PeerRequest>(&bytes, deflated) {
+            Ok(request) => handler.handle(from, request).await,
+            Err(_) => PeerResponse::Refused {
+                reason: sovra_core::group::Refusal::Malformed,
             },
-            Err(error) => {
-                tracing::debug!(%error, "group request could not be read");
-                return;
-            }
-        };
-        if send.write_all(&frame(&response, deflated)).await.is_err() || send.finish().is_err() {
+        },
+        Err(error) => {
+            tracing::debug!(%error, "group request could not be read");
             return;
         }
+    };
+    if send.write_all(&frame(&response, deflated)).await.is_err() || send.finish().is_err() {
+        tracing::debug!("group answer could not be sent");
     }
 }
 
@@ -544,6 +592,7 @@ impl GroupTransport for Mesh {
                 incoming,
                 handler.clone(),
                 self.gossip.clone(),
+                spawn.clone(),
             )));
         }
     }
@@ -560,29 +609,19 @@ impl GroupTransport for Mesh {
         // noticed; one fresh connection settles whether the other computer is
         // really gone.
         let mut last = TransportError::Unreachable("no connection".into());
-        for attempt in 0..2 {
-            let reused = self
-                .pool
-                .lock()
-                .expect("connection pool lock is never poisoned")
-                .get(&to.device)
-                .is_some_and(|pooled| pooled.close_reason().is_none());
-            let connection = self.connection(to).await?;
-            let mut guard = Evict {
-                pool: &self.pool,
-                device: to.device,
-                connection: &connection,
-                keep: false,
-            };
-            match Self::exchange(&connection, &request).await {
+        for _attempt in 0..2 {
+            let pooled = self.connection(to).await?;
+            let mut flight = InFlight::start(&self.pool, to.device, pooled.clone());
+            match Self::exchange(&pooled.connection, &request).await {
                 Ok(response) => {
-                    guard.keep = true;
+                    flight.answered = true;
                     return Ok(response);
                 }
                 Err(error) => {
-                    drop(guard);
                     last = error;
-                    if !reused || attempt > 0 {
+                    let closed = pooled.connection.close_reason().is_some();
+                    drop(flight);
+                    if !closed {
                         break;
                     }
                 }
@@ -628,7 +667,8 @@ impl GroupTransport for Mesh {
             .lock()
             .expect("connection pool lock is never poisoned")
             .get(device)
-            .cloned()?;
+            .cloned()?
+            .connection;
         if connection.close_reason().is_some() {
             return None;
         }
@@ -648,8 +688,8 @@ impl GroupTransport for Mesh {
                 .lock()
                 .expect("connection pool lock is never poisoned"),
         );
-        for connection in open.into_values() {
-            connection.close(0u32.into(), b"done");
+        for pooled in open.into_values() {
+            pooled.connection.close(0u32.into(), b"done");
         }
         self.endpoint.close().await;
     }

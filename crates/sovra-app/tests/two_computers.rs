@@ -559,3 +559,192 @@ async fn two_computers_far_apart_form_a_group_and_share_through_a_relay() {
             .await;
     }
 }
+
+// ---- two processes on two networks -------------------------------------------
+//
+// The next two tests are one run split across two programs, so each can be
+// started on a different network (two machines, or two network namespaces each
+// behind its own router). They meet through the files in `SOVRA_FAR_DIR`, as
+// people do through an email: the inviter leaves the link there.
+//
+//   SOVRA_FAR_DIR=/shared/dir cargo test -p sovra-app --test two_computers \
+//       far_network_inviter -- --ignored --exact
+//   SOVRA_FAR_DIR=/shared/dir cargo test -p sovra-app --test two_computers \
+//       far_network_joiner -- --ignored --exact
+
+fn far_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var_os("SOVRA_FAR_DIR").expect("SOVRA_FAR_DIR names a folder both sides share"),
+    )
+}
+
+/// Waits for the other program to leave `name` in the shared folder.
+async fn far_file(name: &str) -> String {
+    let path = far_dir().join(name);
+    tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            if let Ok(text) = std::fs::read_to_string(&path)
+                && !text.is_empty()
+            {
+                return text;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the other side never wrote {name}"))
+}
+
+fn far_note(name: &str, text: &str) {
+    let path = far_dir().join(name);
+    let partial = far_dir().join(format!("{name}.partial"));
+    std::fs::write(&partial, text).expect("the shared folder is writable");
+    std::fs::rename(&partial, &path).expect("the shared folder is writable");
+}
+
+impl Computer {
+    /// A computer with ordinary internet reach and a key that is new each run.
+    fn on_the_internet(name: &str) -> Self {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut key = [0u8; 32];
+        for (index, chunk) in key.chunks_mut(8).enumerate() {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (
+                std::time::SystemTime::now(),
+                std::process::id(),
+                name,
+                index,
+            )
+                .hash(&mut hasher);
+            chunk.copy_from_slice(&hasher.finish().to_le_bytes());
+        }
+        Self::open(name, key, &[], false, true, sovra_mesh::Reach::Internet)
+    }
+
+    /// Watches how this computer reaches the other one for `watch`, pressing
+    /// "Check now" as a person might, and returns every route it saw in order.
+    async fn routes_seen(&self, watch: Duration) -> Vec<String> {
+        let mut seen: Vec<String> = Vec::new();
+        let until = tokio::time::Instant::now() + watch;
+        while tokio::time::Instant::now() < until {
+            self.send(GroupCommand::CheckNow);
+            let route = self
+                .try_wait(Duration::from_secs(5), |event| match event {
+                    GroupEvent::Network(network) if !network.checking => {
+                        Some(network.routes.values().next().copied())
+                    }
+                    _ => None,
+                })
+                .await
+                .flatten();
+            let label = match route {
+                Some(sovra_core::group::Route::Direct) => "direct",
+                Some(sovra_core::group::Route::Relayed) => "relayed",
+                None => "none",
+            };
+            if seen.last().map(String::as_str) != Some(label) {
+                seen.push(label.to_owned());
+            }
+            if label == "direct" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+        seen
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "one half of a two-network run: needs SOVRA_FAR_DIR and the joiner"]
+async fn far_network_inviter() {
+    let started = std::time::Instant::now();
+    let mum = Computer::on_the_internet("net-mum");
+    mum.send(GroupCommand::Create {
+        name: "Family".into(),
+        your_name: "Mum".into(),
+        computer_name: "Mum's laptop".into(),
+    });
+    mum.roster("the new group", |state| state.name == "Family")
+        .await;
+    mum.send(GroupCommand::InvitePerson {
+        name: "Dad".into(),
+        role: Role::Member,
+    });
+    let link = mum
+        .wait("an invite link", |event| match event {
+            GroupEvent::InviteReady { link, .. } => Some(link),
+            _ => None,
+        })
+        .await;
+    far_note("link", &link);
+    mum.roster("Dad in the group", |state| state.people.len() == 2)
+        .await;
+    let joined = started.elapsed();
+
+    mum.wait("Dad's note on Mum's laptop", |event| match event {
+        GroupEvent::Knowledge(details) if details.iter().any(|d| d.text.contains("12 March")) => {
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+    let letter = "A long letter to the family.\n".repeat(15_000);
+    let sent = std::time::Instant::now();
+    mum.send(GroupCommand::ShareArtifact {
+        title: "Family letter".into(),
+        kind: ArtifactKind::Checklist,
+        language: String::new(),
+        content: letter,
+        new_version_of: None,
+        local_id: "art-letter".into(),
+        with: None,
+    });
+    let routes = mum.routes_seen(Duration::from_secs(45)).await;
+    let arrived = far_file("joiner").await;
+    far_note(
+        "inviter",
+        &format!(
+            "joined after {joined:?}; routes {routes:?}; letter confirmed {:?} after sending; joiner said: {arrived}",
+            sent.elapsed()
+        ),
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "one half of a two-network run: needs SOVRA_FAR_DIR and the inviter"]
+async fn far_network_joiner() {
+    let link = far_file("link").await;
+    let started = std::time::Instant::now();
+    let dad = Computer::on_the_internet("net-dad");
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Dad's desktop".into(),
+    });
+    dad.roster("Dad in the group", |state| state.people.len() == 2)
+        .await;
+    let joined = started.elapsed();
+    dad.send(GroupCommand::Share {
+        text: "The boiler service is booked for 12 March".into(),
+        about: vec!["boiler".into()],
+        with: None,
+    });
+    let waiting = std::time::Instant::now();
+    let received = dad
+        .artifacts("Mum's letter on Dad's desktop", |artifacts| {
+            artifacts.iter().any(|a| a.title == "Family letter")
+        })
+        .await;
+    let letter = waiting.elapsed();
+    let bytes = received
+        .iter()
+        .find(|a| a.title == "Family letter")
+        .map_or(0, |a| a.content.len());
+    assert_eq!(bytes, 435_000, "the whole document arrived");
+    let routes = dad.routes_seen(Duration::from_secs(45)).await;
+    far_note(
+        "joiner",
+        &format!(
+            "joined after {joined:?}; letter of {bytes} bytes after {letter:?}; routes {routes:?}"
+        ),
+    );
+}

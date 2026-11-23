@@ -245,8 +245,10 @@ Making or re-copying a link waits up to three seconds for the relay first, so a
 link made straight after launch is not same-network only; the joining computer
 also looks the inviter up by key. Requests to one computer share one pooled
 QUIC connection, which is what lets a relayed connection move to a direct
-path. A request the runtime gives up on closes that connection, and the next
-request dials again. Catching up runs with every computer at once, in rounds of
+path. Each request has its own stream and is answered on its own task, so a
+small question does not wait behind a large document, and a request the
+runtime stops waiting for does not disturb the others. A connection that
+closes is dialled again by the next request. Catching up runs with every computer at once, in rounds of
 at most 1 MiB of shared items, and allows five minutes per exchange. Frames are
 deflated when both computers offer `sovra/group/2`; a computer that only knows
 `sovra/group/1` is still served plain JSON. An item already on its way to a
@@ -298,6 +300,7 @@ the removal, their own group file is cleared.
 | Handing a turn to the group, answering without tools | `crates/sovra-adk/src/group_work.rs` |
 | Two real runtimes over iroh (pairing by link and code, sharing, asking) | `crates/sovra-app/tests/two_computers.rs` |
 | The same over n0's relays with no direct path | `two_computers_far_apart…` in that file, `#[ignore]`: needs the internet |
+| One run split across two programs, for two machines or two networks | `far_network_inviter` and `far_network_joiner` in that file, `#[ignore]`: they meet through `SOVRA_FAR_DIR` |
 | Helper instructions when group evidence is attached | `crates/sovra-adk/src/recall.rs` |
 | Evidence caps | `crates/sovra-core/src/memory/recall.rs` (`GroupEvidence`, six items) |
 

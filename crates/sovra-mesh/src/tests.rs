@@ -463,8 +463,8 @@ async fn group_members_hear_each_others_broadcasts_over_iroh_gossip() {
 
 // ---- groups across the internet --------------------------------------------
 
-/// Answers a sync once `ready` is set; until then it never answers, like a computer
-/// whose connection went quiet.
+/// Answers once `ready` is set; until then every answer is held back, like a
+/// large document crawling through a relay.
 struct Sleepy {
     ready: std::sync::atomic::AtomicBool,
 }
@@ -472,8 +472,8 @@ struct Sleepy {
 #[async_trait::async_trait]
 impl PeerHandler for Sleepy {
     async fn handle(&self, _from: DeviceId, _request: PeerRequest) -> PeerResponse {
-        if !self.ready.load(Ordering::SeqCst) {
-            std::future::pending::<()>().await;
+        while !self.ready.load(Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         PeerResponse::Accepted
     }
@@ -493,7 +493,7 @@ fn pooled(mesh: &Mesh, device: &DeviceId) -> Option<usize> {
         .lock()
         .expect("not poisoned")
         .get(device)
-        .map(iroh::endpoint::Connection::stable_id)
+        .map(|pooled| pooled.connection.stable_id())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -548,26 +548,77 @@ async fn requests_reuse_one_connection_and_a_restarted_computer_is_dialled_again
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_request_that_is_given_up_on_never_leaves_a_stuck_connection_behind() {
+async fn giving_up_on_one_request_does_not_cut_off_another_on_the_same_connection() {
     let a = Mesh::bind([23; 32], Reach::LocalOnly).await.expect("binds");
     let b = Mesh::bind([24; 32], Reach::LocalOnly).await.expect("binds");
     let sleepy = Arc::new(Sleepy {
         ready: std::sync::atomic::AtomicBool::new(false),
     });
     let mut server = serve(&b, sleepy.clone());
+    let address = b.address();
 
-    // The runtime's time limit drops the request while it waits for an answer.
+    // A large document is on its way (here: an answer that takes its time).
+    let mut slow = tokio::task::JoinSet::new();
+    {
+        let (a, address) = (a.clone(), address.clone());
+        slow.spawn(async move { a.request(&address, sync_request(&a)).await });
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while pooled(&a, &b.this_device()).is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the connection opens");
+    let shared = pooled(&a, &b.this_device());
+
+    // Beside it, a small question runs out of time and is dropped by the runtime.
+    let gave_up = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        a.request(&address, sync_request(&a)),
+    )
+    .await;
+    assert!(gave_up.is_err(), "no answer came in time");
+    assert_eq!(
+        pooled(&a, &b.this_device()),
+        shared,
+        "the connection the document is travelling on stays open"
+    );
+
+    // The document still arrives, on that same connection.
+    sleepy.ready.store(true, Ordering::SeqCst);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(20), slow.join_next())
+        .await
+        .expect("answers in time")
+        .expect("the request was started")
+        .expect("task finishes")
+        .expect("the first request was not cut off");
+    assert_eq!(response, PeerResponse::Accepted);
+    assert_eq!(pooled(&a, &b.this_device()), shared);
+
+    a.close().await;
+    b.close().await;
+    while server.join_next().await.is_some() {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lone_request_that_is_given_up_on_does_not_leave_a_stuck_connection() {
+    let a = Mesh::bind([25; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([26; 32], Reach::LocalOnly).await.expect("binds");
+    let sleepy = Arc::new(Sleepy {
+        ready: std::sync::atomic::AtomicBool::new(false),
+    });
+    let mut server = serve(&b, sleepy.clone());
+
+    // Nothing else is on the connection when the runtime stops waiting: it may
+    // have gone quiet (the other computer restarted), so it is not kept.
     let gave_up = tokio::time::timeout(
         std::time::Duration::from_millis(500),
         a.request(&b.address(), sync_request(&a)),
     )
     .await;
     assert!(gave_up.is_err(), "no answer came");
-    assert_eq!(
-        pooled(&a, &b.this_device()),
-        None,
-        "the quiet connection is not kept for the next request"
-    );
+    assert_eq!(pooled(&a, &b.this_device()), None);
 
     sleepy.ready.store(true, Ordering::SeqCst);
     let response = tokio::time::timeout(
@@ -735,7 +786,7 @@ async fn computers_on_this_sovra_deflate_and_still_talk_to_an_older_one_both_way
         .lock()
         .expect("not poisoned")
         .get(&other.this_device())
-        .map(|connection| connection.alpn().to_vec());
+        .map(|pooled| pooled.connection.alpn().to_vec());
     assert_eq!(negotiated.as_deref(), Some(PEER_ALPN_DEFLATE));
 
     // An older computer calls this one: plain JSON in, plain JSON back.
