@@ -364,6 +364,7 @@ fn synthetic_selected_model_evaluation() {
             })
         })),
         Some(ModelsConfig {
+            laya: None,
             readiness: None,
             repository,
             providers: vec![

@@ -678,6 +678,9 @@ pub struct ModelPreferences {
     /// Whether the user has completed or dismissed the guided onboarding tutorial.
     #[serde(default)]
     pub onboarding_completed: bool,
+    /// AI and thinking level by question difficulty (`crate::ai_tiers`).
+    #[serde(default)]
+    pub tier_routing: crate::ai_tiers::TierRouting,
 }
 
 /// Deterministic setup progression stage so the UI only asks for what is still missing.
@@ -829,6 +832,9 @@ pub struct ModelsState {
     pub pull_progress: Option<String>,
     /// Why the chosen model cannot answer right now, as reported by the runtime.
     pub active_problem: Option<String>,
+    pub laya: crate::ai_tiers::LayaStatus,
+    /// The latest sample question sorted on My AIs.
+    pub tier_test: Option<(String, crate::ai_tiers::TierDecision)>,
 }
 
 impl ModelsState {
@@ -890,6 +896,7 @@ impl ModelsState {
                 self.preferences
                     .favorites
                     .retain(|k| k.connection_id != *id);
+                self.preferences.tier_routing.forget_connection(id);
                 if self
                     .preferences
                     .active
@@ -918,6 +925,10 @@ impl ModelsState {
             }
             ModelEvent::PullProgress(message) => self.pull_progress.clone_from(message),
             ModelEvent::ActiveModelStatus { problem } => self.active_problem.clone_from(problem),
+            ModelEvent::LayaStatus(status) => self.laya.clone_from(status),
+            ModelEvent::TierTested { prompt, decision } => {
+                self.tier_test = Some((prompt.clone(), decision.clone()));
+            }
         }
     }
 
@@ -1441,6 +1452,20 @@ pub enum ModelCommand {
     SetOnboardingCompleted {
         completed: bool,
     },
+    /// Save the AI and thinking level used for each question difficulty.
+    SetTierRouting {
+        routing: crate::ai_tiers::TierRouting,
+    },
+    /// Download and verify Laya's weights into Sovra's data folder.
+    InstallLaya,
+    /// Stop an in-progress Laya download.
+    CancelLayaInstall,
+    /// Delete Laya's downloaded weights; sorting falls back to the quick sorter.
+    RemoveLaya,
+    /// Sort a sample question without sending it to any AI.
+    TestTierDecision {
+        prompt: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1480,6 +1505,12 @@ pub enum ModelEvent {
     /// plain-language reason it cannot (for example, it left the catalog).
     ActiveModelStatus {
         problem: Option<String>,
+    },
+    LayaStatus(crate::ai_tiers::LayaStatus),
+    /// The answer to [`ModelCommand::TestTierDecision`].
+    TierTested {
+        prompt: String,
+        decision: crate::ai_tiers::TierDecision,
     },
 }
 

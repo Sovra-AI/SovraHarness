@@ -55,6 +55,10 @@ const LAYERS: &[(&str, &[&str])] = &[
     // Plugin code runs in a WebAssembly interpreter, its own dependency set behind
     // the core PluginCodeEngine port; runtime receives the engine from the composition root.
     ("sovra-wasm", &["sovra-core"]),
+    // Laya, the local decision model that sorts messages by difficulty: candle tensors,
+    // a tokenizer and 640 MB of weights are a distinct dependency set behind the core
+    // DifficultyJudge/LayaLoader ports; runtime receives the loader from the root.
+    ("sovra-laya", &["sovra-core"]),
     ("sovra-ui", &["sovra-core", "sovra-runtime"]),
     (
         "sovra-app",
@@ -77,6 +81,8 @@ const LAYERS: &[(&str, &[&str])] = &[
             "sovra-whatsapp",
             // Composition root supplies the plugin code sandbox through its core port.
             "sovra-wasm",
+            // Composition root supplies the Laya loader through its core port.
+            "sovra-laya",
         ],
     ),
     ("xtask", &[]),
@@ -129,6 +135,11 @@ const EXTERNAL_OWNERS: &[(&str, &str, &str)] = &[
         "wasmi",
         "sovra-wasm",
         "plugin code runs only inside the sandbox adapter, behind the core PluginCodeEngine port",
+    ),
+    (
+        "laya-candle",
+        "sovra-laya",
+        "the decision model and its candle tensors stay behind the core DifficultyJudge port",
     ),
     (
         "velopack",

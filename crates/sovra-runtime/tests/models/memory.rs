@@ -527,6 +527,7 @@ async fn start(server: &Server, store: Arc<Store>, enabled: bool) -> (Fixture, C
             Box::pin(async move { Ok(store as Arc<dyn MemoryStore>) })
         })),
         Some(ModelsConfig {
+            laya: None,
             readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(CompatibleProvider)],
@@ -1632,6 +1633,7 @@ async fn visible_conversation_context_survives_restart_and_model_change_with_rem
             Box::pin(async move { Ok(restored_store as Arc<dyn MemoryStore>) })
         })),
         Some(ModelsConfig {
+            laya: None,
             readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(CompatibleProvider)],

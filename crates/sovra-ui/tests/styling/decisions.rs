@@ -66,6 +66,7 @@ fn a_chat_reply_keeps_its_source_and_changed_stops_need_a_fresh_check(cx: &mut T
         Event::AgentResponseStarted {
             session_id: session.clone(),
             model: sovra_core::ResponseModel {
+                route: None,
                 model_id: "test".into(),
                 name: "Test model".into(),
                 provider: "Test".into(),

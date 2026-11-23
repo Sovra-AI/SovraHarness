@@ -17,6 +17,7 @@ rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 sovra-adk = { workspace = true }
 sovra-core = { workspace = true }
 sovra-providers = { workspace = true }
@@ -34,7 +35,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 rmcp = { workspace = true, features = ["client"] }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
 

@@ -219,9 +219,12 @@ the [documentation](docs/README.md) for current behavior, and the
   discovery and encrypted relays. Review the [network inventory](docs/network.md).
 - Local accounts do not provide separate encrypted data stores. Terminal commands
   and local MCP programs run with your OS permissions, without a sandbox.
-- **My AIs** shows your saved chat AI, with **Chat** and **Change AI**, and three
-  preview choices of the same height. Internal
-  task classification is built into the executable and needs no routing service.
+- **My AIs** shows your saved chat AI, with **Chat** and **Change AI**, how long it
+  thinks (from **No thinking** to **Think deeply**), and an optional different AI and
+  thinking level for simple, medium and complex questions. Messages are sorted by
+  built-in quick rules or by Laya, a small sorting AI compiled into the executable
+  whose files are downloaded once; no routing service is used. See
+  [Models](docs/models.md#choose-an-ai-by-how-hard-the-question-is).
 - Website hosting supports static output; server backends and server-side
   rendering are not hosted. Hosting stops when Sovra closes.
 - Phone control pairs with the [SovraiOS](https://github.com/Sovra-AI/SovraiOS) and

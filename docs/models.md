@@ -77,15 +77,60 @@ what the model supports. Switching models starts fresh provider history.
 **My AIs** shows your saved chat AI with **Chat** and **Change AI**. If a
 connection key or a model is missing, the page offers the next setup step instead.
 The choice is the same one saved in Models and restored when Sovra starts.
-Three preview choices sit in one row and share the same height: use your chat
-model, preview effort by task, or preview automatic choice. They do not switch
-the model that answers chats.
 
-Model setup and selection use the existing Models home. There are no effort
-sliders, decision-engine choices or simulations to configure.
-Internal task classification runs in embedded Rust code in the Sovra executable;
-it does not contact Laya, OpenJev or another routing service. Chat uses the saved
-model. AI providers you choose still receive the requests needed to answer.
+### Thinking levels
+
+**How long your chat AI thinks** sets the thinking level of the chat model:
+**AI decides** (send nothing; the service's default), **No thinking**, **Think a
+little**, **Think**, **Think hard** or **Think deeply**. More thinking gives steadier
+answers to hard questions but is slower and costs more. Sovra translates the level
+for each service:
+
+| Service | What is sent |
+| --- | --- |
+| OpenRouter | `reasoning.effort` (`none` … `max`), only for models whose catalog lists the `reasoning` parameter. Claude models get `minimal` instead of `none`, which OpenRouter rejects for them. |
+| Anthropic | For models whose details list thinking: adaptive thinking with `output_config.effort` on current Claude models; **No thinking** sends the lowest effort, because newer models cannot switch thinking off. Models from before adaptive thinking (Claude 3.7, 4.0, 4.1, 4.5) get a thinking budget of 2K–32K tokens inside their output limit. |
+| Ollama | For models whose details list thinking: `reasoning_effort` (`none`, `low`, `medium`, `high`; **Think deeply** becomes `high`). Other models get nothing, because Ollama refuses thinking settings for them. |
+| Other compatible servers | `reasoning_effort` with the same name as the level, including `max`. A server that does not support it may ignore or refuse it; choose **AI decides** for such a server. |
+
+Structured background requests (memory notes, file summaries) never get a thinking
+setting.
+
+### Choose an AI by how hard the question is
+
+Turn on **Choose an AI by how hard the question is** to use up to three AIs: one
+for **simple** questions (greetings, quick facts), one for **medium** questions
+(emails, summaries, explanations) and one for **complex** questions (code, maths,
+plans, research). Each has its own thinking level; by default simple questions do
+not think and complex questions think hard. A difficulty left on **Use my chat AI**
+uses the chat model at that difficulty's thinking level, so "think hard for complex
+questions" works with a single AI too. Each reply's model label says which
+difficulty and thinking level answered it and why, for example
+*Complex question · Think hard (it contains code)*.
+
+Every message is sorted before it is sent:
+
+- **Quick rules** (always available, instant): words such as "think hard",
+  "step by step", "quickly" or "briefly" choose for you; a greeting is simple; pasted
+  code, a proof or a very long request is complex; otherwise length and telling
+  words decide.
+- **Laya, on this computer**: [Laya](https://github.com/NandhaKishorM/laya) is a
+  small Apache-2.0 decision model from Convai Innovations. Its multilingual
+  checkpoint (mmBERT-base, 322M parameters, 100+ languages) runs inside the Sovra
+  executable through the pure-Rust [`laya-candle`](https://crates.io/crates/laya-candle)
+  port; there is no server, Python or separate program. **Download Laya** fetches its
+  files once (about 680 MB, fixed revision, SHA-256 checked) into the app data folder.
+  It loads in about two seconds and rates a message in roughly a quarter of a second
+  on a laptop processor. The quick rules still decide unmistakable cases, a firm
+  "complex" verdict is never lowered, and if Laya is missing, unsure, or takes longer
+  than 1.5 seconds, the quick rules answer instead. Laya's raw checkpoints are not
+  tuned for difficulty, so Sovra maps its scores onto the three tiers using bands
+  measured on real prompts.
+
+**Try a question** shows where a question would go without sending it to any AI.
+A difficulty whose AI cannot be prepared (for example, its connection was removed)
+falls back to the chat model instead of failing. Choices are saved with your other
+model preferences.
 
 ## Connections
 

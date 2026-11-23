@@ -7,12 +7,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
 use sovra_adk::AdkHarness;
+use sovra_core::ai_tiers::{LayaStatus, Sorter, ThinkingLevel, TierRouting};
 use sovra_core::files::ModelPurpose;
 use sovra_core::models::{
     Authentication, CatalogSnapshot, CatalogState, CredentialChange, ModelCommand, ModelConnection,
     ModelError, ModelEvent, ModelInfo, ModelKey, ModelProvider, ModelSecret, ProviderKind,
 };
+use sovra_core::providers::ModelTier;
 use sovra_core::{AgentConfig, Event};
+
+use crate::ai_tiers::{Laya, LayaSetup, TierExecution, TierState};
 use sovra_providers::{ModelRepository, SavedModels, validate_connection};
 use tokio::sync::RwLock;
 use tokio::task::{AbortHandle, JoinSet};
@@ -22,6 +26,8 @@ pub struct ModelsConfig {
     pub repository: ModelRepository,
     pub readiness: Option<Arc<dyn sovra_core::models::ModelReadiness>>,
     pub providers: Vec<Arc<dyn ModelProvider>>,
+    /// Laya's folder and loader; `None` leaves only the quick sorter.
+    pub laya: Option<LayaSetup>,
 }
 
 impl std::fmt::Debug for ModelsConfig {
@@ -30,6 +36,7 @@ impl std::fmt::Debug for ModelsConfig {
             .field("repository", &self.repository)
             .field("readiness", &self.readiness.is_some())
             .field("providers", &self.providers.len())
+            .field("laya", &self.laya)
             .finish()
     }
 }
@@ -60,6 +67,8 @@ pub(crate) struct ModelsRuntime {
     pub(crate) file_models: Arc<RwLock<BTreeMap<ModelPurpose, FileModel>>>,
     pub(crate) memory_enabled: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) web_search_enabled: Arc<std::sync::atomic::AtomicBool>,
+    tiers: Arc<RwLock<TierState>>,
+    laya: Arc<Laya>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -77,7 +86,13 @@ impl ModelsRuntime {
         let file_models = Arc::new(RwLock::new(BTreeMap::new()));
         let memory_enabled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let web_search_enabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let tiers = Arc::new(RwLock::new(TierState::default()));
+        let laya = Arc::new(Laya::new(config.laya));
         let actor = ModelActor {
+            tiers: tiers.clone(),
+            laya: laya.clone(),
+            laya_install: None,
+            laya_progress: async_channel::bounded(16),
             memory_control: memory_control.clone(),
             repository: config.repository,
             readiness: config.readiness,
@@ -109,6 +124,8 @@ impl ModelsRuntime {
             file_models,
             memory_enabled,
             web_search_enabled,
+            tiers,
+            laya,
             // sovra-runtime owns the executor; this actor is the sanctioned spawn point
             // (owned JoinHandle, aborted on drop). The workspace-wide disallow steers
             // other crates here.
@@ -118,6 +135,13 @@ impl ModelsRuntime {
             )]
             task: tokio::spawn(actor.run(receiver)),
         }
+    }
+
+    /// The execution for this message when choosing by difficulty; `None` uses the
+    /// single chat model.
+    pub(crate) async fn route(&self, prompt: &str) -> Option<ModelExecution> {
+        let state = self.tiers.read().await.clone();
+        crate::ai_tiers::route(&state, &self.laya, prompt).await
     }
 
     pub(crate) fn send(&self, command: ModelCommand) {
@@ -156,6 +180,12 @@ enum Completed {
         generation: u64,
         result: Result<(), ModelError>,
     },
+    LayaInstalled(Result<(), String>),
+    LayaLoaded(Result<(), String>),
+    TierTest {
+        prompt: String,
+        decision: sovra_core::ai_tiers::TierDecision,
+    },
 }
 
 struct RunningPull {
@@ -165,6 +195,8 @@ struct RunningPull {
 }
 
 type PullProgressChannel = (Sender<(u64, String)>, Receiver<(u64, String)>);
+/// Bytes received and total, from the Laya download to the actor.
+type LayaProgressChannel = (Sender<(u64, u64)>, Receiver<(u64, u64)>);
 
 struct ModelActor {
     memory_control: crate::remembering::MemoryControl,
@@ -185,6 +217,10 @@ struct ModelActor {
     file_models: Arc<RwLock<BTreeMap<ModelPurpose, FileModel>>>,
     memory_enabled: Arc<std::sync::atomic::AtomicBool>,
     web_search_enabled: Arc<std::sync::atomic::AtomicBool>,
+    tiers: Arc<RwLock<TierState>>,
+    laya: Arc<Laya>,
+    laya_install: Option<AbortHandle>,
+    laya_progress: LayaProgressChannel,
     events: Sender<Event>,
 }
 
@@ -250,6 +286,11 @@ impl ModelActor {
                         && self.pull.as_ref().is_some_and(|pull| pull.generation == generation)
                     {
                         self.emit(ModelEvent::PullProgress(Some(message))).await;
+                    }
+                }
+                progress = self.laya_progress.1.recv() => {
+                    if let Ok((received, total)) = progress && self.laya_install.is_some() {
+                        self.emit(ModelEvent::LayaStatus(LayaStatus::Downloading { received, total })).await;
                     }
                 }
                 completed = self.jobs.join_next(), if !self.jobs.is_empty() => {
@@ -352,6 +393,93 @@ impl ModelActor {
         }
         self.publish_memory().await;
         self.rebuild_file_models().await;
+        self.emit(ModelEvent::LayaStatus(self.laya.status())).await;
+        self.preload_laya();
+        Ok(())
+    }
+
+    /// Loads Laya in the background when it is the chosen sorter and downloaded, so
+    /// the first message does not wait for it.
+    fn preload_laya(&mut self) {
+        if self.saved.preferences.tier_routing.sorter != Sorter::Laya
+            || !self.laya.installed()
+            || self.laya.is_loaded()
+        {
+            return;
+        }
+        let laya = self.laya.clone();
+        self.jobs.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || laya.load_blocking())
+                .await
+                .unwrap_or_else(|_| Err("Laya stopped while loading.".into()));
+            Completed::LayaLoaded(result)
+        });
+    }
+
+    /// Builds one harness per tier. A tier whose model cannot be prepared is left
+    /// out, so its messages go to the chat model instead of failing.
+    async fn rebuild_tiers(&self) {
+        let routing = self.saved.preferences.tier_routing.clone();
+        let active = self.saved.preferences.active.clone();
+        let mut tiers = BTreeMap::new();
+        if routing.enabled {
+            for tier in ModelTier::ALL {
+                let Some((key, thinking)) = routing.resolve(tier, active.as_ref()) else {
+                    continue;
+                };
+                let execution = if Some(&key) == active.as_ref()
+                    && thinking == routing.chat_thinking
+                {
+                    self.execution.read().await.clone()
+                } else {
+                    match self.configure_model(&key, thinking).await {
+                        Ok((harness, _, connection)) => ModelExecution::Selected {
+                            harness: Box::new(harness),
+                            timeout: sovra_providers::model_turn_timeout(&connection),
+                        },
+                        Err(error) => {
+                            tracing::warn!(?tier, model = %key.model_id, %error, "tier model unavailable; using the chat model");
+                            continue;
+                        }
+                    }
+                };
+                tiers.insert(
+                    tier,
+                    TierExecution {
+                        execution,
+                        thinking,
+                    },
+                );
+            }
+        }
+        *self.tiers.write().await = TierState { routing, tiers };
+    }
+
+    async fn set_tier_routing(&mut self, routing: TierRouting) -> Result<(), ModelError> {
+        for tier in ModelTier::ALL {
+            if let Some(key) = &routing.choice(tier).model {
+                let model = self.find_model(key)?;
+                if let Some(reason) = model.chat_unavailable_reason() {
+                    return Err(ModelError(reason.into()));
+                }
+            }
+        }
+        let thinking_changed =
+            routing.chat_thinking != self.saved.preferences.tier_routing.chat_thinking;
+        let mut saved = self.saved.clone();
+        saved.preferences.tier_routing = routing;
+        self.persist(saved.clone()).await?;
+        self.saved = saved;
+        match self.saved.preferences.active.clone() {
+            // Rebuilds the chat harness at the new thinking level, then every tier.
+            Some(active) if thinking_changed => self.activate(&active, false).await?,
+            Some(_) | None => self.rebuild_tiers().await,
+        }
+        self.preload_laya();
+        self.emit(ModelEvent::PreferencesChanged(
+            self.saved.preferences.clone(),
+        ))
+        .await;
         Ok(())
     }
 
@@ -621,6 +749,62 @@ impl ModelActor {
                 .await;
             }
             ModelCommand::Activate { key } => self.activate(&key, true).await?,
+            ModelCommand::SetTierRouting { routing } => self.set_tier_routing(routing).await?,
+            ModelCommand::InstallLaya => {
+                let Some(dir) = self.laya.dir().map(std::path::Path::to_path_buf) else {
+                    return Err(ModelError("Laya is not available in this build.".into()));
+                };
+                if self.laya_install.is_some() || self.laya.installed() {
+                    self.emit(ModelEvent::LayaStatus(self.laya.status())).await;
+                    return Ok(());
+                }
+                let progress = self.laya_progress.0.clone();
+                self.emit(ModelEvent::LayaStatus(LayaStatus::Downloading {
+                    received: 0,
+                    total: sovra_core::ai_tiers::laya_download_bytes(),
+                }))
+                .await;
+                self.laya_install = Some(self.jobs.spawn(async move {
+                    Completed::LayaInstalled(crate::ai_tiers::install(dir, progress).await)
+                }));
+            }
+            ModelCommand::CancelLayaInstall => {
+                if let Some(job) = self.laya_install.take() {
+                    job.abort();
+                    if let Some(dir) = self.laya.dir() {
+                        let _ = crate::ai_tiers::uninstall(&dir.with_extension("download")).await;
+                    }
+                }
+                self.emit(ModelEvent::LayaStatus(self.laya.status())).await;
+            }
+            ModelCommand::RemoveLaya => {
+                if let Some(job) = self.laya_install.take() {
+                    job.abort();
+                }
+                self.laya.forget();
+                if let Some(dir) = self.laya.dir() {
+                    crate::ai_tiers::uninstall(dir).await.map_err(ModelError)?;
+                }
+                self.emit(ModelEvent::LayaStatus(self.laya.status())).await;
+            }
+            ModelCommand::TestTierDecision { prompt } => {
+                let routing = self.saved.preferences.tier_routing.clone();
+                let laya = self.laya.clone();
+                self.jobs.spawn(async move {
+                    if routing.sorter == Sorter::Laya && laya.installed() && !laya.is_loaded() {
+                        let loading = laya.clone();
+                        let _ = tokio::task::spawn_blocking(move || loading.load_blocking()).await;
+                    }
+                    let decision = crate::ai_tiers::decide(
+                        &routing,
+                        &laya,
+                        &prompt,
+                        crate::ai_tiers::TEST_DEADLINE,
+                    )
+                    .await;
+                    Completed::TierTest { prompt, decision }
+                });
+            }
             ModelCommand::AssignPurpose { purpose, key } => {
                 self.assign_purpose(purpose, key).await?;
             }
@@ -724,6 +908,7 @@ impl ModelActor {
     async fn configure_model(
         &self,
         key: &ModelKey,
+        thinking: ThinkingLevel,
     ) -> Result<(AdkHarness, ModelInfo, ModelConnection), ModelError> {
         let connection = self.connection(&key.connection_id)?;
         let model = self.find_model(key)?;
@@ -750,7 +935,7 @@ impl ModelActor {
                 .retain(|p| p != "tools");
         }
         let harness =
-            AdkHarness::from_selected_model_with_readiness(&effective_agent, &connection, &effective_model, &secret, self.readiness.clone())
+            AdkHarness::from_selected_model_with_readiness(&effective_agent, &connection, &effective_model, &secret, thinking, self.readiness.clone())
                 .map_err(|_| {
                     ModelError(
                         "Could not configure this model. Check its connection URL and authentication settings."
@@ -761,7 +946,9 @@ impl ModelActor {
     }
 
     async fn activate(&mut self, key: &ModelKey, persist: bool) -> Result<(), ModelError> {
-        let (harness, model, connection) = self.configure_model(key).await?;
+        let (harness, model, connection) = self
+            .configure_model(key, self.saved.preferences.tier_routing.chat_thinking)
+            .await?;
         if persist {
             let mut saved = self.saved.clone();
             saved.preferences.active = Some(key.clone());
@@ -802,7 +989,8 @@ impl ModelActor {
             let Some(key) = key else {
                 continue;
             };
-            if let Ok((harness, model, connection)) = self.configure_model(key).await
+            if let Ok((harness, model, connection)) =
+                self.configure_model(key, ThinkingLevel::ModelDefault).await
                 && purpose.accepts(&model, connection.kind)
             {
                 executions.insert(
@@ -830,6 +1018,7 @@ impl ModelActor {
             }
         }
         *self.file_models.write().await = executions;
+        self.rebuild_tiers().await;
     }
 
     async fn assign_purpose(
@@ -838,7 +1027,9 @@ impl ModelActor {
         key: Option<ModelKey>,
     ) -> Result<(), ModelError> {
         if let Some(key) = &key {
-            let (_, model, connection) = self.configure_model(key).await?;
+            let (_, model, connection) = self
+                .configure_model(key, ThinkingLevel::ModelDefault)
+                .await?;
             if !purpose.accepts(&model, connection.kind) {
                 return Err(ModelError(format!(
                     "Choose a model that can {}. This model or connection cannot handle that kind of input.",
@@ -1033,6 +1224,7 @@ impl ModelActor {
             .preferences
             .favorites
             .retain(|k| k.connection_id != id);
+        saved.preferences.tier_routing.forget_connection(id);
         let removed_active = saved
             .preferences
             .active
@@ -1088,6 +1280,35 @@ impl ModelActor {
 
     async fn completed(&mut self, completed: Completed) {
         match completed {
+            Completed::LayaInstalled(result) => {
+                self.laya_install = None;
+                match result {
+                    Ok(()) => {
+                        self.emit(ModelEvent::LayaStatus(self.laya.status())).await;
+                        self.preload_laya();
+                    }
+                    Err(message) => {
+                        self.emit(ModelEvent::LayaStatus(LayaStatus::Failed(message)))
+                            .await;
+                    }
+                }
+            }
+            Completed::LayaLoaded(result) => {
+                let status = match result {
+                    Ok(()) => self.laya.status(),
+                    Err(message) => {
+                        tracing::warn!(%message, "Laya could not load");
+                        LayaStatus::Failed(format!(
+                            "Laya could not start: {message}. The quick sorter is used instead."
+                        ))
+                    }
+                };
+                self.emit(ModelEvent::LayaStatus(status)).await;
+            }
+            Completed::TierTest { prompt, decision } => {
+                self.emit(ModelEvent::LayaStatus(self.laya.status())).await;
+                self.emit(ModelEvent::TierTested { prompt, decision }).await;
+            }
             Completed::Catalog {
                 connection,
                 generation,

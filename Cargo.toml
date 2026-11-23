@@ -20,6 +20,7 @@ rust_decimal = { version = "1.43.0", default-features = false, features = ["std"
 # Internal crates
 sovra-adk = { path = "crates/sovra-adk" }
 sovra-core = { path = "crates/sovra-core" }
+sovra-laya = { path = "crates/sovra-laya" }
 sovra-train = { path = "crates/sovra-train" }
 sovra-files = { path = "crates/sovra-files" }
 sovra-github = { path = "crates/sovra-github" }
@@ -157,6 +158,10 @@ tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
+# Laya decision model (sovra-laya only): Convai's Apache-2.0 Laya ported to candle, a
+# pure-Rust tensor stack compiled into the executable. No server or Python. Library only:
+# no CLI, and no hf-hub client (the runtime downloads and verifies the weights itself).
+laya-candle = { version = "=0.1.2", default-features = false }
 # Sealed-box plugin code (sovra-wasm only). A pure-Rust interpreter: no machine
 # code is generated, fuel bounds every call. The text format is left out of the
 # app; `wat` is only for tests that write modules by hand.

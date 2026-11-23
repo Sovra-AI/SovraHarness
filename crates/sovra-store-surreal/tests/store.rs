@@ -879,6 +879,7 @@ async fn chat_threads_save_list_and_soft_delete() {
         vec![],
     ));
     thread2.messages[0].model = Some(sovra_core::ResponseModel {
+        route: None,
         model_id: "provider/model".into(),
         name: "Friendly model".into(),
         provider: "OpenRouter".into(),

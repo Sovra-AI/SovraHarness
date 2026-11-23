@@ -39,6 +39,32 @@ package version.
   colours on the card and when you open it. Those colours follow light and dark
   mode. Letters, notes, lists, and tables stay ordinary writing.
 
+- **Choose how long your AI thinks.** My AIs has a thinking level for the chat
+  AI: AI decides, No thinking, Think a little, Think, Think hard or Think deeply.
+  Sovra sends it in each service's own form: OpenRouter `reasoning.effort`,
+  Anthropic adaptive thinking with effort (a token budget on older Claude
+  models), and `reasoning_effort` for Ollama and compatible servers. Memory and
+  file-summary requests never get one.
+
+- **A different AI for simple, medium and complex questions.** Turn on Choose an
+  AI by how hard the question is, then pick an AI and thinking level for each
+  difficulty (or keep your chat AI). Every message is sorted first, and the
+  reply's model label says which difficulty answered and why. Writing "think
+  hard" or "quickly" chooses for you. Try a question shows where a question
+  would go without sending it. A difficulty whose AI is unavailable uses the
+  chat AI.
+
+- **Laya sorts messages on this computer.** Laya, Convai's Apache-2.0 decision
+  model, is compiled into the Sovra executable through the pure-Rust
+  `laya-candle` port (new `sovra-laya` crate); there is no server or Python.
+  Download Laya fetches its multilingual checkpoint once (about 680 MB, fixed
+  revision, every file SHA-256 checked) and Delete Laya removes it. It reads
+  100+ languages and takes about a quarter of a second per message. Quick rules
+  keep deciding sure cases and take over when Laya is missing, unsure or slower
+  than 1.5 seconds. The quick rules now match whole words, so "current" no
+  longer counts as "rent". The preview-only cards on My AIs are replaced by
+  these working controls.
+
 - **Roadmap is up to date with v0.8.0.** It now says the decision record shipped
   in v0.8.0, links to the latest release instead of naming a version, and records
   the owner's choice that the person running Sovra picks the base model for future

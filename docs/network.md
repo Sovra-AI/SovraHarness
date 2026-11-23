@@ -27,6 +27,7 @@ additional destinations; it is not a network allowlist.
 | Group training: helping | While a run started with **Train with my group** is running, with group computers that have **Help the group train** on or were chosen by hand | To helpers: pieces of the chosen text (up to 4,096 bytes each), the current model values and the settings for that piece. Back to the owner: an update made of numbers. Uses the group connection; no other destination. **Pause**, **Carry on without my group**, **Stop helping** and turning the Groups switch off stop it. The owner's grant is never saved, so nothing is shared after a restart until a new run is started with the group. See [Training](training.md#privacy-and-consent). |
 | Group training: model delivery | After a shared run finishes or **Share with my group**; every member's computer also asks the others for new models at start, when **Training** opens, and about every 30 seconds for computers seen recently | Finished model files (at most 16 MiB, in parts of up to 2 MiB) and their descriptions, to current group members only. Each computer fetches the file itself and checks it before keeping it. Leaving the group stops it. Training downloads nothing from the Internet. |
 | Phone-control peers, discovery, and encrypted relays | While phone access is enabled | Remote-control traffic. Access starts off each launch. `SOVRA_REMOTE_REACH=local` limits reach; it does not enable access. |
+| Hugging Face (`huggingface.co` and its download servers) | Only after **Download Laya** on My AIs | A one-time download of about 680 MB of Laya's files from a fixed revision of `convaiinnovations/laya`. Every file is checked against its SHA-256 before use. No messages or account details are sent. **Delete Laya** removes the files; after that, sorting uses the quick rules. |
 | Remote MCP servers | Reconnecting configured services and calling enabled tools | Tool arguments and configured credentials. Disable or remove the service. Local MCP programs have their own network access. |
 | jsDelivr | Opening a Mermaid artifact in the browser | The browser downloads the Mermaid script. Review generated web content for its own external resources. |
 
@@ -36,8 +37,9 @@ Implementation: [composition root](../crates/sovra-app/src/main.rs),
 [group transport](../crates/sovra-mesh/src), and
 [browser previews](../crates/sovra-core/src/artifacts.rs).
 
-Internal task classification runs inside the Sovra executable and sends no routing
-requests to a separate service.
+Sorting messages by difficulty runs inside the Sovra executable and sends no routing
+requests to a separate service. Laya, the optional sorting AI, also runs inside the
+executable, on this computer's processor; only its files are downloaded, once.
 
 ## Configure local operation
 
@@ -47,7 +49,7 @@ requests to a separate service.
 2. Choose its local connection in Models and remove unused remote connections,
    including the default OpenRouter connection if you do not want catalog requests.
 3. Disable helper web search and remove scheduled research tasks.
-4. Choose the embedded router if you do not want decision-server requests.
+4. Leave Laya downloaded or use the quick rules; neither sends your messages anywhere.
 5. Leave unused cloud credentials and `SOVRA_SEARXNG_URL` unset.
 6. Disconnect messaging, Google, GitHub, and remote MCP services. Review local
    MCP programs and terminal commands separately; they are not network sandboxes.

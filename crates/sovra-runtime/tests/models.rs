@@ -41,6 +41,9 @@ mod summaries;
 #[path = "models/telegram.rs"]
 mod telegram;
 
+#[path = "models/tiers.rs"]
+mod tiers;
+
 #[path = "models/whatsapp.rs"]
 mod whatsapp;
 
@@ -97,6 +100,7 @@ impl Fixture {
             AgentConfig::default(),
             None,
             Some(ModelsConfig {
+                laya: None,
                 readiness: None,
                 repository: self.repo.clone(),
                 providers: vec![
@@ -841,6 +845,7 @@ async fn conversational_reply_arrives_before_the_server_finishes_without_cards_o
     assert_eq!(
         responder.unwrap(),
         sovra_core::ResponseModel {
+            route: None,
             model_id: "chat-model".into(),
             name: "chat-model".into(),
             provider: "OpenAI compatible".into(),
@@ -1097,6 +1102,7 @@ async fn purpose_assignment_keeps_chat_model_and_sends_real_images_and_document_
         AgentConfig::default(),
         None,
         Some(ModelsConfig {
+            laya: None,
             readiness: None,
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(CompatibleProvider)],
@@ -1279,6 +1285,7 @@ async fn local_startup_is_explicit_and_inference_reports_readiness_failures() {
         AgentConfig::default(),
         None,
         Some(ModelsConfig {
+            laya: None,
             readiness: Some(readiness.clone()),
             repository: fixture.repo.clone(),
             providers: vec![Arc::new(OllamaProvider)],

@@ -1459,19 +1459,26 @@ fn render_model_pill(
     } else {
         &model.name
     };
-    let label = if model.provider.is_empty() {
+    let mut label = if model.provider.is_empty() {
         name.clone()
     } else {
         format!("{name} · {}", model.provider)
     };
+    if let Some(route) = &model.route {
+        label = format!("{label} · {route}");
+    }
     let details = format!(
-        "Response model: {name}\nModel ID: {}{}",
+        "Response model: {name}\nModel ID: {}{}{}",
         model.model_id,
         if model.provider.is_empty() {
             String::new()
         } else {
             format!("\nConnection: {}", model.provider)
-        }
+        },
+        model
+            .route
+            .as_ref()
+            .map_or_else(String::new, |route| format!("\nChosen for: {route}"))
     );
     h_flex()
         .id(("response-model", index))
@@ -2036,6 +2043,7 @@ mod tests {
         })
         .unwrap();
         let model = ResponseModel {
+            route: None,
             model_id: "organization/model-version-2026".into(),
             name: "A model with a deliberately long catalog display name".into(),
             provider: "My OpenRouter connection".into(),

@@ -109,6 +109,8 @@ crates/
                   The only crate naming burn and sysinfo.
   sovra-wasm      The sealed box plugin code runs in: a WebAssembly interpreter behind the
                   core PluginCodeEngine port. The only crate naming wasmi.
+  sovra-laya      Laya decision model (candle, CPU) that sorts messages by difficulty,
+                  behind the core DifficultyJudge port. The only crate naming laya-candle.
   sovra-ui        GPUI views. The only crate allowed to use gpui-kit.
   sovra-app       binary + composition root: velopack hook, paths, logging, wiring. No logic.
 xtask/            automation: ci, hooks, layering rules (xtask/src/deps.rs)

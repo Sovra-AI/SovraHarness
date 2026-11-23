@@ -31,7 +31,7 @@ impl Skill {
             "explore-knowledge" => "Explore your connected sources",
             "knowledge" => "See what Sovra remembers",
             "schedules" => "One-time and repeating tasks that run on their own",
-            "agents" => "How Sovra picks the best helper",
+            "agents" => "Use a cheap AI for easy questions and a strong one for hard ones",
             "development" => "Test Sovra while developing",
             "settings" => "Appearance, text size & settings",
             "team" => "Chat with one helper or a chosen group",
@@ -139,8 +139,8 @@ impl Skill {
                 "/schedules ".to_owned(),
             ),
             "agents" => (
-                "See your chat AI, change it, or start chatting.".to_owned(),
-                "/agents ".to_owned(),
+                "Open My AIs, turn on Choose an AI by how hard the question is, pick a strong AI that thinks hard for complex questions, then try: Think hard: plan a week of dinners for a family of four on a budget.".to_owned(),
+                "/my-ais ".to_owned(),
             ),
             "remote-control" => (
                 "Let me use Sovra from my phone.".to_owned(),
@@ -447,9 +447,9 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "agents",
             "My AIs",
-            "See or change the AI that answers your messages.",
+            "See or change the AI that answers your messages, choose how long it thinks, and pick a different AI for simple, medium and complex questions. Sovra sorts each message itself, with quick rules or Laya, a small sorting AI that runs on this computer.",
             SkillAction::Agents,
-            &["my-ais"],
+            &["my-ais", "thinking", "think"],
         ),
         action(
             "remote-control",

@@ -34,6 +34,7 @@ mod sources_footer;
 mod team;
 mod terminal;
 mod text_tool_calls;
+mod thinking;
 mod web_search;
 mod work_log;
 mod working_context;
@@ -385,15 +386,24 @@ impl AdkHarness {
         model: &ModelInfo,
         secret: &ModelSecret,
     ) -> Result<Self, Error> {
-        Self::from_selected_model_with_readiness(config, connection, model, secret, None)
+        Self::from_selected_model_with_readiness(
+            config,
+            connection,
+            model,
+            secret,
+            sovra_core::ai_tiers::ThinkingLevel::ModelDefault,
+            None,
+        )
     }
 
-    /// As above, with runtime-owned local server preparation at every inference call.
+    /// As above, thinking at `thinking`, with runtime-owned local server preparation
+    /// at every inference call.
     pub fn from_selected_model_with_readiness(
         config: &AgentConfig,
         connection: &ModelConnection,
         model: &ModelInfo,
         secret: &ModelSecret,
+        thinking: sovra_core::ai_tiers::ThinkingLevel,
         readiness: Option<Arc<dyn sovra_core::models::ModelReadiness>>,
     ) -> Result<Self, Error> {
         let llm: Arc<dyn Llm> = match connection.kind {
@@ -465,9 +475,11 @@ impl AdkHarness {
                 if connection.base_url.starts_with("http://") {
                     anthropic = anthropic.allow_insecure_http();
                 }
+                let anthropic = thinking::anthropic_config(anthropic, model, thinking);
                 Arc::new(adk_model::AnthropicClient::new(anthropic).map_err(Error::ModelInit)?)
             }
         };
+        let llm = thinking::wrap(llm, connection.kind, model, thinking);
         let llm = readiness::wrap(llm, connection, readiness);
         let tools = web_search::chat_tools(model.supports("tools"), None);
         let llm = admission::wrap(
@@ -487,6 +499,7 @@ impl AdkHarness {
             model.supports("tools"),
         )?;
         harness.response_model = ResponseModel {
+            route: None,
             model_id: model.id.clone(),
             name: model.name.clone(),
             provider: connection.name.clone(),
@@ -496,6 +509,13 @@ impl AdkHarness {
             harness.secrets.push(secret.clone());
         }
         Ok(harness)
+    }
+
+    /// Labels this harness's replies with why it was chosen (shown beside the model name).
+    #[must_use]
+    pub fn with_route_note(mut self, note: String) -> Self {
+        self.response_model.route = Some(note);
+        self
     }
 
     /// Builds an `AdkHarness` backed by Google's `GeminiModel` and `adk-ui`'s native
@@ -508,6 +528,7 @@ impl AdkHarness {
         let model = GeminiModel::new(api_key, &config.model).map_err(Error::ModelInit)?;
         let mut harness = Self::with_llm_and_tools(config, Arc::new(model), native_ui::tools())?;
         harness.response_model = ResponseModel {
+            route: None,
             model_id: config.model.clone(),
             name: config.model.clone(),
             provider: "Google Gemini".into(),
@@ -701,6 +722,7 @@ impl AdkHarness {
     ) -> Result<Self, Error> {
         let web_search_enabled = web_search_enabled && tools_enabled;
         let response_model = ResponseModel {
+            route: None,
             model_id: llm.name().into(),
             name: llm.name().into(),
             provider: String::new(),
@@ -1174,6 +1196,7 @@ mod tests {
                 Event::AgentResponseStarted {
                     session_id: "session-1".into(),
                     model: ResponseModel {
+                        route: None,
                         model_id: "fake-gemini".into(),
                         name: "fake-gemini".into(),
                         provider: String::new(),
@@ -1381,6 +1404,7 @@ mod tests {
             event.set_content(Content::new(role).with_text("not an assistant reply"));
             assert_eq!(extract_output(&event), (None, None));
             let mut model = Some(ResponseModel {
+                route: None,
                 model_id: "test".into(),
                 name: "Test model".into(),
                 provider: String::new(),

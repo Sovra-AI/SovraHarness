@@ -102,6 +102,12 @@ fn main() -> anyhow::Result<()> {
             Arc::new(sovra_providers::CompatibleProvider),
             Arc::new(sovra_providers::AnthropicProvider),
         ],
+        // Laya's code is compiled into this executable; only its weights are fetched,
+        // once, into the app data folder when the person asks for them.
+        laya: Some(sovra_runtime::LayaSetup {
+            dir: data_dir.as_path().join("laya"),
+            loader: Arc::new(sovra_laya::CpuLayaLoader),
+        }),
     };
     // WhatsApp credentials (Signal keys) live in one SQLite file in the app data directory.
     let whatsapp = sovra_whatsapp::WhatsAppChannel::new(data_dir.as_path().join("whatsapp"));

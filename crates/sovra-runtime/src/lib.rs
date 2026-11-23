@@ -4,6 +4,7 @@
 //!
 //! The UI never sees tokio, and this crate never sees the UI.
 
+mod ai_tiers;
 mod artifacts;
 mod auth;
 mod chat_history;
@@ -44,6 +45,7 @@ pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
 mod teams;
 mod training;
+pub use ai_tiers::LayaSetup;
 pub use groups::{GroupServices, QrEncoder, TransportFactory, TransportFuture};
 pub use models::ModelsConfig;
 pub use schedules::{JsonScheduleStore, MemoryScheduleStore};
@@ -1080,7 +1082,12 @@ async fn serve(
                 context,
             } => {
                 let (selected, timeout) = if let Some(models) = &models {
-                    match models.execution.read().await.clone() {
+                    let routed = models.route(&prompt).await;
+                    let execution = match routed {
+                        Some(execution) => execution,
+                        None => models.execution.read().await.clone(),
+                    };
+                    match execution {
                         models::ModelExecution::Legacy => match harness.clone() {
                             Some(harness) => (Some(harness), None),
                             None => (group_harness(&groups, &agent_config).await, None),

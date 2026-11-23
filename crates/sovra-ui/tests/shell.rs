@@ -529,7 +529,7 @@ fn my_ais_uses_the_saved_chat_choice_and_guides_setup(cx: &mut TestAppContext) {
                         assert!(window.try_find(removed).is_none());
                     }
                     let cards: Vec<_> = (0..3usize)
-                        .map(|index| window.find(("routing-mode-btn", index)).bounds())
+                        .map(|index| window.find(("tier-card", index)).bounds())
                         .collect();
                     let page = window.find("sovra-my-ais-view").bounds();
                     let same_row = cards
@@ -538,7 +538,7 @@ fn my_ais_uses_the_saved_chat_choice_and_guides_setup(cx: &mut TestAppContext) {
                     if width >= 2560. {
                         assert!(
                             same_row,
-                            "preview choices should share one row at {width}×{height}"
+                            "tier cards should share one row at {width}×{height}"
                         );
                     }
                     if same_row {
@@ -546,7 +546,7 @@ fn my_ais_uses_the_saved_chat_choice_and_guides_setup(cx: &mut TestAppContext) {
                         for card in &cards {
                             assert!(
                                 (card.size.height - height).abs() < px(1.),
-                                "preview choices differ in height at {width}×{height} @{scale}%: {cards:?}"
+                                "tier cards differ in height at {width}×{height} @{scale}%: {cards:?}"
                             );
                         }
                     }
@@ -554,7 +554,7 @@ fn my_ais_uses_the_saved_chat_choice_and_guides_setup(cx: &mut TestAppContext) {
                         assert!(
                             card.left() >= page.left() - px(1.)
                                 && card.right() <= page.right() + px(1.),
-                            "a preview choice runs outside the page at {width}×{height}"
+                            "a tier card runs outside the page at {width}×{height}"
                         );
                     }
                     if chat {
@@ -590,6 +590,163 @@ fn my_ais_uses_the_saved_chat_choice_and_guides_setup(cx: &mut TestAppContext) {
                 "Opening My AIs must not change routing or send a prompt"
             );
         }
+    }
+}
+
+#[gpui_kit::test]
+fn my_ais_tier_controls_save_routing_download_laya_and_sort_a_sample(cx: &mut TestAppContext) {
+    use sovra_core::ai_tiers::{DecisionSource, LayaStatus, Sorter, TierDecision, TierRouting};
+    use sovra_core::models::{
+        ModelCommand, ModelConnection, ModelEvent, ModelKey, ModelPreferences, ProviderKind,
+    };
+    use sovra_core::providers::ModelTier;
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        let (client, commands, events) = Client::loopback();
+        cx.update(|cx| {
+            sovra_ui::init(client, cx);
+            sovra_ui::design::set_interface_scale(
+                sovra_core::models::InterfaceScale::from_percent(scale),
+                cx,
+            );
+        });
+        let mut shell_entity = None;
+        let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+            let view = cx.new(|cx| Shell::new(0, window, cx));
+            shell_entity = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let shell = shell_entity.unwrap();
+        let mut connection = ModelConnection::new("test", ProviderKind::OpenRouter);
+        connection.has_credential = true;
+        let preferences = ModelPreferences {
+            active: Some(ModelKey {
+                connection_id: "test".into(),
+                model_id: "chat".into(),
+            }),
+            ..Default::default()
+        };
+        events
+            .send_blocking(Event::Models(ModelEvent::Loaded {
+                connections: vec![connection],
+                preferences: preferences.clone(),
+            }))
+            .unwrap();
+        let settle = |cx: &mut TestAppContext| {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+        };
+        settle(cx);
+        let drain = || std::iter::from_fn(|| commands.try_recv().ok()).collect::<Vec<_>>();
+        drain();
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.select_tab(NavTab::MyAis, cx));
+            window.render_frame(cx);
+            for card in 0..3usize {
+                assert!(window.try_find(("tier-card", card)).is_some());
+            }
+            assert!(window.try_find("tier-sorter").is_none(), "sorting is off");
+            assert_eq!(
+                window.find("tier-routing-switch").label(),
+                Some("Choose an AI by how hard the question is")
+            );
+            reveal_my_ai_action(window, "tier-routing-switch", cx);
+            window.click("tier-routing-switch", cx);
+        })
+        .unwrap();
+        settle(cx);
+        let sent = drain();
+        assert!(
+            sent.iter().any(|c| matches!(c,
+                Command::Models(ModelCommand::SetTierRouting { routing }) if routing.enabled)),
+            "the switch saves routing at {width}×{height} @{scale}%: {sent:?}"
+        );
+
+        let enabled = TierRouting {
+            enabled: true,
+            ..TierRouting::default()
+        };
+        events
+            .send_blocking(Event::Models(ModelEvent::PreferencesChanged(
+                ModelPreferences {
+                    tier_routing: enabled.clone(),
+                    ..preferences.clone()
+                },
+            )))
+            .unwrap();
+        events
+            .send_blocking(Event::Models(ModelEvent::LayaStatus(
+                LayaStatus::NotInstalled,
+            )))
+            .unwrap();
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            reveal_my_ai_action(window, "tier-sorter-laya", cx);
+            window.click("tier-sorter-laya", cx);
+            reveal_my_ai_action(window, "laya-install-btn", cx);
+            window.click("laya-install-btn", cx);
+        })
+        .unwrap();
+        settle(cx);
+        let sent = drain();
+        assert!(sent.iter().any(|c| matches!(c,
+            Command::Models(ModelCommand::SetTierRouting { routing }) if routing.sorter == Sorter::Laya)));
+        assert!(
+            sent.iter()
+                .any(|c| matches!(c, Command::Models(ModelCommand::InstallLaya)))
+        );
+
+        events
+            .send_blocking(Event::Models(ModelEvent::LayaStatus(
+                LayaStatus::Downloading {
+                    received: 100_000_000,
+                    total: 680_000_000,
+                },
+            )))
+            .unwrap();
+        events
+            .send_blocking(Event::Models(ModelEvent::TierTested {
+                prompt: "Prove it".into(),
+                decision: TierDecision {
+                    tier: ModelTier::Deep,
+                    source: DecisionSource::QuickSorter,
+                    reason: "it asks for a proof or derivation".into(),
+                },
+            }))
+            .unwrap();
+        settle(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("laya-status").label(),
+                Some("Laya: Downloading… 100 of 680 MB")
+            );
+            assert!(window.try_find("laya-cancel-btn").is_some());
+            reveal_my_ai_action(window, "tier-test-result", cx);
+            let result = window
+                .find("tier-test-result")
+                .label()
+                .unwrap_or_default()
+                .to_owned();
+            assert!(result.contains("complex question"), "{result}");
+            assert!(result.contains("Think hard"), "{result}");
+            let page = window.find("sovra-my-ais-view").bounds();
+            for card in 0..3usize {
+                let bounds = window.find(("tier-card", card)).bounds();
+                assert!(
+                    bounds.left() >= page.left() - px(1.)
+                        && bounds.right() <= page.right() + px(1.),
+                    "tier card {card} leaves the page at {width}×{height} @{scale}%"
+                );
+            }
+        })
+        .unwrap();
+        let sent = drain();
+        assert!(
+            !sent.iter().any(|c| matches!(c, Command::RunPrompt { .. })),
+            "My AIs never sends a chat message"
+        );
     }
 }
 

@@ -2089,11 +2089,13 @@ mod tests {
         let mut state = WorkspaceState::new(0);
         let session_id = state.session_id.clone();
         let first = crate::ResponseModel {
+            route: None,
             model_id: "provider/first".into(),
             name: "First model".into(),
             provider: "OpenRouter".into(),
         };
         let second = crate::ResponseModel {
+            route: None,
             model_id: "local/second".into(),
             name: "Second model".into(),
             provider: "Local server".into(),

@@ -176,6 +176,10 @@ pub struct ResponseModel {
     pub model_id: String,
     pub name: String,
     pub provider: String,
+    /// Why this model answered when choosing by difficulty, for example
+    /// "Complex question · Think hard". `None` for a single chat model.
+    #[serde(default)]
+    pub route: Option<String>,
 }
 
 /// A single message in the main chat conversation stream.

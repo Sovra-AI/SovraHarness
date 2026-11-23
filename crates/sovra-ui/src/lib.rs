@@ -4,6 +4,7 @@
 //! (a [`sovra_runtime::Client`]); it never blocks and never touches tokio.
 
 mod agui_widgets;
+mod ai_tiers_view;
 mod app_menu;
 mod artifact_highlight;
 mod artifacts_view;

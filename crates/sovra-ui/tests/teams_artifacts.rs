@@ -1074,6 +1074,7 @@ fn saving_a_reply_and_browsing_the_library(cx: &mut TestAppContext) {
         Event::AgentResponseStarted {
             session_id: session.clone(),
             model: sovra_core::ResponseModel {
+                route: None,
                 model_id: "m".into(),
                 name: "Model".into(),
                 provider: "Test".into(),
@@ -1415,6 +1416,7 @@ fn a_saved_web_page_card_opens_the_browser_and_shows_where(cx: &mut TestAppConte
         Event::AgentResponseStarted {
             session_id: session.clone(),
             model: sovra_core::ResponseModel {
+                route: None,
                 model_id: "m".into(),
                 name: "Model".into(),
                 provider: "Test".into(),

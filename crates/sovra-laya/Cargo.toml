@@ -1,0 +1,17 @@
+[package]
+name = "sovra-laya"
+description = "Laya, the local decision model that sorts messages by difficulty, compiled into Sovra."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+laya-candle = { workspace = true }
+serde_json = { workspace = true }
+sovra-core = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

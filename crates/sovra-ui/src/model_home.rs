@@ -14,9 +14,9 @@ use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::models_view::{GoToChat, ModelsView, StartSystemTour, caption, pill};
 
 /// One chat model a person can switch to, with the everyday facts beside its name.
-struct ListedChatModel {
-    key: ModelKey,
-    name: String,
+pub(crate) struct ListedChatModel {
+    pub(crate) key: ModelKey,
+    pub(crate) name: String,
     price: String,
     good_for: String,
 }
@@ -143,7 +143,7 @@ impl ModelsView {
     }
 
     /// Chat models on connections that can be used now, ordered by name.
-    fn switchable_chat_models(&self) -> Vec<ListedChatModel> {
+    pub(crate) fn switchable_chat_models(&self) -> Vec<ListedChatModel> {
         let mut models = Vec::new();
         for connection in self
             .state

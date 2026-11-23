@@ -5,6 +5,7 @@
 
 mod agent;
 mod agui;
+pub mod ai_tiers;
 pub mod artifacts;
 pub mod auth;
 mod capabilities;

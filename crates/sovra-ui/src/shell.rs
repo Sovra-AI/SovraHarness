@@ -86,6 +86,7 @@ pub struct Shell {
     /// Exact text of Message on `WhatsApp`, until that review appears in chat.
     pub(crate) people_open_review: Option<String>,
     models: Entity<crate::ModelsView>,
+    ai_tiers: Entity<crate::ai_tiers_view::AiTiersView>,
     team_view: Entity<crate::team_view::TeamView>,
     training_view: Entity<crate::training_view::TrainingView>,
     artifacts_view: Entity<crate::artifacts_view::ArtifactsView>,
@@ -238,6 +239,10 @@ impl Shell {
 
         let events = cx.global::<RuntimeClient>().0.events();
         let models = cx.new(|cx| crate::ModelsView::new(window, cx));
+        let ai_tiers = {
+            let models = models.clone();
+            cx.new(|cx| crate::ai_tiers_view::AiTiersView::new(models, window, cx))
+        };
         let memory_view =
             cx.new(|cx| crate::memory_view::MemoryView::new(models.clone(), window, cx));
         let models_navigation = cx.subscribe_in(
@@ -910,6 +915,7 @@ impl Shell {
             _people_search_events: people_search_events,
             people_open_review: None,
             models,
+            ai_tiers,
             training_view: cx.new(|cx| crate::training_view::TrainingView::new(window, cx)),
             team_view,
             artifacts_view,
@@ -2191,8 +2197,9 @@ impl Shell {
                             .into_any_element()
                     }
                     NavTab::Training => self.training_view.clone().into_any_element(),
-                    NavTab::MyAis => render_my_ais_view(&self.models, self.state.routing.mode, cx)
-                        .into_any_element(),
+                    NavTab::MyAis => {
+                        render_my_ais_view(&self.models, &self.ai_tiers, cx).into_any_element()
+                    }
                     NavTab::Schedules => render_schedules_view(
                         &self.state,
                         &crate::schedules_view::ScheduleForm {
