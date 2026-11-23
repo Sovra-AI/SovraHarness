@@ -2413,7 +2413,7 @@ dependencies = [
  "log",
  "quick-xml 0.42.0",
  "serde",
- "zip 9.6.1",
+ "zip 9.8.2",
 ]
 
 [[package]]
@@ -2464,7 +2464,7 @@ dependencies = [
  "tokenizers 0.23.2",
  "yoke",
  "zerocopy",
- "zip 9.6.1",
+ "zip 9.8.2",
 ]
 
 [[package]]
@@ -2945,9 +2945,9 @@ dependencies = [
 
 [[package]]
 name = "comrak"
-version = "0.59.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3adf553d37681e21753316065ad5a763d9513f81c910e250576c572114a8eb06"
+checksum = "a253d04a12dff46b9ff641890e76bad5f6475afa891faac93d736a04fed5804e"
 dependencies = [
  "caseless",
  "entities",
@@ -6467,9 +6467,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-bidi"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12ca465817de1670c6c1a830c0f4a0a665434e4d02c30a7ffc6362e0194f9cc9"
+checksum = "451e9db3745b499d24011e3927feb95994ec9a35add4b3d98d21b9bef2469aa4"
 dependencies = [
  "gpui-pre",
  "unicode-bidi",
@@ -12054,9 +12054,9 @@ dependencies = [
 
 [[package]]
 name = "plist"
-version = "1.10.3"
+version = "1.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "327a4cb2ad49dc48adfdc9da89e22c64d488b508c67a044d71ba729e4521a285"
+checksum = "d86a77b7d9cdebd9643c180c158748db7d894b24a3935ed4b5843e698ae086eb"
 dependencies = [
  "base64 0.23.1",
  "indexmap",
@@ -13067,9 +13067,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.13.1"
+version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+checksum = "9807af0e638c12e753aa1b4e601791bf2a8f71274023c8bbeec12fc149950857"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -13079,9 +13079,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.18"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
+checksum = "41d60ef07df457506a0a1a2073112eb4aae5733dbd2813c3da77d1b0fd441158"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -13096,9 +13096,9 @@ checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 
 [[package]]
 name = "regex-syntax"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 
 [[package]]
 name = "rend"
@@ -14372,22 +14372,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_toon_format"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83047917cd35d3cf33b1cfa3085e048546c8fb0f1f86ab90aa8e680196679fc3"
-dependencies = [
- "itoa",
- "memchr",
- "ryu",
- "serde",
- "serde_json",
- "smallvec",
- "smol_str 0.3.7",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14725,7 +14709,6 @@ version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eeb7109d23f319619d4cc0de5464613c8b7b1a09db2774a58101459cf6be2f10"
 dependencies = [
- "borsh",
  "serde_core",
 ]
 
@@ -14901,7 +14884,7 @@ dependencies = [
  "umap-rs",
  "unicode-normalization",
  "xberg",
- "zip 9.6.1",
+ "zip 9.8.2",
 ]
 
 [[package]]
@@ -18127,7 +18110,7 @@ dependencies = [
  "waitpid-any",
  "windows 0.62.2",
  "xml",
- "zip 9.6.1",
+ "zip 9.8.2",
 ]
 
 [[package]]
@@ -20204,9 +20187,9 @@ dependencies = [
 
 [[package]]
 name = "xberg"
-version = "1.4.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b910feabe35c37d08f05000c72ae5f3456f3d38b7a8012193f1ce692bcecb974"
+checksum = "0fe8f1781ec4ed07cbf0e02bc2a9c64bedced1ae71502458567780481ebced8f"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -20214,7 +20197,6 @@ dependencies = [
  "base64 0.23.1",
  "biblatex",
  "biblib",
- "bitvec",
  "blake3",
  "bytes",
  "calamine",
@@ -20261,7 +20243,6 @@ dependencies = [
  "roxmltree 0.21.2",
  "serde",
  "serde_json",
- "serde_toon_format",
  "snap",
  "tempfile",
  "thiserror 2.0.21",
@@ -20276,14 +20257,14 @@ dependencies = [
  "v_htmlescape",
  "xberg-native-pdf",
  "yaml_serde",
- "zip 9.6.1",
+ "zip 9.8.2",
 ]
 
 [[package]]
 name = "xberg-native-pdf"
-version = "1.4.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fe457811b651780ecd171a2312be34d6265f70f1b423cf3ba5d984e7b6f2ad6"
+checksum = "60091576c35c28dd6551d05ca9509295c20b6294da9a265e2604845e2dbf01b6"
 dependencies = [
  "aes 0.9.3",
  "base64 0.23.1",
@@ -20793,9 +20774,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.6.1"
+version = "9.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "953a376f4930ed5af88e1e65948385f76866b45e7f75b21ac275327d0eeb9b46"
+checksum = "2d8dbe089cf6b0448b78f5fc50139ab5aaa40d08ac07cdc1baf2c13add35fcce"
 dependencies = [
  "constant_time_eq 0.6.1",
  "crc32fast",
