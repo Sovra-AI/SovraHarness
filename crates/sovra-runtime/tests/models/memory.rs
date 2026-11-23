@@ -1225,7 +1225,7 @@ async fn selected_model_budget_trims_restored_context_and_rejects_oversized_curr
         assert_eq!(request.body["max_tokens"], 2048);
         assert!(request.body.get("max_completion_tokens").is_none());
         assert!(
-            text.len() + 2048 < 8192,
+            sovra_core::text_input_units(text.as_bytes()) + 2048 < 8192,
             "assembled HTTP request plus reply reserve must fit this fixture"
         );
         attachment_reply("memory-model")
@@ -1263,7 +1263,8 @@ async fn selected_model_budget_trims_restored_context_and_rejects_oversized_curr
         .send(Command::RunPrompt {
             context: Some(sovra_core::ConversationContext::default()),
             session_id: "oversized".into(),
-            prompt: "x".repeat(9000),
+            // ASCII counts half a unit per byte, so this is 9,000 units.
+            prompt: "x".repeat(18_000),
         })
         .unwrap();
     event(&client, |event| matches!(event, Event::AgentError { session_id, message } if session_id == "oversized" && message.contains("input budget"))).await;

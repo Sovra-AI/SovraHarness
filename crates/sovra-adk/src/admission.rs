@@ -273,6 +273,12 @@ fn prepare(request: &mut LlmRequest, budget: ContextBudget) -> adk_core::Result<
                     }
                     request.contents[index] = Content::new("system").with_text(OMITTED_HISTORY);
                 } else {
+                    tracing::warn!(
+                        units = units(request)?,
+                        allowed = allowance.input_units,
+                        tools = request.tools.len(),
+                        "request does not fit the model's input budget after trimming"
+                    );
                     return Err(error());
                 }
             }
@@ -280,7 +286,7 @@ fn prepare(request: &mut LlmRequest, budget: ContextBudget) -> adk_core::Result<
     }
 }
 
-/// Text uses UTF-8 byte units, including tool schemas and live tool results.
+/// Text uses [`sovra_core::text_input_units`], including tool schemas and live tool results.
 /// Media reservations are provider-independent estimates, not tokenizer claims.
 fn media_units(mime: &str) -> u64 {
     sovra_core::media_input_units(mime, None)
@@ -340,14 +346,14 @@ fn strip_media_hints(request: &mut LlmRequest) {
 fn units(request: &LlmRequest) -> adk_core::Result<u64> {
     let mut total =
         serialized_units(&request.config)?.saturating_add(serialized_units(&request.tools)?);
-    total = total.saturating_add(request.model.len() as u64);
+    total = total.saturating_add(sovra_core::text_input_units(request.model.as_bytes()));
     for content in &request.contents {
         total = total
             .saturating_add(content.role.len() as u64)
             .saturating_add(32);
         for part in &content.parts {
             let cost = match part {
-                Part::Text { text } => text.len() as u64,
+                Part::Text { text } => sovra_core::text_input_units(text.as_bytes()),
                 Part::InlineData {
                     mime_type,
                     annotations,
@@ -388,7 +394,7 @@ fn serialized_units(value: &impl Serialize) -> adk_core::Result<u64> {
     struct Counter(u64);
     impl std::io::Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self.0.saturating_add(bytes.len() as u64);
+            self.0 = self.0.saturating_add(sovra_core::text_input_units(bytes));
             if self.0 > 1_048_576 {
                 return Err(std::io::Error::other("request exceeds admission cap"));
             }
@@ -480,6 +486,33 @@ mod tests {
         assert_eq!(config.max_output_tokens, Some(1024));
     }
 
+    /// Regression: a plain "hello!" to a 32K-window Ollama model was refused, because
+    /// Sovra's instructions and 31 tool schemas measured 40,915 bytes and every byte
+    /// counted as a token (about 12K real tokens).
+    #[test]
+    fn a_full_sovra_request_fits_a_32k_window() {
+        let mut request = LlmRequest::new(
+            "qwen2.5-coder:7b",
+            vec![Content::new("user").with_text("hello!")],
+        );
+        for index in 0..31 {
+            request.tools.insert(
+                format!("tool_{index}"),
+                json!({"description": "Reads and writes things for the person. ".repeat(30)}),
+            );
+        }
+        request.contents.insert(
+            0,
+            Content::new("system").with_text("Follow the house rules carefully. ".repeat(250)),
+        );
+        assert!(units(&request).unwrap() > 20_000, "realistic size");
+        let budget = ContextBudget {
+            context_tokens: Some(32_768),
+            max_output_tokens: None,
+        };
+        prepare(&mut request, budget).expect("a 32K model can answer");
+    }
+
     #[test]
     fn tool_schemas_live_results_and_utf8_bytes_all_count_toward_admission() {
         let mut request = LlmRequest::new(
@@ -488,7 +521,7 @@ mod tests {
         );
         request.tools.insert(
             "big_tool".into(),
-            json!({"description": "schema".repeat(400)}),
+            json!({"description": "schema".repeat(800)}),
         );
         assert!(
             prepare(&mut request, budget(4096)).is_err(),
@@ -500,7 +533,7 @@ mod tests {
             parts: vec![Part::FunctionResponse {
                 function_response: FunctionResponseData::new(
                     "read",
-                    json!({"text": "result".repeat(500)}),
+                    json!({"text": "result".repeat(1000)}),
                 ),
                 id: Some("live".into()),
                 annotations: None,
@@ -729,7 +762,7 @@ mod tests {
                 .generate_content(
                     LlmRequest::new(
                         "test",
-                        vec![Content::new("user").with_text("x".repeat(8192))]
+                        vec![Content::new("user").with_text("x".repeat(16_384))]
                     ),
                     false
                 )

@@ -41,6 +41,9 @@ mod summaries;
 #[path = "models/telegram.rs"]
 mod telegram;
 
+#[path = "models/small_context.rs"]
+mod small_context;
+
 #[path = "models/tiers.rs"]
 mod tiers;
 

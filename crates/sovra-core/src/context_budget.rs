@@ -4,6 +4,20 @@ const FALLBACK_WINDOW: u64 = 65_536;
 const MAX_WINDOW: u64 = 1_048_576;
 const FRAMING_RESERVE: u64 = 1024;
 
+/// Input units for UTF-8 text: an upper estimate of its tokens without a tokenizer.
+///
+/// ASCII costs half a unit per byte: English prose, code and JSON schemas average
+/// three to four ASCII bytes per token in current tokenizers, so two is a safe
+/// floor. Every other byte costs a full unit, the worst case for tokenizers that
+/// fall back to single bytes on rare scripts. Counting every byte as a token
+/// refused 32K-window local models: Sovra's instructions and 31 tool schemas are
+/// about 41 KB, roughly 12K real tokens.
+pub fn text_input_units(bytes: &[u8]) -> u64 {
+    let ascii = bytes.iter().filter(|byte| byte.is_ascii()).count() as u64;
+    let other = bytes.len() as u64 - ascii;
+    ascii.div_ceil(2) + other
+}
+
 /// Conservative admission policy, not a universal provider tokenizer bound.
 /// Known durations can only increase the existing per-item reserves. The rates
 /// leave margin above the documented static Gemini rates (32 audio / 263 video).
@@ -94,6 +108,23 @@ impl ContextBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ascii_text_costs_half_and_other_scripts_cost_every_byte() {
+        assert_eq!(text_input_units(b""), 0);
+        assert_eq!(text_input_units(b"a"), 1);
+        assert_eq!(text_input_units(b"abcd"), 2);
+        assert_eq!(text_input_units("مرحبا".as_bytes()), 10);
+        assert_eq!(text_input_units("hi 你".as_bytes()), 2 + 3);
+        // A 41 KB ASCII request fits a 32K window with its output reserve.
+        let allowance = ContextBudget {
+            context_tokens: Some(32_768),
+            max_output_tokens: None,
+        }
+        .allowance(None)
+        .expect("32K window has room");
+        assert!(text_input_units(&vec![b'x'; 41_000]) <= allowance.input_units);
+    }
+
     #[test]
     fn media_reserves_grow_with_duration_and_never_wrap_or_shrink() {
         assert_eq!(media_input_units("video/mp4", Some(600_000)), 307_200);

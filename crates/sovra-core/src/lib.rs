@@ -89,6 +89,7 @@ pub use connections::{
 };
 pub use context_budget::{
     ContextAllowance, ContextBudget, ContextLimitError, ContextTrim, media_input_units,
+    text_input_units,
 };
 pub use conversation_context::{
     ContextMessage, ConversationContext, ConversationInput, MAX_CONTEXT_MESSAGES,

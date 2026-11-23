@@ -39,6 +39,14 @@ package version.
   colours on the card and when you open it. Those colours follow light and dark
   mode. Letters, notes, lists, and tables stay ordinary writing.
 
+- **Local AIs with a 32K memory can chat again.** The size check before each
+  message counted every byte as a token, so Sovra's own instructions and 31
+  tool descriptions (about 41 KB, roughly 12K real tokens) were refused by
+  models such as `qwen2.5-coder:7b` with "This request cannot fit the selected
+  model's input budget", even for "hello!". Plain ASCII text now counts as half
+  a token per byte; every other byte still counts as a full token, the worst
+  case for rare scripts. A refused request now logs its measured size.
+
 - **Choose how long your AI thinks.** My AIs has a thinking level for the chat
   AI: AI decides, No thinking, Think a little, Think, Think hard or Think deeply.
   Sovra sends it in each service's own form: OpenRouter `reasoning.effort`,
