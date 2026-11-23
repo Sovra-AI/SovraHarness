@@ -59,31 +59,42 @@ pub(super) fn reading_panel(
         .child(
             div()
                 .id(SharedString::from(format!("index-live-count-{id}")))
+                .min_w_0()
+                .max_w_full()
                 .test_support()
+                .aria_label(picture.count_line.clone())
                 .child(picture.count_line.clone()),
         );
     if let Some(time_left) = picture.time_left.clone() {
         counts = counts.child(
             div()
                 .id(SharedString::from(format!("index-live-eta-{id}")))
+                .min_w_0()
+                .max_w_full()
                 .test_support()
                 .text_color(t.text_secondary)
                 .child(time_left),
         );
     }
     panel = panel.child(counts);
-    if let Some(name) = picture.now_reading.clone() {
-        panel = panel.child(
-            div()
-                .id(SharedString::from(format!("index-live-now-{id}")))
-                .test_support()
-                .min_w_0()
-                .text_ellipsis()
-                .sovra_text(TextRole::Caption, cx)
-                .text_color(t.text_secondary)
-                .aria_label(format!("Now reading {name}"))
-                .child(format!("Now reading: {name}")),
-        );
+    let detail = |key: &str, text: String| {
+        div()
+            .id(SharedString::from(format!("index-live-{key}-{id}")))
+            .test_support()
+            .min_w_0()
+            .w_full()
+            .sovra_text(TextRole::Caption, cx)
+            .aria_label(text.clone())
+            .child(text)
+    };
+    if let Some(path) = picture.now_reading {
+        panel = panel.child(detail("now", path));
+    } else if let Some(path) = &root.progress.current {
+        panel = panel.child(detail("now", format!("Last processed · {path}")));
+    }
+    panel = panel.child(detail("throughput", picture.throughput));
+    if let Some(quiet) = picture.quiet {
+        panel = panel.child(detail("quiet", quiet));
     }
     if !picture.found.is_empty() {
         panel = panel.child(section(
@@ -361,17 +372,31 @@ mod tests {
         });
         let shell = shell.expect("shell view");
         cx.update_window(window.into(), |_, window, cx| {
+            let mut waiting = root();
+            waiting.id = "queued".into();
+            waiting.path = "/a-waiting-folder".into();
+            waiting.auto_refresh = true;
+            waiting.status = IndexStatus::Pending;
             shell.update(cx, |shell, cx| {
                 shell
                     .file_index
                     .state
-                    .apply(&IndexEvent::Roots(vec![counting()]));
+                    .apply(&IndexEvent::Roots(vec![waiting.clone(), counting()]));
                 shell.select_tab(NavTab::Knowledge, cx);
                 shell.select_knowledge_section(crate::knowledge_view::KnowledgeSection::Files, cx);
             });
             window.render_frame(cx);
             window.render_frame(cx);
             assert!(window.try_find("index-live-headline-chosen").is_some());
+            let expected = format!("Queued · currently scanning {}", counting().path.display());
+            assert_eq!(
+                window.find("index-capture-status-queued").label(),
+                Some(expected.as_str())
+            );
+            assert!(
+                window.find("index-live-headline-chosen").bounds().top()
+                    < window.find("index-capture-status-queued").bounds().top()
+            );
             assert!(window.try_find("index-live-bar-chosen").is_some());
             assert!(
                 window.try_find("index-live-eta-chosen").is_none(),

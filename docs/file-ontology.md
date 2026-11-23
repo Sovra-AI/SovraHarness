@@ -45,9 +45,18 @@ constants and dependency licenses when extending the taxonomy.
 
 ## Live progress (what a person sees)
 
+The Files page shows the active folder above the search controls. During a scan, the
+current relative path and stage distinguish reading a file from saving it to
+the index. Large files also show the passage being saved. The most recently processed file is labelled separately when the
+scanner has no active path to report. Processed files include reused, skipped
+and failed files. After ten seconds without a new progress signal, the panel
+shows how long that has been and hides the time estimate. Folders queued for
+their first scan name the active folder. Automatic checks rotate among due
+folders after each scan.
+
 | Rule | Why | Source |
 |---|---|---|
-| "Finding your files…" with an indeterminate bar while the walk counts, then "1,204 of 5,000 files read" with a determinate bar | Determinate when possible; never fake a percentage | [Apple HIG](https://developer.apple.com/design/human-interface-guidelines/progress-indicators), [NN/g](https://www.nngroup.com/articles/progress-indicators/) |
+| "Finding your files…" with an indeterminate bar while the walk counts, then "1,204 of 5,000 files processed" with a determinate bar | Determinate when possible; never fake a percentage | [Apple HIG](https://developer.apple.com/design/human-interface-guidelines/progress-indicators), [NN/g](https://www.nngroup.com/articles/progress-indicators/) |
 | Counts ("of 5,000 files") over bare percentages | Easier to understand | NN/g |
 | Time left only after a warm-up, from a smoothed rate (EMA, α = 0.3), rounded generously ("About 4 minutes left", "Almost done") | Avoid Spotlight-style jumping estimates | [NN/g](https://www.nngroup.com/articles/progress-indicators/), [Eclectic Light on Spotlight](https://eclecticlight.co/2024/11/19/when-and-how-to-rebuild-spotlight-indexes/) |
 | "What I've found so far" chips (icon + words + count), and "Your files seem to be about" | Waiting feels productive; mirrors Google/Apple Photos | [Google Photos](https://support.google.com/photos/answer/6193313), [Apple Photos](https://support.apple.com/en-gb/105081) |

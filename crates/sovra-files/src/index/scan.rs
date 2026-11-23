@@ -30,7 +30,9 @@ use sovra_core::file_index::{
 
 use super::{db_error, digest, io_error, now, save_root};
 
+mod activity;
 mod read;
+use sovra_core::file_index::live::ScanPhase;
 mod stream_text;
 mod walk;
 
@@ -65,6 +67,17 @@ pub(super) fn run(
     root: &mut IndexedRoot,
     storage: &Path,
     observer: &dyn ScanObserver,
+    activity: i64,
+) -> Result<Completion, IndexError> {
+    let live = activity::Live::new(observer, root, readers());
+    live.during(|| run_observed(db, root, storage, &live, activity))
+}
+
+fn run_observed(
+    db: &mut Connection,
+    root: &mut IndexedRoot,
+    storage: &Path,
+    observer: &activity::Live<'_>,
     activity: i64,
 ) -> Result<Completion, IndexError> {
     let dir = Dir::open_ambient_dir(&root.path, cap_std::ambient_authority())
@@ -115,6 +128,7 @@ pub(super) fn run(
     }
     // Failed files retain observed metadata but revoke readable text. A traversal
     // error returns before this point, preserving the unvisited subtree.
+    let _work = observer.working(0, ScanPhase::CheckingRemoved, None);
     let tx = scan.db.transaction().map_err(|e| db_error(&e))?;
     let missing = {
         let mut statement = tx
@@ -249,7 +263,7 @@ struct Scan<'a> {
     activity: i64,
     db: &'a mut Connection,
     root: &'a mut IndexedRoot,
-    observer: &'a dyn ScanObserver,
+    observer: &'a activity::Live<'a>,
     generation: i64,
     excluded: Option<PathBuf>,
     notices: Vec<super::report::PendingNotice>,
@@ -314,10 +328,11 @@ impl Scan<'_> {
                 })
             };
             let workers: Vec<_> = (0..readers)
-                .map(|_| {
+                .map(|slot| {
+                    let live = self.observer;
                     let (context, shared) = (&context, &shared);
                     let (jobs, out) = (Arc::clone(&job_rx), out_tx.clone());
-                    scope.spawn(move || read::work(context, shared, &jobs, &out))
+                    scope.spawn(move || read::work(context, shared, &jobs, &out, live, slot + 1))
                 })
                 .collect();
             drop((out_tx, job_rx));
@@ -457,6 +472,7 @@ impl Scan<'_> {
             ..
         } = self;
         let writer = Writer {
+            live: self.observer,
             root_id: root.id.clone(),
             root_path: root.path.clone(),
             generation: *generation,
@@ -466,8 +482,15 @@ impl Scan<'_> {
         let (progress, issues, pending) = (root.progress.clone(), root.issues.len(), notices.len());
         let saved = db.transaction().map_err(|e| db_error(&e)).and_then(|tx| {
             for outcome in batch.drain(..) {
+                let path = match &outcome {
+                    Outcome::Notice { path, .. } | Outcome::Metadata { path, .. } => path,
+                    Outcome::Read(read) => &read.path,
+                    Outcome::Stream(job) => &job.path,
+                };
+                let _work = self.observer.working(0, ScanPhase::Saving, Some(path));
                 writer.apply(&tx, root, notices, outcome)?;
             }
+            let _commit = self.observer.working(0, ScanPhase::Saving, None);
             tx.commit().map_err(|e| db_error(&e))
         });
         if let Err(error) = saved {
@@ -492,6 +515,7 @@ impl Scan<'_> {
             path,
             metadata,
         } = job;
+        let _work = self.observer.working(0, ScanPhase::Reading, Some(&path));
         let bytes_before = self.root.progress.bytes_read;
         let result = self.file(&mut file, &name, &path, &metadata);
         let streamed = self.root.progress.bytes_read.saturating_sub(bytes_before);
@@ -604,16 +628,18 @@ impl Scan<'_> {
 }
 
 /// The writer's view of one scan: everything needed to save an outcome in a transaction.
-struct Writer {
+struct Writer<'a> {
+    live: &'a activity::Live<'a>,
     root_id: String,
     root_path: PathBuf,
     generation: i64,
     activity: i64,
 }
 
-impl Writer {
-    fn of(scan: &Scan<'_>) -> Self {
+impl<'a> Writer<'a> {
+    fn of(scan: &Scan<'a>) -> Self {
         Self {
+            live: scan.observer,
             root_id: scan.root.id.clone(),
             root_path: scan.root.path.clone(),
             generation: scan.generation,
@@ -805,6 +831,7 @@ impl Writer {
                     ""
                 };
             for (ordinal, chunk) in chunks(source_text).into_iter().enumerate() {
+                self.live.saving_passage(ordinal as u64 + 1);
                 let stored = sovra_core::file_index::contextual_passage(
                     &path,
                     source_text,

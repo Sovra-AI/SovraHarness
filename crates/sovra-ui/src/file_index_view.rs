@@ -13,9 +13,7 @@ use gpui_kit::{
 };
 use sovra_core::{
     Command, NavTab,
-    file_index::{
-        IndexCommand, IndexQuery, IndexState, IndexStatus, IndexedRoot, MonitorMode, MonitorStatus,
-    },
+    file_index::{IndexCommand, IndexQuery, IndexState, IndexStatus, IndexedRoot, MonitorMode},
     skills::{SkillAction, SkillKind},
 };
 
@@ -309,18 +307,10 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .children((!state.roots.is_empty()).then(|| div().id("index-capture-summary").test_support()
             .role(gpui_kit::Role::Status).aria_label(capture_summary.clone())
             .min_w_0().sovra_text(TextRole::Body, cx).child(capture_summary)))
+        .children(state.roots.iter().filter(|root| root.status == IndexStatus::Scanning).map(|root| folder_card(shell, root, cx)))
         .children((!state.roots.is_empty()).then(|| render_search(shell, cx)))
         .children((!state.roots.is_empty()).then(|| browser::render(shell, cx)))
-        .children(state.roots.iter().map(|root| {
-            let removal = if shell.file_index.pending_removal.contains(&root.id) {
-                RemovalPrompt::Working
-            } else if shell.file_index.removing.as_deref() == Some(root.id.as_str()) {
-                RemovalPrompt::Confirm
-            } else {
-                RemovalPrompt::None
-            };
-            root_row(root, state.monitors.get(&root.id), state.semantic.iter().find(|s| s.setting.root_id == root.id), &removal, shell.file_index.detailed_roots.contains(&root.id), shell.file_index.options.get(&root.id).copied(), cx)
-        }));
+        .children(state.roots.iter().filter(|root| root.status != IndexStatus::Scanning).map(|root| folder_card(shell, root, cx)));
     if let Some(root_id) = shell
         .file_index
         .semantic_root
@@ -540,27 +530,44 @@ enum RemovalPrompt {
     Working,
 }
 
-fn root_row(
+fn folder_card(
+    shell: &Shell,
     root: &IndexedRoot,
-    monitor: Option<&MonitorStatus>,
-    semantic: Option<&sovra_core::file_index::semantic::SemanticStatus>,
-    removal: &RemovalPrompt,
-    detailed: bool,
-    pending_options: Option<sovra_core::file_index::ScanOptions>,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
+    let state = &shell.file_index.state;
+    let monitor = state.monitors.get(&root.id);
+    let semantic = state.semantic.iter().find(|s| s.setting.root_id == root.id);
+    let pending_options = shell.file_index.options.get(&root.id).copied();
+    let detailed = shell.file_index.detailed_roots.contains(&root.id);
+    let removal = if shell.file_index.pending_removal.contains(&root.id) {
+        RemovalPrompt::Working
+    } else if shell.file_index.removing.as_deref() == Some(root.id.as_str()) {
+        RemovalPrompt::Confirm
+    } else {
+        RemovalPrompt::None
+    };
     let t = design::tokens(cx);
     let has_notices =
         !root.issues.is_empty() || root.progress.skipped > 0 || root.progress.failed > 0;
+    let queued;
     let status = match root.status {
         IndexStatus::Pending => {
-            if root.auto_refresh {
-                "Waiting to read this folder"
+            if root.auto_refresh
+                && let Some(active) = state
+                    .roots
+                    .iter()
+                    .find(|r| r.status == IndexStatus::Scanning)
+            {
+                queued = format!("Queued · currently scanning {}", active.path.display());
+                &queued
+            } else if root.auto_refresh {
+                "Queued for indexing"
             } else {
                 "Paused — turn on automatic updates to read it"
             }
         }
-        IndexStatus::Scanning => "Reading your files…",
+        IndexStatus::Scanning => "Scanning",
         IndexStatus::Ready if has_notices => "Done — a few files need a look",
         IndexStatus::Ready => "Done — ready to search",
         IndexStatus::Cancelled => "Stopped — press Refresh to carry on",
@@ -596,22 +603,26 @@ fn root_row(
                 )))
                 .test_support()
                 .role(gpui_kit::Role::Status)
-                .aria_label(status)
+                .aria_label(status.to_owned())
                 .sovra_text(TextRole::Body, cx)
-                .child(status),
+                .child(status.to_owned()),
         );
         let row = match live::found_summary(root, cx) {
             Some(found) => row.child(found),
             None => row,
         };
-        // The plain-number detail stays for people who want it, in everyday words.
-        row.child(div().sovra_text(TextRole::Caption, cx).child(format!(
+        if root.status == IndexStatus::Pending && root.completed_at.is_none() {
+            row
+        } else {
+            // The plain-number detail stays for people who want it, in everyday words.
+            row.child(div().sovra_text(TextRole::Caption, cx).child(format!(
             "Last time: {} new or changed · {} already saved · {} left out · {} couldn't be read",
             sovra_core::file_index::ontology::group_digits(progress.indexed),
             sovra_core::file_index::ontology::group_digits(progress.reused),
             sovra_core::file_index::ontology::group_digits(progress.skipped),
             sovra_core::file_index::ontology::group_digits(progress.failed),
         )))
+        }
     };
     if has_notices {
         row = row.child(div()

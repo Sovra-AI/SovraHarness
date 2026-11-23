@@ -3,7 +3,7 @@
 //!
 //! Rules (sources in `docs/file-ontology.md` → *Live progress*):
 //! - Indeterminate "Finding your files…" while the walk is still counting; determinate
-//!   "1,204 of 5,000 files read" once the total is known (Apple HIG, NN/g).
+//!   "1,204 of 5,000 files processed" once the total is known (Apple HIG, NN/g).
 //! - Time left comes from a smoothed rate, is hidden until it settles, and is rounded
 //!   generously ("About 3 minutes left", "Almost done").
 //! - Problems are one calm summary line, never a stream of alerts.
@@ -59,6 +59,31 @@ impl RateEstimator {
     }
 }
 
+/// In-flight work is kept separate from outcomes that have been committed to the index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanPhase {
+    Discovering,
+    Reading,
+    Saving,
+    CheckingRemoved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanActivity {
+    pub phase: ScanPhase,
+    pub path: Option<String>,
+    pub seconds_without_change: u64,
+    pub passage: Option<u64>,
+}
+
+fn duration(seconds: u64) -> String {
+    match seconds {
+        0..60 => format!("{seconds}s"),
+        60..3600 => format!("{}m {}s", seconds / 60, seconds % 60),
+        _ => format!("{}h {}m", seconds / 3600, seconds / 60 % 60),
+    }
+}
+
 /// Everything the live scan card shows, already worded.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScanPicture {
@@ -67,7 +92,9 @@ pub struct ScanPicture {
     pub percent: Option<f32>,
     pub count_line: String,
     pub time_left: Option<String>,
-    /// File name only: paths are noise to most people.
+    pub throughput: String,
+    pub quiet: Option<String>,
+    /// Full path relative to the connected folder.
     pub now_reading: Option<String>,
     /// Kinds found so far, most common first.
     pub found: Vec<(FileKind, u64)>,
@@ -80,12 +107,14 @@ impl ScanPicture {
     /// Picture of a scan in progress.
     pub fn of(progress: &IndexProgress) -> Self {
         let remaining = progress.discovered.saturating_sub(progress.handled);
-        let headline = if !progress.walk_complete {
-            "Finding your files…"
-        } else if remaining == 0 {
-            "Finishing up…"
-        } else {
-            "Reading your files…"
+        let activity = progress.activity.as_ref();
+        let headline = match activity.map(|a| a.phase) {
+            Some(ScanPhase::Reading) => "Reading file contents",
+            Some(ScanPhase::Saving) => "Saving files to the search index",
+            Some(ScanPhase::CheckingRemoved) => "Checking for removed files",
+            _ if !progress.walk_complete => "Finding your files…",
+            _ if remaining == 0 => "Finishing up…",
+            _ => "Processing files",
         };
         let percent = progress.walk_complete.then(|| {
             let permille = progress
@@ -98,14 +127,26 @@ impl ScanPicture {
         });
         let count_line = if progress.walk_complete {
             format!(
-                "{} of {} read",
+                "{} of {} processed",
                 group_digits(progress.handled.min(progress.discovered)),
                 files(progress.discovered)
             )
         } else {
-            format!("Found {} so far", files(progress.discovered))
+            format!(
+                "{} found · {} processed",
+                files(progress.discovered),
+                group_digits(progress.handled)
+            )
         };
-        let time_left = (progress.walk_complete && remaining > 0)
+        let quiet = activity
+            .filter(|a| a.seconds_without_change >= 10)
+            .map(|a| {
+                format!(
+                    "No new scan progress reported for {}.",
+                    duration(a.seconds_without_change)
+                )
+            });
+        let time_left = (quiet.is_none() && progress.walk_complete && remaining > 0)
             .then(|| time_left(remaining, progress.files_per_minute))
             .flatten();
         Self {
@@ -113,10 +154,21 @@ impl ScanPicture {
             percent,
             count_line,
             time_left,
-            now_reading: progress
-                .current
-                .as_deref()
-                .map(|path| path.rsplit('/').next().unwrap_or(path).to_owned()),
+            now_reading: activity.and_then(|a| {
+                a.path.as_ref().map(|path| match a.passage {
+                    None => path.clone(),
+                    Some(number) => format!("{path} · passage {}", group_digits(number)),
+                })
+            }),
+            throughput: format!(
+                "{} elapsed · {} MiB read · {} indexed · {} reused · {} skipped",
+                duration(progress.elapsed_ms / 1000),
+                group_digits(progress.bytes_read / (1024 * 1024)),
+                group_digits(progress.indexed),
+                group_digits(progress.reused),
+                group_digits(progress.skipped)
+            ),
+            quiet,
             found: ranked(&progress.kinds),
             areas: ranked(&progress.areas),
             problems: problems(progress),
@@ -202,7 +254,7 @@ mod tests {
         let picture = ScanPicture::of(&p);
         assert_eq!(picture.headline, "Finding your files…");
         assert_eq!(picture.percent, None);
-        assert_eq!(picture.count_line, "Found 3,214 files so far");
+        assert_eq!(picture.count_line, "3,214 files found · 0 processed");
         assert_eq!(picture.time_left, None, "no estimate without a total");
     }
 
@@ -215,11 +267,40 @@ mod tests {
         p.files_per_minute = 1_000;
         p.current = Some("Photos/Spain/IMG_0001.jpg".into());
         let picture = ScanPicture::of(&p);
-        assert_eq!(picture.headline, "Reading your files…");
+        assert_eq!(picture.headline, "Processing files");
         assert_eq!(picture.percent, Some(24.0));
-        assert_eq!(picture.count_line, "1,204 of 5,000 files read");
+        assert_eq!(picture.count_line, "1,204 of 5,000 files processed");
         assert_eq!(picture.time_left.as_deref(), Some("About 4 minutes left"));
-        assert_eq!(picture.now_reading.as_deref(), Some("IMG_0001.jpg"));
+        assert_eq!(
+            picture.now_reading, None,
+            "a settled file is no longer active"
+        );
+    }
+
+    #[test]
+    fn slow_save_exposes_active_path_and_suppresses_stale_estimate() {
+        let mut p = progress();
+        p.discovered = 200;
+        p.walk_complete = true;
+        p.handled = 10;
+        p.files_per_minute = 600;
+        p.elapsed_ms = 65000;
+        p.current = Some("finished.txt".into());
+        p.activity = Some(ScanActivity {
+            phase: ScanPhase::Saving,
+            path: Some("photos/large.svg".into()),
+            seconds_without_change: 32,
+            passage: Some(71),
+        });
+        let picture = ScanPicture::of(&p);
+        assert_eq!(picture.headline, "Saving files to the search index");
+        assert_eq!(
+            picture.now_reading.as_deref(),
+            Some("photos/large.svg · passage 71")
+        );
+        assert!(picture.quiet.as_deref().unwrap().contains("32s"));
+        assert!(picture.throughput.contains("1m 5s elapsed"));
+        assert_eq!(picture.time_left, None);
     }
 
     #[test]
@@ -245,7 +326,7 @@ mod tests {
         let picture = ScanPicture::of(&p);
         assert_eq!(picture.percent, Some(100.0));
         assert_eq!(picture.headline, "Finishing up…");
-        assert_eq!(picture.count_line, "0 of 0 files read");
+        assert_eq!(picture.count_line, "0 of 0 files processed");
     }
 
     #[test]

@@ -14,6 +14,11 @@ package version.
 
 ## [Unreleased]
 
+- The Files page shows the active folder first, explains which folder is holding
+  the queue, and reports the current path, indexing stage, elapsed time and
+  processed counts during long reads and saves. Automatic scans rotate among
+  folders that are due for a check.
+
 - **Removing a Knowledge folder finishes.** Confirming Remove on Knowledge →
   Files tells you the folder is being removed, then drops that folder's saved
   index and quotations. The original files stay where they are. A large folder,

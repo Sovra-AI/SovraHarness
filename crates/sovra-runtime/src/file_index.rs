@@ -527,6 +527,7 @@ fn mutate(
         };
         let observer = Observer {
             root_id: id.clone(),
+            last_progress: Arc::default(),
             controls: controls.clone(),
             token,
             stopped,
@@ -748,6 +749,7 @@ impl Drop for IndexRuntime {
 #[derive(Clone)]
 struct Observer {
     root_id: String,
+    last_progress: Arc<Mutex<Option<std::time::Instant>>>,
     controls: SharedControls,
     token: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
@@ -797,6 +799,17 @@ impl ScanObserver for Observer {
         }
     }
     fn progress(&self, root: &IndexedRoot) {
+        // Coalesce fast batches before cloning their paths and issue lists into UI events.
+        if root.status == sovra_core::file_index::IndexStatus::Scanning {
+            let mut last = self
+                .last_progress
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if last.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(200)) {
+                return;
+            }
+            *last = Some(std::time::Instant::now());
+        }
         let _ = self
             .events
             .try_send(Event::FileIndex(IndexEvent::Progress(root.clone())));

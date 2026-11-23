@@ -42,6 +42,8 @@ pub(super) fn work(
     shared: &Shared<'_>,
     jobs: &Mutex<Receiver<Job>>,
     out: &SyncSender<Outcome>,
+    live: &super::activity::Live<'_>,
+    slot: usize,
 ) {
     // Without a reader connection every file is simply extracted; correctness is kept by
     // the writer, which re-checks before saving.
@@ -58,7 +60,11 @@ pub(super) fn work(
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         };
-        if let Some(outcome) = read(context, shared, db.as_ref(), job)
+        let outcome = {
+            let _work = live.working(slot, super::ScanPhase::Reading, Some(&job.path));
+            read(context, shared, db.as_ref(), job)
+        };
+        if let Some(outcome) = outcome
             && out.send(outcome).is_err()
         {
             return;

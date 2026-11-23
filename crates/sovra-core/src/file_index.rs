@@ -71,7 +71,10 @@ pub struct IndexProgress {
     /// The walk finished, so `discovered` is the true total and progress is determinate.
     #[serde(default)]
     pub walk_complete: bool,
-    /// Relative path most recently settled — "Now reading …".
+    /// Transient activity from the running scanner. Old snapshots need no migration.
+    #[serde(skip)]
+    pub activity: Option<live::ScanActivity>,
+    /// Relative path of the most recently processed file.
     #[serde(default)]
     pub current: Option<String>,
     #[serde(default)]

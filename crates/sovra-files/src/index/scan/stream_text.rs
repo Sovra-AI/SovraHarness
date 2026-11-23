@@ -71,6 +71,7 @@ impl Scan<'_> {
                 |row| row.get(0),
             )
             .map_err(|e| db_error(&e))?;
+        let _saving = self.observer.working(0, ScanPhase::Saving, Some(path));
         let tx = self.db.transaction().map_err(|e| db_error(&e))?;
         tx.execute_cached("INSERT INTO index_files(id,root_id,path,identity,current_version,generation,available) VALUES(?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,identity=excluded.identity,current_version=excluded.current_version,generation=excluded.generation,available=1",
             params![file_id, self.root.id, path, physical, version, self.generation]).map_err(|e| db_error(&e))?;
@@ -107,6 +108,7 @@ impl Scan<'_> {
                 legacy,
                 |text| {
                     for chunk in chunks(text) {
+                        self.observer.saving_passage(ordinal.cast_unsigned() + 1);
                         let stored = sovra_core::file_index::contextual_passage(
                             path,
                             text,

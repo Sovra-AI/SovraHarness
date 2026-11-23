@@ -52,6 +52,7 @@ pub(super) struct Monitors {
     scopes: BTreeMap<String, Scope>,
     paused: BTreeSet<String>,
     clock: Instant,
+    last_started: Option<String>,
     events: Sender<Event>,
 }
 
@@ -61,6 +62,7 @@ impl Monitors {
             scopes: BTreeMap::new(),
             paused: BTreeSet::new(),
             clock: Instant::now(),
+            last_started: None,
             events,
         }
     }
@@ -142,6 +144,7 @@ impl Monitors {
     }
 
     pub(super) fn started(&mut self, id: &str) {
+        self.last_started = Some(id.to_owned());
         let now = self.now();
         if let Some(scope) = self.scopes.get_mut(id) {
             scope.signal.dirty.swap(false, Ordering::Relaxed);
@@ -152,7 +155,10 @@ impl Monitors {
     pub(super) fn due(&mut self) -> Option<String> {
         let now = self.now();
         let mut statuses = vec![];
-        let mut due = None;
+        // A scan can last longer than the reconciliation interval. Rotate among
+        // due folders so repeated changes in an earlier root cannot starve the rest.
+        let mut first_due = None;
+        let mut next_due = None;
         for (id, scope) in &mut self.scopes {
             if scope.signal.dirty.swap(false, Ordering::Relaxed) {
                 scope.schedule.changed(now);
@@ -169,14 +175,17 @@ impl Monitors {
                 }
                 statuses.push((id.clone(), error));
             }
-            if due.is_none() && scope.schedule.due(now) {
-                due = Some(id.clone());
+            if scope.schedule.due(now) {
+                first_due.get_or_insert_with(|| id.clone());
+                if next_due.is_none() && self.last_started.as_ref().is_none_or(|last| id > last) {
+                    next_due = Some(id.clone());
+                }
             }
         }
         for (id, error) in statuses {
             self.publish(&id, MonitorMode::Periodic, Some(error));
         }
-        due
+        next_due.or(first_due)
     }
 
     fn publish(&self, root_id: &str, mode: MonitorMode, detail: Option<String>) {
@@ -186,5 +195,31 @@ impl Monitors {
                 root_id: root_id.into(),
                 status: MonitorStatus { mode, detail },
             }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn due_folders_rotate_even_if_all_are_due_again() {
+        let (events, _rx) = async_channel::unbounded();
+        let mut monitors = Monitors::new(events);
+        for id in ["a", "b", "c"] {
+            monitors.scopes.insert(
+                id.into(),
+                Scope {
+                    guard: None,
+                    signal: Arc::default(),
+                    schedule: RefreshSchedule::new(0, true),
+                },
+            );
+        }
+        for expected in ["a", "b", "c", "a"] {
+            assert_eq!(monitors.due().as_deref(), Some(expected));
+            monitors.started(expected);
+            monitors.scopes.get_mut(expected).unwrap().schedule = RefreshSchedule::new(0, true);
+        }
     }
 }
