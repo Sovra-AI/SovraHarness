@@ -547,11 +547,7 @@ impl ModelsView {
                 )
                 .small()
                 .selected(group.shown)
-                .accessibility_label(if group.shown {
-                    format!("{}, the group you are looking at", group.name)
-                } else {
-                    format!("Open the group {}", group.name)
-                })
+                .accessibility_label(group.spoken())
                 .on_click(cx.listener(move |view, _, _, cx| {
                     if view
                         .groups

@@ -84,7 +84,9 @@ address.
 **Your groups** at the top of the page lists every group this computer is in.
 Press one to look at it. **＋ Start or join another group** shows the choice
 again without leaving any group; pressing a group there goes back. The groups
-that are not on screen keep catching up and receiving in the background.
+that are not on screen keep catching up and receiving in the background, and
+their button says how much is new there (**Work · 12 people · 2 new**) until
+the group is opened. Sovra opens on the group that was looked at last.
 
 Leaving a group leaves only that one. A link to a group this computer is
 already in is refused here, before it is used. Asking the group, lending or

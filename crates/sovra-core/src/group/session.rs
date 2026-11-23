@@ -273,17 +273,37 @@ pub struct GroupSummary {
     pub you: String,
     /// The group the Groups page is showing.
     pub shown: bool,
+    /// Notes and documents that arrived since this group was last on screen.
+    pub new: usize,
 }
 
 impl GroupSummary {
-    /// "Family · 4 people", for a button.
+    /// "Family · 4 people", or "Family · 4 people · 2 new", for a button.
     pub fn label(&self) -> String {
-        format!(
+        let size = format!(
             "{} · {} {}",
             self.name,
             self.people,
             if self.people == 1 { "person" } else { "people" }
-        )
+        );
+        if self.new == 0 {
+            size
+        } else {
+            format!("{size} · {} new", self.new)
+        }
+    }
+
+    /// What a screen reader says for the button that opens this group.
+    pub fn spoken(&self) -> String {
+        match (self.shown, self.new) {
+            (true, _) => format!("{}, the group you are looking at", self.name),
+            (false, 0) => format!("Open the group {}", self.name),
+            (false, 1) => format!("Open the group {}. 1 new thing was shared there", self.name),
+            (false, new) => format!(
+                "Open the group {}. {new} new things were shared there",
+                self.name
+            ),
+        }
     }
 }
 

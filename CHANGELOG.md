@@ -21,7 +21,9 @@ package version.
   Under every reply in a chat, and beside your own messages, **Share with
   <group>** sends it to a group in one press and says when it is shared. A
   large group gets **Find a person** and **Search the notes**, notes come
-  twenty at a time, and the how-to steps fold away once a group is going.
+  twenty at a time, and the how-to steps fold away once a group is going. A
+  group that is not on screen shows how many new things were shared there, and
+  Sovra opens on the group you looked at last.
 
 - **Folder indexing is faster.** Initial scans write fewer database records per file,
   repeat scans can confirm unchanged files, including large text files, without rereading

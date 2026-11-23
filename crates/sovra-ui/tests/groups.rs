@@ -2070,6 +2070,7 @@ fn membership(name: &str, id: u8, people: usize, shown: bool) -> sovra_core::gro
         people,
         you: "Mum".into(),
         shown,
+        new: 0,
     }
 }
 

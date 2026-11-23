@@ -2585,7 +2585,27 @@ fn summary(name: &str, id: u8, shown: bool) -> GroupSummary {
         people: usize::from(id),
         you: "Mum".into(),
         shown,
+        new: 0,
     }
+}
+
+#[test]
+fn a_group_off_screen_says_how_much_is_new_there() {
+    let mut work = summary("Work", 2, false);
+    assert_eq!(work.spoken(), "Open the group Work");
+    work.new = 1;
+    assert_eq!(work.label(), "Work · 2 people · 1 new");
+    assert_eq!(
+        work.spoken(),
+        "Open the group Work. 1 new thing was shared there"
+    );
+    work.new = 3;
+    assert_eq!(
+        work.spoken(),
+        "Open the group Work. 3 new things were shared there"
+    );
+    work.shown = true;
+    assert_eq!(work.spoken(), "Work, the group you are looking at");
 }
 
 #[test]

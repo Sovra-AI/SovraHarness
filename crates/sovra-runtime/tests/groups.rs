@@ -3195,6 +3195,12 @@ async fn a_computer_can_be_in_several_groups_and_keeps_them_apart() {
     });
     mum.knowledge(|details| has(details, "Dinner is at seven"))
         .await;
+    // The list says something new is waiting there.
+    let waiting = dad
+        .groups(|groups| groups.iter().any(|g| g.name == "Family" && g.new > 0))
+        .await;
+    assert_eq!(waiting[1].label(), "Family · 2 people · 1 new");
+    assert_eq!(waiting[0].new, 0);
     dad.send(GroupCommand::Switch { group: family });
     let at_home = dad
         .knowledge(|details| has(details, "Dinner is at seven"))
@@ -3214,7 +3220,11 @@ async fn a_computer_can_be_in_several_groups_and_keeps_them_apart() {
     drop(dad);
     let dad = Computer::restart_all(&net, 102, store, more);
     dad.send(GroupCommand::Load);
-    assert_eq!(dad.groups(|groups| groups.len() == 2).await.len(), 2);
+    assert_eq!(
+        names(&dad.groups(|groups| groups.len() == 2).await),
+        [("Work", false), ("Family", true)],
+        "it opens on the group looked at last, with nothing counted as new"
+    );
 
     // Leaving one group leaves the other untouched and puts it on screen.
     dad.send(GroupCommand::Switch { group: work });

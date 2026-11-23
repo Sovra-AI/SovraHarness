@@ -371,12 +371,14 @@ impl Host {
                 state.shown = groups.slot;
             }
         }
-        // Show a place that holds a group, if there is one.
+        // Show the group its person looked at last, if this computer is in any.
         let mut shown = state.shown;
+        let mut latest = None;
         for groups in &state.groups {
-            if groups.group().await.is_some() {
+            let inner = groups.inner.lock().await;
+            if inner.record.group.is_some() && latest.is_none_or(|at| inner.record.shown_at > at) {
+                latest = Some(inner.record.shown_at);
                 shown = groups.slot;
-                break;
             }
         }
         self.show(&mut state, shown).await;
@@ -461,6 +463,14 @@ impl Host {
             .expect("groups handle lock is never poisoned") = used.as_ref().map(Arc::downgrade);
         self.memberships(state).await;
         if let Some(groups) = state.at(slot) {
+            // Remembered across restarts: the app opens on this group again.
+            {
+                let mut inner = groups.inner.lock().await;
+                if inner.record.group.is_some() {
+                    inner.record.shown_at = Some(now());
+                    groups.persist(&inner).await;
+                }
+            }
             groups.publish_loaded().await;
             groups.publish_presence().await;
         }
@@ -475,7 +485,20 @@ impl Host {
             let Some(roster) = &inner.roster else {
                 continue;
             };
+            // Whatever is here while the group is on screen has been seen. A
+            // group not shown since the app started counts from what it had.
+            let now_holds = {
+                let shared = Groups::shared(&inner);
+                shared.details.len() + shared.artifacts.len()
+            };
+            let seen = &groups.seen;
+            let order = std::sync::atomic::Ordering::SeqCst;
+            if groups.slot == state.shown || seen.load(order) == usize::MAX {
+                seen.store(now_holds, order);
+            }
+            let new = now_holds.saturating_sub(seen.load(order));
             list.push(sovra_core::group::GroupSummary {
+                new,
                 group: roster.group,
                 name: roster.name.clone(),
                 people: roster.people.len(),
@@ -1177,6 +1200,9 @@ struct Groups {
     retired: std::sync::atomic::AtomicBool,
     /// Tells the host that the list of groups may have changed.
     changed: Sender<()>,
+    /// How many notes and documents this group held when it was last on
+    /// screen; what it holds beyond that is new to its person.
+    seen: std::sync::atomic::AtomicUsize,
 }
 
 /// What a group worker shares with the others on this computer.
@@ -1242,6 +1268,7 @@ impl Groups {
             shown: std::sync::atomic::AtomicBool::new(false),
             retired: std::sync::atomic::AtomicBool::new(false),
             changed,
+            seen: std::sync::atomic::AtomicUsize::new(usize::MAX),
             inner: Mutex::new(Inner {
                 record,
                 roster: None,
@@ -3008,6 +3035,7 @@ impl Groups {
             membership: vec![op],
             knowledge: Vec::new(),
             addresses: Vec::new(),
+            shown_at: Some(now()),
             // A new group starts with no invites out.
             invites: Vec::new(),
             federated: inner.record.federated,

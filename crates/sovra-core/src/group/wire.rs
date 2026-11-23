@@ -409,6 +409,10 @@ pub struct GroupRecord {
     pub knowledge: Vec<KnowledgeOp>,
     /// Last known way to reach each computer, learned from links and sync.
     pub addresses: Vec<PeerAddress>,
+    /// When the Groups page last showed this group, so a computer in several
+    /// groups opens on the one its person looked at last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown_at: Option<crate::Timestamp>,
     /// Invites this computer made that have not expired, so a link sent to
     /// someone far away still works after this computer restarts. The file is
     /// owner-only; a cancelled or expired invite is removed.
