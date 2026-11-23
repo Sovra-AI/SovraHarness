@@ -91,7 +91,7 @@ run the same command with `native_watch_registration_measurements` as the test
 name. Each invocation measures five registrations on 221 directories with
 20,000 files.
 
-Five alternating runs per build on a Ryzen 7 3700X with an ext4 NVMe disk gave
+Five interleaved runs per build on a Ryzen 7 3700X with an ext4 NVMe disk gave
 the following median wall times. The baseline was `f02d3a8`. Both builds used
 the same Rust profiles and generated fresh synthetic folders. The OS could cache
 their newly written files, and a separate development app was indexing in the
@@ -107,6 +107,65 @@ background.
 | Recheck those two streamed documents | 26.2 ms | 6.4 ms |
 | 40 three-page PDFs, 40 presentations and 40 CSVs | 44.8 ms | 35.0 ms |
 | Register native watches across 20,000 files (15 registrations per build) | 58.3 ms | 24.9 ms |
+
+At 200,000 files, absolute times varied across the two runs per build. Each
+unchanged scan read zero source bytes. Each incremental scan replaced 2,000
+files, recorded the removal, found the renamed file and returned the added file
+after reopening.
+
+| 200,000 short files | Before, observed range | After, observed range |
+| --- | ---: | ---: |
+| First scan into a new index | 150.9–151.8 s | 98.1–131.5 s |
+| All files unchanged | 38.4–41.9 s | 9.3–10.5 s |
+| 1% updated, plus the rename, deletion and addition | 37.9–40.8 s | 9.7–10.1 s |
+
+The JSON fixture was a 13,510,583-byte array of 73,000 synthetic project records,
+one record per line, with unique hexadecimal identifiers, two labels and a numeric
+value. Three runs per build timed the complete single-file test process, including
+opening and closing a new index. The optimized median fell from 10.18 s to 1.30 s.
+The standard development profile used in `HarnessRun` went from **69.13 s to
+2.53 s** on the same JSON workload. Its 10,000-file medians across three more
+runs per build were **6.05 s to 4.56 s** fresh, **2.34 s to 1.37 s** unchanged,
+and **2.35 s to 1.41 s** with 1% edited. User-selected folders vary in file types,
+size, permissions, cache state and existing index size.
+
+
+To reproduce the JSON workload, generate it outside the timer and point the
+existing real-folder benchmark at it. Use the two Cargo profile overrides above
+for the optimized comparison, or omit both to match the development build.
+
+```sh
+export SOVRA_LIVE_SCAN_DIR="$(mktemp -d)"
+python3 - <<'PYDATA'
+import hashlib, json, os
+from pathlib import Path
+with (Path(os.environ["SOVRA_LIVE_SCAN_DIR"]) / "report.json").open("w") as file:
+    file.write("[\n")
+    for i in range(73000):
+        if i:
+            file.write(",\n")
+        json.dump(dict(id=i, document=hashlib.sha256(str(i).encode()).hexdigest(),
+                       title="Monthly project notes", group=i % 170,
+                       labels=["measurements", "archive"], amount=i * 7 % 9001),
+                  file, separators=(",", ":"))
+    file.write("\n]\n")
+PYDATA
+cargo test -p sovra-files --lib live_panel_against_a_real_folder -- --ignored --nocapture
+```
+
+The retrieval benchmark found the expected file for all 60 identifier searches
+and all 60 nearest-vector searches per build at 10,000 files. Across those
+queries, median identifier latency was 1.10 ms before and 1.05 ms after.
+Exhaustive vector search was 143.5 ms before and 148.8 ms after. Growing the
+optional vector index from 1,000 to 10,000 files took 125.4 s before and 129.4 s
+after (three-run medians). The benchmark generates deterministic vectors locally.
+It makes zero model calls. All six runs verified that replacement, reopening
+and removing a folder preserved access and citation behavior.
+
+The optimized scanner was measured at `4e65696`. The development-profile
+repeat includes the elapsed-time fix in `4336d09`. Durations in the CSV are
+microseconds. JSON workload timings come from the test runner’s wall clock,
+which reports hundredths of a second. [Raw benchmark samples](folder-index-benchmark.csv)
 
 The writer now confirms unchanged versions against the live row, retains the
 original change history and uses fewer statements for each new file. Both normal
