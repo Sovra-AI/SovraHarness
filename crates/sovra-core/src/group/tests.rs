@@ -2478,6 +2478,13 @@ fn a_used_or_cancelled_invite_takes_its_link_off_the_screen_and_waiting_is_expla
         expires_at: invite.expires_at,
         qr: vec![vec![true]],
     });
+    view.apply(GroupEvent::Problem(GroupProblem::BadInvite));
+    view.apply(GroupEvent::InviteReady {
+        link: link.clone(),
+        expires_at: invite.expires_at,
+        qr: vec![vec![true]],
+    });
+    assert_eq!(view.problem, None, "a success clears the last complaint");
     view.apply(GroupEvent::Invites(vec![pending]));
     assert_eq!(view.invite.as_ref().map(|(text, _)| text), Some(&link));
     assert_eq!(view.pending_invites.len(), 1);

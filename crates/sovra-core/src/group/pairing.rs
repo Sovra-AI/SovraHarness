@@ -212,6 +212,14 @@ impl InviteBook {
             .map(|(invite, _)| invite)
     }
 
+    /// Makes a redeemed invite usable again, when the computer that redeemed it
+    /// could not be added after all. A link is only spent by a real arrival.
+    pub fn reopen(&mut self, id: &InviteId) {
+        if let Some((_, used)) = self.invites.get_mut(&id.0) {
+            *used = false;
+        }
+    }
+
     /// Cancels an invite so its link stops working at once. Returns whether there
     /// was one to cancel.
     pub fn cancel(&mut self, id: &InviteId) -> bool {

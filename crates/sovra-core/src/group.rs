@@ -30,7 +30,9 @@ pub use federated::{
     MAX_ASK_CHARS, MAX_ASK_LOG, MAX_FEDERATED_ITEMS, MAX_FEDERATED_STATEMENT_CHARS, check_ask,
     federated_items, log_ask,
 };
-pub use fold::{DeviceEntry, GroupDepartment, GroupState, MAX_NAME_CHARS, Member, Rejection, fold};
+pub use fold::{
+    DeviceEntry, GroupDepartment, GroupState, MAX_NAME_CHARS, Member, Rejection, fold, valid_name,
+};
 pub use guide::{
     BENEFITS, Benefit, FirstStep, GroupPage, HOW_IT_WORKS, PRIVACY_PROMISE, WHAT_IS_A_GROUP,
 };

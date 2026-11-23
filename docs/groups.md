@@ -35,6 +35,9 @@ with an internet connection. Links are single-use and expire after seven days.
 Unused invites are kept across restarts of the inviting computer. Same-room
 codes allow one attempt within two minutes and are not kept.
 **Add another of my own computers** associates another computer with your identity.
+An invite needs the person's name, and joining needs a name for the computer;
+a missing name is asked for before anything is sent, and a join that fails
+does not use up the link.
 
 A link is a key to your group for whoever holds it, until it is used,
 cancelled or seven days old. Send it privately, and cancel it if it went to
@@ -229,7 +232,10 @@ endpoint with ALPN `sovra/group/1`.
 | Local only | `SOVRA_GROUP_REACH=local` before each participating app starts. | iroh preset `Minimal`: direct connections, no relays, no address lookup. |
 | Relay only | `SOVRA_GROUP_REACH=relay`. | Internet reach with the IP transports removed, so every packet crosses a relay. For checking a group on a network that blocks direct connections. |
 
-The endpoint's current relay URL and IP addresses are what a link embeds.
+A link embeds the endpoint's current relay URL. It carries this computer's IP
+addresses only when no relay is known (local reach, or no internet), so a link
+sent over the internet is short and does not list home-network addresses; a
+computer nearby still reaches a direct path after connecting through the relay.
 Making or re-copying a link waits up to three seconds for the relay first, so a
 link made straight after launch is not same-network only; the joining computer
 also looks the inviter up by key. Requests to one computer share one pooled

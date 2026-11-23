@@ -2885,3 +2885,75 @@ async fn the_screen_hears_how_this_computer_is_connected_and_check_now_catches_u
     assert!(!network.checking);
     assert!(network.routes.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_missing_name_is_asked_for_and_never_uses_up_the_invite() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 91).await;
+
+    // An invite for nobody in particular could never let anyone in.
+    mum.send(invite("   "));
+    assert!(matches!(
+        mum.problem().await,
+        sovra_core::group::GroupProblem::Other(words) if words.starts_with("Type their name first")
+    ));
+
+    mum.send(invite("Dad"));
+    let link = mum.link().await;
+    mum.invites(|invites| invites.len() == 1).await;
+
+    // Dad forgets to name his computer: he is told, and nothing is sent.
+    let dad = Computer::start(&net, 92);
+    dad.send(GroupCommand::Join {
+        link: link.clone(),
+        computer_name: String::new(),
+    });
+    assert!(matches!(
+        dad.problem().await,
+        sovra_core::group::GroupProblem::Other(words)
+            if words.starts_with("Give this computer a name first")
+    ));
+
+    // An older Sovra that sends the blank name anyway is refused, and the link
+    // is still good afterwards.
+    let parsed = sovra_core::group::JoinLink::parse(&link, sovra_core::Timestamp(0))
+        .expect("a link Sovra made");
+    let handler = net
+        .handlers
+        .lock()
+        .expect("not poisoned")
+        .get(&mum.device)
+        .cloned()
+        .expect("mum listening");
+    let response = handler
+        .handle(
+            dad.device,
+            PeerRequest::Join {
+                group: parsed.group,
+                proof: sovra_core::group::invite_proof(
+                    &parsed.secret,
+                    &sovra_core::group::join_transcript(&mum.device, &dad.device, &parsed.group),
+                ),
+                person: sovra_core::group::PersonId([92; 32]),
+                person_name: "Dad".into(),
+                computer_name: " ".into(),
+                from: PeerAddress {
+                    device: dad.device,
+                    relay: None,
+                    addrs: Vec::new(),
+                },
+            },
+        )
+        .await;
+    assert_eq!(
+        response,
+        PeerResponse::Refused {
+            reason: sovra_core::group::Refusal::Malformed
+        }
+    );
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Desktop".into(),
+    });
+    dad.roster(|state| state.people.len() == 2).await;
+}

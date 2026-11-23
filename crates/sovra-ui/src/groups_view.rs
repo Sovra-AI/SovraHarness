@@ -1239,6 +1239,8 @@ impl ModelsView {
             GroupPage::Departments => self.render_departments(cx).into_any_element(),
             GroupPage::History => self.render_audit(cx).into_any_element(),
         };
+        let result_showing = page == GroupPage::Invite
+            && (self.groups.invite.is_some() || self.groups.short_code.is_some());
         v_flex()
             .id(SharedString::from(format!("groups-pane-{}", page.id())))
             .test_support()
@@ -1259,15 +1261,17 @@ impl ModelsView {
                     .sovra_text(TextRole::Body, cx)
                     .child(page.what()),
             )
-            .child(
+            // A fresh link or code carries its own steps and must not sit below
+            // the general ones.
+            .children((!result_showing).then(|| {
                 v_flex()
                     .w_full()
                     .gap(t.space.compact)
                     .p(t.space.compact)
                     .sovra_surface(Surface::Subtle, cx)
                     .child(heading("How to use it", cx))
-                    .child(numbered("groups-pane-how", page.how(), cx)),
-            )
+                    .child(numbered("groups-pane-how", page.how(), cx))
+            }))
             .child(content)
     }
 

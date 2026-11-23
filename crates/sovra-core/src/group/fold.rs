@@ -466,7 +466,9 @@ fn removal_verdict(
     adds_target.then_some(Rejection::RemovedConcurrently)
 }
 
-fn valid_name(name: &str) -> bool {
+/// Whether a person, computer or group may be called this: something, and not
+/// longer than [`MAX_NAME_CHARS`].
+pub fn valid_name(name: &str) -> bool {
     let trimmed = name.trim();
     !trimmed.is_empty() && trimmed.chars().count() <= MAX_NAME_CHARS
 }

@@ -502,15 +502,22 @@ impl GroupsView {
                 self.invite = Some((link, expires_at));
                 self.invite_qr = qr;
                 self.short_code = None;
+                // It worked: an earlier complaint no longer applies.
+                self.problem = None;
                 self.pairing = std::mem::replace(&mut self.pairing, PairingStage::Idle)
                     .advance(PairingStep::InviteShown { expires_at });
             }
             GroupEvent::ShortCodeReady { code, expires_at } => {
                 self.short_code = Some((code, expires_at));
+                self.problem = None;
                 self.pairing = std::mem::replace(&mut self.pairing, PairingStage::Idle)
                     .advance(PairingStep::InviteShown { expires_at });
             }
             GroupEvent::Pairing(step) => {
+                if matches!(step, PairingStep::PeerConnected) {
+                    // A new try starts with a clean page.
+                    self.problem = None;
+                }
                 let finished = matches!(
                     step,
                     PairingStep::Admitted { .. } | PairingStep::Failed(_) | PairingStep::Cancel

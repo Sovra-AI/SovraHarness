@@ -28,7 +28,12 @@ package version.
   connections can become direct and large shares no longer time out after
   fifteen seconds. A computer's address is only accepted from that computer.
   `SOVRA_GROUP_REACH=relay` checks a group on a network that blocks direct
-  connections.
+  connections. Links sent over the internet are about half as long and no
+  longer list this computer's home-network addresses. Joining without naming
+  the computer, or inviting without a name, now asks for the name instead of
+  failing with "Only an admin can do that" and using up the link. A new link
+  appears at the top of **Invite someone**, and an old error message clears
+  once the next action works.
 
 - The Files page shows the active folder first, explains which folder is holding
   the queue, and reports the current path, indexing stage, elapsed time and

@@ -2233,6 +2233,10 @@ impl Groups {
             .await;
             return;
         }
+        if !sovra_core::group::valid_name(&computer_name) {
+            self.emit(GroupEvent::Problem(unnamed_computer())).await;
+            return;
+        }
         let Some(person) = random::<32>() else {
             self.emit(GroupEvent::Problem(GroupProblem::Other(
                 "This computer couldn't make a secure key. Try again.".into(),
@@ -2596,6 +2600,18 @@ impl Groups {
                 .await;
             return;
         }
+        if let InviteKind::Person { name, .. } = &kind
+            && !sovra_core::group::valid_name(name)
+        {
+            // A link without a usable name could never let anyone in.
+            drop(inner);
+            self.emit(GroupEvent::Problem(GroupProblem::Other(format!(
+                "Type their name first, so the group knows who joined. A name can be up to {} characters.",
+                sovra_core::group::MAX_NAME_CHARS
+            ))))
+            .await;
+            return;
+        }
         let Some(secret) = random::<16>() else {
             drop(inner);
             self.emit(GroupEvent::Problem(GroupProblem::Other(
@@ -2623,7 +2639,13 @@ impl Groups {
         // addresses; a moment's wait lets the link work from far away too.
         self.transport.wait_until_reachable(REACHABLE_WAIT_MS).await;
         let me = self.me();
-        let address = self.transport.address();
+        let mut address = self.transport.address();
+        if address.relay.is_some() {
+            // A computer far away cannot use this one's home addresses, and one
+            // nearby finds the direct way by itself once connected. Leaving them
+            // out keeps the link short and says nothing about the home network.
+            address.addrs.clear();
+        }
         let link = JoinLink::new(
             roster.group,
             roster.name.clone(),
@@ -2773,6 +2795,10 @@ impl Groups {
             .await;
             return;
         }
+        if !sovra_core::group::valid_name(&computer_name) {
+            self.emit(GroupEvent::Problem(unnamed_computer())).await;
+            return;
+        }
         let Some(person) = random::<32>() else {
             self.emit(GroupEvent::Problem(GroupProblem::Other(
                 "This computer couldn't make a secure key. Try again.".into(),
@@ -2855,8 +2881,16 @@ impl Groups {
                         PairingFailure::Refused,
                     )))
                     .await;
-                    self.emit(GroupEvent::Problem(refusal_problem(reason)))
-                        .await;
+                    // "Not a member" here means the inviting computer could
+                    // not add this one, not that anyone lacks permission.
+                    let problem = match reason {
+                        Refusal::NotAMember => GroupProblem::Other(
+                            "Their computer couldn't add this one. Ask them for a new invite."
+                                .into(),
+                        ),
+                        reason => refusal_problem(reason),
+                    };
+                    self.emit(GroupEvent::Problem(problem)).await;
                     return;
                 }
                 Ok(other) => {
@@ -3109,6 +3143,12 @@ impl Groups {
         computer_name: String,
         address: PeerAddress,
     ) -> PeerResponse {
+        if !sovra_core::group::valid_name(&computer_name) {
+            // Refused before the invite is looked at, so the link stays good.
+            return PeerResponse::Refused {
+                reason: Refusal::Malformed,
+            };
+        }
         let mut inner = self.inner.lock().await;
         let me = self.me();
         let invite = match inner
@@ -3128,6 +3168,7 @@ impl Groups {
         };
         // The invite is spent: keep that across a restart too.
         Self::keep_invites(&mut inner);
+        let id = InviteId::of(&invite);
         let response = self
             .admit_kind(
                 inner,
@@ -3139,6 +3180,13 @@ impl Groups {
                 address,
             )
             .await;
+        if matches!(response, PeerResponse::Refused { .. }) {
+            // Nobody arrived, so the link is not spent.
+            let mut inner = self.inner.lock().await;
+            inner.invites.reopen(&id);
+            Self::keep_invites(&mut inner);
+            self.persist(&inner).await;
+        }
         self.publish_invites().await;
         response
     }
@@ -3624,6 +3672,14 @@ impl Groups {
         }
         evidence
     }
+}
+
+/// What to say when someone tries to join without naming their computer.
+fn unnamed_computer() -> GroupProblem {
+    GroupProblem::Other(format!(
+        "Give this computer a name first, like “Grandad's laptop”. A name can be up to {} characters.",
+        sovra_core::group::MAX_NAME_CHARS
+    ))
 }
 
 fn membership_problem(rejection: Rejection) -> GroupProblem {

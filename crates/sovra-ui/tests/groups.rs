@@ -1875,6 +1875,10 @@ fn the_group_says_how_it_is_connected_and_lists_invites_still_waiting(cx: &mut T
             cx.read_from_clipboard().and_then(|item| item.text()),
             Some("sovra://join/grans".into())
         );
+        assert!(
+            window.try_find("groups-pane-how").is_none(),
+            "the link's own steps replace the general ones, so it is not pushed down"
+        );
         assert_eq!(
             window.find("groups-check-now").disabled(),
             Some(true),
