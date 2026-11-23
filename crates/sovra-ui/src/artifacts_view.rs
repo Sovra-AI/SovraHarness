@@ -17,7 +17,6 @@ use gpui_kit::component::{
     button::ButtonVariants as _,
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
-    text::TextView,
     v_flex,
 };
 use gpui_kit::{
@@ -54,28 +53,15 @@ pub(crate) fn kind_icon(kind: ArtifactKind) -> IconName {
     }
 }
 
-/// Markdown that previews the artifact: prose as is, everything else as a
-/// highlighted code block so nothing is executed or rendered unsafely here.
-fn preview_markdown(kind: ArtifactKind, language: &str, content: &str) -> String {
-    match kind {
-        ArtifactKind::Document
-        | ArtifactKind::Checklist
-        | ArtifactKind::Table
-        | ArtifactKind::Note => content.to_owned(),
-        ArtifactKind::Code
-        | ArtifactKind::Diagram
-        | ArtifactKind::Webpage
-        | ArtifactKind::Picture
-        | ArtifactKind::Data
-        | ArtifactKind::Project => {
-            let fence = if content.contains("```") {
-                "~~~~"
-            } else {
-                "```"
-            };
-            format!("{fence}{language}\n{content}\n{fence}")
-        }
-    }
+/// A library filter chip. Compact height, and one shared wrapping row, so the
+/// controls do not stack into full-width bars above the saved work.
+fn library_control(
+    id: impl Into<gpui_kit::ElementId>,
+    label: impl Into<gpui_kit::SharedString>,
+    cx: &gpui_kit::App,
+) -> gpui_kit::component::button::Button {
+    let height = design::tokens(cx).layout.compact_control_height;
+    design::button(id, label, cx).small().min_h(height)
 }
 
 /// The first words of a shared piece of writing, on one line.
@@ -88,14 +74,20 @@ fn snippet(content: &str) -> String {
 /// What a card shows under its caption. Source stays text; nothing is run.
 enum CardBlurb {
     Sentence(String),
-    Source(Vec<String>),
+    Source {
+        lines: Vec<String>,
+        language: String,
+    },
 }
 
-fn card_blurb(kind: ArtifactKind, content: &str, sentence: String) -> CardBlurb {
+fn card_blurb(kind: ArtifactKind, language: &str, content: &str, sentence: String) -> CardBlurb {
     if kind.previews_as_source() {
         let lines = source_card_lines(content);
         if !lines.is_empty() {
-            return CardBlurb::Source(lines);
+            return CardBlurb::Source {
+                lines,
+                language: language.to_owned(),
+            };
         }
     }
     CardBlurb::Sentence(sentence)
@@ -104,7 +96,135 @@ fn card_blurb(kind: ArtifactKind, content: &str, sentence: String) -> CardBlurb 
 fn blurb_name(blurb: &CardBlurb) -> String {
     match blurb {
         CardBlurb::Sentence(sentence) => sentence.clone(),
-        CardBlurb::Source(lines) => lines.join("\n"),
+        CardBlurb::Source { lines, .. } => lines.join("\n"),
+    }
+}
+
+/// One source line, coloured when the highlighter named spans on it.
+fn source_line_row(
+    line: &str,
+    line_start: usize,
+    styles: &[(std::ops::Range<usize>, gpui_kit::HighlightStyle)],
+    mono: &gpui_kit::SharedString,
+    mono_size: gpui_kit::Pixels,
+    ink: gpui_kit::Hsla,
+) -> gpui_kit::Div {
+    let line_end = line_start + line.len();
+    let mut runs: Vec<(String, gpui_kit::Hsla)> = Vec::new();
+    let mut cursor = line_start;
+    for (range, style) in styles {
+        if range.end <= cursor || range.start >= line_end {
+            continue;
+        }
+        let start = range.start.max(cursor);
+        let end = range.end.min(line_end);
+        if start > cursor
+            && let Some(text) = line.get(cursor - line_start..start - line_start)
+            && !text.is_empty()
+        {
+            runs.push((text.to_owned(), ink));
+        }
+        if let Some(text) = line.get(start - line_start..end - line_start)
+            && !text.is_empty()
+        {
+            runs.push((text.to_owned(), style.color.unwrap_or(ink)));
+        }
+        cursor = end;
+    }
+    if cursor < line_end
+        && let Some(text) = line.get(cursor - line_start..)
+        && !text.is_empty()
+    {
+        runs.push((text.to_owned(), ink));
+    }
+    if runs.is_empty() {
+        runs.push((line.to_owned(), ink));
+    }
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
+        .flex_nowrap()
+        .children(runs.into_iter().map(|(text, color)| {
+            div()
+                .flex_shrink_0()
+                .whitespace_nowrap()
+                .font_family(mono.clone())
+                .text_size(mono_size)
+                .text_color(color)
+                .child(text)
+        }))
+}
+
+/// Ordinary writing. Letters, notes, lists, and tables stay unfenced.
+fn reading_text(id: impl Into<gpui_kit::ElementId>, markdown: String) -> gpui_kit::base::TextView {
+    gpui_kit::base::TextView::markdown(id, markdown)
+        .selectable(true)
+        .w_full()
+}
+
+/// Source for an open piece, one line per row, coloured when the language is known.
+///
+/// A nested text view in this page never asks its code block to highlight, so
+/// the colours would not reach the screen. These runs are the highlight.
+fn coloured_source(language: &str, content: &str, cx: &gpui_kit::App) -> gpui_kit::AnyElement {
+    let t = design::tokens(cx);
+    let mono = cx.theme().mono_font_family.clone();
+    let mono_size = cx.theme().mono_font_size;
+    let ink = cx.theme().foreground;
+    let styles = crate::artifact_highlight::highlight_code(
+        language,
+        content,
+        cx.theme().highlight_theme.as_ref(),
+    );
+    let colored = styles.iter().any(|(_, style)| style.color.is_some());
+    let lines: Vec<&str> = content.split('\n').collect();
+    let mut offset = 0usize;
+    let mut rows = Vec::with_capacity(lines.len());
+    for (index, line) in lines.iter().enumerate() {
+        let row = if colored {
+            source_line_row(line, offset, &styles, &mono, mono_size, ink)
+        } else {
+            div()
+                .w_full()
+                .min_w_0()
+                .overflow_hidden()
+                .font_family(mono.clone())
+                .text_size(mono_size)
+                .text_color(ink)
+                .whitespace_nowrap()
+                .child((*line).to_owned())
+        };
+        rows.push(row.min_h(t.space.medium));
+        offset += line.len();
+        if index + 1 != lines.len() {
+            offset += 1;
+        }
+    }
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .max_w_full()
+        .overflow_hidden()
+        .p(t.space.small)
+        .rounded(t.chat.code_radius)
+        .bg(t.code_background)
+        .children(rows)
+        .into_any_element()
+}
+
+/// The open piece: source kinds are coloured lines, and prose stays prose.
+fn open_piece_body(
+    id: impl Into<gpui_kit::ElementId>,
+    kind: ArtifactKind,
+    language: &str,
+    content: &str,
+    cx: &gpui_kit::App,
+) -> gpui_kit::AnyElement {
+    if kind.previews_as_source() {
+        coloured_source(language, content, cx)
+    } else {
+        reading_text(id, content.to_owned()).into_any_element()
     }
 }
 
@@ -128,10 +248,39 @@ fn render_card_blurb(
             .line_clamp(2)
             .child(sentence.clone())
             .into_any_element(),
-        CardBlurb::Source(lines) => {
+        CardBlurb::Source { lines, language } => {
             let mono = cx.theme().mono_font_family.clone();
             let mono_size = cx.theme().mono_font_size;
             let ink = cx.theme().foreground;
+            let source = lines.join("\n");
+            let styles = crate::artifact_highlight::highlight_code(
+                language,
+                &source,
+                cx.theme().highlight_theme.as_ref(),
+            );
+            let colored = styles.iter().any(|(_, style)| style.color.is_some());
+            let mut offset = 0usize;
+            let mut rows = Vec::new();
+            for (index, line) in lines.iter().enumerate() {
+                let row = if colored {
+                    source_line_row(line, offset, &styles, &mono, mono_size, ink)
+                } else {
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .truncate()
+                        .font_family(mono.clone())
+                        .text_size(mono_size)
+                        .text_color(ink)
+                        .child(line.clone())
+                };
+                rows.push(row);
+                offset += line.len();
+                if index + 1 != lines.len() {
+                    offset += 1;
+                }
+            }
             v_flex()
                 .id(id)
                 .test_support()
@@ -143,17 +292,7 @@ fn render_card_blurb(
                 .p(t.space.small)
                 .rounded(t.chat.code_radius)
                 .bg(t.code_background)
-                .children(lines.iter().map(|line| {
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .truncate()
-                        .font_family(mono.clone())
-                        .text_size(mono_size)
-                        .text_color(ink)
-                        .child(line.clone())
-                }))
+                .children(rows)
                 .into_any_element()
         }
     }
@@ -307,6 +446,7 @@ impl ArtifactsView {
         self.confirm_delete = false;
         self.share_error = None;
         self.share_notice = None;
+        self.scroll_to_start();
         cx.notify();
     }
 
@@ -320,7 +460,14 @@ impl ArtifactsView {
         self.confirm_withdraw = false;
         self.share_error = None;
         self.share_notice = None;
+        self.scroll_to_start();
         cx.notify();
+    }
+
+    /// Opening or leaving a piece starts at the top, so the name is not left
+    /// under a scroll position from the library.
+    fn scroll_to_start(&self) {
+        self.scroll.set_offset(gpui_kit::Point::default());
     }
 
     fn back_to_library(&mut self, cx: &mut Context<Self>) {
@@ -332,6 +479,7 @@ impl ArtifactsView {
         self.editing = false;
         self.share_error = None;
         self.share_notice = None;
+        self.scroll_to_start();
         cx.notify();
     }
 
@@ -381,7 +529,12 @@ impl ArtifactsView {
                 kind: artifact.kind,
                 shared_by: artifact.shared_by.clone(),
                 shared_at: artifact.shared_at,
-                blurb: card_blurb(artifact.kind, &artifact.content, snippet(&artifact.content)),
+                blurb: card_blurb(
+                    artifact.kind,
+                    &artifact.language,
+                    &artifact.content,
+                    snippet(&artifact.content),
+                ),
                 two_versions: matches!(artifact.status, DetailStatus::Disputed { .. }),
                 space_label: groups.space_label(&artifact.space),
             })
@@ -823,7 +976,7 @@ impl Render for ArtifactsView {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .p(t.space.large)
+            .p(t.space.medium)
             .child(
                 v_flex()
                     .w_full()
@@ -880,15 +1033,16 @@ impl ArtifactsView {
         } = data;
         let page_count = shown.len().div_ceil(24).max(1);
         let page = self.page.min(page_count - 1);
-        let mut folders = h_flex()
+        let mut filters = h_flex()
             .id("artifact-folders")
             .test_support()
             .w_full()
+            .min_w_0()
             .flex_wrap()
-            .gap(t.space.small)
+            .items_center()
+            .gap(t.space.compact)
             .child(
-                design::button("artifact-folder-all", "All folders", cx)
-                    .small()
+                library_control("artifact-folder-all", "All folders", cx)
                     .selected(self.filter.collection.is_none())
                     .on_click(cx.listener(|view, _, _, cx| {
                         view.filter.collection = None;
@@ -897,8 +1051,7 @@ impl ArtifactsView {
                     })),
             )
             .child(
-                design::button("artifact-favorites", "Favorites", cx)
-                    .small()
+                library_control("artifact-favorites", "Favorites", cx)
                     .selected(self.filter.favorites_only)
                     .on_click(cx.listener(|view, _, _, cx| {
                         view.filter.favorites_only = !view.filter.favorites_only;
@@ -912,9 +1065,8 @@ impl ArtifactsView {
             } else {
                 &folder
             };
-            folders = folders.child(
-                design::button(("artifact-folder", index), format!("{label} ({count})"), cx)
-                    .small()
+            filters = filters.child(
+                library_control(("artifact-folder", index), format!("{label} ({count})"), cx)
                     .selected(self.filter.collection.as_ref() == Some(&folder))
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.filter.collection = Some(folder.clone());
@@ -923,7 +1075,6 @@ impl ArtifactsView {
                     })),
             );
         }
-        let mut sorting = h_flex().w_full().flex_wrap().gap(t.space.small);
         for (index, (sort, label)) in [
             (ArtifactSort::Recent, "Recently updated"),
             (ArtifactSort::Name, "Name A–Z"),
@@ -932,9 +1083,8 @@ impl ArtifactsView {
         .into_iter()
         .enumerate()
         {
-            sorting = sorting.child(
-                design::button(("artifact-sort", index), label, cx)
-                    .small()
+            filters = filters.child(
+                library_control(("artifact-sort", index), label, cx)
                     .selected(self.filter.sort == sort)
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.filter.sort = sort;
@@ -945,7 +1095,9 @@ impl ArtifactsView {
         }
         let paging = h_flex()
             .w_full()
+            .min_w_0()
             .flex_wrap()
+            .items_center()
             .gap(t.space.small)
             .child(
                 design::button("artifact-page-previous", "Previous", cx)
@@ -955,11 +1107,16 @@ impl ArtifactsView {
                         cx.notify();
                     })),
             )
-            .child(div().child(format!(
-                "Page {} of {page_count} · {} results",
-                page + 1,
-                shown.len()
-            )))
+            .child(
+                div()
+                    .min_w_0()
+                    .whitespace_normal()
+                    .child(design::paragraph(format!(
+                        "Page {} of {page_count} · {} results",
+                        page + 1,
+                        shown.len()
+                    ))),
+            )
             .child(
                 design::button("artifact-page-next", "Next", cx)
                     .disabled(page + 1 >= page_count)
@@ -969,33 +1126,26 @@ impl ArtifactsView {
                     })),
             );
         let now = now();
-        let mut chips = h_flex()
-            .id("artifact-kind-filters")
-            .w_full()
-            .flex_wrap()
-            .gap(t.space.compact)
-            .child(
-                design::button("artifact-kind-all", format!("All ({total})"), cx)
-                    .small()
-                    .selected(self.filter.kind.is_none())
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.filter.kind = None;
-                        view.page = 0;
-                        cx.notify();
-                    })),
-            );
+        filters = filters.child(
+            library_control("artifact-kind-all", format!("All ({total})"), cx)
+                .selected(self.filter.kind.is_none())
+                .on_click(cx.listener(|view, _, _, cx| {
+                    view.filter.kind = None;
+                    view.page = 0;
+                    cx.notify();
+                })),
+        );
         for (kind, count) in kind_counts {
             let index = KINDS
                 .iter()
                 .position(|info| info.kind == kind)
                 .unwrap_or_default();
-            chips = chips.child(
-                design::button(
+            filters = filters.child(
+                library_control(
                     ("artifact-kind", index),
                     format!("{} ({count})", kind.info().plural),
                     cx,
                 )
-                .small()
                 .icon(Icon::new(kind_icon(kind)))
                 .selected(self.filter.kind == Some(kind))
                 .on_click(cx.listener(move |view, _, _, cx| {
@@ -1016,14 +1166,20 @@ impl ArtifactsView {
                 .id("artifacts-no-results")
                 .test_support()
                 .w_full()
+                .min_w_0()
                 .gap(t.space.small)
                 .child(
                     div()
+                        .w_full()
+                        .min_w_0()
+                        .whitespace_normal()
                         .sovra_text(TextRole::Body, cx)
                         .text_color(t.text_secondary)
-                        .child("No saved work matches this search and these filters."),
+                        .child(design::paragraph(
+                            "No saved work matches this search and these filters.",
+                        )),
                 )
-                .child(h_flex().flex_wrap().child(
+                .child(h_flex().w_full().min_w_0().flex_wrap().child(
                     design::button("artifact-clear-filters", "Show all saved work", cx).on_click(
                         cx.listener(|view, _, window, cx| {
                             view.filter.kind = None;
@@ -1054,24 +1210,33 @@ impl ArtifactsView {
                 )
                 .into_any_element()
         };
+        let tools = (total > 0).then(|| {
+            v_flex()
+                .id("artifact-library-tools")
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .gap(t.space.small)
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .max_w(t.layout.reading_width)
+                        .child(
+                            Input::new(&self.search)
+                                .id("artifact-search")
+                                .aria_label("Search your saved work"),
+                        ),
+                )
+                .child(filters)
+        });
         v_flex()
             .w_full()
-            .gap(t.space.medium)
-            .child(design::page_header(
-                "Artifacts",
-                "Everything you and your AI made and kept — letters, lists, tables, code, diagrams and more. Open one to read it, copy it or save it to your computer.",
-                cx,
-            ))
-            .children((total > 0).then(||
-                div()
-                    .w_full()
-                    .max_w(t.layout.reading_width)
-                    .child(Input::new(&self.search).id("artifact-search").aria_label("Search your saved work"))
-            ))
+            .min_w_0()
+            .gap(t.space.small)
+            .child(library_header(cx))
+            .children(tools)
             .children(shared_section)
-            .children((total > 0).then_some(folders))
-            .children((total > 0).then_some(chips))
-            .children((total > 1).then_some(sorting))
             .children((page_count > 1).then_some(paging))
             .child(content)
     }
@@ -1094,6 +1259,8 @@ impl ArtifactsView {
         let sharing = group.as_ref().and_then(|_| self.sharing(artifact, cx));
         let mut actions = h_flex()
             .id("artifact-actions")
+            .w_full()
+            .min_w_0()
             .flex_wrap()
             .gap(t.space.small)
             .child(
@@ -1273,11 +1440,19 @@ impl ArtifactsView {
         };
         let organization = v_flex()
             .w_full()
+            .min_w_0()
             .gap(t.space.small)
-            .child(div().child(format!("Folder: {folder_name}")))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .whitespace_normal()
+                    .child(design::paragraph(format!("Folder: {folder_name}"))),
+            )
             .child(
                 h_flex()
                     .w_full()
+                    .min_w_0()
                     .flex_wrap()
                     .gap(t.space.small)
                     .child(
@@ -1301,9 +1476,9 @@ impl ArtifactsView {
                             );
                         })),
                     )
-                    .child(
+                    .child(div().w_full().min_w_0().max_w_full().child(
                         Input::new(&self.folder).aria_label("Move to folder (blank for Unfiled)"),
-                    )
+                    ))
                     .child(
                         design::button("artifact-move-folder", "Move to folder", cx).on_click(
                             cx.listener(move |view, _, _, cx| {
@@ -1411,14 +1586,7 @@ impl ArtifactsView {
                         .min_w_0()
                         .gap(t.space.small)
                         .child(files)
-                        .child(
-                            TextView::markdown(
-                                "artifact-project-code",
-                                preview_markdown(ArtifactKind::Code, "", &source),
-                            )
-                            .selectable(true)
-                            .style(design::markdown_style(cx)),
-                        )
+                        .child(coloured_source("", &source, cx))
                         .into_any_element()
                 }
                 Err(error) => div().child(error).into_any_element(),
@@ -1427,30 +1595,47 @@ impl ArtifactsView {
             div()
                 .id("artifact-preview")
                 .test_support()
+                .aria_label(snippet(&artifact.content))
                 .w_full()
                 .min_w_0()
                 .p(t.space.medium)
                 .sovra_surface(Surface::Subtle, cx)
                 .sovra_text(TextRole::Reading, cx)
-                .child(
-                    TextView::markdown(
-                        (
-                            "artifact-preview-text",
-                            artifact.updated_at.millis().unsigned_abs(),
-                        ),
-                        preview_markdown(artifact.kind, &artifact.language, &artifact.content),
-                    )
-                    .selectable(true)
-                    .style(design::markdown_style(cx)),
-                )
+                .child(open_piece_body(
+                    (
+                        "artifact-preview-text",
+                        artifact.updated_at.millis().unsigned_abs(),
+                    ),
+                    artifact.kind,
+                    &artifact.language,
+                    &artifact.content,
+                    cx,
+                ))
                 .into_any_element()
         };
+        let explanation = if artifact.versions.is_empty() {
+            info.explanation.to_owned()
+        } else {
+            format!(
+                "{} Edited {} time{} — earlier versions are kept.",
+                info.explanation,
+                artifact.versions.len(),
+                if artifact.versions.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            )
+        };
+        // Name and writing lead. Actions and folder controls stay, below the preview,
+        // so a short window shows the piece before the button cluster.
         v_flex()
             .id("artifact-detail")
             .test_support()
             .w_full()
+            .min_w_0()
             .max_w(t.chat.column_width)
-            .gap(t.space.medium)
+            .gap(t.space.small)
             .when(self.pending_exit.is_some(), |detail| {
                 detail.child(
                     v_flex()
@@ -1461,11 +1646,20 @@ impl ArtifactsView {
                         .gap(t.space.small)
                         .p(t.space.medium)
                         .sovra_surface(Surface::Subtle, cx)
-                        .child(div().sovra_text(TextRole::Body, cx).child(
-                            "You have unsaved changes. Keep editing, or discard them to continue.",
-                        ))
+                        .child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .sovra_text(TextRole::Body, cx)
+                                .child(design::paragraph(
+                                    "You have unsaved changes. Keep editing, or discard them to continue.",
+                                )),
+                        )
                         .child(
                             h_flex()
+                                .w_full()
+                                .min_w_0()
                                 .flex_wrap()
                                 .gap(t.space.small)
                                 .child(
@@ -1493,7 +1687,7 @@ impl ArtifactsView {
                 )
             })
             .child(
-                h_flex().child(
+                h_flex().w_full().min_w_0().child(
                     design::button("artifact-back", "← All saved work", cx)
                         .ghost()
                         .disabled(self.pending_save.is_some())
@@ -1502,49 +1696,59 @@ impl ArtifactsView {
             )
             .child(
                 h_flex()
+                    .id("artifact-title")
+                    .test_support()
+                    .aria_label(artifact.title.clone())
+                    .w_full()
                     .gap(t.space.small)
-                    .items_center()
+                    .items_start()
                     .min_w_0()
                     .child(Icon::new(kind_icon(artifact.kind)).text_color(cx.theme().primary))
                     .child(
                         div()
                             .min_w_0()
+                            .flex_1()
+                            .whitespace_normal()
                             .sovra_text(TextRole::PageTitle, cx)
-                            .child(artifact.title.clone()),
+                            .child(design::paragraph(artifact.title.clone())),
                     ),
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
+                    .whitespace_normal()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
-                    .child(format!("{} · made by {made_by} · {when}", info.label)),
+                    .child(design::paragraph(format!(
+                        "{} · made by {made_by} · {when}",
+                        info.label
+                    ))),
             )
-            .child(
-                div()
-                    .sovra_text(TextRole::Body, cx)
-                    .text_color(t.text_secondary)
-                    .child(if artifact.versions.is_empty() {
-                        info.explanation.to_owned()
-                    } else {
-                        format!(
-                            "{} Edited {} time{} — earlier versions are kept.",
-                            info.explanation,
-                            artifact.versions.len(),
-                            if artifact.versions.len() == 1 {
-                                ""
-                            } else {
-                                "s"
-                            }
-                        )
-                    }),
-            )
+            .child(body)
+            .when(!self.editing, |detail| {
+                detail.child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child(design::paragraph(explanation)),
+                )
+            })
             .when(!self.editing, |detail| detail.child(actions))
             .children(
                 self.build_status(&artifact.id, cx)
-                    .map(|message| div().child(message)),
+                    .map(|message| {
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .whitespace_normal()
+                            .child(design::paragraph(message))
+                    }),
             )
             .children(self.share_feedback(share_status, cx))
-            .child(body)
             .when(!self.editing, |detail| detail.child(organization))
     }
 
@@ -1625,6 +1829,8 @@ impl ArtifactsView {
         let my_copy = self.my_copy_of(id, cx);
         let mut actions = h_flex()
             .id("shared-artifact-actions")
+            .w_full()
+            .min_w_0()
             .flex_wrap()
             .gap(t.space.small)
             .child(
@@ -1684,14 +1890,34 @@ impl ArtifactsView {
                 })),
             );
         }
+        let preview = div()
+            .id("shared-artifact-preview")
+            .test_support()
+            .aria_label(snippet(&artifact.content))
+            .w_full()
+            .min_w_0()
+            .p(t.space.medium)
+            .sovra_surface(Surface::Subtle, cx)
+            .sovra_text(TextRole::Reading, cx)
+            .child(open_piece_body(
+                (
+                    "shared-artifact-preview-text",
+                    artifact.shared_at.millis().unsigned_abs(),
+                ),
+                artifact.kind,
+                &artifact.language,
+                &artifact.content,
+                cx,
+            ));
         v_flex()
             .id("shared-artifact-detail")
             .test_support()
             .w_full()
+            .min_w_0()
             .max_w(t.chat.column_width)
-            .gap(t.space.medium)
+            .gap(t.space.small)
             .child(
-                h_flex().child(
+                h_flex().w_full().min_w_0().child(
                     design::button("shared-artifact-back", "← All artifacts", cx)
                         .ghost()
                         .on_click(cx.listener(|view, _, _, cx| view.back_to_library(cx))),
@@ -1699,58 +1925,46 @@ impl ArtifactsView {
             )
             .child(
                 h_flex()
+                    .w_full()
                     .gap(t.space.small)
-                    .items_center()
+                    .items_start()
                     .min_w_0()
                     .child(Icon::new(kind_icon(artifact.kind)).text_color(cx.theme().primary))
                     .child(
                         div()
                             .min_w_0()
+                            .flex_1()
+                            .whitespace_normal()
                             .sovra_text(TextRole::PageTitle, cx)
-                            .child(artifact.title.clone()),
+                            .child(design::paragraph(artifact.title.clone())),
                     ),
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
+                    .whitespace_normal()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
-                    .child(format!(
+                    .child(design::paragraph(format!(
                         "{} · shared by {}{from} · {when}",
                         info.label, artifact.shared_by
-                    )),
+                    ))),
             )
+            .child(preview)
             .children(note.map(|note| {
                 div()
                     .id("shared-artifact-note")
                     .test_support()
+                    .w_full()
+                    .min_w_0()
                     .whitespace_normal()
                     .sovra_text(TextRole::Body, cx)
                     .text_color(t.text_secondary)
-                    .child(note)
+                    .child(design::paragraph(note))
             }))
             .child(actions)
             .children(self.share_feedback(None, cx))
-            .child(
-                div()
-                    .id("shared-artifact-preview")
-                    .test_support()
-                    .w_full()
-                    .min_w_0()
-                    .p(t.space.medium)
-                    .sovra_surface(Surface::Subtle, cx)
-                    .sovra_text(TextRole::Reading, cx)
-                    .child(
-                        TextView::markdown(
-                            (
-                                "shared-artifact-preview-text",
-                                artifact.shared_at.millis().unsigned_abs(),
-                            ),
-                            preview_markdown(artifact.kind, &artifact.language, &artifact.content),
-                        )
-                        .selectable(true)
-                        .style(design::markdown_style(cx)),
-                    ),
-            )
     }
 }
 
@@ -1859,23 +2073,68 @@ fn shared_card(
         )
 }
 
+/// Title plus a short description. Caption size keeps the sentence to a couple
+/// of lines so the cards below it can share the first view.
+fn library_header(cx: &mut Context<ArtifactsView>) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .gap(t.space.compact)
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::PageTitle, cx)
+                .child(design::paragraph("Artifacts").id("page-title")),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::Caption, cx)
+                .text_color(t.text_secondary)
+                .child(
+                    design::paragraph(
+                        "Everything you and your AI made and kept — letters, lists, tables, code, diagrams and more. Open one to read it, copy it or save it to your computer.",
+                    )
+                    .id("page-description"),
+                ),
+        )
+}
+
 fn empty_state(cx: &mut Context<ArtifactsView>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     v_flex()
         .id("artifacts-empty")
         .test_support()
         .w_full()
+        .min_w_0()
         .max_w(t.layout.reading_width)
         .gap(t.space.small)
         .p(t.space.large)
         .sovra_surface(Surface::Subtle, cx)
         .child(Icon::new(IconName::LibraryBig).text_color(cx.theme().primary))
-        .child(div().sovra_text(TextRole::SectionTitle, cx).child("Nothing saved yet"))
         .child(
             div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .sovra_text(TextRole::SectionTitle, cx)
+                .child(design::paragraph("Nothing saved yet")),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
-                .child("When Sovra or your team writes something worth keeping, press Save under the answer. You can also ask: “save this as a document”."),
+                .child(design::paragraph(
+                    "When Sovra or your team writes something worth keeping, press Save under the answer. You can also ask: “save this as a document”.",
+                )),
         )
         .child(
             h_flex().flex_wrap().child(
@@ -1942,7 +2201,12 @@ fn artifact_card(
         )
         .child(render_card_blurb(
             ("artifact-blurb", index),
-            &card_blurb(artifact.kind, &artifact.content, artifact.preview()),
+            &card_blurb(
+                artifact.kind,
+                &artifact.language,
+                &artifact.content,
+                artifact.preview(),
+            ),
             cx,
         ))
         .child(div().sovra_text(TextRole::Caption, cx).child(format!(

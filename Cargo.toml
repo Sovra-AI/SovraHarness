@@ -132,6 +132,11 @@ reqwest = { version = "0.12.28", default-features = false, features = ["json", "
 # exact: GPUI has no semver promise; bump deliberately. `syntect` highlights chat code
 # blocks with pure-Rust regexes (no C deps); results are cached per unchanged block.
 gpui-kit = { version = "=0.8.0", features = ["syntect"] }
+# The same syntax collection GPUI's code highlighter uses. Its highlight function is
+# crate-private, so saved-work code installs this pair and resolves colours from the
+# theme GPUI already built for light and dark.
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }
+two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"] }
 gpui-bidi = "=0.1.1"
 serde = { version = "1.0.229", features = ["derive"] }
 # Persisted optimizer moments must decode to the exact original f64 values.

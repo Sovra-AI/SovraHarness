@@ -5,6 +5,7 @@
 
 mod agui_widgets;
 mod app_menu;
+mod artifact_highlight;
 mod artifacts_view;
 mod assets;
 mod chat_history_view;
@@ -56,6 +57,9 @@ use gpui_kit::component::TitleBar;
 use gpui_kit::{App, AppContext as _, Global, TitlebarOptions, WindowBounds, WindowOptions};
 use sovra_runtime::Client;
 
+pub use artifact_highlight::{
+    SavedWorkHighlight, saved_work_highlight_calls, take_saved_work_highlight,
+};
 pub use models_view::ModelsView;
 pub use shell::Shell;
 

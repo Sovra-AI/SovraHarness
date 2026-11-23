@@ -14881,8 +14881,10 @@ dependencies = [
  "serde_json",
  "sovra-core",
  "sovra-runtime",
+ "syntect",
  "time",
  "tracing",
+ "two-face",
  "unicode-bidi",
 ]
 

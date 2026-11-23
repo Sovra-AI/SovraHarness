@@ -24,6 +24,16 @@ package version.
   statements. See [Knowledge](docs/knowledge.md#explore-your-sources) and
   [Performance](docs/performance.md#connected-knowledge).
 
+
+- **Saved work leads the Artifacts page.** Search, folders, favorites, kind, and
+  sort share one row, and opening a piece shows its name and writing before the
+  buttons. The same filters, copy, save, edit, and delete actions stay available.
+
+- **Coloured code on the Artifacts page.** A saved program in a language Sovra
+  already knows, such as Rust, shows a keyword and quoted text in two different
+  colours on the card and when you open it. Those colours follow light and dark
+  mode. Letters, notes, lists, and tables stay ordinary writing.
+
 - **Roadmap is up to date with v0.8.0.** It now says the decision record shipped
   in v0.8.0, links to the latest release instead of naming a version, and records
   the owner's choice that the person running Sovra picks the base model for future

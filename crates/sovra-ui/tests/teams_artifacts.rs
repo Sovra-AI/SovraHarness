@@ -1155,7 +1155,7 @@ fn saving_a_reply_and_browsing_the_library(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn artifacts_page_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
-    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (1280., 820., 200)] {
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
         let (window, shell, _commands, events) = open(cx, width, height);
         events
             .send_blocking(Event::Artifacts(ArtifactEvent::Loaded(vec![artifact(
@@ -1166,18 +1166,36 @@ fn artifacts_page_fits_minimum_wide_and_double_size(cx: &mut TestAppContext) {
             )])))
             .unwrap();
         settle(cx);
-        cx.update(|cx| design::set_interface_scale(InterfaceScale::from_percent(scale), cx));
-        cx.update_window(window.into(), |_, window, cx| {
-            shell.update(cx, |shell, cx| shell.open_artifact("doc", cx));
-            window.render_frame(cx);
-            let page = window.find("sovra-artifacts-view").bounds();
-            for id in ["artifact-copy", "artifact-preview"] {
-                let element = window.find(id);
-                assert!(element.visible(), "{width}x{height}@{scale}: {id}");
-                assert!(element.bounds().right() <= page.right(), "{id} overflows");
-            }
-        })
-        .unwrap();
+        for theme in [ThemeMode::Dark, ThemeMode::Light] {
+            cx.update(|cx| {
+                Theme::change(theme, None, cx);
+                design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            });
+            cx.update_window(window.into(), |_, window, cx| {
+                shell.update(cx, |shell, cx| shell.open_artifact("doc", cx));
+                window.render_frame(cx);
+                let page = window.find("sovra-artifacts-view").bounds();
+                for id in ["artifact-title", "artifact-preview", "artifact-copy"] {
+                    let element = window.find(id);
+                    let bounds = element.bounds();
+                    assert!(
+                        bounds.left() >= page.left() && bounds.right() <= page.right(),
+                        "{width}x{height}@{scale} {theme:?}: {id} {bounds:?} exceeds {page:?}"
+                    );
+                }
+                let preview = window
+                    .find("artifact-preview")
+                    .label()
+                    .map(str::to_owned)
+                    .unwrap_or_default();
+                assert!(
+                    preview.contains("Dear friend"),
+                    "the writing stays source text, got {preview:?}"
+                );
+                assert!(window.try_find("artifact-open-browser").is_none());
+            })
+            .unwrap();
+        }
         cx.update(|cx| design::set_interface_scale(InterfaceScale::default(), cx));
     }
 }
