@@ -635,6 +635,154 @@ async fn a_lone_request_that_is_given_up_on_does_not_leave_a_stuck_connection() 
     while server.join_next().await.is_some() {}
 }
 
+/// A served computer whose every task can be stopped at once.
+struct Running {
+    mesh: Mesh,
+    server: tokio::task::JoinSet<()>,
+    connections: Arc<std::sync::Mutex<tokio::task::JoinSet<()>>>,
+}
+
+impl Running {
+    fn start(mesh: Mesh, handler: Arc<dyn PeerHandler>) -> Self {
+        let (spawn, connections) = spawner();
+        let serving = mesh.clone();
+        let mut server = tokio::task::JoinSet::new();
+        server.spawn(async move { serving.serve(handler, spawn).await });
+        Self {
+            mesh,
+            server,
+            connections,
+        }
+    }
+
+    /// Stops the computer with no goodbye: nothing is closed, no last packet is
+    /// sent, as when the power goes or the lid shuts.
+    async fn cut_off(mut self) {
+        self.server.abort_all();
+        while self.server.join_next().await.is_some() {}
+        let mut connections = std::mem::take(&mut *self.connections.lock().expect("not poisoned"));
+        connections.abort_all();
+        while connections.join_next().await.is_some() {}
+        drop(self.mesh);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_computer_that_restarts_without_saying_goodbye_is_reached_again_at_once() {
+    let a = Mesh::bind([27; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([28; 32], Reach::LocalOnly).await.expect("binds");
+    let recorder = || {
+        Arc::new(Recorder {
+            seen_from: std::sync::Mutex::new(Vec::new()),
+            calls: AtomicUsize::new(0),
+        })
+    };
+    let mut a_server = serve(&a, recorder());
+    let (b_device, b_address) = (b.this_device(), b.address());
+    let running = Running::start(b.clone(), recorder());
+    // Both ways, as two group computers that catch up with each other do.
+    a.request(&b_address, sync_request(&a))
+        .await
+        .expect("delivered");
+    b.request(&a.address(), sync_request(&b))
+        .await
+        .expect("delivered");
+    let old = pooled(&a, &b_device).expect("kept");
+
+    // B is cut off with no goodbye: no close reaches A, whose connection to it
+    // goes on looking open.
+    drop(b);
+    running.cut_off().await;
+
+    // B starts again and says hello, as a computer's first catch-up does.
+    let b = Mesh::bind([28; 32], Reach::LocalOnly).await.expect("binds");
+    let mut b_server = serve(&b, recorder());
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        b.request(&a.address(), sync_request(&b)),
+    )
+    .await
+    .expect("answers in time")
+    .expect("the restarted computer reaches A");
+
+    // A's next request reaches the new B without waiting out the old connection.
+    let started = std::time::Instant::now();
+    // The old connection would take about thirty seconds to time out by itself.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        a.request(&b.address(), sync_request(&a)),
+    )
+    .await
+    .expect("no waiting for the old connection to time out")
+    .expect("delivered to the restarted computer");
+    assert_ne!(pooled(&a, &b.this_device()), Some(old));
+    assert!(started.elapsed() < std::time::Duration::from_secs(15));
+
+    a.close().await;
+    b.close().await;
+    while a_server.join_next().await.is_some() {}
+    while b_server.join_next().await.is_some() {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_request_already_waiting_on_a_computer_that_restarted_is_sent_again() {
+    let a = Mesh::bind([29; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([30; 32], Reach::LocalOnly).await.expect("binds");
+    let recorder = || {
+        Arc::new(Recorder {
+            seen_from: std::sync::Mutex::new(Vec::new()),
+            calls: AtomicUsize::new(0),
+        })
+    };
+    let mut a_server = serve(&a, recorder());
+    // The first B never answers, like one that froze just before it was cut off.
+    let b_device = b.this_device();
+    let running = Running::start(
+        b.clone(),
+        Arc::new(Sleepy {
+            ready: std::sync::atomic::AtomicBool::new(false),
+        }),
+    );
+    b.request(&a.address(), sync_request(&b))
+        .await
+        .expect("delivered");
+    let mut waiting = tokio::task::JoinSet::new();
+    {
+        let (a, address) = (a.clone(), b.address());
+        waiting.spawn(async move { a.request(&address, sync_request(&a)).await });
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while pooled(&a, &b_device).is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the request is on its way");
+
+    drop(b);
+    running.cut_off().await;
+    let b = Mesh::bind([30; 32], Reach::LocalOnly).await.expect("binds");
+    let mut b_server = serve(&b, recorder());
+    b.request(&a.address(), sync_request(&b))
+        .await
+        .expect("the restarted computer reaches A");
+
+    // The waiting request is answered by the new B, long before the old
+    // connection would have timed out.
+    let response = tokio::time::timeout(std::time::Duration::from_secs(12), waiting.join_next())
+        .await
+        .expect("not left waiting for a computer that is gone")
+        .expect("the request was started")
+        .expect("task finishes")
+        .expect("sent again and answered");
+    assert!(matches!(response, PeerResponse::Synced { .. }));
+
+    a.close().await;
+    b.close().await;
+    while a_server.join_next().await.is_some() {}
+    while b_server.join_next().await.is_some() {}
+}
+
 fn random_key() -> [u8; 32] {
     let mut key = [0u8; 32];
     getrandom::fill(&mut key).expect("the OS has randomness");

@@ -52,6 +52,87 @@ const CONNECTING_GRACE: std::time::Duration = std::time::Duration::from_secs(20)
 /// One open connection per computer, reused for every request to it.
 type Pool = Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, Pooled>>>;
 
+/// The latest connection each computer opened to this one.
+type Accepted =
+    Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, iroh::endpoint::Connection>>>;
+
+/// Notes a new connection from `from` and returns this side's own connection
+/// to that computer, if it has one, to be checked (see [`probe`]).
+///
+/// A computer keeps one connection open and reuses it, so a new one arriving
+/// usually means it started again: after a crash, a closed lid or a quick
+/// restart there is no goodbye, and this side's connection to it would go on
+/// looking open for up to half a minute while leading nowhere. The connection
+/// it had opened before, if that still looks open, is closed here: while it
+/// stays, packets for that computer keep going to where it used to be.
+fn welcome_back(
+    from: DeviceId,
+    connection: &iroh::endpoint::Connection,
+    accepted: &Accepted,
+    pool: &Pool,
+) -> Option<Pooled> {
+    let earlier = accepted
+        .lock()
+        .expect("accepted connections lock is never poisoned")
+        .insert(from, connection.clone());
+    let restarted = earlier.is_some_and(|earlier| {
+        let open = earlier.close_reason().is_none();
+        if open {
+            earlier.close(0u32.into(), b"replaced");
+        }
+        open
+    });
+    let mut pool = pool.lock().expect("connection pool lock is never poisoned");
+    let pooled = pool
+        .get(&from)
+        .filter(|pooled| pooled.connection.close_reason().is_none())
+        .cloned()?;
+    // A second connection while the first still looked open is as good as
+    // proof of a restart: with nothing travelling on this side's connection it
+    // is dropped at once, so the very next request dials afresh. Otherwise the
+    // connection is only checked, and kept if it answers.
+    if restarted && pooled.busy.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        pool.remove(&from);
+        pooled.connection.close(0u32.into(), b"replaced");
+        return None;
+    }
+    Some(pooled)
+}
+
+/// How long a connection that may lead nowhere gets to answer a probe.
+const PROBE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Asks this side's connection to a computer for any answer at all, when that
+/// computer has just opened a new connection here. A living computer refuses the
+/// meaningless question at once, even beside a large document, and nothing
+/// changes. Silence means the connection leads to a computer that is no longer
+/// there: it is closed, and whatever was waiting on it is sent again afresh.
+async fn probe(pool: Pool, device: DeviceId, pooled: Pooled) {
+    let answered = n0_future::time::timeout(PROBE_WAIT, async {
+        let (mut send, mut recv) = pooled.connection.open_bi().await.ok()?;
+        send.write_all(b"?").await.ok()?;
+        send.finish().ok()?;
+        recv.read_to_end(MAX_PEER_MESSAGE_BYTES).await.ok()
+    })
+    .await
+    .ok()
+    .flatten()
+    .is_some();
+    if answered {
+        return;
+    }
+    tracing::debug!(peer = %device.fingerprint(), "connection to a restarted computer dropped");
+    let mut open = pool.lock().expect("connection pool lock is never poisoned");
+    if open
+        .get(&device)
+        .is_some_and(|kept| kept.connection.stable_id() == pooled.connection.stable_id())
+    {
+        open.remove(&device);
+    }
+    drop(open);
+    pooled.connection.close(0u32.into(), b"replaced");
+}
+
 /// A pooled connection and how many requests are travelling on it right now.
 #[derive(Debug, Clone)]
 struct Pooled {
@@ -153,6 +234,9 @@ pub struct Mesh {
         Arc<std::sync::Mutex<std::collections::BTreeMap<[u8; 32], iroh_gossip::api::GossipSender>>>,
     /// Open connections to other computers, reused request after request.
     pool: Pool,
+    /// The latest connection each computer opened to this one, to notice when
+    /// one comes back after a restart (see [`welcome_back`]).
+    accepted: Accepted,
     reach: Reach,
     started: std::time::Instant,
 }
@@ -215,6 +299,7 @@ impl Mesh {
             known,
             topics: Arc::default(),
             pool: Arc::default(),
+            accepted: Arc::default(),
             reach,
             started: std::time::Instant::now(),
         })
@@ -277,6 +362,11 @@ impl Mesh {
             .read_to_end(MAX_PEER_MESSAGE_BYTES)
             .await
             .map_err(|error| TransportError::Protocol(error.to_string()))?;
+        if bytes.is_empty() {
+            // The stream ended with no answer on it: whatever was answering
+            // stopped (a computer shutting down or starting again).
+            return Err(TransportError::Unreachable("no answer".into()));
+        }
         unframe(&bytes, deflated)
     }
 
@@ -398,6 +488,8 @@ async fn serve_connection(
     handler: Arc<dyn PeerHandler>,
     gossip: iroh_gossip::net::Gossip,
     spawn: Spawn,
+    accepted: Accepted,
+    pool: Pool,
 ) {
     let connection = match incoming.await {
         Ok(connection) => connection,
@@ -414,6 +506,9 @@ async fn serve_connection(
     }
     let from = DeviceId(*connection.remote_id().as_bytes());
     let deflated = connection.alpn() == PEER_ALPN_DEFLATE;
+    if let Some(doubtful) = welcome_back(from, &connection, &accepted, &pool) {
+        spawn(Box::pin(probe(pool.clone(), from, doubtful)));
+    }
     // Each request gets its own task: the other computer sends everything on one
     // connection, and a small question must not wait behind a large document,
     // nor may one abandoned request end the connection for the rest.
@@ -593,6 +688,8 @@ impl GroupTransport for Mesh {
                 handler.clone(),
                 self.gossip.clone(),
                 spawn.clone(),
+                self.accepted.clone(),
+                self.pool.clone(),
             )));
         }
     }
@@ -618,10 +715,13 @@ impl GroupTransport for Mesh {
                     return Ok(response);
                 }
                 Err(error) => {
+                    // Worth one more try on a connection that is open now: the
+                    // old one closed, or went quiet without an answer.
+                    let again = pooled.connection.close_reason().is_some()
+                        || matches!(error, TransportError::Unreachable(_));
                     last = error;
-                    let closed = pooled.connection.close_reason().is_some();
                     drop(flight);
-                    if !closed {
+                    if !again {
                         break;
                     }
                 }
@@ -691,6 +791,10 @@ impl GroupTransport for Mesh {
         for pooled in open.into_values() {
             pooled.connection.close(0u32.into(), b"done");
         }
+        self.accepted
+            .lock()
+            .expect("accepted connections lock is never poisoned")
+            .clear();
         self.endpoint.close().await;
     }
 }
