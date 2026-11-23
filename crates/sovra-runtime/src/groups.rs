@@ -350,7 +350,10 @@ struct HostState {
 
 impl HostState {
     fn at(&self, slot: u64) -> Option<Arc<Groups>> {
-        self.groups.iter().find(|groups| groups.slot == slot).cloned()
+        self.groups
+            .iter()
+            .find(|groups| groups.slot == slot)
+            .cloned()
     }
 }
 
@@ -382,7 +385,11 @@ impl Host {
     }
 
     /// Starts the worker for one saved (or empty) record and its upkeep.
-    async fn add(self: &Arc<Self>, state: &mut HostState, store: Arc<dyn GroupStore>) -> Arc<Groups> {
+    async fn add(
+        self: &Arc<Self>,
+        state: &mut HostState,
+        store: Arc<dyn GroupStore>,
+    ) -> Arc<Groups> {
         let slot = self
             .next_slot
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -562,27 +569,25 @@ impl Host {
                         found = Some(groups.slot);
                     }
                 }
-                match found {
-                    Some(slot) => {
-                        // Leaving the start-or-join page gives its place up.
-                        state.setup = None;
-                        self.show(&mut state, slot).await;
-                        drop(state);
-                        self.tidy().await;
-                    }
-                    None => {
-                        drop(state);
-                        self.say(not_in_that_group()).await;
-                    }
+                if let Some(slot) = found {
+                    // Leaving the start-or-join page gives its place up.
+                    state.setup = None;
+                    self.show(&mut state, slot).await;
+                    drop(state);
+                    self.tidy().await;
+                } else {
+                    drop(state);
+                    self.say(not_in_that_group()).await;
                 }
             }
-            GroupCommand::StartAnother => match self.setup_place(&mut state).await {
-                Some(slot) => self.show(&mut state, slot).await,
-                None => {
+            GroupCommand::StartAnother => {
+                if let Some(slot) = self.setup_place(&mut state).await {
+                    self.show(&mut state, slot).await;
+                } else {
                     drop(state);
                     self.say(one_group_only()).await;
                 }
-            },
+            }
             GroupCommand::In { group, command } => {
                 let mut found = None;
                 for groups in &state.groups {
@@ -623,16 +628,13 @@ impl Host {
                     None => true,
                 };
                 let target = if needs_place {
-                    match self.setup_place(&mut state).await {
-                        Some(slot) => {
-                            self.show(&mut state, slot).await;
-                            state.at(slot)
-                        }
-                        None => {
-                            drop(state);
-                            self.say(one_group_only()).await;
-                            return;
-                        }
+                    if let Some(slot) = self.setup_place(&mut state).await {
+                        self.show(&mut state, slot).await;
+                        state.at(slot)
+                    } else {
+                        drop(state);
+                        self.say(one_group_only()).await;
+                        return;
                     }
                 } else {
                     shown
@@ -708,7 +710,6 @@ impl PeerHandler for Router {
         }
     }
 }
-
 
 impl GroupRuntime {
     pub(crate) fn start(

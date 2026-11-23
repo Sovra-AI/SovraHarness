@@ -618,6 +618,8 @@ impl Shell {
                                 models.groups.group.is_some() && models.groups.work.use_group
                             });
                             shell.state.group_can_answer = can_answer;
+                            let groups = shell.models.read(cx).groups.groups_to_share_with();
+                            shell.chat.share.apply(event, groups);
                             shell
                                 .artifacts_view
                                 .update(cx, |view, cx| view.group_event(event, cx));

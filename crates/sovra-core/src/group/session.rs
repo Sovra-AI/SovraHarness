@@ -597,7 +597,9 @@ impl GroupsView {
                 // Another group came on screen: what was said about the last
                 // one (a link, a problem, an answer) is not about this one.
                 let shown = |list: &[GroupSummary]| {
-                    list.iter().find(|group| group.shown).map(|group| group.group)
+                    list.iter()
+                        .find(|group| group.shown)
+                        .map(|group| group.group)
                 };
                 // Arriving in a group from the start-or-join page keeps what
                 // that page just said ("You're in").
@@ -847,6 +849,104 @@ impl GroupsView {
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         rows
+    }
+}
+
+/// A group with more people than this gets a box to find one by name.
+pub const FIND_PEOPLE_FROM: usize = 8;
+/// A group with more notes than this gets a box to search them.
+pub const FIND_NOTES_FROM: usize = 8;
+/// How many notes the page shows before "Show more".
+pub const NOTES_PAGE: usize = 20;
+
+/// Whether `text` holds every word typed into a find box (any case, any order).
+fn holds(text: &str, wanted: &str) -> bool {
+    let text = text.to_lowercase();
+    wanted
+        .to_lowercase()
+        .split_whitespace()
+        .all(|word| text.contains(word))
+}
+
+impl GroupsView {
+    /// The people whose name, or one of whose computers, matches what was typed,
+    /// each with its place in [`Self::rows`]. Everyone when nothing is typed.
+    pub fn people_matching(&self, wanted: &str) -> Vec<(usize, PersonRow)> {
+        self.rows()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                holds(&row.name, wanted)
+                    || row
+                        .computers
+                        .iter()
+                        .any(|computer| holds(&computer.name, wanted))
+            })
+            .collect()
+    }
+
+    /// The places in [`Self::knowledge`] of the notes that match what was typed:
+    /// their words, who shared them, or what they are about. All of them when
+    /// nothing is typed. Newest first, as the list is kept.
+    pub fn notes_matching(&self, wanted: &str) -> Vec<usize> {
+        self.knowledge
+            .iter()
+            .enumerate()
+            .filter(|(_, detail)| {
+                holds(
+                    &format!(
+                        "{} {} {} {}",
+                        detail.text,
+                        detail.shared_by,
+                        detail.computer,
+                        detail.about.join(" ")
+                    ),
+                    wanted,
+                )
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// The groups to offer when sharing from a chat: every group this computer
+    /// is in, the one on screen first.
+    pub fn groups_to_share_with(&self) -> Vec<GroupSummary> {
+        let mut groups = self.memberships.clone();
+        groups.sort_by_key(|group| !group.shown);
+        groups
+    }
+}
+
+/// What sharing a piece of a chat into a group sends: a note when it is short
+/// enough to be one, otherwise a document with its first line as the title.
+/// `message` names the chat message, so sharing it twice is the same document.
+pub fn share_from_chat(text: &str, message: &str) -> GroupCommand {
+    let text = text.trim();
+    if text.chars().count() <= super::knowledge::MAX_SHARED_DETAIL_CHARS {
+        return GroupCommand::Share {
+            text: text.to_owned(),
+            about: Vec::new(),
+            with: None,
+        };
+    }
+    let first_line = text
+        .lines()
+        .map(|line| line.trim_matches(|c: char| c == '#' || c == '*' || c.is_whitespace()))
+        .find(|line| !line.is_empty())
+        .unwrap_or("Shared from a chat");
+    let title: String = if first_line.chars().count() > 60 {
+        format!("{}…", first_line.chars().take(59).collect::<String>())
+    } else {
+        first_line.to_owned()
+    };
+    GroupCommand::ShareArtifact {
+        title,
+        kind: ArtifactKind::Document,
+        language: String::new(),
+        content: text.to_owned(),
+        new_version_of: None,
+        local_id: format!("chat-{message}"),
+        with: None,
     }
 }
 

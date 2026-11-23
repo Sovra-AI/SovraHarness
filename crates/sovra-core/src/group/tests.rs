@@ -2575,3 +2575,141 @@ fn joining_and_new_arrivals_are_said_once_in_plain_words() {
     dad.apply(GroupEvent::LeftGroup);
     assert_eq!(dad.notice, None);
 }
+
+// ---- several groups, and finding things in a large one ------------------------
+
+fn summary(name: &str, id: u8, shown: bool) -> GroupSummary {
+    GroupSummary {
+        group: GroupId([id; 32]),
+        name: name.into(),
+        people: usize::from(id),
+        you: "Mum".into(),
+        shown,
+    }
+}
+
+#[test]
+fn switching_groups_clears_what_was_said_about_the_last_one() {
+    let log = Log::family();
+    let mut view = GroupsView::default();
+    view.apply(GroupEvent::Memberships(vec![summary("Family", 1, true)]));
+    view.apply(GroupEvent::Loaded {
+        this_computer: device(1),
+        group: Some(log.state()),
+    });
+    view.apply(GroupEvent::Problem(GroupProblem::NotAllowed));
+    view.apply(GroupEvent::ShortCodeReady {
+        code: "123 456".into(),
+        expires_at: Timestamp(5),
+    });
+    view.apply(GroupEvent::Problem(GroupProblem::NotAllowed));
+    // The same group still on screen: nothing is lost.
+    view.apply(GroupEvent::Memberships(vec![
+        summary("Family", 1, true),
+        summary("Work", 2, false),
+    ]));
+    assert!(view.short_code.is_some());
+    assert!(view.problem.is_some());
+    assert_eq!(summary("Work", 2, false).label(), "Work · 2 people");
+    assert_eq!(summary("Family", 1, true).label(), "Family · 1 person");
+
+    view.apply(GroupEvent::Memberships(vec![
+        summary("Family", 1, false),
+        summary("Work", 2, true),
+    ]));
+    assert_eq!(view.short_code, None);
+    assert_eq!(view.problem, None);
+    assert_eq!(view.pairing, PairingStage::Idle);
+    let offered: Vec<String> = view
+        .groups_to_share_with()
+        .into_iter()
+        .map(|group| group.name)
+        .collect();
+    assert_eq!(
+        offered,
+        ["Work", "Family"],
+        "the group on screen comes first"
+    );
+
+    // Arriving in a group from the start-or-join page keeps "You're in".
+    let mut joining = GroupsView {
+        notice: Some("🎉 You're in.".into()),
+        ..GroupsView::default()
+    };
+    joining.apply(GroupEvent::Memberships(vec![summary("Family", 1, true)]));
+    assert!(joining.notice.is_some());
+}
+
+#[test]
+fn people_and_notes_can_be_found_by_typing_part_of_them() {
+    let log = family_of_three();
+    let mut view = GroupsView::default();
+    view.apply(GroupEvent::Loaded {
+        this_computer: device(1),
+        group: Some(log.state()),
+    });
+    assert_eq!(view.people_matching("").len(), 3);
+    let found: Vec<(usize, String)> = view
+        .people_matching("  PERSON 3 ")
+        .into_iter()
+        .map(|(place, row)| (place, row.name))
+        .collect();
+    assert_eq!(
+        found,
+        [(2, "Person 3".to_owned())],
+        "with its place in the full list"
+    );
+    assert_eq!(
+        view.people_matching("computer 2").len(),
+        1,
+        "or by a computer's name"
+    );
+    assert_eq!(view.people_matching("nobody").len(), 0);
+
+    let mut shared = Shared::new(&log);
+    shared.share(
+        device(2),
+        5_000,
+        "The boiler service is on 12 March",
+        Vec::new(),
+    );
+    shared.share(device(3), 6_000, "Grandad's birthday is 4 June", Vec::new());
+    view.apply(GroupEvent::Knowledge(
+        shared.view().details.values().cloned().collect(),
+    ));
+    assert_eq!(view.notes_matching("").len(), 2);
+    let boiler = view.notes_matching("march BOILER");
+    assert_eq!(boiler.len(), 1);
+    assert!(view.knowledge[boiler[0]].text.contains("boiler"));
+    assert_eq!(view.notes_matching("dentist"), Vec::<usize>::new());
+}
+
+#[test]
+fn a_piece_of_a_chat_is_shared_as_a_note_or_as_a_document_when_long() {
+    assert_eq!(
+        share_from_chat("  The plumber is Sam, 01234 567890  ", "m1"),
+        GroupCommand::Share {
+            text: "The plumber is Sam, 01234 567890".into(),
+            about: Vec::new(),
+            with: None,
+        }
+    );
+    let long = format!("## Holiday plan\n\n{}", "Day one. ".repeat(400));
+    match share_from_chat(&long, "m2") {
+        GroupCommand::ShareArtifact {
+            title,
+            kind,
+            content,
+            local_id,
+            with,
+            ..
+        } => {
+            assert_eq!(title, "Holiday plan");
+            assert_eq!(kind, crate::artifacts::ArtifactKind::Document);
+            assert_eq!(content, long.trim());
+            assert_eq!(local_id, "chat-m2");
+            assert_eq!(with, None);
+        }
+        other => panic!("a long piece is a document: {other:?}"),
+    }
+}

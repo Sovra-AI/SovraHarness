@@ -55,10 +55,9 @@ pub use pairing::{
 };
 pub use sas::{SAS_EMOJI, ShortAuthString, short_auth_string};
 pub use session::{
-    ComputerRow, GroupCommand, GroupEvent, GroupNetwork, GroupProblem, GroupSummary, GroupsView,
-    JoinWaiting,
-    ONLINE_WINDOW_MS, PersonRow, presence_label, removal_warning, role_label, shareable_text,
-    shareable_topics,
+    ComputerRow, FIND_NOTES_FROM, FIND_PEOPLE_FROM, GroupCommand, GroupEvent, GroupNetwork,
+    GroupProblem, GroupSummary, GroupsView, JoinWaiting, NOTES_PAGE, ONLINE_WINDOW_MS, PersonRow,
+    presence_label, removal_warning, role_label, share_from_chat, shareable_text, shareable_topics,
 };
 pub use shared_artifact::{
     ArtifactShareError, MAX_ORIGIN_CHARS, MAX_SHARED_ARTIFACT_BYTES, MAX_SHARED_LANGUAGE_CHARS,

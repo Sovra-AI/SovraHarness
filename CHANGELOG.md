@@ -14,6 +14,15 @@ package version.
 
 ## [Unreleased]
 
+- **Be in several groups, and share from chat.** A computer can now be in more
+  than one group: **Your groups** at the top of Groups switches between them,
+  and **＋ Start or join another group** adds one without leaving any. Each
+  group keeps its own people, notes, invites and history in its own file.
+  Under every reply in a chat, and beside your own messages, **Share with
+  <group>** sends it to a group in one press and says when it is shared. A
+  large group gets **Find a person** and **Search the notes**, notes come
+  twenty at a time, and the how-to steps fold away once a group is going.
+
 - **Folder indexing is faster.** Initial scans write fewer database records per file,
   repeat scans can confirm unchanged files, including large text files, without rereading
   their contents, and long documents find each passage’s heading in a single pass.

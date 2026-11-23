@@ -17,9 +17,10 @@ use gpui_kit::{
     TestSupportExt as _, Window, div, prelude::FluentBuilder as _,
 };
 use sovra_core::group::{
-    BENEFITS, DetailStatus, FederatedSettings, GroupCommand, GroupEvent, GroupPage, HOW_IT_WORKS,
-    InviteKind, InvitePreview, PRIVACY_PROMISE, PairingStage, Reachability, Role, SharedDetail,
-    WHAT_IS_A_GROUP, removal_warning, time_left_label,
+    BENEFITS, DetailStatus, FIND_NOTES_FROM, FIND_PEOPLE_FROM, FederatedSettings, GroupCommand,
+    GroupEvent, GroupPage, HOW_IT_WORKS, InviteKind, InvitePreview, NOTES_PAGE, PRIVACY_PROMISE,
+    PairingStage, Reachability, Role, SharedDetail, WHAT_IS_A_GROUP, removal_warning,
+    time_left_label,
 };
 use sovra_core::models::ChromeKey;
 use sovra_core::{Command, Timestamp};
@@ -49,6 +50,12 @@ pub(crate) struct GroupsForm {
     join_link: Entity<InputState>,
     /// Redraws as the link is pasted, so the page can say what it is an invite to.
     _link_changes: gpui_kit::Subscription,
+    /// "Find a person" in a large group, and "Search the notes".
+    find_person: Entity<InputState>,
+    find_note: Entity<InputState>,
+    _find_changes: [gpui_kit::Subscription; 2],
+    /// How many notes are on the page; "Show more" adds a page.
+    notes_shown: usize,
     invite_name: Entity<InputState>,
     share: Entity<InputState>,
     _share_changes: gpui_kit::Subscription,
@@ -94,6 +101,9 @@ enum Panel {
     MorePages,
     /// "More ways to invite": an admin link and adding your own computers.
     MoreInvite,
+    /// "How do I use this page?": the numbered steps of the open page. Open by
+    /// itself while a new group is still getting started.
+    HowTo,
 }
 
 impl GroupsForm {
@@ -127,7 +137,27 @@ impl GroupsForm {
                     cx.notify();
                 }
             });
+        let find_person = input("Type a name, like Grandad", window, cx);
+        let find_note = input("Type a word, like boiler or dentist", window, cx);
+        let redraw =
+            |input: &Entity<InputState>, window: &mut Window, cx: &mut Context<ModelsView>| {
+                cx.subscribe_in(input, window, |view, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        // A new search starts from the first page again.
+                        view.groups_form.notes_shown = NOTES_PAGE;
+                        cx.notify();
+                    }
+                })
+            };
+        let find_changes = [
+            redraw(&find_person, window, cx),
+            redraw(&find_note, window, cx),
+        ];
         Self {
+            find_person,
+            find_note,
+            _find_changes: find_changes,
+            notes_shown: NOTES_PAGE,
             group_name: input("For example: Family", window, cx),
             your_name: input("For example: Mum", window, cx),
             computer_name: input("For example: Mum's laptop", window, cx),
@@ -436,6 +466,13 @@ impl ModelsView {
         if let Some(check) = self.render_picture_check(cx) {
             body = body.child(check);
         }
+        if let Some(switcher) = self.render_switcher(cx) {
+            body = body.child(switcher);
+        }
+        if view.group.is_none() && !view.memberships.is_empty() {
+            // One more group: the choice, without the first-time explanation.
+            return body.child(self.render_setup(cx)).into_any_element();
+        }
         if view.group.is_none() {
             // The choice comes first; the longer explanation follows for anyone unsure.
             return body
@@ -472,6 +509,71 @@ impl ModelsView {
         body.child(self.render_page_tabs(cx))
             .child(self.render_group_page(self.current_page(), cx))
             .into_any_element()
+    }
+
+    /// Your groups, to move between them, and the way to be in one more. `None`
+    /// before this computer is in any group: there is nothing to choose between.
+    fn render_switcher(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let view = &self.groups;
+        if view.memberships.is_empty() {
+            return None;
+        }
+        let t = design::tokens(cx);
+        let setting_up = view.group.is_none();
+        let row = h_flex()
+            .id("groups-switcher")
+            .role(gpui_kit::Role::Group)
+            .aria_label("Your groups")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .gap(t.space.small)
+            .child(caption(
+                if view.memberships.len() == 1 {
+                    "Your group:"
+                } else {
+                    "Your groups:"
+                },
+                cx,
+            ))
+            .children(view.memberships.iter().enumerate().map(|(index, group)| {
+                let id = group.group;
+                design::button(
+                    ("groups-switch", index),
+                    format!("🏠 {}", group.label()),
+                    cx,
+                )
+                .small()
+                .selected(group.shown)
+                .accessibility_label(if group.shown {
+                    format!("{}, the group you are looking at", group.name)
+                } else {
+                    format!("Open the group {}", group.name)
+                })
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    if view
+                        .groups
+                        .memberships
+                        .iter()
+                        .any(|g| g.group == id && !g.shown)
+                    {
+                        send(GroupCommand::Switch { group: id }, cx);
+                    }
+                }))
+            }))
+            .children((!setting_up).then(|| {
+                design::button("groups-start-another", "＋ Start or join another group", cx)
+                    .small()
+                    .ghost()
+                    .accessibility_label("Start or join another group")
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.groups_form.setup = Setup::Choose;
+                        send(GroupCommand::StartAnother, cx);
+                    }))
+            }));
+        Some(row.into_any_element())
     }
 
     /// "What is a group?": what it is, what you can do, how it works, why it's safe.
@@ -1241,6 +1343,10 @@ impl ModelsView {
         };
         let result_showing = page == GroupPage::Invite
             && (self.groups.invite.is_some() || self.groups.short_code.is_some());
+        // A group still getting started sees the steps; once it is going, the
+        // page leads with what is in it and keeps the steps one press away.
+        let new_group = !self.groups.first_steps().is_empty();
+        let steps_open = new_group != self.groups_form.is_open(Panel::HowTo);
         v_flex()
             .id(SharedString::from(format!("groups-pane-{}", page.id())))
             .test_support()
@@ -1263,7 +1369,7 @@ impl ModelsView {
             )
             // A fresh link or code carries its own steps and must not sit below
             // the general ones.
-            .children((!result_showing).then(|| {
+            .children((!result_showing && steps_open).then(|| {
                 v_flex()
                     .w_full()
                     .gap(t.space.compact)
@@ -1273,6 +1379,25 @@ impl ModelsView {
                     .child(numbered("groups-pane-how", page.how(), cx))
             }))
             .child(content)
+            .children((!result_showing).then(|| {
+                h_flex().child(
+                    design::button(
+                        "groups-how-toggle",
+                        if steps_open {
+                            "Hide the steps"
+                        } else {
+                            "How do I use this page?"
+                        },
+                        cx,
+                    )
+                    .small()
+                    .ghost()
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.groups_form.toggle(Panel::HowTo);
+                        cx.notify();
+                    })),
+                )
+            }))
     }
 
     fn render_people(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -1357,184 +1482,200 @@ impl ModelsView {
         let t = design::tokens(cx);
         let manage = self.groups.can_manage();
         let confirm = self.groups_form.confirm_remove.clone();
+        let everyone = self.groups.group.as_ref().map_or(0, |g| g.people.len());
+        // A large group gets a box to find one person; a family does not need it.
+        let finding = everyone > FIND_PEOPLE_FROM;
+        let wanted = if finding {
+            value(&self.groups_form.find_person, cx)
+        } else {
+            String::new()
+        };
+        let found = self.groups.people_matching(&wanted);
         v_flex()
             .id("groups-roster")
             .test_support()
             .w_full()
             .gap(t.space.compact)
-            .children(
-                self.groups
-                    .rows()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, row)| {
-                        let person = row.person;
-                        let person_key = format!("person:{}", person.to_hex());
-                        let mine = row
-                            .computers
-                            .iter()
-                            .any(|computer| computer.is_this_computer);
-                        let mut card = v_flex()
-                            .id(("groups-person", index))
-                            .test_support()
-                            .w_full()
-                            .min_w_0()
-                            .gap(t.space.compact)
-                            .p(t.space.compact)
-                            .sovra_surface(Surface::Subtle, cx)
-                            .child(
-                                h_flex()
-                                    .flex_wrap()
-                                    .items_center()
-                                    .gap(t.space.small)
-                                    .child(heading(
-                                        if mine {
-                                            format!("{} (you)", row.name)
-                                        } else {
-                                            row.name.clone()
-                                        },
-                                        cx,
-                                    ))
-                                    .child(caption(row.role_label, cx)),
-                            );
-                        for (slot, computer) in row.computers.iter().enumerate() {
-                            let device = computer.device;
-                            let key = format!("computer:{}", device.to_hex());
-                            let now = Timestamp(now_millis());
-                            let label = if computer.is_this_computer {
-                                format!("💻 {} (this computer)", computer.name)
+            .children(finding.then(|| {
+                field(
+                    "groups-find-person",
+                    "Find a person",
+                    &self.groups_form.find_person,
+                    "Type part of their name or of their computer's name.",
+                    cx,
+                )
+            }))
+            .children((finding && !wanted.is_empty()).then(|| {
+                let count = match found.len() {
+                    0 => format!("Nobody in this group matches “{wanted}”."),
+                    1 => format!("1 of {everyone} people"),
+                    n => format!("{n} of {everyone} people"),
+                };
+                caption(count.clone(), cx)
+                    .id("groups-find-person-count")
+                    .role(gpui_kit::Role::Status)
+                    .aria_label(count)
+                    .test_support()
+            }))
+            .children(found.into_iter().map(|(index, row)| {
+                let person = row.person;
+                let person_key = format!("person:{}", person.to_hex());
+                let mine = row
+                    .computers
+                    .iter()
+                    .any(|computer| computer.is_this_computer);
+                let mut card = v_flex()
+                    .id(("groups-person", index))
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .gap(t.space.compact)
+                    .p(t.space.compact)
+                    .sovra_surface(Surface::Subtle, cx)
+                    .child(
+                        h_flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(t.space.small)
+                            .child(heading(
+                                if mine {
+                                    format!("{} (you)", row.name)
+                                } else {
+                                    row.name.clone()
+                                },
+                                cx,
+                            ))
+                            .child(caption(row.role_label, cx)),
+                    );
+                for (slot, computer) in row.computers.iter().enumerate() {
+                    let device = computer.device;
+                    let key = format!("computer:{}", device.to_hex());
+                    let now = Timestamp(now_millis());
+                    let label = if computer.is_this_computer {
+                        format!("💻 {} (this computer)", computer.name)
+                    } else {
+                        format!("💻 {} · {}", computer.name, computer.status(now))
+                    };
+                    let online = computer.is_this_computer || computer.is_online(now);
+                    let name = computer.name.clone();
+                    let mut line = h_flex()
+                        .id(("groups-computer", index * 100 + slot))
+                        .aria_label(label.clone())
+                        .test_support()
+                        .w_full()
+                        .min_w_0()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(t.space.small)
+                        .child(status_dot(
+                            if online {
+                                cx.theme().success
                             } else {
-                                format!("💻 {} · {}", computer.name, computer.status(now))
-                            };
-                            let online = computer.is_this_computer || computer.is_online(now);
-                            let name = computer.name.clone();
-                            let mut line = h_flex()
-                                .id(("groups-computer", index * 100 + slot))
-                                .aria_label(label.clone())
-                                .test_support()
-                                .w_full()
-                                .min_w_0()
-                                .flex_wrap()
-                                .items_center()
-                                .gap(t.space.small)
-                                .child(status_dot(
-                                    if online {
-                                        cx.theme().success
+                                t.text_secondary
+                            },
+                            cx,
+                        ))
+                        .child(caption(label, cx).flex_1().min_w_0().whitespace_normal());
+                    if (manage || mine) && !computer.is_this_computer {
+                        if confirm.as_deref() == Some(key.as_str()) {
+                            line = line
+                                .child(caption(removal_warning(&name), cx).whitespace_normal())
+                                .child(
+                                    design::button(
+                                        ("groups-remove-computer-yes", index * 100 + slot),
+                                        "Yes, remove",
+                                        cx,
+                                    )
+                                    .small()
+                                    .on_click(cx.listener(
+                                        move |view, _, _, cx| {
+                                            view.groups_form.confirm_remove = None;
+                                            send(GroupCommand::RemoveComputer { device }, cx);
+                                        },
+                                    )),
+                                );
+                        } else {
+                            line = line.child(
+                                design::button(
+                                    ("groups-remove-computer", index * 100 + slot),
+                                    "Remove",
+                                    cx,
+                                )
+                                .ghost()
+                                .xsmall()
+                                .accessibility_label(format!("Remove {name} from the group"))
+                                .on_click(cx.listener(
+                                    move |view, _, _, cx| {
+                                        view.groups_form.confirm_remove = Some(key.clone());
+                                        cx.notify();
+                                    },
+                                )),
+                            );
+                        }
+                    }
+                    card = card.child(line);
+                }
+                if manage && !mine {
+                    let make_admin = row.role != Role::Admin;
+                    card = card.child(
+                        h_flex()
+                            .flex_wrap()
+                            .gap(t.space.small)
+                            .child(
+                                design::button(
+                                    ("groups-role", index),
+                                    if make_admin {
+                                        "Make admin"
                                     } else {
-                                        t.text_secondary
+                                        "Make a member again"
                                     },
                                     cx,
+                                )
+                                .ghost()
+                                .xsmall()
+                                .on_click(cx.listener(
+                                    move |_, _, _, cx| {
+                                        let role = if make_admin {
+                                            Role::Admin
+                                        } else {
+                                            Role::Member
+                                        };
+                                        send(GroupCommand::ChangeRole { person, role }, cx);
+                                    },
+                                )),
+                            )
+                            .child(if confirm.as_deref() == Some(person_key.as_str()) {
+                                design::button(
+                                    ("groups-remove-person-yes", index),
+                                    "Yes, remove them",
+                                    cx,
+                                )
+                                .small()
+                                .on_click(cx.listener(
+                                    move |view, _, _, cx| {
+                                        view.groups_form.confirm_remove = None;
+                                        send(GroupCommand::RemovePerson { person }, cx);
+                                    },
                                 ))
-                                .child(caption(label, cx).flex_1().min_w_0().whitespace_normal());
-                            if (manage || mine) && !computer.is_this_computer {
-                                if confirm.as_deref() == Some(key.as_str()) {
-                                    line = line
-                                        .child(
-                                            caption(removal_warning(&name), cx).whitespace_normal(),
-                                        )
-                                        .child(
-                                            design::button(
-                                                ("groups-remove-computer-yes", index * 100 + slot),
-                                                "Yes, remove",
-                                                cx,
-                                            )
-                                            .small()
-                                            .on_click(
-                                                cx.listener(move |view, _, _, cx| {
-                                                    view.groups_form.confirm_remove = None;
-                                                    send(
-                                                        GroupCommand::RemoveComputer { device },
-                                                        cx,
-                                                    );
-                                                }),
-                                            ),
-                                        );
-                                } else {
-                                    line = line.child(
-                                        design::button(
-                                            ("groups-remove-computer", index * 100 + slot),
-                                            "Remove",
-                                            cx,
-                                        )
-                                        .ghost()
-                                        .xsmall()
-                                        .accessibility_label(format!(
-                                            "Remove {name} from the group"
-                                        ))
-                                        .on_click(
-                                            cx.listener(move |view, _, _, cx| {
-                                                view.groups_form.confirm_remove = Some(key.clone());
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    );
-                                }
-                            }
-                            card = card.child(line);
-                        }
-                        if manage && !mine {
-                            let make_admin = row.role != Role::Admin;
-                            card = card.child(
-                                h_flex()
-                                    .flex_wrap()
-                                    .gap(t.space.small)
-                                    .child(
-                                        design::button(
-                                            ("groups-role", index),
-                                            if make_admin {
-                                                "Make admin"
-                                            } else {
-                                                "Make a member again"
-                                            },
-                                            cx,
-                                        )
-                                        .ghost()
-                                        .xsmall()
-                                        .on_click(
-                                            cx.listener(move |_, _, _, cx| {
-                                                let role = if make_admin {
-                                                    Role::Admin
-                                                } else {
-                                                    Role::Member
-                                                };
-                                                send(GroupCommand::ChangeRole { person, role }, cx);
-                                            }),
-                                        ),
-                                    )
-                                    .child(if confirm.as_deref() == Some(person_key.as_str()) {
-                                        design::button(
-                                            ("groups-remove-person-yes", index),
-                                            "Yes, remove them",
-                                            cx,
-                                        )
-                                        .small()
-                                        .on_click(
-                                            cx.listener(move |view, _, _, cx| {
-                                                view.groups_form.confirm_remove = None;
-                                                send(GroupCommand::RemovePerson { person }, cx);
-                                            }),
-                                        )
-                                    } else {
-                                        design::button(
-                                            ("groups-remove-person", index),
-                                            "Remove from group",
-                                            cx,
-                                        )
-                                        .ghost()
-                                        .xsmall()
-                                        .on_click(
-                                            cx.listener(move |view, _, _, cx| {
-                                                view.groups_form.confirm_remove =
-                                                    Some(person_key.clone());
-                                                cx.notify();
-                                            }),
-                                        )
-                                    }),
-                            );
-                        }
-                        card
-                    }),
-            )
+                            } else {
+                                design::button(
+                                    ("groups-remove-person", index),
+                                    "Remove from group",
+                                    cx,
+                                )
+                                .ghost()
+                                .xsmall()
+                                .on_click(cx.listener(
+                                    move |view, _, _, cx| {
+                                        view.groups_form.confirm_remove = Some(person_key.clone());
+                                        cx.notify();
+                                    },
+                                ))
+                            }),
+                    );
+                }
+                card
+            }))
     }
 
     fn render_invites(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -2116,8 +2257,59 @@ impl ModelsView {
                 cx,
             ));
         }
+        // Many notes get a search box, and the page shows them a page at a time.
+        let all = self.groups.knowledge.len();
+        let searching = all > FIND_NOTES_FROM;
+        let wanted = if searching {
+            value(&self.groups_form.find_note, cx)
+        } else {
+            String::new()
+        };
+        let matching = self.groups.notes_matching(&wanted);
+        let found = matching.len();
+        let on_page = self.groups_form.notes_shown.max(NOTES_PAGE);
+        if searching {
+            section = section.child(field(
+                "groups-find-note",
+                "Search the notes",
+                &self.groups_form.find_note,
+                "Type a word from the note, or the name of who shared it.",
+                cx,
+            ));
+            if !wanted.is_empty() {
+                let count = match found {
+                    0 => format!("No note matches “{wanted}”."),
+                    1 => format!("1 of {all} notes"),
+                    n => format!("{n} of {all} notes"),
+                };
+                section = section.child(
+                    caption(count.clone(), cx)
+                        .id("groups-find-note-count")
+                        .role(gpui_kit::Role::Status)
+                        .aria_label(count)
+                        .test_support(),
+                );
+            }
+        }
+        let more = (found > on_page).then(|| {
+            h_flex().child(
+                design::button(
+                    "groups-notes-more",
+                    format!("Show {} more", (found - on_page).min(NOTES_PAGE)),
+                    cx,
+                )
+                .small()
+                .accessibility_label("Show more notes")
+                .on_click(cx.listener(|view, _, _, cx| {
+                    view.groups_form.notes_shown =
+                        view.groups_form.notes_shown.max(NOTES_PAGE) + NOTES_PAGE;
+                    cx.notify();
+                })),
+            )
+        });
         section
-            .children(self.groups.knowledge.iter().enumerate().map(|(index, detail)| {
+            .children(matching.into_iter().take(on_page).map(|index| {
+                let detail = &self.groups.knowledge[index];
                 let id = detail.id;
                 let erase_key = format!("erase:{id:?}");
                 let mine = detail.person.is_some() && detail.person == my_person;
@@ -2202,6 +2394,7 @@ impl ModelsView {
                 }
                 row
             }))
+            .children(more)
     }
 }
 

@@ -1980,6 +1980,22 @@ fn joining_and_connection_status_fit_the_minimum_window_a_wide_window_and_double
             );
             group_event(&events, connected(false));
             group_event(&events, GroupEvent::Invites(vec![grans_invite()]));
+            // Someone in many groups with long names.
+            group_event(
+                &events,
+                GroupEvent::Memberships(
+                    (0..7u8)
+                        .map(|n| {
+                            membership(
+                                &format!("The {n}th neighbourhood gardening and allotment society"),
+                                n,
+                                40,
+                                n == 0,
+                            )
+                        })
+                        .collect(),
+                ),
+            );
             settle(cx);
             cx.update_window(window.into(), |_, window, cx| {
                 shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
@@ -1987,6 +2003,8 @@ fn joining_and_connection_status_fit_the_minimum_window_a_wide_window_and_double
                 inside_column(
                     window,
                     &[
+                        "groups-switcher",
+                        "groups-start-another",
                         "groups-connection",
                         "groups-check-now",
                         "groups-connection-summary",
@@ -2035,6 +2053,383 @@ fn someone_joining_is_announced_once_and_can_be_dismissed(cx: &mut TestAppContex
         window.click("groups-notice-dismiss", cx);
         window.render_frame(cx);
         assert!(window.try_find("groups-notice").is_none());
+    })
+    .expect("window open");
+}
+
+// ---- several groups, large groups, and sharing from a chat ------------------
+
+fn membership(name: &str, id: u8, people: usize, shown: bool) -> sovra_core::group::GroupSummary {
+    sovra_core::group::GroupSummary {
+        group: if id == 0 {
+            family().group
+        } else {
+            GroupId([id; 32])
+        },
+        name: name.into(),
+        people,
+        you: "Mum".into(),
+        shown,
+    }
+}
+
+/// Mum's group with `others` more people in it, each with one computer.
+fn big_group(others: u8) -> GroupState {
+    let nonce = [9; 16];
+    let group = GroupId::derive(&MUM, &nonce);
+    let genesis = UnsignedOp {
+        group,
+        author: MUM,
+        seq: 1,
+        prev: None,
+        deps: Vec::new(),
+        at: Timestamp(1),
+        body: MembershipBody::Genesis {
+            name: "Choir".into(),
+            nonce,
+            founder: PersonId([10; 32]),
+            founder_name: "Mum".into(),
+            device_name: "Mum's laptop".into(),
+        },
+    };
+    let mut ops = vec![genesis.sign(Signature([0; 64]))];
+    for n in 0..others {
+        for body in [
+            MembershipBody::AddPerson {
+                person: PersonId([100 + n; 32]),
+                name: format!("Singer {n:02}"),
+                role: Role::Member,
+            },
+            MembershipBody::AddDevice {
+                person: PersonId([100 + n; 32]),
+                device: DeviceId([100 + n; 32]),
+                name: format!("Tablet {n:02}"),
+            },
+        ] {
+            let draft = fold(group, &ops, &AcceptAll).draft(MUM, Timestamp(2), body);
+            ops.push(draft.sign(Signature([0; 64])));
+        }
+    }
+    fold(group, &ops, &AcceptAll)
+}
+
+fn many_notes(count: u8) -> Vec<SharedDetail> {
+    (0..count)
+        .map(|n| {
+            let mut note = dads_detail();
+            note.id = OpHash([n; 32]);
+            note.text = format!("Rehearsal note number {n:02}");
+            note.shared_at = Timestamp(1_000 - i64::from(n));
+            note
+        })
+        .collect()
+}
+
+#[gpui_kit::test]
+fn your_groups_are_listed_and_you_can_switch_or_start_another(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Memberships(vec![
+            membership("Family", 0, 2, true),
+            membership("Work", 7, 12, false),
+        ]),
+    );
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        assert_eq!(window.find("groups-switcher").label(), Some("Your groups"));
+        assert_eq!(
+            window.find(("groups-switch", 0usize)).label(),
+            Some("Family, the group you are looking at")
+        );
+        assert_eq!(
+            window.find(("groups-switch", 1usize)).label(),
+            Some("Open the group Work")
+        );
+        // Pressing the group already on screen asks for nothing.
+        window.click(("groups-switch", 0usize), cx);
+        window.click(("groups-switch", 1usize), cx);
+        window.click("groups-start-another", cx);
+    })
+    .expect("window open");
+    assert_eq!(
+        drain(&commands)
+            .into_iter()
+            .filter(|command| matches!(command, Command::Group(_)))
+            .collect::<Vec<_>>(),
+        [
+            Command::Group(GroupCommand::Switch {
+                group: GroupId([7; 32])
+            }),
+            Command::Group(GroupCommand::StartAnother),
+        ]
+    );
+
+    // Starting another: the choice appears, the groups stay one press away, and
+    // the first-time explanation is not repeated.
+    group_event(
+        &events,
+        GroupEvent::Memberships(vec![
+            membership("Family", 0, 2, false),
+            membership("Work", 7, 12, false),
+        ]),
+    );
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: None,
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("groups-choose").visible());
+        assert!(window.find(("groups-switch", 1usize)).visible());
+        assert!(window.try_find("groups-start-another").is_none());
+        assert!(window.try_find("groups-intro").is_none());
+        window.click(("groups-switch", 0usize), cx);
+    })
+    .expect("window open");
+    assert!(
+        drain(&commands).contains(&Command::Group(GroupCommand::Switch {
+            group: family().group
+        }))
+    );
+}
+
+#[gpui_kit::test]
+fn a_large_group_is_searchable_and_its_notes_come_a_page_at_a_time(cx: &mut TestAppContext) {
+    let (window, shell, _commands, events) = open(cx, 1280., 6000.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(big_group(12)),
+        },
+    );
+    group_event(&events, GroupEvent::Knowledge(many_notes(30)));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        page(window, cx, "people");
+        assert!(window.find(("groups-person", 12usize)).visible());
+        window.click("groups-find-person", cx);
+        window.input("singer 07", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("groups-find-person-count").label(),
+            Some("1 of 13 people")
+        );
+        assert_eq!(
+            (0..13usize)
+                .filter(|index| window.try_find(("groups-person", *index)).is_some())
+                .count(),
+            1,
+            "only the person found is listed"
+        );
+
+        page(window, cx, "notes");
+        assert!(window.find(("groups-detail", 19usize)).visible());
+        assert!(
+            window.try_find(("groups-detail", 20usize)).is_none(),
+            "the first page holds twenty notes"
+        );
+        press(window, cx, "groups-notes-more");
+        assert!(window.find(("groups-detail", 29usize)).visible());
+        assert!(window.try_find("groups-notes-more").is_none());
+        press(window, cx, "groups-find-note");
+        window.input("number 27", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("groups-find-note-count").label(),
+            Some("1 of 30 notes")
+        );
+        assert!(window.find(("groups-detail", 27usize)).visible());
+        assert!(window.try_find(("groups-detail", 0usize)).is_none());
+    })
+    .expect("window open");
+
+    // A family has no need of either box.
+    let (window, shell, _commands, events) = open(cx, 1280., 2400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    group_event(&events, GroupEvent::Knowledge(vec![dads_detail()]));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| shell.select_tab(NavTab::Groups, cx));
+        window.render_frame(cx);
+        assert!(window.try_find("groups-find-note").is_none());
+        // A group still getting started shows the steps; they fold away on request.
+        assert!(window.find("groups-pane-how").visible());
+        press(window, cx, "groups-how-toggle");
+        assert!(window.try_find("groups-pane-how").is_none());
+        press(window, cx, "groups-how-toggle");
+        assert!(window.find("groups-pane-how").visible());
+        page(window, cx, "people");
+        assert!(window.try_find("groups-find-person").is_none());
+    })
+    .expect("window open");
+}
+
+fn reply(events: &async_channel::Sender<Event>, session: &str, text: &str) {
+    for event in [
+        Event::AgentResponseStarted {
+            session_id: session.to_owned(),
+            model: sovra_core::ResponseModel {
+                route: None,
+                model_id: "m".into(),
+                name: "Model".into(),
+                provider: "Test".into(),
+            },
+        },
+        Event::AgentChunk {
+            session_id: session.to_owned(),
+            text: text.to_owned(),
+        },
+        Event::AgentCompleted {
+            session_id: session.to_owned(),
+        },
+    ] {
+        events.send_blocking(event).expect("fixture is available");
+    }
+}
+
+#[gpui_kit::test]
+fn a_chat_message_is_shared_with_a_group_in_one_press(cx: &mut TestAppContext) {
+    let (window, shell, commands, events) = open(cx, 1280., 1400.);
+    group_event(
+        &events,
+        GroupEvent::Loaded {
+            this_computer: MUM,
+            group: Some(family()),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.send_prompt_text("Who is our plumber?", window, cx);
+        });
+    })
+    .expect("window open");
+    let session = shell.read_with(cx, |shell, _| shell.workspace().session_id.clone());
+    reply(&events, &session, "Your plumber is Sam, 01234 567890.");
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find(("share-message", 1usize)).is_none(),
+            "nothing to share with before the chat knows of a group"
+        );
+    })
+    .expect("window open");
+
+    // One group: the button names it and one press shares.
+    group_event(
+        &events,
+        GroupEvent::Memberships(vec![membership("Family", 0, 2, true)]),
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("share-message", 1usize)).label(),
+            Some("Share this with your group Family")
+        );
+        assert!(
+            window.find(("share-message", 0usize)).visible(),
+            "what the person wrote can be shared too"
+        );
+        window.click(("share-message", 1usize), cx);
+    })
+    .expect("window open");
+    assert_eq!(
+        drain(&commands)
+            .into_iter()
+            .filter(|command| matches!(command, Command::Group(_)))
+            .collect::<Vec<_>>(),
+        [Command::Group(GroupCommand::In {
+            group: family().group,
+            command: Box::new(GroupCommand::Share {
+                text: "Your plumber is Sam, 01234 567890.".into(),
+                about: Vec::new(),
+                with: None,
+            }),
+        })]
+    );
+    group_event(
+        &events,
+        GroupEvent::Shared {
+            group: family().group,
+            group_name: "Family".into(),
+        },
+    );
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("share-message-done", 1usize)).label(),
+            Some("Shared with Family")
+        );
+        assert!(window.try_find(("share-message", 1usize)).is_none());
+    })
+    .expect("window open");
+
+    // Several groups: the button opens a choice. A share that fails says why.
+    group_event(
+        &events,
+        GroupEvent::Memberships(vec![
+            membership("Family", 0, 2, true),
+            membership("Work", 7, 12, false),
+        ]),
+    );
+    settle(cx);
+    drain(&commands);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(("share-message-to", 1usize)).is_none());
+        window.click(("share-message", 0usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("share-message-to", 1usize)).label(),
+            Some("Share this with Work")
+        );
+        window.click(("share-message-to", 1usize), cx);
+    })
+    .expect("window open");
+    assert!(drain(&commands).contains(&Command::Group(GroupCommand::In {
+        group: GroupId([7; 32]),
+        command: Box::new(GroupCommand::Share {
+            text: "Who is our plumber?".into(),
+            about: Vec::new(),
+            with: None,
+        }),
+    })));
+    group_event(&events, GroupEvent::Problem(GroupProblem::NotAllowed));
+    settle(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(("share-message-failed", 0usize)).label(),
+            Some("Couldn't share: Only an admin can do that.")
+        );
     })
     .expect("window open");
 }

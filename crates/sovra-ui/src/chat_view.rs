@@ -104,6 +104,8 @@ pub(crate) struct ChatPresentation {
     pub(crate) turn_started: Option<Instant>,
     was_generating: bool,
     pub(crate) composer_focused: bool,
+    /// "Share with group" on messages.
+    pub(crate) share: crate::chat_share::ChatShare,
 }
 
 fn markdown_view(
@@ -268,6 +270,7 @@ impl ChatPresentation {
             turn_started: None,
             was_generating: false,
             composer_focused: false,
+            share: crate::chat_share::ChatShare::default(),
         }
     }
 
@@ -887,6 +890,7 @@ fn render_user_message(
         .justify_end()
         .items_start()
         .gap(chat.row_gap)
+        .children(shell.chat.share.control(&msg.id, &msg.text, index, cx))
         .child(
             design::button(("copy-user-message", index), "", cx)
                 .ghost()
@@ -1338,6 +1342,7 @@ fn render_assistant_segment(
                 .iter()
                 .any(|artifact| artifact.source.message_id == msg.id);
             let save_text = copy_text.clone();
+            let share_text = copy_text.clone();
             let decision_draft = sovra_core::decisions::DecisionDraft {
                 decision: copy_text.clone(),
                 chat: Some(sovra_core::decisions::DecisionEvidence {
@@ -1412,6 +1417,11 @@ fn render_assistant_segment(
                             );
                         })
                     }))
+                    .children(
+                        answering
+                            .then(|| chat.share.control(&msg.id, &share_text, index, cx))
+                            .flatten(),
+                    )
                     .children(
                         msg.model
                             .as_ref()

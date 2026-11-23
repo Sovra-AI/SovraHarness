@@ -10,6 +10,7 @@ mod artifact_highlight;
 mod artifacts_view;
 mod assets;
 mod chat_history_view;
+mod chat_share;
 mod chat_view;
 mod code_panel;
 mod composer;

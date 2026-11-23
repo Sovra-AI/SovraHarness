@@ -174,7 +174,7 @@ impl Skill {
                 "/connections ".to_owned(),
             ),
             "groups" => (
-                "Opens Groups, which explains everything step by step: start a group or join one, then invite your family or team with a link that works from anywhere, even another country. Share a detail like “the boiler service is on 12 March” and everyone's helpers can answer with it, saying who shared it.".to_owned(),
+                "Opens Groups, which explains everything step by step: start a group or join one, then invite your family or team with a link that works from anywhere, even another country. You can be in several groups, like family and work. Share a detail like “the boiler service is on 12 March” and everyone's helpers can answer with it, saying who shared it.".to_owned(),
                 "/groups ".to_owned(),
             ),
             "share-artifact" => (

@@ -12,7 +12,9 @@ automatically.
 
 ## Start or join
 
-1. Open **Groups**. A computer can belong to one group at a time.
+1. Open **Groups**. A computer can be in several groups at once, such as a
+   family and a team at work. Each keeps its own people, notes, invites,
+   history and choices; nothing passes from one to another.
 2. Choose **Start a new group**, then enter the group name, your name, and the
    name of this computer. Alternatively choose **Join a group** and paste an
    invitation link or enter the same-room code. A pasted link says which group
@@ -77,7 +79,27 @@ namespaces on one machine, each leaving through a different home router: same
 times, and the connection stayed relayed because both routers share one public
 address.
 
+## Several groups
+
+**Your groups** at the top of the page lists every group this computer is in.
+Press one to look at it. **＋ Start or join another group** shows the choice
+again without leaving any group; pressing a group there goes back. The groups
+that are not on screen keep catching up and receiving in the background.
+
+Leaving a group leaves only that one. A link to a group this computer is
+already in is refused here, before it is used. Asking the group, lending or
+borrowing an AI and training with the group act on the group on screen (or the
+first one while another is being started); helpers read the shared notes and
+documents of every group.
+
 ## Share work
+
+- In a chat, press **Share with <group>** under a reply, or beside something
+  you wrote. With several groups the button is **Share with a group** and
+  opens the list. The message goes to everyone in that group and the button
+  becomes **✓ Shared with <group>**; if it could not be shared, the reason is
+  shown there. A short message becomes a shared note; one longer than 2,000
+  characters becomes a shared document titled with its first line.
 
 - In **Shared notes**, write a detail, choose **Everyone**, a person, or a smaller
   circle, then press **Share**. Wait for confirmation before assuming it is saved.
@@ -108,7 +130,11 @@ embedding or indexing jobs. The relevant computers must be online.
 
 ## People, leaving, and history
 
-**People** lists members, roles, computers, and presence. Admins can change Admin/
+**People** lists members, roles, computers, and presence. A group of more than
+eight people gets a **Find a person** box. **Shared notes** gets a **Search the
+notes** box above eight notes and shows twenty at a time with **Show more**.
+The numbered steps on each page show while a group is getting started and
+fold behind **How do I use this page?** afterwards. Admins can change Admin/
 Member roles or remove people/computers after confirmation. The last admin cannot
 leave other people without an admin: appoint another first. If you are alone,
 leaving ends the group. Leaving removes all computers belonging to your person.
@@ -146,7 +172,7 @@ startup.
 | Piece | Where | What happens if it fails |
 | --- | --- | --- |
 | Device secret | Credential entry `group-device-key`, 32 raw bytes stored as hex | Groups are not started. Release builds use the OS keychain. A debug build launched with `SOVRA_DEV=1` (`cargo xtask dev`) uses `dev-credentials/` in app data, owner-only on Unix. |
-| Group record | `<app data>/groups/group.json` | A missing file is an empty record. A corrupt file is logged and the app starts with no group. |
+| Group record | `<app data>/groups/group.json` for the first group, `group-<32 hex digits>.json` beside it for each further one | A missing file is an empty record. A corrupt file is logged and that group does not start. The file of a group that was left is deleted. |
 | Outstanding invites | `invites` in `<app data>/groups/group.json`, each with its 128-bit secret, until used, cancelled or expired | The file is owner-only on Unix. Anyone who can read it can use an unused invite. Leaving the group removes them. Same-room codes stay in memory only. |
 | Reach | `SOVRA_GROUP_REACH` | `local` is direct connections only. `relay` never connects directly. Any other value, including unset, is Internet reach. Read at launch. See [configuration](configuration.md). |
 
@@ -269,7 +295,7 @@ stay on the local network unless every participant was launched with `local`.
 
 ## Limits of this foundation
 
-Shipped today: one group per computer, signed membership, one-time seven-day
+Shipped today: several groups per computer, signed membership, one-time seven-day
 links with QR codes that survive a restart and can be cancelled, joining that
 keeps trying until the inviting computer answers, connection status per
 computer, same-room codes with the picture check, peer sync and
@@ -302,6 +328,8 @@ the removal, their own group file is cleared.
 | QUIC messages and the `GroupStore` / `GroupTransport` ports | `crates/sovra-core/src/group/wire.rs` |
 | iroh endpoint, Ed25519, `groups/group.json` | `crates/sovra-mesh/src/lib.rs`, `crates/sovra-mesh/src/store.rs` |
 | Create, invite, join, admit, sync, broadcast, recall wrapper | `crates/sovra-runtime/src/groups.rs` |
+| One worker per group, which group is on screen, routing requests by group | `Host` and `Router` in that file |
+| Share from a chat message | `crates/sovra-ui/src/chat_share.rs`, `share_from_chat` in `crates/sovra-core/src/group/session.rs` |
 | Device key and reach | `crates/sovra-app/src/main.rs` (`group_device_key`, `group_services`) |
 | Groups tab (layout) | `crates/sovra-ui/src/groups_view.rs` |
 | Groups tab wording, pages and Getting started | `crates/sovra-core/src/group/guide.rs` |

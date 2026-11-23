@@ -392,7 +392,12 @@ impl Computer {
     }
 
     /// The same computer switched on again with every group it saved.
-    fn restart_all(net: &Arc<Network>, n: u8, store: Arc<MemoryStore>, more: Arc<MemoryStores>) -> Self {
+    fn restart_all(
+        net: &Arc<Network>,
+        n: u8,
+        store: Arc<MemoryStore>,
+        more: Arc<MemoryStores>,
+    ) -> Self {
         Self::open_with(net, n, None, store, None, more)
     }
 
@@ -3176,7 +3181,10 @@ async fn a_computer_can_be_in_several_groups_and_keeps_them_apart() {
         .await;
     assert!(!has(&at_work, "Football practice moved to Thursday"));
     assert_eq!(
-        names(&dad.groups(|groups| groups.iter().any(|g| g.name == "Work" && g.shown)).await),
+        names(
+            &dad.groups(|groups| groups.iter().any(|g| g.name == "Work" && g.shown))
+                .await
+        ),
         [("Work", true), ("Family", false)]
     );
     // While Work is on screen, the family group still receives what Mum shares.
@@ -3185,7 +3193,8 @@ async fn a_computer_can_be_in_several_groups_and_keeps_them_apart() {
         about: Vec::new(),
         with: None,
     });
-    mum.knowledge(|details| has(details, "Dinner is at seven")).await;
+    mum.knowledge(|details| has(details, "Dinner is at seven"))
+        .await;
     dad.send(GroupCommand::Switch { group: family });
     let at_home = dad
         .knowledge(|details| has(details, "Dinner is at seven"))
@@ -3194,7 +3203,9 @@ async fn a_computer_can_be_in_several_groups_and_keeps_them_apart() {
     assert!(!has(&at_home, "Payroll runs on the 25th"));
     let mums = mum.store.0.lock().expect("not poisoned").clone();
     assert!(
-        mums.knowledge.iter().all(|op| op.unsigned().group == family),
+        mums.knowledge
+            .iter()
+            .all(|op| op.unsigned().group == family),
         "nothing from Work ever reached Mum's computer"
     );
 
@@ -3233,7 +3244,13 @@ async fn starting_another_group_can_be_abandoned_and_a_stranger_to_a_group_is_re
         names(&mum.groups(|groups| groups.iter().all(|g| !g.shown)).await),
         [("Family", false)]
     );
-    let family = mum.store.0.lock().expect("not poisoned").group.expect("founded");
+    let family = mum
+        .store
+        .0
+        .lock()
+        .expect("not poisoned")
+        .group
+        .expect("founded");
     mum.send(GroupCommand::Switch { group: family });
     mum.roster(|state| state.name == "Family").await;
     assert_eq!(
@@ -3280,6 +3297,8 @@ async fn starting_another_group_can_be_abandoned_and_a_stranger_to_a_group_is_re
     });
     assert_eq!(
         mum.problem().await,
-        sovra_core::group::GroupProblem::Other("This computer isn't in that group any more.".into())
+        sovra_core::group::GroupProblem::Other(
+            "This computer isn't in that group any more.".into()
+        )
     );
 }

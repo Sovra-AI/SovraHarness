@@ -132,7 +132,11 @@ impl GroupStores for FileGroupStores {
     fn fresh(&self) -> Option<Arc<dyn GroupStore>> {
         let mut id = [0u8; 16];
         getrandom::fill(&mut id).ok()?;
-        let hex: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
+        let hex = id.iter().fold(String::with_capacity(32), |mut hex, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
         Some(Arc::new(FileGroupStore::named(
             &self.dir,
             &format!("{MORE_PREFIX}{hex}{MORE_SUFFIX}"),
