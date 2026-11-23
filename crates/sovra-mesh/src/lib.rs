@@ -21,9 +21,9 @@ use std::sync::Arc;
 use iroh::endpoint::presets;
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayUrl, SecretKey, TransportAddr};
 use sovra_core::group::{
-    DeviceId, GroupTransport, MAX_PEER_MESSAGE_BYTES, PEER_ALPN, PeerAddress, PeerHandler,
-    PeerRequest, PeerResponse, Reachability, Route, Signature, SignatureVerifier, Spawn,
-    TransportError,
+    DeviceId, GroupTransport, MAX_PEER_MESSAGE_BYTES, PEER_ALPN, PEER_ALPN_DEFLATE, PeerAddress,
+    PeerHandler, PeerRequest, PeerResponse, Reachability, Route, Signature, SignatureVerifier,
+    Spawn, TransportError,
 };
 
 pub use remote::RemoteMesh;
@@ -152,6 +152,9 @@ impl Mesh {
         let endpoint = builder
             .secret_key(secret.clone())
             .alpns(vec![
+                // The accepting side chooses: deflated frames when the caller
+                // knows them, plain ones for a computer on an older Sovra.
+                PEER_ALPN_DEFLATE.to_vec(),
                 PEER_ALPN.to_vec(),
                 iroh_gossip::net::GOSSIP_ALPN.to_vec(),
             ])
@@ -207,7 +210,14 @@ impl Mesh {
         }
         let connection = self
             .endpoint
-            .connect(Self::target(to)?, PEER_ALPN)
+            .connect_with_opts(
+                Self::target(to)?,
+                PEER_ALPN_DEFLATE,
+                iroh::endpoint::ConnectOptions::new()
+                    .with_additional_alpns(vec![PEER_ALPN.to_vec()]),
+            )
+            .await
+            .map_err(|error| TransportError::Unreachable(error.to_string()))?
             .await
             .map_err(|error| TransportError::Unreachable(error.to_string()))?;
         // Two requests may have dialled at once; the last one in is kept and the
@@ -227,8 +237,9 @@ impl Mesh {
         fn unreachable(error: impl std::fmt::Display) -> TransportError {
             TransportError::Unreachable(error.to_string())
         }
+        let deflated = connection.alpn() == PEER_ALPN_DEFLATE;
         let (mut send, mut recv) = connection.open_bi().await.map_err(unreachable)?;
-        send.write_all(&encode(request))
+        send.write_all(&frame(request, deflated))
             .await
             .map_err(unreachable)?;
         send.finish().map_err(unreachable)?;
@@ -236,7 +247,7 @@ impl Mesh {
             .read_to_end(MAX_PEER_MESSAGE_BYTES)
             .await
             .map_err(|error| TransportError::Protocol(error.to_string()))?;
-        decode(&bytes)
+        unframe(&bytes, deflated)
     }
 
     /// The public key for a device secret, without binding anything.
@@ -269,6 +280,44 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, TransportEr
 
 fn encode<T: serde::Serialize>(value: &T) -> Vec<u8> {
     serde_json::to_vec(value).expect("peer messages are plain serialisable data")
+}
+
+/// One message as it travels: JSON, deflated when both computers agreed to it.
+fn frame<T: serde::Serialize>(value: &T, deflated: bool) -> Vec<u8> {
+    use std::io::Write as _;
+    let json = encode(value);
+    if !deflated {
+        return json;
+    }
+    // The default level, not the fastest: some deflate backends skip the coding
+    // step at their fastest level, and that step is all that shrinks hex.
+    let mut packer = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    packer
+        .write_all(&json)
+        .and_then(|()| packer.finish())
+        .expect("writing to memory cannot fail")
+}
+
+/// Reads one message. A deflated frame is never unpacked beyond the largest
+/// message allowed, however small it was made to look on the wire.
+fn unframe<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    deflated: bool,
+) -> Result<T, TransportError> {
+    use std::io::Read as _;
+    if !deflated {
+        return decode(bytes);
+    }
+    let limit = u64::try_from(MAX_PEER_MESSAGE_BYTES).unwrap_or(u64::MAX);
+    let mut json = Vec::new();
+    flate2::read::DeflateDecoder::new(bytes)
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut json)
+        .map_err(|error| TransportError::Protocol(error.to_string()))?;
+    if json.len() > MAX_PEER_MESSAGE_BYTES {
+        return Err(TransportError::Protocol("message too large".into()));
+    }
+    decode(&json)
 }
 
 /// Records every computer discovery reports, with its announced tag, until shutdown.
@@ -333,12 +382,13 @@ async fn serve_connection(
         return;
     }
     let from = DeviceId(*connection.remote_id().as_bytes());
+    let deflated = connection.alpn() == PEER_ALPN_DEFLATE;
     loop {
         let Ok((mut send, mut recv)) = connection.accept_bi().await else {
             return;
         };
         let response = match recv.read_to_end(MAX_PEER_MESSAGE_BYTES).await {
-            Ok(bytes) => match decode::<PeerRequest>(&bytes) {
+            Ok(bytes) => match unframe::<PeerRequest>(&bytes, deflated) {
                 Ok(request) => handler.handle(from, request).await,
                 Err(_) => PeerResponse::Refused {
                     reason: sovra_core::group::Refusal::Malformed,
@@ -349,7 +399,7 @@ async fn serve_connection(
                 return;
             }
         };
-        if send.write_all(&encode(&response)).await.is_err() || send.finish().is_err() {
+        if send.write_all(&frame(&response, deflated)).await.is_err() || send.finish().is_err() {
             return;
         }
     }

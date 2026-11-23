@@ -33,12 +33,21 @@ use super::membership::MembershipOp;
 /// The application protocol name negotiated in the QUIC handshake. Versioned so
 /// computers on different releases can be told apart.
 pub const PEER_ALPN: &[u8] = b"sovra/group/1";
+/// The same messages with every frame deflated. Shared documents travel as hex
+/// inside JSON, twice their size; through a relay, which passes only tens of
+/// kilobytes a second, halving that is the difference between seconds and
+/// minutes. Computers offer both names and fall back to [`PEER_ALPN`] with a
+/// computer that only knows the first.
+pub const PEER_ALPN_DEFLATE: &[u8] = b"sovra/group/2";
 /// Largest single message either way; a group's whole history fits comfortably.
 pub const MAX_PEER_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Most shared-knowledge bytes one message carries. Shared artifacts make a history
 /// larger than one message; whatever does not fit follows on the next sync round.
-pub const MAX_REPLY_KNOWLEDGE_BYTES: usize = 6 * 1024 * 1024;
+/// Kept small so that on a slow relayed connection each round lands, is saved
+/// and never has to be sent again, instead of one huge message that is lost
+/// whole if the connection drops near its end.
+pub const MAX_REPLY_KNOWLEDGE_BYTES: usize = 1024 * 1024;
 
 /// Keeps operations, in order, until `budget` bytes of JSON are used. The first one
 /// is always kept so every round makes progress. Returns whether any were left out.

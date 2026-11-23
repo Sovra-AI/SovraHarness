@@ -663,3 +663,133 @@ async fn two_computers_far_apart_reach_each_other_through_a_relay() {
     b.close().await;
     while server.join_next().await.is_some() {}
 }
+
+// ---- deflated frames, and computers on an older Sovra ------------------------
+
+/// A sealed document as it travels: bytes written as hex inside JSON.
+fn big_question(len: usize) -> PeerRequest {
+    let mut bytes = vec![0u8; len / 2];
+    getrandom::fill(&mut bytes).expect("the OS has randomness");
+    PeerRequest::Ask {
+        group: GroupId([9; 32]),
+        question: serde_json::to_string(&sovra_core::group::Bytes(bytes)).expect("encodes"),
+    }
+}
+
+#[test]
+fn a_deflated_frame_is_about_half_the_size_and_is_never_unpacked_past_the_limit() {
+    use std::io::Write as _;
+    let request = big_question(400_000);
+    let plain = frame(&request, false);
+    let packed = frame(&request, true);
+    assert!(
+        packed.len() * 10 < plain.len() * 6,
+        "hex deflates to nearly the bytes it stands for: {} of {}",
+        packed.len(),
+        plain.len()
+    );
+    assert_eq!(unframe::<PeerRequest>(&packed, true), Ok(request.clone()));
+    assert_eq!(unframe::<PeerRequest>(&plain, false), Ok(request));
+    assert!(matches!(
+        unframe::<PeerRequest>(b"not deflate at all", true),
+        Err(TransportError::Protocol(_))
+    ));
+
+    // A few kilobytes on the wire that would unpack to far more than one message.
+    let mut packer = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+    packer
+        .write_all(&vec![b' '; MAX_PEER_MESSAGE_BYTES * 4])
+        .expect("writes to memory");
+    let bomb = packer.finish().expect("finishes");
+    assert!(bomb.len() < 200_000);
+    assert_eq!(
+        unframe::<PeerRequest>(&bomb, true),
+        Err(TransportError::Protocol("message too large".into()))
+    );
+}
+
+/// A bare endpoint that speaks only the first protocol name, as Sovra 0.8 does.
+async fn older_sovra(key: u8) -> Endpoint {
+    Endpoint::builder(presets::Minimal)
+        .secret_key(SecretKey::from_bytes(&[key; 32]))
+        .alpns(vec![PEER_ALPN.to_vec()])
+        .bind()
+        .await
+        .expect("binds")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn computers_on_this_sovra_deflate_and_still_talk_to_an_older_one_both_ways() {
+    let new = Mesh::bind([31; 32], Reach::LocalOnly).await.expect("binds");
+    let other = Mesh::bind([32; 32], Reach::LocalOnly).await.expect("binds");
+    let recorder = Arc::new(Recorder {
+        seen_from: std::sync::Mutex::new(Vec::new()),
+        calls: AtomicUsize::new(0),
+    });
+    let mut server = serve(&other, recorder.clone());
+    new.request(&other.address(), sync_request(&new))
+        .await
+        .expect("delivered");
+    let negotiated = new
+        .pool
+        .lock()
+        .expect("not poisoned")
+        .get(&other.this_device())
+        .map(|connection| connection.alpn().to_vec());
+    assert_eq!(negotiated.as_deref(), Some(PEER_ALPN_DEFLATE));
+
+    // An older computer calls this one: plain JSON in, plain JSON back.
+    let old = older_sovra(33).await;
+    let connection = old
+        .connect(Mesh::target(&other.address()).expect("valid"), PEER_ALPN)
+        .await
+        .expect("an older computer still connects");
+    let (mut send, mut recv) = connection.open_bi().await.expect("opens");
+    send.write_all(&encode(&sync_request(&new)))
+        .await
+        .expect("writes");
+    send.finish().expect("finishes");
+    let reply = recv
+        .read_to_end(MAX_PEER_MESSAGE_BYTES)
+        .await
+        .expect("reads");
+    assert!(matches!(
+        decode::<PeerResponse>(&reply),
+        Ok(PeerResponse::Synced { .. })
+    ));
+    connection.close(0u32.into(), b"done");
+
+    // This computer calls an older one: it falls back to plain JSON.
+    let answering = old.clone();
+    let mut old_server = tokio::task::JoinSet::new();
+    old_server.spawn(async move {
+        let connection = answering
+            .accept()
+            .await
+            .expect("a caller")
+            .await
+            .expect("handshake");
+        let (mut send, mut recv) = connection.accept_bi().await.expect("a request");
+        let bytes = recv
+            .read_to_end(MAX_PEER_MESSAGE_BYTES)
+            .await
+            .expect("reads");
+        assert!(decode::<PeerRequest>(&bytes).is_ok(), "plain JSON arrived");
+        send.write_all(&encode(&PeerResponse::Accepted))
+            .await
+            .expect("writes");
+        send.finish().expect("finishes");
+        connection.closed().await;
+    });
+    let response = new
+        .request(&peer_address(&old), sync_request(&new))
+        .await
+        .expect("delivered to the older computer");
+    assert_eq!(response, PeerResponse::Accepted);
+
+    new.close().await;
+    other.close().await;
+    old.close().await;
+    while server.join_next().await.is_some() {}
+    while old_server.join_next().await.is_some() {}
+}

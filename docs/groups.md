@@ -67,6 +67,11 @@ those stay on the relay. Either way the traffic is encrypted between the two
 computers; a relay passes it along and cannot read it. Each computer keeps one
 connection open to every other online computer and reuses it.
 
+A relayed connection is slow. Measured on 2026-11-23 through n0's public relay
+with no direct path, a note arrived in under a second and a 435 KB document in
+about ten seconds; the relay passed roughly 46 KB a second. A direct connection
+has no such limit.
+
 ## Share work
 
 - In **Shared notes**, write a detail, choose **Everyone**, a person, or a smaller
@@ -241,8 +246,11 @@ link made straight after launch is not same-network only; the joining computer
 also looks the inviter up by key. Requests to one computer share one pooled
 QUIC connection, which is what lets a relayed connection move to a direct
 path. A request the runtime gives up on closes that connection, and the next
-request dials again. Catching up runs with every computer at once and allows
-90 seconds per exchange. Hole punching and relay fallback are iroh's, on the
+request dials again. Catching up runs with every computer at once, in rounds of
+at most 1 MiB of shared items, and allows five minutes per exchange. Frames are
+deflated when both computers offer `sovra/group/2`; a computer that only knows
+`sovra/group/1` is still served plain JSON. An item already on its way to a
+computer is not sent to it a second time by a catch-up that starts meanwhile. Hole punching and relay fallback are iroh's, on the
 Internet preset.
 There is no Sovra server in the path, and there is no promise that packets
 stay on the local network unless every participant was launched with `local`.

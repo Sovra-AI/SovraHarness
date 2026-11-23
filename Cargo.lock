@@ -14953,6 +14953,7 @@ dependencies = [
  "aes-gcm",
  "async-trait",
  "curve25519-dalek 5.0.0",
+ "flate2",
  "getrandom 0.4.3",
  "iroh",
  "iroh-gossip",

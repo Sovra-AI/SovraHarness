@@ -74,9 +74,11 @@ impl std::fmt::Debug for GroupServices {
 const SYNC_EVERY: Duration = Duration::from_secs(20);
 /// A request to another computer gives up after this long.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-/// Catching up may carry megabytes of shared documents through a relay, which is
-/// slow; it gets longer before it is given up on and started again from nothing.
-const SYNC_TIMEOUT: Duration = Duration::from_secs(90);
+/// Catching up may carry a megabyte of shared documents through a relay that
+/// passes only tens of kilobytes a second. Giving up early would start the same
+/// message again from nothing, for ever; a computer that has really gone is
+/// noticed by the connection itself within seconds, long before this.
+const SYNC_TIMEOUT: Duration = Duration::from_mins(5);
 /// How long making a link waits for this computer to be reachable from far away,
 /// so a link made straight after starting carries more than same-network addresses.
 const REACHABLE_WAIT_MS: u64 = 3_000;
@@ -100,7 +102,7 @@ const JOIN_RETRY_WAITS: [Duration; 4] = [
 ];
 /// Most catch-up rounds with one computer per sync; each round carries up to
 /// `MAX_REPLY_KNOWLEDGE_BYTES`, so this bounds one sync at a few hundred megabytes.
-const MAX_SYNC_ROUNDS: usize = 32;
+const MAX_SYNC_ROUNDS: usize = 192;
 
 /// What the Groups screens show of the shared lane.
 struct SharedNow {
@@ -745,6 +747,10 @@ struct Inner {
     join_run: u64,
     /// When this computer last finished catching up with the others.
     checked_at: Option<Timestamp>,
+    /// Shared items on their way to each computer right now. A large document
+    /// takes many seconds through a relay; a catch-up that starts meanwhile must
+    /// not send the same thing again beside it and halve the speed of both.
+    pushing: std::collections::BTreeMap<DeviceId, BTreeSet<OpHash>>,
     /// This computer's signed audit history, rebuilt from `record.audit` at start.
     audit: AuditLedger,
     /// Whether every saved entry verified. If not, nothing more is appended, so a
@@ -853,6 +859,7 @@ impl Groups {
                 invites: InviteBook::default(),
                 join_run: 0,
                 checked_at: None,
+                pushing: std::collections::BTreeMap::new(),
                 asks: Vec::new(),
                 limiter: AskLimiter::default(),
                 quiet_until: std::collections::BTreeMap::new(),
@@ -1575,6 +1582,18 @@ impl Groups {
             (self.spawn)(Box::pin(async move {
                 // A two-person space's history only ever goes to that pair's computers.
                 let knowledge = groups.for_device(knowledge, &peer.device).await;
+                // Whatever is already on its way to this computer is left alone.
+                let (knowledge, sending) = {
+                    let mut inner = groups.inner.lock().await;
+                    let on_the_way = inner.pushing.entry(peer.device).or_default();
+                    let knowledge: Vec<KnowledgeOp> = knowledge
+                        .into_iter()
+                        .filter(|op| !on_the_way.contains(&op.hash()))
+                        .collect();
+                    let sending: Vec<OpHash> = knowledge.iter().map(KnowledgeOp::hash).collect();
+                    on_the_way.extend(sending.iter().copied());
+                    (knowledge, sending)
+                };
                 if membership.is_empty() && knowledge.is_empty() {
                     return;
                 }
@@ -1583,7 +1602,16 @@ impl Groups {
                     membership,
                     knowledge,
                 };
-                if let Err(error) = groups.ask_within(&peer, request, SYNC_TIMEOUT).await {
+                let sent = groups.ask_within(&peer, request, SYNC_TIMEOUT).await;
+                {
+                    let mut inner = groups.inner.lock().await;
+                    if let Some(on_the_way) = inner.pushing.get_mut(&peer.device) {
+                        for hash in &sending {
+                            on_the_way.remove(hash);
+                        }
+                    }
+                }
+                if let Err(error) = sent {
                     tracing::debug!(%error, peer = %peer.device.fingerprint(), "push not delivered; sync will retry");
                 }
             }));
@@ -3422,6 +3450,14 @@ impl Groups {
                                     .knowledge
                                     .iter()
                                     .filter(|op| !knowledge.contains(&op.hash()))
+                                    // Already being sent to this computer: it
+                                    // will have it without a second copy.
+                                    .filter(|op| {
+                                        !inner
+                                            .pushing
+                                            .get(&from)
+                                            .is_some_and(|sending| sending.contains(&op.hash()))
+                                    })
                                     .cloned()
                                     .collect(),
                                 &from,

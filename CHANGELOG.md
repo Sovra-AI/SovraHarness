@@ -33,7 +33,11 @@ package version.
   the computer, or inviting without a name, now asks for the name instead of
   failing with "Only an admin can do that" and using up the link. A new link
   appears at the top of **Invite someone**, and an old error message clears
-  once the next action works.
+  once the next action works. Messages between computers are compressed (older
+  versions are still understood), catching up moves in smaller rounds, and a
+  document already on its way is no longer sent again beside itself: on a
+  relay-only connection a 435 KB document now arrives in about ten seconds
+  instead of thirty to sixty.
 
 - The Files page shows the active folder first, explains which folder is holding
   the queue, and reports the current path, indexing stage, elapsed time and

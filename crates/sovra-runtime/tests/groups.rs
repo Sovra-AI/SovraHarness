@@ -57,6 +57,9 @@ struct Network {
     audit_visible_prefix: Mutex<Option<u64>>,
     completed_checkpoints: Mutex<BTreeSet<(DeviceId, u64)>>,
     delivered_gossip: Mutex<BTreeSet<GossipDelivery>>,
+    /// While set, pushes of shared items wait here, like a large document
+    /// crawling through a relay.
+    slow_pushes: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
 }
 
 /// Recipient, topic and content hash, matching content-based gossip suppression.
@@ -267,6 +270,12 @@ impl GroupTransport for LoopTransport {
             .get(&to.device)
             .cloned()
             .ok_or_else(|| TransportError::Unreachable("not listening".into()))?;
+        let slow = self.net.slow_pushes.lock().expect("not poisoned").clone();
+        if let (Some(gate), PeerRequest::Push { knowledge, .. }) = (slow, &request)
+            && !knowledge.is_empty()
+        {
+            let _through = gate.acquire().await.expect("the gate stays open");
+        }
         // Round-trip through JSON, as the real wire does, with its size cap.
         let encoded = serde_json::to_vec(&request).expect("encodes");
         assert!(
@@ -2956,4 +2965,76 @@ async fn a_missing_name_is_asked_for_and_never_uses_up_the_invite() {
         computer_name: "Desktop".into(),
     });
     dad.roster(|state| state.people.len() == 2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_document_on_its_way_is_not_sent_again_by_a_catch_up() {
+    let net = Arc::new(Network::default());
+    let mum = founded(&net, 93).await;
+    mum.send(invite("Dad"));
+    let link = mum.link().await;
+    let dad = Computer::start(&net, 94);
+    dad.send(GroupCommand::Join {
+        link,
+        computer_name: "Desktop".into(),
+    });
+    let family = dad.roster(|state| state.people.len() == 2).await;
+    mum.roster(|state| state.people.len() == 2).await;
+
+    let handler = net
+        .handlers
+        .lock()
+        .expect("not poisoned")
+        .get(&mum.device)
+        .cloned()
+        .expect("mum listening");
+    let catch_up = || PeerRequest::Sync {
+        group: family.group,
+        membership: BTreeSet::new(),
+        knowledge: BTreeSet::new(),
+        from: PeerAddress {
+            device: dad.device,
+            relay: None,
+            addrs: vec!["loopback".into()],
+        },
+    };
+    let shared_ops = |response: PeerResponse| match response {
+        PeerResponse::Synced { knowledge, .. } => knowledge.len(),
+        other => panic!("unexpected answer: {other:?}"),
+    };
+    let before = shared_ops(handler.handle(dad.device, catch_up()).await);
+
+    // Mum shares a note; on a slow connection it is still on its way to Dad.
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *net.slow_pushes.lock().expect("not poisoned") = Some(gate.clone());
+    mum.send(GroupCommand::Share {
+        text: "The long family letter".into(),
+        about: Vec::new(),
+        with: None,
+    });
+    mum.knowledge(|details| has(details, "The long family letter"))
+        .await;
+
+    // Dad's computer catches up meanwhile. Mum's does not send a second copy
+    // beside the first.
+    let everything = shared_ops(handler.handle(dad.device, catch_up()).await);
+    assert_eq!(everything, before, "nothing on its way is offered again");
+
+    // The first copy arrives; from then on a catch-up offers it as usual.
+    gate.add_permits(64);
+    dad.knowledge(|details| has(details, "The long family letter"))
+        .await;
+    *net.slow_pushes.lock().expect("not poisoned") = None;
+    let mut after = everything;
+    for _ in 0..50 {
+        after = shared_ops(handler.handle(dad.device, catch_up()).await);
+        if after > everything {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        after > everything,
+        "once it has arrived, a catch-up offers the note as usual"
+    );
 }
