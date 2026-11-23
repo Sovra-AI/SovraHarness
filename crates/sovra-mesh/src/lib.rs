@@ -49,88 +49,69 @@ pub enum Reach {
 /// it is called offline instead of "getting connected".
 const CONNECTING_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
 
+/// The handler and task spawner [`GroupTransport::serve`] was started with.
+#[derive(Clone, Default)]
+struct Serving(Arc<std::sync::Mutex<Option<Server>>>);
+
+/// Who answers requests, and where their tasks run.
+type Server = (Arc<dyn PeerHandler>, Spawn);
+
+impl std::fmt::Debug for Serving {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Serving")
+    }
+}
+
+impl Serving {
+    fn get(&self) -> Option<Server> {
+        self.0
+            .lock()
+            .expect("serving lock is never poisoned")
+            .clone()
+    }
+
+    fn set(&self, serving: Option<Server>) {
+        *self.0.lock().expect("serving lock is never poisoned") = serving;
+    }
+}
+
 /// One open connection per computer, reused for every request to it.
 type Pool = Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, Pooled>>>;
 
-/// The latest connection each computer opened to this one.
-type Accepted =
-    Arc<std::sync::Mutex<std::collections::BTreeMap<DeviceId, iroh::endpoint::Connection>>>;
+/// A connection younger than this that is replaced in the pool is left to finish
+/// what it carries: two computers that dial each other at the same moment each
+/// end up using the other's connection, and neither is cut off.
+const SETTLED_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Notes a new connection from `from` and returns this side's own connection
-/// to that computer, if it has one, to be checked (see [`probe`]).
+/// Makes the connection `from` just opened the one this computer uses for its
+/// own requests to `from`. Requests travel both ways on one connection, so there
+/// is nothing to dial; and when a computer comes back after a crash, a closed
+/// lid or a quick restart, with no goodbye, its first word arrives on a new
+/// connection and the answer goes straight back on it. Dialling it instead can
+/// hang for half a minute, because the connections it left behind go on looking
+/// open and packets keep going to where it used to be.
 ///
-/// A computer keeps one connection open and reuses it, so a new one arriving
-/// usually means it started again: after a crash, a closed lid or a quick
-/// restart there is no goodbye, and this side's connection to it would go on
-/// looking open for up to half a minute while leading nowhere. The connection
-/// it had opened before, if that still looks open, is closed here: while it
-/// stays, packets for that computer keep going to where it used to be.
-fn welcome_back(
-    from: DeviceId,
-    connection: &iroh::endpoint::Connection,
-    accepted: &Accepted,
-    pool: &Pool,
-) -> Option<Pooled> {
-    let earlier = accepted
+/// The connection it replaces, if it has been in use for a while, is closed:
+/// whatever was waiting on it was waiting for a program that is gone, and is
+/// sent again on the new one.
+fn adopt(pool: &Pool, from: DeviceId, connection: &iroh::endpoint::Connection) {
+    let replaced = pool
         .lock()
-        .expect("accepted connections lock is never poisoned")
-        .insert(from, connection.clone());
-    let restarted = earlier.is_some_and(|earlier| {
-        let open = earlier.close_reason().is_none();
-        if open {
-            earlier.close(0u32.into(), b"replaced");
-        }
-        open
-    });
-    let mut pool = pool.lock().expect("connection pool lock is never poisoned");
-    let pooled = pool
-        .get(&from)
-        .filter(|pooled| pooled.connection.close_reason().is_none())
-        .cloned()?;
-    // A second connection while the first still looked open is as good as
-    // proof of a restart: with nothing travelling on this side's connection it
-    // is dropped at once, so the very next request dials afresh. Otherwise the
-    // connection is only checked, and kept if it answers.
-    if restarted && pooled.busy.load(std::sync::atomic::Ordering::SeqCst) == 0 {
-        pool.remove(&from);
-        pooled.connection.close(0u32.into(), b"replaced");
-        return None;
-    }
-    Some(pooled)
-}
-
-/// How long a connection that may lead nowhere gets to answer a probe.
-const PROBE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// Asks this side's connection to a computer for any answer at all, when that
-/// computer has just opened a new connection here. A living computer refuses the
-/// meaningless question at once, even beside a large document, and nothing
-/// changes. Silence means the connection leads to a computer that is no longer
-/// there: it is closed, and whatever was waiting on it is sent again afresh.
-async fn probe(pool: Pool, device: DeviceId, pooled: Pooled) {
-    let answered = n0_future::time::timeout(PROBE_WAIT, async {
-        let (mut send, mut recv) = pooled.connection.open_bi().await.ok()?;
-        send.write_all(b"?").await.ok()?;
-        send.finish().ok()?;
-        recv.read_to_end(MAX_PEER_MESSAGE_BYTES).await.ok()
-    })
-    .await
-    .ok()
-    .flatten()
-    .is_some();
-    if answered {
-        return;
-    }
-    tracing::debug!(peer = %device.fingerprint(), "connection to a restarted computer dropped");
-    let mut open = pool.lock().expect("connection pool lock is never poisoned");
-    if open
-        .get(&device)
-        .is_some_and(|kept| kept.connection.stable_id() == pooled.connection.stable_id())
+        .expect("connection pool lock is never poisoned")
+        .insert(
+            from,
+            Pooled {
+                connection: connection.clone(),
+                busy: Arc::default(),
+                opened: std::time::Instant::now(),
+            },
+        );
+    if let Some(replaced) = replaced
+        && replaced.connection.stable_id() != connection.stable_id()
+        && replaced.opened.elapsed() >= SETTLED_AFTER
     {
-        open.remove(&device);
+        replaced.connection.close(0u32.into(), b"replaced");
     }
-    drop(open);
-    pooled.connection.close(0u32.into(), b"replaced");
 }
 
 /// A pooled connection and how many requests are travelling on it right now.
@@ -138,6 +119,7 @@ async fn probe(pool: Pool, device: DeviceId, pooled: Pooled) {
 struct Pooled {
     connection: iroh::endpoint::Connection,
     busy: Arc<std::sync::atomic::AtomicUsize>,
+    opened: std::time::Instant,
 }
 
 /// Counts one request on a pooled connection. When the request ends without an
@@ -234,9 +216,9 @@ pub struct Mesh {
         Arc<std::sync::Mutex<std::collections::BTreeMap<[u8; 32], iroh_gossip::api::GossipSender>>>,
     /// Open connections to other computers, reused request after request.
     pool: Pool,
-    /// The latest connection each computer opened to this one, to notice when
-    /// one comes back after a restart (see [`welcome_back`]).
-    accepted: Accepted,
+    /// Who answers requests, once [`GroupTransport::serve`] has started: a
+    /// connection this computer opens carries the other computer's requests too.
+    serving: Serving,
     reach: Reach,
     started: std::time::Instant,
 }
@@ -299,7 +281,7 @@ impl Mesh {
             known,
             topics: Arc::default(),
             pool: Arc::default(),
-            accepted: Arc::default(),
+            serving: Serving::default(),
             reach,
             started: std::time::Instant::now(),
         })
@@ -331,9 +313,24 @@ impl Mesh {
             .map_err(|error| TransportError::Unreachable(error.to_string()))?
             .await
             .map_err(|error| TransportError::Unreachable(error.to_string()))?;
+        // Both computers send requests on this one connection (only computers
+        // that deflate know to), so answer the other one's here too.
+        if let Some((handler, spawn)) = self.serving.get()
+            && connection.alpn() == PEER_ALPN_DEFLATE
+        {
+            let tasks = spawn.clone();
+            spawn(Box::pin(serve_requests(
+                connection.clone(),
+                handler,
+                tasks,
+                to.device,
+                true,
+            )));
+        }
         let pooled = Pooled {
             connection,
             busy: Arc::default(),
+            opened: std::time::Instant::now(),
         };
         // Two requests may have dialled at once; the last one in is kept and the
         // other closes once its request is done and it is dropped.
@@ -488,7 +485,6 @@ async fn serve_connection(
     handler: Arc<dyn PeerHandler>,
     gossip: iroh_gossip::net::Gossip,
     spawn: Spawn,
-    accepted: Accepted,
     pool: Pool,
 ) {
     let connection = match incoming.await {
@@ -506,12 +502,23 @@ async fn serve_connection(
     }
     let from = DeviceId(*connection.remote_id().as_bytes());
     let deflated = connection.alpn() == PEER_ALPN_DEFLATE;
-    if let Some(doubtful) = welcome_back(from, &connection, &accepted, &pool) {
-        spawn(Box::pin(probe(pool.clone(), from, doubtful)));
+    if deflated {
+        adopt(&pool, from, &connection);
     }
-    // Each request gets its own task: the other computer sends everything on one
-    // connection, and a small question must not wait behind a large document,
-    // nor may one abandoned request end the connection for the rest.
+    serve_requests(connection, handler, spawn, from, deflated).await;
+}
+
+/// Answers every request arriving on `connection` until it closes. Each request
+/// gets its own task: everything between two computers shares one connection,
+/// and a small question must not wait behind a large document, nor may one
+/// abandoned request end the connection for the rest.
+async fn serve_requests(
+    connection: iroh::endpoint::Connection,
+    handler: Arc<dyn PeerHandler>,
+    spawn: Spawn,
+    from: DeviceId,
+    deflated: bool,
+) {
     while let Ok((send, recv)) = connection.accept_bi().await {
         spawn(Box::pin(serve_request(
             send,
@@ -676,6 +683,7 @@ impl GroupTransport for Mesh {
     }
 
     async fn serve(&self, handler: Arc<dyn PeerHandler>, spawn: Spawn) {
+        self.serving.set(Some((handler.clone(), spawn.clone())));
         // Keep the nearby table current on the runtime's own task.
         if let Some(nearby) = self.nearby.clone() {
             let heard = self.heard.clone();
@@ -688,7 +696,6 @@ impl GroupTransport for Mesh {
                 handler.clone(),
                 self.gossip.clone(),
                 spawn.clone(),
-                self.accepted.clone(),
                 self.pool.clone(),
             )));
         }
@@ -791,10 +798,7 @@ impl GroupTransport for Mesh {
         for pooled in open.into_values() {
             pooled.connection.close(0u32.into(), b"done");
         }
-        self.accepted
-            .lock()
-            .expect("accepted connections lock is never poisoned")
-            .clear();
+        self.serving.set(None);
         self.endpoint.close().await;
     }
 }

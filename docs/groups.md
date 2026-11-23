@@ -253,11 +253,12 @@ QUIC connection, which is what lets a relayed connection move to a direct
 path. Each request has its own stream and is answered on its own task, so a
 small question does not wait behind a large document, and a request the
 runtime stops waiting for does not disturb the others. A connection that
-closes is dialled again by the next request. When a computer opens a new
-connection, this side's own connection to it is probed and dropped if it is
-silent, so a computer that restarted without a goodbye is not waited on. The
-group broadcast layer keeps its own connections; after such a restart, requests
-to that computer can still take up to about thirty seconds to get through. Catching up runs with every computer at once, in rounds of
+closes is dialled again by the next request. A connection carries requests
+both ways, so two computers share one whoever opened it; when a computer
+restarts without a goodbye, its first message arrives on a new connection and
+the other side answers on that one instead of dialling the address it had,
+which can hang for about thirty seconds. Computers on `sovra/group/1` still
+use one connection each way. Catching up runs with every computer at once, in rounds of
 at most 1 MiB of shared items, and allows five minutes per exchange. Frames are
 deflated when both computers offer `sovra/group/2`; a computer that only knows
 `sovra/group/1` is still served plain JSON. An item already on its way to a

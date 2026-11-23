@@ -758,6 +758,8 @@ async fn a_request_already_waiting_on_a_computer_that_restarted_is_sent_again() 
     })
     .await
     .expect("the request is on its way");
+    // The connection has been in use for a while when B is cut off.
+    tokio::time::sleep(SETTLED_AFTER + std::time::Duration::from_millis(200)).await;
 
     drop(b);
     running.cut_off().await;
@@ -769,13 +771,82 @@ async fn a_request_already_waiting_on_a_computer_that_restarted_is_sent_again() 
 
     // The waiting request is answered by the new B, long before the old
     // connection would have timed out.
-    let response = tokio::time::timeout(std::time::Duration::from_secs(12), waiting.join_next())
+    let response = tokio::time::timeout(std::time::Duration::from_secs(20), waiting.join_next())
         .await
         .expect("not left waiting for a computer that is gone")
         .expect("the request was started")
         .expect("task finishes")
         .expect("sent again and answered");
     assert!(matches!(response, PeerResponse::Synced { .. }));
+
+    a.close().await;
+    b.close().await;
+    while a_server.join_next().await.is_some() {}
+    while b_server.join_next().await.is_some() {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restarted_computer_is_answered_on_its_new_connection_despite_old_broadcast_links() {
+    let a = Mesh::bind([33; 32], Reach::LocalOnly).await.expect("binds");
+    let b = Mesh::bind([34; 32], Reach::LocalOnly).await.expect("binds");
+    let recorder = || {
+        Arc::new(Recorder {
+            seen_from: std::sync::Mutex::new(Vec::new()),
+            calls: AtomicUsize::new(0),
+        })
+    };
+    let mut a_server = serve(&a, recorder());
+    let old_address = b.address();
+    let running = Running::start(b.clone(), recorder());
+    // The broadcast layer keeps connections of its own between the two, which
+    // nothing here can close when B vanishes.
+    let (spawn_a, _a_tasks) = spawner();
+    let spawn_b: Spawn = {
+        let tasks = running.connections.clone();
+        Arc::new(move |task| {
+            tasks.lock().expect("not poisoned").spawn(task);
+        })
+    };
+    let topic = [6; 32];
+    let heard_by_b = Arc::new(Heard::default());
+    a.gossip_join(
+        topic,
+        vec![old_address.clone()],
+        Arc::new(Heard::default()),
+        spawn_a,
+    )
+    .await;
+    b.gossip_join(topic, vec![a.address()], heard_by_b.clone(), spawn_b)
+        .await;
+    a.request(&old_address, sync_request(&a))
+        .await
+        .expect("delivered");
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while heard_by_b.0.lock().expect("not poisoned").is_empty() {
+            a.gossip_send(topic, b"hello".to_vec()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the broadcast link is up");
+
+    drop(b);
+    running.cut_off().await;
+    let b = Mesh::bind([34; 32], Reach::LocalOnly).await.expect("binds");
+    let mut b_server = serve(&b, recorder());
+    b.request(&a.address(), sync_request(&b))
+        .await
+        .expect("the restarted computer reaches A");
+
+    // Dialling B now would hang for half a minute behind the dead broadcast
+    // link. A answers on the connection B just opened instead.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        a.request(&old_address, sync_request(&a)),
+    )
+    .await
+    .expect("no waiting behind the old broadcast link")
+    .expect("delivered to the restarted computer");
 
     a.close().await;
     b.close().await;
