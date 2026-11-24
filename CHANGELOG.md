@@ -83,6 +83,10 @@ package version.
   that only say a search found nothing, and short replies that only announce a
   search. Your own words and helper replies with content are still used. This
   also covers replies saved before this change, so nothing needs to be deleted.
+- **Helpers no longer invent quotes from tables.** A small model wrote "Basil is
+  grown by Anna" in quotation marks although the file holds only a table row.
+  Helpers are now told to quote only wording that appears in a passage and to
+  describe a table row instead; the same model then answered plainly.
 
 ## [0.9.0] — 2026-11-24
 
