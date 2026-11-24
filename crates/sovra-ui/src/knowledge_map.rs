@@ -43,6 +43,16 @@ enum OptionKey {
     LinkedLayout,
 }
 
+struct Hover {
+    node: usize,
+    neighbours: BTreeSet<usize>,
+}
+impl Hover {
+    fn includes(&self, i: usize) -> bool {
+        i == self.node || self.neighbours.contains(&i)
+    }
+}
+
 pub(crate) struct MapView {
     width: design::WidthClass,
     filters_open: bool,
@@ -60,6 +70,7 @@ pub(crate) struct MapView {
     pending: Option<(u64, Option<String>)>,
     status: String,
     selected: Option<String>,
+    hover: Option<Rc<Hover>>,
     hidden: BTreeSet<Layer>,
     page: usize,
     neighbours: usize,
@@ -100,6 +111,7 @@ impl MapView {
             pending: None,
             status: String::new(),
             selected: None,
+            hover: None,
             hidden: BTreeSet::new(),
             page: 0,
             neighbours: 0,
@@ -125,7 +137,28 @@ impl MapView {
     fn on(&self, option: OptionKey) -> bool {
         self.options.contains(&option)
     }
+    fn set_hover(&mut self, node: Option<usize>) -> bool {
+        if self.hover.as_ref().map(|h| h.node) == node {
+            return false;
+        }
+        self.hover = node.map(|i| {
+            Rc::new(Hover {
+                node: i,
+                neighbours: self
+                    .scene
+                    .neighbours(
+                        i,
+                        self.on(OptionKey::Membership),
+                        self.on(OptionKey::Relationships),
+                    )
+                    .filter(|&j| self.shown[j] && j != i)
+                    .collect(),
+            })
+        });
+        true
+    }
     fn filter(&mut self) {
+        self.hover = None;
         self.shown = Rc::new(self.scene.visible(
             &self.hidden,
             self.selected_index().filter(|_| self.on(OptionKey::Focus)),
@@ -670,7 +703,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     .truncate()
                     .sovra_text(TextRole::Caption, cx)
                     .text_color(t.text_secondary)
-                    .child("Scroll to zoom · Drag to pan · Select a point to explore"),
+                    .child("Hover to highlight connections · Scroll to zoom · Drag to pan"),
             );
         }
         page =

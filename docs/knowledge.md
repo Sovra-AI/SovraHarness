@@ -44,6 +44,8 @@ cited passage. A **mentions topic** link means two records use the same label.
 files, saved details and artifacts onto the map. Each source keeps its own identity.
 
 Scroll up over the graph to zoom in at the pointer, or scroll down to zoom out.
+Hover over a point or its label to highlight its direct neighbours and the links between them.
+Unrelated points and links turn grey. Moving away restores the map and keeps your selected record open.
 Drag to pan. Pinch and the zoom buttons also work. **Fit map** restores the overview. Use **Neighbours only** to inspect one point and its direct links.
 **Read as a list** gives keyboard access to the points and their connections.
 **Include history** reopens the map with earlier records, file observations and

@@ -3,7 +3,7 @@ use gpui_kit::{
     TestAppContext,
     component::{Root, Theme, ThemeMode},
     point, size,
-    test::TestWindowExt as _,
+    test::{TestEventExt as _, TestWindowExt as _},
 };
 use sovra_core::{NavTab, models::InterfaceScale};
 use sovra_runtime::Client;
@@ -34,6 +34,7 @@ fn example() -> MapPage {
     );
     page.member(Layer::Artifacts, &id);
     page.subject(&id, "Starling", Layer::Artifacts);
+    page.link(&id, &root, "cites", false);
     page
 }
 #[test]
@@ -63,6 +64,80 @@ fn linked_layout_preserves_neighbours_in_a_large_scene() {
     for key in ["record:4999", "record:5000", "record:5001"] {
         assert!(shown[scene.by_id[key]]);
     }
+}
+
+fn check_hover(shell: &Entity<Shell>, window: &mut Window, cx: &mut gpui_kit::App) {
+    let state = &shell.read(cx).knowledge_map;
+    let indices = &state.scene.by_id;
+    let artifact = indices["artifact:one"];
+    let topic = indices["topic:starling"];
+    let root = indices["root:one"];
+    let hub = indices[&Layer::Artifacts.hub()];
+    let files = indices[&Layer::Files.hub()];
+    let records = state.visible_nodes;
+    let dot = &state.scene.nodes[artifact];
+    let position = state.frame.unwrap().to_screen(state.camera, dot.x, dot.y);
+    window.pointer_move(position, None, cx);
+    window.render_frame(cx);
+    let state = &shell.read(cx).knowledge_map;
+    let h = state
+        .hover
+        .as_ref()
+        .expect("a painted dot responds without clicking");
+    assert_eq!(h.node, artifact);
+    assert_eq!(h.neighbours, BTreeSet::from([root, topic, hub]));
+    assert!(!h.includes(files), "two hops away");
+    assert_eq!(state.visible_nodes, records);
+    assert!(state.selected.is_none());
+
+    let empty = window.find("knowledge-map-canvas").bounds().origin
+        + point(Pixels::from(3.), Pixels::from(3.));
+    window.pointer_move(empty, None, cx);
+    window.render_frame(cx);
+    assert!(shell.read(cx).knowledge_map.hover.is_none());
+
+    window.click("atlas-filters", cx);
+    window.render_frame(cx);
+    window.click("atlas-membership", cx);
+    window.click(("atlas-layer", Layer::Files as usize), cx);
+    window.render_frame(cx);
+    window.hover(("atlas-label", artifact), cx);
+    window.render_frame(cx);
+    assert_eq!(
+        shell
+            .read(cx)
+            .knowledge_map
+            .hover
+            .as_ref()
+            .unwrap()
+            .neighbours,
+        BTreeSet::from([topic])
+    );
+    window.click(("atlas-label", artifact), cx);
+    window.render_frame(cx);
+    window.hover(("atlas-label", hub), cx);
+    window.render_frame(cx);
+    let state = &shell.read(cx).knowledge_map;
+    assert_eq!(state.selected_index(), Some(artifact));
+    let h = state
+        .hover
+        .as_ref()
+        .expect("label hover previews an isolated hub");
+    assert_eq!(h.node, hub);
+    assert!(h.neighbours.is_empty());
+    window.hover("atlas-close", cx);
+    window.render_frame(cx);
+    assert!(shell.read(cx).knowledge_map.hover.is_none());
+    assert_eq!(
+        shell.read(cx).knowledge_map.selected_index(),
+        Some(artifact)
+    );
+
+    window.click("atlas-clear", cx);
+    window.click(("atlas-layer", Layer::Files as usize), cx);
+    window.click("atlas-membership", cx);
+    window.click("atlas-filters", cx);
+    window.render_frame(cx);
 }
 
 #[gpui_kit::test]
@@ -129,6 +204,9 @@ fn knowledge_map_fits_the_pane_and_expands_through_the_native_controls(cx: &mut 
             assert!(window.find("atlas-fit").visible());
             assert!(window.try_find("sovra-sidebar").is_none());
 
+            if scale == 100 {
+                check_hover(shell, window, cx);
+            }
             let map = &shell.read(cx).knowledge_map;
             let label = (0..map.scene.nodes.len())
                 .find(|&i| {

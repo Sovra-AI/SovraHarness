@@ -9,6 +9,7 @@ pub(super) struct Scene {
     pub edges: Vec<Edge>,
     pub adjacent: Vec<Vec<usize>>,
     pub by_id: BTreeMap<String, usize>,
+    pub by_x: Vec<usize>,
 }
 pub(super) struct Dot {
     pub id: String,
@@ -99,6 +100,12 @@ impl Scene {
         if linked {
             scene.arrange_connections();
         }
+        // The camera preserves horizontal order. Pointer moves can search a
+        // narrow slice of the scene even after panning or zooming.
+        scene.by_x = (0..scene.nodes.len()).collect();
+        scene
+            .by_x
+            .sort_unstable_by(|&a, &b| scene.nodes[a].x.total_cmp(&scene.nodes[b].x));
         scene
     }
 
@@ -162,6 +169,23 @@ impl Scene {
             }
         }
     }
+    pub(super) fn neighbours(
+        &self,
+        node: usize,
+        membership: bool,
+        relationships: bool,
+    ) -> impl Iterator<Item = usize> {
+        self.adjacent[node].iter().filter_map(move |&j| {
+            let e = &self.edges[j];
+            let enabled = if e.membership {
+                membership
+            } else {
+                relationships
+            };
+            enabled.then_some(if e.from == node { e.to } else { e.from })
+        })
+    }
+
     pub(super) fn visible(
         &self,
         hidden: &BTreeSet<Layer>,
@@ -172,12 +196,8 @@ impl Scene {
         let mut shown = vec![focus.is_none(); self.nodes.len()];
         if let Some(i) = focus {
             shown[i] = true;
-            for &j in &self.adjacent[i] {
-                let e = &self.edges[j];
-                if (e.membership && membership) || (!e.membership && relationships) {
-                    shown[e.from] = true;
-                    shown[e.to] = true;
-                }
+            for neighbour in self.neighbours(i, membership, relationships) {
+                shown[neighbour] = true;
             }
         }
         for (show, dot) in shown.iter_mut().zip(&self.nodes) {

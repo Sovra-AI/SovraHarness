@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+- Hover over a Knowledge map point or its label to highlight its direct connections. The rest of the map turns grey until the pointer moves away.
+
 - The Knowledge map fills the desktop workspace. Scroll over any point or label to zoom around the pointer. Search and filters open on demand.
 
 - **Explore all your knowledge on one map.** Open the map from Knowledge, show the collections you want and follow a relationship back to the wording behind it. Folder and finding counts cover the index, and you can draw more records as you explore.

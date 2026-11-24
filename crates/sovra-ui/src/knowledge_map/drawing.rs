@@ -35,6 +35,40 @@ fn node_diameter(scene: &Scene, index: usize, base: Pixels, hub: Pixels, zoom: f
     diameter * zoom.sqrt().clamp(0.85, 1.7)
 }
 
+fn node_at(
+    state: &MapView,
+    at: Point<Pixels>,
+    window: &Window,
+    cx: &Context<Shell>,
+) -> Option<usize> {
+    let frame = state.frame?;
+    let ink = design::tokens(cx).graph;
+    let rem = window.rem_size();
+    let base = ink.node.to_pixels(rem);
+    let hub = ink.node_max.to_pixels(rem);
+    let tap = ink.hit.to_pixels(rem) * 0.45;
+    let reach = tap.max(hub * 0.5 * state.camera.zoom.sqrt().clamp(0.85, 1.7));
+    let scene = &state.scene;
+    let screen = |i: usize| {
+        let dot = &scene.nodes[i];
+        frame.to_screen(state.camera, dot.x, dot.y)
+    };
+    let first = scene.by_x.partition_point(|&i| screen(i).x < at.x - reach);
+    let last = scene.by_x.partition_point(|&i| screen(i).x <= at.x + reach);
+    scene.by_x[first..last]
+        .iter()
+        .copied()
+        .filter(|&i| state.shown[i])
+        .filter_map(|i| {
+            let p = screen(i);
+            let distance = (at.x - p.x).abs().max((at.y - p.y).abs());
+            let radius = node_diameter(scene, i, base, hub, state.camera.zoom) * 0.5;
+            (frame.bounds.contains(&p) && distance <= tap.max(radius)).then_some((i, distance))
+        })
+        .min_by_key(|&(_, distance)| distance)
+        .map(|(i, _)| i)
+}
+
 pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let state = &shell.knowledge_map;
     let tokens = design::tokens(cx);
@@ -51,6 +85,9 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
     let scene = state.scene.clone();
     let visible = state.shown.clone();
     let selected = state.selected_index();
+    let hover = state.hover.clone();
+    let focus = hover.as_ref().map(|h| h.node).or(selected);
+    let quiet = tokens.text_secondary.grayscale();
     let view = state.camera;
     let draw_members = state.on(OptionKey::Membership);
     let draw_links = state.on(OptionKey::Relationships);
@@ -64,6 +101,7 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
             weak.update(cx, |shell, cx| {
                 if shell.knowledge_map.frame != Some(frame) {
                     shell.knowledge_map.frame = Some(frame);
+                    shell.knowledge_map.hover = None;
                     // Labels are GPUI elements laid out before the canvas is measured.
                     // Rebuild them against the new bounds after this frame is presented.
                     cx.on_next_frame(window, |_, _, cx| cx.notify());
@@ -103,7 +141,7 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                     {
                         continue;
                     }
-                    let lit = Some(e.from) == selected || Some(e.to) == selected;
+                    let lit = Some(e.from) == focus || Some(e.to) == focus;
                     if active != lit {
                         continue;
                     }
@@ -129,20 +167,28 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                     if let Some(p) = path
                         && let Ok(p) = p.build()
                     {
-                        window.paint_path(
-                            p,
-                            colour.alpha(if active {
-                                0.95
-                            } else if selected.is_some() {
-                                0.14
-                            } else {
-                                0.52
-                            }),
-                        );
+                        let stroke = if active {
+                            colour.alpha(0.95)
+                        } else if hover.is_some() {
+                            quiet.alpha(0.20)
+                        } else if selected.is_some() {
+                            colour.alpha(0.14)
+                        } else {
+                            colour.alpha(0.52)
+                        };
+                        window.paint_path(p, stroke);
                     }
                 }
             }
-            for (i, dot) in scene.nodes.iter().enumerate() {
+            // Paint the hovered neighbourhood last so it stays visible in dense clusters.
+            let background =
+                (0..scene.nodes.len()).filter(|&i| !hover.as_ref().is_some_and(|h| h.includes(i)));
+            let neighbours = hover.iter().flat_map(|h| h.neighbours.iter().copied());
+            for i in background
+                .chain(neighbours)
+                .chain(hover.iter().map(|h| h.node))
+            {
+                let dot = &scene.nodes[i];
                 if !visible[i] || !frame.bounds.contains(&points[i]) {
                     continue;
                 }
@@ -153,7 +199,12 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                     ink.node_max.to_pixels(rem),
                     view.zoom,
                 );
-                let colour = palette[dot.layer as usize];
+                let muted = hover.as_ref().is_some_and(|h| !h.includes(i));
+                let colour = if muted {
+                    quiet.alpha(0.48)
+                } else {
+                    palette[dot.layer as usize]
+                };
                 let disc = |side: Pixels, colour: Hsla| {
                     fill(
                         Bounds::new(
@@ -164,12 +215,17 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                     )
                     .corner_radii(side * 0.5)
                 };
-                if dot.hub || Some(i) == selected {
-                    window.paint_quad(disc(diameter * 1.65, colour.alpha(0.15)));
+                if !muted && (dot.hub || Some(i) == focus) {
+                    let alpha = if hover.as_ref().is_some_and(|h| h.node == i) {
+                        0.32
+                    } else {
+                        0.15
+                    };
+                    window.paint_quad(disc(diameter * 1.65, colour.alpha(alpha)));
                 }
                 window.paint_quad(
                     disc(diameter, colour)
-                        .border_color(if Some(i) == selected {
+                        .border_color(if Some(i) == focus {
                             ink.focus
                         } else {
                             ink.backdrop
@@ -184,7 +240,9 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
     let mut area = div()
         .id("knowledge-map-canvas")
         .test_support()
-        .aria_label("Knowledge graph. Select a point to inspect its connections.")
+        .aria_label(
+            "Knowledge graph. Hover to highlight connections or select a point to inspect them.",
+        )
         .relative()
         .w_full()
         .min_w_0()
@@ -199,19 +257,15 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
         .child(drawing)
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|shell, e: &gpui_kit::MouseDownEvent, _, _| {
+            cx.listener(|shell, e: &gpui_kit::MouseDownEvent, _, cx| {
                 shell.knowledge_map.drag = Some((e.position, e.position));
+                if shell.knowledge_map.set_hover(None) {
+                    cx.notify();
+                }
             }),
         )
-        .on_mouse_move(cx.listener(|shell, e: &gpui_kit::MouseMoveEvent, _, cx| {
-            if e.pressed_button != Some(MouseButton::Left) {
-                shell.knowledge_map.drag = None;
-                return;
-            }
-            let state = &mut shell.knowledge_map;
-            if let Some((start, last)) = state.drag {
-                state.camera.pan += e.position - last;
-                state.drag = Some((start, e.position));
+        .on_hover(cx.listener(|shell, inside: &bool, _, cx| {
+            if !inside && shell.knowledge_map.set_hover(None) {
                 cx.notify();
             }
         }))
@@ -232,30 +286,9 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                 {
                     return;
                 }
-                if let Some(frame) = s.frame {
-                    let nearest = s
-                        .scene
-                        .nodes
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| s.shown[*i])
-                        .filter_map(|(i, d)| {
-                            let p = frame.to_screen(s.camera, d.x, d.y);
-                            let dist = (p.x - e.position.x).abs().max((p.y - e.position.y).abs());
-                            let radius = node_diameter(
-                                &s.scene,
-                                i,
-                                ink.node.to_pixels(rem),
-                                ink.node_max.to_pixels(rem),
-                                s.camera.zoom,
-                            ) * 0.5;
-                            (dist <= tap.max(radius)).then_some((i, dist))
-                        })
-                        .min_by(|a, b| a.1.cmp(&b.1));
-                    if let Some((i, _)) = nearest {
-                        s.select_index(i);
-                        cx.notify();
-                    }
+                if let Some(i) = node_at(s, e.position, window, cx) {
+                    s.select_index(i);
+                    cx.notify();
                 }
             }),
         )
@@ -280,15 +313,15 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
             zoom(shell, 1. + e.delta, Some(e.position), cx);
             cx.stop_propagation();
         }));
-    if !state.on(OptionKey::Labels) {
-        return area;
-    }
-    if let Some(frame) = state.frame {
+    let mut labels: Vec<(usize, Bounds<Pixels>)> = Vec::new();
+    if let Some(frame) = state.frame.filter(|_| state.on(OptionKey::Labels)) {
         let scene = &state.scene;
         let mut order = Vec::new();
-        if let Some(i) = selected {
-            order.push(i);
+        if let Some(h) = &state.hover {
+            order.push(h.node);
+            order.extend(h.neighbours.iter().copied());
         }
+        order.extend(selected);
         order.extend(
             scene
                 .nodes
@@ -298,7 +331,6 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                 .map(|(i, _)| i),
         );
         order.extend(0..scene.nodes.len());
-        let mut occupied: Vec<Bounds<Pixels>> = Vec::new();
         // Label occupancy bounds both shaping and element count regardless of graph size.
         let unit = frame.pad;
         for i in order {
@@ -323,11 +355,11 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
             if !frame.bounds.contains(&spot)
                 || bounds.right() > frame.bounds.right()
                 || bounds.bottom() > frame.bounds.bottom()
-                || occupied.iter().any(|r| r.intersects(&bounds))
+                || labels.iter().any(|(_, r)| r.intersects(&bounds))
             {
                 continue;
             }
-            occupied.push(bounds);
+            labels.push((i, bounds));
             area = area.child(
                 div()
                     .id(("atlas-label", i))
@@ -337,6 +369,7 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                     .left(at.x - frame.bounds.left())
                     .top(at.y - frame.bounds.top())
                     .w(width)
+                    .h(bounds.size.height)
                     .rounded(tokens.radius.small)
                     .px(tokens.space.hair)
                     .bg(if dot.hub {
@@ -353,7 +386,11 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                         },
                         cx,
                     )
-                    .text_color(cx.theme().foreground)
+                    .text_color(if state.hover.as_ref().is_some_and(|h| !h.includes(i)) {
+                        quiet.alpha(0.70)
+                    } else {
+                        cx.theme().foreground
+                    })
                     .truncate()
                     .child(dot.label.clone())
                     .cursor_pointer()
@@ -362,10 +399,31 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                         cx.notify();
                     })),
             );
-            if occupied.len() >= 36 {
+            if labels.len() >= 36 {
                 break;
             }
         }
     }
-    area
+    area.on_mouse_move(
+        cx.listener(move |shell, e: &gpui_kit::MouseMoveEvent, window, cx| {
+            let state = &mut shell.knowledge_map;
+            if e.pressed_button != Some(MouseButton::Left) {
+                state.drag = None;
+                let next = labels
+                    .iter()
+                    .find(|(_, bounds)| bounds.contains(&e.position))
+                    .map(|&(i, _)| i)
+                    .or_else(|| node_at(state, e.position, window, cx));
+                if state.set_hover(next) {
+                    cx.notify();
+                }
+                return;
+            }
+            if let Some((start, last)) = state.drag {
+                state.camera.pan += e.position - last;
+                state.drag = Some((start, e.position));
+                cx.notify();
+            }
+        }),
+    )
 }

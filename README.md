@@ -115,7 +115,7 @@ has the first run, group steps, every setting, privacy details and limits.
   details, and follow each file as Sovra checks it for changes, extracts text, or saves
   passages. Search files, personal details, and saved artifacts together at the top of
   **Knowledge**. Choose **Open knowledge map** to explore folders, findings, personal
-  records, saved work, people and group knowledge together. Scroll over the full-workspace map to zoom. **Found in your files** shows what Sovra classified automatically.
+  records, saved work, people and group knowledge together. Scroll over the full-workspace map to zoom. Hover over a point to highlight its neighbours. **Found in your files** shows what Sovra classified automatically.
   Expand **Relationships & categories** to see what your files are, read each
   connection as a short sentence, and open the line it came from.
 - **Save your work:** organize versioned documents, code, and other artifacts
