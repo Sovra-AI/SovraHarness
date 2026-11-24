@@ -225,6 +225,7 @@ impl IndexedFiles for Reader {
         ));
         Ok(sovra_core::file_index::automatic::FindingPage {
             items: vec![sovra_core::file_index::automatic::DiscoveredFinding {
+                id: 9,
                 kind: query.kind,
                 detail: "The orchid budget is 420 dollars.".into(),
                 path: passage().path,
@@ -1067,6 +1068,7 @@ impl IndexedFiles for Logbook {
         Ok(sovra_core::file_index::automatic::FindingPage {
             items: hit
                 .then(|| sovra_core::file_index::automatic::DiscoveredFinding {
+                    id: 6,
                     kind: query.kind,
                     detail: "value · the day of 2 February 2026 · 1 reading · average 80.2 kg"
                         .into(),
