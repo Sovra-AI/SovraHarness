@@ -1,6 +1,5 @@
-//! Team page: the user's AI helpers, ported from `SovraSRX` Team ("Your
-//! teammates"). Plain words throughout: each helper is a card with a face, a
-//! job and one line on how they help; editing is one short form.
+//! Team page: the user's AI helpers. Each card is the person. Opening it is
+//! how you chat, switch them on or off, edit, remove, or add them to a group.
 //!
 //! The roster lives in [`sovra_core::WorkspaceState::team`] (the shell folds
 //! `Event::Teams`); this view owns only its form and asks the runtime to change
@@ -35,6 +34,8 @@ pub(crate) struct AskTeam {
 
 pub(crate) struct TeamView {
     shell: WeakEntity<Shell>,
+    /// The helper whose card is open. Actions live here, not on the card.
+    opened: Option<String>,
     /// The member being edited; `builtin`/`id` are kept from it on save.
     editing: Option<TeamMember>,
     adding: bool,
@@ -62,6 +63,7 @@ impl TeamView {
         };
         Self {
             shell,
+            opened: None,
             editing: None,
             adding: false,
             error: None,
@@ -102,6 +104,9 @@ impl TeamView {
         self.instructions.update(cx, |input, cx| {
             input.set_value(member.instructions.clone(), window, cx);
         });
+        if !member.id.is_empty() {
+            self.opened = Some(member.id.clone());
+        }
         self.editing = Some(member);
         self.adding = false;
         self.error = None;
@@ -164,15 +169,29 @@ impl Render for TeamView {
         });
         let t = design::tokens(cx);
         let members = self.members(cx);
+        let opened = self.opened.as_ref().and_then(|id| {
+            members
+                .iter()
+                .enumerate()
+                .find(|(_, member)| member.id == *id)
+                .map(|(index, member)| (index, member.clone()))
+        });
         let mut page = v_flex()
             .w_full()
             .max_w(t.layout.page_width)
             .mx_auto()
             .gap(t.space.large)
-            .child(self.header(cx))
-            .child(how_it_works(cx));
+            .child(self.header(cx));
         if let Some(member) = &self.editing {
             page = page.child(self.form(member, cx));
+        } else if let Some((index, member)) = &opened {
+            page = page.child(opened_helper(
+                member,
+                *index,
+                can_share,
+                self.picked.iter().any(|id| id == &member.id),
+                cx,
+            ));
         }
         page = page.child(
             h_flex()
@@ -185,12 +204,12 @@ impl Render for TeamView {
                     member_card(
                         member,
                         index,
-                        can_share,
-                        self.picked.iter().any(|id| id == &member.id),
+                        self.opened.as_deref() == Some(member.id.as_str()),
                         cx,
                     )
                 })),
         );
+        page = page.child(how_it_works(cx));
         page = page.child(self.add_section(&members, cx));
         v_flex()
             .id("sovra-team-view")
@@ -428,7 +447,7 @@ impl TeamView {
                     .gap(t.space.medium)
                     .children(templates.into_iter().enumerate().map(|(index, template)| {
                         let pick = template.clone();
-                        card_shell(("team-template", index), cx)
+                        card_shell(("team-template", index), Surface::Glass, cx)
                             .child(member_identity(&template, cx))
                             .child(
                                 design::button(("team-template-add", index), "Add to my team", cx)
@@ -438,7 +457,7 @@ impl TeamView {
                             )
                     }))
                     .child(
-                        card_shell("team-template-blank", cx)
+                        card_shell("team-template-blank", Surface::Glass, cx)
                             .child(
                                 div()
                                     .sovra_text(TextRole::SectionTitle, cx)
@@ -464,6 +483,7 @@ impl TeamView {
                                             conductor: false,
                                             active: true,
                                             builtin: false,
+                                            personality: None,
                                         },
                                         window,
                                         cx,
@@ -522,6 +542,7 @@ fn how_it_works(cx: &mut Context<TeamView>) -> impl IntoElement + use<> {
 
 fn card_shell(
     id: impl Into<gpui_kit::ElementId>,
+    surface: Surface,
     cx: &Context<TeamView>,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
     let t = design::tokens(cx);
@@ -532,7 +553,7 @@ fn card_shell(
         .max_w(t.layout.card_max_width)
         .gap(t.space.small)
         .p(t.space.medium)
-        .sovra_surface(Surface::Glass, cx)
+        .sovra_surface(surface, cx)
 }
 
 fn member_identity(member: &TeamMember, cx: &Context<TeamView>) -> impl IntoElement + use<> {
@@ -572,11 +593,62 @@ fn member_identity(member: &TeamMember, cx: &Context<TeamView>) -> impl IntoElem
 fn member_card(
     member: &TeamMember,
     index: usize,
+    open: bool,
+    cx: &mut Context<TeamView>,
+) -> impl IntoElement + use<> {
+    let t = design::tokens(cx);
+    let id = member.id.clone();
+    let line = member.personality_line().to_owned();
+    card_shell(
+        ("team-member", index),
+        if open {
+            Surface::Elevated
+        } else {
+            Surface::Glass
+        },
+        cx,
+    )
+    .test_support()
+    .cursor_pointer()
+    .aria_label(format!("{}, {}, {line}", member.name, member.role))
+    .opacity(if member.active {
+        1.
+    } else {
+        t.chat.action_idle_opacity
+    })
+    .on_click(cx.listener(move |view, _, _, cx| {
+        view.opened = Some(id.clone());
+        view.editing = None;
+        view.error = None;
+        cx.notify();
+    }))
+    .child(member_identity(member, cx))
+    .child(
+        div()
+            .id(("team-member-line", index))
+            .test_support()
+            .min_w_0()
+            .sovra_text(TextRole::Body, cx)
+            .text_color(t.text_secondary)
+            .child(line),
+    )
+}
+
+fn opened_helper(
+    member: &TeamMember,
+    index: usize,
     can_share: bool,
     picked: bool,
     cx: &mut Context<TeamView>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    let focus = member.focus_line();
+    let steps_back = member.defer_line();
+    let summary = format!(
+        "{name}, {role}. What they focus on: {focus}. Where they step back: {steps_back}.",
+        name = member.name,
+        role = member.role,
+    );
     // Built-in helpers come with Sovra, so only the person's own are worth sharing.
     let share = (can_share && !member.builtin).then(|| {
         let template = sovra_core::group::Template::Helper {
@@ -586,6 +658,7 @@ fn member_card(
             tagline: member.tagline.clone(),
             instructions: member.instructions.clone(),
             expertise: member.expertise.clone(),
+            personality: member.personality.clone(),
         };
         design::button(("team-member-share", index), "Share with my group", cx)
             .ghost()
@@ -613,20 +686,33 @@ fn member_card(
                 TeamView::send(TeamCommand::RemoveMember { id: id.clone() }, cx);
             }))
     });
-    card_shell(("team-member", index), cx)
+    v_flex()
+        .id("team-member-open")
         .test_support()
-        .aria_label(format!("{}, {}", member.name, member.role))
-        .opacity(if member.active {
-            1.
-        } else {
-            t.chat.action_idle_opacity
-        })
+        .w_full()
+        .max_w(t.layout.reading_width)
+        .min_w_0()
+        .gap(t.space.small)
+        .p(t.space.medium)
+        .sovra_surface(Surface::Elevated, cx)
+        .aria_label(summary)
         .child(member_identity(member, cx))
         .child(
             div()
+                .id("team-member-focus")
+                .test_support()
+                .min_w_0()
+                .sovra_text(TextRole::Body, cx)
+                .child(format!("What they focus on: {focus}")),
+        )
+        .child(
+            div()
+                .id("team-member-defer")
+                .test_support()
+                .min_w_0()
                 .sovra_text(TextRole::Body, cx)
                 .text_color(t.text_secondary)
-                .child(member.tagline.clone()),
+                .child(format!("Where they step back: {steps_back}")),
         )
         .child(
             Switch::new(("team-member-active", index))

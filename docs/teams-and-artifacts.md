@@ -15,10 +15,19 @@ and are designed for someone with no technical experience.
 
 ## Ask a team and save work
 
-1. Open **Team**, or press the helpers button in the chat box. That opens a
-   new chat and leaves the one you were in alone. **Chat with** one helper, or
-   pick a few and **Start a group chat**. **Ask my team** opens a new chat with
-   every switched-on helper. Ask everyone stays off until you turn it on.
+1. Open **Team**. Each card is a person: a face, a name, a job, and one line
+   about how they sound. Open a card to chat with that helper, switch them on
+   or off, edit them, remove a helper you added, or add them to a group. The
+   opened card says what they focus on and where they step back. **Ask my team**
+   and **Start a group chat** stay on the page. **Ask my team**, or the helpers
+   button in the chat box, opens a new chat and leaves the one you were in
+   alone. Ask everyone stays off until you turn it on. A new team starts with
+   Alex, Morgan, Priya, Jamie, Sam, Robin, Noor, Kai, Scout (looks things up on
+   the web), Quinn (prices and trade-offs), and Mara (the right words on the
+   right channel). **Add a helper** also offers Engineer, Designer, Sales,
+   Operations, Skeptic, Visionary, Diplomat, and Hustler, plus the helpers that
+   were already there. A team you already saved keeps your edits and anyone you
+   switched off, and gains any of these helpers that was missing.
 2. A question can ask one helper or several. The same helper can answer two
    parts at the same time. A stray word does not pull in an extra helper when
    someone else is the stronger match. Turn on **Ask everyone** when you want
@@ -109,7 +118,7 @@ The compiler lists every `match` that needs the new variant.
   - "Open in browser".
   - The live card says "Priya is answering…" and "Nothing to add".
 - **One obvious action per place.**
-  - The Team page has one primary button, **Ask my team**.
+  - The Team page leads with the helpers. **Ask my team** and **Start a group chat** stay on the page. Chat, on/off, edit, remove, and group pick are on the opened helper.
   - Each reply has **Save**.
   - Each artifact has **Copy**, **Save to my computer** and, for web pages, diagrams
     and pictures, **Open in browser**.
@@ -117,7 +126,9 @@ The compiler lists every `match` that needs the new variant.
   - Editing an artifact keeps the old content as a version.
   - Deleting is soft in the store and needs a second click ("Click again to delete").
   - Built-in helpers are switched off rather than deleted, and **Restore original**
-    brings back their settings.
+    brings back their settings, including how they sound and where they step back.
+  - A saved team gains any missing shipped helper. It does not overwrite an edit
+    or switch someone back on.
 - **Team mode is never a surprise.** While it is on, a note above the chat box says
   so and offers **Ask Sovra only**.
 - **Nothing is executed inside the app.**
@@ -140,8 +151,10 @@ The compiler lists every `match` that needs the new variant.
   single-member turn.
 - **`sovra-store-surreal`:** the roster and artifacts round-trip, and soft delete works.
 - **`sovra-runtime`:** through `Client`, the roster is seeded, edited, switched off and
-  reset. Artifacts are saved, edited, exported as CSV, opened and deleted. A team turn
-  with no AI connected explains how to connect one.
+  reset. A saved roster that already edited Alex and switched Morgan off loads again
+  with those changes and with Scout, Quinn, and Mara. Artifacts are saved, edited,
+  exported as CSV, opened and deleted. A team turn with no AI connected explains how
+  to connect one.
 - **`sovra-ui`:** headless tests cover:
   - the Team page at 640×420, at 2560×1440 and at 200% text size, in both themes;
   - "Ask my team" sending a team run;

@@ -105,7 +105,19 @@ impl TeamRuntime {
             && let Some(store) = &self.store
         {
             match store.load_team().await {
-                Ok(saved) => *members = saved,
+                Ok(Some(saved)) => {
+                    let before = saved.len();
+                    let merged = teams::merge_shipped(saved);
+                    let added = merged.len() != before;
+                    *members = Some(merged);
+                    if added
+                        && let Some(current) = members.as_ref()
+                        && let Err(error) = store.save_team(current).await
+                    {
+                        tracing::warn!(%error, "failed to save team");
+                    }
+                }
+                Ok(None) => {}
                 Err(error) => tracing::warn!(%error, "failed to load team"),
             }
         }

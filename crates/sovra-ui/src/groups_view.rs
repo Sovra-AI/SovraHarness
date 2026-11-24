@@ -2777,6 +2777,7 @@ impl ModelsView {
                     tagline,
                     instructions,
                     expertise,
+                    personality,
                 } => {
                     let member = sovra_core::teams::TeamMember {
                         id: shared.helper_id(),
@@ -2789,6 +2790,7 @@ impl ModelsView {
                         conductor: false,
                         active: true,
                         builtin: false,
+                        personality,
                     };
                     design::button(("groups-template-use", index), "Use this helper", cx)
                         .small()

@@ -148,7 +148,15 @@ fn route_speakers_follows_sovra_srx_precedence() {
     );
 
     let everyone = non_leads(&members);
-    let with_lead = leads_and(everyone.iter().map(String::as_str).collect());
+    // "Everyone" still stops at the reply cap. The lead stays last, so a larger
+    // roster does not push Alex out or invite every new helper past the cap.
+    let with_lead = leads_and(
+        everyone
+            .iter()
+            .map(String::as_str)
+            .take(MAX_REPLIES_PER_TURN.saturating_sub(1))
+            .collect(),
+    );
     for phrase in [
         "team",
         "everyone",
@@ -633,4 +641,176 @@ fn older_saved_team_cards_still_load() {
     let activity: TeamActivity = serde_json::from_str(saved).expect("old card");
     assert_eq!(activity.speakers[0].steps, 0);
     assert_eq!(activity.speakers[0].doing, None);
+}
+
+#[test]
+fn the_starting_team_has_the_named_helpers_and_the_eight_roles() {
+    let members = team();
+    let names: Vec<_> = members.iter().map(|member| member.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Alex", "Morgan", "Priya", "Jamie", "Sam", "Robin", "Noor", "Kai", "Scout", "Quinn",
+            "Mara",
+        ]
+    );
+    let mut ids: Vec<_> = members.iter().map(|member| member.id.as_str()).collect();
+    let unique = {
+        ids.sort_unstable();
+        let mut unique = ids.clone();
+        unique.dedup();
+        unique
+    };
+    assert_eq!(ids, unique);
+    assert!(members.iter().all(|member| member.personality.is_some()));
+    let roles: Vec<_> = helper_templates()
+        .into_iter()
+        .map(|member| member.role)
+        .collect();
+    for role in [
+        "Tech helper",
+        "Engineer",
+        "Designer",
+        "Sales",
+        "Operations",
+        "Skeptic",
+        "Visionary",
+        "Diplomat",
+        "Hustler",
+    ] {
+        assert!(roles.iter().any(|item| item == role), "{role}");
+    }
+}
+
+#[test]
+fn a_speciality_question_can_choose_scout_quinn_or_mara() {
+    let members = team();
+    assert_eq!(
+        speakers("Search the web for the latest news", &members),
+        ["scout"]
+    );
+    assert_eq!(
+        speakers("Which price is cheaper after shipping?", &members),
+        ["quinn"]
+    );
+    assert_eq!(
+        speakers("Send this on WhatsApp and pick the right channel", &members),
+        ["mara"]
+    );
+    assert_eq!(speakers("I can't sleep and feel stress", &members), ["sam"]);
+    assert_eq!(
+        speakers("Write a letter about the web", &members),
+        ["jamie"],
+        "one stray web word does not pull Scout in"
+    );
+    assert_eq!(
+        speakers(
+            "Search the web. Which price is cheaper? Send this on WhatsApp.",
+            &members
+        ),
+        ["scout", "quinn", "mara", "alex"]
+    );
+    let room = TeamRoom::group(["scout", "quinn"]);
+    let chat: Vec<TeamMember> = chat_members(&members, &room).into_iter().cloned().collect();
+    let scout = chat
+        .iter()
+        .find(|member| member.id == "scout")
+        .expect("scout");
+    let told = member_instruction(scout, &chat, true, "Ann");
+    assert!(told.contains("@quinn"), "{told}");
+    assert!(told.contains("@alex"), "{told}");
+    assert!(!told.contains("@sam"), "{told}");
+    assert!(told.contains("# YOUR LENS"), "{told}");
+    assert!(told.contains("# WHERE YOU STEP BACK"), "{told}");
+    assert!(told.contains(PASS_TOKEN), "{told}");
+}
+
+#[test]
+fn personalities_keep_each_voice_and_an_older_roster_still_loads() {
+    let members = team();
+    let told = |id: &str| {
+        let member = members.iter().find(|member| member.id == id).expect(id);
+        member_instruction(member, &members, true, "Ann")
+    };
+    let morgan = told("morgan");
+    assert!(morgan.contains("Decision time:"), "{morgan}");
+    assert!(morgan.contains("leverage"), "{morgan}");
+    assert!(morgan.contains("Leads with the decision"), "{morgan}");
+    let priya = told("priya");
+    assert!(
+        priya.contains("Separates what is known from what is guessed"),
+        "{priya}"
+    );
+    assert!(priya.contains("(inference)"), "{priya}");
+    let jamie = told("jamie");
+    assert!(jamie.contains("Cut."), "{jamie}");
+    assert!(jamie.contains("Cuts weak sentences"), "{jamie}");
+    let alex = told("alex");
+    assert!(alex.contains(CONDUCTOR_TAIL), "{alex}");
+    assert!(!alex.contains("# ADD OR SKIP"), "{alex}");
+    assert!(alex.contains("do not solve the task"), "{alex}");
+
+    let custom: TeamMember = serde_json::from_str(
+        r#"{"id":"grace","name":"Grace","icon":"🌻","role":"Garden expert","tagline":"Knows plants","instructions":"Speak softly about soil.","expertise":["soil"],"conductor":false,"active":true,"builtin":false}"#,
+    )
+    .expect("a roster saved before personalities");
+    assert!(custom.personality.is_none());
+    let note = member_instruction(&custom, std::slice::from_ref(&custom), false, "Ann");
+    assert!(note.contains("Speak softly about soil."), "{note}");
+    assert!(!note.contains(PASS_TOKEN), "{note}");
+
+    let mut edited = builtin_member("morgan").expect("morgan");
+    edited.tagline = "Changed".into();
+    edited
+        .personality
+        .as_mut()
+        .expect("shipped voice")
+        .voice
+        .tone = "Still Morgan".into();
+    let decoded: TeamMember =
+        serde_json::from_str(&serde_json::to_string(&edited).expect("save")).expect("load");
+    assert_eq!(decoded.tagline, "Changed");
+    assert_eq!(
+        decoded.personality.expect("kept").voice.tone,
+        "Still Morgan"
+    );
+    let restored = builtin_member("morgan").expect("reset");
+    assert_ne!(restored.tagline, "Changed");
+    assert!(
+        restored
+            .personality_line()
+            .contains("Cuts consulting jargon")
+    );
+
+    let mut old = default_team();
+    old.retain(|member| !matches!(member.id.as_str(), "scout" | "quinn" | "mara"));
+    let alex = old
+        .iter_mut()
+        .find(|member| member.id == "alex")
+        .expect("alex");
+    alex.tagline = "My own lead".into();
+    alex.personality = None;
+    old.iter_mut()
+        .find(|member| member.id == "morgan")
+        .expect("morgan")
+        .active = false;
+    old.push(custom);
+    let merged = merge_shipped(old);
+    let alex = merged
+        .iter()
+        .find(|member| member.id == "alex")
+        .expect("alex");
+    assert_eq!(alex.tagline, "My own lead");
+    assert!(alex.personality.is_none());
+    assert!(
+        !merged
+            .iter()
+            .find(|member| member.id == "morgan")
+            .expect("morgan")
+            .active
+    );
+    for id in ["scout", "quinn", "mara", "grace"] {
+        assert!(merged.iter().any(|member| member.id == id), "{id}");
+    }
+    assert_eq!(merge_shipped(merged.clone()).len(), merged.len());
 }

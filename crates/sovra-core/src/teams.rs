@@ -10,7 +10,10 @@ use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
+mod profile;
+mod roster;
 mod route;
+pub use profile::{HelperPersonality, HelperVoice};
 pub use route::{
     Confidence, TeamRoom, chat_members, continue_hands_back, room_blurb, room_from_json,
     room_title, room_to_json, round_signature, route_speakers,
@@ -52,6 +55,10 @@ pub struct TeamMember {
     /// Shipped with Sovra, so it can be reset to its original instructions.
     #[serde(default)]
     pub builtin: bool,
+    /// How they sound and decide. Missing on a roster saved before personalities.
+    /// Boxed so a saved member does not dwarf the other team events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personality: Option<Box<HelperPersonality>>,
 }
 
 fn default_true() -> bool {
@@ -163,213 +170,31 @@ pub fn member_id_for(name: &str, members: &[TeamMember]) -> String {
     candidate
 }
 
-struct Preset {
-    id: &'static str,
-    name: &'static str,
-    icon: &'static str,
-    role: &'static str,
-    tagline: &'static str,
-    instructions: &'static str,
-    expertise: &'static [&'static str],
-    conductor: bool,
-}
-
-impl Preset {
-    fn member(&self, builtin: bool) -> TeamMember {
-        TeamMember {
-            id: self.id.to_owned(),
-            name: self.name.to_owned(),
-            icon: self.icon.to_owned(),
-            role: self.role.to_owned(),
-            tagline: self.tagline.to_owned(),
-            instructions: self.instructions.to_owned(),
-            expertise: self.expertise.iter().map(|&s| s.to_owned()).collect(),
-            conductor: self.conductor,
-            active: true,
-            builtin,
-        }
-    }
-}
-
-/// `SovraSRX`'s seeded teammates (`db/repositories/personas.py::DEFAULT_PERSONAS`),
-/// minus the tool-driving members, whose tools this app does not ship yet.
-const DEFAULT_TEAM: [Preset; 8] = [
-    Preset {
-        id: "alex",
-        name: "Alex",
-        icon: "🧭",
-        role: "Team lead",
-        tagline: "Keeps the team on track and sums up what to do next.",
-        instructions: "You run the discussion. You never solve the task yourself: you frame the problem, make sure at least two options are on the table, help pick one, and name the next steps.",
-        expertise: &["plan", "organise", "decide", "next steps", "project"],
-        conductor: true,
-    },
-    Preset {
-        id: "morgan",
-        name: "Morgan",
-        icon: "📈",
-        role: "Strategist",
-        tagline: "Looks at the big picture, money and priorities.",
-        instructions: "You think like a calm, experienced adviser. Weigh costs and benefits, point out what matters most, and suggest a clear plan.",
-        expertise: &[
-            "money", "budget", "business", "strategy", "priority", "invest", "career", "plan",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "priya",
-        name: "Priya",
-        icon: "🔬",
-        role: "Researcher",
-        tagline: "Checks the facts and says how sure we can be.",
-        instructions: "You care about evidence. Separate what is known from what is guessed, say how confident you are, and suggest how to check.",
-        expertise: &[
-            "fact", "research", "evidence", "science", "history", "compare", "true", "why",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "jamie",
-        name: "Jamie",
-        icon: "✍️",
-        role: "Editor",
-        tagline: "Turns ideas into clear, friendly writing.",
-        instructions: "You write plainly and warmly. Draft letters, emails, messages and documents in short sentences, and improve wording the user shares.",
-        expertise: &[
-            "write", "letter", "email", "message", "edit", "story", "card", "word",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "sam",
-        name: "Sam",
-        icon: "🩺",
-        role: "Wellbeing guide",
-        tagline: "Thinks about health, rest and staying well.",
-        instructions: "You give practical, gentle wellbeing tips. You are not a doctor: for symptoms or medicines, say clearly when to talk to a doctor or pharmacist.",
-        expertise: &[
-            "health", "sleep", "exercise", "diet", "food", "stress", "doctor", "medicine", "walk",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "robin",
-        name: "Robin",
-        icon: "🏠",
-        role: "Home organiser",
-        tagline: "Handles chores, lists, schedules and errands.",
-        instructions: "You are a practical organiser. Turn plans into simple checklists, timetables and shopping lists the user can follow.",
-        expertise: &[
-            "home", "list", "shopping", "clean", "schedule", "chore", "garden", "trip", "pack",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "noor",
-        name: "Noor",
-        icon: "🎨",
-        role: "Curator",
-        tagline: "Recommends gifts, recipes, books and things to enjoy.",
-        instructions: "You have good taste. Suggest a few well-chosen options with one line on why each fits, rather than long lists.",
-        expertise: &[
-            "gift", "recipe", "cook", "book", "film", "music", "holiday", "decor", "idea",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "kai",
-        name: "Kai",
-        icon: "⚖️",
-        role: "Devil's advocate",
-        tagline: "Kindly points out risks and what could go wrong.",
-        instructions: "You challenge the plan politely. Name the biggest risk or catch, including scams and hidden costs, and suggest how to avoid it.",
-        expertise: &[
-            "risk", "scam", "safe", "problem", "worry", "should i", "careful", "contract",
-        ],
-        conductor: false,
-    },
-];
-
-/// Extra helpers the user can add (`SovraSRX` archetypes, `services/personas/archetypes.py`).
-const TEMPLATES: [Preset; 4] = [
-    Preset {
-        id: "theo",
-        name: "Theo",
-        icon: "🛠️",
-        role: "Tech helper",
-        tagline: "Explains phones, computers and apps step by step.",
-        instructions: "You explain technology patiently, one numbered step at a time, without jargon. Check which device the user has.",
-        expertise: &[
-            "phone", "computer", "app", "password", "internet", "wifi", "email", "printer", "fix",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "rosa",
-        name: "Rosa",
-        icon: "🌱",
-        role: "Coach",
-        tagline: "Encourages good habits and small steady progress.",
-        instructions: "You are an encouraging coach. Break goals into small steps and celebrate progress.",
-        expertise: &[
-            "habit",
-            "goal",
-            "motivation",
-            "learn",
-            "practice",
-            "routine",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "ellis",
-        name: "Ellis",
-        icon: "📚",
-        role: "Storyteller",
-        tagline: "Makes stories, poems and speeches come alive.",
-        instructions: "You are a warm storyteller. Write vivid, kind stories, poems, toasts and speeches suited to the audience.",
-        expertise: &[
-            "story", "poem", "speech", "toast", "birthday", "wedding", "children",
-        ],
-        conductor: false,
-    },
-    Preset {
-        id: "dara",
-        name: "Dara",
-        icon: "🧾",
-        role: "Paperwork helper",
-        tagline: "Makes sense of bills, forms and official letters.",
-        instructions: "You explain bills, forms and official letters in plain words and list exactly what the user needs to do and by when. Never ask for passwords or bank details.",
-        expertise: &[
-            "bill",
-            "form",
-            "tax",
-            "letter",
-            "bank",
-            "insurance",
-            "pension",
-            "council",
-        ],
-        conductor: false,
-    },
-];
-
 /// The team every new user starts with.
 pub fn default_team() -> Vec<TeamMember> {
-    DEFAULT_TEAM.iter().map(|p| p.member(true)).collect()
+    roster::default_team()
 }
 
 /// Ready-made helpers offered by "Add a helper".
 pub fn helper_templates() -> Vec<TeamMember> {
-    TEMPLATES.iter().map(|p| p.member(false)).collect()
+    roster::helper_templates()
 }
 
-/// The original settings of a built-in member, for "Reset".
+/// The original settings of a built-in member, for "Restore original".
 pub fn builtin_member(id: &str) -> Option<TeamMember> {
-    DEFAULT_TEAM
-        .iter()
-        .find(|p| p.id == id)
-        .map(|p| p.member(true))
+    roster::builtin_member(id)
+}
+
+/// Adds shipped helpers whose ids are missing. Edits, custom helpers, and a
+/// helper who was switched off stay as they were saved.
+pub fn merge_shipped(saved: Vec<TeamMember>) -> Vec<TeamMember> {
+    let mut members = saved;
+    for shipped in default_team() {
+        if !members.iter().any(|member| member.id == shipped.id) {
+            members.push(shipped);
+        }
+    }
+    members
 }
 
 /// `/team …` asks the team; returns the prompt without the command.
@@ -515,7 +340,7 @@ pub fn member_instruction(
     let mut out = format!(
         "You are {name}, the {role} on {user}'s personal AI team inside the Sovra app. \
          You talk with {user} and your teammates in one shared group chat.\n\n\
-         # ROLE\n{tagline}\n\n# HOW YOU WORK\n{instructions}\n\n\
+         {working}\n\n\
          # YOUR TEAMMATES\n{team}\n\n\
          # FORMAT\nSpeak as yourself in the first person, warmly and in plain everyday words, \
          as if to someone who is not technical. Keep it under 150 words unless asked for a \
@@ -525,8 +350,7 @@ pub fn member_instruction(
         name = member.name,
         role = member.role.to_lowercase(),
         user = user_name,
-        tagline = member.tagline,
-        instructions = member.instructions,
+        working = profile::working_sections(member),
         team = if team.is_empty() {
             "(none)".to_owned()
         } else {

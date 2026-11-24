@@ -39,6 +39,9 @@ pub enum Template {
         instructions: String,
         #[serde(default)]
         expertise: Vec<String>,
+        /// How they sound and decide. Absent on a helper shared before personalities.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        personality: Option<Box<crate::teams::HelperPersonality>>,
     },
     Schedule {
         name: String,
@@ -81,11 +84,13 @@ impl Template {
                 tagline,
                 instructions,
                 expertise,
+                personality,
             } => {
                 for text in [name, icon, role, tagline, instructions] {
                     text.clear();
                 }
                 expertise.clear();
+                *personality = None;
             }
             Self::Schedule {
                 name,
@@ -122,6 +127,22 @@ pub enum TemplateError {
     TooManyTopics,
 }
 
+fn personality_too_long(profile: &crate::teams::HelperPersonality) -> bool {
+    let line = |text: &str| text.chars().count() > MAX_TEMPLATE_LINE_CHARS;
+    let list =
+        |items: &[String]| items.len() > MAX_TEMPLATE_TOPICS || items.iter().any(|item| line(item));
+    let voice = &profile.voice;
+    line(&voice.tone)
+        || line(&voice.cadence)
+        || line(&profile.decides)
+        || line(&profile.lens)
+        || list(&voice.openings)
+        || list(&voice.phrases)
+        || list(&voice.avoids)
+        || list(&profile.knows)
+        || list(&profile.defers)
+}
+
 /// The rules a shared helper or schedule must meet.
 pub fn check_template(template: &Template) -> Result<(), TemplateError> {
     let too_long = |text: &str, limit: usize| text.chars().count() > limit;
@@ -139,6 +160,7 @@ pub fn check_template(template: &Template) -> Result<(), TemplateError> {
             tagline,
             instructions,
             expertise,
+            personality,
         } => {
             if [name, icon, role, tagline]
                 .iter()
@@ -147,6 +169,7 @@ pub fn check_template(template: &Template) -> Result<(), TemplateError> {
                 || expertise
                     .iter()
                     .any(|topic| too_long(topic, MAX_TEMPLATE_LINE_CHARS))
+                || personality.as_deref().is_some_and(personality_too_long)
             {
                 return Err(TemplateError::TooLong);
             }

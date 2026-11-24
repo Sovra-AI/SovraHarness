@@ -858,6 +858,16 @@ fn a_shared_helper_or_schedule_becomes_your_own_copy_when_you_choose(cx: &mut Te
                     tagline: "Knows our garden".into(),
                     instructions: "Water the roses on Sundays.".into(),
                     expertise: Vec::new(),
+                    personality: Some(Box::new(sovra_core::teams::HelperPersonality {
+                        voice: sovra_core::teams::HelperVoice::default(),
+                        decides: String::new(),
+                        lens: "Soil and seasons.".into(),
+                        knows: Vec::new(),
+                        defers: vec!["the accounts".into()],
+                        argues: false,
+                        plays_along: true,
+                        moderates_only: false,
+                    })),
                 },
             ),
             template(
@@ -889,7 +899,13 @@ fn a_shared_helper_or_schedule_becomes_your_own_copy_when_you_choose(cx: &mut Te
     assert!(sent.iter().any(|command| matches!(
         command,
         Command::Teams(sovra_core::teams::TeamCommand::SaveMember(member))
-            if member.name == "Gardener" && member.id.starts_with("shared-") && !member.builtin
+            if member.name == "Gardener"
+                && member.id.starts_with("shared-")
+                && !member.builtin
+                && member
+                    .personality
+                    .as_ref()
+                    .is_some_and(|profile| profile.lens == "Soil and seasons.")
     )));
     assert!(sent.iter().any(|command| matches!(
         command,
@@ -921,6 +937,22 @@ fn your_own_helper_can_be_shared_from_the_team_page(cx: &mut TestAppContext) {
                 conductor: false,
                 active: true,
                 builtin: false,
+                personality: Some(Box::new(sovra_core::teams::HelperPersonality {
+                    voice: sovra_core::teams::HelperVoice {
+                        tone: "Speaks softly about soil.".into(),
+                        cadence: String::new(),
+                        openings: Vec::new(),
+                        phrases: Vec::new(),
+                        avoids: Vec::new(),
+                    },
+                    decides: "Checks the season first.".into(),
+                    lens: "Soil and seasons.".into(),
+                    knows: vec!["roses".into()],
+                    defers: vec!["the accounts".into()],
+                    argues: false,
+                    plays_along: true,
+                    moderates_only: false,
+                })),
             }],
         }))
         .expect("headless test fixture is available");
@@ -929,6 +961,7 @@ fn your_own_helper_can_be_shared_from_the_team_page(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         shell.update(cx, |shell, cx| shell.select_tab(NavTab::Team, cx));
         window.render_frame(cx);
+        window.click(("team-member", 0usize), cx);
         window.click(("team-member-share", 0usize), cx);
     })
     .expect("window open");
@@ -936,9 +969,12 @@ fn your_own_helper_can_be_shared_from_the_team_page(cx: &mut TestAppContext) {
     assert!(drain(&commands).iter().any(|command| matches!(
         command,
         Command::Group(GroupCommand::ShareTemplate {
-            template: sovra_core::group::Template::Helper { name, .. },
+            template: sovra_core::group::Template::Helper { name, personality, .. },
             with: None,
         }) if name == "Gardener"
+            && personality
+                .as_ref()
+                .is_some_and(|profile| profile.lens == "Soil and seasons.")
     )));
 }
 

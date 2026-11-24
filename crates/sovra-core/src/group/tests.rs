@@ -1919,6 +1919,7 @@ fn helper(instructions: &str) -> Template {
         tagline: "Knows our garden".into(),
         instructions: instructions.into(),
         expertise: vec!["roses".into()],
+        personality: None,
     }
 }
 
@@ -2035,6 +2036,7 @@ fn templates_are_checked_for_names_words_and_size() {
         tagline,
         instructions,
         expertise: vec!["topic".into(); MAX_TEMPLATE_TOPICS + 1],
+        personality: None,
     };
     assert_eq!(check_template(&crowded), Err(TemplateError::TooManyTopics));
 }

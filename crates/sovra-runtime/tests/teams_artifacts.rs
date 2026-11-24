@@ -1,10 +1,16 @@
-//! Teams and artifacts driven through the runtime's `Client`, without a store.
+//! Teams and artifacts driven through the runtime's `Client`.
+
+use std::sync::{Arc, Mutex};
 
 use sovra_core::artifacts::{
     ArtifactCommand, ArtifactDraft, ArtifactEvent, ArtifactKind, ArtifactSource,
 };
-use sovra_core::teams::{TeamCommand, TeamEvent};
-use sovra_core::{AgUiEvent, Command, Event};
+use sovra_core::teams::{TeamCommand, TeamEvent, TeamMember};
+use sovra_core::{
+    AgUiEvent, Command, Episode, EpisodeId, Event, FactId, MemoryCandidate, MemoryClaim,
+    MemoryError, MemoryExtractedChunk, MemoryInput, MemoryJob, MemoryPolicy, MemoryStore,
+    NewEpisode, NewFact, RecallQuery, RecalledFact, Timestamp,
+};
 
 fn started() -> (sovra_runtime::Client, async_channel::Receiver<Event>) {
     let client = sovra_runtime::start("9.9.9").expect("runtime starts");
@@ -81,6 +87,215 @@ fn team_roster_seeds_edits_switches_off_builtins_and_resets() {
         TeamEvent::MemberRemoved { id: "theo".into() }
     );
     client.send(Command::Shutdown).unwrap();
+}
+
+/// A roster saved before Scout, Quinn, and Mara existed. Load must add them
+/// without putting back an edited lead or a helper who was switched off.
+struct RosterStore(Mutex<Option<Vec<TeamMember>>>);
+
+impl RosterStore {
+    fn seeded(members: Vec<TeamMember>) -> Self {
+        Self(Mutex::new(Some(members)))
+    }
+}
+
+#[async_trait::async_trait]
+impl MemoryStore for RosterStore {
+    async fn health(&self) -> Result<(), MemoryError> {
+        Ok(())
+    }
+
+    async fn memory_policy(&self) -> Result<MemoryPolicy, MemoryError> {
+        Ok(MemoryPolicy {
+            enabled: false,
+            generation: 0,
+        })
+    }
+
+    async fn set_memory_enabled(&self, _: bool) -> Result<MemoryPolicy, MemoryError> {
+        self.memory_policy().await
+    }
+
+    async fn enqueue_memory(&self, _: MemoryInput) -> Result<EpisodeId, MemoryError> {
+        Err(MemoryError::Backend("unused in the roster test".into()))
+    }
+
+    async fn claim_memory(&self, _: Timestamp) -> Result<Option<MemoryClaim>, MemoryError> {
+        Ok(None)
+    }
+
+    async fn save_memory_extraction(
+        &self,
+        _: &MemoryClaim,
+        _: &MemoryExtractedChunk,
+        _: Timestamp,
+    ) -> Result<(), MemoryError> {
+        Ok(())
+    }
+
+    async fn complete_memory(
+        &self,
+        _: &MemoryClaim,
+        _: Vec<MemoryCandidate>,
+        _: &str,
+        _: Timestamp,
+    ) -> Result<Vec<FactId>, MemoryError> {
+        Ok(Vec::new())
+    }
+
+    async fn fail_memory(&self, _: &MemoryClaim, _: &str, _: Timestamp) -> Result<(), MemoryError> {
+        Ok(())
+    }
+
+    async fn memory_job(&self, id: &EpisodeId) -> Result<MemoryJob, MemoryError> {
+        Err(MemoryError::Backend(format!("no job for {}", id.0)))
+    }
+
+    async fn record_episode(&self, _: NewEpisode) -> Result<EpisodeId, MemoryError> {
+        Err(MemoryError::Backend("unused in the roster test".into()))
+    }
+
+    async fn episode(&self, _: &EpisodeId) -> Result<Episode, MemoryError> {
+        Err(MemoryError::Backend("unused in the roster test".into()))
+    }
+
+    async fn recent_episodes(&self, _: &str, _: usize) -> Result<Vec<Episode>, MemoryError> {
+        Ok(Vec::new())
+    }
+
+    async fn save_fact(&self, _: NewFact) -> Result<FactId, MemoryError> {
+        Err(MemoryError::Backend("unused in the roster test".into()))
+    }
+
+    async fn invalidate_fact(&self, _: &FactId, _: Timestamp) -> Result<(), MemoryError> {
+        Ok(())
+    }
+
+    async fn recall(&self, _: RecallQuery) -> Result<Vec<RecalledFact>, MemoryError> {
+        Ok(Vec::new())
+    }
+
+    async fn load_team(&self) -> Result<Option<Vec<TeamMember>>, MemoryError> {
+        Ok(self.0.lock().expect("roster lock").clone())
+    }
+
+    async fn save_team(&self, members: &[TeamMember]) -> Result<(), MemoryError> {
+        *self.0.lock().expect("roster lock") = Some(members.to_vec());
+        Ok(())
+    }
+}
+
+fn older_roster() -> Vec<TeamMember> {
+    let mut members = sovra_core::teams::default_team();
+    members.retain(|member| !matches!(member.id.as_str(), "scout" | "quinn" | "mara"));
+    let alex = members
+        .iter_mut()
+        .find(|member| member.id == "alex")
+        .expect("alex");
+    alex.tagline = "My own lead".into();
+    alex.personality = None;
+    members
+        .iter_mut()
+        .find(|member| member.id == "morgan")
+        .expect("morgan")
+        .active = false;
+    members.push(TeamMember {
+        id: "grace".into(),
+        name: "Grace".into(),
+        icon: "🌻".into(),
+        role: "Garden expert".into(),
+        tagline: "Knows plants".into(),
+        instructions: "Speak softly about soil.".into(),
+        expertise: vec!["soil".into()],
+        conductor: false,
+        active: true,
+        builtin: false,
+        personality: None,
+    });
+    members
+}
+
+fn assert_saved_roster_kept_edits(members: &[TeamMember]) {
+    let alex = members
+        .iter()
+        .find(|member| member.id == "alex")
+        .expect("alex");
+    assert_eq!(alex.tagline, "My own lead");
+    assert!(alex.personality.is_none());
+    assert!(
+        !members
+            .iter()
+            .find(|member| member.id == "morgan")
+            .expect("morgan")
+            .active
+    );
+    assert_eq!(
+        members
+            .iter()
+            .find(|member| member.id == "grace")
+            .expect("grace")
+            .instructions,
+        "Speak softly about soil."
+    );
+    for id in ["scout", "quinn", "mara"] {
+        let member = members
+            .iter()
+            .find(|member| member.id == id)
+            .unwrap_or_else(|| panic!("{id}"));
+        assert!(member.personality.is_some(), "{id}");
+        assert!(member.active, "{id}");
+    }
+}
+
+fn start_saved(
+    store: &Arc<RosterStore>,
+) -> (sovra_runtime::Client, async_channel::Receiver<Event>) {
+    let store = Arc::clone(store);
+    let memory: sovra_runtime::MemoryFactory = Box::new(move || {
+        let store = Arc::clone(&store);
+        Box::pin(async move { Ok(store as Arc<dyn MemoryStore>) })
+    });
+    let client =
+        sovra_runtime::start_with_config("9.9.9", sovra_core::AgentConfig::default(), Some(memory))
+            .expect("runtime starts");
+    let events = client.events();
+    assert!(matches!(events.recv_blocking(), Ok(Event::Ready { .. })));
+    (client, events)
+}
+
+fn stop(client: &sovra_runtime::Client, events: &async_channel::Receiver<Event>) {
+    client
+        .send(Command::Shutdown)
+        .expect("runtime accepts shutdown");
+    loop {
+        if matches!(events.recv_blocking().expect("event"), Event::Stopped) {
+            break;
+        }
+    }
+}
+
+#[test]
+fn a_saved_roster_keeps_edits_and_gains_missing_helpers() {
+    let store = Arc::new(RosterStore::seeded(older_roster()));
+    let (client, events) = start_saved(&store);
+    client
+        .send(Command::Teams(TeamCommand::Load))
+        .expect("runtime accepts load");
+    let TeamEvent::Loaded { members } = next_team(&events) else {
+        panic!("roster loads");
+    };
+    assert_saved_roster_kept_edits(&members);
+    stop(&client, &events);
+
+    let (client, events) = start_saved(&store);
+    client
+        .send(Command::Teams(TeamCommand::Load))
+        .expect("runtime accepts load");
+    let TeamEvent::Loaded { members } = next_team(&events) else {
+        panic!("roster loads again");
+    };
+    assert_saved_roster_kept_edits(&members);
+    stop(&client, &events);
 }
 
 #[test]

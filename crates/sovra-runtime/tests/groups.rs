@@ -1360,6 +1360,7 @@ async fn a_shared_helper_and_schedule_reach_others_as_templates_to_copy() {
             tagline: "Knows our garden".into(),
             instructions: "Water the roses on Sundays.".into(),
             expertise: Vec::new(),
+            personality: None,
         },
         with: None,
     });

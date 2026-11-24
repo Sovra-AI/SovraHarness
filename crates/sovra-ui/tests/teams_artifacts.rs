@@ -125,11 +125,39 @@ fn team_page_fits_every_window_and_text_size_and_asks_the_team(cx: &mut TestAppC
                     card.bounds().right() <= page.right(),
                     "cards stay inside the page"
                 );
+                let card_label = owned_label(window, ("team-member", 0usize));
+                assert!(card_label.contains("Alex"), "{card_label}");
+                assert!(card_label.contains("Team lead"), "{card_label}");
+                assert!(
+                    card_label.contains("does not solve the task"),
+                    "{card_label}"
+                );
+                click_on_team_page(window, ("team-member", 0usize), cx);
+                click_on_team_page(window, "team-member-focus", cx);
+                let open = window.find("team-member-open");
+                let page = window.find("sovra-team-view").bounds();
+                assert!(
+                    open.bounds().left() >= page.left() && open.bounds().right() <= page.right(),
+                    "opened helper stays inside the page: {:?} page {page:?}",
+                    open.bounds()
+                );
+                let focus = window.find("team-member-focus").bounds();
+                assert!(
+                    focus.top() >= page.top() && focus.bottom() <= page.bottom(),
+                    "opened helper stays inside the page: {focus:?} page {page:?}"
+                );
+                let opened = owned_label(window, "team-member-open");
+                assert!(opened.contains("What they focus on"), "{opened}");
+                assert!(opened.contains("Where they step back"), "{opened}");
+                assert!(!says_jargon(&opened), "{opened}");
+                assert!(!says_jargon(&card_label), "{card_label}");
             })
             .unwrap();
         }
-        cx.update_window(window.into(), |_, window, cx| window.click("team-ask", cx))
-            .unwrap();
+        cx.update_window(window.into(), |_, window, cx| {
+            click_on_team_page(window, "team-ask", cx);
+        })
+        .unwrap();
         settle(cx);
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
@@ -173,7 +201,9 @@ fn team_members_can_be_switched_off_and_edited(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         shell.update(cx, |shell, cx| shell.select_tab(NavTab::Team, cx));
         window.render_frame(cx);
+        click_on_team_page(window, ("team-member", 1usize), cx);
         window.click(("team-member-active", 1usize), cx);
+        click_on_team_page(window, ("team-member", 2usize), cx);
         window.click(("team-member-edit", 2usize), cx);
         window.render_frame(cx);
         assert!(window.find("team-member-form").visible());
@@ -192,6 +222,13 @@ fn team_members_can_be_switched_off_and_edited(cx: &mut TestAppContext) {
     assert_eq!((saved[0].id.as_str(), saved[0].active), ("morgan", false));
     assert_eq!(saved[1].id, "priya");
     assert_eq!(saved[1].name, "Priya", "editing keeps what was there");
+    assert!(
+        saved[1]
+            .personality
+            .as_ref()
+            .is_some_and(|profile| profile.lens.contains("Evidence")),
+        "saving an edit keeps how they decide"
+    );
 }
 
 #[gpui_kit::test]
@@ -484,12 +521,14 @@ fn team_button_leaves_a_chat_that_already_has_a_message(cx: &mut TestAppContext)
     cx.update_window(window.into(), |_, window, cx| {
         shell.update(cx, |shell, cx| shell.select_tab(NavTab::Team, cx));
         window.render_frame(cx);
+        click_on_team_page(window, ("team-member", 1usize), cx);
         click_on_team_page(window, ("team-member-pick", 1usize), cx);
-        click_on_team_page(window, ("team-member-pick", 2usize), cx);
         assert_eq!(
             owned_label(window, ("team-member-pick", 1usize)),
             "In this group"
         );
+        click_on_team_page(window, ("team-member", 2usize), cx);
+        click_on_team_page(window, ("team-member-pick", 2usize), cx);
         assert_eq!(
             owned_label(window, ("team-member-pick", 2usize)),
             "In this group"
@@ -661,6 +700,7 @@ fn each_helpers_click_opens_another_chat(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         return_to_ordinary_team_page(window, &shell, &original, cx);
+        click_on_team_page(window, ("team-member", 4usize), cx);
         click_on_team_page(window, ("team-member-chat", 4usize), cx);
     })
     .unwrap();
@@ -669,6 +709,7 @@ fn each_helpers_click_opens_another_chat(cx: &mut TestAppContext) {
     room_is(&shell, cx, &sam_a, &TeamRoom::direct("sam"));
     cx.update_window(window.into(), |_, window, cx| {
         return_to_ordinary_team_page(window, &shell, &original, cx);
+        click_on_team_page(window, ("team-member", 4usize), cx);
         click_on_team_page(window, ("team-member-chat", 4usize), cx);
     })
     .unwrap();
@@ -692,7 +733,9 @@ fn each_helpers_click_opens_another_chat(cx: &mut TestAppContext) {
     for _ in 0..2 {
         cx.update_window(window.into(), |_, window, cx| {
             return_to_ordinary_team_page(window, &shell, &original, cx);
+            click_on_team_page(window, ("team-member", 1usize), cx);
             click_on_team_page(window, ("team-member-pick", 1usize), cx);
+            click_on_team_page(window, ("team-member", 2usize), cx);
             click_on_team_page(window, ("team-member-pick", 2usize), cx);
             click_on_team_page(window, "team-start-group", cx);
         })
@@ -739,6 +782,7 @@ fn each_helpers_click_opens_another_chat(cx: &mut TestAppContext) {
         assert_eq!(owned_label(window, "composer-team-mode"), START_HELPERS);
         shell.update(cx, |shell, cx| shell.select_tab(NavTab::Team, cx));
         window.render_frame(cx);
+        click_on_team_page(window, ("team-member", 2usize), cx);
         click_on_team_page(window, ("team-member-ask", 2usize), cx);
     })
     .unwrap();
@@ -782,7 +826,8 @@ fn one_helper_and_a_group_keep_their_own_members(cx: &mut TestAppContext) {
             owned_label(window, "team-group-hint"),
             "Pick at least two helpers."
         );
-        window.click(("team-member-chat", 4usize), cx);
+        click_on_team_page(window, ("team-member", 4usize), cx);
+        click_on_team_page(window, ("team-member-chat", 4usize), cx);
     })
     .unwrap();
     settle(cx);
@@ -795,8 +840,10 @@ fn one_helper_and_a_group_keep_their_own_members(cx: &mut TestAppContext) {
         assert!(window.try_find("composer-ask-everyone").is_none());
         shell.update(cx, |shell, cx| shell.select_tab(NavTab::Team, cx));
         window.render_frame(cx);
-        window.click(("team-member-pick", 1usize), cx);
-        window.click(("team-member-pick", 2usize), cx);
+        click_on_team_page(window, ("team-member", 1usize), cx);
+        click_on_team_page(window, ("team-member-pick", 1usize), cx);
+        click_on_team_page(window, ("team-member", 2usize), cx);
+        click_on_team_page(window, ("team-member-pick", 2usize), cx);
         window.click("team-start-group", cx);
     })
     .unwrap();
