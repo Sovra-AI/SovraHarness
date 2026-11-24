@@ -119,31 +119,71 @@ fn knowledge_map_fits_the_pane_and_expands_through_the_native_controls(cx: &mut 
             window.render_frame(cx);
             let canvas = window.find("knowledge-map-canvas").bounds();
             let pane = window.find("all-knowledge-map").bounds();
+            assert!(canvas.size.width >= Pixels::from(width) * 0.95);
+            assert!(canvas.top() >= pane.top() && canvas.bottom() <= pane.bottom());
+            let minimum_share = if scale == 200 { 0.45 } else { 0.85 };
             assert!(
-                canvas.size.width > Pixels::ZERO
-                    && canvas.left() >= pane.left()
-                    && canvas.right() <= pane.right() + Pixels::from(1.)
+                canvas.size.height >= pane.size.height * minimum_share,
+                "{canvas:?} inside {pane:?}"
             );
-            if width < 1000. {
-                window.scroll(
-                    "all-knowledge-map",
-                    gpui_kit::ScrollDelta::Pixels(point(Pixels::ZERO, pane.top() - canvas.top())),
-                    cx,
-                );
+            assert!(window.find("atlas-fit").visible());
+            assert!(window.try_find("sovra-sidebar").is_none());
+
+            let map = &shell.read(cx).knowledge_map;
+            let label = (0..map.scene.nodes.len())
+                .find(|&i| {
+                    window
+                        .try_find(("atlas-label", i))
+                        .is_some_and(|label| label.visible())
+                })
+                .expect("one drawn label");
+            let anchor = window.find(("atlas-label", label)).bounds().center();
+            let frame = map.frame.unwrap();
+            let before = frame.to_screen(map.camera, 500., 500.);
+            window.scroll(
+                ("atlas-label", label),
+                gpui_kit::ScrollDelta::Lines(point(0., 3.)),
+                cx,
+            );
+            window.render_frame(cx);
+            let zoomed = shell.read(cx).knowledge_map.camera;
+            assert!((zoomed.zoom - design::tokens(cx).graph.zoom_step).abs() < f32::EPSILON);
+            let after = frame.to_screen(zoomed, 500., 500.);
+            let expected = anchor + (before - anchor) * zoomed.zoom;
+            assert!(
+                (after.x - expected.x).abs() < Pixels::from(1.),
+                "{width}: {after:?}, expected {expected:?} at {anchor:?}"
+            );
+            assert!(
+                (after.y - expected.y).abs() < Pixels::from(1.),
+                "{width}: {after:?}, expected {expected:?} at {anchor:?}"
+            );
+            window.scroll(
+                "knowledge-map-canvas",
+                gpui_kit::ScrollDelta::Pixels(point(Pixels::ZERO, -window.line_height())),
+                cx,
+            );
+            window.render_frame(cx);
+            assert!(shell.read(cx).knowledge_map.camera.zoom < zoomed.zoom);
+            assert_eq!(window.find("knowledge-map-canvas").bounds(), canvas);
+            window.click("atlas-fit", cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).knowledge_map.camera, Viewport::default());
+            window.click("atlas-filters", cx);
+            window.render_frame(cx);
+            if scale == 200 {
+                assert!(window.find("atlas-filter-scroll").visible());
+                window.click("atlas-filters", cx);
                 window.render_frame(cx);
-                assert!(
-                    window.find("knowledge-map-canvas").visible(),
-                    "pane {pane:?}, original {canvas:?}, after scroll {:?}",
-                    window.find("knowledge-map-canvas").bounds()
-                );
+                assert_eq!(window.find("knowledge-map-canvas").bounds(), canvas);
                 return;
             }
-            assert!(canvas.top() < pane.bottom(), "canvas starts below the fold");
             window.click("atlas-list", cx);
             window.render_frame(cx);
             let index = shell.read(cx).knowledge_map.scene.by_id["root:one"];
             window.click(("atlas-record", index), cx);
             window.render_frame(cx);
+            assert!(window.find("atlas-inspector-scroll").visible());
             window.click("atlas-expand", cx);
             let request = std::iter::from_fn(|| commands.try_recv().ok())
                 .find_map(|c| {

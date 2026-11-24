@@ -31,8 +31,9 @@ Choose **Knowledge → Open knowledge map**. The coloured collection buttons con
 files, findings, relationships, personal records, saved work, people and visible
 group spaces independently. The map opens without a search. Folder, category and
 finding totals describe the index. The point and connection counts above the
-drawing describe the current view. In a narrow window, open **Search and filters**
-to reach the collection and display controls.
+drawing describe the current view. The graph fills the workspace. Open **Search and filters** (**Filters** in a
+narrow window) for collection and display controls. **Back to Knowledge** restores
+the regular workspace.
 
 Select a point and choose **Draw connected records** to add its next page to the
 same drawing. **Draw more across collections** adds a page from each enabled collection
@@ -42,8 +43,8 @@ cited passage. A **mentions topic** link means two records use the same label.
 **Add search results** can bring matching excerpts and equivalent readings from
 files, saved details and artifacts onto the map. Each source keeps its own identity.
 
-Drag to move, zoom with the buttons or pinch, and use **Fit map** to return to
-the overview. Use **Neighbours only** to inspect one point and its direct links.
+Scroll up over the graph to zoom in at the pointer, or scroll down to zoom out.
+Drag to pan. Pinch and the zoom buttons also work. **Fit map** restores the overview. Use **Neighbours only** to inspect one point and its direct links.
 **Read as a list** gives keyboard access to the points and their connections.
 **Include history** reopens the map with earlier records, file observations and
 replaced relationships available. **Refresh** reads the local sources again.

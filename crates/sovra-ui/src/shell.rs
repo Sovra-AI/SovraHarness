@@ -2374,6 +2374,9 @@ impl Shell {
                     .min_h_0()
                     .w_full()
                     .overflow_hidden();
+                if self.state.active_tab == NavTab::Knowledge && self.knowledge_map.open {
+                    return body.child(center).into_any_element();
+                }
                 if design::is_rtl(cx) {
                     body = body.flex_row_reverse();
                 }
@@ -2422,10 +2425,7 @@ impl Shell {
                         body.child(div().absolute().inset_0().occlude().child(panel))
                     };
                 }
-                if self.state.active_tab == NavTab::Knowledge
-                    && self.inspector_docked
-                    && !self.knowledge_map.open
-                {
+                if self.state.active_tab == NavTab::Knowledge && self.inspector_docked {
                     body = body.child(render_inspector(&self.state, &self.search_input, cx));
                 }
                 v_flex()

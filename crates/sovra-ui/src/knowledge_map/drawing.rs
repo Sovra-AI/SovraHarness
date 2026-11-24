@@ -21,6 +21,20 @@ pub(super) fn zoom(
         cx.notify();
     }
 }
+fn node_diameter(scene: &Scene, index: usize, base: Pixels, hub: Pixels, zoom: f32) -> Pixels {
+    let diameter = if scene.nodes[index].hub {
+        hub
+    } else {
+        let degree = f32::from(
+            u8::try_from(scene.adjacent[index].len())
+                .unwrap_or(u8::MAX)
+                .min(25),
+        );
+        base * (0.88 + degree.sqrt() * 0.14)
+    };
+    diameter * zoom.sqrt().clamp(0.85, 1.7)
+}
+
 pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let state = &shell.knowledge_map;
     let tokens = design::tokens(cx);
@@ -50,7 +64,9 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
             weak.update(cx, |shell, cx| {
                 if shell.knowledge_map.frame != Some(frame) {
                     shell.knowledge_map.frame = Some(frame);
-                    cx.notify();
+                    // Labels are GPUI elements laid out before the canvas is measured.
+                    // Rebuild them against the new bounds after this frame is presented.
+                    cx.on_next_frame(window, |_, _, cx| cx.notify());
                 }
             })
             .ok();
@@ -130,16 +146,13 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                 if !visible[i] || !frame.bounds.contains(&points[i]) {
                     continue;
                 }
-                let degree = f32::from(
-                    u8::try_from(scene.adjacent[i].len())
-                        .unwrap_or(u8::MAX)
-                        .min(25),
+                let diameter = node_diameter(
+                    &scene,
+                    i,
+                    ink.node.to_pixels(rem),
+                    ink.node_max.to_pixels(rem),
+                    view.zoom,
                 );
-                let diameter = if dot.hub {
-                    ink.node_max.to_pixels(rem)
-                } else {
-                    ink.node.to_pixels(rem) * (0.63 + degree.sqrt() * 0.12)
-                };
                 let colour = palette[dot.layer as usize];
                 let disc = |side: Pixels, colour: Hsla| {
                     fill(
@@ -175,7 +188,8 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
         .relative()
         .w_full()
         .min_w_0()
-        .h(ink.compact_height)
+        .flex_1()
+        .min_h_0()
         .rounded(tokens.radius.panel)
         .border_1()
         .border_color(cx.theme().border)
@@ -208,7 +222,9 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                 let Some((start, _)) = s.drag.take() else {
                     return;
                 };
-                let tap = design::tokens(cx).graph.hit.to_pixels(window.rem_size()) * 0.45;
+                let ink = design::tokens(cx).graph;
+                let rem = window.rem_size();
+                let tap = ink.hit.to_pixels(rem) * 0.45;
                 if (start.x - e.position.x)
                     .abs()
                     .max((start.y - e.position.y).abs())
@@ -226,7 +242,14 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                         .filter_map(|(i, d)| {
                             let p = frame.to_screen(s.camera, d.x, d.y);
                             let dist = (p.x - e.position.x).abs().max((p.y - e.position.y).abs());
-                            (dist <= tap).then_some((i, dist))
+                            let radius = node_diameter(
+                                &s.scene,
+                                i,
+                                ink.node.to_pixels(rem),
+                                ink.node_max.to_pixels(rem),
+                                s.camera.zoom,
+                            ) * 0.5;
+                            (dist <= tap.max(radius)).then_some((i, dist))
                         })
                         .min_by(|a, b| a.1.cmp(&b.1));
                     if let Some((i, _)) = nearest {
@@ -242,14 +265,14 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
         )
         .on_scroll_wheel(
             cx.listener(|shell, e: &gpui_kit::ScrollWheelEvent, window, cx| {
-                if !e.modifiers.control && !e.modifiers.platform {
-                    return;
-                }
                 let lines = match e.delta {
                     ScrollDelta::Pixels(d) => d.y / window.line_height(),
                     ScrollDelta::Lines(d) => d.y,
                 };
-                zoom(shell, 1.18_f32.powf(lines), Some(e.position), cx);
+                // A three-line wheel notch matches one zoom-button step. Pixel
+                // deltas retain their fraction of that step on high-resolution pads.
+                let factor = design::tokens(cx).graph.zoom_step.powf(lines / 3.);
+                zoom(shell, factor, Some(e.position), cx);
                 cx.stop_propagation();
             }),
         )
@@ -288,12 +311,13 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                 * (f32::from(
                     u8::try_from(dot.label.chars().count())
                         .unwrap_or(u8::MAX)
-                        .min(24),
-                ) * 0.22
+                        .min(35),
+                ) * 0.27
                     + 0.85);
             let at = point(
                 (spot.x - width * 0.5).max(frame.bounds.left()),
-                spot.y + unit * if dot.hub { 0.64 } else { 0.28 },
+                spot.y
+                    + unit * if dot.hub { 0.65 } else { 0.32 } * view.zoom.sqrt().clamp(0.85, 1.7),
             );
             let bounds = Bounds::new(at, size(width, unit * 0.86));
             if !frame.bounds.contains(&spot)
@@ -321,7 +345,14 @@ pub(super) fn canvas_view(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoEl
                         ink.backdrop.alpha(0.94)
                     })
                     .text_center()
-                    .sovra_text(TextRole::Caption, cx)
+                    .sovra_text(
+                        if dot.hub {
+                            TextRole::SectionTitle
+                        } else {
+                            TextRole::Body
+                        },
+                        cx,
+                    )
                     .text_color(cx.theme().foreground)
                     .truncate()
                     .child(dot.label.clone())

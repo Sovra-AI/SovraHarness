@@ -20,6 +20,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
     Pixels, Point, StatefulInteractiveElement as _, Styled as _, TestSupportExt as _, Window, div,
+    relative,
 };
 use scene::Scene;
 use sovra_core::{
@@ -358,201 +359,194 @@ impl Shell {
 pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let s = &shell.knowledge_map;
     let t = design::tokens(cx);
-    let mut page = v_flex()
-        .id("all-knowledge-map")
-        .test_support()
-        .flex_1()
-        .min_h_0()
-        .min_w_0()
-        .w_full()
-        .overflow_y_scroll()
-        .items_center()
-        .relative()
-        .child(design::width_probe(cx, |s| &mut s.knowledge_map.width))
-        .p(t.space.medium);
+    let compact = s.width == design::WidthClass::Compact;
     let counts = format!(
         "{} points drawn · {} connections drawn",
         s.visible_nodes, s.visible_edges
     );
-    let header = v_flex()
+    let count = div()
+        .id("atlas-count")
+        .test_support()
+        .aria_label(counts.clone())
+        .sovra_text(TextRole::Caption, cx)
+        .text_color(t.text_secondary)
+        .child(counts);
+    let mut heading = h_flex().min_w_0().flex_1().gap(t.space.small).child(
+        div()
+            .truncate()
+            .sovra_text(TextRole::SectionTitle, cx)
+            .child("Knowledge map"),
+    );
+    let mut filters = v_flex()
         .w_full()
-        .items_start()
+        .min_w_0()
+        .flex_shrink_0()
+        .gap(t.space.small);
+    if compact {
+        filters = filters.child(count);
+    } else {
+        heading = heading.child(count);
+    }
+    let header = h_flex()
+        .w_full()
+        .flex_shrink_0()
         .gap(t.space.compact)
+        .child(heading)
         .child(
-            div()
-                .w_full()
-                .sovra_text(TextRole::PageTitle, cx)
-                .child("Knowledge map"),
+            design::button(
+                "atlas-filters",
+                if compact {
+                    "Filters"
+                } else {
+                    "Search and filters"
+                },
+                cx,
+            )
+            .accessibility_label("Search and filters")
+            .small()
+            .selected(s.filters_open)
+            .on_click(cx.listener(|shell, _, _, cx| {
+                shell.knowledge_map.filters_open = !shell.knowledge_map.filters_open;
+                cx.notify();
+            })),
         )
         .child(
-            h_flex()
-                .w_full()
-                .flex_wrap()
-                .items_center()
-                .justify_between()
-                .gap(t.space.small)
-                .child(
-                    div()
-                        .id("atlas-count")
-                        .test_support()
-                        .aria_label(counts.clone())
-                        .sovra_text(TextRole::Caption, cx)
-                        .text_color(t.text_secondary)
-                        .flex_shrink_0()
-                        .child(counts),
-                )
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap(t.space.compact)
-                        .child(
-                            design::button("atlas-refresh", "Refresh", cx)
-                                .icon(IconName::RefreshCw)
-                                .on_click(
-                                    cx.listener(|shell, _, _, cx| shell.open_knowledge_map(cx)),
-                                ),
-                        )
-                        .child(
-                            design::button("atlas-close", "Back to Knowledge", cx)
-                                .ghost()
-                                .on_click(cx.listener(|shell, _, _, cx| {
-                                    shell.knowledge_map.open = false;
-                                    shell.knowledge_map.clear();
-                                    cx.notify();
-                                })),
-                        ),
-                ),
+            design::button(
+                "atlas-close",
+                if compact { "Back" } else { "Back to Knowledge" },
+                cx,
+            )
+            .accessibility_label("Back to Knowledge")
+            .small()
+            .ghost()
+            .on_click(cx.listener(|shell, _, _, cx| {
+                shell.knowledge_map.close();
+                cx.notify();
+            })),
         );
-    let mut layers = h_flex().flex_wrap().gap(t.space.compact);
-    let ink = t.graph;
-    let colours = [
-        ink.detail,
-        ink.version,
-        ink.subject,
-        ink.chat,
-        ink.message,
-        ink.saved_from,
-        ink.focus,
-    ];
-    for layer in Layer::ALL {
-        let enabled = !s.hidden.contains(&layer);
-        layers = layers.child(
-            design::button(("atlas-layer", layer as usize), layer.label(), cx)
-                .small()
-                .selected(enabled)
-                .child(
-                    div()
-                        .size(ink.legend_swatch)
-                        .rounded(t.radius.pill)
-                        .bg(colours[layer as usize]),
-                )
-                .on_click(cx.listener(move |shell, _, _, cx| {
-                    let s = &mut shell.knowledge_map;
-                    if !s.hidden.remove(&layer) {
-                        s.hidden.insert(layer);
-                    }
-                    if s.selected_index()
-                        .is_some_and(|i| s.hidden.contains(&s.scene.nodes[i].layer))
-                    {
-                        s.selected = None;
-                        s.status.clear();
-                        s.options.remove(&OptionKey::Focus);
-                    }
-                    s.page = 0;
-                    s.neighbours = 0;
-                    s.filter();
-                    cx.notify();
-                })),
-        );
-    }
-    let mut controls = h_flex().flex_wrap().gap(t.space.compact);
-    for (id, label, option) in [
-        ("atlas-labels", "Labels", OptionKey::Labels),
-        (
-            "atlas-membership",
-            "Collection links",
-            OptionKey::Membership,
-        ),
-        (
-            "atlas-relations",
-            "Evidence links",
-            OptionKey::Relationships,
-        ),
-        (
-            "atlas-layout",
-            "Group by connections",
-            OptionKey::LinkedLayout,
-        ),
-        ("atlas-focus", "Neighbours only", OptionKey::Focus),
-        ("atlas-history", "Include history", OptionKey::History),
-        ("atlas-list", "Read as a list", OptionKey::List),
-    ] {
-        controls = controls.child(
-            design::button(id, label, cx)
-                .small()
-                .ghost()
-                .selected(s.on(option))
-                .disabled(option == OptionKey::Focus && s.selected.is_none())
-                .on_click(cx.listener(move |shell, _, _, cx| {
-                    let state = &mut shell.knowledge_map;
-                    if !state.options.remove(&option) {
-                        state.options.insert(option);
-                    }
-                    state.page = 0;
-                    state.neighbours = 0;
-                    match option {
-                        OptionKey::History => shell.open_knowledge_map(cx),
-                        OptionKey::LinkedLayout => {
-                            state.rebuild();
-                            cx.notify();
-                        }
-                        _ => {
-                            state.filter();
-                            cx.notify();
-                        }
-                    }
-                })),
-        );
-    }
-    if s.queue.is_empty() {
-        controls = controls.child(
-            design::button("atlas-draw-more", "Draw more across collections", cx)
-                .small()
-                .disabled(s.pending.is_some())
-                .on_click(cx.listener(|shell, _, _, cx| shell.draw_more_collections(cx))),
-        );
-    } else {
-        controls = controls.child(
-            design::button("atlas-stop", "Stop adding pages", cx)
-                .small()
-                .on_click(cx.listener(|shell, _, _, cx| {
-                    shell.knowledge_map.queue.clear();
-                    cx.notify();
-                })),
-        );
-    }
-    let mut col = v_flex()
+    let mut page = v_flex()
+        .id("all-knowledge-map")
+        .test_support()
+        .relative()
+        .size_full()
+        .flex_1()
+        .min_h_0()
         .min_w_0()
-        .w_full()
-        .max_w(t.layout.page_width)
-        .flex_shrink_0()
-        .gap(t.space.small)
+        .overflow_hidden()
+        .p(t.space.small)
+        .gap(t.space.compact)
+        .child(design::width_probe(cx, |s| &mut s.knowledge_map.width))
         .child(header);
-    let compact = s.width == design::WidthClass::Compact;
-    if compact {
-        col = col.child(
-            design::button("atlas-filters", "Search and filters", cx)
-                .small()
-                .self_start()
-                .selected(s.filters_open)
-                .on_click(cx.listener(|shell, _, _, cx| {
-                    shell.knowledge_map.filters_open = !shell.knowledge_map.filters_open;
-                    cx.notify();
-                })),
-        );
-    }
-    if !compact || s.filters_open {
-        col = col
+    if s.filters_open {
+        let mut layers = h_flex().flex_wrap().gap(t.space.compact);
+        let ink = t.graph;
+        let colours = [
+            ink.detail,
+            ink.version,
+            ink.subject,
+            ink.chat,
+            ink.message,
+            ink.saved_from,
+            ink.focus,
+        ];
+        for layer in Layer::ALL {
+            let enabled = !s.hidden.contains(&layer);
+            layers = layers.child(
+                design::button(("atlas-layer", layer as usize), layer.label(), cx)
+                    .small()
+                    .selected(enabled)
+                    .child(
+                        div()
+                            .size(ink.legend_swatch)
+                            .rounded(t.radius.pill)
+                            .bg(colours[layer as usize]),
+                    )
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        let s = &mut shell.knowledge_map;
+                        if !s.hidden.remove(&layer) {
+                            s.hidden.insert(layer);
+                        }
+                        if s.selected_index()
+                            .is_some_and(|i| s.hidden.contains(&s.scene.nodes[i].layer))
+                        {
+                            s.selected = None;
+                            s.status.clear();
+                            s.options.remove(&OptionKey::Focus);
+                        }
+                        s.page = 0;
+                        s.neighbours = 0;
+                        s.filter();
+                        cx.notify();
+                    })),
+            );
+        }
+        let mut controls = h_flex().flex_wrap().gap(t.space.compact);
+        for (id, label, option) in [
+            ("atlas-labels", "Labels", OptionKey::Labels),
+            (
+                "atlas-membership",
+                "Collection links",
+                OptionKey::Membership,
+            ),
+            (
+                "atlas-relations",
+                "Evidence links",
+                OptionKey::Relationships,
+            ),
+            (
+                "atlas-layout",
+                "Group by connections",
+                OptionKey::LinkedLayout,
+            ),
+            ("atlas-focus", "Neighbours only", OptionKey::Focus),
+            ("atlas-history", "Include history", OptionKey::History),
+            ("atlas-list", "Read as a list", OptionKey::List),
+        ] {
+            controls = controls.child(
+                design::button(id, label, cx)
+                    .small()
+                    .ghost()
+                    .selected(s.on(option))
+                    .disabled(option == OptionKey::Focus && s.selected.is_none())
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        let state = &mut shell.knowledge_map;
+                        if !state.options.remove(&option) {
+                            state.options.insert(option);
+                        }
+                        state.page = 0;
+                        state.neighbours = 0;
+                        match option {
+                            OptionKey::History => shell.open_knowledge_map(cx),
+                            OptionKey::LinkedLayout => {
+                                state.rebuild();
+                                cx.notify();
+                            }
+                            _ => {
+                                state.filter();
+                                cx.notify();
+                            }
+                        }
+                    })),
+            );
+        }
+        if s.queue.is_empty() {
+            controls = controls.child(
+                design::button("atlas-draw-more", "Draw more across collections", cx)
+                    .small()
+                    .disabled(s.pending.is_some())
+                    .on_click(cx.listener(|shell, _, _, cx| shell.draw_more_collections(cx))),
+            );
+        } else {
+            controls = controls.child(
+                design::button("atlas-stop", "Stop adding pages", cx)
+                    .small()
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.knowledge_map.queue.clear();
+                        cx.notify();
+                    })),
+            );
+        }
+        filters = filters
             .child(
                 h_flex()
                     .flex_wrap()
@@ -577,10 +571,28 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     ),
             )
             .child(layers)
-            .child(controls);
+            .child(
+                controls.child(
+                    design::button("atlas-refresh", "Refresh", cx)
+                        .small()
+                        .icon(IconName::RefreshCw)
+                        .on_click(cx.listener(|shell, _, _, cx| shell.open_knowledge_map(cx))),
+                ),
+            );
+        page = page.child(
+            div()
+                .id("atlas-filter-scroll")
+                .test_support()
+                .w_full()
+                .min_h_0()
+                .max_h(relative(0.40))
+                .flex_shrink_0()
+                .overflow_y_scroll()
+                .child(filters),
+        );
     }
     if !s.status.is_empty() {
-        col = col.child(
+        page = page.child(
             div()
                 .id("atlas-status")
                 .test_support()
@@ -589,8 +601,8 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                 .child(s.status.clone()),
         );
     }
-    if s.shown.iter().all(|x| !*x) && s.pending.is_none() {
-        col = col.child(
+    if s.visible_nodes == 0 && s.pending.is_none() {
+        page = page.child(
             div()
                 .sovra_text(TextRole::Body, cx)
                 .child(if s.hidden.len() == 7 {
@@ -600,70 +612,104 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                 }),
         );
     }
-    let mut view = v_flex().w_full().min_w_0().gap(t.space.small);
+    let mut view = v_flex().flex_1().min_w_0().min_h_0().overflow_hidden();
     if s.on(OptionKey::List) {
-        view = view.child(record_list(s, cx));
-    } else {
-        view = view.child(drawing::canvas_view(shell, cx)).child(
-            h_flex()
-                .flex_wrap()
-                .justify_between()
-                .gap(t.space.small)
-                .child(
-                    div()
-                        .sovra_text(TextRole::Caption, cx)
-                        .text_color(t.text_secondary)
-                        .child("Select a point to explore · Drag to pan · Ctrl/⌘ + scroll to zoom"),
-                )
-                .child(
-                    h_flex()
-                        .gap(t.space.compact)
-                        .child(
-                            design::button("atlas-out", "Zoom out", cx)
-                                .small()
-                                .on_click(cx.listener(|shell, _, _, cx| {
-                                    drawing::zoom(shell, 0.8, None, cx);
-                                })),
-                        )
-                        .child(design::button("atlas-fit", "Fit map", cx).small().on_click(
-                            cx.listener(|shell, _, _, cx| {
-                                shell.knowledge_map.camera = Viewport::default();
-                                cx.notify();
-                            }),
-                        ))
-                        .child(design::button("atlas-in", "Zoom in", cx).small().on_click(
-                            cx.listener(|shell, _, _, cx| drawing::zoom(shell, 1.25, None, cx)),
-                        )),
-                ),
+        view = view.child(
+            div()
+                .id("atlas-list-scroll")
+                .test_support()
+                .size_full()
+                .overflow_y_scroll()
+                .child(record_list(s, cx)),
         );
+    } else {
+        view = view.child(drawing::canvas_view(shell, cx));
     }
+    let mut content = div()
+        .flex()
+        .flex_1()
+        .min_h_0()
+        .min_w_0()
+        .w_full()
+        .gap(t.space.small);
+    let wide = s.width.fits_detail_pane();
+    content = if wide {
+        content.flex_row()
+    } else {
+        content.flex_col()
+    };
+    content = content.child(view);
     if let Some(i) = s.selected_index() {
-        if s.width.fits_detail_pane() {
-            col = col.child(
-                h_flex()
-                    .w_full()
+        let inspector_pane = div()
+            .id("atlas-inspector-scroll")
+            .test_support()
+            .min_h_0()
+            .min_w_0()
+            .flex_shrink_0()
+            .overflow_y_scroll();
+        let inspector_pane = if wide {
+            inspector_pane.w(t.layout.inspector_width).h_full()
+        } else {
+            inspector_pane.w_full().max_h(relative(0.45))
+        };
+        content = content.child(inspector_pane.child(inspector(s, i, cx)));
+    }
+    page = page.child(content);
+    if !s.on(OptionKey::List) {
+        let level = format!("{:.0}%", s.camera.zoom * 100.);
+        let mut toolbar = h_flex()
+            .w_full()
+            .flex_shrink_0()
+            .gap(t.space.compact)
+            .justify_end();
+        if !compact {
+            toolbar = toolbar.child(
+                div()
+                    .flex_1()
                     .min_w_0()
-                    .items_start()
-                    .gap(t.space.small)
-                    .child(div().flex_1().min_w_0().child(view))
+                    .truncate()
+                    .sovra_text(TextRole::Caption, cx)
+                    .text_color(t.text_secondary)
+                    .child("Scroll to zoom · Drag to pan · Select a point to explore"),
+            );
+        }
+        page =
+            page.child(
+                toolbar
+                    .child(
+                        design::button("atlas-out", "−", cx)
+                            .accessibility_label("Zoom out")
+                            .tooltip("Zoom out")
+                            .small()
+                            .on_click(
+                                cx.listener(|shell, _, _, cx| drawing::zoom(shell, 0.8, None, cx)),
+                            ),
+                    )
                     .child(
                         div()
-                            .id("atlas-inspector-scroll")
+                            .id("atlas-zoom-level")
                             .test_support()
-                            .w(t.layout.inspector_width)
-                            .flex_shrink_0()
-                            .max_h(t.graph.compact_height)
-                            .overflow_y_scroll()
-                            .child(inspector(s, i, cx)),
-                    ),
+                            .aria_label(level.clone())
+                            .sovra_text(TextRole::Body, cx)
+                            .child(level),
+                    )
+                    .child(
+                        design::button("atlas-in", "+", cx)
+                            .accessibility_label("Zoom in")
+                            .tooltip("Zoom in")
+                            .small()
+                            .on_click(
+                                cx.listener(|shell, _, _, cx| drawing::zoom(shell, 1.25, None, cx)),
+                            ),
+                    )
+                    .child(design::button("atlas-fit", "Fit map", cx).small().on_click(
+                        cx.listener(|shell, _, _, cx| {
+                            shell.knowledge_map.camera = Viewport::default();
+                            cx.notify();
+                        }),
+                    )),
             );
-        } else {
-            col = col.child(view).child(inspector(s, i, cx));
-        }
-    } else {
-        col = col.child(view);
     }
-    page = page.child(col);
     page
 }
 fn node_button(
