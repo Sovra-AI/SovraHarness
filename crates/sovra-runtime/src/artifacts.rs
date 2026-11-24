@@ -3,6 +3,7 @@
 //! Without a store the library still works for the session, in memory.
 
 mod hosting;
+mod knowledge_map;
 mod project;
 mod search;
 

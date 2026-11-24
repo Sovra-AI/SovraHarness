@@ -1,4 +1,6 @@
 //! Scoped, concurrent reads of the owner's connected sources.
+mod map;
+mod map_files;
 use crate::{artifacts::ArtifactRuntime, recalling, remembering::MemoryControl};
 use sovra_core::{
     Event, MemoryContext, MemorySearch, MemorySourceOrigin, MemoryStore,
@@ -10,6 +12,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Sources {
+    pub(crate) groups: crate::groups::GroupKnowledge,
     pub(crate) media: Option<Arc<dyn FileStore>>,
     pub(crate) files: Option<Arc<dyn FileIndex>>,
     pub(crate) memory: Option<Arc<dyn MemoryStore>>,
@@ -21,6 +24,7 @@ pub(crate) struct Explorer {
     events: async_channel::Sender<Event>,
     task: Option<tokio::task::JoinHandle<()>>,
     cpu: Arc<tokio::sync::Semaphore>,
+    map_task: Option<tokio::task::JoinHandle<()>>,
 }
 impl Explorer {
     pub(crate) fn new(sources: Sources, events: async_channel::Sender<Event>) -> Self {
@@ -28,6 +32,7 @@ impl Explorer {
             sources,
             events,
             task: None,
+            map_task: None,
             cpu: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
@@ -47,6 +52,9 @@ impl Explorer {
 }
 impl Drop for Explorer {
     fn drop(&mut self) {
+        if let Some(task) = self.map_task.take() {
+            task.abort();
+        }
         if let Some(task) = self.task.take() {
             task.abort();
         }

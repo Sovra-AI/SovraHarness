@@ -25,6 +25,34 @@ details** where offered to move between an interpretation and its evidence.
 The **Saved details** citation card in chat opens the same Knowledge records.
 A citation is a navigation aid, not proof that a reply is correct.
 
+## Open the knowledge map
+
+Choose **Knowledge → Open knowledge map**. The coloured collection buttons control
+files, findings, relationships, personal records, saved work, people and visible
+group spaces independently. The map opens without a search. Folder, category and
+finding totals describe the index. The point and connection counts above the
+drawing describe the current view. In a narrow window, open **Search and filters**
+to reach the collection and display controls.
+
+Select a point and choose **Draw connected records** to add its next page to the
+same drawing. **Draw more across collections** adds a page from each enabled collection
+and folder. **Group by connections** brings related points closer together.
+**Find on map** steps through drawn points matching your words. Select a saved relationship to follow its subject, object and
+cited passage. A **mentions topic** link means two records use the same label.
+**Add search results** can bring matching excerpts and equivalent readings from
+files, saved details and artifacts onto the map. Each source keeps its own identity.
+
+Drag to move, zoom with the buttons or pinch, and use **Fit map** to return to
+the overview. Use **Neighbours only** to inspect one point and its direct links.
+**Read as a list** gives keyboard access to the points and their connections.
+**Include history** reopens the map with earlier records, file observations and
+replaced relationships available. **Refresh** reads the local sources again.
+
+The layout uses collection aggregates, indexed continuation pages, batched line
+drawing and a limited number of non-overlapping labels. The design draws on
+[research on large graph hierarchies](https://www.cs.ubc.ca/labs/imager/tr/2009/Archambault_TugGraph_PacificVis/)
+and [Cytoscape’s rendering guidance](https://js.cytoscape.org/#performance).
+
 ## Explore your sources
 
 The **Evidence map** shows how many excerpts and shared connections the search

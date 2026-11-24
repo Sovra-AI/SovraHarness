@@ -637,6 +637,7 @@ async fn serve(
     );
     let mut explorer = knowledge_analysis::Explorer::new(
         knowledge_analysis::Sources {
+            groups: groups.knowledge.clone(),
             media: files.clone(),
             files: index,
             memory: memory.clone(),
@@ -918,6 +919,7 @@ async fn serve(
                 runs.insert(session_id, run);
             }
             Command::Teams(command) => team.handle(&handle, command),
+            Command::KnowledgeMap(request) => explorer.map(&handle, request),
             Command::Explore(request) => explorer.search(&handle, request),
             Command::Artifacts(command) => artifact_library.handle(&handle, command),
             Command::Connections(command) => {

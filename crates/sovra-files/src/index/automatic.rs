@@ -150,6 +150,7 @@ fn findings(
                 Ok((
                     r.get::<_, i64>(7)?,
                     DiscoveredFinding {
+                        id: r.get(7)?,
                         kind,
                         reference: PassageRef {
                             root_id: r.get(0)?,

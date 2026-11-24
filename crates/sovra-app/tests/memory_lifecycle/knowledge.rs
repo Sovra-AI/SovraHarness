@@ -2,6 +2,7 @@
 
 use super::*;
 use sovra_core::file_index::{FileIndex, IndexedRoot, ScanCancellation, ScanObserver};
+use sovra_core::knowledge_map::{Branch, Layer, MapRequest};
 
 const SOURCE_TEXT: &str = "The orchid greenhouse budget is 420 dollars.";
 
@@ -286,6 +287,52 @@ fn explorer_combines_three_current_sources_and_respects_edits_and_removal_after_
     };
     driver.close();
     let mut driver = fixture.start_with_index(Some(store));
+    // The map starts with every collection. Looking up the same term adds its
+    // cross-store agreement to that graph, keeping the exact file locator.
+    let mut map_request = |branch, id| {
+        driver.send(Command::KnowledgeMap(MapRequest {
+            id,
+            branch,
+            history: false,
+        }));
+        let Event::KnowledgeMapped { result, .. } =
+            driver.wait(|e| matches!(e,Event::KnowledgeMapped{request_id,..} if *request_id==id))
+        else {
+            unreachable!()
+        };
+        result.unwrap()
+    };
+    let overview = map_request(Branch::Overview, 10);
+    assert!(
+        Layer::ALL
+            .iter()
+            .all(|layer| overview.nodes.contains_key(&layer.hub()))
+    );
+    assert!(overview.nodes.contains_key(&format!("fact:{}", note.0)));
+    assert!(
+        overview
+            .nodes
+            .contains_key(&format!("artifact:{}", item.id))
+    );
+    let folder = overview.branches[&format!("root:{}", root.id)]
+        .clone()
+        .unwrap();
+    let files = map_request(folder, 11);
+    assert!(files.nodes.values().any(|n| n.label == "sample.txt"));
+    let searched = map_request(Branch::Search("Juniper".into()), 12);
+    let agreement = searched
+        .nodes
+        .values()
+        .find(|n| n.label.contains("Equivalent reading of 500 g"))
+        .unwrap();
+    assert_eq!(
+        searched
+            .links
+            .iter()
+            .filter(|l| l.from == agreement.id)
+            .count(),
+        3
+    );
     let found = search(&mut driver, 1);
     assert!(
         found

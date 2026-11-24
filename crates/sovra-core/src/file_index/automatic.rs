@@ -11,6 +11,7 @@ use crate::knowledge_analysis::{FindingKind, Statement};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredFinding {
+    pub id: i64,
     pub kind: FindingKind,
     pub detail: String,
     pub path: String,

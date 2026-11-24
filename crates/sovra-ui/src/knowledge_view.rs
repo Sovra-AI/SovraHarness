@@ -151,6 +151,7 @@ impl Shell {
         section: KnowledgeSection,
         cx: &mut Context<Self>,
     ) {
+        self.knowledge_map.close();
         self.knowledge_open.insert(section);
         if section == KnowledgeSection::Memories {
             self.memory_view
@@ -191,6 +192,9 @@ pub(crate) fn render_knowledge_view(
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
+    if shell.knowledge_map.open {
+        return crate::knowledge_map::render(shell, cx).into_any_element();
+    }
     if shell.memory_view.read(cx).source_only() && !shell.explorer.reading_personal_source {
         return v_flex()
             .id("sovra-memory-source-view").test_support()
@@ -237,6 +241,12 @@ pub(crate) fn render_knowledge_view(
                 block
                     .id("knowledge-column")
                     .test_support()
+                    .child(
+                        design::button("open-knowledge-map", "Open knowledge map", cx)
+                            .icon(IconName::Workflow)
+                            .self_start()
+                            .on_click(cx.listener(|shell, _, _, cx| shell.open_knowledge_map(cx))),
+                    )
                     .child(crate::knowledge_explorer::render(shell, cx))
                     .children(discoveries::overview(shell, cx)),
             );

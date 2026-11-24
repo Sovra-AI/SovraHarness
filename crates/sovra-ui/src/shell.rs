@@ -50,6 +50,7 @@ pub struct Shell {
     pub(crate) skill_menu: crate::skill_menu::MenuState,
     pub(crate) skill_library: crate::skill_library::SkillLibrary,
     pub(crate) plugins: crate::plugin_browser::PluginBrowser,
+    pub(crate) knowledge_map: crate::knowledge_map::MapView,
     pub(crate) explorer: crate::knowledge_explorer::ExplorerView,
     pub(crate) file_index: crate::file_index_view::FileIndexView,
     pub(crate) memory_view: Entity<crate::memory_view::MemoryView>,
@@ -378,6 +379,7 @@ impl Shell {
                     shell.state.observe_time(wall_time());
                     let mut threads_to_persist = std::collections::BTreeSet::new();
                     for event in batch {
+                        shell.observe_knowledge_map(&event, cx);
                         shell.explorer.observe(&event);
                         let memory_visible = shell.state.active_tab == NavTab::Knowledge
                             && shell
@@ -929,6 +931,7 @@ impl Shell {
             skill_menu: crate::skill_menu::MenuState::default(),
             skill_library,
             plugins,
+            knowledge_map: crate::knowledge_map::MapView::new(window, cx),
             explorer,
             file_index,
             memory_view,
@@ -1141,6 +1144,7 @@ impl Shell {
     }
 
     pub fn select_tab(&mut self, tab: NavTab, cx: &mut Context<Self>) {
+        self.knowledge_map.close();
         self.explorer.reading_personal_source = false;
         self.state.select_tab(tab);
         if tab == NavTab::Training {
@@ -2418,7 +2422,10 @@ impl Shell {
                         body.child(div().absolute().inset_0().occlude().child(panel))
                     };
                 }
-                if self.state.active_tab == NavTab::Knowledge && self.inspector_docked {
+                if self.state.active_tab == NavTab::Knowledge
+                    && self.inspector_docked
+                    && !self.knowledge_map.open
+                {
                     body = body.child(render_inspector(&self.state, &self.search_input, cx));
                 }
                 v_flex()

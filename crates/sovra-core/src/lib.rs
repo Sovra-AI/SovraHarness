@@ -27,6 +27,7 @@ pub mod google;
 pub mod group;
 mod knowledge;
 pub mod knowledge_analysis;
+pub mod knowledge_map;
 pub mod mcp;
 mod memory;
 pub mod microsoft;

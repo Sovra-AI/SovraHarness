@@ -1428,6 +1428,7 @@ impl WorkspaceState {
             )
             | Event::Skills(_)
             | Event::Plugins(_)
+            | Event::KnowledgeMapped { .. }
             | Event::Explored { .. }
             | Event::FileIndex(_)
             | Event::Ready { .. }

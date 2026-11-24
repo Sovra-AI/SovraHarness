@@ -24,6 +24,7 @@ use crate::{
 mod directory;
 mod exploration;
 mod graph;
+pub(crate) use graph::viewport::{Frame, Viewport};
 mod profile;
 mod repeats;
 mod source_browser;

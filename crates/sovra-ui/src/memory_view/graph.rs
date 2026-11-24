@@ -6,7 +6,7 @@
 //! the domain stored or the person confirmed. Words stay in the inspector and in an
 //! optional list; clickable labels also keep the map reachable by keyboard.
 
-mod viewport;
+pub(crate) mod viewport;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

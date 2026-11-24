@@ -113,7 +113,7 @@ impl Skill {
                     .to_owned(),
                 "/files ".to_owned(),
             ),
-            "explore-knowledge" => ("Find a measurement in your folders, statements and saved tables. Open the source wording beside the result.".into(),"/explore-knowledge".into()),
+            "explore-knowledge" => ("Open the knowledge map and follow a connection, or find a measurement across your folders, statements and saved tables.".into(),"/explore-knowledge".into()),
             "index-folder" => (
                 "Pick a folder and watch Sovra read it: you'll see how far along it is, about how long is left, and what it finds — photos, letters, bills — sorted into everyday groups like Money, Health and Travel."
                     .to_owned(),
@@ -431,7 +431,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         action(
             "explore-knowledge",
             "Explore your connected sources",
-            "Find matching wording, compare measurements and inspect relationships across files, saved statements and artifacts.",
+            "Open one map of your local knowledge, follow connections back to their sources, or search for matching wording and measurements.",
             SkillAction::ExploreKnowledge,
             &[],
         ),

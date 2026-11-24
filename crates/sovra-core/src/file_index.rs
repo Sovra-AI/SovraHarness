@@ -691,6 +691,15 @@ pub trait FileIndex: Send + Sync + std::fmt::Debug {
         self.search(query)
     }
     fn read(&self, reference: &PassageRef) -> Result<IndexPassage, IndexError>;
+    /// Read a keyset page without recounting a large folder on every expansion.
+    fn map_folder(
+        &self,
+        _root: &str,
+        _after: &str,
+        _history: bool,
+    ) -> Result<crate::knowledge_map::MapPage, IndexError> {
+        Err(IndexError("Folder map browsing is unavailable.".into()))
+    }
     fn catalogue(&self, query: &CatalogQuery) -> Result<CatalogPage, IndexError>;
     fn history(&self, query: &FileHistoryQuery) -> Result<FileHistory, IndexError>;
     fn read_history(&self, reference: &HistoryPassageRef) -> Result<HistoricalPassage, IndexError>;

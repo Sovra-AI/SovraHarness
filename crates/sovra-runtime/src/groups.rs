@@ -133,12 +133,21 @@ pub(crate) type LocalModel = Arc<
 pub(crate) struct GroupKnowledge(
     /// For each group this computer is in (by its place in the host): one view
     /// per space its person is in, the whole group first. Helpers read them all.
-    Arc<RwLock<std::collections::BTreeMap<u64, Vec<KnowledgeView>>>>,
+    Arc<RwLock<std::collections::BTreeMap<u64, VisibleGroup>>>,
     Arc<std::sync::RwLock<Option<LocalMemory>>>,
     Arc<std::sync::RwLock<Option<std::sync::Weak<Groups>>>>,
     Arc<std::sync::RwLock<Option<LocalModel>>>,
     Arc<std::sync::RwLock<Option<crate::training::PeerInbox>>>,
 );
+
+struct VisibleGroup {
+    name: String,
+    id: String,
+    views: Vec<KnowledgeView>,
+    members: std::collections::BTreeMap<PersonId, String>,
+}
+
+mod knowledge_map;
 
 impl GroupKnowledge {
     fn local_reader(&self) -> Option<Arc<dyn sovra_core::MemoryReader>> {
@@ -177,7 +186,7 @@ impl GroupKnowledge {
             let views = self.0.read().await;
             let mut hits: Vec<SharedHit> = views
                 .values()
-                .flatten()
+                .flat_map(|g| &g.views)
                 .flat_map(|view| view.search(question, sovra_core::MAX_GROUP_EVIDENCE_ITEMS))
                 .collect();
             hits.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -187,7 +196,7 @@ impl GroupKnowledge {
                     .collect::<Vec<_>>(),
                 views
                     .values()
-                    .flatten()
+                    .flat_map(|g| &g.views)
                     .flat_map(|view| view.search_artifacts(question, ARTIFACT_EVIDENCE_ITEMS))
                     .take(ARTIFACT_EVIDENCE_ITEMS)
                     .map(artifact_evidence)
@@ -1509,7 +1518,26 @@ impl Groups {
         }
         let mut all = vec![inner.view.clone()];
         all.extend(inner.pairs.values().cloned());
-        self.knowledge.0.write().await.insert(self.slot, all);
+        let mut visible = self.knowledge.0.write().await;
+        if let Some(roster) = &inner.roster
+            && roster.owner_of(&self.me()).is_some()
+        {
+            visible.insert(
+                self.slot,
+                VisibleGroup {
+                    name: roster.name.clone(),
+                    id: roster.group.to_hex(),
+                    views: all,
+                    members: roster
+                        .people
+                        .iter()
+                        .map(|(id, m)| (*id, m.name.clone()))
+                        .collect(),
+                },
+            );
+        } else {
+            visible.remove(&self.slot);
+        }
     }
 
     /// Folds each space, opens any lane keys granted to this computer and any sealed
@@ -4367,13 +4395,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn map_pages_visible_group_spaces_and_omits_redacted_details() {
+        let groups = GroupKnowledge::default();
+        let template = view_with_dads_detail()
+            .details
+            .into_values()
+            .next()
+            .unwrap();
+        let mut lanes = [KnowledgeView::default(), KnowledgeView::default()];
+        for n in 0..35u8 {
+            let mut d = template.clone();
+            d.id = OpHash([n; 32]);
+            d.text = format!("Observation {n}");
+            if n == 33 {
+                d.status = sovra_core::group::DetailStatus::Redacted;
+            }
+            lanes[usize::from(n % 2)].details.insert(d.id, d);
+        }
+        for (n, name, views) in [(0, "Family", Vec::from(lanes)), (1, "Office", Vec::new())] {
+            groups.0.write().await.insert(
+                n,
+                VisibleGroup {
+                    id: name.into(),
+                    name: name.into(),
+                    views,
+                    members: std::collections::BTreeMap::new(),
+                },
+            );
+        }
+        let mut map = groups.map_page(true, None).await;
+        assert!(map.nodes.contains_key("group:Office"));
+        let Some(sovra_core::knowledge_map::Branch::GroupRecords(group, after)) =
+            map.branches["group:Family"].clone()
+        else {
+            panic!("the group needs another page");
+        };
+        map.merge(groups.map_page(true, Some((&group, after))).await);
+        assert_eq!(
+            map.nodes
+                .keys()
+                .filter(|id| id.starts_with("shared:"))
+                .count(),
+            34
+        );
+        assert_eq!(map.branches["group:Family"], None);
+        assert!(
+            !map.nodes
+                .contains_key(&format!("shared:{}", OpHash([33; 32]).to_hex()))
+        );
+    }
+
+    #[tokio::test]
     async fn a_helpers_recall_carries_shared_group_details_with_who_shared_them() {
         let knowledge = GroupKnowledge::default();
-        knowledge
-            .0
-            .write()
-            .await
-            .insert(0, vec![view_with_dads_detail()]);
+        knowledge.0.write().await.insert(
+            0,
+            VisibleGroup {
+                name: "Family".into(),
+                id: "group".into(),
+                views: vec![view_with_dads_detail()],
+                members: std::collections::BTreeMap::new(),
+            },
+        );
         let reader = knowledge
             .wrap(Some(Arc::new(Empty)))
             .expect("wraps an existing reader");

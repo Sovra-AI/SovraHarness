@@ -31,6 +31,7 @@ impl RuntimeStatus {
             | Event::Development(_)
             | Event::Models(_)
             | Event::Skills(_)
+            | Event::KnowledgeMapped { .. }
             | Event::Explored { .. }
             | Event::FileIndex(_)
             | Event::Teams(_)

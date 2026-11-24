@@ -490,3 +490,45 @@ fn legacy_index_migrates_atomically_without_inventing_sizes_or_losing_citations(
         SCHEMA_VERSION
     );
 }
+
+#[test]
+fn whole_map_pages_every_file_once_and_rechecks_grants() {
+    use sovra_core::knowledge_map::Branch;
+    let fixture = Fixture::new();
+    for i in 0..143 {
+        fixture.write(&format!("sample-{i:03}.txt"), "A source passage.");
+    }
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let hub = format!("root:{}", root.id);
+    let first = store.map_folder(&root.id, "", false).unwrap();
+    assert_eq!(first.links.iter().filter(|l| l.from == hub).count(), 128);
+    let Branch::Files { after, .. } = first.branches[&hub].clone().unwrap() else {
+        panic!()
+    };
+    let second = store.map_folder(&root.id, &after, false).unwrap();
+    assert_eq!(second.links.iter().filter(|l| l.from == hub).count(), 15);
+    assert_eq!(second.branches[&hub], None);
+    assert!(first.links.is_disjoint(&second.links));
+    std::fs::remove_file(fixture.source().join("sample-142.txt")).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    assert!(
+        !store
+            .map_folder(&root.id, &after, false)
+            .unwrap()
+            .nodes
+            .values()
+            .any(|n| n.label == "sample-142.txt")
+    );
+    assert!(
+        store
+            .map_folder(&root.id, &after, true)
+            .unwrap()
+            .nodes
+            .values()
+            .any(|n| n.label == "sample-142.txt")
+    );
+    store.remove(&root.id).unwrap();
+    assert!(store.map_folder(&root.id, &after, true).is_err());
+}

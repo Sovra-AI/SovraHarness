@@ -7,6 +7,7 @@ mod catalogue;
 mod derived;
 mod graph;
 mod history;
+mod map;
 mod matching;
 mod report;
 mod scan;
@@ -288,6 +289,14 @@ impl FileIndex for LocalFileIndex {
         reference: &sovra_core::file_index::HistoryPassageRef,
     ) -> Result<sovra_core::file_index::HistoricalPassage, IndexError> {
         history::read(&mut self.connect()?, reference)
+    }
+    fn map_folder(
+        &self,
+        root: &str,
+        after: &str,
+        history: bool,
+    ) -> Result<sovra_core::knowledge_map::MapPage, IndexError> {
+        map::folder_page(&self.connect()?, root, after, history)
     }
     fn catalogue(&self, query: &CatalogQuery) -> Result<CatalogPage, IndexError> {
         catalogue::query(&mut self.connect()?, query)
