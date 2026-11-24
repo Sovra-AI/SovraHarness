@@ -49,6 +49,25 @@ package version.
 
   Every date in a file tool's answer now also comes in plain UTC beside the
   Unix number; one model had turned a November timestamp into February.
+- **Local and OpenAI-style models now see your folder passages.** Sovra sends
+  the passages that match your question as a separate system message. Ollama's
+  qwen3-coder kept only the first system message and silently dropped the
+  passages, and other OpenAI-style servers reject a system message after the
+  first. The model then answered that your files held nothing, even with the
+  matching line attached. For Ollama, OpenAI-compatible servers and OpenRouter,
+  the opening system messages are now combined into one, and later ones are sent
+  as notes. The passages also sit just before your question rather than above the
+  whole conversation. With qwen3-coder 30B, five everyday questions about test
+  folders (a weight log, a thermometer reading, an insurance letter, who grows
+  the basil, what the folders hold) were answered correctly and cited. Before,
+  they got "nothing found". Anthropic and Gemini were unaffected. Also:
+  - "latest" or "today" in a question no longer forces the web search helper
+    when your folders have a matching passage. "Search the web…" still does.
+  - When saved details find nothing, the model is told that this says nothing
+    about your files.
+  - A tool call that Qwen models write as text in their own
+    `<function=…><parameter=…>` form now runs, even with closing tags missing,
+    instead of showing as raw text.
 
 ## [0.9.0] — 2026-11-24
 

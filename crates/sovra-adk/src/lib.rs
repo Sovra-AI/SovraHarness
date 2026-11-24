@@ -32,6 +32,7 @@ mod schedules;
 mod skills;
 mod sources_footer;
 mod storage;
+mod system_messages;
 mod team;
 mod terminal;
 mod text_tool_calls;
@@ -208,6 +209,9 @@ pub struct AdkHarness {
     memory_output: memory::OutputMode,
     /// Model underneath automatic folder evidence, so a later call can remove it.
     file_model: Option<Arc<dyn Llm>>,
+    /// The scoped folder reader, so a question the folders answer is not
+    /// forced to the web because it says "latest".
+    own_records: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
     /// Set by [`AdkHarness::with_artifact_saver`]; team members inherit it.
     artifact_saver: Option<ArtifactSaver>,
     /// Skills the model may apply unasked; appended only while `load_skill` is offered.
@@ -250,11 +254,13 @@ impl AdkHarness {
         if let Some(inner) = prepared.file_model.take() {
             prepared.llm = inner;
         }
+        prepared.own_records = None;
         let mut tools = prepared.base_tools.clone();
         tools.retain(|tool| !file_index::TOOL_NAMES.contains(&tool.name()));
         if prepared.tools_enabled
             && let Some(reader) = reader
         {
+            prepared.own_records = Some(Arc::clone(&reader));
             tools.extend(file_index::tools(&reader));
             prepared.file_model = Some(Arc::clone(&prepared.llm));
             prepared.llm = file_index::evidence::model(Arc::clone(&prepared.llm), reader);
@@ -487,6 +493,13 @@ impl AdkHarness {
                 let anthropic = thinking::anthropic_config(anthropic, model, thinking);
                 Arc::new(adk_model::AnthropicClient::new(anthropic).map_err(Error::ModelInit)?)
             }
+        };
+        // Innermost, so evidence every outer wrapper adds is covered.
+        let llm = match connection.kind {
+            ProviderKind::OpenRouter | ProviderKind::Ollama | ProviderKind::OpenAiCompatible => {
+                system_messages::OneSystemMessage::wrap(llm)
+            }
+            ProviderKind::Anthropic => llm,
         };
         let llm = thinking::wrap(llm, connection.kind, model, thinking);
         let llm = readiness::wrap(llm, connection, readiness);
@@ -771,6 +784,7 @@ impl AdkHarness {
                 &llm,
             ),
             tools_enabled,
+            own_records: parent.and_then(|parent| parent.own_records.clone()),
         })?;
         let sessions = parent.map_or_else(
             || Arc::new(InMemorySessionService::new()),
@@ -799,6 +813,7 @@ impl AdkHarness {
             page_viewer: None,
             memory_output: memory::OutputMode::Prompt,
             file_model: parent.and_then(|parent| parent.file_model.clone()),
+            own_records: parent.and_then(|parent| parent.own_records.clone()),
             artifact_saver: None,
             skill_guide: None,
             root,

@@ -25,6 +25,10 @@ pub fn parse_text_tool_call<'a>(
     text: &str,
     offered: impl IntoIterator<Item = &'a str>,
 ) -> Option<TextToolCall> {
+    let offered: Vec<&str> = offered.into_iter().collect();
+    if let Some(call) = xml_call(text.trim()) {
+        return offered.contains(&call.name.as_str()).then_some(call);
+    }
     let body = strip_wrappers(text.trim())?;
     let value: Value = serde_json::from_str(body).ok()?;
     let object = match value {
@@ -40,7 +44,7 @@ pub fn parse_text_tool_call<'a>(
         _ => object,
     };
     let name = object.get("name")?.as_str()?.trim();
-    if !offered.into_iter().any(|tool| tool == name) {
+    if !offered.contains(&name) {
         return None;
     }
     let args = arguments(&object)?;
@@ -76,7 +80,61 @@ pub fn may_be_text_tool_call(tail: &str) -> bool {
     } else {
         trimmed
     };
-    json_call_prefix(body)
+    json_call_prefix(body) || xml_call_prefix(body)
+}
+
+/// True while `body` still reads like the opening of `<function=`.
+fn xml_call_prefix(body: &str) -> bool {
+    let body = body.trim_start();
+    body.starts_with(XML_FUNCTION) || XML_FUNCTION.starts_with(body)
+}
+
+const XML_FUNCTION: &str = "<function=";
+const XML_PARAMETER: &str = "<parameter=";
+
+/// Qwen 3 Coder's own call format, also when the model drops closing tags:
+/// `<tool_call><function=NAME><parameter=KEY>VALUE</parameter></function></tool_call>`.
+/// A value that parses as JSON (a number, list or object) keeps that type.
+fn xml_call(text: &str) -> Option<TextToolCall> {
+    let text = text
+        .strip_prefix("<tool_call>")
+        .unwrap_or(text)
+        .trim_start();
+    let text = text.strip_suffix("</tool_call>").unwrap_or(text).trim_end();
+    let text = text.strip_suffix("</function>").unwrap_or(text);
+    let rest = text.strip_prefix(XML_FUNCTION)?;
+    let (name, mut rest) = rest.split_once('>')?;
+    let name = name.trim();
+    if name.is_empty() || name.contains(char::is_whitespace) {
+        return None;
+    }
+    let mut args = Map::new();
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        let after = rest.strip_prefix(XML_PARAMETER)?;
+        let (key, after) = after.split_once('>')?;
+        let end = [after.find("</parameter>"), after.find(XML_PARAMETER)]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(after.len());
+        let raw = after[..end].trim();
+        let value = serde_json::from_str(raw)
+            .ok()
+            .filter(|v: &Value| !v.is_string())
+            .unwrap_or_else(|| Value::String(raw.to_owned()));
+        args.insert(key.trim().to_owned(), value);
+        rest = after[end..]
+            .strip_prefix("</parameter>")
+            .unwrap_or(&after[end..]);
+    }
+    Some(TextToolCall {
+        name: name.to_owned(),
+        args: Value::Object(args),
+    })
 }
 
 /// Byte offset of the earliest line at or after `from` where a text call
@@ -191,6 +249,39 @@ mod tests {
             assert_eq!(call.name, "web_search");
             assert_eq!(call.args, json!({ "queries": ["rust"] }), "{text}");
         }
+    }
+
+    /// Seen live with qwen3-coder:30b on Ollama: its own format, closing tags dropped.
+    #[test]
+    fn qwen_xml_calls_are_recovered_even_without_closing_tags() {
+        let offered = ["search_saved_details", "list_file_findings"];
+        for text in [
+            "<function=search_saved_details> <parameter=query> What temperature did the thermometer read?  </tool_call>",
+            "<tool_call>\n<function=search_saved_details>\n<parameter=query>\nWhat temperature did the thermometer read?\n</parameter>\n</function>\n</tool_call>",
+        ] {
+            let call = parse_text_tool_call(text, offered).unwrap_or_else(|| panic!("{text}"));
+            assert_eq!(call.name, "search_saved_details");
+            assert_eq!(
+                call.args,
+                json!({ "query": "What temperature did the thermometer read?" })
+            );
+        }
+        let typed = parse_text_tool_call(
+            "<function=list_file_findings><parameter=kind>measurement</parameter><parameter=next>7</parameter></function>",
+            offered,
+        )
+        .expect("typed call");
+        assert_eq!(typed.args, json!({ "kind": "measurement", "next": 7 }));
+        assert!(parse_text_tool_call("<function=remove_all></function>", offered).is_none());
+        assert!(
+            parse_text_tool_call("Use <function=search_saved_details> later", offered).is_none()
+        );
+        assert!(may_be_text_tool_call("<funct"));
+        assert!(may_be_text_tool_call("<tool_call>\n<function=search"));
+        let lead = "I need to search your saved details.\n\n<function=search_saved_details> <parameter=query> thermometer </tool_call>";
+        let (start, call) = split_text_tool_call(lead, &offered).expect("lead-in call");
+        assert!(lead[..start].starts_with("I need to search"));
+        assert_eq!(call.args, json!({ "query": "thermometer" }));
     }
 
     #[test]

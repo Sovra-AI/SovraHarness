@@ -1119,6 +1119,18 @@ async fn when_no_passage_matches_the_model_still_sees_related_findings() {
     assert!(seen.contains("average 80.2 kg"), "{seen}");
     assert!(seen.contains("Home/weight-log.csv"));
     assert!(seen.contains("findings Sovra read automatically"));
+    // Beside the question, not above the instructions, where a small model skipped it.
+    let evidence = seen
+        .find("Indexed folder passages follow")
+        .expect("evidence");
+    let question = seen
+        .rfind("How has Sam's weight changed lately?")
+        .expect("question");
+    assert!(
+        seen.find("You are Sovra").is_some_and(|i| i < evidence),
+        "{seen}"
+    );
+    assert!(evidence < question);
     let asked = reader.asked.lock().expect("asked").clone();
     assert!(asked.contains(&"dated_series:sam".to_owned()), "{asked:?}");
     assert!(

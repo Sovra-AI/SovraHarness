@@ -152,6 +152,8 @@ pub(crate) struct OrchestratorParts {
     /// not offered, so the parent cannot route to one that would only guess.
     pub providers: Vec<Arc<dyn CapabilityProvider>>,
     pub tools_enabled: bool,
+    /// Connected folders, consulted before a question is forced to the web.
+    pub own_records: Option<Arc<dyn sovra_core::file_index::IndexedFiles>>,
 }
 
 pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Error> {
@@ -248,9 +250,10 @@ pub(crate) fn build(mut parts: OrchestratorParts) -> Result<Arc<dyn Agent>, Erro
         .iter()
         .find(|spec| active_skill_requests(&parts.instruction, &spec.id))
         .map(|spec| spec.id.clone());
-    let parent_llm = RequiredFirstCall::wrap(
+    let parent_llm = RequiredFirstCall::wrap_checking_records(
         SourcesFooter::wrap(parts.llm),
         FirstCall::Delegate { procedure_requests },
+        parts.own_records,
     );
     let mut builder = crate::work_log::harden(
         LlmAgentBuilder::new(ORCHESTRATOR_ID)

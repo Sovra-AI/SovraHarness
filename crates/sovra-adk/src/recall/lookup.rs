@@ -120,7 +120,7 @@ impl Lookup {
         }
         match parse(args.clone()) {
             Ok(_) => {
-                json!({"invocation": self.invocation, "lookup": args, "notice": "Query accepted. Read the fresh saved evidence attached to the next model request. This receipt contains no remembered facts."})
+                json!({"invocation": self.invocation, "lookup": args, "notice": "Query accepted. Read the fresh saved evidence attached to the next model request. This receipt contains no remembered facts. Saved details cover only what was said in chats: when the question is about the user's files or records, answer from the connected-folder passages beside the question and the file tools (search_indexed_files, list_file_findings, overview_file_knowledge) when offered; an empty saved-details result says nothing about the files."})
             }
             Err(error) => json!({"invocation": self.invocation, "error": error.to_string()}),
         }
@@ -133,7 +133,7 @@ impl Tool for Lookup {
         NAME
     }
     fn description(&self) -> &'static str {
-        "Request fresh conversation evidence for a focused question, optionally about an exact person/entity, a past valid date, or what was known by a date. Dates accept YYYY-MM-DD (00:00 UTC) or RFC 3339 with an explicit offset. Only use constraints supported by the user's question or context; clarify ambiguous dates. At most four lookups per turn, shared with helpers. The receipt contains only the query; fresh evidence and citations appear in the next model request. No results means missing evidence, never proof that something did not happen. No files or external documents are searched."
+        "Request fresh conversation evidence for a focused question, optionally about an exact person/entity, a past valid date, or what was known by a date. Dates accept YYYY-MM-DD (00:00 UTC) or RFC 3339 with an explicit offset. Only use constraints supported by the user's question or context; clarify ambiguous dates. At most four lookups per turn, shared with helpers. The receipt contains only the query; fresh evidence and citations appear in the next model request. No results means missing evidence, never proof that something did not happen. No files or external documents are searched: for the user's files use the connected-folder passages and file tools when offered."
     }
     fn is_read_only(&self) -> bool {
         true

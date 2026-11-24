@@ -102,6 +102,13 @@ For progress and classification, see [File understanding](file-ontology.md).
   more distinctive words that matches nothing is retried with any of them,
   ranked so passages with more of the words come first. Every timestamp in a
   file tool result also has a `<name>_utc` copy in plain UTC.
+- Matching passages are inserted just before the latest question. For Ollama,
+  OpenAI-compatible servers and OpenRouter, Sovra then sends one leading system
+  message and turns any later system entry into a user-role note. Some servers
+  keep only the first system message or reject later ones.
+- A question that sounds current ("latest", "today") is forced to web search
+  only when the connected folders have no matching passage, unless the person
+  explicitly asks to search the web.
 - `query_file_knowledge` returns every saved relationship. Each one's
   `basis.tier` says where it came from: `deterministic_extraction` (a table),
   `heuristic_extraction` (sentence wording, so check the cited passage), or

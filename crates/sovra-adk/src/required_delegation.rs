@@ -14,6 +14,7 @@ use adk_core::{
 };
 use futures::stream::{self, StreamExt as _};
 use serde_json::json;
+use sovra_core::file_index::{IndexQuery, IndexedFiles};
 use sovra_core::required_delegate;
 
 /// What a turn's first model call must do when the model itself does not.
@@ -45,11 +46,57 @@ impl FirstCall {
 pub(crate) struct RequiredFirstCall {
     inner: Arc<dyn Llm>,
     rule: FirstCall,
+    own_records: Option<Arc<dyn IndexedFiles>>,
 }
 
 impl RequiredFirstCall {
     pub(crate) fn wrap(inner: Arc<dyn Llm>, rule: FirstCall) -> Arc<dyn Llm> {
-        Arc::new(Self { inner, rule })
+        Self::wrap_checking_records(inner, rule, None)
+    }
+
+    /// As [`Self::wrap`], but a question the connected folders already answer
+    /// is not forced to web search just because it says "latest" or "today".
+    pub(crate) fn wrap_checking_records(
+        inner: Arc<dyn Llm>,
+        rule: FirstCall,
+        own_records: Option<Arc<dyn IndexedFiles>>,
+    ) -> Arc<dyn Llm> {
+        Arc::new(Self {
+            inner,
+            rule,
+            own_records,
+        })
+    }
+
+    /// Seen live: "What was Sam's latest weight reading?" went to the web
+    /// helper although the weight log was in a connected folder.
+    async fn folders_answer(&self, target: &str, user_text: &str) -> bool {
+        let Some(reader) = &self.own_records else {
+            return false;
+        };
+        let implied = matches!(
+            &self.rule,
+            FirstCall::Delegate {
+                procedure_requests: None
+            }
+        );
+        if target != sovra_core::WEB_SEARCH_AGENT_ID
+            || !implied
+            || sovra_core::is_explicit_web_search(user_text)
+        {
+            return false;
+        }
+        let end = user_text.floor_char_boundary(2048.min(user_text.len()));
+        let query = IndexQuery {
+            text: user_text[..end].to_owned(),
+            roots: Vec::new(),
+            path_prefix: None,
+            limit: 1,
+        };
+        reader
+            .search_report(query)
+            .await
+            .is_ok_and(|report| !report.passages.is_empty())
     }
 }
 
@@ -79,6 +126,9 @@ impl Llm for RequiredFirstCall {
         let Some((target, args)) = self.rule.decide(&user_text, &offered) else {
             return self.inner.generate_content(request, stream).await;
         };
+        if self.folders_answer(&target, &user_text).await {
+            return self.inner.generate_content(request, stream).await;
+        }
         // This wrapper sits outside the admission filler. Snapshot ids already
         // on the request so a call we synthesize below does not reuse one.
         let mut used_ids = request
@@ -248,6 +298,97 @@ mod tests {
                 .all(|part| !matches!(part, Part::FunctionCall { .. })),
             "{out:?}"
         );
+    }
+
+    /// Folders holding one passage for every question.
+    #[derive(Debug)]
+    struct Log;
+
+    #[async_trait::async_trait]
+    impl IndexedFiles for Log {
+        async fn history(
+            &self,
+            _: sovra_core::file_index::FileHistoryQuery,
+        ) -> Result<sovra_core::file_index::FileHistory, sovra_core::file_index::IndexError>
+        {
+            Err(sovra_core::file_index::IndexError("unused".into()))
+        }
+        async fn read_history(
+            &self,
+            _: sovra_core::file_index::HistoryPassageRef,
+        ) -> Result<sovra_core::file_index::HistoricalPassage, sovra_core::file_index::IndexError>
+        {
+            Err(sovra_core::file_index::IndexError("unused".into()))
+        }
+        async fn folders(
+            &self,
+        ) -> Result<Vec<sovra_core::file_index::IndexedRoot>, sovra_core::file_index::IndexError>
+        {
+            Ok(Vec::new())
+        }
+        async fn catalogue(
+            &self,
+            _: sovra_core::file_index::CatalogQuery,
+        ) -> Result<sovra_core::file_index::CatalogPage, sovra_core::file_index::IndexError>
+        {
+            Err(sovra_core::file_index::IndexError("unused".into()))
+        }
+        async fn search(
+            &self,
+            _: IndexQuery,
+        ) -> Result<Vec<sovra_core::file_index::IndexPassage>, sovra_core::file_index::IndexError>
+        {
+            Ok(vec![sovra_core::file_index::IndexPassage {
+                reference: sovra_core::file_index::PassageRef {
+                    root_id: "root".into(),
+                    file_id: "log".into(),
+                    version_id: "v1".into(),
+                    ordinal: 0,
+                },
+                path: "Home/weight-log.csv".into(),
+                text: "2026-02-02,Sam,80.2,kg".into(),
+                start_line: 6,
+                end_line: 6,
+                mime_type: "text/csv".into(),
+                note: None,
+                observed_at: 1,
+                modified_at: None,
+            }])
+        }
+        async fn read(
+            &self,
+            _: sovra_core::file_index::PassageRef,
+        ) -> Result<sovra_core::file_index::IndexPassage, sovra_core::file_index::IndexError>
+        {
+            Err(sovra_core::file_index::IndexError("unused".into()))
+        }
+    }
+
+    /// Regression (seen live): "What was Sam's latest weight reading?" was
+    /// forced to the web helper although the weight log was in a folder.
+    #[test]
+    fn a_question_the_folders_answer_is_not_forced_to_the_web() {
+        let llm = RequiredFirstCall::wrap_checking_records(
+            Arc::new(Stubborn {
+                calls: AtomicUsize::new(0),
+            }),
+            FirstCall::Delegate {
+                procedure_requests: None,
+            },
+            Some(Arc::new(Log)),
+        );
+        let user = Content::new("user").with_text("What was Sam's latest weight reading?");
+        let out = parts(&llm, request(vec![user]));
+        assert!(
+            out.iter()
+                .all(|part| !matches!(part, Part::FunctionCall { .. })),
+            "{out:?}"
+        );
+        let user = Content::new("user").with_text("Search the web for the latest Rust release");
+        assert!(matches!(
+            &parts(&llm, request(vec![user]))[..],
+            [Part::FunctionCall { name, .. }] if name == "WebSearchAgent"
+        ));
     }
 
     #[test]

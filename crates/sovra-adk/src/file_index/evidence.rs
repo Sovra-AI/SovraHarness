@@ -14,7 +14,7 @@ Use a passage only when its own text supports the answer. Cite its path and extr
 An empty result, a partial vector reading, or a passage that was left out is not proof the fact is absent. Read notices before saying something is missing. \
 A further search_indexed_files call accepts the ordinary question. Do not shorten that question into a list of at most 32 keywords. \
 For broad questions about the folders, or for numbers, dates, tables and how things connect, overview_file_knowledge shows what Sovra already worked out, list_file_findings lists measurements, dated readings and tables, and query_file_knowledge follows saved relationships. \
-These are the user's own records: when they answer the question, answer from them and cite them instead of searching the web.\n";
+These are the user's own records: when they answer the question, answer from them and cite them yourself; do not call WebSearchAgent or another web helper for the user's own records unless the user asks for the web.\n";
 
 const MAX_FILE_EVIDENCE_BYTES: usize = 12 * 1024;
 const MAX_QUESTION_BYTES: usize = 2048;
@@ -63,8 +63,12 @@ impl Llm for EvidenceModel {
                 notices.push(FINDINGS_NOTICE.into());
             }
             let included = passages.len();
+            // Seen live with a local model: evidence placed above the long
+            // instructions and history was ignored. Next to the question it is
+            // read. Anthropic and Gemini lift every system entry wherever it sits.
+            let at = question_index(&request).unwrap_or(0);
             request.contents.insert(
-                0,
+                at,
                 Content::new("system").with_text(GUIDANCE).with_text(
                     serde_json::json!({
                         "passages": passages,
@@ -184,13 +188,18 @@ fn bounded_question(question: &str) -> (String, bool) {
     (question[..end].to_owned(), true)
 }
 
-fn user_question(request: &LlmRequest) -> Option<String> {
-    let content = request.contents.iter().rev().find(|content| {
+/// Position of the latest user message with words in it.
+fn question_index(request: &LlmRequest) -> Option<usize> {
+    request.contents.iter().rposition(|content| {
         content.role == "user"
             && content.parts.iter().any(
                 |part| matches!(part, adk_core::Part::Text { text } if !text.trim().is_empty()),
             )
-    })?;
+    })
+}
+
+fn user_question(request: &LlmRequest) -> Option<String> {
+    let content = &request.contents[question_index(request)?];
     let mut text = String::new();
     for part in &content.parts {
         if let adk_core::Part::Text { text: piece } = part {
