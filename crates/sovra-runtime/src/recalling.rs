@@ -178,7 +178,13 @@ impl Reader {
             }
         }
         // Reserve evidence space even when the extractor omitted the relevant detail.
-        for source in sources.unwrap_or_default() {
+        // An earlier helper reply that found nothing is not evidence; shown
+        // again it was repeated instead of reading the files beside the question.
+        for source in sources
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|source| !source.is_helper_absence_report())
+        {
             context.push_source(source);
         }
         let hits = fuse_rrf(legs, 24);

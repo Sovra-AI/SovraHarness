@@ -11,6 +11,21 @@ use std::sync::Arc;
 const MARKS: &str = "sovra_optional_context";
 const MEDIA_DURATION: &str = "sovra_media_duration_millis";
 pub(crate) const ERROR_CODE: &str = "model.sovra.context_budget";
+/// Abilities a turn can do without, least useful first, left out only when the
+/// request would not otherwise fit. Reading files, findings, saved details and
+/// helpers are never on this list.
+const OPTIONAL_TOOLS: &[&str] = &[
+    "render_progress",
+    "render_alert",
+    "render_confirm",
+    "render_card",
+    "render_table",
+    "deploy_artifact",
+    "propose_file_knowledge",
+    "analyze_source_wording",
+    "read_file_history",
+    "inspect_file_history",
+];
 const OMITTED_HISTORY: &str = "Earlier conversation was shortened to fit this request. Ask for missing details rather than inventing them; no earlier actions were replayed.";
 const OMITTED_MEMORY: &str = "Saved evidence was omitted to fit this request. Do not invent remembered facts or treat missing evidence as proof of absence.";
 const NOTICE: &str =
@@ -221,6 +236,17 @@ fn prepare(request: &mut LlmRequest, budget: ContextBudget) -> adk_core::Result<
         if units(request)? <= allowance.input_units {
             return Ok(());
         }
+        // Seen live: a 32k-token local model could not answer at all once folders
+        // were connected, because tool descriptions alone filled the window.
+        // Optional abilities go before the conversation or saved details do.
+        if let Some(name) = OPTIONAL_TOOLS
+            .iter()
+            .find(|name| request.tools.contains_key(**name))
+        {
+            request.tools.remove(*name);
+            tracing::debug!(tool = name, "left out an optional tool to fit the model");
+            continue;
+        }
         let memories = evidence.as_ref().map_or(0, |value| {
             value["memories"].as_array().map_or(0, Vec::len)
                 + value["sources"].as_array().map_or(0, Vec::len)
@@ -421,6 +447,39 @@ mod tests {
             context_tokens: Some(window),
             max_output_tokens: Some(1024),
         }
+    }
+
+    /// Regression (seen live): qwen2.5-coder:7b (32k window) refused every
+    /// question once folders were connected; tool descriptions filled it.
+    #[test]
+    fn optional_tools_are_left_out_before_the_conversation_or_file_tools() {
+        let mut request = LlmRequest::new(
+            "test",
+            vec![
+                Content::new("user").with_text("EARLIER QUESTION"),
+                Content::new("user").with_text("CURRENT QUESTION"),
+            ],
+        );
+        let schema = |n: usize| json!({"description": "x".repeat(n)});
+        for name in ["render_table", "render_card", "propose_file_knowledge"] {
+            request.tools.insert(name.into(), schema(3000));
+        }
+        request
+            .tools
+            .insert("search_indexed_files".into(), schema(3000));
+        prepare(&mut request, budget(8192)).unwrap();
+        assert!(units(&request).unwrap() <= budget(8192).allowance(None).unwrap().input_units);
+        assert!(request.tools.contains_key("search_indexed_files"));
+        assert!(
+            !request.tools.contains_key("render_card"),
+            "least useful goes first"
+        );
+        assert!(
+            request.tools.contains_key("propose_file_knowledge"),
+            "only as many as needed"
+        );
+        let text = serde_json::to_string(&request).unwrap();
+        assert!(text.contains("EARLIER QUESTION") && text.contains("CURRENT QUESTION"));
     }
 
     #[test]

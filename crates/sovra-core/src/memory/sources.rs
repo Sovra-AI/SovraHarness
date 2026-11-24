@@ -107,7 +107,59 @@ pub fn attach_conversation_sources(
     out
 }
 
+/// Wording of a helper reply that reports its own search came up empty.
+const ABSENCE_REPORTS: &[&str] = &[
+    "couldn't find",
+    "could not find",
+    "can't find",
+    "cannot find",
+    "unable to find",
+    "not able to find",
+    "don't have any information",
+    "do not have any information",
+    "don't have information",
+    "don't see any",
+    "do not see any",
+    "no results",
+    "isn't stored",
+    "is not stored",
+    "isn't a recorded",
+    "isn't any recorded",
+    "no recorded",
+];
+
+/// Wording of a helper reply that only announces a search it is about to make.
+const SEARCH_ANNOUNCEMENTS: &[&str] = &[
+    "let me look",
+    "let me search",
+    "let me check",
+    "i need to search",
+    "i'll search",
+    "i will search",
+    "i'll look",
+];
+
+/// Longer replies that announce a search usually go on to answer.
+const ANNOUNCEMENT_ONLY_BYTES: usize = 400;
+
 impl MemorySourceEvidence {
+    /// A helper reply saying it could not find something records that one
+    /// search came up empty, and a short reply that only announces a search
+    /// records nothing at all; neither is a fact about the world. Seen live:
+    /// such replies, recalled in later chats, were repeated word for word
+    /// although the answer was in a connected file beside the question.
+    pub fn is_helper_absence_report(&self) -> bool {
+        if self.origin != MemorySourceOrigin::AssistantOutput {
+            return false;
+        }
+        let text = self.quote.to_lowercase().replace('\u{2019}', "'");
+        ABSENCE_REPORTS.iter().any(|phrase| text.contains(phrase))
+            || (text.len() <= ANNOUNCEMENT_ONLY_BYTES
+                && SEARCH_ANNOUNCEMENTS
+                    .iter()
+                    .any(|phrase| text.contains(phrase)))
+    }
+
     /// Called only after storage has checked admission and current permissions.
     pub fn private_user(source: &Episode, query: &MemorySearch) -> Result<Self, MemoryError> {
         if !matches!(source.kind, EpisodeKind::UserMessage | EpisodeKind::Note) {
@@ -337,6 +389,46 @@ mod review_tests {
         assert!(evidence.quote.len() <= 1536);
         source.kind = EpisodeKind::ToolResult;
         assert!(MemorySourceEvidence::private_admitted(&source, &query).is_err());
+    }
+
+    #[test]
+    fn helper_replies_that_found_nothing_are_recognised_but_user_words_are_not() {
+        let evidence = |kind, text: &str| {
+            let source = Episode {
+                id: EpisodeId("episode:x".into()),
+                session_id: "chat".into(),
+                kind,
+                content: text.into(),
+                occurred_at: Timestamp(1),
+            };
+            MemorySourceEvidence::private_admitted(&source, &MemorySearch::default()).unwrap()
+        };
+        for reply in [
+            "The search returned no results, which means there isn't a recorded weight reading for Sam.",
+            "I couldn’t find any information about a specific thermometer reading.",
+            "I don't have any information about that.",
+            "I need to search for information about Sam's weight. Let me look into your saved details to find this information.",
+        ] {
+            assert!(
+                evidence(EpisodeKind::AgentMessage, reply).is_helper_absence_report(),
+                "{reply}"
+            );
+        }
+        assert!(
+            !evidence(
+                EpisodeKind::AgentMessage,
+                "Sam weighed 80.2 kg on 2 February."
+            )
+            .is_helper_absence_report()
+        );
+        assert!(
+            !evidence(
+                EpisodeKind::UserMessage,
+                "I couldn't find my keys this morning."
+            )
+            .is_helper_absence_report(),
+            "what the person said is always kept"
+        );
     }
     #[test]
     fn unknown_origin_and_checking_are_not_presented_as_personal_facts() {

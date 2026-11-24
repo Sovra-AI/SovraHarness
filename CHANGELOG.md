@@ -68,6 +68,21 @@ package version.
   - A tool call that Qwen models write as text in their own
     `<function=…><parameter=…>` form now runs, even with closing tags missing,
     instead of showing as raw text.
+- **Smaller local models can answer with folders connected.** With a folder
+  connected, qwen2.5-coder 7B (a 32k window) refused every question as too
+  long, because the descriptions of every tool already filled the window. Now,
+  when a request is too long, Sovra first leaves out optional abilities: chat
+  cards, running a website, proposing new relationships, wording analysis and
+  file history. Only after that does it shorten the conversation or saved
+  details. Reading files, findings, saved details and helpers always stay. The
+  7B model then answered all four test questions correctly from the folders.
+- **Earlier "I couldn't find it" replies no longer mislead later chats.**
+  Every helper reply is kept as evidence, so a reply that found nothing was
+  later shown back to the model, which repeated it word for word with the
+  answer right beside the question. Saved details now leave out helper replies
+  that only say a search found nothing, and short replies that only announce a
+  search. Your own words and helper replies with content are still used. This
+  also covers replies saved before this change, so nothing needs to be deleted.
 
 ## [0.9.0] — 2026-11-24
 
