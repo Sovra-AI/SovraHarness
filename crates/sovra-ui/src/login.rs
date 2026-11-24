@@ -1,5 +1,6 @@
-//! The sign-in gate: a name on a new account, optional email and password, and
-//! Google Sign-In via the browser (RFC 8252 loopback hand-off).
+//! The sign-in gate: a name on a new account, optional email and password,
+//! continuing as a guest, and Google Sign-In via the browser (RFC 8252 loopback
+//! hand-off).
 //!
 //! Pure rendering over [`sovra_core::AuthState`]; every decision lives in the
 //! core reducer and the runtime. The adapted glass look comes from
@@ -239,6 +240,31 @@ fn login_form(
                 .on_click(cx.listener(|shell, _, _, cx| {
                     shell.submit_login(cx);
                 })),
+        )
+        .child(
+            design::button(
+                "login-guest-btn",
+                design::chrome(cx, ChromeKey::LoginContinueGuest),
+                cx,
+            )
+            .w_full()
+            .disabled(busy)
+            .on_click(cx.listener(|shell, _, _, cx| {
+                shell.continue_as_guest(cx);
+            })),
+        )
+        .child(
+            div()
+                .id("login-guest-hint")
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .text_color(t.text_secondary)
+                .sovra_text(TextRole::Caption, cx)
+                .child(design::paragraph(design::chrome(
+                    cx,
+                    ChromeKey::LoginGuestHint,
+                ))),
         )
         // Only offered when this copy can sign in with Google; otherwise the button
         // would lead to an error about setup the person cannot do yet.

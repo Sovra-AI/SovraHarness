@@ -323,8 +323,7 @@ impl DecisionRecord {
 
     pub fn can_accept(&self, by: &DecisionPerson, now: Timestamp) -> Result<(), DecisionError> {
         let version = self.current()?;
-        required(&by.account_id, "A signed-in account", 128)?;
-        required(&by.name, "The person's name", 512)?;
+        require_real_account(by)?;
         if self
             .versions
             .iter()
@@ -377,8 +376,7 @@ impl DecisionRecord {
     ) -> Result<Self, DecisionError> {
         self.check_revision(expected)?;
         required(&reason, "Why this decision ended", 8_192)?;
-        required(&by.account_id, "A signed-in account", 128)?;
-        required(&by.name, "The person's name", 512)?;
+        require_real_account(&by)?;
         if self.current()?.ended.is_some() {
             return Err(DecisionError("This decision has already ended.".into()));
         }
@@ -394,6 +392,18 @@ impl DecisionRecord {
         next.revision += 1;
         Ok(next)
     }
+}
+
+/// A guest visit is not a second person. Drafting stays allowed.
+fn require_real_account(by: &DecisionPerson) -> Result<(), DecisionError> {
+    required(&by.account_id, "A signed-in account", 128)?;
+    required(&by.name, "The person's name", 512)?;
+    if by.account_id == crate::auth::GUEST_ACCOUNT_ID {
+        return Err(DecisionError(
+            "Sign in with your own account before accepting or ending a company decision.".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Strict Gregorian date parsing without a clock, timezone, or IO dependency.

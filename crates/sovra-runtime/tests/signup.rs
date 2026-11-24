@@ -408,3 +408,98 @@ fn signup_stores_the_typed_name_and_keeps_email_password_optional() {
 
     session.shutdown();
 }
+
+#[test]
+fn a_guest_visit_is_saved_without_adding_an_account_and_sign_out_clears_it() {
+    use sovra_core::auth::{AuthProvider, AuthSession};
+    let saved = vec![
+        AuthAccount {
+            id: "local".into(),
+            email: String::new(),
+            full_name: "Sam".into(),
+            provider: AuthProvider::Password,
+            password_phc: None,
+            created_at: Timestamp(1),
+        },
+        AuthAccount {
+            id: "password".into(),
+            email: "sam@example.com".into(),
+            full_name: "Sam".into(),
+            provider: AuthProvider::Password,
+            password_phc: Some("protected".into()),
+            created_at: Timestamp(1),
+        },
+    ];
+    let store = Arc::new(AuthMemory(Mutex::new(Some(AuthRecords {
+        accounts: saved.clone(),
+        session: None,
+    }))));
+    let mut session = Session::start(store.clone());
+    session.send(Command::Auth(AuthCommand::Load));
+    session.wait_for(|event| {
+        matches!(
+            event,
+            Event::Auth(AuthEvent::Loaded {
+                session: None,
+                has_accounts: true,
+                ..
+            })
+        )
+        .then_some(())
+    });
+    session.send(Command::Auth(AuthCommand::ContinueAsGuest));
+    let guest = session.wait_for(|event| match event {
+        Event::Auth(AuthEvent::SignedIn {
+            session,
+            new_account: false,
+        }) => Some(session.clone()),
+        _ => None,
+    });
+    assert!(guest.is_guest());
+    assert_eq!(guest.provider, AuthProvider::Guest);
+    assert_eq!(guest.full_name, "Guest");
+    assert_eq!(guest.email, "");
+    {
+        let records = store
+            .0
+            .lock()
+            .expect("auth store lock")
+            .clone()
+            .expect("guest visit was saved");
+        assert_eq!(records.accounts, saved);
+        assert_eq!(
+            records.session.as_ref().map(AuthSession::is_guest),
+            Some(true)
+        );
+    }
+    session.shutdown();
+
+    let mut session = Session::start(store.clone());
+    session.send(Command::Auth(AuthCommand::Load));
+    let restored = session.wait_for(|event| match event {
+        Event::Auth(AuthEvent::Loaded {
+            session: Some(session),
+            has_accounts: true,
+            ..
+        }) if session.is_guest() => Some(session.clone()),
+        _ => None,
+    });
+    assert_eq!(restored.account_id, sovra_core::auth::GUEST_ACCOUNT_ID);
+    let profiles = session.wait_for(|event| match event {
+        Event::Auth(AuthEvent::LocalProfiles(profiles)) => Some(profiles.clone()),
+        _ => None,
+    });
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0].account_id, "local");
+    session.send(Command::Auth(AuthCommand::SignOut));
+    session.wait_for(|event| matches!(event, Event::Auth(AuthEvent::SignedOut)).then_some(()));
+    let records = store
+        .0
+        .lock()
+        .expect("auth store lock")
+        .clone()
+        .expect("sign-out was saved");
+    assert!(records.session.is_none());
+    assert_eq!(records.accounts, saved);
+    session.shutdown();
+}

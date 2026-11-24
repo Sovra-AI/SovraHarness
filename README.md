@@ -122,7 +122,8 @@ has the first run, group steps, every setting, privacy details and limits.
 - **Keep company decisions:** record reasons, quoted evidence, review dates and
   company-written hard stops in **Artifacts → Decisions**, or start from a chat
   reply with **Record a decision**. A second person signs in with a different
-  local account to accept the saved version. Edits keep earlier versions and
+  local account to accept the saved version. A guest visit does not count.
+  Edits keep earlier versions and
   require fresh acceptance. See
   [Decision records](docs/decisions.md) for the local-account approval boundary.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
@@ -168,7 +169,7 @@ check its release notes. In-app update checks are not implemented. See the
 
 After launching:
 
-1. Create or open a local account.
+1. Create or open a local account, or choose **Continue as guest**.
 2. Follow the guided tour or open **Models** to connect a service and choose a
    chat model. Cloud services may require a key and charge for usage. For Ollama,
    install Ollama once; Sovra starts its local server when you use it.

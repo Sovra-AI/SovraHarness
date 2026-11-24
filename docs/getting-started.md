@@ -12,10 +12,14 @@ the build prerequisites and run `cargo xtask dev`. Installed builds can be
 launched normally. The interface starts in English; the sign-in screen and Settings include a language
 picker and **Text size** from 75–200%.
 
-On a fresh workspace, create a local account with your name. Email and password
-are optional and must be supplied together. Press Enter in the password box to
-sign in or finish creating the account. A name-only account can be reopened
-using its named sign-in button on this computer.
+On a fresh workspace, create a local account with your name, or choose
+**Continue as guest** and use Sovra without a name, email, or password. Email
+and password are optional and must be supplied together. Press Enter in the
+password box to sign in or finish creating the account. A name-only account can
+be reopened using its named sign-in button on this computer. A guest visit is
+remembered on the next launch until you sign out. Creating an account or
+signing in replaces that visit. A guest is not a second person for accepting or
+ending a company decision.
 Later launches restore the session or ask you to sign in. Google sign-in needs a
 configured desktop OAuth client; see [Google](google.md). Local accounts do not
 establish separate encrypted data stores or company SSO. The current sign-in
@@ -64,7 +68,7 @@ under a completed chat reply. Add the question, your company's criteria, quoted
 evidence, a review date and what would end the decision, then save the draft.
 
 A second person signs in with a different local account to review and accept
-it. Use **Sign out**, then **Create another account** if that person is new here.
+it. Continuing as a guest does not count. Use **Sign out**, then **Create another account** if that person is new here.
 The record becomes the company position only after **Confirm acceptance**.
 Edits retain earlier versions and need fresh acceptance. See
 [Decision records](decisions.md) for hard stops, review dates and the limits of

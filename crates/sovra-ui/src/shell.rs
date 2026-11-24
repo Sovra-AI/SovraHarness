@@ -1297,6 +1297,13 @@ impl Shell {
         );
     }
 
+    pub(crate) fn continue_as_guest(&mut self, cx: &mut Context<Self>) {
+        if self.state.auth.busy() {
+            return;
+        }
+        self.submit_auth(sovra_core::AuthCommand::ContinueAsGuest, cx);
+    }
+
     pub(crate) fn switch_login_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.state.auth.busy() {
             return;

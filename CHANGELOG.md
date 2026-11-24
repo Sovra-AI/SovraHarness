@@ -14,6 +14,8 @@ package version.
 
 ## [Unreleased]
 
+- **Continue as guest.** The sign-in screen lets you open Sovra without a name, email, or password. The visit is remembered until you sign out. Creating an account or signing in takes its place. A guest cannot accept or end a company decision.
+
 - **Your team leads with people.** Each helper's card shows a face, a name, a job, and one line about how they sound. Open the card to chat, switch them on or off, edit, remove, or add them to a group. **Ask my team** and **Start a group chat** stay on the page. A new team starts with Alex, Morgan, Priya, Jamie, Sam, Robin, Noor, Kai, Scout, Quinn, and Mara. **Add a helper** also offers Engineer, Designer, Sales, Operations, Skeptic, Visionary, Diplomat, and Hustler. A team you already saved keeps your edits, anyone you switched off, and your own helpers, and gains any helper that was missing. Opening a helper says what they focus on and where they step back.
 
 - **Knowledge opens on one page.** Search files, saved details, and artifacts at

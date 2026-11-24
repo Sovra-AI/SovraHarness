@@ -21,13 +21,21 @@ pub enum AuthProvider {
     Password,
     /// Google Sign-In (OAuth 2.0 authorization code + PKCE, loopback redirect).
     Google,
+    /// A visit with no account. It is not a second person for a company decision.
+    Guest,
 }
+
+/// Reserved session id for [`AuthProvider::Guest`]. Never issued to an account.
+/// Decision acceptance and ending reject this id, so a guest cannot stand in
+/// for someone else.
+pub const GUEST_ACCOUNT_ID: &str = "guest";
 
 impl AuthProvider {
     pub fn label(self) -> &'static str {
         match self {
             Self::Password => "Email & password",
             Self::Google => "Google",
+            Self::Guest => "Guest",
         }
     }
 }
@@ -43,6 +51,22 @@ pub struct AuthSession {
 }
 
 impl AuthSession {
+    /// A visit with no name, email, or password. Not stored as an account.
+    pub fn guest(now: Timestamp) -> Self {
+        Self {
+            account_id: GUEST_ACCOUNT_ID.to_owned(),
+            email: String::new(),
+            full_name: "Guest".to_owned(),
+            provider: AuthProvider::Guest,
+            signed_in_at: now,
+        }
+    }
+
+    /// True when this visit uses the reserved guest id.
+    pub fn is_guest(&self) -> bool {
+        self.account_id == GUEST_ACCOUNT_ID
+    }
+
     /// Up to two initials for the avatar chip, from the first and last word.
     pub fn initials(&self) -> String {
         initials(&self.full_name, &self.email)
@@ -362,6 +386,8 @@ pub enum AuthCommand {
     ContinueLocalProfile {
         account_id: String,
     },
+    /// Open the workspace with no account. The visit is remembered until sign-out.
+    ContinueAsGuest,
     /// Open the Google consent page in the browser and await the loopback redirect.
     StartGoogleSignIn,
     /// Abandon a waiting Google flow (closes the loopback listener).
@@ -461,8 +487,15 @@ impl AuthState {
                 self.error = None;
                 self.phase = AuthPhase::Submitting;
             }
-            AuthEvent::SignedIn { session, .. } => {
-                self.has_accounts = true;
+            AuthEvent::SignedIn {
+                session,
+                new_account,
+            } => {
+                // A guest visit does not create an account. An existing account
+                // list stays as the last Loaded event reported it.
+                if *new_account || !session.is_guest() {
+                    self.has_accounts = true;
+                }
                 self.error = None;
                 self.phase = AuthPhase::SignedIn(session.clone());
             }
@@ -541,6 +574,47 @@ pub fn callback_page(success: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_guest_visit_is_not_an_account() {
+        let session = AuthSession::guest(Timestamp(4));
+        assert!(session.is_guest());
+        assert_eq!(session.provider, AuthProvider::Guest);
+        assert_eq!(session.account_id, GUEST_ACCOUNT_ID);
+        assert_eq!(session.email, "");
+        assert_eq!(session.full_name, "Guest");
+        let stored = serde_json::to_string(&session).expect("guest session serializes");
+        assert!(stored.contains("\"guest\""));
+        let restored: AuthSession = serde_json::from_str(&stored).expect("guest session loads");
+        assert_eq!(restored, session);
+
+        let mut state = AuthState::default();
+        state.apply(&AuthEvent::Loaded {
+            session: None,
+            has_accounts: false,
+            google_ready: false,
+        });
+        state.apply(&AuthEvent::SignedIn {
+            session: session.clone(),
+            new_account: false,
+        });
+        assert!(state.is_signed_in());
+        assert!(!state.has_accounts);
+        state.apply(&AuthEvent::SignedOut);
+        assert_eq!(state.phase, AuthPhase::SignedOut);
+        assert!(state.creating_account(false));
+
+        state.apply(&AuthEvent::Loaded {
+            session: None,
+            has_accounts: true,
+            google_ready: false,
+        });
+        state.apply(&AuthEvent::SignedIn {
+            session,
+            new_account: false,
+        });
+        assert!(state.has_accounts);
+    }
 
     #[test]
     fn signup_is_available_after_the_first_account_without_changing_saved_account_state() {

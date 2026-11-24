@@ -28,7 +28,9 @@ the record; later changes to the source files do not change those quotations.
 A second person signs in with their own Sovra account on this computer, opens
 the record, reviews it, and chooses **Accept as company position**, then
 **Confirm acceptance**. The runtime obtains their identity from its active
-session; there is no field for typing an approver's name.
+session; there is no field for typing an approver's name. Continuing as a guest
+does not count as that person. A guest can draft a decision, and cannot accept
+or end one.
 
 Use **Sign out** at the bottom of the sidebar to switch people. If the reviewer
 has no account here yet, choose **Create another account** on the sign-in page.
@@ -72,6 +74,7 @@ and stops and records when those conditions have been met or broken.
 | What you see | What to do |
 | --- | --- |
 | A second person must sign in | Sign out and let someone who has not drafted any version use their own account. Creating a new version yourself does not make you its reviewer. |
+| Sign in with your own account before accepting or ending | A guest visit cannot accept or end a company decision. Sign out, then use your own account. |
 | Blocked by your hard stops | Review each condition your company wrote. Save a new version with a condition checked only when it has been met, then ask the second person to accept it. |
 | The review date has arrived | Save a reviewed version with a future date, then obtain fresh acceptance. |
 | Already accepted or no longer valid | Keep the existing record as history. Use **Save a new version** when a new company position is needed. |

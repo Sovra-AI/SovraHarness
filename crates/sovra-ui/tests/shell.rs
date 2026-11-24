@@ -123,6 +123,74 @@ fn enter_on_the_password_field_signs_in(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui_kit::test]
+fn continue_as_guest_opens_the_workspace_without_an_account(cx: &mut TestAppContext) {
+    use gpui_kit::component::{Theme, ThemeMode};
+    use sovra_core::auth::{AuthCommand, AuthEvent, AuthSession};
+    for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let (client, commands, events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                sovra_ui::design::set_interface_scale(
+                    sovra_core::models::InterfaceScale::from_percent(scale),
+                    cx,
+                );
+            });
+            let mut shell = None;
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let view = cx.new(|cx| Shell::new(0, window, cx));
+                shell = Some(view.clone());
+                Root::new(view, window, cx)
+            });
+            let shell = shell.expect("login shell");
+            events
+                .send_blocking(Event::Auth(AuthEvent::Loaded {
+                    session: None,
+                    has_accounts: false,
+                    google_ready: true,
+                }))
+                .expect("login state");
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                reveal_login_control(window, "login-guest-btn", cx);
+                assert_eq!(
+                    window.find("login-guest-btn").label(),
+                    Some("Continue as guest")
+                );
+                reveal_login_control(window, "login-guest-hint", cx);
+                window.click("login-guest-btn", cx);
+            })
+            .expect("guest button");
+            assert!(
+                std::iter::from_fn(|| commands.try_recv().ok()).any(|command| {
+                    matches!(command, Command::Auth(AuthCommand::ContinueAsGuest))
+                })
+            );
+            events
+                .send_blocking(Event::Auth(AuthEvent::SignedIn {
+                    session: AuthSession::guest(sovra_core::Timestamp(1)),
+                    new_account: false,
+                }))
+                .expect("guest session");
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert_eq!(shell.read(cx).workspace().route, ScreenRoute::MainWorkspace);
+                assert!(window.find("sovra-main-workspace").visible());
+                assert!(window.try_find("sovra-login-screen").is_none());
+                window.remove_window();
+            })
+            .expect("guest workspace");
+        }
+    }
+}
+
 fn reveal_login_control(window: &mut gpui_kit::Window, id: &'static str, cx: &mut gpui_kit::App) {
     for _ in 0..40 {
         window.render_frame(cx);

@@ -238,10 +238,12 @@ pub enum ChromeKey {
     LoginNamePlaceholder,
     NavPlugins,
     NavPluginsTooltip,
+    LoginContinueGuest,
+    LoginGuestHint,
 }
 
 impl ChromeKey {
-    pub const ALL: [Self; 96] = [
+    pub const ALL: [Self; 98] = [
         Self::LoginWelcomeTitle,
         Self::LoginWelcomeSubtitle,
         Self::LoginCreateTitle,
@@ -338,6 +340,8 @@ impl ChromeKey {
         Self::NavTrainingTooltip,
         Self::NavPlugins,
         Self::NavPluginsTooltip,
+        Self::LoginContinueGuest,
+        Self::LoginGuestHint,
     ];
 }
 
@@ -1098,6 +1102,8 @@ fn arabic(key: ChromeKey) -> &'static str {
         ChromeKey::NavGroupsTooltip => "شارك مع عائلتك أو فريقك",
         ChromeKey::LoginName => "اسمك",
         ChromeKey::LoginNamePlaceholder => "اكتب اسمك",
+        ChromeKey::LoginContinueGuest => "المتابعة كضيف",
+        ChromeKey::LoginGuestHint => "تجوّل دون حساب. سجّل الدخول لاحقاً إذا أردت اسمك على ما تحفظه.",
     }
 }
 
@@ -1215,6 +1221,10 @@ fn english(key: ChromeKey) -> &'static str {
         ChromeKey::NavGroupsTooltip => "Share with your family or team",
         ChromeKey::LoginName => "Your name",
         ChromeKey::LoginNamePlaceholder => "What should we call you?",
+        ChromeKey::LoginContinueGuest => "Continue as guest",
+        ChromeKey::LoginGuestHint => {
+            "Look around without an account. Sign in later if you want your name on what you save."
+        }
     }
 }
 
@@ -1264,6 +1274,17 @@ mod tests {
         assert!(
             has_arabic_script(password),
             "Arabic login password placeholder: {password}"
+        );
+        assert_eq!(
+            chrome(&UiLanguage::english(), ChromeKey::LoginContinueGuest),
+            "Continue as guest"
+        );
+        let guest = chrome(&arabic, ChromeKey::LoginContinueGuest);
+        assert!(has_arabic_script(guest), "Arabic guest button: {guest}");
+        let guest_hint = chrome(&arabic, ChromeKey::LoginGuestHint);
+        assert!(
+            has_arabic_script(guest_hint),
+            "Arabic guest hint: {guest_hint}"
         );
         assert_eq!(
             chrome(&UiLanguage::english(), ChromeKey::SettingsTitle),

@@ -103,8 +103,10 @@ profiles can produce additional dependency artifacts; do not clean after every e
 ## Sign-in integration status
 
 Local account creation accepts a name, optionally paired email/password, and
-Google sign-in with a configured desktop OAuth client. The runtime persists
-account/session records through `MemoryStore`; passwords use Argon2id hashes.
+Google sign-in with a configured desktop OAuth client. **Continue as guest**
+stores a session only, with no account. That visit cannot accept or end a
+company decision. The runtime persists account/session records through
+`MemoryStore`; passwords use Argon2id hashes.
 Signing out clears the session without deleting the account or workspace data.
 Local accounts are not separate encrypted data stores or company SSO.
 

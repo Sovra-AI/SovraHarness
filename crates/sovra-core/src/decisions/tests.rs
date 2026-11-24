@@ -259,6 +259,39 @@ fn bounded_required_fields_and_corrupt_empty_records_fail_closed() {
 }
 
 #[test]
+fn a_guest_cannot_accept_or_end_a_company_decision() {
+    let mut cleared = draft();
+    cleared.hard_stops[0].cleared = true;
+    let record =
+        DecisionRecord::create("one".into(), cleared, person("writer"), Timestamp(1)).unwrap();
+    let guest = DecisionPerson::from(&AuthSession::guest(Timestamp(2)));
+    assert_eq!(guest.account_id, crate::auth::GUEST_ACCOUNT_ID);
+    let accept = record.can_accept(&guest, Timestamp(3)).unwrap_err();
+    assert!(accept.0.contains("own account"));
+    assert!(record.accept(1, guest.clone(), Timestamp(3)).is_err());
+    let ended = record
+        .end(
+            1,
+            "The supplier missed the date.".into(),
+            guest,
+            Timestamp(3),
+        )
+        .unwrap_err();
+    assert!(ended.0.contains("own account"));
+    assert!(record.can_accept(&person("reviewer"), Timestamp(3)).is_ok());
+    assert!(
+        record
+            .end(
+                1,
+                "The supplier missed the date.".into(),
+                person("reviewer"),
+                Timestamp(3),
+            )
+            .is_ok()
+    );
+}
+
+#[test]
 fn book_folds_only_runtime_results_and_keeps_open_record_on_failure() {
     let record = record();
     let mut book = DecisionBook::default();

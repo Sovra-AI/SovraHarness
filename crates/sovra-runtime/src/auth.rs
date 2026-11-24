@@ -182,6 +182,7 @@ impl Actor {
                     self.fail(AuthField::General, "This account needs its original sign-in method. Use email and password or Google.".into()).await;
                 }
             }
+            AuthCommand::ContinueAsGuest => self.continue_as_guest().await,
             AuthCommand::StartGoogleSignIn => self.start_google().await,
             AuthCommand::CancelGoogleSignIn => {
                 self.stop_browser_wait();
@@ -309,6 +310,9 @@ impl Actor {
                 AuthProvider::Password => {
                     "This account was created with a name only. It has no password to check."
                 }
+                AuthProvider::Guest => {
+                    "A guest visit is not an account. Create an account or sign in to continue."
+                }
             };
             return self.fail(AuthField::Password, message.into()).await;
         };
@@ -408,6 +412,20 @@ impl Actor {
         };
         self.store_refresh_token(identity.refresh_token).await;
         self.finish_sign_in(&account, new_account).await;
+    }
+
+    /// Remembers a visit and leaves every saved account as it is.
+    async fn continue_as_guest(&mut self) {
+        self.stop_browser_wait();
+        self.emit(AuthEvent::Submitting).await;
+        let session = AuthSession::guest(crate::now());
+        self.records.session = Some(session.clone());
+        self.save().await;
+        self.emit(AuthEvent::SignedIn {
+            session,
+            new_account: false,
+        })
+        .await;
     }
 
     async fn finish_sign_in(&mut self, account: &AuthAccount, new_account: bool) {
