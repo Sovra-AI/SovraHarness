@@ -683,7 +683,7 @@ pub fn builtin_skills() -> Vec<Skill> {
             ..procedure(
                 "file-knowledge",
                 "Explore file knowledge",
-                "Browse saved relationships in Knowledge → Relationships & taxonomy, follow people and projects, and read the original supporting passages.",
+                "Browse saved relationships in Knowledge → Relationships & categories, follow people and projects, and read the original supporting passages.",
                 "Files",
                 &["file-graph", "knowledge-graph"],
                 &[

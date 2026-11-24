@@ -120,11 +120,13 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
                 knowledge::reveal(window, "knowledge-auto-status", cx);
                 assert_eq!(
                     window.find("knowledge-auto-status").label(),
-                    Some("2 files classified · 5 findings")
+                    Some("2 files sorted · 5 findings")
                 );
                 for (section, content) in [
                     ("knowledge-files", "index-folder"),
                     ("knowledge-relationships", "knowledge-auto-details"),
+                    ("knowledge-relationships", "knowledge-auto-findings"),
+                    ("knowledge-relationships", "knowledge-saved-types"),
                     ("knowledge-memories", "conversation-memory-status"),
                     ("knowledge-people", "people-empty"),
                     ("knowledge-help", "knowledge-intro"),

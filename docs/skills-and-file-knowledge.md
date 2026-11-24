@@ -82,7 +82,7 @@ For progress and classification, see [File understanding](file-ontology.md).
   History is not a byte-for-byte backup of the original file, and it is not
   where a saved answer keeps its wording.
 - `/map-files` proposes relationships grounded in source passages. Review and
-  explicitly save a proposal in **Knowledge → Relationships & taxonomy** before it becomes reviewed knowledge. Model
+  explicitly save a proposal in **Knowledge → Relationships & categories** before it becomes reviewed knowledge. Model
   confidence is not a calibrated truth score. Source access, provenance, and
   revocation remain separate from accepting an interpretation.
 

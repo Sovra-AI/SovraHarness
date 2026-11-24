@@ -44,12 +44,12 @@ pub(crate) fn render(state: &IndexState, cx: &mut Context<Shell>) -> impl IntoEl
             .child(
                 div()
                     .sovra_text(TextRole::SectionTitle, cx)
-                    .child("Proposed relationships"),
+                    .child("Suggestions waiting for you"),
             )
             .child(
                 div()
                     .sovra_text(TextRole::Caption, cx)
-                    .child("Read the source wording before deciding which connections to save."),
+                    .child("A helper suggested these. Read the wording from the file, then save the ones that are right."),
             );
     }
     panel.children(state.knowledge_pending.iter().map(|proposal| {
@@ -74,7 +74,7 @@ fn card(
         .min_w_0()
         .w_full()
         .gap(t.space.small)
-        .p(t.space.small)
+        .p(t.space.medium)
         .sovra_surface(Surface::Subtle, cx)
         .child(
             div()
@@ -82,7 +82,7 @@ fn card(
                 .child(proposal.draft.title.clone()),
         )
         .child(div().sovra_text(TextRole::Caption, cx).child(format!(
-            "Proposed by {} · {} · Model inference, unverified",
+            "Suggested by {} · {} · a helper’s reading, not yet checked",
             proposal.origin.agent,
             date(Some(proposal.created_at))
         )));
@@ -197,7 +197,7 @@ fn card(
             .child(
                 design::button(
                     SharedString::from(format!("save-knowledge-{id}")),
-                    "Save inferences",
+                    "Save these",
                     cx,
                 )
                 .disabled(reviewing)
@@ -216,7 +216,7 @@ fn card(
             .child(
                 design::button(
                     SharedString::from(format!("reject-knowledge-{id}")),
-                    "Reject",
+                    "Don’t save",
                     cx,
                 )
                 .disabled(reviewing)

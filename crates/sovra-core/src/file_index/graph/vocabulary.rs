@@ -88,6 +88,31 @@ impl EntityKind {
             Self::Domain(id) => &id.0,
         }
     }
+
+    /// The label as a person reads it: `food:grower` shows as "Grower".
+    pub fn display_name(&self) -> String {
+        let words = readable(self.label());
+        let mut chars = words.chars();
+        chars.next().map_or_else(String::new, |first| {
+            first.to_uppercase().chain(chars).collect()
+        })
+    }
+}
+
+/// A vocabulary identifier without its namespace and with spaces between words,
+/// so `food:grown_by` reads "grown by". Built-in labels pass through unchanged.
+fn readable(label: &str) -> String {
+    let local = label.rsplit_once(':').map_or(label, |(_, local)| local);
+    let words = local
+        .split(['_', '-'])
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if words.is_empty() {
+        label.to_owned()
+    } else {
+        words
+    }
 }
 
 /// A stable property identifier declares both endpoint classes. Distinct namespaces
@@ -164,6 +189,37 @@ impl RelationKind {
             Self::IsA => "is a",
             Self::Property(property) => &property.id.0,
         }
+    }
+
+    /// The relationship as a person reads it: `food:grown_by` shows as "grown by".
+    pub fn display_name(&self) -> String {
+        readable(self.label())
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    #[test]
+    fn custom_names_read_as_words_and_built_ins_are_unchanged() {
+        let property = RelationKind::Property(DomainProperty {
+            id: VocabularyId("food:grown_by".into()),
+            subject: EntityKind::Domain(VocabularyId("food:product".into())),
+            object: EntityKind::Domain(VocabularyId("grower".into())),
+        });
+        assert_eq!(property.display_name(), "grown by");
+        assert_eq!(RelationKind::DependsOn.display_name(), "depends on");
+        let RelationKind::Property(property) = property else {
+            unreachable!()
+        };
+        assert_eq!(property.subject.display_name(), "Product");
+        assert_eq!(property.object.display_name(), "Grower");
+        assert_eq!(EntityKind::Literal.display_name(), "Value");
+        assert_eq!(
+            EntityKind::Domain(VocabularyId(":".into())).display_name(),
+            ":"
+        );
     }
 }
 

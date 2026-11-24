@@ -394,7 +394,17 @@ fn read(db: &Connection, job: &Job) -> Result<Reading> {
         }
         (text.get(start..end).unwrap_or_default().trim(), refs)
     };
+    let prose = ontology::classify(job.mime.as_deref(), &job.path).sentences_describe_the_world();
+    let named_lines: std::collections::BTreeSet<u32> = analysis
+        .statements
+        .iter()
+        .filter(|claim| claim.explicit)
+        .map(|claim| claim.line)
+        .collect();
     for claim in analysis.statements {
+        if !prose && !claim.explicit {
+            continue;
+        }
         let (wording, refs) = source_line(claim.line);
         if let Some(mut draft) = source_claim(&claim, &refs[0], wording) {
             draft.evidence = refs;
@@ -417,6 +427,9 @@ fn read(db: &Connection, job: &Job) -> Result<Reading> {
         }
     }
     for mut finding in analysis.findings {
+        if !prose && finding.kind == FindingKind::Relation && !named_lines.contains(&finding.from) {
+            continue;
+        }
         let ordinal = source_line(finding.from).1[0].ordinal;
         finding.from = absolute(finding.from);
         finding.to = absolute(finding.to);

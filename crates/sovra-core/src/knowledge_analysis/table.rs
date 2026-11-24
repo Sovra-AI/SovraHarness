@@ -192,19 +192,18 @@ pub(super) fn inspect(
         _ => format!(" · equally matching profiles: {}", matches.join(", ")),
     };
     let names = if profiles.is_empty() {
-        "table of unknown type".into()
+        "Table".into()
     } else {
         profiles.join(", ")
     };
     add(
         FindingKind::Profile,
         format!(
-            "{names} · {} row{}, {} columns, {} numeric column{}, {blanks} empty cell{}{matching_profiles}{}",
+            "{names} · {} row{} and {} columns · {} with numbers · {blanks} empty cell{}{matching_profiles}{}",
             rows.len(),
             if rows.len() == 1 { "" } else { "s" },
             header.len(),
             numeric.len(),
-            if numeric.len() == 1 { "" } else { "s" },
             if blanks == 1 { "" } else { "s" },
             if *limited {
                 " in the first 1,024 rows"
@@ -288,14 +287,14 @@ pub(super) fn inspect(
             entry.1 += 1;
         }
         if output.len() < scope.limit(32) {
-            let mut parts = vec![format!(
-                "{} = {} {}",
-                q.original,
-                q.value.normalize(),
-                q.unit
-            )];
+            let comparable = format!("{} {}", q.value.normalize(), q.unit);
+            let mut parts = vec![if comparable == q.original {
+                comparable
+            } else {
+                format!("{} (the same as {comparable})", q.original)
+            }];
             for (label, col) in [
-                ("instrument", instrument),
+                ("measured with", instrument),
                 ("calibrated", calibration),
                 ("reference", reference),
             ] {
@@ -355,9 +354,8 @@ pub(super) fn inspect(
                 from: *first,
                 to: last,
                 detail: format!(
-                    "{label}{} · {} s window · {} reading{} · mean {} {unit}",
-                    start.format(&Rfc3339).unwrap_or_default(),
-                    window_seconds,
+                    "{label}{} · {} reading{} · average {} {unit}",
+                    window_phrase(start, window_seconds),
                     count,
                     if *count == 1 { "" } else { "s" },
                     mean.normalize()
@@ -374,6 +372,18 @@ pub(super) fn inspect(
         });
     }
 }
+/// A time window in words: "the day of 2 March 2026", "the hour from 08:00 on 1 March 2026 (UTC)".
+fn window_phrase(start: OffsetDateTime, seconds: u32) -> String {
+    let day = format!("{} {} {}", start.day(), start.month(), start.year());
+    let clock = format!("{:02}:{:02}", start.hour(), start.minute());
+    match seconds {
+        86_400 => format!("the day of {day}"),
+        3_600 => format!("the hour from {clock} on {day} (UTC)"),
+        60 => format!("the minute from {clock} on {day} (UTC)"),
+        seconds => format!("{seconds} seconds from {clock} on {day} (UTC)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

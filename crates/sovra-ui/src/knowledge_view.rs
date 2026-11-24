@@ -24,6 +24,7 @@ use crate::design::{self, SovraStyled as _, Surface, TextRole};
 use crate::shell::Shell;
 
 mod discoveries;
+pub(crate) mod parts;
 mod vocabulary;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,7 +53,7 @@ impl KnowledgeSection {
         match self {
             Self::Explore => "Search your knowledge",
             Self::Files => "Files",
-            Self::Relationships => "Relationships & taxonomy",
+            Self::Relationships => "Relationships & categories",
             Self::Memories => "About you",
             Self::People => "People",
             Self::Help => "Guide",
@@ -107,13 +108,23 @@ impl KnowledgeSection {
                     .iter()
                     .find(|(k, _)| *k == sovra_core::knowledge_analysis::FindingKind::Relation)
                     .map_or(0, |v| v.1);
+                let files = summary.kinds.iter().map(|v| v.1).sum::<u64>();
                 format!(
-                    "{found} connections found in indexed wording · {} file kinds",
-                    summary.kinds.len()
+                    "{found} {} · {files} {} sorted",
+                    if found == 1 {
+                        "connection"
+                    } else {
+                        "connections"
+                    },
+                    plural(
+                        usize::try_from(files).unwrap_or(usize::MAX),
+                        "file",
+                        "files"
+                    )
                 )
             }
             Self::Relationships => {
-                "Saved connections, relationship types and file categories".into()
+                "How things in your files connect, and what kind each file is".into()
             }
             Self::Memories => format!(
                 "Conversation memory · {}",
@@ -284,11 +295,15 @@ pub(crate) fn render_knowledge_view(
         if open {
             block = match section {
                 KnowledgeSection::Files => block.child(crate::file_index_view::render(shell, cx)),
+                // Numbers first, then anything waiting for you, then the
+                // relationships themselves; the rest stays folded until asked for.
                 KnowledgeSection::Relationships => block
+                    .gap(t.space.large)
                     .children(discoveries::details(shell, cx))
-                    .child(vocabulary::render(shell, cx))
                     .child(crate::knowledge_review::render(&shell.file_index.state, cx))
-                    .child(crate::file_index_view::knowledge::render(shell, cx)),
+                    .child(crate::file_index_view::knowledge::render(shell, cx))
+                    .children(discoveries::findings(shell, cx))
+                    .child(vocabulary::render(shell, cx)),
                 KnowledgeSection::Memories => {
                     if shell.explorer.reading_personal_source {
                         block = block.child(

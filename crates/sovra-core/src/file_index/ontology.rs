@@ -251,6 +251,13 @@ impl FileKind {
         format!("{} {noun}", group_digits(count))
     }
 
+    /// Whether sentences in this kind of file describe the world. Comments in
+    /// code and text inside programs or archives do not, so a guess read from
+    /// their wording is noise; a relationship a table names outright still counts.
+    pub const fn sentences_describe_the_world(self) -> bool {
+        !matches!(self, Self::Code | Self::App | Self::Archive | Self::Data)
+    }
+
     /// Full DCMI Type IRI (`skos:broader`).
     pub fn dcmi_iri(self) -> Option<String> {
         self.concept().dcmi_type.map(|t| format!("{DCMI}{t}"))
@@ -738,7 +745,8 @@ pub const AREAS: &[AreaConcept] = &[
             "lecture",
             "lectures",
             "study",
-            "notes",
+            // Not "notes": people keep notes about everything, so the word alone
+            // put garden and kitchen notes under school.
             "thesis",
             "exam",
         ],
@@ -1147,5 +1155,30 @@ mod tests {
         assert_eq!(group_digits(0), "0");
         assert_eq!(group_digits(999), "999");
         assert_eq!(group_digits(1_000_000), "1,000,000");
+    }
+}
+
+#[cfg(test)]
+mod wording_tests {
+    use super::*;
+
+    #[test]
+    fn code_comments_are_not_read_as_facts_but_notes_are() {
+        assert!(!classify(None, "src/main.rs").sentences_describe_the_world());
+        assert!(!FileKind::Code.sentences_describe_the_world());
+        assert!(!FileKind::App.sentences_describe_the_world());
+        assert!(FileKind::Document.sentences_describe_the_world());
+        assert!(FileKind::Email.sentences_describe_the_world());
+        assert!(FileKind::Spreadsheet.sentences_describe_the_world());
+    }
+
+    #[test]
+    fn notes_alone_do_not_mean_school_but_lecture_notes_do() {
+        assert_eq!(life_area("notes.md"), None);
+        assert_eq!(life_area("Garden notes.md"), Some(LifeArea::Home));
+        assert_eq!(
+            life_area("lecture notes week 3.pdf"),
+            Some(LifeArea::Learning)
+        );
     }
 }

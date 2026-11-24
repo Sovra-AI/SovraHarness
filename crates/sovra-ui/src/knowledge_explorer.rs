@@ -6,8 +6,11 @@ use crate::{
     design::{self, SovraStyled as _, Surface, TextRole},
     shell::Shell,
 };
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    Selectable as _, h_flex,
+    Selectable as _, Sizable as _,
+    button::ButtonVariants as _,
+    h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
 };
@@ -21,11 +24,19 @@ use sovra_core::{
     file_index::IndexEvent,
     knowledge_analysis::{AnalysisOptions, Citation, Exploration, ExploreRequest, Language},
 };
+/// Search options fold away; the JSON rules box folds inside them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Options {
+    Closed,
+    Open,
+    Expert,
+}
+
 pub(crate) struct ExplorerView {
     query: Entity<InputState>,
     settings: Entity<InputState>,
     _enter: gpui_kit::Subscription,
-    advanced: bool,
+    options: Options,
     results_folded: bool,
     language: Language,
     window_seconds: u32,
@@ -55,7 +66,7 @@ impl ExplorerView {
             query,
             settings,
             _enter: enter,
-            advanced: false,
+            options: Options::Closed,
             results_folded: false,
             language: Language::English,
             window_seconds: 86_400,
@@ -70,7 +81,7 @@ impl ExplorerView {
     }
     pub(crate) fn fold_results(&mut self) {
         self.results_folded = true;
-        self.advanced = false;
+        self.options = Options::Closed;
     }
 
     pub(crate) fn observe(&mut self, event: &Event) {
@@ -201,15 +212,24 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                         .on_click(cx.listener(|shell, _, _, cx| shell.explore_sources(cx))),
                 )
                 .child(
-                    design::button("explore-settings", "Analysis settings", cx).on_click(
-                        cx.listener(|shell, _, _, cx| {
-                            shell.explorer.advanced = !shell.explorer.advanced;
+                    design::button("explore-settings", "Search options", cx)
+                        .ghost()
+                        .icon(if view.options == Options::Closed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .selected(view.options != Options::Closed)
+                        .on_click(cx.listener(|shell, _, _, cx| {
+                            shell.explorer.options = match shell.explorer.options {
+                                Options::Closed => Options::Open,
+                                Options::Open | Options::Expert => Options::Closed,
+                            };
                             cx.notify();
-                        }),
-                    ),
+                        })),
                 ),
         );
-    if view.advanced {
+    if view.options != Options::Closed {
         let mut languages = h_flex().flex_wrap().gap(t.space.compact);
         for (index, language) in [
             Language::English,
@@ -226,6 +246,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         {
             languages = languages.child(
                 design::button(("explorer-language", index), format!("{language:?}"), cx)
+                    .small()
                     .selected(view.language == language)
                     .on_click(cx.listener(move |shell, _, _, cx| {
                         shell.explorer.language = language;
@@ -240,6 +261,7 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         {
             windows = windows.child(
                 design::button(("explorer-window", index), label, cx)
+                    .small()
                     .selected(view.window_seconds == seconds)
                     .on_click(cx.listener(move |shell, _, _, cx| {
                         shell.explorer.window_seconds = seconds;
@@ -247,12 +269,66 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                     })),
             );
         }
-        let lang_label = format!("Word forms · {:?}", view.language);
-        let time_label = format!("Time window · {} seconds", view.window_seconds);
-        column=column.child(div().id("explore-selected-language").test_support().aria_label(lang_label.clone()).sovra_text(TextRole::Caption,cx).child(lang_label)).child(languages)
-            .child(div().id("explore-selected-window").test_support().aria_label(time_label.clone()).sovra_text(TextRole::Caption,cx).child(time_label)).child(windows)
-            .child(div().sovra_text(TextRole::Caption,cx).child("Optional JSON overrides individual settings. Set mask_radius for images, profiles for table columns, or properties for the classes a relationship connects."))
-            .child(Input::new(&view.settings).id("explore-settings-json").aria_label("Analysis settings JSON"));
+        let lang_label = format!("Language of your files · {:?}", view.language);
+        let time_label = format!(
+            "Group dated readings by · {}",
+            match view.window_seconds {
+                60 => "minute".to_owned(),
+                3_600 => "hour".to_owned(),
+                86_400 => "day".to_owned(),
+                seconds => format!("{seconds} seconds"),
+            }
+        );
+        let mut options = v_flex()
+            .id("explore-options")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .gap(t.space.small)
+            .p(t.space.medium)
+            .sovra_surface(Surface::Subtle, cx)
+            .child(
+                div()
+                    .id("explore-selected-language")
+                    .test_support()
+                    .aria_label(lang_label.clone())
+                    .sovra_text(TextRole::Caption, cx)
+                    .child(lang_label),
+            )
+            .child(languages)
+            .child(
+                div()
+                    .id("explore-selected-window")
+                    .test_support()
+                    .aria_label(time_label.clone())
+                    .sovra_text(TextRole::Caption, cx)
+                    .child(time_label),
+            )
+            .child(windows)
+            .child(
+                design::button("explore-expert", "Custom rules for experts", cx)
+                    .ghost()
+                    .small()
+                    .self_start()
+                    .icon(if view.options == Options::Expert {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .on_click(cx.listener(|shell, _, _, cx| {
+                        shell.explorer.options = match shell.explorer.options {
+                            Options::Expert => Options::Open,
+                            Options::Closed | Options::Open => Options::Expert,
+                        };
+                        cx.notify();
+                    })),
+            );
+        if view.options == Options::Expert {
+            options = options
+                .child(div().sovra_text(TextRole::Caption, cx).child("Optional JSON overrides individual settings. Set mask_radius for images, profiles for table columns, or properties for the classes a relationship connects. See the Knowledge guide."))
+                .child(Input::new(&view.settings).id("explore-settings-json").aria_label("Analysis settings JSON"));
+        }
+        column = column.child(options);
     }
     if !view.notice.is_empty() {
         column = column.child(

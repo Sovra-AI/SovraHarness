@@ -160,3 +160,41 @@ fn existing_catalogue_backfills_every_supported_relation_across_windows() {
     }
     assert_eq!(lines.len(), 155);
 }
+
+#[test]
+fn wording_in_code_comments_is_not_saved_as_a_relationship_but_notes_are() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "src/solver.rs",
+        "// The solver depends on the cache.\nfn main() {}\n",
+    );
+    fixture.write("notes.txt", "Painting depends on Priming.\n");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let report = finish(&store);
+    assert_eq!(
+        report.predicates,
+        [(RelationKind::DependsOn, 1)],
+        "{report:?}"
+    );
+    assert!(
+        report
+            .examples
+            .iter()
+            .filter(|e| e.kind == FindingKind::Relation)
+            .all(|e| e.path.ends_with("notes.txt")),
+        "{report:?}"
+    );
+    let page = store
+        .knowledge()
+        .unwrap()
+        .query(&GraphQuery::default())
+        .unwrap();
+    assert!(
+        page.relations
+            .iter()
+            .all(|r| !r.statement.contains("solver")),
+        "{page:?}"
+    );
+}

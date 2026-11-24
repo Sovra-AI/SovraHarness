@@ -18,6 +18,25 @@ package version.
 
 - **Your team leads with people.** Each helper's card shows a face, a name, a job, and one line about how they sound. Open the card to chat, switch them on or off, edit, remove, or add them to a group. **Ask my team** and **Start a group chat** stay on the page. A new team starts with Alex, Morgan, Priya, Jamie, Sam, Robin, Noor, Kai, Scout, Quinn, and Mara. **Add a helper** also offers Engineer, Designer, Sales, Operations, Skeptic, Visionary, Diplomat, and Hustler. A team you already saved keeps your edits, anyone you switched off, and your own helpers, and gains any helper that was missing. Opening a helper says what they focus on and where they step back.
 
+- **A simpler Relationships & categories section.** Knowledge's former
+  **Relationships & taxonomy** section now opens on four numbers at a glance
+  and pills for what your files are and what they mention. Each relationship
+  reads as a short sentence, such as *Basil grown by Anna*, with one row of type
+  filters above the list. Opening one shows its facts and the file it came
+  from. Measurements, dates, tables and other findings show one kind at a time,
+  and the full list of types folds away under **What Sovra can recognise**.
+  Names a file defined, such as `food:grown_by`, read as plain words.
+  Findings say what they mean: "21 Cel (the same as 294.15 K) · measured with
+  thermometer", "the day of 2 March 2026 · 1 reading · average 294.15 K", and
+  "“notes” is matched by its root “note”". **Found in your files** shows the
+  five most common file kinds and counts the rest. **Analysis settings** is now
+  **Search options**, with the JSON box folded under **Custom rules for
+  experts**. Comments in code, programs, archives and data files are no longer
+  saved as possible relationships; already indexed folders keep the ones saved
+  before. A file called "notes" is no longer
+  filed under Learning & school on that word alone, and cards show the kinds of
+  things a relationship joins only when a table or you named them.
+
 - **Knowledge opens on one page.** Search files, saved details, and artifacts at
   the top. Expand folders, relationships, personal details, and people together.
   The overview shows folder activity and pending relationship reviews. Choose

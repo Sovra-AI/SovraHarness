@@ -2,8 +2,8 @@
 
 Open **Knowledge** and use **Search your knowledge** to find wording across
 files, saved personal details, and artifacts. Below search, **Files** shows
-folder activity, **Relationships & taxonomy** holds reviewed evidence and its
-vocabulary, **About you** opens saved personal details, and **People** lists
+folder activity, **Relationships & categories** shows how things in your files
+connect and what kind each file is, **About you** opens saved personal details, and **People** lists
 contacts. **Guide** explains how Sovra remembers. Expand the sections you need
 together. **Overview** folds them and returns to search. You can reopen the
 last search results there.
@@ -48,11 +48,11 @@ world-validity dates, corrections, and withdrawn evidence.
 
 | Question | What the result uses |
 | --- | --- |
-| What kind of thing is this and how does it relate? | A table with `subject,predicate,object` gives ordered, named statements. Add `subject_type,object_type` to check a declared property. A shared namespaced ID can connect two sources. Simple English statements receive a **Possible relation from wording** label. Sovra saves compatible source relationships during indexing. |
+| What kind of thing is this and how does it relate? | A table with `subject,predicate,object` gives ordered, named statements. Add `subject_type,object_type` to check a declared property. A shared namespaced ID can connect two sources. Simple English statements are labelled **possible connection from wording**. Sovra saves compatible source relationships during indexing. Wording in code, programs, archives and data files is not read as a fact; a relationship a table names outright still counts. |
 | What shape do the samples form? | Two to sixteen numeric coordinate columns named `x`, `y`, `z`, or `dim1` through `dimN`, in a common scale. The first 64 points give connected-component and loop counts at stated Euclidean distances, including the longest loop’s birth and death when present. |
 | What type of dataset fits? | Column names, finite numeric values, dates, units and missing cells provide the evidence. Optional named profiles keep ties visible. An unrecognized table is reported as unknown. |
 | Do the measurements agree? | Decimal readings keep their original units and use compatible base units for comparison. Supply `value,unit,instrument,calibration_date,reference,uncertainty` for context. Add `reference_value,reference_unit,tolerance` for an accuracy check. Tolerance and uncertainty use the reading’s unit. Supported dimensions are mass, length, time, volume, temperature, pressure and ratio. |
-| Which forms match? | Select English, French, German, Spanish, Italian, Portuguese, Dutch or Arabic under **Analysis settings**. Word stems and observed changes explain matches. Folder identifiers such as `SITE-778` retain literal-token retrieval. Black-and-white image masks and plain `P1` bitmap text report foreground, erosion, dilation and inner-boundary pixel counts for a stated square and zero border. |
+| Which forms match? | Select English, French, German, Spanish, Italian, Portuguese, Dutch or Arabic under **Search options**. Word stems and observed changes explain matches. Folder identifiers such as `SITE-778` retain literal-token retrieval. Black-and-white image masks and plain `P1` bitmap text report foreground, erosion, dilation and inner-boundary pixel counts for a stated square and zero border. |
 | What happened over time? | Dated table rows use event time, including out-of-order readings. Minute, hour and day windows give UTC counts and means per instrument and compatible unit. A date without a time means midnight UTC. |
 | What does each result mean? | Source type, provenance, line numbers, measurement units, and wording are readable in text. Possible interpretations retain their label. A shared numeric value establishes agreement on the quantity alone. |
 
@@ -63,7 +63,7 @@ matching passage and its line range. Mask image inputs are limited to one millio
 pixels (1,048,576), with opaque black as foreground and white or transparent as
 background. SVG uses rendered pixels.
 
-**Analysis settings** also accepts JSON. This example defines a table profile,
+Under **Search options**, **Custom rules for experts** also accepts JSON. This example defines a table profile,
 an hourly window, and a property whose object must be a grower.
 
 ```json
@@ -88,19 +88,18 @@ covers a subset of UCUM, and word matching uses language-specific stemmers.
 ## Explore the connections
 
 **Found in your files** shows the live file and finding counts as Sovra analyzes
-granted folders locally. Previously indexed folders catch up from their saved
-passages. Under **Relationships & taxonomy**, **Automatic classification** lists
-the file kinds, areas of life, subject types, and relationships actually found.
-Measurements, dated observations, table traits, and shape analyses appear when
-the source supports them. Each group shows examples. **Browse all** pages through
-the remaining findings and **Read source** opens the saved passage.
+granted folders locally, and **See relationships** opens the section below.
+Previously indexed folders catch up from their saved passages.
 
-Open **Relationship types & file categories**
-to see the standard relationships, subject types, file kinds, and areas of life.
-Custom relationships found in indexed files show the subject and object types they connect.
-Choose a relationship such as **depends on** or **is a** to filter saved
-connections. **Read relationship** opens its subjects, source wording, and
-recorded dates. Separate proposals from a helper can also be reviewed here.
+**Relationships & categories** reads from top to bottom:
+
+| Part | What it shows |
+| --- | --- |
+| Numbers at a glance | Files sorted, connections, kinds of things, and other findings, then pills for what your files are, the parts of life they cover, and the things they mention. |
+| Suggestions waiting for you | Relationships a helper proposed. Read the file's wording, then **Save these** or **Don't save**. Only shown when there are some. |
+| Relationships | Each saved relationship as a short sentence, such as *Basil grown by Anna*, with the kinds of things it joins and how Sovra knows it. Search by a word, or choose **All** or a relationship type found in your files. Open one to see its facts, **Everything about** either side, and **Where it came from**, where **Read** opens the saved passage. Tick **Show changed files** or **Show replaced ones** to see older relationships. |
+| More that Sovra noticed | Measurements, dates and times, tables, word forms and other findings, one kind at a time. **Source** shows the passage beside a finding and **Show more** pages through the rest. |
+| What Sovra can recognise | Folded by default: every relationship type (choose one to filter), kinds of things, kinds of files and parts of life. A type a file defined for itself shows the kinds it joins, such as *grown by (Product → Grower)*. |
 
 Under **About you**, the native map shows saved personal details and their connections. Select a label to
 inspect its story, or filter the kinds of connections displayed. **Focus on these

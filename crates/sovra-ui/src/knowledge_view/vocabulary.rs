@@ -1,4 +1,6 @@
-//! The vocabulary beside indexed and reviewed evidence. Selecting a predicate uses the saved graph query.
+//! The words Sovra sorts with, folded away by default. Choosing a relationship
+//! type filters the saved relationships through the saved graph query.
+use super::parts::pills;
 use super::*;
 use sovra_core::file_index::{
     graph::{EntityKind, RelationKind},
@@ -8,90 +10,94 @@ use sovra_core::file_index::{
 pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement + use<> {
     let t = design::tokens(cx);
     let open = shell.knowledge_vocabulary_open;
-    let mut panel = v_flex().min_w_0().w_full().gap(t.space.small).child(
-        design::button(
-            "knowledge-taxonomy",
-            "Relationship types & file categories",
-            cx,
-        )
-        .self_start()
-        .icon(if open {
-            IconName::ChevronDown
-        } else {
-            IconName::ChevronRight
-        })
-        .selected(open)
-        .on_click(cx.listener(|shell, _, _, cx| {
-            shell.knowledge_vocabulary_open = !shell.knowledge_vocabulary_open;
-            cx.notify();
-        })),
+    let panel = v_flex().min_w_0().w_full().gap(t.space.medium).child(
+        design::button("knowledge-taxonomy", "What Sovra can recognise", cx)
+            .ghost()
+            .small()
+            .self_start()
+            .icon(if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .selected(open)
+            .on_click(cx.listener(|shell, _, _, cx| {
+                shell.knowledge_vocabulary_open = !shell.knowledge_vocabulary_open;
+                cx.notify();
+            })),
     );
-    if open {
-        let browser = &shell.file_index.state.knowledge_browser;
-        let mut predicates = h_flex().min_w_0().flex_wrap().gap(t.space.compact);
-        for (index, kind) in RelationKind::BUILT_INS.iter().enumerate() {
-            predicates = predicates.child(predicate_button(index, kind, shell, cx));
-        }
-        panel = panel
-            .child(
-                div()
-                    .sovra_text(TextRole::Body, cx)
-                    .child("Filter connections by relationship type."),
-            )
-            .child(predicates);
-        let discovered = shell
-            .file_index
-            .state
-            .discoveries
-            .as_ref()
-            .and_then(|r| r.as_ref().ok());
-        let mut custom: Vec<_> = discovered
-            .into_iter()
-            .flat_map(|r| &r.predicates)
-            .map(|(kind, _)| kind)
-            .filter(|kind| matches!(kind, RelationKind::Property(_)))
-            .collect();
-
-        if let Some(page) = &browser.page {
-            for edge in &page.relations {
-                if matches!(edge.relation, RelationKind::Property(_))
-                    && !custom.contains(&&edge.relation)
-                {
-                    custom.push(&edge.relation);
-                }
+    if !open {
+        return panel;
+    }
+    let discovered = shell
+        .file_index
+        .state
+        .discoveries
+        .as_ref()
+        .and_then(|r| r.as_ref().ok());
+    // Types a file defined for itself, such as "grown by" between a product and a grower.
+    let mut custom: Vec<&RelationKind> = discovered
+        .into_iter()
+        .flat_map(|r| &r.predicates)
+        .map(|(kind, _)| kind)
+        .filter(|kind| matches!(kind, RelationKind::Property(_)))
+        .collect();
+    if let Some(page) = &shell.file_index.state.knowledge_browser.page {
+        for edge in &page.relations {
+            if matches!(edge.relation, RelationKind::Property(_))
+                && !custom.contains(&&edge.relation)
+            {
+                custom.push(&edge.relation);
             }
         }
-        if !custom.is_empty() {
-            panel = panel.child(
-                div()
-                    .sovra_text(TextRole::SectionTitle, cx)
-                    .child("Custom relationship types"),
-            );
-            for (index, kind) in custom.into_iter().enumerate() {
-                let RelationKind::Property(property) = kind else {
-                    continue;
-                };
-                let endpoints =
-                    format!("{} → {}", property.subject.label(), property.object.label());
-                panel = panel.child(
-                    h_flex()
-                        .min_w_0()
-                        .flex_wrap()
-                        .gap(t.space.small)
-                        .child(predicate_button(
-                            index + RelationKind::BUILT_INS.len(),
-                            kind,
-                            shell,
-                            cx,
-                        ))
-                        .child(div().sovra_text(TextRole::Caption, cx).child(endpoints)),
-                );
-            }
-        }
-        for (id, title, labels) in [
-            (
-                "knowledge-entity-types",
-                "Kinds of subjects",
+    }
+    let mut types = h_flex().min_w_0().w_full().flex_wrap().gap(t.space.compact);
+    for (index, kind) in RelationKind::BUILT_INS.iter().enumerate() {
+        types = types.child(predicate_button(
+            index,
+            kind,
+            kind.display_name(),
+            shell,
+            cx,
+        ));
+    }
+    for (index, kind) in custom.into_iter().enumerate() {
+        let RelationKind::Property(property) = kind else {
+            continue;
+        };
+        let label = format!(
+            "{} ({} → {})",
+            kind.display_name(),
+            property.subject.display_name(),
+            property.object.display_name()
+        );
+        types = types.child(predicate_button(
+            index + RelationKind::BUILT_INS.len(),
+            kind,
+            label,
+            shell,
+            cx,
+        ));
+    }
+    let names = |labels: Vec<String>| labels.into_iter().map(|l| (l, None)).collect::<Vec<_>>();
+    panel
+        .child(
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(t.space.compact)
+                .child(
+                    div()
+                        .sovra_text(TextRole::Caption, cx)
+                        .text_color(t.text_secondary)
+                        .child("Ways things can relate · choose one to show only those"),
+                )
+                .child(types),
+        )
+        .child(pills(
+            "knowledge-entity-types",
+            "Kinds of things",
+            names(
                 EntityKind::BUILT_INS
                     .iter()
                     .chain(
@@ -101,46 +107,34 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
                             .map(|(kind, _)| kind)
                             .filter(|kind| matches!(kind, EntityKind::Domain(_))),
                     )
-                    .map(EntityKind::label)
-                    .collect::<Vec<_>>(),
+                    .map(EntityKind::display_name)
+                    .collect(),
             ),
-            (
-                "knowledge-file-types",
-                "File kinds",
-                KINDS.iter().map(|k| k.pref_label).collect(),
-            ),
-            (
-                "knowledge-life-areas",
-                "Areas of life",
-                AREAS.iter().map(|a| a.pref_label).collect(),
-            ),
-        ] {
-            panel = panel.child(
-                v_flex()
-                    .min_w_0()
-                    .gap(t.space.compact)
-                    .child(div().sovra_text(TextRole::SectionTitle, cx).child(title))
-                    .child(
-                        div()
-                            .id(id)
-                            .test_support()
-                            .sovra_text(TextRole::Body, cx)
-                            .child(labels.join(" · ")),
-                    ),
-            );
-        }
-    }
-    panel
+            cx,
+        ))
+        .child(pills(
+            "knowledge-file-types",
+            "Kinds of files",
+            names(KINDS.iter().map(|k| k.pref_label.to_owned()).collect()),
+            cx,
+        ))
+        .child(pills(
+            "knowledge-life-areas",
+            "Parts of life",
+            names(AREAS.iter().map(|a| a.pref_label.to_owned()).collect()),
+            cx,
+        ))
 }
 
-fn predicate_button(
+pub(super) fn predicate_button(
     index: usize,
     kind: &RelationKind,
+    label: String,
     shell: &Shell,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     let relation = kind.clone();
-    design::button(("knowledge-predicate", index), kind.label().to_owned(), cx)
+    design::button(("knowledge-predicate", index), label, cx)
         .small()
         .max_w_full()
         .selected(

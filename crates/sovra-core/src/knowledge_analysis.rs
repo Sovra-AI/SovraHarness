@@ -367,20 +367,15 @@ fn inspect_words(text: &str, language: Language, findings: &mut Vec<Finding>) {
             if surface_change.is_none()
                 && stem != lower
                 && !stem.is_empty()
-                && let Some((prefix, suffix)) = lower.split_once(stem.as_ref())
+                && lower.contains(stem.as_ref())
             {
-                let description = match (prefix, suffix) {
-                    ("", suffix) => format!("removed ending “{suffix}”"),
-                    (prefix, "") => format!("removed beginning “{prefix}”"),
-                    (prefix, suffix) => {
-                        format!("removed beginning “{prefix}” and ending “{suffix}”")
-                    }
-                };
                 surface_change = Some(Finding {
                     kind: FindingKind::Morphology,
                     from: lineno,
                     to: lineno,
-                    detail: format!("{word} → {stem} · {language:?} stemmer {description}"),
+                    detail: format!(
+                        "“{word}” is matched by its root “{stem}”, so a search finds other forms of it ({language:?})"
+                    ),
                 });
             }
             let entry = forms
@@ -402,7 +397,9 @@ fn inspect_words(text: &str, language: Language, findings: &mut Vec<Finding>) {
                 kind: FindingKind::Morphology,
                 from,
                 to,
-                detail: format!("{first} and {other} share the {language:?} search stem “{stem}”."),
+                detail: format!(
+                    "“{first}” and “{other}” are forms of one word (root “{stem}”), so a search for either finds both"
+                ),
             });
         }
     }
@@ -489,7 +486,7 @@ mod tests {
         assert!(
             details
                 .iter()
-                .any(|d| d.contains("mean 500 g") && d.contains("2 readings"))
+                .any(|d| d.contains("average 500 g") && d.contains("2 readings"))
         );
         assert!(
             details.iter().any(|d| d.contains("scale A")
@@ -548,7 +545,7 @@ mod table_formats {
             result
                 .findings
                 .iter()
-                .any(|f| f.detail.contains("unknown type"))
+                .any(|f| f.detail.starts_with("Table · "))
         );
     }
 }

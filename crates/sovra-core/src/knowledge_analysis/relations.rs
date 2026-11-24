@@ -15,19 +15,19 @@ pub struct Statement {
 impl Statement {
     pub(super) fn finding(&self) -> Finding {
         let origin = if self.explicit {
-            "Named relation in the table"
+            "named in a table"
         } else {
-            "Possible relation from wording"
+            "possible connection from wording"
         };
         let typed = |term: &str, kind: Option<&str>| {
-            kind.map_or_else(|| term.to_owned(), |class| format!("{term} [{class}]"))
+            kind.map_or_else(|| term.to_owned(), |class| format!("{term} ({class})"))
         };
         Finding {
             kind: FindingKind::Relation,
             from: self.line,
             to: self.line,
             detail: format!(
-                "{origin} · {} → {} → {}",
+                "{} {} {} · {origin}",
                 typed(&self.subject, self.subject_type.as_deref()),
                 self.predicate,
                 typed(&self.object, self.object_type.as_deref())
