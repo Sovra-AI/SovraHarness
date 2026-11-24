@@ -10,7 +10,8 @@ use sovra_core::{
     file_index::{
         EvidenceTier, IndexError, PassageRef,
         automatic::{
-            AutomaticIndex, DiscoveredFinding, DiscoveryOverview, FindingPage, source_claim,
+            AutomaticIndex, DiscoveredFinding, DiscoveryOverview, FindingPage, FindingQuery,
+            source_claim,
         },
         graph::{GraphDraft, GraphOrigin, RelationKind},
         ontology, passage_wording,
@@ -63,8 +64,14 @@ impl AutomaticIndex for LocalFileIndex {
         Ok(worked || backfilling)
     }
 
-    fn findings(&self, kind: FindingKind, before: Option<i64>) -> Result<FindingPage> {
-        findings(&self.connect()?, kind, before, 20)
+    fn search(&self, query: &FindingQuery) -> Result<FindingPage> {
+        findings(
+            &self.connect()?,
+            query.kind,
+            query.contains.as_deref(),
+            query.before,
+            20,
+        )
     }
 
     fn overview(&self, since: Option<u64>) -> Result<Option<DiscoveryOverview>> {
@@ -124,7 +131,7 @@ impl AutomaticIndex for LocalFileIndex {
                     overview.counts.push((kind, n));
                     overview
                         .examples
-                        .extend(findings(&tx, kind, None, 2)?.items);
+                        .extend(findings(&tx, kind, None, None, 2)?.items);
                 }
                 _ => return Err(IndexError("Unknown automatic knowledge category.".into())),
             }
@@ -136,16 +143,25 @@ impl AutomaticIndex for LocalFileIndex {
 fn findings(
     db: &Connection,
     kind: FindingKind,
+    contains: Option<&str>,
     before: Option<i64>,
     limit: u32,
 ) -> Result<FindingPage> {
+    // SQLite's lower() folds ASCII only; the query text is already lowercased.
     let sql = "SELECT f.root_id, f.id, f.current_version, f.path, d.ordinal, d.line, d.detail, d.id
         FROM index_auto_findings d JOIN index_files f ON f.id=d.file_id
-        WHERE d.category=?1 AND d.id<?2 AND f.available=1 ORDER BY d.id DESC LIMIT ?3";
+        WHERE d.category=?1 AND d.id<?2 AND f.available=1
+          AND (?4 IS NULL OR instr(lower(d.detail || ' ' || f.path), ?4) > 0)
+        ORDER BY d.id DESC LIMIT ?3";
     let mut query = db.prepare_cached(sql).map_err(|e| db_error(&e))?;
     let rows = query
         .query_map(
-            params![json(&kind)?, before.unwrap_or(i64::MAX), limit + 1],
+            params![
+                json(&kind)?,
+                before.unwrap_or(i64::MAX),
+                limit + 1,
+                contains
+            ],
             |r| {
                 Ok((
                     r.get::<_, i64>(7)?,

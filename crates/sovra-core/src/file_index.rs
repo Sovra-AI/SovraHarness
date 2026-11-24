@@ -737,6 +737,19 @@ pub trait IndexedFiles: Send + Sync + std::fmt::Debug {
             "File knowledge is unavailable in this session.".into(),
         ))
     }
+    async fn discoveries(&self) -> Result<automatic::DiscoveryOverview, IndexError> {
+        Err(IndexError(
+            "Automatic file findings are unavailable in this session.".into(),
+        ))
+    }
+    async fn findings(
+        &self,
+        _: automatic::FindingQuery,
+    ) -> Result<automatic::FindingPage, IndexError> {
+        Err(IndexError(
+            "Automatic file findings are unavailable in this session.".into(),
+        ))
+    }
     async fn search_report(&self, query: IndexQuery) -> Result<semantic::SearchReport, IndexError> {
         Ok(semantic::SearchReport {
             passages: self.search(query).await?,

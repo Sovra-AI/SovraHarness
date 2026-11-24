@@ -216,6 +216,60 @@ impl FindingKind {
             Self::Coverage => "Reading limits",
         }
     }
+
+    pub const ALL: [Self; 7] = [
+        Self::Relation,
+        Self::Measurement,
+        Self::Chronology,
+        Self::Profile,
+        Self::Morphology,
+        Self::Topology,
+        Self::Coverage,
+    ];
+
+    /// The stable name a helper passes to ask for one kind.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Relation => "relationship",
+            Self::Topology => "number_pattern",
+            Self::Profile => "table",
+            Self::Measurement => "measurement",
+            Self::Morphology => "word_form",
+            Self::Chronology => "dated_series",
+            Self::Coverage => "reading_limit",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.id() == id)
+    }
+
+    /// What one finding of this kind tells a reader, so a helper knows when to look.
+    pub const fn meaning(self) -> &'static str {
+        match self {
+            Self::Relation => {
+                "How two named things connect, from a table row or a sentence. Answers who, what belongs to what, what depends on what."
+            }
+            Self::Measurement => {
+                "A number with its unit, converted to a standard unit, and the instrument when named. Answers how much, how heavy, how hot."
+            }
+            Self::Chronology => {
+                "Dated readings grouped into a time window, with how many and their average. Answers when, how often, and trends over time."
+            }
+            Self::Profile => {
+                "What a table holds: its columns, row count, numeric columns and empty cells. Answers what data a file has."
+            }
+            Self::Morphology => {
+                "Words matched by their root, so different forms of one word are found together."
+            }
+            Self::Topology => {
+                "The shape of numeric points across distances, such as clusters or gaps."
+            }
+            Self::Coverage => {
+                "Where Sovra stopped reading a file early, so absence there is not proof."
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

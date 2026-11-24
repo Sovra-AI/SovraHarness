@@ -481,6 +481,17 @@ pub fn describe_step(tool: &str, args: &Value) -> (StepKind, String) {
             StepKind::Read,
             with("Reading", &["file_name", "path", "name", "title"]),
         ),
+        "overview_file_knowledge" => (
+            StepKind::Read,
+            "Looking at what's in your folders".to_owned(),
+        ),
+        "list_file_findings" => (
+            StepKind::Search,
+            with(
+                "Looking through what Sovra found for",
+                &["contains", "kind"],
+            ),
+        ),
         "list_attachments" | "list_indexed_folders" => {
             (StepKind::Read, "Looking through your files".to_owned())
         }

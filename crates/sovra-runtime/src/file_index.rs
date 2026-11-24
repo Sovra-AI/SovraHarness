@@ -658,6 +658,14 @@ fn knowledge(
         .ok_or_else(|| IndexError("File knowledge is unavailable in this session.".into()))
 }
 
+fn automatic(
+    store: &dyn FileIndex,
+) -> Result<&dyn sovra_core::file_index::automatic::AutomaticIndex, IndexError> {
+    store.automatic().ok_or_else(|| {
+        IndexError("Automatic file findings are unavailable in this session.".into())
+    })
+}
+
 #[async_trait::async_trait]
 impl sovra_core::file_index::IndexedFiles for Reader {
     async fn propose_knowledge(
@@ -690,6 +698,24 @@ impl sovra_core::file_index::IndexedFiles for Reader {
     ) -> Result<sovra_core::file_index::graph::GraphEvidence, IndexError> {
         let store = self.0.clone();
         retrieve(move || knowledge(store.as_ref())?.evidence(id)).await
+    }
+    async fn discoveries(
+        &self,
+    ) -> Result<sovra_core::file_index::automatic::DiscoveryOverview, IndexError> {
+        let store = self.0.clone();
+        retrieve(move || {
+            automatic(store.as_ref())?
+                .overview(None)?
+                .ok_or_else(|| IndexError("Sovra has not finished sorting files yet.".into()))
+        })
+        .await
+    }
+    async fn findings(
+        &self,
+        query: sovra_core::file_index::automatic::FindingQuery,
+    ) -> Result<sovra_core::file_index::automatic::FindingPage, IndexError> {
+        let store = self.0.clone();
+        retrieve(move || automatic(store.as_ref())?.search(&query)).await
     }
     async fn search_report(
         &self,

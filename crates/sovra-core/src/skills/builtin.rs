@@ -57,7 +57,8 @@ impl Skill {
             "read-files" => "Read & explain attached files",
             "search-files" => "Find answers in your folders",
             "map-files" => "Connect people & topics in your files",
-            "file-knowledge" => "Explore reviewed file connections",
+            "file-knowledge" => "Explore how things in your files connect",
+            "file-findings" => "See what's in your folders",
             "file-catalog" => "List & count files in your folders",
             "file-history" => "See what changed in a file over time",
             "card" => "Summarize as a neat info card",
@@ -242,7 +243,11 @@ impl Skill {
             ),
             "file-knowledge" => sample_pair(
                 "file-knowledge",
-                "What have we reviewed about our project timeline?",
+                "Who and what is connected to our greenhouse project?",
+            ),
+            "file-findings" => sample_pair(
+                "file-findings",
+                "What measurements and dates are in my garden spreadsheets?",
             ),
             "file-catalog" => sample_pair(
                 "file-catalog",
@@ -688,11 +693,32 @@ pub fn builtin_skills() -> Vec<Skill> {
                 &["file-graph", "knowledge-graph"],
                 &[
                     "list_indexed_folders",
+                    "overview_file_knowledge",
                     "query_file_knowledge",
                     "read_file_knowledge_evidence",
                 ],
-                "Resolve the requested indexed folders, then query reviewed file knowledge. Follow exact entity IDs for bounded graph traversal and read the cited evidence before answering. Distinguish model inference, storage approval, source freshness and factual truth. Recorded time is when Sovra learned the relationship; valid time describes the world only when established. Unknown dates are not a date match. Include stale/superseded relationships only when historical context is needed, label them, and do not treat a bounded or empty graph result as proof of absence. If no question is given, describe a bounded selection of saved knowledge and its coverage limits.",
+                "Resolve the requested indexed folders. Call overview_file_knowledge to see which relationship types exist and pass their exact relation values, then query saved file knowledge: relationships Sovra read from tables and sentences, and ones the user approved. Follow exact entity IDs for bounded graph traversal and read the cited evidence before answering. Distinguish model inference, storage approval, source freshness and factual truth. Recorded time is when Sovra learned the relationship; valid time describes the world only when established. Unknown dates are not a date match. Include stale/superseded relationships only when historical context is needed, label them, and do not treat a bounded or empty graph result as proof of absence. If no question is given, describe a bounded selection of saved knowledge and its coverage limits.",
                 "[question about saved file knowledge]",
+            )
+        },
+        Skill {
+            requires_input: false,
+            ..procedure(
+                "file-findings",
+                "See what's in your folders",
+                "Ask what your connected folders hold: the kinds of files, the parts of life they cover, and the measurements, dates, tables and connections Sovra found in them, each with the line it came from.",
+                "Files",
+                &["file-overview", "file-facts"],
+                &[
+                    "list_indexed_folders",
+                    "overview_file_knowledge",
+                    "list_file_findings",
+                    "read_indexed_file",
+                    "query_file_knowledge",
+                    "read_file_knowledge_evidence",
+                ],
+                "Start with overview_file_knowledge to learn what Sovra already worked out: file kinds, parts of life, kinds of things mentioned, relationship types and how many findings of each kind. For numbers, units, dates, averages or what a table holds, call list_file_findings with the matching kind and contains text such as a unit, name or file name; follow next only while it helps. For how things connect, call query_file_knowledge with a relation value from the overview. Read the passage with read_indexed_file before stating an exact value. Cite the path and line. Findings are automatic readings, not verified facts; say so when it matters. Counts cover every connected folder and grow while Sovra is still reading. An empty result is not proof of absence: try other wording or search_indexed_files. With no question, summarise the overview in plain words and suggest two or three things to ask.",
+                "[what to find out about your folders]",
             )
         },
         Skill {

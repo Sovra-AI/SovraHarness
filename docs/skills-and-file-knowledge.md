@@ -85,6 +85,21 @@ For progress and classification, see [File understanding](file-ontology.md).
   explicitly save a proposal in **Knowledge → Relationships & categories** before it becomes reviewed knowledge. Model
   confidence is not a calibrated truth score. Source access, provenance, and
   revocation remain separate from accepting an interpretation.
+- `/file-findings` (**See what's in your folders**) lets a helper use what Sovra
+  already worked out on its own. `overview_file_knowledge` gives the counts:
+  file kinds, parts of life, kinds of things mentioned, relationship types, and
+  how many findings of each kind there are. `list_file_findings` lists one kind
+  at a time — `measurement`, `dated_series`, `table`, `relationship`,
+  `word_form`, `number_pattern` or `reading_limit` — and can keep only findings
+  whose wording or file path contains some text. Each finding carries the path,
+  line and a passage reference, and the helper reads that passage before giving
+  an exact value. Every chat turn with connected folders tells the model these
+  tools exist. Delegated helpers get them with the other read-only file tools;
+  they never get `propose_file_knowledge`.
+- `query_file_knowledge` returns every saved relationship. Each one's
+  `basis.tier` says where it came from: `deterministic_extraction` (a table),
+  `heuristic_extraction` (sentence wording, so check the cited passage), or
+  `model_inference` (a helper's proposal that you approved).
 
 Reviewed proposals can introduce a stable domain class or property identifier.
 A property declares the subject and object classes it accepts. Follow a named

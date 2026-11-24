@@ -197,6 +197,43 @@ impl IndexedFiles for Reader {
         })
     }
 
+    async fn discoveries(
+        &self,
+    ) -> Result<sovra_core::file_index::automatic::DiscoveryOverview, IndexError> {
+        use sovra_core::file_index::{graph::RelationKind, ontology};
+        use sovra_core::knowledge_analysis::FindingKind;
+        Ok(sovra_core::file_index::automatic::DiscoveryOverview {
+            revision: 3,
+            roots: vec!["root".into()],
+            working: true,
+            kinds: vec![(ontology::classify(Some("text/csv"), "garden.csv"), 2)],
+            areas: vec![(ontology::LifeArea::Home, 2)],
+            counts: vec![(FindingKind::Measurement, 5), (FindingKind::Relation, 1)],
+            subjects: vec![],
+            predicates: vec![(RelationKind::DependsOn, 1)],
+            examples: vec![],
+        })
+    }
+    async fn findings(
+        &self,
+        query: sovra_core::file_index::automatic::FindingQuery,
+    ) -> Result<sovra_core::file_index::automatic::FindingPage, IndexError> {
+        self.queries.lock().expect("query log").push(format!(
+            "{}:{}",
+            query.kind.id(),
+            query.contains.unwrap_or_default()
+        ));
+        Ok(sovra_core::file_index::automatic::FindingPage {
+            items: vec![sovra_core::file_index::automatic::DiscoveredFinding {
+                kind: query.kind,
+                detail: "The orchid budget is 420 dollars.".into(),
+                path: passage().path,
+                line: 7,
+                reference: passage().reference,
+            }],
+            next: Some(9),
+        })
+    }
     async fn search(&self, query: IndexQuery) -> Result<Vec<IndexPassage>, IndexError> {
         self.queries.lock().expect("query log").push(query.text);
         self.searches.fetch_add(1, Ordering::SeqCst);
@@ -532,6 +569,8 @@ impl Llm for HelperKnowledgeModel {
                 "read_file_history",
                 "query_file_knowledge",
                 "read_file_knowledge_evidence",
+                "overview_file_knowledge",
+                "list_file_findings",
             ] {
                 assert!(
                     request.tools.contains_key(name),
@@ -881,4 +920,127 @@ async fn question_without_a_filename_puts_the_answering_passage_on_the_model_tur
     assert!(!closed_seen.contains("forty-two"));
     assert!(!closed_seen.contains("ZX-ORCHID"));
     assert!(closed_seen.contains("not proof"));
+}
+
+/// A helper learns what the folders hold, narrows to one finding kind, then
+/// reads the cited passage before answering.
+struct FindingsModel;
+
+#[async_trait::async_trait]
+impl Llm for FindingsModel {
+    fn name(&self) -> &'static str {
+        "findings-test"
+    }
+
+    async fn generate_content(
+        &self,
+        request: LlmRequest,
+        _: bool,
+    ) -> adk_core::Result<LlmResponseStream> {
+        let last = request
+            .contents
+            .iter()
+            .rev()
+            .flat_map(|content| content.parts.iter().rev())
+            .find_map(|part| match part {
+                Part::FunctionResponse {
+                    function_response, ..
+                } => Some(function_response.clone()),
+                _ => None,
+            });
+        let part = match last {
+            None => {
+                assert!(
+                    serde_json::to_string(&request)
+                        .unwrap()
+                        .contains("overview_file_knowledge shows what Sovra already worked out"),
+                    "every turn with folders says the findings exist"
+                );
+                call("overview_file_knowledge", json!({}), 0)
+            }
+            Some(r) if r.name == "overview_file_knowledge" => {
+                let o = &r.response;
+                assert_eq!(o["files_sorted"], 2, "{o}");
+                assert_eq!(o["still_reading"], true);
+                assert_eq!(o["life_areas"][0]["area"], "home");
+                assert_eq!(o["relationship_types"][0]["relation"], "depends_on");
+                assert_eq!(o["findings"][0]["kind"], "measurement");
+                assert!(
+                    o["findings"][0]["meaning"]
+                        .as_str()
+                        .unwrap()
+                        .contains("unit")
+                );
+                call(
+                    "list_file_findings",
+                    json!({"kind": o["findings"][0]["kind"], "contains": "Orchid"}),
+                    1,
+                )
+            }
+            Some(r) if r.name == "list_file_findings" => {
+                let page = &r.response;
+                assert_eq!(page["next"], 9, "{page}");
+                assert_eq!(page["findings"][0]["line"], 7);
+                call(
+                    "read_indexed_file",
+                    json!({"reference": page["findings"][0]["reference"]}),
+                    2,
+                )
+            }
+            Some(r) => {
+                assert_eq!(r.name, "read_indexed_file");
+                assert_eq!(r.response["passage"]["text"], passage().text);
+                Part::Text {
+                    text: "The orchid budget is 420 dollars. [notes/budget.md:7]".into(),
+                }
+            }
+        };
+        let response = LlmResponse::new(Content {
+            role: "model".into(),
+            parts: vec![part],
+        });
+        Ok(Box::pin(futures::stream::once(async move { Ok(response) })))
+    }
+}
+
+#[tokio::test]
+async fn helper_uses_the_overview_and_findings_then_reads_the_source() {
+    let reader = Arc::new(Reader::default());
+    let catalog = Arc::new(SkillCatalog::default());
+    let skill = catalog.find("file-findings").unwrap();
+    let harness =
+        AdkHarness::with_llm_and_tools(&AgentConfig::default(), Arc::new(FindingsModel), vec![])
+            .unwrap()
+            .with_indexed_files(Some(reader.clone()))
+            .unwrap()
+            .with_skill_catalog(catalog.clone())
+            .unwrap()
+            .with_skill(skill)
+            .unwrap();
+    let (events, received) = async_channel::unbounded();
+    harness
+        .run_prompt("findings-test", "What is in my garden files?", &events)
+        .await;
+    let output: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+    assert!(
+        output.iter().any(
+            |event| matches!(event, Event::AgentChunk { text, .. } if text.contains("notes/budget.md:7"))
+        ),
+        "{output:?}"
+    );
+    assert!(
+        reader
+            .queries
+            .lock()
+            .expect("query log")
+            .iter()
+            .any(|q| q == "measurement:orchid")
+    );
+    assert!(
+        harness
+            .with_indexed_files(None)
+            .unwrap()
+            .with_skill(skill)
+            .is_err()
+    );
 }

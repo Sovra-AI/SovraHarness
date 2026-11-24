@@ -20,6 +20,19 @@ package version.
 
 - **Explore all your knowledge on one map.** Open the map from Knowledge, show the collections you want and follow a relationship back to the wording behind it. Folder and finding counts cover the index, and you can draw more records as you explore.
 
+- **Helpers can use what Sovra found in your files.** The new
+  **See what's in your folders** skill lets a helper ask Sovra for an overview
+  first: how many files it sorted, what kinds they are, the parts of life they
+  cover, the kinds of things they mention, the relationship types saved, and
+  how many measurements, dated readings and tables it found. Then the helper
+  lists one kind at a time, optionally only the findings that mention a word,
+  unit or file name. It reads the cited line before giving an exact number.
+  Every chat with connected folders tells the model these findings exist, and
+  delegated helpers get the same read-only tools. The relationship search now
+  says which relationships came from a table, which from a sentence, and which
+  you approved, instead of calling them all "reviewed". **Explore reviewed file
+  connections** is now **Explore how things in your files connect**.
+
 ## [0.9.0] — 2026-11-24
 
 - **Continue as guest.** The sign-in screen lets you open Sovra without a name, email, or password. The visit is remembered until you sign out. Creating an account or signing in takes its place. A guest cannot accept or end a company decision.

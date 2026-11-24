@@ -63,10 +63,55 @@ impl FindingBrowser {
     }
 }
 
+/// One page of one kind of finding, optionally only those whose wording or
+/// file path contains some text. Helpers ask through this; the UI pages by kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingQuery {
+    pub kind: FindingKind,
+    pub contains: Option<String>,
+    pub before: Option<i64>,
+}
+
+impl FindingQuery {
+    pub const MAX_TEXT: usize = 240;
+
+    /// Blank text means no filter; matching ignores letter case.
+    pub fn new(
+        kind: FindingKind,
+        contains: Option<&str>,
+        before: Option<i64>,
+    ) -> Result<Self, IndexError> {
+        let contains = contains.map(str::trim).filter(|t| !t.is_empty());
+        if contains.is_some_and(|t| t.len() > Self::MAX_TEXT) {
+            return Err(IndexError(format!(
+                "Search findings with at most {} bytes of text.",
+                Self::MAX_TEXT
+            )));
+        }
+        if before.is_some_and(|b| b < 1) {
+            return Err(IndexError(
+                "Use the next cursor returned by the previous page.".into(),
+            ));
+        }
+        Ok(Self {
+            kind,
+            contains: contains.map(str::to_lowercase),
+            before,
+        })
+    }
+}
+
 pub trait AutomaticIndex: Send + Sync {
     /// Advance a bounded portion of saved data. More work can resume after restart.
     fn advance(&self) -> Result<bool, IndexError>;
-    fn findings(&self, kind: FindingKind, before: Option<i64>) -> Result<FindingPage, IndexError>;
+    fn findings(&self, kind: FindingKind, before: Option<i64>) -> Result<FindingPage, IndexError> {
+        self.search(&FindingQuery {
+            kind,
+            contains: None,
+            before,
+        })
+    }
+    fn search(&self, query: &FindingQuery) -> Result<FindingPage, IndexError>;
     fn overview(&self, since: Option<u64>) -> Result<Option<DiscoveryOverview>, IndexError>;
 }
 

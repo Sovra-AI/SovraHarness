@@ -117,7 +117,9 @@ has the first run, group steps, every setting, privacy details and limits.
   **Knowledge**. Choose **Open knowledge map** to explore folders, findings, personal
   records, saved work, people and group knowledge together. Scroll over the full-workspace map to zoom. Hover over a point to highlight its neighbours. **Found in your files** shows what Sovra classified automatically.
   Expand **Relationships & categories** to see what your files are, read each
-  connection as a short sentence, and open the line it came from.
+  connection as a short sentence, and open the line it came from. Helpers in
+  chat can use the same findings: ask **See what's in your folders** about the
+  measurements, dates and tables in your files.
 - **Save your work:** organize versioned documents, code, and other artifacts
   into folders and favorites. Preview saved websites in your browser.
 - **Keep company decisions:** record reasons, quoted evidence, review dates and

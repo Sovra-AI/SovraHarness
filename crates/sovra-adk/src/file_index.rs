@@ -8,6 +8,7 @@ use sovra_core::file_index::{
 };
 use std::sync::Arc;
 pub(super) mod evidence;
+mod findings;
 mod graph;
 pub(crate) use graph::property_schema;
 
@@ -31,6 +32,8 @@ pub(super) const TOOL_NAMES: &[&str] = &[
     "propose_file_knowledge",
     "query_file_knowledge",
     "read_file_knowledge_evidence",
+    "overview_file_knowledge",
+    "list_file_findings",
 ];
 
 struct IndexTool {
@@ -56,6 +59,7 @@ pub(super) fn tools(reader: &Arc<dyn IndexedFiles>) -> Vec<Arc<dyn Tool>> {
     })
     .collect();
     tools.extend(graph::tools(reader));
+    tools.extend(findings::tools(reader));
     tools
 }
 

@@ -198,3 +198,34 @@ fn wording_in_code_comments_is_not_saved_as_a_relationship_but_notes_are() {
         "{page:?}"
     );
 }
+
+#[test]
+fn helpers_can_narrow_findings_to_a_word_or_file() {
+    use sovra_core::file_index::automatic::FindingQuery;
+    let fixture = Fixture::new();
+    fixture.write(
+        "garden.csv",
+        "date,value,unit\n2025-05-01,12,kg\n2025-05-02,20,kg\n",
+    );
+    fixture.write("kitchen.csv", "date,value,unit\n2025-05-01,3,L\n");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    finish(&store);
+    let auto = store.automatic().unwrap();
+    let all = auto.findings(FindingKind::Measurement, None).unwrap().items;
+    assert!(all.iter().any(|f| f.path == "garden.csv"), "{all:?}");
+    assert!(all.iter().any(|f| f.path == "kitchen.csv"), "{all:?}");
+    let garden = auto
+        .search(&FindingQuery::new(FindingKind::Measurement, Some("GARDEN"), None).unwrap())
+        .unwrap()
+        .items;
+    assert!(
+        !garden.is_empty() && garden.iter().all(|f| f.path == "garden.csv"),
+        "{garden:?}"
+    );
+    let none = auto
+        .search(&FindingQuery::new(FindingKind::Measurement, Some("no such words"), None).unwrap())
+        .unwrap();
+    assert!(none.items.is_empty() && none.next.is_none());
+}
