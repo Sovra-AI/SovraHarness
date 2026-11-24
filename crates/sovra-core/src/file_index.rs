@@ -816,11 +816,29 @@ pub fn lexical_match(text: &str) -> String {
         .join(joiner)
 }
 
+/// Any distinctive word of `text`, for a retry when requiring every word found
+/// nothing. `None` below three such words, so a short search stays exact.
+pub fn lexical_any(text: &str) -> Option<String> {
+    let terms = content_terms(text);
+    (terms.len() >= 3).then(|| {
+        terms
+            .into_iter()
+            .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    })
+}
+
 /// Distinctive tokens in first-seen order, capped so a long question stays bounded.
 pub fn content_terms(text: &str) -> Vec<String> {
     let mut terms = Vec::new();
     for raw in text.split_whitespace() {
         let token = raw.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
+        // "Sam's" is written "Sam" in a table or a list of names.
+        let token = token
+            .strip_suffix("'s")
+            .or_else(|| token.strip_suffix("\u{2019}s"))
+            .unwrap_or(token);
         if token.is_empty() || is_stopword(token) {
             continue;
         }
@@ -1162,6 +1180,13 @@ mod tests {
         assert_eq!(
             lexical_match("sunflower OR absent"),
             "\"sunflower\" AND \"OR\" AND \"absent\""
+        );
+        assert_eq!(content_terms("Sam's weight"), ["Sam", "weight"]);
+        assert_eq!(content_terms("Sam’s log"), ["Sam", "log"]);
+        assert_eq!(lexical_any("sunflower budget"), None);
+        assert_eq!(
+            lexical_any("Sam's weight changes").as_deref(),
+            Some("\"Sam\" OR \"weight\" OR \"changes\"")
         );
         let source = "# Keeper note\n\nThe allotment levy is forty-two dinars.\n";
         let stored = contextual_passage(

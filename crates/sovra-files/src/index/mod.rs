@@ -556,14 +556,15 @@ impl FileIndex for LocalFileIndex {
             .text
             .chars()
             .any(|c| c.is_numeric() || matches!(c, '-' | '_' | '/' | '.' | '"' | ':' | '\\'));
+        let stemmed;
+        let mut source = query.text.as_str();
         let (table, terms) = if literal {
             ("index_fts".to_owned(), terms)
         } else if language != sovra_core::knowledge_analysis::Language::English {
             let table = matching::language_index(&db, language).map_err(|e| db_error(&e))?;
-            (
-                table,
-                sovra_core::file_index::lexical_match(&language.stem_text(&query.text)),
-            )
+            stemmed = language.stem_text(&query.text);
+            source = &stemmed;
+            (table, sovra_core::file_index::lexical_match(source))
         } else if query
             .text
             .chars()
@@ -583,18 +584,21 @@ impl FileIndex for LocalFileIndex {
             "{PASSAGES} JOIN {table} ft ON ft.rowid=c.rowid WHERE {table} MATCH ?1 AND f.available=1 AND f.current_version=v.id AND (?2='[]' OR f.root_id IN (SELECT value FROM json_each(?2))) AND f.path LIKE ?3 ESCAPE '\\' ORDER BY bm25({table}),f.root_id,f.path,vc.ordinal LIMIT ?4"
         );
         let mut stmt = db.prepare(&sql).map_err(|error| db_error(&error))?;
-        stmt.query_map(
-            params![
-                terms,
-                roots,
-                prefix,
-                i64::try_from(query.limit).expect("validated result limit fits i64")
-            ],
-            passage,
-        )
-        .map_err(|error| db_error(&error))?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| db_error(&error))
+        let limit = i64::try_from(query.limit).expect("validated result limit fits i64");
+        let mut run = |terms: &str| {
+            stmt.query_map(params![terms, roots, prefix, limit], passage)
+                .map_err(|error| db_error(&error))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| db_error(&error))
+        };
+        let found = run(&terms)?;
+        // A helper often searches with a phrase such as "Sam's weight changes
+        // and latest reading"; requiring every word then finds nothing. Fall back
+        // to any distinctive word, still ranked so passages matching more come first.
+        match sovra_core::file_index::lexical_any(source) {
+            Some(any) if found.is_empty() && any != terms => run(&any),
+            _ => Ok(found),
+        }
     }
 
     fn read(&self, reference: &PassageRef) -> Result<IndexPassage, IndexError> {

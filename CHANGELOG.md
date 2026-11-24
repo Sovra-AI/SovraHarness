@@ -32,6 +32,23 @@ package version.
   says which relationships came from a table, which from a sentence, and which
   you approved, instead of calling them all "reviewed". **Explore reviewed file
   connections** is now **Explore how things in your files connect**.
+- **Helpers stop missing what is in your files.** In tests with a local model,
+  questions about the person's own files went wrong in four ways, now fixed:
+  - A question like "What was Sam's latest weight reading?" went to the web
+    search helper because it sounded current. Questions about your own records
+    now stay with your folders unless you ask for the web.
+  - A file search for a phrase such as "Sam's weight changes and latest reading"
+    found nothing unless one passage held every word. Phrases of three or more
+    words now fall back to any of their words, best matches first, and "Sam's"
+    matches "Sam".
+  - When nothing matches the wording, Sovra now shows the model up to six
+    findings that mention the question's words. The weight log's rows never
+    say "weight", but its file name does.
+  - Findings now come in file and line order, so a model no longer reads a log
+    bottom to top and calls the oldest reading the latest.
+
+  Every date in a file tool's answer now also comes in plain UTC beside the
+  Unix number; one model had turned a November timestamp into February.
 
 ## [0.9.0] — 2026-11-24
 

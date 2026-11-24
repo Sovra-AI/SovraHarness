@@ -229,3 +229,27 @@ fn helpers_can_narrow_findings_to_a_word_or_file() {
         .unwrap();
     assert!(none.items.is_empty() && none.next.is_none());
 }
+
+#[test]
+fn a_descriptive_phrase_still_finds_passages_with_some_of_its_words() {
+    use sovra_core::file_index::IndexQuery;
+    let fixture = Fixture::new();
+    fixture.write("log.txt", "Sam weighed in on Monday.\n");
+    let store = fixture.store();
+    let root = store.add_root(&fixture.source()).unwrap();
+    store.scan(&root.id, &Observer::default()).unwrap();
+    let query = |text: &str| IndexQuery {
+        text: text.into(),
+        roots: vec![],
+        path_prefix: None,
+        limit: 5,
+    };
+    let found = store
+        .search(&query("Sam's weighed changes and latest reading"))
+        .unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        store.search(&query("Sam latest")).unwrap().is_empty(),
+        "two words stay exact"
+    );
+}

@@ -45,7 +45,7 @@ impl Tool for FindingTool {
                 "See what is in the connected folders before searching: how many files Sovra sorted, what kinds they are (documents, spreadsheets, photos…), which parts of life they cover, the kinds of things they mention, the relationship types saved, and how many measurements, dated readings, tables and other findings exist. Call this first for broad questions such as 'what do my files say about…', 'what data do I have', or when you need to know which finding kinds or relationship types to ask for. Each relationship type includes the exact relation value for query_file_knowledge; each finding kind includes the kind value for list_file_findings."
             }
             Operation::List => {
-                "List findings Sovra worked out from the connected files without a model: measurements with units, dated readings grouped by time window with averages, what each table holds, relationships named in tables or sentences, and more. Choose one kind from overview_file_knowledge; add contains to keep only findings whose wording or file path includes that text (for example a unit, a name, or a file name). Each finding has the file path, extracted-text line and a reference for read_indexed_file, so read the passage before relying on a finding for an exact answer. Findings are automatic readings, not verified facts. Follow next for older findings."
+                "List findings Sovra worked out from the connected files without a model: measurements with units, dated readings grouped by time window with averages, what each table holds, relationships named in tables or sentences, and more. Choose one kind from overview_file_knowledge; add contains to keep only findings whose wording or file path includes that text (for example a unit, a name, or a file name). Each finding has the file path, extracted-text line and a reference for read_indexed_file, so read the passage before relying on a finding for an exact answer. Findings are automatic readings, not verified facts. For change over time, trends or the latest value, use dated_series: each finding names its time window. A measurement finding does not include the date on its row. Follow next for more findings."
             }
         }
     }
@@ -71,19 +71,23 @@ impl Tool for FindingTool {
         let result = match self.operation {
             Operation::Overview => self.reader.discoveries().await.map(|o| overview(&o)),
             Operation::List => match query(&args) {
-                Ok(query) => self.reader.findings(query).await.map(|page| {
+                Ok(query) => self.reader.findings(query).await.map(|mut page| {
+                    // Pages run newest-saved first, which reads a log bottom to
+                    // top; a model then calls the first row the latest one.
+                    page.items.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
                     json!({
                         "findings": page.items.iter().map(finding).collect::<Vec<_>>(),
                         "next": page.next,
+                        "order": "by file path, then line from the top of the file; line order is not date order",
                         "source_kind": "automatic_reading",
                         "source_claims_verified": false,
-                        "notice": "Automatic readings of the file text. Cite the path and line. Read the passage with read_indexed_file before giving an exact number or date. An empty page is not proof the fact is absent: try another kind, other wording, or search_indexed_files."
+                        "notice": "Automatic readings of the file text. Cite the path and line. Read the passage with read_indexed_file before giving an exact number or date. To say which reading is earliest or latest, compare the dates written in the file, not the order of this list. An empty page is not proof the fact is absent: try another kind, other wording, or search_indexed_files."
                     })
                 }),
                 Err(error) => Err(error),
             },
         };
-        Ok(result.unwrap_or_else(|e| json!({"error":e.to_string()})))
+        Ok(result.map_or_else(|e| json!({"error":e.to_string()}), super::readable_dates))
     }
 }
 
@@ -193,5 +197,21 @@ mod tests {
         for kind in FindingKind::ALL {
             assert_eq!(FindingKind::from_id(kind.id()), Some(kind));
         }
+    }
+
+    #[test]
+    fn timestamps_gain_plain_utc_dates_beside_the_number() {
+        let out = super::super::readable_dates(json!({
+            "passage": {"observed_at": 1_795_529_786, "modified_at": null, "text": "x"},
+            "relations": [{"valid_time": {"from": 1_767_571_200, "until": null}, "from": 3}]
+        }));
+        assert_eq!(out["passage"]["observed_at"], 1_795_529_786);
+        assert_eq!(out["passage"]["observed_at_utc"], "2026-11-24 14:16 UTC");
+        assert!(out["passage"].get("modified_at_utc").is_none());
+        assert_eq!(
+            out["relations"][0]["valid_time"]["from_utc"],
+            "2026-01-05 00:00 UTC"
+        );
+        assert!(out["relations"][0].get("from_utc").is_none());
     }
 }

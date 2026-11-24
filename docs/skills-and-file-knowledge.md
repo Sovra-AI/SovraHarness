@@ -95,7 +95,13 @@ For progress and classification, see [File understanding](file-ontology.md).
   line and a passage reference, and the helper reads that passage before giving
   an exact value. Every chat turn with connected folders tells the model these
   tools exist. Delegated helpers get them with the other read-only file tools;
-  they never get `propose_file_knowledge`.
+  they never get `propose_file_knowledge`. When no passage matches a
+  question's wording, the turn instead carries up to six findings whose
+  wording or file path contains one of its first three distinctive words.
+- File search requires every word of a short search. A search of three or
+  more distinctive words that matches nothing is retried with any of them,
+  ranked so passages with more of the words come first. Every timestamp in a
+  file tool result also has a `<name>_utc` copy in plain UTC.
 - `query_file_knowledge` returns every saved relationship. Each one's
   `basis.tier` says where it came from: `deterministic_extraction` (a table),
   `heuristic_extraction` (sentence wording, so check the cited passage), or

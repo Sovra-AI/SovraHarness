@@ -1044,3 +1044,86 @@ async fn helper_uses_the_overview_and_findings_then_reads_the_source() {
             .is_err()
     );
 }
+
+/// No passage says "weight", but Sovra read the weight log into findings.
+#[derive(Debug, Default)]
+struct Logbook {
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl IndexedFiles for Logbook {
+    async fn findings(
+        &self,
+        query: sovra_core::file_index::automatic::FindingQuery,
+    ) -> Result<sovra_core::file_index::automatic::FindingPage, IndexError> {
+        let term = query.contains.clone().unwrap_or_default();
+        self.asked
+            .lock()
+            .expect("asked")
+            .push(format!("{}:{term}", query.kind.id()));
+        let hit = term == "weight"
+            && query.kind == sovra_core::knowledge_analysis::FindingKind::Chronology;
+        Ok(sovra_core::file_index::automatic::FindingPage {
+            items: hit
+                .then(|| sovra_core::file_index::automatic::DiscoveredFinding {
+                    kind: query.kind,
+                    detail: "value · the day of 2 February 2026 · 1 reading · average 80.2 kg"
+                        .into(),
+                    path: "Home/weight-log.csv".into(),
+                    line: 6,
+                    reference: levy_passage().reference,
+                })
+                .into_iter()
+                .collect(),
+            next: None,
+        })
+    }
+    async fn history(&self, _: FileHistoryQuery) -> Result<FileHistory, IndexError> {
+        Err(IndexError("History is not used in this test.".into()))
+    }
+    async fn read_history(&self, _: HistoryPassageRef) -> Result<HistoricalPassage, IndexError> {
+        Err(IndexError("History is not used in this test.".into()))
+    }
+    async fn folders(&self) -> Result<Vec<IndexedRoot>, IndexError> {
+        Ok(Vec::new())
+    }
+    async fn catalogue(&self, _: CatalogQuery) -> Result<CatalogPage, IndexError> {
+        Err(IndexError("Catalogue is not used in this test.".into()))
+    }
+    async fn search(&self, _: IndexQuery) -> Result<Vec<IndexPassage>, IndexError> {
+        Ok(Vec::new())
+    }
+    async fn read(&self, _: PassageRef) -> Result<IndexPassage, IndexError> {
+        Err(IndexError("Reading is not used in this test.".into()))
+    }
+}
+
+#[tokio::test]
+async fn when_no_passage_matches_the_model_still_sees_related_findings() {
+    let reader = Arc::new(Logbook::default());
+    let model = Arc::new(QuestionModel {
+        expect_passage: false,
+        calls: AtomicUsize::new(0),
+        seen: std::sync::Mutex::new(String::new()),
+    });
+    let harness = AdkHarness::with_llm_and_tools(&AgentConfig::default(), model.clone(), vec![])
+        .unwrap()
+        .with_indexed_files(Some(reader.clone()))
+        .unwrap();
+    let (events, _received) = async_channel::unbounded();
+    harness
+        .run_prompt("logbook", "How has Sam's weight changed lately?", &events)
+        .await;
+    let seen = model.seen.lock().expect("seen request").clone();
+    assert!(seen.contains("average 80.2 kg"), "{seen}");
+    assert!(seen.contains("Home/weight-log.csv"));
+    assert!(seen.contains("findings Sovra read automatically"));
+    let asked = reader.asked.lock().expect("asked").clone();
+    assert!(asked.contains(&"dated_series:sam".to_owned()), "{asked:?}");
+    assert!(
+        asked.contains(&"dated_series:weight".to_owned()),
+        "{asked:?}"
+    );
+    assert!(asked.len() <= 12, "{asked:?}");
+}

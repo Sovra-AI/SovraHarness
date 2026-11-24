@@ -83,7 +83,7 @@ impl Tool for GraphTool {
             Operation::Query=>match query(args){Ok(query)=>self.reader.knowledge(query).await.map(|page|json!({"knowledge":page,"source_kind":"saved_file_knowledge","source_claims_verified":false,"notice":"basis.tier says how each relationship was found: deterministic_extraction from a table, heuristic_extraction from wording (check the cited passage), model_inference approved by the user. Saving is not factual verification. Entity labels retain their creation evidence. Relationships carry their own citations and recorded/world validity. Inspect sources before synthesis; stale and superseded records are historical when explicitly requested. Narrow the query if truncated."})),Err(error)=>Err(error)},
             Operation::Evidence=>match evidence_id(&args){Ok(id)=>self.reader.knowledge_evidence(id).await.map(|evidence|json!({"evidence":evidence,"source_kind":"indexed_source_snapshot","notice":"Cite the source path, version and extracted-text lines. current=false means superseded or unavailable-on-disk text, not necessarily false content."})),Err(error)=>Err(error)},
         };
-        Ok(result.unwrap_or_else(|e| json!({"error":e.to_string()})))
+        Ok(result.map_or_else(|e| json!({"error":e.to_string()}), super::readable_dates))
     }
 }
 

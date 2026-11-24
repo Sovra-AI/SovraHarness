@@ -127,7 +127,10 @@ impl CapabilityProvider for WebSearchProvider {
              specific web-backed specialist before you answer, even if files are attached and \
              even if the topic mentions rust or code. Then cite only the titles and URLs it \
              returns. Greetings and questions you can answer reliably from general knowledge \
-             are answered by you directly."
+             are answered by you directly. A question about the user's own records, such as \
+             a reading, a budget, a date or a person in their files, is not a web question: \
+             when connected-folder passages or file tools are present, answer from those and \
+             search the web only if the user asks for the web."
         ))
     }
 }

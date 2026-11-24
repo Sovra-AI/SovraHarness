@@ -163,10 +163,16 @@ impl Tool for IndexTool {
                 Err(error) => Err(error),
             },
             Operation::Search => match query(&args) {
-                Ok(query) => self.reader.search_report(query).await.map(|report| json!({
-                    "passages":report.passages,"retrieval_notices":report.notices,"source_kind":"indexed_snapshot",
-                    "notice":"These are retrieved passages, not complete files. Cite path and extracted-text lines; observed_at identifies the saved snapshot. Refresh the folder in Knowledge when current disk contents are needed."
-                })),
+                Ok(query) => self.reader.search_report(query).await.map(|report| {
+                    let mut out = json!({
+                        "passages":report.passages,"retrieval_notices":report.notices,"source_kind":"indexed_snapshot",
+                        "notice":"These are retrieved passages, not complete files. Cite path and extracted-text lines; observed_at identifies the saved snapshot. Refresh the folder in Knowledge when current disk contents are needed."
+                    });
+                    if report.passages.is_empty() {
+                        out["next_steps"] = json!("No passage matched this wording. Before saying the information is missing: call list_file_findings with a likely kind (dated_series, measurement, table or relationship) and contains set to one key word, which also matches file names; call overview_file_knowledge to see what kinds of findings exist; or search again with fewer, different words.");
+                    }
+                    out
+                }),
                 Err(error) => Err(error),
             },
             Operation::Read => match reference(&args) {
@@ -174,8 +180,50 @@ impl Tool for IndexTool {
                 Err(error) => Err(error),
             },
         };
-        Ok(result.unwrap_or_else(|error| json!({"error":error.to_string()})))
+        Ok(result.map_or_else(|error| json!({"error":error.to_string()}), readable_dates))
     }
+}
+
+/// Models misread Unix seconds (one turned a November date into February), so
+/// each timestamp in a tool result gains a `<key>_utc` sibling in plain UTC.
+/// The number stays for exact comparison and for passing back as an argument.
+pub(super) fn readable_dates(mut value: Value) -> Value {
+    fn utc(seconds: &Value) -> Option<String> {
+        let seconds = seconds.as_i64().filter(|s| *s > 0)?;
+        let at = time::OffsetDateTime::from_unix_timestamp(seconds).ok()?;
+        Some(format!(
+            "{}-{:02}-{:02} {:02}:{:02} UTC",
+            at.year(),
+            u8::from(at.month()),
+            at.day(),
+            at.hour(),
+            at.minute()
+        ))
+    }
+    fn walk(value: &mut Value, in_validity: bool) {
+        match value {
+            Value::Object(map) => {
+                let added: Vec<_> = map
+                    .iter()
+                    .filter(|(key, _)| {
+                        key.ends_with("_at")
+                            || (in_validity && matches!(key.as_str(), "from" | "until"))
+                    })
+                    .filter_map(|(key, v)| Some((format!("{key}_utc"), utc(v)?)))
+                    .collect();
+                for (key, child) in map.iter_mut() {
+                    walk(child, key == "valid_time");
+                }
+                for (key, text) in added {
+                    map.entry(key).or_insert(Value::String(text));
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| walk(item, false)),
+            _ => {}
+        }
+    }
+    walk(&mut value, false);
+    value
 }
 
 fn folder_summary(folder: &IndexedRoot) -> Value {
