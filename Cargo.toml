@@ -152,7 +152,7 @@ serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 serde-saphyr = { version = "=2.1.1", default-features = false, features = ["serialize", "deserialize"] }
 # >=3.3.4: HNSW silently dropped near-duplicate vectors before 3.3.4. BUSL-1.1 licence —
 # permitted for embedding in this app (see docs/architecture.md), excepted in deny.toml.
-surrealdb = { version = "3.3.4", features = ["kv-mem", "kv-surrealkv"] }
+surrealdb = { version = "4.0.1", features = ["kv-mem", "kv-surrealkv"] }
 # Processor name and memory for the Training page's "This computer" card (MIT). The same
 # version the database already compiles; `system` alone, so nothing else is pulled in.
 sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
