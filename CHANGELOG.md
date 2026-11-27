@@ -14,6 +14,9 @@ package version.
 
 ## [Unreleased]
 
+- **More room for the Knowledge map.** Compact panes use smaller outer spacing,
+  keeping the map usable at the minimum window size with 200% text.
+
 - **Supported WebAssembly runtime.** Updated Wasmi to 2.0.3 after its 2.0.2
   release was withdrawn. Plugin sandbox limits and security checks stay in place.
 
@@ -23,7 +26,8 @@ package version.
   reuse the saved sign-in. Changed identities stop before authentication; removing
   a connection forgets its credential. Existing trusted SSH keys still work.
   The Pi setup screen shows only Pi controls, with the generic server setup kept
-  on the other connection screens.
+  on the other connection screens. Returning to Add MCP server after Pi setup
+  restores the other service controls.
 
 - **GPIO answers show the diagram.** The Pi's GPIO tool now returns a native,
   clickable pin map directly in chat, with the board name and numbering. A

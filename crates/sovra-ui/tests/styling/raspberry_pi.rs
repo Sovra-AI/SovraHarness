@@ -21,10 +21,9 @@ fn reveal(window: &mut Window, id: &'static str, cx: &mut App) {
         if item.visible() && bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
             return;
         }
-        let delta = if bounds.top() < pane.top() { 24. } else { -24. };
         window.scroll(
             "connections-scroll",
-            ScrollDelta::Pixels(point(px(0.), px(delta))),
+            ScrollDelta::Pixels(point(px(0.), pane.center().y - bounds.center().y)),
             cx,
         );
     }
@@ -49,10 +48,10 @@ fn reveal_chat(window: &mut Window, id: impl Into<gpui_kit::ElementId>, cx: &mut
         if item.visible() && bounds.top() >= pane.top() && bounds.bottom() <= pane.bottom() {
             return;
         }
-        let delta = if bounds.top() < pane.top() { 24. } else { -24. };
+        // Fixed steps can jump past both edges when a control nearly fills the pane.
         window.scroll(
             "chat-scroll-area",
-            ScrollDelta::Pixels(point(px(0.), px(delta))),
+            ScrollDelta::Pixels(point(px(0.), pane.center().y - bounds.center().y)),
             cx,
         );
     }
@@ -67,6 +66,49 @@ fn settle(cx: &mut TestAppContext) {
     cx.executor()
         .advance_clock(std::time::Duration::from_millis(16));
     cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn leaving_pi_setup_keeps_other_service_connections_available(cx: &mut TestAppContext) {
+    for mode in [ThemeMode::Light, ThemeMode::Dark] {
+        for (width, height, scale) in [(640., 420., 100), (2560., 1440., 100), (640., 420., 200)] {
+            let (client, _commands, _events) = Client::loopback();
+            cx.update(|cx| {
+                sovra_ui::init(client, cx);
+                Theme::change(mode, None, cx);
+                design::set_interface_scale(InterfaceScale::from_percent(scale), cx);
+            });
+            let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+                let shell = cx.new(|cx| Shell::new(0, window, cx));
+                shell.update(cx, |shell, cx| shell.select_tab(NavTab::Connections, cx));
+                Root::new(shell, window, cx)
+            });
+            settle(cx);
+            cx.update_window(window.into(), |_, window, cx| {
+                for id in ["connection-action-web-address", "mcp-mode-pi"] {
+                    reveal(window, id, cx);
+                    window.click(id, cx);
+                }
+                window.render_frame(cx);
+                assert_eq!(
+                    window.find("mcp-connect-section-title").label(),
+                    Some("Raspberry Pi")
+                );
+                for id in ["connections-back", "connection-action-web-address"] {
+                    reveal(window, id, cx);
+                    window.click(id, cx);
+                }
+                window.render_frame(cx);
+                assert_eq!(
+                    window.find("mcp-connect-section-title").label(),
+                    Some("MCP servers")
+                );
+                reveal(window, "mcp-mode-web", cx);
+                assert!(window.find("mcp-mode-web").visible());
+            })
+            .expect("other services remain reachable after Pi setup");
+        }
+    }
 }
 
 #[gpui_kit::test]
