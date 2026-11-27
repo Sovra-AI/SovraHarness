@@ -50,6 +50,7 @@ impl Skill {
             "share-history" => "See everything this computer shared",
             "departments" => "Keep each department's knowledge to itself",
             "connect-service" => "Add an MCP server (extra tools)",
+            "raspberry-pi" => "Set up and use your Raspberry Pi",
             "web-search" => "Search the live web",
             "save-artifact" => "Save work to your library",
             "deploy-website" => "Run your website on this computer",
@@ -215,6 +216,7 @@ impl Skill {
                 "Opens what Sovra remembers. Open a detail, like “Mum's dentist is Dr Patel”, press Share, check the words, and everyone's helpers in your group can use it.".to_owned(),
                 "/share-memory ".to_owned(),
             ),
+            "raspberry-pi" => ("Connect my Raspberry Pi, show its pins, and help me build a project that runs on it.".into(), "/raspberry-pi".into()),
             "connect-service" => sample_pair(
                 "connect-service",
                 "Connect my recipe box at https://recipes.example.com",
@@ -264,9 +266,9 @@ impl Skill {
             ),
             "alert" => sample_pair("alert", "Reminder to check passport renewal dates"),
             "progress" => sample_pair("progress", "Show our 4-step moving checklist progress"),
-            "coding" => sample_pair(
-                "coding",
-                "Build a website for our garden club with meeting times and upcoming events",
+            "coding" => (
+                "Example: “Build a website for our garden club with meeting times and upcoming events”".to_owned(),
+                "Build a website for our garden club with meeting times and upcoming events".to_owned(),
             ),
             "deep-research" => sample_pair(
                 "deep-research",
@@ -378,6 +380,17 @@ impl Skill {
             summary,
             example_display,
             sample_draft,
+        }
+    }
+
+    /// Words the Skills page puts in the chat box.
+    ///
+    /// Coding uses a sentence a person can say. Other skills keep their shortcut.
+    pub fn composer_draft(&self) -> String {
+        if self.name == crate::CODING_SKILL {
+            self.friendly_card_copy().sample_draft
+        } else {
+            format!("/{} ", self.name)
         }
     }
 }
@@ -594,6 +607,13 @@ pub fn builtin_skills() -> Vec<Skill> {
             SkillAction::ConnectService,
             &["mcp", "service"],
         ),
+        action(
+            "raspberry-pi",
+            "Set up and use your Raspberry Pi",
+            "Find your Raspberry Pi, sign in once, see its wiring pins, and build projects that are saved and sent to it from chat.",
+            SkillAction::RaspberryPi,
+            &["pi", "pico"],
+        ),
         // Saving and web search are already offered by their own tool and route; only the
         // file procedures below add guidance the model would otherwise lack.
         Skill {
@@ -807,19 +827,37 @@ pub fn builtin_skills() -> Vec<Skill> {
             continue;
         }
         // Routing already consults specialists on its own; loading their one-line
-        // delegation procedure would only add a round trip.
+        // delegation procedure would only add a round trip. Coding is the
+        // exception: a plain build or change request starts the file-writing run.
+        let coding = specialist.route_key == "coding";
+        let instructions = if coding {
+            "A request to build or change a page, a small program, or a fix starts a coding run. That run writes the files and saves them in the library. Do not paste a code sample in chat instead, and do not claim the work was saved unless the run saved it. An explanation of existing code stays a normal answer.".to_owned()
+        } else {
+            format!(
+                "Delegate the user's request to {} and synthesize the result. Supply the relevant context explicitly. A specialist's domain description is not evidence that an external integration is connected: use only its actual tools, disclose missing access and never claim an action was executed without a tool result.",
+                specialist.id
+            )
+        };
+        let hint = if coding {
+            "what to build or change"
+        } else {
+            "<request>"
+        };
         skills.push(Skill {
             auto_apply: false,
             ..procedure(
-            &specialist.route_key.replace('_', "-"),
-            &specialist.name,
-            &format!("Consult this specialist when you need help with: {}", specialist.description),
-            "Specialists",
-            &[],
-            &[&specialist.id],
-            &format!("Delegate the user's request to {} and synthesize the result. Supply the relevant context explicitly. A specialist's domain description is not evidence that an external integration is connected: use only its actual tools, disclose missing access and never claim an action was executed without a tool result.", specialist.id),
-            "<request>",
-        )
+                &specialist.route_key.replace('_', "-"),
+                &specialist.name,
+                &format!(
+                    "Consult this specialist when you need help with: {}",
+                    specialist.description
+                ),
+                "Specialists",
+                &[],
+                &[&specialist.id],
+                &instructions,
+                hint,
+            )
         });
     }
     skills

@@ -39,9 +39,17 @@ pub(crate) fn render_agui_widget(
     widget: &AgUiWidget,
     index: usize,
     deployments: &std::collections::BTreeMap<String, String>,
+    pi: &crate::raspberry_pi_gpio_view::PiChatPresentation,
     cx: &mut Context<Shell>,
 ) -> impl IntoElement + use<> {
     match widget {
+        AgUiWidget::GpioDiagram { board_id } => {
+            crate::raspberry_pi_gpio_view::render_chat_diagram(board_id, index, pi, cx)
+        }
+        AgUiWidget::RaspberryPi {
+            service_id,
+            board_id,
+        } => crate::raspberry_pi_gpio_view::render_chat_card(service_id, board_id, index, pi, cx),
         AgUiWidget::CodeWriting { .. } => design::button(("show-code", index), "Show code", cx)
             .on_click(cx.listener(|shell, _, _, cx| shell.show_code_panel(true, cx)))
             .into_any_element(),

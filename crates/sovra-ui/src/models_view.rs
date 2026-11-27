@@ -57,6 +57,12 @@ pub(crate) type Selector = SelectState<SearchableVec<Choice>>;
 /// "Show" picker value for every model type at once.
 const ALL_KINDS: &str = "all";
 
+pub(crate) struct GoToPiChat {
+    pub(crate) service_id: String,
+    pub(crate) setup: sovra_core::raspberry_pi::PiSetup,
+}
+impl gpui_kit::EventEmitter<GoToPiChat> for ModelsView {}
+
 pub(crate) struct GoToChat;
 impl gpui_kit::EventEmitter<GoToChat> for ModelsView {}
 

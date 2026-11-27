@@ -1185,7 +1185,8 @@ fn card(
         .split_once(char::is_whitespace)
         .map_or("", |(_, args)| args)
         .to_owned();
-    let show_example = !example_arguments.trim().is_empty();
+    let coding_draft = (skill.name == sovra_core::CODING_SKILL).then(|| skill.composer_draft());
+    let show_example = coding_draft.is_none() && !example_arguments.trim().is_empty();
     let mut visible = format!(
         "{}\n{}\n{}",
         copy.friendly_title, copy.summary, copy.example_display
@@ -1194,7 +1195,11 @@ fn card(
         visible.push_str("\nOff");
     }
 
-    let primary_cta_label = "Try in chat";
+    let primary_cta_label = if skill.name == "raspberry-pi" {
+        "Open now"
+    } else {
+        "Try in chat"
+    };
     let primary_accessible_label = format!("{primary_cta_label}: {}", copy.friendly_title);
 
     let mut card = v_flex()
@@ -1278,6 +1283,23 @@ fn card(
                 .disabled(!enabled)
                 .accessibility_label(primary_accessible_label)
                 .on_click(cx.listener(move |shell, _, window, cx| {
+                    if let Some(draft) = &coding_draft {
+                        shell
+                            .state
+                            .set_room(sovra_core::teams::TeamRoom::ordinary());
+                        shell.select_tab(sovra_core::NavTab::Chat, cx);
+                        shell.fill_composer_draft(draft, window, cx);
+                        return;
+                    }
+                    if run_name == "raspberry-pi" {
+                        shell.run_skill_action(
+                            sovra_core::skills::SkillAction::RaspberryPi,
+                            "",
+                            window,
+                            cx,
+                        );
+                        return;
+                    }
                     let draft = shell.composer_input.read(cx).value();
                     let arguments =
                         crate::widgets::skill_pill::leading_skill(&shell.skills, &draft)

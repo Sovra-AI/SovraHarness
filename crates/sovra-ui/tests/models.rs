@@ -2224,11 +2224,31 @@ fn a_new_person_sees_one_next_step_in_an_empty_chat(cx: &mut TestAppContext) {
                 window.try_find("sovra-setup-coach-strip").is_none(),
                 "{at}: one call to action, not two"
             );
+            // The welcome card scrolls above the composer in a short window.
+            for _ in 0..40 {
+                window.render_frame(cx);
+                let action = window.find("chat-first-step-action").bounds();
+                let pane = window.find("chat-welcome").bounds();
+                if action.top() >= pane.top() && action.bottom() <= pane.bottom() {
+                    break;
+                }
+                window.scroll(
+                    "chat-welcome",
+                    ScrollDelta::Pixels(point(px(0.), pane.center().y - action.center().y)),
+                    cx,
+                );
+            }
+            window.render_frame(cx);
             let action = window.find("chat-first-step-action").bounds();
+            let pane = window.find("chat-welcome").bounds();
             let viewport = window.viewport_size();
             assert!(
-                action.left() >= px(0.) && action.right() <= viewport.width,
-                "{at}: the button fits the window"
+                action.left() >= px(0.)
+                    && action.right() <= viewport.width
+                    && action.top() >= pane.top()
+                    && action.bottom() <= pane.bottom()
+                    && window.find("chat-first-step-action").visible(),
+                "{at}: the button is reachable inside {pane:?}: {action:?}"
             );
             window.click("chat-first-step-action", cx);
             window.render_frame(cx);

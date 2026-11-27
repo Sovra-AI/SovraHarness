@@ -32,6 +32,7 @@ for installation and the [changelog](../CHANGELOG.md) for release history.
 | Link S3 buckets, Azure containers or WebDAV file servers | [Online storage](online-storage.md) |
 | Download plugins or publish a catalog | [Plugin contract and GitHub Pages](plugins.md) |
 | Add external tools | [MCP servers](connected-services.md) |
+| Set up or check a Raspberry Pi | [Raspberry Pi plugins](raspberry-pi.md) |
 | Allow local commands | [Terminal](terminal.md) |
 
 ## Develop and test

@@ -7,8 +7,14 @@
 //! program run in their own tasks, and reconnects are queued one per message so
 //! other commands interleave. Design: `docs/connected-services.md`.
 
+mod builtin;
+mod pi_deployment;
+mod pi_discovery;
+mod pi_pairing;
 mod programs;
+mod raspberry_pi;
 mod sample;
+pub use raspberry_pi::{PiPrograms, run_raspberry_pi_mcp_server};
 
 pub use sample::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
 
@@ -53,6 +59,14 @@ const CATALOGUE_VERSION: u32 = 1;
 type CallReply = tokio::sync::oneshot::Sender<Result<RemoteOutput, String>>;
 
 enum Input {
+    PiTrust {
+        request_id: u64,
+        question: raspberry_pi::access::TrustQuestion,
+    },
+    PiPaired {
+        request_id: u64,
+        result: Result<(), String>,
+    },
     Command(McpCommand),
     Invoke {
         request: RemoteCall,
@@ -81,9 +95,26 @@ struct PendingSignIn {
 #[derive(Debug, Default)]
 struct ToolBoard {
     offers: RwLock<Vec<ToolOffer>>,
+    pi_services: RwLock<HashMap<String, sovra_core::raspberry_pi::PiSetup>>,
+    pi_sessions: RwLock<HashMap<String, String>>,
 }
 
 impl ToolBoard {
+    fn pi_allowed(&self, session: &str, service: &str) -> bool {
+        let pis = self
+            .pi_services
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !pis.contains_key(service) {
+            return true;
+        }
+        self.pi_sessions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session)
+            .is_some_and(|id| id == service)
+    }
+
     fn snapshot(&self) -> Vec<ToolOffer> {
         self.offers
             .read()
@@ -158,6 +189,9 @@ impl McpRuntime {
             next_rpc: 1,
             listeners: HashMap::new(),
             programs: HashMap::new(),
+            pi_searches: tokio::task::JoinSet::new(),
+            pi_pairing: None,
+            pi_pairing_generation: 0,
         };
         let task = handle.spawn(actor.run(rx));
         Self {
@@ -169,11 +203,38 @@ impl McpRuntime {
     }
 
     pub(crate) fn handle(&self, command: McpCommand) {
+        if let McpCommand::SelectRaspberryPi {
+            session_id,
+            service_id,
+        } = &command
+        {
+            self.board
+                .pi_sessions
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(session_id.clone(), service_id.clone());
+        }
         let _ = self.inbox.try_send(Input::Command(command));
     }
 
     pub(crate) fn offers(&self) -> Vec<ToolOffer> {
         self.board.snapshot()
+    }
+
+    pub(crate) fn offers_for(&self, session: &str) -> Vec<ToolOffer> {
+        self.offers()
+            .into_iter()
+            .filter(|offer| {
+                self.board.pi_allowed(session, &offer.service_id)
+                    && (offer.tool.name != "deploy_project"
+                        || !self
+                            .board
+                            .pi_services
+                            .read()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .contains_key(&offer.service_id))
+            })
+            .collect()
     }
 
     pub(crate) fn caller(&self) -> Arc<ServiceCaller> {
@@ -219,6 +280,10 @@ struct Actor {
     listeners: HashMap<String, tokio::task::JoinHandle<()>>,
     /// Running programs by service id. Dropping one stops it.
     programs: HashMap<String, programs::ProgramHandle>,
+    /// Aborted on actor drop, including a forced runtime shutdown.
+    pi_searches: tokio::task::JoinSet<()>,
+    pi_pairing: Option<pi_pairing::PendingPairing>,
+    pi_pairing_generation: u64,
 }
 
 struct Live {
@@ -363,6 +428,11 @@ impl Actor {
     async fn run(mut self, rx: Receiver<Input>) {
         while let Ok(input) = rx.recv().await {
             match input {
+                Input::PiTrust {
+                    request_id,
+                    question,
+                } => self.pi_trust_question(request_id, question).await,
+                Input::PiPaired { request_id, result } => self.pi_paired(request_id, result).await,
                 Input::Command(command) => self.command(command).await,
                 Input::Invoke { request, reply } => self.perform_call(request, Some(reply)).await,
                 Input::Program(update) => self.program_update(update).await,
@@ -389,6 +459,15 @@ impl Actor {
 
     async fn command(&mut self, command: McpCommand) {
         match command {
+            McpCommand::PairRaspberryPi { setup, password } => {
+                self.pair_raspberry_pi(setup, password).await;
+            }
+            McpCommand::ConfirmPiIdentity { request_id, accept } => {
+                self.confirm_pi_identity(request_id, accept);
+            }
+            McpCommand::CancelPiPairing { request_id } => self.cancel_pi_pairing(request_id).await,
+            McpCommand::DiscoverRaspberryPis => self.discover_raspberry_pis().await,
+            McpCommand::SelectRaspberryPi { .. } => {}
             McpCommand::Load => self.load().await,
             McpCommand::Connect {
                 name,
@@ -421,6 +500,7 @@ impl Actor {
             }
             McpCommand::Import { text } => self.import(&text).await,
             McpCommand::AddSample => self.add_sample().await,
+            McpCommand::AddRaspberryPi(setup) => self.add_raspberry_pi(&setup).await,
             McpCommand::Approve { id } => self.approve(&id).await,
             McpCommand::SetEnabled { id, enabled } => self.set_enabled(&id, enabled).await,
             McpCommand::SetToolEnabled { id, tool, enabled } => {
@@ -443,6 +523,28 @@ impl Actor {
                 self.perform_call(request, None).await;
             }
         }
+    }
+
+    async fn discover_raspberry_pis(&mut self) {
+        use sovra_core::raspberry_pi::DiscoveryEvent;
+        while self.pi_searches.try_join_next().is_some() {}
+        if !self.pi_searches.is_empty() {
+            return;
+        }
+        self.emit(McpEvent::RaspberryPiDiscovery(DiscoveryEvent::Started))
+            .await;
+        let events = self.events.clone();
+        self.pi_searches.spawn_on(
+            async move {
+                let result = pi_discovery::discover().await;
+                let _ = events
+                    .send(Event::Mcp(McpEvent::RaspberryPiDiscovery(
+                        DiscoveryEvent::Finished(result),
+                    )))
+                    .await;
+            },
+            &self.handle,
+        );
     }
 
     async fn load(&mut self) {
@@ -748,6 +850,46 @@ impl Actor {
         ))
         .await;
         self.approve(&id).await;
+    }
+
+    async fn add_raspberry_pi(&mut self, setup: &sovra_core::raspberry_pi::PiSetup) {
+        let (board, args) = match setup
+            .validate()
+            .and_then(|board| setup.arguments().map(|args| (board, args)))
+        {
+            Ok(value) => value,
+            Err(problem) => {
+                self.emit(McpEvent::Notice(problem)).await;
+                return;
+            }
+        };
+        let Some(program) = self.sample_program.clone() else {
+            self.emit(McpEvent::Notice(
+                "Raspberry Pi plugins aren't available in this copy of Sovra.".into(),
+            ))
+            .await;
+            return;
+        };
+        let command = program.to_string_lossy().into_owned();
+        let id = program_id_for(&command, &args);
+        if self.live(&id).is_some() {
+            self.emit(McpEvent::Notice("This Pi plugin is already in your list. Its tool choices and pause setting have been kept.".into())).await;
+            return;
+        }
+        let name = if setup.host.is_empty() {
+            board.name.to_owned()
+        } else {
+            format!("{} · {}", board.name, setup.host)
+        };
+        if self
+            .add_program(&name, command, args, Vec::new(), None, true)
+            .await
+        {
+            // This is the bundled server, with validated data arguments and no
+            // user-supplied code. Device IO requires a connection, health or project request.
+            self.approve(&id).await;
+            self.emit(McpEvent::Notice(format!("Added {}. Setup and project help are ready when the plugin starts. A device check is separate; adding a plugin does not connect your Pi.", board.name))).await;
+        }
     }
 
     async fn approve(&mut self, id: &str) {
@@ -1517,6 +1659,13 @@ impl Actor {
             self.emit(McpEvent::Removed { id }).await;
             return;
         };
+        if let Some(setup) =
+            sovra_core::raspberry_pi::service_setup(&self.services[position].service)
+            && let Err(problem) = self.forget_pi_access(&setup).await
+        {
+            self.emit(McpEvent::Notice(problem)).await;
+            return;
+        }
         let live = self.services.remove(position);
         self.programs.remove(&id);
         if let Some(listener) = self.listeners.remove(&id) {
@@ -1537,11 +1686,15 @@ impl Actor {
     /// Starts one tool call and returns at once; the answer arrives from a task of
     /// its own, so a slow service never holds up the others.
     async fn perform_call(&mut self, request: RemoteCall, reply: Option<CallReply>) {
-        let allowed = self.live(&request.service_id).is_some_and(|live| {
-            live.service.enabled
-                && live.service.phase == McpPhase::Connected
-                && live.service.tool_is_on(&request.tool)
-        });
+        let allowed = (request.session_id.is_empty()
+            || self
+                .board
+                .pi_allowed(&request.session_id, &request.service_id))
+            && self.live(&request.service_id).is_some_and(|live| {
+                live.service.enabled
+                    && live.service.phase == McpPhase::Connected
+                    && live.service.tool_is_on(&request.tool)
+            });
         let Some(snap) = self.snapshot(&request.service_id).filter(|_| allowed) else {
             let outcome = self.refuse(&request).await;
             if let Some(reply) = reply {
@@ -1561,7 +1714,11 @@ impl Actor {
             let (answer, answered) = tokio::sync::oneshot::channel();
             program.call(request.tool, arguments, answer);
             drop(self.handle.spawn(async move {
-                let answer = answered.await.unwrap_or_else(|_| programs::ToolAnswer {
+                let mut reply = reply;
+                let answer = tokio::select! {
+                    () = async { if let Some(reply) = &mut reply { reply.closed().await; } else { std::future::pending::<()>().await; } } => return,
+                    answer = answered => answer,
+                }.unwrap_or_else(|_| programs::ToolAnswer {
                     text: TOOL_FAILED_TEXT.to_owned(),
                     widget: None,
                 });
@@ -1815,6 +1972,18 @@ impl Actor {
     }
 
     fn sync_board(&self) {
+        *self
+            .board
+            .pi_services
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = self
+            .services
+            .iter()
+            .filter_map(|live| {
+                sovra_core::raspberry_pi::service_setup(&live.service)
+                    .map(|setup| (live.service.id.clone(), setup))
+            })
+            .collect();
         let offers = self
             .services
             .iter()

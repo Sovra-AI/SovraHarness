@@ -6,6 +6,13 @@ pasted setup, including the built-in sample server.
 In the app this is the **MCP servers** card in **Connections** (the button is **Add MCP
 server**). The code calls them "services".
 
+## Raspberry Pi plugins
+
+The **Raspberry Pi** choice adds a bundled model-specific plugin through this
+same service lifecycle. Its setup and project tools work immediately; hardware
+checks are separate. See [Raspberry Pi plugins](raspberry-pi.md) for all 39
+profiles, connection prerequisites and read-only boundaries.
+
 ## The built-in sample
 
 `sovra --sample-mcp-server` (`sovra-runtime/src/mcp/sample.rs`) is a small stdio MCP

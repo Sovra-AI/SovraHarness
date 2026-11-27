@@ -17,6 +17,17 @@ An explicit shortcut selects a procedure before model execution. Some actions,
 such as opening a page, do not need a model call. Model procedures keep your
 request separate from their instruction text.
 
+## Build or change something
+
+Say what you want in everyday words, for example “Build a website for our
+garden club with meeting times and upcoming events”. Sovra writes the files,
+shows the source in chat, and saves them in your library. A simple website is
+one page with its styles and script inside the file. A framework website, with
+`package.json` and a build script, is one website project you can run on this
+computer when you ask. Other source is saved as code. If nothing was written,
+Sovra says so and does not claim the work was saved. A question about what
+code means stays a normal answer. `/coding` still works and is not required.
+
 ## Add reusable instructions
 
 1. Choose **Add your own** on Skills.

@@ -5,7 +5,7 @@
 //! Its tools touch nothing on the computer and never use the internet.
 
 use rmcp::{
-    ErrorData, RoleServer, ServerHandler, ServiceExt as _,
+    ErrorData, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
         ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
@@ -25,24 +25,7 @@ struct SampleServer;
 
 /// Runs the sample server on stdin/stdout until the client disconnects.
 pub fn run_sample_mcp_server() -> Result<(), crate::Error> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(crate::Error::Start)?;
-    runtime.block_on(async {
-        let service = SampleServer
-            .serve(rmcp::transport::async_rw::AsyncRwTransport::new_server(
-                tokio::io::stdin(),
-                tokio::io::stdout(),
-            ))
-            .await
-            .map_err(|error| crate::Error::Development(error.to_string()))?;
-        service
-            .waiting()
-            .await
-            .map_err(|error| crate::Error::Development(error.to_string()))?;
-        Ok(())
-    })
+    super::builtin::run(SampleServer)
 }
 
 fn tools() -> Vec<Tool> {

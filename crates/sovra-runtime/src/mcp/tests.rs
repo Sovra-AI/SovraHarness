@@ -5,7 +5,7 @@ use super::*;
 
 /// Speaks just enough MCP over stdio: refuses newer discovery so the client falls
 /// back to `initialize`, lists two tools and echoes a private setting.
-const FAKE_SERVER: &str = r#"
+pub(super) const FAKE_SERVER: &str = r#"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   [ -z "$id" ] && continue
@@ -421,6 +421,9 @@ async fn the_old_keychain_list_moves_to_the_file() {
         next_rpc: 1,
         listeners: HashMap::new(),
         programs: HashMap::new(),
+        pi_searches: tokio::task::JoinSet::new(),
+        pi_pairing: None,
+        pi_pairing_generation: 0,
     };
     #[expect(clippy::disallowed_methods, reason = "test owns the actor task")]
     let task = tokio::spawn(actor.run(rx));
@@ -444,4 +447,28 @@ async fn the_old_keychain_list_moves_to_the_file() {
     inbox.close();
     let _ = task.await;
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn raspberry_pi_conversations_cannot_use_another_devices_tools() {
+    let board = ToolBoard::default();
+    let setup = sovra_core::raspberry_pi::PiSetup {
+        board_id: "pi-5".into(),
+        host: "test.invalid".into(),
+        user: "test".into(),
+    };
+    board
+        .pi_services
+        .write()
+        .unwrap()
+        .extend([("first".into(), setup.clone()), ("second".into(), setup)]);
+    board
+        .pi_sessions
+        .write()
+        .unwrap()
+        .insert("chat".into(), "first".into());
+    assert!(board.pi_allowed("chat", "first"));
+    assert!(!board.pi_allowed("chat", "second"));
+    assert!(!board.pi_allowed("other-chat", "first"));
+    assert!(board.pi_allowed("chat", "ordinary-service"));
 }

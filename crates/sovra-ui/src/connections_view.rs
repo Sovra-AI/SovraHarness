@@ -824,6 +824,11 @@ impl ModelsView {
         cx: &mut Context<Self>,
     ) {
         self.manual_form = None;
+        if kind == CatalogueKind::WebAddress
+            && self.services_screen.mode == crate::service_connect_view::AddMode::RaspberryPi
+        {
+            self.services_screen.mode = crate::service_connect_view::AddMode::Web;
+        }
         if kind == CatalogueKind::Microsoft
             && matches!(
                 self.microsoft.state,

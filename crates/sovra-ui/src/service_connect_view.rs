@@ -45,11 +45,13 @@ pub(crate) enum AddMode {
     Web,
     Program,
     Paste,
+    RaspberryPi,
 }
 
 /// The services screen's own form state. Service state comes from the runtime.
 pub(crate) struct ServicesScreen {
     pub(crate) mode: AddMode,
+    pub(crate) pi: crate::raspberry_pi_view::PiScreen,
     pub(crate) query: Entity<InputState>,
     pub(crate) program_name: Entity<InputState>,
     pub(crate) program_command: Entity<InputState>,
@@ -68,6 +70,7 @@ impl ServicesScreen {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<ModelsView>) -> Self {
         Self {
             mode: AddMode::Closed,
+            pi: crate::raspberry_pi_view::PiScreen::new(window, cx),
             query: cx.new(|cx| InputState::new(window, cx).placeholder("Search servers and tools")),
             program_name: cx
                 .new(|cx| InputState::new(window, cx).placeholder("Name, if you want one")),
@@ -95,8 +98,12 @@ impl ServicesScreen {
     }
 
     /// Inputs whose edits should re-render the screen (search, enabled buttons).
-    pub(crate) fn live_inputs(&self) -> [Entity<InputState>; 2] {
-        [self.query.clone(), self.program_command.clone()]
+    pub(crate) fn live_inputs(&self) -> [Entity<InputState>; 3] {
+        [
+            self.query.clone(),
+            self.program_command.clone(),
+            self.pi.query.clone(),
+        ]
     }
 }
 
@@ -179,6 +186,7 @@ impl ModelsView {
                 div().into_any_element()
             } else {
                 design::button("mcp-add-close", "Close", cx)
+                    .disabled(self.services_screen.pi.pairing.busy())
                     .ghost()
                     .small()
                     .on_click(cx.listener(|view, _, _, cx| {
@@ -188,19 +196,28 @@ impl ModelsView {
                     }))
                     .into_any_element()
             });
-        let mut section = settings_section(
-            "mcp-connect-section",
-            "MCP servers",
-            "MCP servers give Sovra extra tools, like reading your files, checking a calendar or searching a database. Add one, then choose which of its tools Sovra may use.",
-            cx,
-        )
-        .child(header);
+        let (title, description) = if mode == AddMode::RaspberryPi {
+            (
+                "Raspberry Pi",
+                "Connect once, then explore its pins and make projects.",
+            )
+        } else {
+            (
+                "MCP servers",
+                "MCP servers give Sovra extra tools, like reading your files, checking a calendar or searching a database. Add one, then choose which of its tools Sovra may use.",
+            )
+        };
+        let mut section = settings_section("mcp-connect-section", title, description, cx)
+            .children((mode != AddMode::RaspberryPi).then_some(header));
         let has_sample = state.services.iter().any(|service| {
             service
                 .address
                 .ends_with(sovra_core::mcp::SAMPLE_SERVER_FLAG)
         });
-        if !has_sample && (state.services.is_empty() || mode != AddMode::Closed) {
+        if mode != AddMode::RaspberryPi
+            && !has_sample
+            && (state.services.is_empty() || mode != AddMode::Closed)
+        {
             section = section.child(Self::render_sample_offer(cx));
         }
         if mode != AddMode::Closed {
@@ -217,6 +234,9 @@ impl ModelsView {
                     .sovra_text(TextRole::Caption, cx)
                     .child(notice.clone()),
             );
+        }
+        if mode == AddMode::RaspberryPi {
+            return section.into_any_element();
         }
         if state.services.len() > SEARCH_AFTER {
             section = section.child(
@@ -235,15 +255,17 @@ impl ModelsView {
             .into_iter()
             .map(|service| self.render_service_card(service, cx).into_any_element())
             .collect();
-        section.child(
-            v_flex()
-                .id("mcp-service-list")
-                .test_support()
-                .w_full()
-                .min_w_0()
-                .gap(t.space.small)
-                .children(cards),
-        )
+        section
+            .child(
+                v_flex()
+                    .id("mcp-service-list")
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .gap(t.space.small)
+                    .children(cards),
+            )
+            .into_any_element()
     }
 
     /// A no-setup way to see what an MCP server does: Sovra's own sample.
@@ -298,6 +320,7 @@ impl ModelsView {
         let t = design::tokens(cx);
         let tabs = h_flex().w_full().flex_wrap().gap(t.space.compact).children(
             [
+                (AddMode::RaspberryPi, "mcp-mode-pi", "Raspberry Pi"),
                 (AddMode::Web, "mcp-mode-web", "From a web address"),
                 (
                     AddMode::Program,
@@ -314,6 +337,7 @@ impl ModelsView {
                 design::button(id, label, cx)
                     .small()
                     .selected(tab == mode)
+                    .disabled(self.services_screen.pi.pairing.busy())
                     .accessibility_label(format!("Add: {label}"))
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.services_screen.mode = tab;
@@ -326,6 +350,7 @@ impl ModelsView {
             AddMode::Web | AddMode::Closed => self.render_web_form(cx).into_any_element(),
             AddMode::Program => self.render_program_form(cx).into_any_element(),
             AddMode::Paste => self.render_paste_form(cx).into_any_element(),
+            AddMode::RaspberryPi => self.render_pi_form(cx).into_any_element(),
         };
         let mut panel = v_flex()
             .id("mcp-add-panel")
@@ -335,7 +360,7 @@ impl ModelsView {
             .p(t.space.medium)
             .gap(t.space.small)
             .sovra_surface(Surface::Subtle, cx)
-            .child(tabs)
+            .children((mode != AddMode::RaspberryPi).then_some(tabs))
             .child(body);
         if let Some(problem) = &self.services_screen.form_problem {
             panel = panel.child(
@@ -498,7 +523,12 @@ impl ModelsView {
         let id = service.id.clone();
         let tone = Self::status_tone(service, cx);
         let mono = cx.theme().mono_font_family.clone();
-        let label = service.label();
+        let is_pi = sovra_core::raspberry_pi::service_setup(service).is_some();
+        let label = if is_pi && service.phase == McpPhase::Connected {
+            "Ready"
+        } else {
+            service.label()
+        };
 
         let enabled_id = id.clone();
         let title_row = h_flex()
@@ -577,7 +607,18 @@ impl ModelsView {
                         .font_family(mono)
                         .sovra_text(TextRole::Caption, cx)
                         .text_color(t.text_secondary)
-                        .child(service.location()),
+                        .child(
+                            sovra_core::raspberry_pi::service_setup(service).map_or_else(
+                                || service.location(),
+                                |setup| {
+                                    if setup.host.is_empty() {
+                                        "Setup and project help · device not checked".to_owned()
+                                    } else {
+                                        format!("Device checks for {}", setup.host)
+                                    }
+                                },
+                            ),
+                        ),
                 )
             });
 
@@ -652,6 +693,45 @@ impl ModelsView {
                 );
         }
 
+        if is_pi {
+            let chat_service = service.clone();
+            let details_id = id.clone();
+            card = card.child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(t.space.small)
+                    .child(
+                        design::primary_button(sid("pi-chat", &id), "Connect and chat", cx)
+                            .disabled(!service.enabled || service.phase != McpPhase::Connected)
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                if let Some(setup) =
+                                    sovra_core::raspberry_pi::service_setup(&chat_service)
+                                {
+                                    cx.emit(crate::models_view::GoToPiChat {
+                                        service_id: chat_service.id.clone(),
+                                        setup,
+                                    });
+                                }
+                            })),
+                    )
+                    .child(
+                        design::button(sid("pi-details", &id), "Details", cx)
+                            .small()
+                            .ghost()
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                if !view.services_screen.pi.details.remove(&details_id) {
+                                    view.services_screen.pi.details.insert(details_id.clone());
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
+            if !screen.pi.details.contains(&id) {
+                return card.into_any_element();
+            }
+        }
+        card = card.child(self.render_pi_actions(service, cx));
+
         if service.phase == McpPhase::Connected && !service.tools.is_empty() {
             card = card.child(self.render_tools(service, cx));
         }
@@ -701,6 +781,7 @@ impl ModelsView {
         }
 
         card.child(self.render_card_actions(service, cx))
+            .into_any_element()
     }
 
     /// Shown before a program first runs: the exact, untruncated command and

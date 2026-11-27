@@ -14,6 +14,69 @@ package version.
 
 ## [Unreleased]
 
+- **More room for the Knowledge map.** Compact panes use smaller outer spacing,
+  keeping the map usable at the minimum window size with 200% text.
+
+- **Supported WebAssembly runtime.** Updated Wasmi to 2.0.3 after its 2.0.2
+  release was withdrawn. Plugin sandbox limits and security checks stay in place.
+
+- **First-time Pi sign-in inside Sovra.** Enter the Pi account and password in a
+  private field, confirm its connection identity, and let Sovra verify the model
+  before remembering access. Later connections, health checks and project delivery
+  reuse the saved sign-in. Changed identities stop before authentication; removing
+  a connection forgets its credential. Existing trusted SSH keys still work.
+  The Pi setup screen shows only Pi controls, with the generic server setup kept
+  on the other connection screens. Returning to Add MCP server after Pi setup
+  restores the other service controls.
+
+- **GPIO answers show the diagram.** The Pi's GPIO tool now returns a native,
+  clickable pin map directly in chat, with the board name and numbering. A
+  reference diagram cannot select a different device or start a project.
+
+- **Find your Pi on the network.** Choosing a Pi computer starts an eight-second
+  nearby-computer search. Select a name to fill connection details, or type one
+  manually. Results are suggestions; connecting still verifies the board model
+  over trusted SSH. Searches run in the background and stop with their owner.
+
+- **Build or change something in everyday words.** A chat message that asks
+  for a page, a small program, or a fix writes the files, shows the source as
+  it is written, and saves the result. A simple website is one page with its
+  styles and script inside the file. A framework site with `package.json` and
+  a build script is one website project. Other source is saved as code. If
+  nothing was written, the chat says so and does not claim a save. A question
+  about what code means stays a normal answer. `/coding` still works and is
+  not required. Opening this skill from a team chat switches to the ordinary
+  coding conversation before you send the request.
+
+- **A simpler Pi workflow.** Connect and chat opens a conversation bound to the
+  chosen device, with a collapsible native GPIO card. Guides and service settings
+  move under Details. Build a project uses the in-app coding run, saves its source,
+  then sends it to the selected Pi through trusted SSH or MicroPython USB. Model
+  mismatches, missing tools and failed launches are reported without inventing success.
+
+- **Raspberry Pi wiring and project tools.** Installed Pi plugins now include
+  clickable GPIO references, LED and button lessons, and troubleshooting.
+  Physical pins and code numbers are separate; original P1 revisions, P5 pads,
+  Pico edge pins and keyboard orientation are covered. Compute Modules ask for
+  the exact carrier before suggesting wiring. Guides and code can be saved;
+  viewing a pin does not read or drive hardware.
+
+- **Dependency security updates.** Updated URL parsing and archive readers after
+  the required security gate reported RUSTSEC-2026-0592 and RUSTSEC-2026-0545
+  through 0548. Xberg 1.5.4 uses the corrected archive dependency; Velopack is
+  pinned to published prerelease 1.3.39-g8d2844f because stable 1.2.161 still
+  requires vulnerable zip 8.x. Installer hooks stay unchanged and no in-app
+  update checks are introduced. Removed the now-obsolete ZIP and calamine
+  advisory exceptions; the remaining security checks are unchanged.
+
+- **Raspberry Pi plugins in Connections.** Added 39 researched board profiles,
+  including classic, Zero, keyboard, Compute Module and Pico variants, through
+  the existing MCP service system. Choose a model, follow its setup guide, try
+  a first project and save the result. Computer health checks use saved sign-in or an
+  existing trusted SSH key connection; Pico checks enumerate USB devices
+  without interrupting projects. Plugin readiness and device detection are
+  presented separately. The capability is also listed on Skills.
+
 - Hover over a Knowledge map point or its label to highlight its direct connections. The rest of the map turns grey until the pointer moves away.
 
 - The Knowledge map fills the desktop workspace. Scroll over any point or label to zoom around the pointer. Search and filters open on demand.

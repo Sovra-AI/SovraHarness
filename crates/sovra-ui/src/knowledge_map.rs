@@ -466,7 +466,11 @@ pub(crate) fn render(shell: &Shell, cx: &mut Context<Shell>) -> impl IntoElement
         .min_h_0()
         .min_w_0()
         .overflow_hidden()
-        .p(t.space.small)
+        .p(if compact {
+            t.space.compact
+        } else {
+            t.space.small
+        })
         .gap(t.space.compact)
         .child(design::width_probe(cx, |s| &mut s.knowledge_map.width))
         .child(header);

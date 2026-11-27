@@ -216,7 +216,25 @@ fn every_specialist_and_builtin_skill_has_grandma_friendly_skills_page_copy() {
         assert_ne!(copy.friendly_title.trim(), "");
         assert_ne!(copy.summary.trim(), "");
         assert_ne!(copy.example_display.trim(), "");
-        assert!(copy.sample_draft.starts_with('/'));
+        if skill.name == "coding" {
+            assert!(
+                !copy.sample_draft.starts_with('/'),
+                "the coding example is something a person can say: {}",
+                copy.sample_draft
+            );
+            let visible = format!(
+                "{} {} {}",
+                copy.summary, copy.example_display, copy.sample_draft
+            );
+            assert!(
+                !visible.to_ascii_lowercase().contains("/coding")
+                    && !visible.to_ascii_lowercase().contains("slash"),
+                "the coding card must not require a shortcut: {visible}"
+            );
+            assert_eq!(skill.composer_draft(), copy.sample_draft);
+        } else {
+            assert!(copy.sample_draft.starts_with('/'));
+        }
         if matches!(skill.kind, SkillKind::Procedure) {
             assert!(
                 !copy.sample_draft.contains('<') && !copy.sample_draft.contains('['),
@@ -254,6 +272,19 @@ fn installed(name: &str, description: &str, tools: &[&str]) -> Skill {
         compatibility: None,
         metadata: std::collections::BTreeMap::new(),
     }
+}
+
+#[test]
+fn coding_shortcut_starts_the_file_writing_run() {
+    let skill = builtin_skills()
+        .into_iter()
+        .find(|skill| skill.name == "coding")
+        .expect("coding skill");
+    assert!(skill.instructions.contains("coding run"));
+    assert!(skill.tools.iter().any(|tool| tool == "CodingAgent"));
+    assert!(!skill.auto_apply);
+    assert_eq!(skill.argument_hint, "what to build or change");
+    assert!(skill.requires_input);
 }
 
 #[test]

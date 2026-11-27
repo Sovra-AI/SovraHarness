@@ -141,7 +141,7 @@ fn knowledge_sections_stay_reachable_at_minimum_wide_and_double_text_sizes(
                     );
                     assert!(window.find("knowledge-overview").visible());
                     window.click("knowledge-overview", cx);
-                    window.render_frame(cx);
+                    knowledge::reveal(window, "explore-query", cx);
                     assert!(window.find("explore-query").visible());
                 }
             }

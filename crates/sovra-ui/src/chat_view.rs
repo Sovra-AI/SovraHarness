@@ -88,6 +88,7 @@ enum Row {
 }
 
 pub(crate) struct ChatPresentation {
+    pub(crate) pi: crate::raspberry_pi_gpio_view::PiChatPresentation,
     pub(crate) list: ListState,
     /// Keyed by position: a conversation only grows, and saved history can hold
     /// duplicate message ids from older builds.
@@ -266,6 +267,7 @@ impl ChatPresentation {
             thinking_toggled: HashSet::new(),
             work_toggled: HashSet::new(),
             terminal_expanded: HashSet::new(),
+            pi: crate::raspberry_pi_gpio_view::PiChatPresentation::default(),
             session_id: String::new(),
             turn_started: None,
             was_generating: false,
@@ -295,6 +297,7 @@ impl ChatPresentation {
         if self.session_id != state.session_id {
             self.session_id.clone_from(&state.session_id);
             self.markdown.clear();
+            self.pi = crate::raspberry_pi_gpio_view::PiChatPresentation::default();
             self.rows.clear();
             self.thinking_toggled.clear();
             self.work_toggled.clear();
@@ -1242,6 +1245,22 @@ fn render_assistant_segment(
                 ));
             }
         }
+        // Put the requested visual before the full, saveable pin reference text.
+        content = content.children(
+            msg.widgets
+                .iter()
+                .enumerate()
+                .filter(|(_, widget)| matches!(widget, AgUiWidget::GpioDiagram { .. }))
+                .map(|(widget_index, widget)| {
+                    render_agui_widget(
+                        widget,
+                        index * 10 + widget_index,
+                        &state.artifacts.deployments,
+                        &chat.pi,
+                        cx,
+                    )
+                }),
+        );
     }
     if let Some(part) = markdown
         .answer
@@ -1319,12 +1338,18 @@ fn render_assistant_segment(
             msg.widgets
                 .iter()
                 .enumerate()
-                .filter(|(_, widget)| !matches!(widget, AgUiWidget::WorkLog(_)))
+                .filter(|(_, widget)| {
+                    !matches!(
+                        widget,
+                        AgUiWidget::WorkLog(_) | AgUiWidget::GpioDiagram { .. }
+                    )
+                })
                 .map(|(widget_index, widget)| {
                     render_agui_widget(
                         widget,
                         index * 10 + widget_index,
                         &state.artifacts.deployments,
+                        &chat.pi,
                         cx,
                     )
                 }),

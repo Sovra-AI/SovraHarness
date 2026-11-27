@@ -184,6 +184,18 @@ impl Shell {
                     cx,
                 );
             }
+            SkillAction::RaspberryPi => {
+                self.present_connections(
+                    Some(sovra_core::CatalogueKind::WebAddress),
+                    false,
+                    window,
+                    cx,
+                );
+                self.models().update(cx, |models, cx| {
+                    models.services_screen.mode = crate::service_connect_view::AddMode::RaspberryPi;
+                    cx.notify();
+                });
+            }
             SkillAction::RemoteControl => {
                 if !crate::remote_control_view::is_remote_input(cx) {
                     self.open_remote_control(cx);
@@ -1375,6 +1387,55 @@ for two";
             })
             .unwrap();
         }
+    }
+
+    #[gpui_kit::test]
+    fn coding_card_try_in_chat_uses_a_spoken_sentence(cx: &mut TestAppContext) {
+        let (client, _commands, _events) = Client::loopback();
+        cx.update(|cx| crate::init(client, cx));
+        let (shell, window) = open(cx, size(px(1280.), px(820.)));
+        cx.update_window(window.into(), |_, window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell
+                    .state
+                    .set_room(sovra_core::teams::TeamRoom::all_helpers());
+                shell.select_tab(NavTab::Skills, cx);
+            });
+            window.render_frame(cx);
+            let coding = shell
+                .read(cx)
+                .skills
+                .find("coding")
+                .expect("coding skill")
+                .clone();
+            let copy = coding.friendly_card_copy();
+            assert_eq!(coding.composer_draft(), copy.sample_draft);
+            assert!(!copy.sample_draft.starts_with('/'));
+            window.click("skill-filter-specialists", cx);
+            window.render_frame(cx);
+            let index = card_with_title(window, &copy.friendly_title);
+            let label = window
+                .find(("skill-card", index))
+                .label()
+                .expect("card names its visible text")
+                .to_owned();
+            assert!(label.contains(copy.example_display.as_str()), "{label}");
+            assert!(
+                !label.to_ascii_lowercase().contains("/coding")
+                    && !label.to_ascii_lowercase().contains("slash"),
+                "{label}"
+            );
+            assert!(window.try_find(("skill-try-example", index)).is_none());
+            click_visible(window, ("skill-use", index), cx);
+            window.render_frame(cx);
+            assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            assert!(shell.read(cx).state.room.is_ordinary());
+            assert_eq!(
+                shell.read(cx).composer_input.read(cx).value().as_ref(),
+                copy.sample_draft.as_str()
+            );
+        })
+        .unwrap();
     }
 
     fn card_with_title(window: &Window, title: &str) -> usize {

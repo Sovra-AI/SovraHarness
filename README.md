@@ -129,6 +129,12 @@ has the first run, group steps, every setting, privacy details and limits.
   Edits keep earlier versions and
   require fresh acceptance. See
   [Decision records](docs/decisions.md) for the local-account approval boundary.
+- **Build a page or a small program:** say what you want in everyday words.
+  Sovra shows the source as it is written and saves it. A simple website is
+  one page with its styles and script inside the file. A framework site is one
+  project with its source and a build script. Other work is saved as source.
+  If nothing was written, Sovra says so and does not claim a save. Asking what
+  code means stays a normal answer. `/coding` still works and is not required.
 - **Connect services:** use Google, GitHub, WhatsApp, Telegram, and MCP tools.
 - **Link online storage:** add Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, Google Cloud
   Storage, MinIO and other S3-compatible buckets, Azure Blob containers, or Nextcloud,
@@ -151,6 +157,13 @@ has the first run, group steps, every setting, privacy details and limits.
   before confirming removal. To make your own, start from the open-source
   [plugin template](https://github.com/Sovra-AI/sovra-plugin-template). See [Plugins](docs/plugins.md) for
   the package contract, editor schema, read-only catalog check, and publisher.
+- **Use your Raspberry Pi:** choose from 39 board profiles, pick a nearby computer
+  with **Find my Pi**, enter its account and password once, then **Connect and chat**.
+  Sovra remembers the confirmed Pi identity and sign-in on this computer.
+  Expand **GPIO pins** in the Pi's chat, or choose **Build a project** to write,
+  save and automatically deploy a project to that Pi. Setup lessons and connection
+  settings stay under **Details**. See [Raspberry Pi plugins](docs/raspberry-pi.md)
+  for SSH/MicroPython prerequisites and supported project types.
 - **Schedule tasks:** run repeating prompts, confirm timed messages, or send a
   scheduled search note to a WhatsApp group.
 - **Share with a group:** share selected knowledge, artifacts, helpers, and

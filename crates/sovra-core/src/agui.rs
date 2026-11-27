@@ -38,6 +38,13 @@ pub struct ClarifyChip {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgUiWidget {
+    /// Read-only board reference from a tool answer; grants no device access.
+    GpioDiagram { board_id: String },
+    /// The Pi selected for this conversation; a reference map, never live IO.
+    RaspberryPi {
+        service_id: String,
+        board_id: String,
+    },
     /// A complete ADK-UI surface delivered over the AG-UI custom event profile.
     Components {
         surface_id: String,

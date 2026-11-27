@@ -41,6 +41,8 @@ mod messaging;
 mod microsoft;
 #[path = "styling/plugins.rs"]
 mod plugins;
+#[path = "styling/raspberry_pi.rs"]
+mod raspberry_pi;
 #[path = "styling/remote_control.rs"]
 mod remote_control;
 #[path = "styling/research_board.rs"]
