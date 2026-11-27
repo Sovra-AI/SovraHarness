@@ -233,6 +233,7 @@ fn pi_plugins_fit_and_route_through_mcp_at_every_supported_layout(cx: &mut TestA
                 ]
                 .map(|name| McpToolInfo {
                     name: name.into(),
+                    title: String::new(),
                     description: name.into(),
                     input_schema: serde_json::json!({"type":"object"}),
                 })

@@ -1395,7 +1395,12 @@ for two";
         cx.update(|cx| crate::init(client, cx));
         let (shell, window) = open(cx, size(px(1280.), px(820.)));
         cx.update_window(window.into(), |_, window, cx| {
-            shell.update(cx, |shell, cx| shell.select_tab(NavTab::Skills, cx));
+            shell.update(cx, |shell, cx| {
+                shell
+                    .state
+                    .set_room(sovra_core::teams::TeamRoom::all_helpers());
+                shell.select_tab(NavTab::Skills, cx);
+            });
             window.render_frame(cx);
             let coding = shell
                 .read(cx)
@@ -1424,6 +1429,7 @@ for two";
             click_visible(window, ("skill-use", index), cx);
             window.render_frame(cx);
             assert_eq!(shell.read(cx).state.active_tab, NavTab::Chat);
+            assert!(shell.read(cx).state.room.is_ordinary());
             assert_eq!(
                 shell.read(cx).composer_input.read(cx).value().as_ref(),
                 copy.sample_draft.as_str()

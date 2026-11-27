@@ -1284,6 +1284,9 @@ fn card(
                 .accessibility_label(primary_accessible_label)
                 .on_click(cx.listener(move |shell, _, window, cx| {
                     if let Some(draft) = &coding_draft {
+                        shell
+                            .state
+                            .set_room(sovra_core::teams::TeamRoom::ordinary());
                         shell.select_tab(sovra_core::NavTab::Chat, cx);
                         shell.fill_composer_draft(draft, window, cx);
                         return;

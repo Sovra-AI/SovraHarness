@@ -41,7 +41,8 @@ package version.
   a build script is one website project. Other source is saved as code. If
   nothing was written, the chat says so and does not claim a save. A question
   about what code means stays a normal answer. `/coding` still works and is
-  not required.
+  not required. Opening this skill from a team chat switches to the ordinary
+  coding conversation before you send the request.
 
 - **A simpler Pi workflow.** Connect and chat opens a conversation bound to the
   chosen device, with a collapsible native GPIO card. Guides and service settings
