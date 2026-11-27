@@ -10746,9 +10746,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.31.3"
+version = "0.31.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+checksum = "2bc81ce8148d3b4f3274da811f11cdd824ae661ee4ef732cdb229825cf5be7f7"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
@@ -12761,7 +12761,7 @@ checksum = "1f21b97672d2dc848e7b25701ab4535618b92f4861c13cc3f7f7bed52ad3c8da"
 dependencies = [
  "futures",
  "indexmap",
- "nix 0.31.3",
+ "nix 0.31.4",
  "tokio",
  "tracing",
  "windows 0.62.2",
@@ -14094,7 +14094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3aec6cb630dbe85d72ffd7bcd95f07e1bd69f9f270ee8adfa1afe443a6331438"
 dependencies = [
  "log",
- "nix 0.31.3",
+ "nix 0.31.4",
  "ssh-encoding",
  "windows-sys 0.61.2",
 ]
@@ -15650,7 +15650,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "mdns-sd",
- "nix 0.31.3",
+ "nix 0.32.0",
  "reqwest 0.12.28",
  "rmcp",
  "russh",
