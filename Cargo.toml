@@ -132,7 +132,7 @@ rayon = "1.12.0"
 memchr = "2.8.3"
 # Safe `killpg` and `openpty` so the terminal tool stops a command's whole process
 # group and captures live libc output on a tty (Unix only). `fs` is F_SETFD/CLOEXEC.
-nix = { version = "0.31.3", default-features = false, features = ["signal", "process", "term", "fs"] }
+nix = { version = "0.32.0", default-features = false, features = ["signal", "process", "term", "fs"] }
 keyring = { version = "4.2.0", default-features = false, features = ["v1"] }
 # Online storage listings (S3, WebDAV, Azure answer in XML); already in the tree via other crates.
 roxmltree = "0.21.2"
