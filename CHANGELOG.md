@@ -14,6 +14,9 @@ package version.
 
 ## [Unreleased]
 
+- **Supported WebAssembly runtime.** Updated Wasmi to 2.0.3 after its 2.0.2
+  release was withdrawn. Plugin sandbox limits and security checks stay in place.
+
 - **First-time Pi sign-in inside Sovra.** Enter the Pi account and password in a
   private field, confirm its connection identity, and let Sovra verify the model
   before remembering access. Later connections, health checks and project delivery

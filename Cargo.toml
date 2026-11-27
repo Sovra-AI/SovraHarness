@@ -172,7 +172,7 @@ laya-candle = { version = "=0.1.2", default-features = false }
 # Sealed-box plugin code (sovra-wasm only). A pure-Rust interpreter: no machine
 # code is generated, fuel bounds every call. The text format is left out of the
 # app; `wat` is only for tests that write modules by hand.
-wasmi = { version = "2.0.2", default-features = false, features = ["stable", "std", "validate", "auto-dispatch"] }
+wasmi = { version = "2.0.3", default-features = false, features = ["stable", "std", "validate", "auto-dispatch"] }
 wat = "1.228.0"
 # The stable 1.2 line pins vulnerable zip 8.x. This upstream prerelease uses
 # zip 9.x; its startup hook is unchanged. Keep the choice explicit until stable.
