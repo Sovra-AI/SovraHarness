@@ -466,7 +466,9 @@ async fn plain_build_request_saves_the_page_and_an_explanation_does_not() {
             memory: Some(memory),
             models: Some(ModelsConfig {
                 repository: fixture.repo.clone(),
+                readiness: None,
                 providers: vec![Arc::new(CompatibleProvider)],
+                laya: None,
             }),
             ..RuntimeServices::default()
         },
