@@ -42,7 +42,7 @@ mod plugins;
 mod skills;
 mod storage;
 mod terminal;
-pub use mcp::{SAMPLE_SERVER_FLAG, run_sample_mcp_server};
+pub use mcp::{PiPrograms, SAMPLE_SERVER_FLAG, run_raspberry_pi_mcp_server, run_sample_mcp_server};
 pub use terminal::TerminalConfig;
 mod teams;
 mod training;
@@ -73,12 +73,22 @@ pub type MemoryFactory = Box<dyn FnOnce() -> MemoryStoreFuture + Send>;
 /// Errors surfaced to the composition root.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Pi SSH connection failed")]
+    PiConnection(#[from] russh::Error),
+    #[error("Pi identity changed")]
+    PiIdentityChanged,
+    #[error("Pi identity unconfirmed")]
+    PiIdentityUnconfirmed,
+    #[error("Pi sign-in cancelled")]
+    PiPairingCancelled,
     #[error("failed to start the async runtime")]
     Start(#[source] std::io::Error),
     #[error("the runtime has stopped")]
     Stopped,
     #[error("development MCP failed: {0}")]
     Development(String),
+    #[error("bundled MCP server failed: {0}")]
+    BuiltinMcp(String),
     #[error("remote reference client failed: {0}")]
     RemoteReference(String),
 }
@@ -1233,7 +1243,7 @@ async fn serve(
                         },
                         messaging: connections.messaging(&session_id),
                         remote_tools: if private_access {
-                            let mut offers = mcp.offers();
+                            let mut offers = mcp.offers_for(&session_id);
                             offers.extend(code_tools.offers());
                             offers
                         } else {
@@ -1245,6 +1255,11 @@ async fn serve(
                             handle: handle.clone(),
                         }),
                         approvals: terminal.approval_watch(),
+                        pi_deployment: if private_access {
+                            mcp.pi_deployment(&session_id)
+                        } else {
+                            None
+                        },
                         memory_reader: if private_access {
                             inputs.reader(groups.knowledge.wrap(recalling::reader(
                                 memory.as_ref(),
@@ -1430,6 +1445,7 @@ struct PromptJob {
     remote_tools: Vec<sovra_core::mcp::ToolOffer>,
     remote_caller: Arc<plugins::code::ToolRouter>,
     approvals: terminal::ApprovalWatch,
+    pi_deployment: Option<Arc<dyn sovra_core::raspberry_pi::PiDeployment>>,
 }
 
 fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
@@ -1453,6 +1469,7 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         remote_tools,
         remote_caller,
         approvals,
+        pi_deployment,
     } = job;
     let asking = {
         let session_id = session_id.clone();
@@ -1474,6 +1491,22 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
             sovra_core::is_deep_research_skill(&skill.name)
                 || sovra_core::skill_requests_deep_research(&skill.tools)
         });
+        // A coding shortcut, or a private chat that asks to build or change
+        // something, writes files. Explanations stay on the chat path.
+        let coding_enabled = skills
+            .find(sovra_core::CODING_SKILL)
+            .is_some_and(|coding_skill| coding_skill.enabled);
+        let (skill_name, skill_tools) = match skill.as_ref() {
+            Some(skill) => (Some(skill.name.as_str()), skill.tools.as_slice()),
+            None => (None, [].as_slice()),
+        };
+        let coding = sovra_core::starts_coding_run(
+            skill_name,
+            skill_tools,
+            coding_enabled,
+            private_access,
+            &prompt,
+        );
         let evaluation = evaluate_routing(
             &routing,
             &specialists,
@@ -1554,8 +1587,8 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
         let adk = match adk.with_working_context(context.as_ref()).and_then(|adk| adk.with_conversation_memory(memory_reader, &prompt, now())).and_then(|adk| adk.with_indexed_files(indexed_files))
             .and_then(|adk| adk.with_messaging(messaging)).and_then(|adk| if private_access { adk.with_skill_library(skills, skill_resources) } else { Ok(adk) })
             .and_then(|adk| {
-                if deep_research {
-                    // Dedicated parallel research path — skip the specialist procedure.
+                if deep_research || coding {
+                    // Dedicated runs — skip the specialist procedure.
                     Ok(adk)
                 } else {
                     skill.as_ref().map_or_else(|| Ok(adk.clone()), |skill| adk.with_skill(skill))
@@ -1602,6 +1635,30 @@ fn spawn_prompt(handle: &tokio::runtime::Handle, job: PromptJob) -> ActiveRun {
                 }
             } else {
                 adk.run_deep_research(&turn, &events).await;
+            }
+            return;
+        }
+        if coding {
+            let turn = sovra_adk::OpenCodeTurn {
+                session_id: session_id.clone(),
+                run_id: sovra_adk::new_opencode_run_id(),
+                prompt,
+            };
+            let run = adk.run_opencode_for_pi(&turn, &events, pi_deployment);
+            if let Some(timeout) = timeout {
+                if tokio::time::timeout(timeout, run).await.is_err() {
+                    adk.interrupt(&session_id);
+                    let _ = events
+                        .send(Event::AgUi {
+                            session_id,
+                            event: sovra_core::AgUiEvent::RunError {
+                                message: "Coding timed out. Increase the connection timeout or try a smaller request.".into(),
+                            },
+                        })
+                        .await;
+                }
+            } else {
+                run.await;
             }
             return;
         }

@@ -258,7 +258,7 @@ async fn run(
     loop {
         tokio::select! {
             request = inbox.recv() => {
-                let Ok(Request::Call { tool, arguments, reply }) = request else {
+                let Ok(Request::Call { tool, arguments, mut reply }) = request else {
                     break;
                 };
                 let mut params = CallToolRequestParams::new(tool);
@@ -266,7 +266,9 @@ async fn run(
                     Value::Object(map) => Some(map),
                     _ => None,
                 };
-                let answer = match tokio::time::timeout(CALL_TIMEOUT, client.call_tool(params)).await {
+                let deadline = if spec.args.first().is_some_and(|arg| arg == sovra_core::raspberry_pi::SERVER_FLAG) && params.name == "deploy_project" { Duration::from_mins(30) } else { CALL_TIMEOUT };
+                let result = tokio::select! { () = reply.closed() => continue, result = tokio::time::timeout(deadline, client.call_tool(params)) => result };
+                let answer = match result {
                     Ok(Ok(result)) => serde_json::to_value(&result)
                         .ok()
                         .and_then(|value| {

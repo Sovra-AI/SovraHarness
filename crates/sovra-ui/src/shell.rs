@@ -113,6 +113,7 @@ pub struct Shell {
     _history_search_events: Subscription,
     _models_events: Subscription,
     _models_navigation: Subscription,
+    _pi_navigation: Subscription,
     _models_tour: Subscription,
     _connection_navigation: Subscription,
     _show_local_ai: Subscription,
@@ -252,6 +253,42 @@ impl Shell {
             window,
             |shell, _, _: &crate::models_view::GoToChat, window, cx| {
                 shell.select_tab(NavTab::Chat, cx);
+                shell
+                    .composer_input
+                    .read(cx)
+                    .focus_handle(cx)
+                    .focus(window, cx);
+            },
+        );
+        let pi_navigation = cx.subscribe_in(
+            &models,
+            window,
+            |shell, _, pi: &crate::models_view::GoToPiChat, window, cx| {
+                shell.start_new_chat(window, cx);
+                shell.select_tab(NavTab::Chat, cx);
+                if sovra_core::raspberry_pi::board(&pi.setup.board_id).is_none() {
+                    return;
+                }
+                sovra_core::raspberry_pi::begin_chat(
+                    &mut shell.state,
+                    &pi.service_id,
+                    &pi.setup.board_id,
+                );
+                let client = &cx.global::<RuntimeClient>().0;
+                let _ = client.send(Command::Mcp(
+                    sovra_core::mcp::McpCommand::SelectRaspberryPi {
+                        service_id: pi.service_id.clone(),
+                        session_id: shell.state.session_id.clone(),
+                    },
+                ));
+                let _ = client.send(Command::Mcp(sovra_core::mcp::McpCommand::CallTool {
+                    service_id: pi.service_id.clone(),
+                    tool: "connect_device".into(),
+                    arguments: serde_json::json!({}),
+                    session_id: Some(shell.state.session_id.clone()),
+                }));
+                shell.persist_active_thread(cx);
+                shell.refresh(cx);
                 shell
                     .composer_input
                     .read(cx)
@@ -543,6 +580,42 @@ impl Shell {
                             }
                             shell.models.update(cx, |models, cx| {
                                 models.services.apply(event);
+                                if let sovra_core::mcp::McpEvent::RaspberryPiPairing(pairing) = event {
+                                    models.services_screen.pi.pairing.apply(pairing);
+                                    match &models.services_screen.pi.pairing.phase {
+                                        sovra_core::raspberry_pi::PairingPhase::Failed(_) => models.services_screen.pi.pending_chat = None,
+                                        sovra_core::raspberry_pi::PairingPhase::Connected => models.services_screen.mode = crate::service_connect_view::AddMode::Closed,
+                                        sovra_core::raspberry_pi::PairingPhase::Idle | sovra_core::raspberry_pi::PairingPhase::Checking | sovra_core::raspberry_pi::PairingPhase::ConfirmIdentity { .. } => {}
+                                    }
+                                }
+                                if let sovra_core::mcp::McpEvent::RaspberryPiDiscovery(discovery) =
+                                    event
+                                {
+                                    models.services_screen.pi.discovery.apply(discovery);
+                                }
+                                if let sovra_core::mcp::McpEvent::Upsert(service) = event
+                                    && service.phase == sovra_core::mcp::McpPhase::Connected
+                                    && sovra_core::raspberry_pi::service_setup(service)
+                                        .as_ref()
+                                        .is_some_and(|setup| {
+                                            models.services_screen.pi.pending_chat.as_ref()
+                                                == Some(setup)
+                                        })
+                                    && let Some(setup) =
+                                        models.services_screen.pi.pending_chat.take()
+                                {
+                                    cx.emit(crate::models_view::GoToPiChat {
+                                        service_id: service.id.clone(),
+                                        setup,
+                                    });
+                                }
+                                models.services_screen.pi.results.apply(event);
+                                let services = &models.services;
+                                models
+                                    .services_screen
+                                    .pi
+                                    .gpio_maps
+                                    .retain(|id| services.service(id).is_some());
                                 cx.notify();
                             });
                         }
@@ -914,6 +987,7 @@ impl Shell {
             _history_search_events: history_search_events,
             _models_events: models_events,
             _models_navigation: models_navigation,
+            _pi_navigation: pi_navigation,
             _models_tour: models_tour,
             _connection_navigation: connection_navigation,
             _show_local_ai: show_local_ai,
@@ -2049,6 +2123,23 @@ impl Shell {
     }
 
     fn dispatch_runtime_prompt(&self, prompt: &str, cx: &mut Context<Self>) {
+        if let Some(service_id) = self
+            .state
+            .messages
+            .iter()
+            .flat_map(|message| &message.widgets)
+            .find_map(|widget| match widget {
+                sovra_core::AgUiWidget::RaspberryPi { service_id, .. } => Some(service_id),
+                _ => None,
+            })
+        {
+            let _ = cx.global::<RuntimeClient>().0.send(Command::Mcp(
+                sovra_core::mcp::McpCommand::SelectRaspberryPi {
+                    session_id: self.state.session_id.clone(),
+                    service_id: service_id.clone(),
+                },
+            ));
+        }
         let _ = cx
             .global::<RuntimeClient>()
             .0

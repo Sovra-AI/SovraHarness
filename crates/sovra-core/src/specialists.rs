@@ -64,7 +64,7 @@ pub fn default_sovra_srx_agents() -> Vec<SpecialistAgentSpec> {
             "CodingAgent",
             "coding",
             "Coding & Architecture Specialist",
-            "Builds websites and small browser apps, and helps write, fix, explain or review code. Keeps complete source so you can run a saved web page on this computer.",
+            "building or changing a page, a small program, or a fix. Say what you want in everyday words. Sovra writes the files and saves them, so you can open a web page or keep the code.",
             true,
             ModelTier::Deep,
         ),

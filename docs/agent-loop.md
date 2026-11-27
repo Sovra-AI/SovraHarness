@@ -35,7 +35,7 @@ their order. Team members use the same rule.
 ## Guard rails (every loop)
 
 `work_log::harden` applies the same limits to the parent, every specialist,
-every team member and every deep-research helper:
+every team member, every deep-research helper and the coding file-writing run:
 
 | Guard | Value | Why |
 | --- | --- | --- |

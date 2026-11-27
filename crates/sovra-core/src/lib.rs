@@ -11,6 +11,7 @@ pub mod auth;
 mod capabilities;
 pub mod chat_history;
 mod citations;
+pub mod coding;
 pub mod communications;
 pub mod connected_text;
 pub mod connection_catalogue;
@@ -37,6 +38,7 @@ pub mod people;
 pub mod plugins;
 mod protocol;
 pub mod providers;
+pub mod raspberry_pi;
 pub mod remote_control;
 pub mod research;
 mod routing;
@@ -75,6 +77,11 @@ pub use chat_history::{
     group_threads, infer_topic_icon, recency_bucket, sanitize_generated_title,
 };
 pub use citations::sources_footer;
+pub use coding::{
+    CODING_AGENT_ID, CODING_SKILL, CodeWorkspace, CodingRequest, SavedCode, accept_code_path,
+    classify_coding_request, coding_title, is_coding_skill, language_for_path, package_code,
+    skill_requests_coding, starts_coding_run,
+};
 pub use connection_catalogue::{
     CatalogueCard, CatalogueKind, CatalogueSources, ConnectionCatalogue, KindCopy, LinkPhase,
     LinkProbe, PROBE_BOUND, ProbeReport, catalogue_from, first_screen_asks_for_secret,

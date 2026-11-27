@@ -737,7 +737,10 @@ impl McpState {
                 self.notice = Some("Removed.".to_owned());
             }
             McpEvent::Notice(notice) => self.notice = Some(notice.clone()),
-            McpEvent::ToolResult { .. } | McpEvent::OpenSignIn { .. } => {}
+            McpEvent::ToolResult { .. }
+            | McpEvent::OpenSignIn { .. }
+            | McpEvent::RaspberryPiPairing(_)
+            | McpEvent::RaspberryPiDiscovery(_) => {}
         }
     }
 
@@ -749,6 +752,24 @@ impl McpState {
 /// What the screen asks the runtime to do. `Debug` hides secrets.
 #[derive(Clone, PartialEq, Eq)]
 pub enum McpCommand {
+    /// Look for nearby computer names. Does not authenticate or change any device.
+    DiscoverRaspberryPis,
+    PairRaspberryPi {
+        setup: crate::raspberry_pi::PiSetup,
+        password: crate::models::ModelSecret,
+    },
+    ConfirmPiIdentity {
+        request_id: u64,
+        accept: bool,
+    },
+    CancelPiPairing {
+        request_id: u64,
+    },
+    /// Bind Pi tools to one conversation. Other Pis cannot be called from it.
+    SelectRaspberryPi {
+        session_id: String,
+        service_id: String,
+    },
     Load,
     Connect {
         name: String,
@@ -770,6 +791,8 @@ pub enum McpCommand {
     },
     /// Add Sovra's own built-in sample MCP server, ready to use.
     AddSample,
+    /// Add a bundled, model-specific Raspberry Pi plugin through the same service lifecycle.
+    AddRaspberryPi(crate::raspberry_pi::PiSetup),
     /// The person read the exact command and allows the program to run.
     Approve {
         id: String,
@@ -818,6 +841,29 @@ pub enum McpCommand {
 impl std::fmt::Debug for McpCommand {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::PairRaspberryPi { setup, password } => formatter
+                .debug_struct("PairRaspberryPi")
+                .field("setup", setup)
+                .field("password", password)
+                .finish(),
+            Self::ConfirmPiIdentity { request_id, accept } => formatter
+                .debug_struct("ConfirmPiIdentity")
+                .field("request_id", request_id)
+                .field("accept", accept)
+                .finish(),
+            Self::CancelPiPairing { request_id } => formatter
+                .debug_struct("CancelPiPairing")
+                .field("request_id", request_id)
+                .finish(),
+            Self::DiscoverRaspberryPis => formatter.write_str("DiscoverRaspberryPis"),
+            Self::SelectRaspberryPi {
+                session_id,
+                service_id,
+            } => formatter
+                .debug_struct("SelectRaspberryPi")
+                .field("session_id", session_id)
+                .field("service_id", service_id)
+                .finish(),
             Self::Load => formatter.write_str("Load"),
             Self::Connect {
                 name,
@@ -859,6 +905,10 @@ impl std::fmt::Debug for McpCommand {
                 .field("working_dir", working_dir)
                 .finish(),
             Self::AddSample => formatter.write_str("AddSample"),
+            Self::AddRaspberryPi(setup) => formatter
+                .debug_tuple("AddRaspberryPi")
+                .field(setup)
+                .finish(),
             Self::Import { text } => formatter
                 .debug_struct("Import")
                 .field("bytes", &text.len())
@@ -902,6 +952,8 @@ impl std::fmt::Debug for McpCommand {
 /// What the runtime tells the screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpEvent {
+    RaspberryPiPairing(crate::raspberry_pi::PairingEvent),
+    RaspberryPiDiscovery(crate::raspberry_pi::DiscoveryEvent),
     Loaded(McpState),
     Upsert(McpService),
     Removed {
@@ -1320,7 +1372,17 @@ pub fn parse_tool_widget(result: &Value) -> Option<AgUiWidget> {
     if structured.get("protocol").and_then(Value::as_str) != Some("ag_ui") {
         return None;
     }
-    serde_json::from_value(structured.get("widget")?.clone()).ok()
+    let widget = serde_json::from_value(structured.get("widget")?.clone()).ok()?;
+    // Only a local explicit selection may bind a conversation to hardware.
+    if matches!(widget, AgUiWidget::RaspberryPi { .. }) {
+        return None;
+    }
+    if let AgUiWidget::GpioDiagram { board_id } = &widget
+        && crate::raspberry_pi::board(board_id).is_none()
+    {
+        return None;
+    }
+    Some(widget)
 }
 
 /// A connected tool offered to one chat turn.

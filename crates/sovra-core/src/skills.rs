@@ -42,6 +42,7 @@ pub enum SkillAction {
     Connections,
     /// Opens Connections on the card that asks for a web address.
     ConnectService,
+    RaspberryPi,
     Settings,
     RemoteControl,
     /// Opens the Groups page on one of its pages.

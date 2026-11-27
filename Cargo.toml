@@ -17,6 +17,11 @@ authors = ["Sovra"]
 csv = "1.4.0"
 rust-stemmers = "1.2.0"
 rust_decimal = { version = "1.43.0", default-features = false, features = ["std", "serde"] }
+# Cross-platform USB serial enumeration for the bundled Pico plugin. No port is opened.
+serialport = { version = "=4.10.1", default-features = false }
+# Local network discovery for the Pi setup; runtime owns its bounded lifetime.
+russh = { version = "=0.65.4", default-features = false, features = ["ring", "rsa"] }
+mdns-sd = { version = "=0.22.0", default-features = false, features = ["async"] }
 # Internal crates
 sovra-adk = { path = "crates/sovra-adk" }
 sovra-core = { path = "crates/sovra-core" }
@@ -115,7 +120,7 @@ whatsapp-rust = { version = "0.7.0", default-features = false, features = ["sqli
 # Renders the pairing payload WhatsApp issues as a QR module grid the UI paints.
 qrcode = { version = "0.14.1", default-features = false }
 tar = "0.4.46"
-zip = { version = "9.0.2", default-features = false, features = ["deflate"] }
+zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 http = "1.4.0"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "pnm", "tga", "qoi", "hdr", "dds", "exr", "ff"] }
 infer = "0.22.0"
@@ -159,7 +164,7 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-url = "2.5.8"
+url = "2.5.9"
 # Laya decision model (sovra-laya only): Convai's Apache-2.0 Laya ported to candle, a
 # pure-Rust tensor stack compiled into the executable. No server or Python. Library only:
 # no CLI, and no hf-hub client (the runtime downloads and verifies the weights itself).
@@ -173,7 +178,7 @@ wat = "1.228.0"
 # zip 9.x; its startup hook is unchanged. Keep the choice explicit until stable.
 velopack = "=1.3.39-g8d2844f"
 # Local document parsers only: no hosted OCR, model downloads, servers, or native PDFium.
-xberg = { version = "=1.4.0", default-features = false, features = ["pdf", "office", "excel-wasm", "email", "html", "xml", "iwork", "hwp", "notebook", "mdx"] }
+xberg = { version = "=1.5.4", default-features = false, features = ["pdf", "office", "excel-wasm", "email", "html", "xml", "iwork", "hwp", "notebook", "mdx"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -53,6 +53,23 @@ fn main() -> anyhow::Result<()> {
     {
         return sovra_runtime::run_sample_mcp_server().context("sample MCP server failed");
     }
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == sovra_core::raspberry_pi::SERVER_FLAG)
+    {
+        let setup = std::env::args()
+            .nth(2)
+            .context("missing Raspberry Pi setup")?;
+        return sovra_runtime::run_raspberry_pi_mcp_server(
+            &setup,
+            sovra_runtime::PiPrograms {
+                credentials: Some(credential_store(&data_dir)),
+                mpremote: std::env::var_os("SOVRA_MPREMOTE_PROGRAM")
+                    .map_or_else(|| "mpremote".into(), Into::into),
+            },
+        )
+        .context("Raspberry Pi plugin failed");
+    }
     let development = sovra_runtime::DevelopmentConfig {
         // Watched development is observable by default; installed/release binaries
         // always start with control off, regardless of a retained dev preference.
